@@ -7,6 +7,10 @@ enum BottomTab: Hashable {
     case setup
     case run(String)
     case terminal(String)
+
+    /// "Whichever terminal tab is first." A workspace picks its bottom tab before its terminal
+    /// tabs have been read from the store, so it cannot name one by id yet.
+    static let firstTerminal = BottomTab.terminal("")
 }
 
 /// Which tab the top of the inspector is showing.
@@ -40,7 +44,7 @@ final class WorkspaceModel {
     var isLoadingPullRequest = false
 
     // Bottom panel.
-    var bottomTab: BottomTab = .terminal("default")
+    var bottomTab: BottomTab = .firstTerminal
     var isBottomPanelVisible = true
     var setupOutput: String = ""
     var isRunningSetup = false
@@ -158,7 +162,7 @@ final class WorkspaceModel {
                 bottomTab = .setup
                 return
             }
-            bottomTab = .terminal("default")
+            bottomTab = .firstTerminal
         }
 
         await reloadSessions()

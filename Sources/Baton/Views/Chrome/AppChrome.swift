@@ -6,13 +6,37 @@ import BatonCore
 extension Notification.Name {
     /// Decouples notification delivery from navigation so the app delegate never owns UI state.
     static let batonOpenWorkspace = Notification.Name("batonOpenWorkspace")
+    /// Carries a `baton://` URL from the Apple Event handler to whichever window is open.
+    static let batonHandleURL = Notification.Name("batonHandleURL")
 }
 
 /// Bridges macOS lifecycle callbacks into the observation-driven app without introducing a second state owner.
 @MainActor
 final class BatonAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    /// Claiming the URL Apple Event has to happen before launching finishes. If SwiftUI's own
+    /// `onOpenURL` path handles a `baton://` link instead, a WindowGroup opens a SECOND window
+    /// for it, which is not what anyone wants from a deep link that is meant to add a workspace
+    /// to the window already on screen.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleURLEvent(_:withReply:)),
+            forEventClass: AEEventClass(kInternetEventClass),
+            andEventID: AEEventID(kAEGetURL)
+        )
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
+    }
+
+    @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, withReply reply: NSAppleEventDescriptor) {
+        guard let text = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+              let url = URL(string: text) else { return }
+
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.windows.first?.makeKeyAndOrderFront(nil)
+        NotificationCenter.default.post(name: .batonHandleURL, object: url)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -47,7 +71,17 @@ final class BatonAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
 /// Preserves Conductor deep links so existing scripts can hand work to Baton unchanged.
 @MainActor
 enum BatonDeepLink {
+    /// The Apple Event handler and SwiftUI's onOpenURL can both see the same link, and creating
+    /// the same workspace twice is a lot more annoying than dropping a genuine duplicate that
+    /// arrived within a second of the first.
+    private static var lastHandled: (url: URL, at: Date)?
+
     static func open(_ url: URL, in app: AppModel) {
+        if let last = lastHandled, last.url == url, Date().timeIntervalSince(last.at) < 2 {
+            return
+        }
+        lastHandled = (url, Date())
+
         guard url.scheme?.lowercased() == "baton",
               let values = values(from: url),
               let prompt = values["prompt"]?.removingPercentEncoding,
@@ -101,9 +135,16 @@ struct BatonURLHandler: ViewModifier {
     let app: AppModel
 
     func body(content: Content) -> some View {
-        content.onOpenURL { url in
-            BatonDeepLink.open(url, in: app)
-        }
+        content
+            // The Apple Event handler in BatonAppDelegate is the real entry point. onOpenURL is
+            // kept as a fallback for the case where macOS launches the app with the URL before
+            // the handler is installed.
+            .onReceive(NotificationCenter.default.publisher(for: .batonHandleURL)) { note in
+                if let url = note.object as? URL { BatonDeepLink.open(url, in: app) }
+            }
+            .onOpenURL { url in
+                BatonDeepLink.open(url, in: app)
+            }
     }
 }
 

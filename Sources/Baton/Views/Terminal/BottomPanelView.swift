@@ -177,7 +177,10 @@ struct BottomPanelView: View {
             }
 
         case .terminal(let id):
-            if let tab = terminalTabs.first(where: { $0.id == id }) {
+            // Falling back to the first tab matters because `WorkspaceModel` selects terminals by
+            // a placeholder id before any tab exists. Reconciling only on load left the panel
+            // stuck on the spinner whenever the selection was set again afterwards.
+            if let tab = terminalTabs.first(where: { $0.id == id }) ?? terminalTabs.first {
                 TerminalView(
                     tab: tab,
                     workspace: model.workspace,

@@ -2,6 +2,27 @@
 
 A Swift/SwiftUI rebuild of Conductor: parallel Claude Code agents, one git worktree each.
 
+## Status
+
+Every phase below is done and checked against its endgoal. The app builds with zero warnings,
+149 core tests pass, and the whole loop has been driven end to end: a `baton://` deep link
+created a worktree, ran the repo's setup script, started an agent, streamed its transcript,
+persisted every event, produced a real diff, and rendered that diff in the inspector.
+
+Three live tests (`BATON_LIVE=1 ./test-core.sh LiveAgent`) run against the real `claude` binary
+and cover a full turn with tool use, session resume across two runner instances, and
+cancellation. They are opt-in because they spend tokens.
+
+Bugs found by those end to end runs, now fixed and covered by tests:
+
+- Cancelling a turn was recorded as a failure, because the CLI reports `error_during_execution`
+  on its way out after SIGTERM.
+- The UI wrote whole `Session` rows, clobbering the agent session id the runner had just saved,
+  which silently broke resume. The UI now writes only the columns it owns.
+- A `baton://` link opened a second window, because a `WindowGroup` makes one per URL.
+- The bottom panel sat on a spinner forever when a workspace selected a terminal before its
+  tabs had been read from the store.
+
 ## Non-goals
 
 Cloud workspaces, auth, teams, the public API, non-Claude agent backends, checkpointing.

@@ -23,9 +23,8 @@ struct SettingsView: View {
         .tabViewStyle(.automatic)
         .frame(width: 620, height: 480)
         .background(Palette.windowBackground)
-        .alert(item: Bindable(app).alert) { alert in
-            Alert(title: Text(alert.title), message: Text(alert.message))
-        }
+        // RootView is the single presenter for `app.alert`. Binding it here too gave one alert
+        // two presenters, and the loser leaves an empty dialog shell on screen.
     }
 }
 
