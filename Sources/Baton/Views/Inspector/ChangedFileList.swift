@@ -61,6 +61,22 @@ struct ChangedFileList: View {
         VStack(spacing: 6) {
             if model.isLoadingChanges {
                 ProgressView().controlSize(.small)
+            } else if let problem = model.changesError {
+                // "No changes" and "git could not tell us" look identical otherwise, and the
+                // second one quietly convinces the user their agent did nothing.
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 16, weight: .light))
+                    .foregroundStyle(Palette.warning)
+                Text("Could not read the changes")
+                    .font(Typo.captionEmphasis)
+                    .foregroundStyle(Palette.textSecondary)
+                Text(problem)
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(4)
+                    .frame(maxWidth: 260)
+                    .textSelection(.enabled)
             } else {
                 Image(systemName: "checkmark.circle")
                     .font(.system(size: 16, weight: .light))

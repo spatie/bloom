@@ -133,9 +133,12 @@ struct GitTests {
 
         let files = try await Git.changedFiles(worktree: worktree, base: "main")
         let paths = Set(files.map(\.path))
-        #expect(paths.contains("committed.txt"))
-        #expect(paths.contains("README.md"))
-        #expect(paths.contains("untracked.txt"))
+        // The observed set is printed on failure. This has flaked once under heavy parallel
+        // load, and a bare `contains` failure says nothing about what git actually returned.
+        let observed = paths.sorted().joined(separator: ", ")
+        #expect(paths.contains("committed.txt"), "got: \(observed)")
+        #expect(paths.contains("README.md"), "got: \(observed)")
+        #expect(paths.contains("untracked.txt"), "got: \(observed)")
 
         let untracked = try #require(files.first { $0.path == "untracked.txt" })
         #expect(untracked.change == .untracked)

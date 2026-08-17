@@ -29,6 +29,9 @@ struct ArchiveRequest: Identifiable {
     var workspace: Workspace
     var report: WorkspaceSafetyReport
     var deleteBranch: Bool?
+    /// Set when git could not be asked at all, so the report is empty for want of an answer rather
+    /// than because there is nothing at stake. Shown alongside the losses, never instead of them.
+    var problem: String?
 }
 
 /// The root of the app's state. Owns the store, the repo and workspace lists, and one
@@ -308,14 +311,24 @@ final class AppModel {
     func archive(_ workspace: Workspace, deleteBranch: Bool? = nil) async {
         guard let manager, let repo = repo(for: workspace) else { return }
 
-        let report = try? await manager.safetyReport(workspace: workspace, repo: repo)
-        // No report means git could not answer, and that is not a licence to delete. Treat it the
-        // same as unsafe and let the user look at what it says.
-        guard let report, report.isSafeToDiscard else {
+        let report: WorkspaceSafetyReport
+        do {
+            report = try await manager.safetyReport(workspace: workspace, repo: repo)
+        } catch {
+            // Git could not answer, and not knowing what is at stake is not a licence to delete it.
+            // The user still gets the choice, with the reason the check failed in front of them.
             pendingArchive = ArchiveRequest(
                 workspace: workspace,
-                report: report ?? WorkspaceSafetyReport(hasUncommittedChanges: true),
-                deleteBranch: deleteBranch
+                report: WorkspaceSafetyReport(),
+                deleteBranch: deleteBranch,
+                problem: "Baton could not check this workspace for unsaved work: \(error)"
+            )
+            return
+        }
+
+        guard report.isSafeToDiscard else {
+            pendingArchive = ArchiveRequest(
+                workspace: workspace, report: report, deleteBranch: deleteBranch
             )
             return
         }
@@ -369,7 +382,8 @@ final class AppModel {
                     title: "The archive script for \(workspace.name) failed",
                     message: "Nothing was removed and the workspace is intact. "
                         + "The script exited with status \(status).\n\n"
-                        + output.trimmingCharacters(in: .whitespacesAndNewlines)
+                        // The tail is where a script says why it gave up.
+                        + String(output.trimmingCharacters(in: .whitespacesAndNewlines).suffix(1_000))
                 )
             case .unsafeToArchive(let report):
                 // Only reachable when the worktree changed between the check and the archive.
