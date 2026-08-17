@@ -1,0 +1,805 @@
+import SwiftUI
+import AppKit
+import BatonCore
+
+/// The keys the composer has to answer for itself.
+///
+/// A menu is open on top of a text view that never loses first responder, so the arrow keys and
+/// Return mean different things depending on what is on screen. The text view forwards the
+/// question here rather than deciding.
+enum ComposerKey {
+    case up
+    case down
+    case returnKey
+    case commandReturn
+    case escape
+    case tab
+}
+
+/// The prompt box at the bottom of the centre column.
+///
+/// Everything the user can change about the next turn lives in this one view: the text, the
+/// model, the effort, the permission mode. That is deliberate. A setting that lives in a
+/// preferences window is a setting nobody changes per task, and per task is exactly the
+/// granularity these need.
+struct ComposerView: View {
+    @Bindable var transcript: TranscriptModel
+    /// Optional so the composer can be dropped anywhere a transcript exists. When it is passed,
+    /// the session list is kept in step with edits made here.
+    var model: WorkspaceModel?
+    /// The transcript owns the scroll position, so it decides whether the unread pill is useful.
+    var isScrolledUp: Bool = true
+
+    @Environment(AppModel.self) private var app
+
+    @State private var caret = 0
+    @State private var editorHeight: CGFloat = 0
+    @State private var isFocused = false
+    @State private var isFastMode = false
+    @State private var draftSaveTask: Task<Void, Never>?
+
+    @State private var slashCatalog = SlashCommandCatalog()
+    @State private var fileMatches: [FileMatch] = []
+    @State private var menuIndex = 0
+    @State private var isMenuDismissed = false
+
+    private let placeholder = "Ask to make changes, @mention files, run /commands"
+
+    var body: some View {
+        box
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.bottom, 10)
+            .padding(.top, 4)
+            .background(Palette.surface)
+            .task(id: transcript.session.id) { await prepare() }
+            .task(id: transcript.workspace.path) {
+                await slashCatalog.load(workspacePath: transcript.workspace.path)
+            }
+            .task(id: mentionToken?.query) { await refreshFileMatches() }
+            .onChange(of: transcript.draft) { _, _ in
+                menuIndex = 0
+                scheduleDraftSave()
+            }
+            .onChange(of: activeMenu) { _, _ in
+                menuIndex = 0
+                isMenuDismissed = false
+            }
+            .onDisappear {
+                draftSaveTask?.cancel()
+                let transcript = transcript
+                Task { await transcript.saveDraft() }
+            }
+    }
+
+    private var box: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            editor
+            footer
+        }
+        .padding(12)
+        .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isFocused ? Palette.borderStrong : Palette.border, lineWidth: 1)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .onTapGesture { isFocused = true }
+        .overlay(alignment: .topLeading) {
+            menuOverlay
+                .alignmentGuide(.top) { $0[.bottom] + 6 }
+        }
+        .overlay(alignment: .top) {
+            unreadOverlay
+                .alignmentGuide(.top) { $0[.bottom] + 8 }
+        }
+    }
+
+    // MARK: - Editor
+
+    private var editor: some View {
+        ZStack(alignment: .topLeading) {
+            if transcript.draft.isEmpty {
+                Text(placeholder)
+                    .font(Typo.body)
+                    .foregroundStyle(Palette.textTertiary)
+                    .allowsHitTesting(false)
+            }
+            ComposerTextEditor(
+                text: $transcript.draft,
+                caret: $caret,
+                isFocused: $isFocused,
+                onHeightChange: { editorHeight = $0 },
+                onKey: handle(key:)
+            )
+            .frame(height: max(editorHeight, ComposerTextEditor.lineHeight))
+        }
+    }
+
+    // MARK: - Footer
+
+    private var footer: some View {
+        HStack(spacing: 4) {
+            modelPicker
+            fastToggle
+            effortPicker
+            permissionPicker
+
+            Spacer(minLength: 8)
+
+            Button(action: attach) {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Palette.textSecondary)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("Attach a file")
+
+            sendButton
+        }
+    }
+
+    private var modelPicker: some View {
+        Menu {
+            ForEach(ComposerOption.models) { option in
+                Button {
+                    update { $0.model = option.id }
+                } label: {
+                    if transcript.session.model == option.id { Text("\(option.label) \u{2713}") }
+                    else { Text(option.label) }
+                }
+            }
+        } label: {
+            ComposerControlLabel(
+                systemImage: "sparkle",
+                text: ComposerOption.label(for: transcript.session.model, in: ComposerOption.models)
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    /// Fast mode has no column on `Session`, so it is kept in the store's key value table. It is
+    /// still per session and it still survives a relaunch, which is all the toggle promises.
+    private var fastToggle: some View {
+        Button {
+            isFastMode.toggle()
+            let key = Self.fastModeKey(sessionID: transcript.session.id)
+            let value = isFastMode ? "1" : nil
+            if let store = app.store {
+                Task { try? await store.setSetting(key, value) }
+            }
+        } label: {
+            ComposerControlLabel(
+                systemImage: "bolt.fill",
+                text: "Fast",
+                tint: isFastMode ? Palette.accent : Palette.textSecondary,
+                isActive: isFastMode
+            )
+        }
+        .buttonStyle(.plain)
+        .help("Fast mode trades some reasoning for a quicker reply")
+    }
+
+    private var effortPicker: some View {
+        Menu {
+            ForEach(ComposerOption.efforts) { option in
+                Button {
+                    update { $0.effort = option.id }
+                } label: {
+                    if transcript.session.effort == option.id { Text("\(option.label) \u{2713}") }
+                    else { Text(option.label) }
+                }
+            }
+        } label: {
+            ComposerControlLabel(
+                systemImage: "chart.bar.fill",
+                text: ComposerOption.label(for: transcript.session.effort, in: ComposerOption.efforts)
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private var permissionPicker: some View {
+        Menu {
+            ForEach(PermissionMode.allCases, id: \.self) { mode in
+                Button {
+                    update { $0.permissionMode = mode }
+                } label: {
+                    if transcript.session.permissionMode == mode { Text("\(mode.label) \u{2713}") }
+                    else { Text(mode.label) }
+                }
+            }
+        } label: {
+            ComposerControlLabel(
+                systemImage: Self.permissionGlyph(transcript.session.permissionMode),
+                text: transcript.session.permissionMode.label,
+                tint: transcript.session.permissionMode == .bypassPermissions
+                    ? Palette.warning
+                    : Palette.textSecondary
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private var sendButton: some View {
+        Button {
+            if transcript.isRunning { transcript.stop() } else { send() }
+        } label: {
+            Circle()
+                .fill(sendTint)
+                .frame(width: 26, height: 26)
+                .overlay {
+                    Image(systemName: transcript.isRunning ? "stop.fill" : "arrow.up")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Palette.textInverted)
+                }
+        }
+        .buttonStyle(.plain)
+        .disabled(!transcript.isRunning && !hasBody)
+        .help(transcript.isRunning ? "Stop the agent" : "Send (Return)")
+    }
+
+    private var sendTint: Color {
+        if transcript.isRunning { return Palette.negative }
+        return hasBody ? Palette.accent : Palette.textTertiary.opacity(0.5)
+    }
+
+    private var hasBody: Bool {
+        !transcript.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    // MARK: - Overlays
+
+    @ViewBuilder
+    private var menuOverlay: some View {
+        switch activeMenu {
+        case .slash(let query):
+            SlashCommandMenu(
+                commands: slashResults,
+                query: query,
+                selectedIndex: menuIndex,
+                onPick: pick(command:),
+                onHighlight: { menuIndex = $0 }
+            )
+        case .mention(let query):
+            FileMentionMenu(
+                matches: fileMatches,
+                query: query,
+                selectedIndex: menuIndex,
+                onPick: pick(file:),
+                onHighlight: { menuIndex = $0 }
+            )
+        case .none:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var unreadOverlay: some View {
+        if isScrolledUp, transcript.unreadCount > 0 {
+            NextUnreadPill(count: transcript.unreadCount) {
+                transcript.jumpToNextUnread()
+            }
+        }
+    }
+
+    // MARK: - Menus
+
+    private enum ActiveMenu: Equatable {
+        case none
+        case slash(String)
+        case mention(String)
+    }
+
+    /// The draft plus the caret is enough to know which menu belongs on screen, so there is no
+    /// separate "menu is open" flag to get out of step with the text.
+    private var activeMenu: ActiveMenu {
+        if isMenuDismissed { return .none }
+        if let query = slashQuery { return .slash(query) }
+        if let token = mentionToken { return .mention(token.query) }
+        return .none
+    }
+
+    private var isMenuOpen: Bool { activeMenu != .none }
+
+    /// A slash command is only offered while the whole draft is one unbroken `/word`, because
+    /// that is the only shape the CLI treats as a command.
+    private var slashQuery: String? {
+        let text = transcript.draft
+        guard text.hasPrefix("/") else { return nil }
+        let rest = text.dropFirst()
+        guard !rest.contains(where: { $0 == " " || $0 == "\n" || $0 == "\t" }) else { return nil }
+        return String(rest)
+    }
+
+    private struct MentionToken: Equatable {
+        var start: Int
+        var length: Int
+        var query: String
+    }
+
+    /// Everything here counts in UTF-16, the unit `NSTextView` reports its caret in, so a path
+    /// with an emoji in it cannot shift the replacement range by a character.
+    private var mentionToken: MentionToken? {
+        let text = transcript.draft as NSString
+        let location = min(max(caret, 0), text.length)
+        guard location > 0 else { return nil }
+
+        let before = text.substring(to: location) as NSString
+        let at = before.range(of: "@", options: .backwards)
+        guard at.location != NSNotFound else { return nil }
+
+        let query = before.substring(from: at.location + 1)
+        guard !query.contains(" "), !query.contains("\n"), !query.contains("\t") else { return nil }
+
+        if at.location > 0 {
+            let previous = before.substring(with: NSRange(location: at.location - 1, length: 1))
+            guard [" ", "\n", "\t", "(", "["].contains(previous) else { return nil }
+        }
+
+        return MentionToken(start: at.location, length: location - at.location, query: query)
+    }
+
+    private var slashResults: [SlashCommand] {
+        guard case .slash(let query) = activeMenu else { return [] }
+        return slashCatalog.matches(query)
+    }
+
+    private var menuCount: Int {
+        switch activeMenu {
+        case .slash: slashResults.count
+        case .mention: fileMatches.count
+        case .none: 0
+        }
+    }
+
+    private func refreshFileMatches() async {
+        guard let token = mentionToken else {
+            fileMatches = []
+            return
+        }
+        let paths = await FileIndex.shared.files(workspacePath: transcript.workspace.path)
+        let query = token.query
+        fileMatches = await Task.detached(priority: .userInitiated) {
+            FileMatch.search(paths, query: query, limit: 200)
+        }.value
+    }
+
+    private func pick(command: SlashCommand) {
+        let text = "/\(command.name) "
+        transcript.draft = text
+        caret = (text as NSString).length
+        isFocused = true
+    }
+
+    private func pick(file: FileMatch) {
+        guard let token = mentionToken else { return }
+        let replacement = "@\(file.path) "
+        let text = NSMutableString(string: transcript.draft)
+        text.replaceCharacters(in: NSRange(location: token.start, length: token.length), with: replacement)
+        transcript.draft = text as String
+        caret = token.start + (replacement as NSString).length
+        isFocused = true
+    }
+
+    private func pickHighlighted() {
+        switch activeMenu {
+        case .slash:
+            guard slashResults.indices.contains(menuIndex) else { return }
+            pick(command: slashResults[menuIndex])
+        case .mention:
+            guard fileMatches.indices.contains(menuIndex) else { return }
+            pick(file: fileMatches[menuIndex])
+        case .none:
+            break
+        }
+    }
+
+    // MARK: - Keys
+
+    /// Returns true when the key was consumed, which is how the text view knows not to type it.
+    private func handle(key: ComposerKey) -> Bool {
+        if isMenuOpen, menuCount > 0 {
+            switch key {
+            case .up:
+                menuIndex = (menuIndex - 1 + menuCount) % menuCount
+                return true
+            case .down:
+                menuIndex = (menuIndex + 1) % menuCount
+                return true
+            case .returnKey, .tab:
+                pickHighlighted()
+                return true
+            case .escape:
+                isMenuDismissed = true
+                return true
+            case .commandReturn:
+                send()
+                return true
+            }
+        }
+
+        switch key {
+        case .returnKey, .commandReturn:
+            send()
+            return true
+        case .escape:
+            if isMenuOpen {
+                isMenuDismissed = true
+            } else {
+                isFocused = false
+            }
+            return true
+        case .up, .down, .tab:
+            return false
+        }
+    }
+
+    // MARK: - Actions
+
+    private func send() {
+        guard hasBody, !transcript.isRunning else { return }
+        draftSaveTask?.cancel()
+        let text = transcript.draft
+        caret = 0
+        let transcript = transcript
+        Task { await transcript.send(text) }
+    }
+
+    /// Half a second is long enough that a fast typist writes one row instead of forty, and short
+    /// enough that a crash mid sentence loses at most a word.
+    private func scheduleDraftSave() {
+        draftSaveTask?.cancel()
+        let transcript = transcript
+        draftSaveTask = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            await transcript.saveDraft()
+        }
+    }
+
+    private func attach() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.directoryURL = URL(fileURLWithPath: transcript.workspace.path)
+        guard panel.runModal() == .OK else { return }
+
+        let root = transcript.workspace.path
+        let mentions = panel.urls.map { url -> String in
+            let path = url.path
+            let relative = path.hasPrefix(root + "/") ? String(path.dropFirst(root.count + 1)) : path
+            return "@\(relative)"
+        }
+        guard !mentions.isEmpty else { return }
+
+        let separator = transcript.draft.isEmpty || transcript.draft.hasSuffix(" ") ? "" : " "
+        transcript.draft += separator + mentions.joined(separator: " ") + " "
+        caret = (transcript.draft as NSString).length
+        isFocused = true
+    }
+
+    /// Writes a session edit through to the store, and into the workspace's own copy so the tab
+    /// strip and the inspector do not keep showing the value from before the change.
+    private func update(_ change: (inout Session) -> Void) {
+        var session = transcript.session
+        change(&session)
+        session.updatedAt = Date()
+        transcript.session = session
+
+        if let model, let index = model.sessions.firstIndex(where: { $0.id == session.id }) {
+            model.sessions[index] = session
+        }
+        if let store = app.store {
+            Task { _ = try? await store.upsert(session) }
+        }
+    }
+
+    /// First run for a session: adopt the repository's configured defaults and read back the
+    /// fast mode flag. Both are only interesting once, hence the `task(id:)`.
+    private func prepare() async {
+        isFocused = true
+        caret = (transcript.draft as NSString).length
+
+        if let store = app.store {
+            let key = Self.fastModeKey(sessionID: transcript.session.id)
+            isFastMode = (try? await store.setting(key)) == "1"
+        }
+
+        guard let repo = app.repo(for: transcript.workspace) else { return }
+        let path = repo.path
+        let settings = await Task.detached(priority: .utility) {
+            SettingsLoader.load(repo: path)
+        }.value
+
+        var session = transcript.session
+        var changed = false
+        if let model = settings.defaultModel, session.model.isEmpty {
+            session.model = model
+            changed = true
+        }
+        if let effort = settings.defaultEffort, session.effort.isEmpty {
+            session.effort = effort
+            changed = true
+        }
+        guard changed else { return }
+        update { $0 = session }
+    }
+
+    private static func fastModeKey(sessionID: String) -> String {
+        "session.\(sessionID).fastMode"
+    }
+
+    private static func permissionGlyph(_ mode: PermissionMode) -> String {
+        switch mode {
+        case .auto: "hand.raised"
+        case .acceptEdits: "checkmark.shield"
+        case .bypassPermissions: "exclamationmark.shield"
+        case .plan: "list.bullet.rectangle"
+        }
+    }
+}
+
+// MARK: - Footer pieces
+
+/// The picker labels in the footer are all the same shape: a glyph, a word, and a hint that it
+/// opens. Defining it once keeps them on one baseline.
+struct ComposerControlLabel: View {
+    var systemImage: String
+    var text: String
+    var tint: Color = Palette.textSecondary
+    var isActive: Bool = false
+
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .medium))
+            Text(text)
+                .font(Typo.caption)
+                .lineLimit(1)
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 6)
+        .frame(height: 22)
+        .background {
+            RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+                .fill(isActive ? Palette.selected : (isHovered ? Palette.hover : .clear))
+        }
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+    }
+}
+
+/// One entry in a footer picker. The id is what gets written to `Session`, the label is what the
+/// user reads, and the two are different on purpose: the CLI wants `opus`, the user wants Opus 5.
+struct ComposerOption: Identifiable, Hashable {
+    var id: String
+    var label: String
+
+    static let models = [
+        ComposerOption(id: "opus", label: "Opus 5"),
+        ComposerOption(id: "sonnet", label: "Sonnet 5"),
+        ComposerOption(id: "haiku", label: "Haiku 4.5"),
+    ]
+
+    static let efforts = [
+        ComposerOption(id: "low", label: "Low"),
+        ComposerOption(id: "medium", label: "Medium"),
+        ComposerOption(id: "high", label: "High"),
+        ComposerOption(id: "xhigh", label: "Xhigh"),
+        ComposerOption(id: "max", label: "Max"),
+    ]
+
+    /// Falls back to the raw value so a model set in a settings file that Baton has never heard
+    /// of is still shown rather than silently rewritten.
+    static func label(for id: String, in options: [ComposerOption]) -> String {
+        options.first { $0.id == id }?.label ?? (id.isEmpty ? options[0].label : id.capitalizedFirst)
+    }
+}
+
+/// The floating "you are behind" affordance.
+///
+/// It lives here rather than in the transcript because it is anchored to the composer, but the
+/// transcript renders one too when the user scrolls far up, so it is a type rather than a
+/// private helper.
+struct NextUnreadPill: View {
+    var count: Int
+    var action: @MainActor () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 9, weight: .bold))
+                Text(count == 1 ? "Next unread" : "Next unread (\(count))")
+                    .font(Typo.captionEmphasis)
+            }
+            .foregroundStyle(Palette.textInverted)
+            .padding(.horizontal, 10)
+            .frame(height: 24)
+            .background(Palette.accent.opacity(isHovered ? 1 : 0.9), in: Capsule())
+            .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+}
+
+// MARK: - The text view
+
+/// The composer's editor, as an `NSTextView` rather than a `TextEditor`.
+///
+/// Two things force it. SwiftUI's `TextEditor` will not tell anyone the height its content wants,
+/// so a box that grows from one line to twelve and only then scrolls cannot be built on top of
+/// it. And Return has to send while Shift+Return inserts a newline, which means seeing the key
+/// event before the text system does. Both are one override away in AppKit and impossible above
+/// it.
+struct ComposerTextEditor: NSViewRepresentable {
+    @Binding var text: String
+    /// Caret offset in UTF-16 units, so the composer can find the `@token` around it.
+    @Binding var caret: Int
+    @Binding var isFocused: Bool
+    var minLines: Int = 1
+    var maxLines: Int = 12
+    var onHeightChange: @MainActor (CGFloat) -> Void
+    var onKey: @MainActor (ComposerKey) -> Bool
+
+    static let font = NSFont.systemFont(ofSize: 13)
+    static let lineHeight: CGFloat = 17
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        // Built out of an explicit TextKit 1 stack. A text view made the modern way answers with
+        // a TextKit 2 layout, and `usedRect(for:)` is the only measurement that reports the exact
+        // height wrapped text occupies.
+        let storage = NSTextStorage()
+        let layout = NSLayoutManager()
+        storage.addLayoutManager(layout)
+        let container = NSTextContainer(size: CGSize(width: 0, height: .greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        layout.addTextContainer(container)
+
+        let textView = ComposerTextView(frame: .zero, textContainer: container)
+        textView.delegate = context.coordinator
+        textView.keyHandler = { [weak coordinator = context.coordinator] event in
+            coordinator?.handle(event) ?? false
+        }
+        textView.font = Self.font
+        textView.textColor = NSColor.labelColor
+        textView.insertionPointColor = NSColor.controlAccentColor
+        textView.drawsBackground = false
+        textView.isRichText = false
+        textView.allowsUndo = true
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.textContainerInset = .zero
+        textView.autoresizingMask = [.width]
+        textView.minSize = CGSize(width: 0, height: 0)
+        textView.maxSize = CGSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+        textView.string = text
+
+        let scrollView = NSScrollView()
+        scrollView.documentView = textView
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.horizontalScrollElasticity = .none
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? ComposerTextView else { return }
+        context.coordinator.parent = self
+
+        if textView.string != text {
+            textView.string = text
+            textView.font = Self.font
+            textView.textColor = NSColor.labelColor
+            let location = min(max(caret, 0), (text as NSString).length)
+            textView.setSelectedRange(NSRange(location: location, length: 0))
+        }
+
+        if isFocused, textView.window?.firstResponder !== textView {
+            textView.window?.makeFirstResponder(textView)
+        } else if !isFocused, textView.window?.firstResponder === textView {
+            textView.window?.makeFirstResponder(nil)
+        }
+
+        context.coordinator.reportHeight(of: textView)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: ComposerTextEditor
+        private var lastReportedHeight: CGFloat = 0
+
+        init(_ parent: ComposerTextEditor) {
+            self.parent = parent
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? ComposerTextView else { return }
+            parent.text = textView.string
+            parent.caret = textView.selectedRange().location
+            reportHeight(of: textView)
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? ComposerTextView else { return }
+            let location = textView.selectedRange().location
+            if parent.caret != location { parent.caret = location }
+        }
+
+        /// Maps a raw key event to composer intent. Shift+Return is deliberately not mapped: it
+        /// falls through to AppKit, which inserts the newline for us.
+        func handle(_ event: NSEvent) -> Bool {
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            switch event.keyCode {
+            case 36, 76: // Return, Enter
+                if flags.contains(.shift) { return false }
+                return parent.onKey(flags.contains(.command) ? .commandReturn : .returnKey)
+            case 53: // Escape
+                return parent.onKey(.escape)
+            case 125: // Down
+                return parent.onKey(.down)
+            case 126: // Up
+                return parent.onKey(.up)
+            case 48: // Tab
+                return parent.onKey(.tab)
+            default:
+                return false
+            }
+        }
+
+        /// Measures what the text actually occupies and clamps it to the growth window. Reported
+        /// asynchronously because this runs inside a SwiftUI update and must not write state back
+        /// into the same pass.
+        func reportHeight(of textView: ComposerTextView) {
+            guard let layout = textView.layoutManager, let container = textView.textContainer else { return }
+            layout.ensureLayout(for: container)
+
+            let used = layout.usedRect(for: container).height
+            let minimum = CGFloat(parent.minLines) * ComposerTextEditor.lineHeight
+            let maximum = CGFloat(parent.maxLines) * ComposerTextEditor.lineHeight
+            let height = min(max(used, minimum), maximum).rounded(.up)
+
+            guard abs(height - lastReportedHeight) > 0.5 else { return }
+            lastReportedHeight = height
+            let report = parent.onHeightChange
+            DispatchQueue.main.async { report(height) }
+        }
+    }
+}
+
+/// An `NSTextView` that offers each key press to the composer before typing it.
+final class ComposerTextView: NSTextView {
+    var keyHandler: (@MainActor (NSEvent) -> Bool)?
+
+    override func keyDown(with event: NSEvent) {
+        if keyHandler?(event) == true { return }
+        super.keyDown(with: event)
+    }
+
+    /// Without this the window's default button, or the field editor's own cancel handling, can
+    /// swallow Escape before `keyDown` ever sees it.
+    override func cancelOperation(_ sender: Any?) {
+        // Handled in keyDown. Overridden so AppKit does not beep.
+    }
+}

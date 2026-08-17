@@ -257,8 +257,11 @@ public enum DiffParser {
             let slice = bytes[cursor..<stop]
             cursor = stop + 1
 
-            let insideHunk = hunk != nil && (remainingOld > 0 || remainingNew > 0)
             let marker = slice.first
+            // The trailing "\ No newline" marker sits outside the hunk's own line budget, so it
+            // stays part of the hunk even once the counts are used up.
+            let insideHunk = hunk != nil
+                && (remainingOld > 0 || remainingNew > 0 || marker == 0x5C)
 
             if insideHunk, marker == nil {
                 // Some tools emit a bare empty line where git would emit a single space.
@@ -481,6 +484,24 @@ public enum DiffParser {
             afterEnd = previousAfter
         }
 
+        // Character trimming happily stops halfway through a word, because "alpha" and "gamma"
+        // share a trailing "a". Push both boundaries back out to word edges so a highlight covers
+        // the whole word a reader is comparing.
+        while beforeEnd < before.endIndex, afterEnd < after.endIndex,
+              isWordCharacter(before[beforeEnd]),
+              (beforeEnd > beforeStart && isWordCharacter(before[before.index(before: beforeEnd)]))
+                || (afterEnd > afterStart && isWordCharacter(after[after.index(before: afterEnd)])) {
+            beforeEnd = before.index(after: beforeEnd)
+            afterEnd = after.index(after: afterEnd)
+        }
+        while beforeStart > before.startIndex, afterStart > after.startIndex,
+              isWordCharacter(before[before.index(before: beforeStart)]),
+              (beforeStart < beforeEnd && isWordCharacter(before[beforeStart]))
+                || (afterStart < afterEnd && isWordCharacter(after[afterStart])) {
+            beforeStart = before.index(before: beforeStart)
+            afterStart = after.index(before: afterStart)
+        }
+
         let beforeMiddle = before[beforeStart..<beforeEnd]
         let afterMiddle = after[afterStart..<afterEnd]
 
@@ -537,21 +558,21 @@ public enum DiffParser {
         var text: Substring
     }
 
+    private static func isWordCharacter(_ character: Character) -> Bool {
+        character.isLetter || character.isNumber || character == "_"
+    }
+
     /// Words, whitespace runs and single punctuation characters. Punctuation stays separate so a
     /// changed argument does not drag the surrounding parentheses into the highlight.
     private static func tokenize(_ input: Substring) -> [Token] {
         var tokens: [Token] = []
         var cursor = input.startIndex
 
-        func isWord(_ character: Character) -> Bool {
-            character.isLetter || character.isNumber || character == "_"
-        }
-
         while cursor < input.endIndex {
             let start = cursor
             let character = input[cursor]
-            if isWord(character) {
-                while cursor < input.endIndex, isWord(input[cursor]) {
+            if isWordCharacter(character) {
+                while cursor < input.endIndex, isWordCharacter(input[cursor]) {
                     cursor = input.index(after: cursor)
                 }
             } else if character.isWhitespace {

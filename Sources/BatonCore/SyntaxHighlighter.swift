@@ -30,7 +30,7 @@ public enum Language: String, Sendable, CaseIterable {
         switch filename {
         case "dockerfile", "makefile", "justfile", "bashrc", ".bashrc", ".zshrc", ".profile":
             return .shell
-        case ".env", ".env.local", ".env.example", ".env.testing":
+        case let name where name == ".env" || name.hasPrefix(".env."):
             return .shell
         default:
             break
@@ -327,7 +327,7 @@ private struct Lexer {
             add(.variable, start, cursor)
             return true
         }
-        if [.php, .shell].contains(language), unit(at: cursor) == 36 {
+        if [.php, .blade, .shell].contains(language), unit(at: cursor) == 36 {
             return scanDollarVariable()
         }
         if language == .markdown, matches("```", at: cursor) {
@@ -507,6 +507,9 @@ private struct Lexer {
             while end < limit, unit(at: end) != 125 { end += 1 }
             return end < limit ? end + 1 : limit
         }
+        if language == .shell, unit(at: start + 1) == 40 {
+            return closingParenthesis(from: start + 2, limit: limit)
+        }
         guard isIdentifierStart(at: start + 1) else { return nil }
         var end = start + 2
         while end < limit, isIdentifierContinue(at: end) { end += 1 }
@@ -565,6 +568,8 @@ private struct Lexer {
         } else if language == .php, nextNonWhitespace(after: cursor) == 58,
                   unit(at: nextNonWhitespaceIndex(after: cursor) + 1) != 58 {
             kind = .variable
+        } else if isHTMLLike, isInsideHTMLTag(at: start) {
+            kind = isHTMLTagName(at: start) ? .type : .attribute
         } else if [.yaml, .toml, .json, .css].contains(language),
                   nextNonWhitespace(after: cursor) == 58 || nextNonWhitespace(after: cursor) == 61 {
             kind = .attribute
@@ -647,6 +652,27 @@ private struct Lexer {
         [.php, .python, .ruby, .yaml, .toml, .shell].contains(language)
     }
 
+    private var isHTMLLike: Bool {
+        [.html, .xml, .vue, .blade].contains(language)
+    }
+
+    private func isInsideHTMLTag(at index: Int) -> Bool {
+        var position = index - 1
+        while position >= 0 {
+            if unit(at: position) == 62 { return false }
+            if unit(at: position) == 60 { return true }
+            position -= 1
+        }
+        return false
+    }
+
+    private func isHTMLTagName(at index: Int) -> Bool {
+        var position = index - 1
+        while position >= 0, isWhitespace(at: position) { position -= 1 }
+        if unit(at: position) == 60 { return true }
+        return unit(at: position) == 47 && unit(at: position - 1) == 60
+    }
+
     private var keywords: Set<String> {
         switch language {
         case .php, .blade:
@@ -676,7 +702,7 @@ private struct Lexer {
 
     private mutating func add(_ kind: TokenKind, _ start: Int, _ end: Int) {
         guard start < end else { return }
-        if let last = tokens.last, last.kind == kind, last.range.upperBound == start {
+        if let last = tokens.last, kind != .plain, last.kind == kind, last.range.upperBound == start {
             tokens[tokens.count - 1].range = last.range.lowerBound..<end
         } else {
             tokens.append(Token(kind: kind, range: start..<end))

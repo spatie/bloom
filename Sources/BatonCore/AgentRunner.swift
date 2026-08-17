@@ -3,8 +3,8 @@ import Foundation
 // MARK: - Process seam
 
 /// What `AgentRunner` needs from a subprocess. `StreamingProcess` is the only production
-/// implementation. It exists as a protocol so tests can drive the runner without launching the
-/// real `claude` binary, which would cost money and need a network.
+/// implementation. It is a protocol so tests can drive the runner without launching the real
+/// `claude` binary, which would need a network, an account, and money.
 public protocol AgentProcessing: Sendable {
     var lines: AsyncThrowingStream<String, Error> { get }
     var errorLines: AsyncStream<String> { get }
@@ -19,8 +19,8 @@ public protocol AgentProcessing: Sendable {
 
 extension StreamingProcess: AgentProcessing {}
 
-/// Everything needed to spawn the agent, kept as a value so argv can be asserted on without a
-/// process existing.
+/// Everything needed to spawn the agent, as a value, so argv can be asserted on without a process
+/// ever existing.
 public struct AgentLaunch: Sendable, Hashable {
     public let executable: String
     public let arguments: [String]
@@ -39,10 +39,11 @@ public struct AgentLaunch: Sendable, Hashable {
 
 /// Supervises one `claude` process for one Baton session.
 ///
-/// The process is long lived: stdin stays open so a follow-up turn is just another line, and the
-/// agent session id from the first `system/init` is persisted immediately so a crashed app can
-/// come back with `--resume`. Every event is written to the store before it reaches the UI, so
-/// the transcript is whatever survived a power cut, not whatever a view happened to hold.
+/// The process is long lived: stdin stays open so a follow-up turn is just one more line, and the
+/// agent session id from the first `system/init` is persisted the moment it arrives so a crashed
+/// app can come back with `--resume`. Every event is written to the store before it reaches the
+/// UI, so the transcript is whatever survived a power cut rather than whatever a view happened to
+/// be holding.
 public actor AgentRunner {
     public nonisolated let workspacePath: String
     public nonisolated let sessionID: String
@@ -50,9 +51,11 @@ public actor AgentRunner {
     private let store: Store
     private let makeProcess: @Sendable (AgentLaunch) -> any AgentProcessing
     private let sink = EventSink()
+    /// Held outside the actor so `cancelNow()` can signal a process from synchronous main-actor
+    /// code without waiting for a turn on the actor, which is exactly when it is least available.
+    private let handle = ProcessHandle()
 
     private var session: Session
-    private var process: (any AgentProcessing)?
     private var readTask: Task<Void, Never>?
     private var stderrTask: Task<Void, Never>?
     private var killTask: Task<Void, Never>?
@@ -62,12 +65,12 @@ public actor AgentRunner {
     private var cancelled = false
 
     /// Stream deltas are the same text arriving character by character, already superseded by the
-    /// `assistant` event behind them. Persisting them would triple the row count and duplicate
-    /// the transcript, so they reach the UI live and are dropped. Flip this on to keep them.
-    public var persistsStreamDeltas = false
+    /// `assistant` event behind them. Storing them would multiply the row count and duplicate the
+    /// transcript, so they reach the UI live and are then dropped. Flip this on to keep them.
+    private var persistsStreamDeltas = false
 
-    /// stderr is only ever surfaced when the process dies without a `result`, so a few lines of
-    /// tail is all that is worth holding on to.
+    /// stderr only ever surfaces when the process dies without a `result`, so a short tail is all
+    /// that is worth holding.
     private static let stderrTailLimit = 40
 
     public init(
@@ -83,7 +86,7 @@ public actor AgentRunner {
         self.makeProcess = makeProcess
     }
 
-    /// The default factory. Kept separate so the injected one can be swapped wholesale.
+    /// The default factory. Separate so an injected one can replace it wholesale.
     public static let spawn: @Sendable (AgentLaunch) -> any AgentProcessing = { launch in
         StreamingProcess(
             executable: launch.executable,
@@ -99,8 +102,9 @@ public actor AgentRunner {
     public static let executable = "claude"
 
     /// The invocation from PROTOCOL.md. `--verbose` is not optional: the CLI refuses to run
-    /// `-p --output-format stream-json` without it.
-    public static func arguments(for session: Session) -> [String] {
+    /// `-p --output-format stream-json` without it. Pure and static so it can be asserted on
+    /// without spawning anything.
+    public static func argv(session: Session, resume: String?) -> [String] {
         var arguments = [
             "-p",
             "--output-format", "stream-json",
@@ -110,18 +114,18 @@ public actor AgentRunner {
             "--permission-mode", session.permissionMode.cliValue,
             "--model", session.model,
         ]
-        if let agentSessionID = session.agentSessionID, !agentSessionID.isEmpty {
-            arguments += ["--resume", agentSessionID]
+        if let resume, !resume.isEmpty {
+            arguments += ["--resume", resume]
         }
         return arguments
     }
 
-    /// Argv for this runner right now. It is recomputed per start because the agent session id
-    /// only exists after the first run, and a restart has to resume rather than begin again.
+    /// How this runner would spawn right now. Recomputed per start, because the agent session id
+    /// only exists after the first run and a restart has to resume rather than begin again.
     public func launch() -> AgentLaunch {
         AgentLaunch(
             executable: Self.executable,
-            arguments: Self.arguments(for: session),
+            arguments: Self.argv(session: session, resume: session.agentSessionID),
             cwd: workspacePath,
             environment: Shell.environment()
         )
@@ -135,7 +139,7 @@ public actor AgentRunner {
 
     /// Decoded events for the UI. Nonisolated so a view can start consuming without hopping onto
     /// the actor, which means it must not read actor state: the continuation lives in its own
-    /// reference box created at init.
+    /// reference box built at init.
     public nonisolated var events: AsyncStream<AgentEvent> { sink.stream }
 
     public func setPersistsStreamDeltas(_ value: Bool) {
@@ -149,7 +153,7 @@ public actor AgentRunner {
         try start()
 
         let line = try Self.encodeTurn(text)
-        process?.writeLine(line)
+        handle.current?.writeLine(line)
 
         await persist(kind: .user, payload: Data(line.utf8))
 
@@ -163,26 +167,27 @@ public actor AgentRunner {
     static func encodeTurn(_ text: String) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]
-        let data = try encoder.encode(UserTurn(text: text))
-        return String(decoding: data, as: UTF8.self)
+        return String(decoding: try encoder.encode(UserTurn(text: text)), as: UTF8.self)
     }
 
     private func start() throws {
-        guard process == nil else { return }
+        guard handle.current == nil else { return }
 
         cancelled = false
-        let proc = makeProcess(launch())
-        process = proc
+        handle.cancelRequested = false
+        stderrTail = []
+        let process = makeProcess(launch())
+        handle.current = process
         alive = true
 
-        // Touching `lines` is what starts the process, so stderr has to be claimed before it or
-        // early diagnostics land nowhere. Both consumers are registered before launch, so no
-        // output can be dropped between the fork and the first read.
-        let errors = proc.errorLines
-        let lines = proc.lines
+        // Touching `lines` is what launches the process, so stderr has to be claimed before it or
+        // early diagnostics land nowhere. Both consumers are registered before the fork, so no
+        // output can be dropped between launch and the first read.
+        let errors = process.errorLines
+        let lines = process.lines
 
         readTask = Task { [weak self] in
-            await self?.consume(proc, lines: lines)
+            await self?.consume(process, lines: lines)
         }
         stderrTask = Task { [weak self] in
             for await line in errors {
@@ -191,7 +196,7 @@ public actor AgentRunner {
         }
     }
 
-    private func consume(_ proc: any AgentProcessing, lines: AsyncThrowingStream<String, Error>) async {
+    private func consume(_ process: any AgentProcessing, lines: AsyncThrowingStream<String, Error>) async {
         var sawResult = false
         do {
             for try await line in lines {
@@ -203,7 +208,7 @@ public actor AgentRunner {
             appendStderr("\(error)")
         }
 
-        let status = await proc.exitStatus
+        let status = await process.exitStatus
         await finish(status: status, sawResult: sawResult)
     }
 
@@ -221,12 +226,12 @@ public actor AgentRunner {
     func ingest(_ event: AgentEvent) async {
         if event.isTranscriptRow || persistsStreamDeltas {
             var durationMS: Int?
-            if case .result(_, let result) = event { durationMS = result.durationMS }
+            if case .result(let result) = event { durationMS = result.durationMS }
             await persist(kind: event.kind, payload: event.raw, durationMS: durationMS, refID: event.refID)
         }
 
         switch event {
-        case .initialized(_, let info):
+        case .initialized(let info):
             if !info.sessionID.isEmpty, session.agentSessionID != info.sessionID {
                 session = session.with {
                     $0.agentSessionID = info.sessionID
@@ -235,12 +240,12 @@ public actor AgentRunner {
                 await save(session)
             }
 
-        case .result(_, let result):
+        case .result(let result):
             session = session.with {
                 $0.inputTokens += result.usage.inputTokens
                 $0.outputTokens += result.usage.outputTokens
                 $0.costUSD += result.usage.costUSD
-                $0.contextTokens = result.usage.contextTokens
+                $0.contextTokens = result.usage.contextUsedTokens
                 $0.state = result.isError ? .failed : .idle
                 $0.updatedAt = Date()
             }
@@ -255,7 +260,7 @@ public actor AgentRunner {
 
     private func persist(kind: MessageKind, payload: Data, durationMS: Int? = nil, refID: String? = nil) async {
         let seq = await reserveSeq()
-        try? await store.append(Message(
+        _ = try? await store.append(Message(
             sessionID: session.id,
             seq: seq,
             kind: kind,
@@ -273,7 +278,7 @@ public actor AgentRunner {
             return seq
         }
         let stored = (try? await store.nextSeq(sessionID: session.id)) ?? 0
-        // Another turn may have initialised the counter while this one was awaiting the store.
+        // Another turn may have initialised the counter while this one awaited the store.
         if let seq = nextSeq {
             nextSeq = seq + 1
             return seq
@@ -283,27 +288,37 @@ public actor AgentRunner {
     }
 
     private func save(_ session: Session) async {
-        try? await store.upsert(session)
+        _ = try? await store.upsert(session)
     }
 
     // MARK: Finishing
 
     private func finish(status: Int32, sawResult: Bool) async {
         alive = false
-        process = nil
+        handle.current = nil
         killTask?.cancel()
         killTask = nil
-        stderrTask?.cancel()
-        stderrTask = nil
-        sink.finish()
 
-        guard !cancelled else { return }
+        // The last stderr lines are usually the reason the process died, and they can still be in
+        // flight when stdout closes. Waiting for that task is what makes the tail complete.
+        await stderrTask?.value
+        stderrTask = nil
+
+        guard !cancelled, !handle.cancelRequested else {
+            markCancelled()
+            return
+        }
 
         if status != 0, !sawResult {
             let tail = stderrTail.joined(separator: "\n")
+            let message = "The agent exited with status \(status)."
             let payload = (try? JSONEncoder().encode(ProcessFailure(status: Int(status), stderr: tail)))
-                ?? Data("{\"type\":\"error\"}".utf8)
-            await persist(kind: .error, payload: payload)
+                ?? Data(#"{"type":"error"}"#.utf8)
+
+            await ingest(.error(AgentError(
+                message: tail.isEmpty ? message : "\(message)\n\(tail)",
+                raw: payload
+            )))
 
             session = session.with {
                 $0.state = .failed
@@ -319,32 +334,48 @@ public actor AgentRunner {
         }
     }
 
+    // MARK: Cancelling
+
     /// SIGTERM now, SIGKILL in three seconds if the agent is still around. Claude Code usually
     /// wants a moment to flush, but it does not get to hang the app.
     public func cancel() {
-        guard let proc = process, !cancelled else { return }
+        let wasRunning = !cancelled
+        markCancelled()
+
+        guard wasRunning, let process = handle.current else { return }
+        process.closeStdin()
+        process.terminate()
+
+        killTask = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, process.isRunning else { return }
+            process.kill()
+        }
+    }
+
+    /// Cancellation can be noticed here or by the read loop finishing first, so the bookkeeping
+    /// has to be idempotent and cannot live in either path alone.
+    private func markCancelled() {
+        guard !cancelled else { return }
         cancelled = true
+        handle.cancelRequested = true
+        alive = false
 
         session = session.with {
             $0.state = .cancelled
             $0.updatedAt = Date()
         }
         let snapshot = session
-        Task { [store] in try? await store.upsert(snapshot) }
-
-        proc.closeStdin()
-        proc.terminate()
-
-        killTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled else { return }
-            if proc.isRunning { proc.kill() }
-            await self?.markStopped()
-        }
+        Task { [store] in _ = try? await store.upsert(snapshot) }
     }
 
-    private func markStopped() {
-        alive = false
+    /// Fire and forget, for a SwiftUI button that cannot await. The intent is recorded and the
+    /// SIGTERM goes out synchronously, so a busy actor can neither delay the signal nor let the
+    /// exit that follows be mistaken for a crash. The bookkeeping catches up a moment later.
+    public nonisolated func cancelNow() {
+        handle.cancelRequested = true
+        handle.current?.terminate()
+        Task { await self.cancel() }
     }
 
     // MARK: Wire formats
@@ -368,7 +399,7 @@ public actor AgentRunner {
         }
     }
 
-    /// Stored as an `.error` row when the process dies without ever emitting a `result`.
+    /// Stored as the `.error` row when the process dies without ever emitting a `result`.
     private struct ProcessFailure: Encodable {
         let type = "error"
         let subtype = "process_exit"
@@ -377,10 +408,10 @@ public actor AgentRunner {
     }
 }
 
-// MARK: - Event sink
+// MARK: - Boxes
 
-/// Holds the events continuation outside the actor, so the `events` accessor can be nonisolated.
-/// An `AsyncStream.Continuation` is already thread safe, so no lock is needed here.
+/// Holds the events continuation outside the actor so the `events` accessor can be nonisolated.
+/// An `AsyncStream.Continuation` is already thread safe, so there is nothing to guard here.
 private final class EventSink: @unchecked Sendable {
     let stream: AsyncStream<AgentEvent>
     private let continuation: AsyncStream<AgentEvent>.Continuation
@@ -400,11 +431,49 @@ private final class EventSink: @unchecked Sendable {
     }
 }
 
+/// The live process, reachable without actor isolation so a signal can be sent from anywhere.
+/// The lock is only ever held across the pointer swap, never across an await.
+private final class ProcessHandle: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: (any AgentProcessing)?
+    private var cancelled = false
+
+    var current: (any AgentProcessing)? {
+        get { read() }
+        set { write(newValue) }
+    }
+
+    /// Set before the signal goes out, so the exit it causes is not mistaken for a crash by the
+    /// read loop finishing on another thread.
+    var cancelRequested: Bool {
+        get { readCancelled() }
+        set { writeCancelled(newValue) }
+    }
+
+    private func read() -> (any AgentProcessing)? {
+        lock.lock(); defer { lock.unlock() }
+        return process
+    }
+
+    private func write(_ value: (any AgentProcessing)?) {
+        lock.lock(); process = value; lock.unlock()
+    }
+
+    private func readCancelled() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return cancelled
+    }
+
+    private func writeCancelled(_ value: Bool) {
+        lock.lock(); cancelled = value; lock.unlock()
+    }
+}
+
 // MARK: - Permission modes
 
 public extension PermissionMode {
-    /// What `--permission-mode` expects. Baton's names happen to match the CLI's today, but the
-    /// two vocabularies are not the same thing and drift is a matter of time.
+    /// What `--permission-mode` expects. Baton's names happen to line up with the CLI's today,
+    /// but they are two separate vocabularies and drift is a matter of time.
     var cliValue: String {
         switch self {
         case .auto: "auto"

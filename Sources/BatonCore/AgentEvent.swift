@@ -6,8 +6,8 @@ import Foundation
 ///
 /// Tool input is arbitrary JSON that Baton neither controls nor fully understands, so it has to
 /// survive a round trip untouched. Modelling it as an enum rather than `Any` keeps it `Sendable`,
-/// keeps it out of the dynamic-cast business, and lets a renderer added later dig into a payload
-/// that was never decoded into a named type.
+/// keeps it out of the dynamic-cast business, and lets a renderer written a year from now dig
+/// into a payload nobody thought to decode today.
 public enum JSONValue: Sendable, Hashable, Codable {
     case string(String)
     case number(Double)
@@ -39,8 +39,8 @@ public enum JSONValue: Sendable, Hashable, Codable {
         }
     }
 
-    /// Parse one JSON document. Returns nil rather than throwing, because every caller in Baton
-    /// is on a path that must never abort the stream.
+    /// Parse one JSON document. Returns nil instead of throwing, because every caller in Baton is
+    /// on a path that must never abort the stream.
     public static func parse(_ data: Data) -> JSONValue? {
         try? JSONDecoder().decode(JSONValue.self, from: data)
     }
@@ -86,6 +86,8 @@ public enum JSONValue: Sendable, Hashable, Codable {
         return false
     }
 
+    /// A JSON `null` reads as a missing key, because for every field Baton cares about the two
+    /// mean the same thing (`is_error` and `parent_tool_use_id` are explicitly null constantly).
     public subscript(key: String) -> JSONValue? {
         guard case .object(let object) = self, let value = object[key], !value.isNull else { return nil }
         return value
@@ -96,8 +98,8 @@ public enum JSONValue: Sendable, Hashable, Codable {
         return array[index]
     }
 
-    /// Strings out of a `[JSONValue]`, skipping anything that is not a string. Used for the tool
-    /// and slash command lists on the init event.
+    /// Strings out of an array, skipping anything that is not one. Used for the tool and slash
+    /// command lists on the init event.
     public var stringArray: [String] {
         (arrayValue ?? []).compactMap(\.stringValue)
     }
@@ -111,77 +113,118 @@ public enum JSONValue: Sendable, Hashable, Codable {
     }
 }
 
-// MARK: - Envelope
-
-/// The fields every line of the stream carries, plus the untouched bytes it arrived as.
-///
-/// Baton stores the raw JSON for every transcript row so a renderer written a year from now can
-/// show detail that nobody thought to decode today.
-public struct AgentEnvelope: Sendable, Hashable {
-    public let raw: Data
-    public let type: String
-    public let subtype: String?
-    public let uuid: String?
-    public let sessionID: String?
-    public let parentToolUseID: String?
-
-    public init(
-        raw: Data,
-        type: String,
-        subtype: String? = nil,
-        uuid: String? = nil,
-        sessionID: String? = nil,
-        parentToolUseID: String? = nil
-    ) {
-        self.raw = raw
-        self.type = type
-        self.subtype = subtype
-        self.uuid = uuid
-        self.sessionID = sessionID
-        self.parentToolUseID = parentToolUseID
-    }
-
-    /// A subagent (the Agent tool) tags everything it emits with the tool use that spawned it,
-    /// so the UI can indent those rows instead of mixing them into the main flow.
-    public var isFromSubagent: Bool { parentToolUseID != nil }
-}
-
 // MARK: - Payloads
 
-/// Everything the first line of a session binds: which agent session to resume, which model
-/// answered, and what it was allowed to do.
+/// Everything the first line of a session binds: the id to resume with, the model that answered,
+/// and what it was allowed to do.
 public struct AgentInit: Sendable, Hashable {
     public let sessionID: String
     public let cwd: String
     public let model: String
     public let permissionMode: String
-    public let outputStyle: String
-    public let version: String
     public let tools: [String]
     public let slashCommands: [String]
     public let agents: [String]
+    public let outputStyle: String
+    public let version: String
+    public let raw: Data
+    public let uuid: String?
+
+    public init(
+        sessionID: String,
+        cwd: String = "",
+        model: String = "",
+        permissionMode: String = "",
+        tools: [String] = [],
+        slashCommands: [String] = [],
+        agents: [String] = [],
+        outputStyle: String = "",
+        version: String = "",
+        raw: Data = Data(),
+        uuid: String? = nil
+    ) {
+        self.sessionID = sessionID
+        self.cwd = cwd
+        self.model = model
+        self.permissionMode = permissionMode
+        self.tools = tools
+        self.slashCommands = slashCommands
+        self.agents = agents
+        self.outputStyle = outputStyle
+        self.version = version
+        self.raw = raw
+        self.uuid = uuid
+    }
 }
 
-public struct AgentText: Sendable, Hashable {
+/// A finished text or thinking block. Both shapes are one string plus the envelope, so they share
+/// a type rather than duplicating it.
+public struct AgentTextBlock: Sendable, Hashable {
     public let text: String
+    public let parentToolUseID: String?
+    public let raw: Data
+    /// Only present on thinking blocks, and only ever needed to replay a block back to the API.
+    public let signature: String
     public let messageID: String
     public let model: String
     public let usage: AgentUsage
-}
+    public let uuid: String?
+    public let sessionID: String?
 
-public struct AgentThinking: Sendable, Hashable {
-    public let thinking: String
-    public let signature: String
-    public let messageID: String
+    public init(
+        text: String,
+        parentToolUseID: String? = nil,
+        raw: Data = Data(),
+        signature: String = "",
+        messageID: String = "",
+        model: String = "",
+        usage: AgentUsage = .zero,
+        uuid: String? = nil,
+        sessionID: String? = nil
+    ) {
+        self.text = text
+        self.parentToolUseID = parentToolUseID
+        self.raw = raw
+        self.signature = signature
+        self.messageID = messageID
+        self.model = model
+        self.usage = usage
+        self.uuid = uuid
+        self.sessionID = sessionID
+    }
 }
 
 public struct AgentToolUse: Sendable, Hashable {
     public let id: String
     public let name: String
     public let input: JSONValue
+    public let parentToolUseID: String?
+    public let raw: Data
     public let messageID: String
+    public let uuid: String?
+    public let sessionID: String?
 
-    /// The one input field worth putting in a collapsed row header for file tools.
+    public init(
+        id: String,
+        name: String,
+        input: JSONValue,
+        parentToolUseID: String? = nil,
+        raw: Data = Data(),
+        messageID: String = "",
+        uuid: String? = nil,
+        sessionID: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.input = input
+        self.parentToolUseID = parentToolUseID
+        self.raw = raw
+        self.messageID = messageID
+        self.uuid = uuid
+        self.sessionID = sessionID
+    }
+
+    /// The one input field worth putting in a collapsed row header for the file tools.
     public var filePath: String? { input["file_path"]?.stringValue }
 }
 
@@ -189,82 +232,143 @@ public struct AgentToolResult: Sendable, Hashable {
     public let toolUseID: String
     public let text: String
     public let isError: Bool
-    /// Screenshots arrive as image blocks. The bytes are not kept, only the fact they were there,
-    /// so a row can offer to show them from the raw payload.
+    /// Screenshots come back as image blocks. The bytes are not lifted out, only the fact that
+    /// they were there, so a row can offer to pull them from the raw payload.
     public let hasImages: Bool
+    public let raw: Data
+    public let parentToolUseID: String?
+    public let uuid: String?
+    public let sessionID: String?
+
+    public init(
+        toolUseID: String,
+        text: String,
+        isError: Bool = false,
+        hasImages: Bool = false,
+        raw: Data = Data(),
+        parentToolUseID: String? = nil,
+        uuid: String? = nil,
+        sessionID: String? = nil
+    ) {
+        self.toolUseID = toolUseID
+        self.text = text
+        self.isError = isError
+        self.hasImages = hasImages
+        self.raw = raw
+        self.parentToolUseID = parentToolUseID
+        self.uuid = uuid
+        self.sessionID = sessionID
+    }
 }
 
 /// A slice of the raw Anthropic streaming API, present only with `--include-partial-messages`.
-/// Good for live typing, worthless for a transcript: the `assistant` event that follows carries
-/// the finished block.
-public struct AgentStreamDelta: Sendable, Hashable {
-    public enum Phase: String, Sendable {
-        case messageStart = "message_start"
-        case contentBlockStart = "content_block_start"
-        case contentBlockDelta = "content_block_delta"
-        case contentBlockStop = "content_block_stop"
-        case messageDelta = "message_delta"
-        case messageStop = "message_stop"
-        case other
-    }
-
-    public enum Fragment: Sendable, Hashable {
-        case text(String)
-        case thinking(String)
-        case signature(String)
-        /// Partial JSON for a tool input. Accumulate it, it only parses once complete.
-        case inputJSON(String)
-    }
-
-    public let phase: Phase
-    public let rawPhase: String
-    public let index: Int?
-    public let blockType: String?
-    public let fragment: Fragment?
+/// Good for live typing, worthless for a transcript: the `assistant` event right behind it
+/// carries the finished block. Anything with no live-rendering use decodes as `.unknown`.
+public enum StreamDelta: Sendable, Hashable {
+    case text(String)
+    case thinking(String)
+    case toolName(String)
+    /// A chunk of `partial_json`. Accumulate it, it only parses once the block is complete.
+    case toolInput(String)
+    case blockFinished
 }
 
-public struct AgentStatus: Sendable, Hashable {
-    public let status: String
-}
-
-public struct AgentThinkingTokens: Sendable, Hashable {
-    public let estimatedTokens: Int
-    public let estimatedTokensDelta: Int
-}
-
-/// Hook output can run to hundreds of kilobytes, so only the shape is decoded here. The body
-/// stays in the raw payload and is never rendered wholesale.
+/// Hook output runs to hundreds of kilobytes, so only the shape is decoded. The body stays in the
+/// raw payload and is never rendered wholesale.
 public struct AgentHook: Sendable, Hashable {
-    public enum Phase: String, Sendable {
-        case started
-        case response
-    }
-
-    public let phase: Phase
     public let name: String
-    public let event: String?
-    public let exitCode: Int?
+    public let event: String
     public let outcome: String?
+    public let exitCode: Int?
+    public let raw: Data
+    public let started: Bool
+    public let uuid: String?
+    public let sessionID: String?
+
+    public init(
+        name: String,
+        event: String = "",
+        outcome: String? = nil,
+        exitCode: Int? = nil,
+        raw: Data = Data(),
+        started: Bool = false,
+        uuid: String? = nil,
+        sessionID: String? = nil
+    ) {
+        self.name = name
+        self.event = event
+        self.outcome = outcome
+        self.exitCode = exitCode
+        self.raw = raw
+        self.started = started
+        self.uuid = uuid
+        self.sessionID = sessionID
+    }
 }
 
 /// The last line of a turn, and the only place a real cost and context window show up.
 public struct AgentResult: Sendable, Hashable {
-    public let subtype: String
+    public let usage: AgentUsage
+    public let summary: String
     public let isError: Bool
-    public let text: String
+    public let subtype: String
     public let durationMS: Int
-    public let durationAPIMS: Int
     public let numTurns: Int
     public let stopReason: String?
+    public let raw: Data
+    public let durationAPIMS: Int
     public let terminalReason: String?
     public let permissionDenials: Int
-    public let usage: AgentUsage
+    public let uuid: String?
+    public let sessionID: String?
+
+    public init(
+        usage: AgentUsage = .zero,
+        summary: String = "",
+        isError: Bool = false,
+        subtype: String = "success",
+        durationMS: Int = 0,
+        numTurns: Int = 0,
+        stopReason: String? = nil,
+        raw: Data = Data(),
+        durationAPIMS: Int = 0,
+        terminalReason: String? = nil,
+        permissionDenials: Int = 0,
+        uuid: String? = nil,
+        sessionID: String? = nil
+    ) {
+        self.usage = usage
+        self.summary = summary
+        self.isError = isError
+        self.subtype = subtype
+        self.durationMS = durationMS
+        self.numTurns = numTurns
+        self.stopReason = stopReason
+        self.raw = raw
+        self.durationAPIMS = durationAPIMS
+        self.terminalReason = terminalReason
+        self.permissionDenials = permissionDenials
+        self.uuid = uuid
+        self.sessionID = sessionID
+    }
 
     public var succeeded: Bool { !isError && subtype == "success" }
 }
 
+/// Not a CLI event type. The runner synthesises one when the process dies without ever saying
+/// how it went, so the transcript never just stops mid sentence.
+public struct AgentError: Sendable, Hashable {
+    public let message: String
+    public let raw: Data
+
+    public init(message: String, raw: Data = Data()) {
+        self.message = message
+        self.raw = raw
+    }
+}
+
 /// Token accounting, filled from either the thin `assistant` usage object or the richer one on
-/// `result`. Cost and context window only ever arrive on `result`.
+/// `result`. Cost and the context window only ever arrive on `result`.
 public struct AgentUsage: Sendable, Hashable {
     public var inputTokens: Int
     public var outputTokens: Int
@@ -272,7 +376,9 @@ public struct AgentUsage: Sendable, Hashable {
     public var cacheCreationTokens: Int
     public var thinkingTokens: Int
     public var costUSD: Double
-    public var contextWindow: Int
+    /// The size of the context window, from `modelUsage.<model>.contextWindow`. Zero when the
+    /// event did not carry one, which is every event except `result`.
+    public var contextTokens: Int
 
     public init(
         inputTokens: Int = 0,
@@ -281,7 +387,7 @@ public struct AgentUsage: Sendable, Hashable {
         cacheCreationTokens: Int = 0,
         thinkingTokens: Int = 0,
         costUSD: Double = 0,
-        contextWindow: Int = 0
+        contextTokens: Int = 0
     ) {
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
@@ -289,19 +395,19 @@ public struct AgentUsage: Sendable, Hashable {
         self.cacheCreationTokens = cacheCreationTokens
         self.thinkingTokens = thinkingTokens
         self.costUSD = costUSD
-        self.contextWindow = contextWindow
+        self.contextTokens = contextTokens
     }
 
     public static let zero = AgentUsage()
 
-    /// What the model actually had in front of it, which is what a "how full is the context"
-    /// gauge needs. Cached tokens count: they occupy the window just the same.
-    public var contextTokens: Int {
+    /// What the model actually had in front of it. Cached tokens count, they occupy the window
+    /// just the same, which is what a "how full is the context" gauge has to measure.
+    public var contextUsedTokens: Int {
         inputTokens + cacheReadTokens + cacheCreationTokens
     }
 
     public var contextFraction: Double {
-        contextWindow > 0 ? min(1, Double(contextTokens) / Double(contextWindow)) : 0
+        contextTokens > 0 ? min(1, Double(contextUsedTokens) / Double(contextTokens)) : 0
     }
 
     /// Read the shape shared by `assistant.message.usage` and `result.usage`.
@@ -321,46 +427,76 @@ public struct AgentUsage: Sendable, Hashable {
 
 /// One decoded line of the `claude` stream.
 ///
-/// Every case pairs the envelope (raw bytes, uuid, session id, subagent parent) with a small
-/// decoded payload. Nothing here throws and nothing here traps: a `type` or `subtype` shipped by
-/// a future CLI release lands in `.unknown` with its bytes intact, and the session carries on.
+/// Nothing here throws and nothing here traps. A `type` or `subtype` shipped by a future CLI
+/// release lands in `.unknown` with its bytes intact and the session carries on, which is the
+/// whole reason the raw line travels with every case.
 public enum AgentEvent: Sendable {
-    case initialized(AgentEnvelope, AgentInit)
-    case assistantText(AgentEnvelope, AgentText)
-    case thinking(AgentEnvelope, AgentThinking)
-    case toolUse(AgentEnvelope, AgentToolUse)
-    case toolResult(AgentEnvelope, AgentToolResult)
-    case streamDelta(AgentEnvelope, AgentStreamDelta)
-    case status(AgentEnvelope, AgentStatus)
-    case thinkingTokens(AgentEnvelope, AgentThinkingTokens)
-    case hook(AgentEnvelope, AgentHook)
-    case result(AgentEnvelope, AgentResult)
-    case rateLimit(AgentEnvelope)
-    case unknown(AgentEnvelope)
+    case initialized(AgentInit)
+    case assistantText(AgentTextBlock)
+    case thinking(AgentTextBlock)
+    case toolUse(AgentToolUse)
+    case toolResult(AgentToolResult)
+    case streamDelta(StreamDelta)
+    case status(String)
+    case thinkingTokens(Int)
+    case hook(AgentHook)
+    case result(AgentResult)
+    case rateLimit(Data)
+    case error(AgentError)
+    case unknown(Data)
 
-    public var envelope: AgentEnvelope {
+    /// The original bytes of the line. A stream delta has none worth keeping: it is never stored
+    /// and its content is superseded a moment later.
+    public var raw: Data {
         switch self {
-        case .initialized(let envelope, _): envelope
-        case .assistantText(let envelope, _): envelope
-        case .thinking(let envelope, _): envelope
-        case .toolUse(let envelope, _): envelope
-        case .toolResult(let envelope, _): envelope
-        case .streamDelta(let envelope, _): envelope
-        case .status(let envelope, _): envelope
-        case .thinkingTokens(let envelope, _): envelope
-        case .hook(let envelope, _): envelope
-        case .result(let envelope, _): envelope
-        case .rateLimit(let envelope): envelope
-        case .unknown(let envelope): envelope
+        case .initialized(let value): value.raw
+        case .assistantText(let value), .thinking(let value): value.raw
+        case .toolUse(let value): value.raw
+        case .toolResult(let value): value.raw
+        case .hook(let value): value.raw
+        case .result(let value): value.raw
+        case .error(let value): value.raw
+        case .rateLimit(let raw), .unknown(let raw): raw
+        case .streamDelta, .status, .thinkingTokens: Data()
         }
     }
 
-    public var raw: Data { envelope.raw }
-    public var uuid: String? { envelope.uuid }
-    public var sessionID: String? { envelope.sessionID }
-    public var parentToolUseID: String? { envelope.parentToolUseID }
+    /// Non-nil when the event came from inside a subagent (the Agent tool), so those rows can be
+    /// indented rather than mixed into the main flow.
+    public var parentToolUseID: String? {
+        switch self {
+        case .assistantText(let value), .thinking(let value): value.parentToolUseID
+        case .toolUse(let value): value.parentToolUseID
+        case .toolResult(let value): value.parentToolUseID
+        default: nil
+        }
+    }
 
-    /// The storage bucket this row belongs in. Detail beyond the bucket lives in the payload.
+    public var sessionID: String? {
+        switch self {
+        case .initialized(let value): value.sessionID
+        case .assistantText(let value), .thinking(let value): value.sessionID
+        case .toolUse(let value): value.sessionID
+        case .toolResult(let value): value.sessionID
+        case .hook(let value): value.sessionID
+        case .result(let value): value.sessionID
+        default: nil
+        }
+    }
+
+    public var uuid: String? {
+        switch self {
+        case .initialized(let value): value.uuid
+        case .assistantText(let value), .thinking(let value): value.uuid
+        case .toolUse(let value): value.uuid
+        case .toolResult(let value): value.uuid
+        case .hook(let value): value.uuid
+        case .result(let value): value.uuid
+        default: nil
+        }
+    }
+
+    /// The storage bucket this row belongs in. Everything finer lives in the stored payload.
     public var kind: MessageKind {
         switch self {
         case .assistantText: .assistantText
@@ -368,24 +504,27 @@ public enum AgentEvent: Sendable {
         case .toolUse: .toolUse
         case .toolResult: .toolResult
         case .result: .result
+        case .error: .error
         case .rateLimit: .notice
         case .initialized, .streamDelta, .status, .thinkingTokens, .hook, .unknown: .system
         }
     }
 
     /// Whether the event belongs in the stored transcript. Stream deltas do not: they are the
-    /// same text arriving character by character, and the `assistant` event right behind them
-    /// carries the finished block.
+    /// same text arriving character by character, and the `assistant` event behind them carries
+    /// the finished block. Status and thinking-token ticks are live indicators, not history.
     public var isTranscriptRow: Bool {
-        if case .streamDelta = self { return false }
-        return true
+        switch self {
+        case .streamDelta, .status, .thinkingTokens: false
+        default: true
+        }
     }
 
-    /// The tool_use id a row should be filed under, so a tool result can find its call later.
+    /// The tool_use id a row is filed under, so a tool result can find its call later.
     public var refID: String? {
         switch self {
-        case .toolUse(_, let use): use.id
-        case .toolResult(_, let result): result.toolUseID
+        case .toolUse(let value): value.id
+        case .toolResult(let value): value.toolUseID
         default: nil
         }
     }
@@ -394,126 +533,139 @@ public enum AgentEvent: Sendable {
 
     /// Turn one NDJSON line into an event.
     ///
-    /// Returns nil only for a blank line or bytes that are not JSON at all (the CLI can be killed
-    /// mid-write). Anything that parses comes back as an event, `.unknown` at worst.
+    /// Returns nil only for a blank line or for bytes that are not JSON at all, which happens
+    /// when the CLI is killed mid-write. Anything that parses comes back as an event, `.unknown`
+    /// at worst.
     public static func decode(line: String) -> AgentEvent? {
         guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
 
         let raw = Data(line.utf8)
         guard let json = JSONValue.parse(raw) else { return nil }
-        guard case .object = json else {
-            return .unknown(AgentEnvelope(raw: raw, type: ""))
-        }
+        guard case .object = json else { return .unknown(raw) }
 
-        let type = json["type"]?.stringValue ?? ""
-        let subtype = json["subtype"]?.stringValue
-        let envelope = AgentEnvelope(
-            raw: raw,
-            type: type,
-            subtype: subtype,
-            uuid: json["uuid"]?.stringValue,
-            sessionID: json["session_id"]?.stringValue,
-            parentToolUseID: json["parent_tool_use_id"]?.stringValue
-        )
-
-        switch type {
-        case "system": return decodeSystem(envelope, json)
-        case "assistant": return decodeAssistant(envelope, json)
-        case "user": return decodeUser(envelope, json)
-        case "stream_event": return decodeStreamEvent(envelope, json)
-        case "result": return decodeResult(envelope, json)
-        case "rate_limit_event": return .rateLimit(envelope)
-        default: return .unknown(envelope)
+        switch json["type"]?.stringValue {
+        case "system": return decodeSystem(json, raw: raw)
+        case "assistant": return decodeAssistant(json, raw: raw)
+        case "user": return decodeUser(json, raw: raw)
+        case "stream_event": return decodeStreamEvent(json, raw: raw)
+        case "result": return decodeResult(json, raw: raw)
+        case "rate_limit_event": return .rateLimit(raw)
+        default: return .unknown(raw)
         }
     }
 
-    private static func decodeSystem(_ envelope: AgentEnvelope, _ json: JSONValue) -> AgentEvent {
-        switch envelope.subtype {
+    private static func decodeSystem(_ json: JSONValue, raw: Data) -> AgentEvent {
+        switch json["subtype"]?.stringValue {
         case "init":
-            return .initialized(envelope, AgentInit(
+            return .initialized(AgentInit(
                 sessionID: json["session_id"]?.stringValue ?? "",
                 cwd: json["cwd"]?.stringValue ?? "",
                 model: json["model"]?.stringValue ?? "",
                 permissionMode: json["permissionMode"]?.stringValue ?? "",
-                outputStyle: json["output_style"]?.stringValue ?? "",
-                version: json["claude_code_version"]?.stringValue ?? "",
                 tools: (json["tools"] ?? .null).stringArray,
                 slashCommands: (json["slash_commands"] ?? .null).stringArray,
-                agents: (json["agents"] ?? .null).stringArray
+                agents: (json["agents"] ?? .null).stringArray,
+                outputStyle: json["output_style"]?.stringValue ?? "",
+                version: json["claude_code_version"]?.stringValue ?? "",
+                raw: raw,
+                uuid: json["uuid"]?.stringValue
             ))
 
         case "status":
-            return .status(envelope, AgentStatus(status: json["status"]?.stringValue ?? ""))
+            return .status(json["status"]?.stringValue ?? "")
 
         case "thinking_tokens":
-            return .thinkingTokens(envelope, AgentThinkingTokens(
-                estimatedTokens: json["estimated_tokens"]?.intValue ?? 0,
-                estimatedTokensDelta: json["estimated_tokens_delta"]?.intValue ?? 0
-            ))
+            return .thinkingTokens(json["estimated_tokens"]?.intValue ?? 0)
 
         case "hook_started", "hook_response":
-            let phase: AgentHook.Phase = envelope.subtype == "hook_started" ? .started : .response
-            return .hook(envelope, AgentHook(
-                phase: phase,
+            return .hook(AgentHook(
                 name: json["hook_name"]?.stringValue ?? "",
-                event: json["hook_event"]?.stringValue,
+                event: json["hook_event"]?.stringValue ?? "",
+                outcome: json["outcome"]?.stringValue,
                 exitCode: json["exit_code"]?.intValue,
-                outcome: json["outcome"]?.stringValue
+                raw: raw,
+                started: json["subtype"]?.stringValue == "hook_started",
+                uuid: json["uuid"]?.stringValue,
+                sessionID: json["session_id"]?.stringValue
             ))
 
         default:
-            return .unknown(envelope)
+            return .unknown(raw)
         }
     }
 
-    private static func decodeAssistant(_ envelope: AgentEnvelope, _ json: JSONValue) -> AgentEvent {
+    private static func decodeAssistant(_ json: JSONValue, raw: Data) -> AgentEvent {
         guard let message = json["message"], let block = message["content"]?[0] else {
-            return .unknown(envelope)
+            return .unknown(raw)
         }
+
+        let parentToolUseID = json["parent_tool_use_id"]?.stringValue
+        let uuid = json["uuid"]?.stringValue
+        let sessionID = json["session_id"]?.stringValue
         let messageID = message["id"]?.stringValue ?? ""
+        let model = message["model"]?.stringValue ?? ""
+        let usage = AgentUsage.decode(message["usage"])
 
         switch block["type"]?.stringValue {
         case "text":
-            return .assistantText(envelope, AgentText(
+            return .assistantText(AgentTextBlock(
                 text: block["text"]?.stringValue ?? "",
+                parentToolUseID: parentToolUseID,
+                raw: raw,
                 messageID: messageID,
-                model: message["model"]?.stringValue ?? "",
-                usage: AgentUsage.decode(message["usage"])
+                model: model,
+                usage: usage,
+                uuid: uuid,
+                sessionID: sessionID
             ))
 
         case "thinking":
-            return .thinking(envelope, AgentThinking(
-                thinking: block["thinking"]?.stringValue ?? "",
+            return .thinking(AgentTextBlock(
+                text: block["thinking"]?.stringValue ?? "",
+                parentToolUseID: parentToolUseID,
+                raw: raw,
                 signature: block["signature"]?.stringValue ?? "",
-                messageID: messageID
+                messageID: messageID,
+                model: model,
+                usage: usage,
+                uuid: uuid,
+                sessionID: sessionID
             ))
 
         case "tool_use":
-            return .toolUse(envelope, AgentToolUse(
+            return .toolUse(AgentToolUse(
                 id: block["id"]?.stringValue ?? "",
                 name: block["name"]?.stringValue ?? "",
                 input: block["input"] ?? .object([:]),
-                messageID: messageID
+                parentToolUseID: parentToolUseID,
+                raw: raw,
+                messageID: messageID,
+                uuid: uuid,
+                sessionID: sessionID
             ))
 
         default:
-            return .unknown(envelope)
+            return .unknown(raw)
         }
     }
 
-    private static func decodeUser(_ envelope: AgentEnvelope, _ json: JSONValue) -> AgentEvent {
+    private static func decodeUser(_ json: JSONValue, raw: Data) -> AgentEvent {
         guard let block = json["message"]?["content"]?[0],
               block["type"]?.stringValue == "tool_result"
         else {
-            return .unknown(envelope)
+            return .unknown(raw)
         }
 
         let rendered = renderToolResultContent(block["content"])
-        return .toolResult(envelope, AgentToolResult(
+        return .toolResult(AgentToolResult(
             toolUseID: block["tool_use_id"]?.stringValue ?? "",
             text: rendered.text,
             isError: block["is_error"]?.boolValue ?? false,
-            hasImages: rendered.hasImages
+            hasImages: rendered.hasImages,
+            raw: raw,
+            parentToolUseID: json["parent_tool_use_id"]?.stringValue,
+            uuid: json["uuid"]?.stringValue,
+            sessionID: json["session_id"]?.stringValue
         ))
     }
 
@@ -521,9 +673,7 @@ public enum AgentEvent: Sendable {
     /// screenshots. Both shapes reduce to text plus a flag.
     static func renderToolResultContent(_ content: JSONValue?) -> (text: String, hasImages: Bool) {
         guard let content else { return ("", false) }
-
         if let string = content.stringValue { return (string, false) }
-
         guard let blocks = content.arrayValue else { return (content.prettyPrinted, false) }
 
         var parts: [String] = []
@@ -538,49 +688,55 @@ public enum AgentEvent: Sendable {
         return (parts.joined(separator: "\n"), hasImages)
     }
 
-    private static func decodeStreamEvent(_ envelope: AgentEnvelope, _ json: JSONValue) -> AgentEvent {
-        guard let event = json["event"] else { return .unknown(envelope) }
+    private static func decodeStreamEvent(_ json: JSONValue, raw: Data) -> AgentEvent {
+        guard let event = json["event"] else { return .unknown(raw) }
 
-        let rawPhase = event["type"]?.stringValue ?? ""
-        var fragment: AgentStreamDelta.Fragment?
-        if let delta = event["delta"] {
-            switch delta["type"]?.stringValue {
-            case "text_delta": fragment = .text(delta["text"]?.stringValue ?? "")
-            case "thinking_delta": fragment = .thinking(delta["thinking"]?.stringValue ?? "")
-            case "signature_delta": fragment = .signature(delta["signature"]?.stringValue ?? "")
-            case "input_json_delta": fragment = .inputJSON(delta["partial_json"]?.stringValue ?? "")
-            default: fragment = nil
+        switch event["type"]?.stringValue {
+        case "content_block_start":
+            guard let block = event["content_block"], block["type"]?.stringValue == "tool_use" else {
+                return .unknown(raw)
             }
-        }
+            return .streamDelta(.toolName(block["name"]?.stringValue ?? ""))
 
-        return .streamDelta(envelope, AgentStreamDelta(
-            phase: AgentStreamDelta.Phase(rawValue: rawPhase) ?? .other,
-            rawPhase: rawPhase,
-            index: event["index"]?.intValue,
-            blockType: event["content_block"]?["type"]?.stringValue,
-            fragment: fragment
-        ))
+        case "content_block_delta":
+            guard let delta = event["delta"] else { return .unknown(raw) }
+            switch delta["type"]?.stringValue {
+            case "text_delta": return .streamDelta(.text(delta["text"]?.stringValue ?? ""))
+            case "thinking_delta": return .streamDelta(.thinking(delta["thinking"]?.stringValue ?? ""))
+            case "input_json_delta": return .streamDelta(.toolInput(delta["partial_json"]?.stringValue ?? ""))
+            default: return .unknown(raw)
+            }
+
+        case "content_block_stop":
+            return .streamDelta(.blockFinished)
+
+        default:
+            return .unknown(raw)
+        }
     }
 
-    private static func decodeResult(_ envelope: AgentEnvelope, _ json: JSONValue) -> AgentEvent {
+    private static func decodeResult(_ json: JSONValue, raw: Data) -> AgentEvent {
         var usage = AgentUsage.decode(json["usage"])
         usage.costUSD = json["total_cost_usd"]?.doubleValue ?? 0
-        usage.contextWindow = (json["modelUsage"]?.objectValue ?? [:])
+        usage.contextTokens = (json["modelUsage"]?.objectValue ?? [:])
             .values
             .compactMap { $0["contextWindow"]?.intValue }
             .max() ?? 0
 
-        return .result(envelope, AgentResult(
-            subtype: envelope.subtype ?? "",
+        return .result(AgentResult(
+            usage: usage,
+            summary: json["result"]?.stringValue ?? "",
             isError: json["is_error"]?.boolValue ?? false,
-            text: json["result"]?.stringValue ?? "",
+            subtype: json["subtype"]?.stringValue ?? "",
             durationMS: json["duration_ms"]?.intValue ?? 0,
-            durationAPIMS: json["duration_api_ms"]?.intValue ?? 0,
             numTurns: json["num_turns"]?.intValue ?? 0,
             stopReason: json["stop_reason"]?.stringValue,
+            raw: raw,
+            durationAPIMS: json["duration_api_ms"]?.intValue ?? 0,
             terminalReason: json["terminal_reason"]?.stringValue,
             permissionDenials: json["permission_denials"]?.arrayValue?.count ?? 0,
-            usage: usage
+            uuid: json["uuid"]?.stringValue,
+            sessionID: json["session_id"]?.stringValue
         ))
     }
 }

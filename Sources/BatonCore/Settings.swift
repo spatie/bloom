@@ -165,7 +165,7 @@ public enum GitHubIdentity {
     }
 }
 
-extension String {
+public extension String {
     var capitalizedFirst: String {
         isEmpty ? self : prefix(1).uppercased() + dropFirst()
     }

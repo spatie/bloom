@@ -39,13 +39,6 @@ public struct CheckRun: Sendable, Hashable, Identifiable {
     }
 }
 
-/// Merge methods mirror gh flags so callers cannot construct an unsupported strategy.
-public enum MergeMethod: String, Sendable, CaseIterable {
-    case merge
-    case squash
-    case rebase
-}
-
 /// GitHub failures retain command context or invalid output without exposing unbounded output.
 public struct GitHubError: Error, Sendable, CustomStringConvertible {
     public let message: String
@@ -131,6 +124,13 @@ private actor GitHubCache {
 
 /// The gh boundary centralizes JSON normalization, timeouts, and short-lived polling state.
 public enum GitHub {
+    /// Merge methods mirror gh flags so callers cannot construct an unsupported strategy.
+    public enum MergeMethod: String, Sendable, CaseIterable {
+        case merge
+        case squash
+        case rebase
+    }
+
     private static let cache = GitHubCache()
     private static let fields = [
         "number", "title", "url", "state", "isDraft", "mergeable",

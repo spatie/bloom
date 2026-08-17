@@ -140,6 +140,14 @@ final class AppModel {
         workspaceModels.values.count { $0.isRunning }
     }
 
+    /// Whether a workspace has a running agent, without forcing a `WorkspaceModel` into
+    /// existence. Sidebar rows ask this for every visible workspace on every redraw, and
+    /// `model(for:)` mutates observable state, so calling that from a view body would schedule
+    /// an extra render pass per row.
+    func isRunning(_ workspace: Workspace) -> Bool {
+        workspaceModels[workspace.id]?.isRunning ?? false
+    }
+
     // MARK: - Repos
 
     func addRepository(at path: String) async {

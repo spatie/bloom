@@ -86,7 +86,9 @@ enum Reveal {
         let url = URL(fileURLWithPath: path)
         for bundleID in ["com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92", "com.apple.dt.Xcode"] {
             if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-                NSWorkspace.shared.open([url], withApplicationAt: app, configuration: .init())
+                NSWorkspace.shared.open(
+                    [url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration()
+                )
                 return
             }
         }
