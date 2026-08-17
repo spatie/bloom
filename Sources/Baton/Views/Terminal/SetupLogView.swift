@@ -44,10 +44,7 @@ struct SetupLogView: View {
     @ViewBuilder
     private var statusIcon: some View {
         if model.isRunningSetup {
-            ProgressView()
-                .controlSize(.small)
-                .scaleEffect(0.7)
-                .frame(width: 12, height: 12)
+            LoadingView()
         } else if succeeded {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 11))

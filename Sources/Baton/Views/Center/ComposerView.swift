@@ -79,13 +79,17 @@ struct ComposerView: View {
             footer
         }
         .padding(12)
-        .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+        // The tap lives on the background rather than the box, so a click inside the text view
+        // still lands on the text view and only the padding acts as a focus target.
+        .background {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Palette.surfaceRaised)
+                .onTapGesture { isFocused = true }
+        }
         .overlay {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(isFocused ? Palette.borderStrong : Palette.border, lineWidth: 1)
         }
-        .contentShape(RoundedRectangle(cornerRadius: 8))
-        .onTapGesture { isFocused = true }
         .overlay(alignment: .topLeading) {
             menuOverlay
                 .alignmentGuide(.top) { $0[.bottom] + 6 }
@@ -781,9 +785,9 @@ struct ComposerTextEditor: NSViewRepresentable {
         /// SwiftUI update, and writing state there is how a view ends up fighting itself.
         func focusChanged(to focused: Bool) {
             guard parent.isFocused != focused else { return }
-            let binding = parent.$isFocused
-            DispatchQueue.main.async {
-                if binding.wrappedValue != focused { binding.wrappedValue = focused }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.parent.isFocused != focused else { return }
+                self.parent.isFocused = focused
             }
         }
 
@@ -813,11 +817,16 @@ struct ComposerTextEditor: NSViewRepresentable {
         /// into the same pass.
         func reportHeight(of textView: ComposerTextView) {
             guard let layout = textView.layoutManager, let container = textView.textContainer else { return }
+            // Before the first layout pass the view has no width, and text wrapped to nothing
+            // measures as one line per word. Measuring then would open the box at full height.
+            guard textView.bounds.width > 1 else { return }
+
             layout.ensureLayout(for: container)
 
+            let line = layout.defaultLineHeight(for: textView.font ?? ComposerTextEditor.font)
             let used = layout.usedRect(for: container).height
-            let minimum = CGFloat(parent.minLines) * ComposerTextEditor.lineHeight
-            let maximum = CGFloat(parent.maxLines) * ComposerTextEditor.lineHeight
+            let minimum = CGFloat(parent.minLines) * line
+            let maximum = CGFloat(parent.maxLines) * line
             let height = min(max(used, minimum), maximum).rounded(.up)
 
             guard abs(height - lastReportedHeight) > 0.5 else { return }
@@ -828,13 +837,34 @@ struct ComposerTextEditor: NSViewRepresentable {
     }
 }
 
-/// An `NSTextView` that offers each key press to the composer before typing it.
+/// An `NSTextView` that offers each key press to the composer before typing it, and says when it
+/// was resized or focused so the SwiftUI side can keep up.
 final class ComposerTextView: NSTextView {
     var keyHandler: (@MainActor (NSEvent) -> Bool)?
+    var onWidthChange: (@MainActor () -> Void)?
+    var onFocusChange: (@MainActor (Bool) -> Void)?
 
     override func keyDown(with event: NSEvent) {
         if keyHandler?(event) == true { return }
         super.keyDown(with: event)
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = abs(newSize.width - frame.width) > 0.5
+        super.setFrameSize(newSize)
+        if changed { onWidthChange?() }
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onFocusChange?(true) }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { onFocusChange?(false) }
+        return resigned
     }
 
     /// Without this the window's default button, or the field editor's own cancel handling, can

@@ -232,10 +232,13 @@ private final class TerminalProcessObserver: LocalProcessTerminalViewDelegate {
     func hostCurrentDirectoryUpdate(source: SwiftTerm.TerminalView, directory: String?) {}
 
     func processTerminated(source: SwiftTerm.TerminalView, exitCode: Int32?) {
+        // Read the terminal out first: it is a main-actor class and so Sendable, while this
+        // observer is not, and capturing the observer itself would send a non-Sendable self.
+        let terminal = owner
         // SwiftTerm's LocalProcess dispatches on DispatchQueue.main unless told otherwise, and
         // LocalProcessTerminalView never tells it otherwise.
         MainActor.assumeIsolated {
-            owner?.handleProcessExit(exitCode)
+            terminal?.handleProcessExit(exitCode)
         }
     }
 }

@@ -67,7 +67,7 @@ struct RootView: View {
     @ViewBuilder
     private var center: some View {
         if !app.isLoaded {
-            LoadingView(label: nil)
+            LoadingView()
         } else {
             switch app.selection {
             case .home:
@@ -133,7 +133,8 @@ struct ResizeHandle: View {
 }
 
 extension Notification.Name {
-    static let batonOpenWorkspace = Notification.Name("baton.openWorkspace")
+    // batonOpenWorkspace is declared in AppChrome.swift, next to the notification delegate that
+    // posts it. These two are only ever posted by views, so they live here.
     static let batonToggleSidebar = Notification.Name("baton.toggleSidebar")
     static let batonNewWorkspace = Notification.Name("baton.newWorkspace")
 }

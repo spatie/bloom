@@ -168,7 +168,12 @@ struct BottomPanelView: View {
             if let script = settings.runScripts.first(where: { $0.id == id }) {
                 RunScriptView(model: model, script: script)
             } else {
-                placeholder("That run script is no longer in the repo settings.")
+                EmptyStateView(
+                    glyph: "play.slash",
+                    title: "That run script is gone",
+                    message: "It is no longer listed in this repository's settings."
+                )
+                .background(Palette.surfaceSunken)
             }
 
         case .terminal(let id):
@@ -181,17 +186,11 @@ struct BottomPanelView: View {
                 )
                 .id(tab.id)
             } else {
-                placeholder("Opening a terminal.")
+                LoadingView("Opening a terminal")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Palette.surfaceSunken)
             }
         }
-    }
-
-    private func placeholder(_ message: String) -> some View {
-        Text(message)
-            .font(Typo.label)
-            .foregroundStyle(Palette.textTertiary)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Palette.surfaceSunken)
     }
 
     // MARK: - Actions

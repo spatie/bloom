@@ -152,7 +152,7 @@ enum ToolPresenter {
         let command = oneLine(input["command"]?.stringValue ?? "")
         // Claude writes a short description of every command it runs, and that reads far better
         // as the label than the word "Bash" repeated forty times down the transcript.
-        let label = input["description"]?.stringValue.map(oneLine) ?? "Bash"
+        let label = input["description"]?.stringValue.map { oneLine($0) } ?? "Bash"
 
         var chips: [String] = []
         if input["run_in_background"]?.boolValue == true { chips.append("background") }

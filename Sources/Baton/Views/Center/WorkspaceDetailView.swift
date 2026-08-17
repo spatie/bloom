@@ -32,6 +32,12 @@ struct WorkspaceDetailView: View {
             } else {
                 emptyState
             }
+
+            // The panel keeps its own tab strip visible while collapsed, so it is always in the
+            // stack and only its content takes room. The sidebar and inspector are placed by
+            // RootView, which is why neither appears here.
+            BottomPanelView(model: model)
+                .frame(height: model.isBottomPanelVisible ? 260 : nil)
         }
         .background(Palette.windowBackground)
         .task(id: model.workspace.id) { await model.onAppear() }
@@ -40,18 +46,13 @@ struct WorkspaceDetailView: View {
     /// Sessions are loaded asynchronously, so there is a moment with none, and archiving the last
     /// one leaves the workspace here for good.
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Spacer()
-            Text("No session in this workspace")
-                .font(Typo.body)
-                .foregroundStyle(Palette.textSecondary)
-            Button("Start a session") {
-                Task { await model.createSession() }
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            Spacer()
+        EmptyStateView(
+            glyph: "bubble.left.and.bubble.right",
+            title: "No session in this workspace",
+            message: "Sessions share the worktree but not the conversation, so a new one starts with a clean context.",
+            actionTitle: "Start a session"
+        ) {
+            Task { await model.createSession() }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

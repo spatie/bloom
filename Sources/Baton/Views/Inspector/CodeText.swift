@@ -54,7 +54,7 @@ struct CodeText: View {
     }
 
     /// The single place a `TokenKind` becomes a colour, so retuning the theme is a one-switch edit.
-    static func color(for kind: TokenKind) -> Color {
+    nonisolated static func color(for kind: TokenKind) -> Color {
         switch kind {
         case .plain: Palette.textPrimary
         case .keyword: Palette.synKeyword
@@ -79,7 +79,7 @@ struct CodeText: View {
     /// boundaries. Every conversion is therefore optional or bounds checked, and a range that
     /// cannot be expressed is dropped rather than approximated, because a wrong colour on one
     /// token is invisible while a crash in a scroll view is not.
-    static func attributedRange(
+    nonisolated static func attributedRange(
         forUTF16 range: Range<Int>,
         of source: String,
         in target: AttributedString
@@ -93,7 +93,7 @@ struct CodeText: View {
         return attributedRange(for: lower..<upper, of: source, in: target)
     }
 
-    static func attributedRange(
+    nonisolated static func attributedRange(
         for range: Range<String.Index>,
         of source: String,
         in target: AttributedString

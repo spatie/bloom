@@ -22,14 +22,26 @@ struct TranscriptView: View {
     /// How far off the bottom the user may be and still be considered to be following along.
     private static let stickyThreshold: CGFloat = 96
 
-    init(transcript: TranscriptModel) {
+    /// Told whenever the user leaves, or returns to, the live end of the transcript. The composer
+    /// uses it to decide whether a "jump to newest" pill is worth offering.
+    private let onScrolledUpChange: (@MainActor @Sendable (Bool) -> Void)?
+
+    init(
+        transcript: TranscriptModel,
+        onScrolledUpChange: (@MainActor @Sendable (Bool) -> Void)? = nil
+    ) {
         self.transcript = transcript
+        self.onScrolledUpChange = onScrolledUpChange
     }
 
     /// The call site holds an optional and should not have to unwrap it just to show an empty
     /// pane, so the optional case is an overload rather than the caller's problem.
-    init(transcript: TranscriptModel?) {
+    init(
+        transcript: TranscriptModel?,
+        onScrolledUpChange: (@MainActor @Sendable (Bool) -> Void)? = nil
+    ) {
         self.transcript = transcript
+        self.onScrolledUpChange = onScrolledUpChange
     }
 
     var body: some View {
@@ -75,7 +87,11 @@ struct TranscriptView: View {
                     // The sentinel sits at the very end of the content, so its distance past the
                     // bottom edge of the viewport is exactly how far the user has scrolled up.
                     let near = minY - viewport < Self.stickyThreshold
-                    Task { @MainActor in isNearBottom = near }
+                    Task { @MainActor in
+                        guard isNearBottom != near else { return }
+                        isNearBottom = near
+                        onScrolledUpChange?(!near)
+                    }
                 }
                 .onChange(of: transcript.rows.count, initial: true) { _, _ in
                     position(proxy, transcript)
@@ -185,15 +201,11 @@ private struct BottomOffsetKey: PreferenceKey {
 /// normal state, not a problem to be announced.
 struct EmptyTranscriptView: View {
     var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "text.alignleft")
-                .font(.system(size: 22, weight: .light))
-                .foregroundStyle(Palette.textTertiary)
-            Text("No session selected")
-                .font(Typo.label)
-                .foregroundStyle(Palette.textTertiary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            glyph: "text.alignleft",
+            title: "No session",
+            message: "Pick a workspace, or start a new one, and the agent's work shows up here."
+        )
         .background(Palette.surface)
     }
 }

@@ -138,11 +138,18 @@ struct RunScriptView: View {
         VStack(spacing: 0) {
             header
             Hairline()
-            LogOutputView(
-                text: session.output,
-                isFollowing: session.isRunning,
-                placeholder: "Not started. Press Start to run \(script.name)."
-            )
+            if session.output.isEmpty && !session.isRunning {
+                EmptyStateView(
+                    glyph: "play.circle",
+                    title: script.name,
+                    message: script.command,
+                    actionTitle: "Start",
+                    action: { session.start(environment: environment(), port: ensurePort()) }
+                )
+                .background(Palette.surfaceSunken)
+            } else {
+                LogOutputView(text: session.output, isFollowing: session.isRunning)
+            }
         }
         .background(Palette.surfaceSunken)
     }

@@ -218,6 +218,9 @@ struct MenuPanel<Content: View>: View {
             content
         }
         .frame(width: 420, alignment: .leading)
+        // The panel floats outside the composer, so it must size itself from its rows rather
+        // than from the space the composer happens to occupy.
+        .fixedSize(horizontal: false, vertical: true)
         .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Metrics.corner))
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.corner)
