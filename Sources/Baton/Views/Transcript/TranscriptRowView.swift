@@ -1,0 +1,341 @@
+import SwiftUI
+import BatonCore
+
+/// One stored event, rendered.
+///
+/// The row decodes its own payload, and it does it in `body` rather than up front. A session can
+/// hold tens of thousands of rows and the enclosing `LazyVStack` only ever builds the handful on
+/// screen, so decoding here is the difference between opening a long transcript instantly and
+/// parsing forty megabytes of JSON before the first frame.
+///
+/// Every kind except assistant prose, a user turn and an expanded row is exactly one line tall.
+/// That is the whole design: an agent run reads as a list of actions, not a chat log.
+struct TranscriptRowView: View {
+    var row: TranscriptRow
+    var isExpanded = false
+    var isNested = false
+    /// The width a user bubble is allowed to fill, handed down because the enclosing scroll view
+    /// already measured it and a per row GeometryReader would not size to its content.
+    var maxBubbleWidth: CGFloat = 560
+    var onToggle: () -> Void = {}
+
+    @State private var isHovered = false
+
+    var body: some View {
+        content
+            .padding(.leading, isNested ? TranscriptLayout.nestIndent : 0)
+            .overlay(alignment: .leading) {
+                if isNested {
+                    Rectangle()
+                        .fill(Palette.border)
+                        .frame(width: Metrics.hairline)
+                        .padding(.leading, 5)
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch row.kind {
+        case .user: userTurn
+        case .assistantText: prose
+        case .thinking: thinkingRow
+        case .toolUse: toolRow
+        case .toolResult: orphanResult
+        case .error: errorRow
+        case .notice: noticeRow
+        case .system: systemRow
+        // A result row is a turn boundary, and the footer that renders it needs the rows around
+        // it, so TranscriptView draws that one itself.
+        case .result: EmptyView()
+        }
+    }
+
+    // MARK: Decoding
+
+    private var event: AgentEvent? {
+        AgentEvent.decode(line: String(decoding: row.payload, as: UTF8.self))
+    }
+
+    /// Only decoded once a row is open, because a tool result is the largest payload in the file.
+    private var toolResult: AgentToolResult? {
+        guard isExpanded, let payload = row.resultPayload,
+              case .toolResult(let result)? = AgentEvent.decode(line: String(decoding: payload, as: UTF8.self))
+        else { return nil }
+        return result
+    }
+
+    private var json: JSONValue? { JSONValue.parse(row.payload) }
+
+    // MARK: Tools
+
+    @ViewBuilder
+    private var toolRow: some View {
+        if case .toolUse(let use)? = event {
+            let presentation = ToolPresenter.present(use)
+
+            VStack(alignment: .leading, spacing: 0) {
+                header(presentation)
+                if isExpanded {
+                    ToolDetailView(use: use, result: toolResult)
+                        .padding(.leading, TranscriptLayout.detailIndent)
+                        .padding(.trailing, 6)
+                        .padding(.bottom, 4)
+                }
+            }
+            .modifier(ExpandableRow(isHovered: isHovered, isError: row.isError, onToggle: onToggle))
+            .onHover { isHovered = $0 }
+        }
+    }
+
+    private func header(_ presentation: ToolPresentation) -> some View {
+        // A chip that repeats the detail replaces it: `Read [notes.txt]` rather than
+        // `Read notes.txt [notes.txt]`.
+        let showsDetail = !presentation.detail.isEmpty && !presentation.chips.contains(presentation.detail)
+
+        return HStack(spacing: TranscriptLayout.glyphGap) {
+            Image(systemName: presentation.glyph)
+                .font(.system(size: 11))
+                .foregroundStyle(row.isError ? Palette.negative : presentation.tint)
+                .frame(width: TranscriptLayout.glyphWidth, alignment: .center)
+
+            Text(presentation.label)
+                .font(Typo.labelEmphasis)
+                .foregroundStyle(Palette.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(width: TranscriptLayout.labelWidth, alignment: .leading)
+
+            if showsDetail {
+                Text(presentation.detail)
+                    .font(Typo.label)
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
+            }
+
+            ForEach(Array(presentation.chips.enumerated()), id: \.offset) { _, chip in
+                Chip(text: chip, monospaced: true)
+                    .fixedSize()
+            }
+
+            Spacer(minLength: 4)
+
+            if row.isError {
+                Text("error")
+                    .font(Typo.micro)
+                    .foregroundStyle(Palette.negative)
+            }
+            if let duration = row.durationMS, duration > 0 {
+                Text(TurnDuration.short(duration))
+                    .font(Typo.micro)
+                    .foregroundStyle(Palette.textTertiary)
+                    .monospacedDigit()
+            }
+
+            TranscriptDisclosure(isExpanded: isExpanded, isVisible: isHovered)
+        }
+        .padding(.horizontal, 6)
+        .frame(height: Metrics.rowHeight)
+    }
+
+    /// A tool result whose call never made it into the transcript. Rare, but it must not vanish.
+    @ViewBuilder
+    private var orphanResult: some View {
+        if case .toolResult(let result)? = event {
+            HStack(spacing: TranscriptLayout.glyphGap) {
+                Image(systemName: "arrow.turn.down.right")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Palette.textTertiary)
+                    .frame(width: TranscriptLayout.glyphWidth)
+                Text(ToolPresenter.oneLine(result.text))
+                    .font(Typo.label)
+                    .foregroundStyle(result.isError ? Palette.negative : Palette.textTertiary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 6)
+            .frame(height: Metrics.rowHeight)
+        }
+    }
+
+    // MARK: Prose
+
+    @ViewBuilder
+    private var prose: some View {
+        if case .assistantText(let block)? = event, !block.text.isEmpty {
+            MarkdownView(block.text)
+                .font(Typo.body)
+                .lineSpacing(4)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 6)
+        }
+    }
+
+    private var userTurn: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 32)
+            Text(userText)
+                .font(Typo.body)
+                .foregroundStyle(Palette.textPrimary)
+                .lineSpacing(3)
+                .textSelection(.enabled)
+                .multilineTextAlignment(.leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8).stroke(Palette.border, lineWidth: Metrics.hairline)
+                }
+                .frame(maxWidth: maxBubbleWidth, alignment: .trailing)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
+    }
+
+    /// A user turn is the line Baton itself wrote to stdin, so it is read straight out of the
+    /// stored request rather than through the event decoder, which only knows about tool results.
+    private var userText: String {
+        guard let blocks = json?["message"]?["content"]?.arrayValue else { return "" }
+        return blocks
+            .compactMap { $0["text"]?.stringValue }
+            .joined(separator: "\n")
+    }
+
+    @ViewBuilder
+    private var thinkingRow: some View {
+        if case .thinking(let block)? = event, !block.text.isEmpty {
+            ThinkingRowView(text: block.text, isExpanded: isExpanded, onToggle: onToggle)
+        }
+    }
+
+    // MARK: Notices
+
+    private var errorRow: some View {
+        let stderr = json?["stderr"]?.stringValue ?? ""
+        let status = json?["status"]?.intValue
+
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: TranscriptLayout.glyphGap) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.negative)
+                    .frame(width: TranscriptLayout.glyphWidth)
+                Text(status.map { "Agent exited (\($0))" } ?? "Agent error")
+                    .font(Typo.labelEmphasis)
+                    .foregroundStyle(Palette.negative)
+                    .frame(width: TranscriptLayout.labelWidth, alignment: .leading)
+                Text(ToolPresenter.oneLine(stderr))
+                    .font(Typo.label)
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                TranscriptDisclosure(isExpanded: isExpanded, isVisible: isHovered)
+            }
+            .padding(.horizontal, 6)
+            .frame(height: Metrics.rowHeight)
+
+            if isExpanded, !stderr.isEmpty {
+                Text(stderr)
+                    .font(Typo.code)
+                    .foregroundStyle(Palette.negative)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 8)
+                    .overlay(alignment: .leading) {
+                        Rectangle().fill(Palette.negative).frame(width: 2)
+                    }
+                    .padding(.leading, TranscriptLayout.detailIndent)
+                    .padding(.bottom, 6)
+            }
+        }
+        .modifier(ExpandableRow(isHovered: isHovered, isError: true, onToggle: onToggle))
+        .onHover { isHovered = $0 }
+    }
+
+    /// Rate limit news. Quiet on purpose: it is information, not a failure.
+    private var noticeRow: some View {
+        let info = json?["rate_limit_info"]
+        let utilization = info?["utilization"]?.doubleValue ?? 0
+        let window = (info?["rateLimitType"]?.stringValue ?? "").replacingOccurrences(of: "_", with: " ")
+
+        return HStack(spacing: TranscriptLayout.glyphGap) {
+            Image(systemName: "gauge.with.dots.needle.33percent")
+                .font(.system(size: 10))
+                .foregroundStyle(Palette.warning)
+                .frame(width: TranscriptLayout.glyphWidth)
+            Text("Rate limit")
+                .font(Typo.labelEmphasis)
+                .foregroundStyle(Palette.textSecondary)
+                .frame(width: TranscriptLayout.labelWidth, alignment: .leading)
+            Text(window.isEmpty
+                ? "\(Int(utilization * 100))% used"
+                : "\(Int(utilization * 100))% of the \(window) window used")
+                .font(Typo.label)
+                .foregroundStyle(Palette.textTertiary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 6)
+        .frame(height: Metrics.rowHeight)
+    }
+
+    @ViewBuilder
+    private var systemRow: some View {
+        if case .initialized(let info)? = event {
+            HStack(spacing: TranscriptLayout.glyphGap) {
+                Image(systemName: "bolt.horizontal.circle")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Palette.textTertiary)
+                    .frame(width: TranscriptLayout.glyphWidth)
+                Text("Session started")
+                    .font(Typo.labelEmphasis)
+                    .foregroundStyle(Palette.textTertiary)
+                    .frame(width: TranscriptLayout.labelWidth, alignment: .leading)
+                if !info.model.isEmpty { Chip(text: info.model) }
+                if !info.permissionMode.isEmpty { Chip(text: info.permissionMode) }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 6)
+            .frame(height: Metrics.rowHeight)
+        }
+    }
+}
+
+/// Hover, click to expand and the error rule, shared by every row that opens.
+private struct ExpandableRow: ViewModifier {
+    var isHovered: Bool
+    var isError: Bool
+    var onToggle: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isHovered ? Palette.hover : .clear)
+            .overlay(alignment: .leading) {
+                if isError {
+                    Rectangle().fill(Palette.negative).frame(width: 2)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onToggle)
+    }
+}
+
+/// Whether a stored row is worth a line at all.
+///
+/// Hook payloads run to hundreds of kilobytes and say nothing a user wants to read, so they are
+/// skipped by sniffing the first bytes of the raw line rather than by decoding it. Decoding a
+/// megabyte of hook output only to throw it away is exactly the cost this avoids.
+enum TranscriptNoise {
+    private static let probeLength = 256
+    private static let hookMarker = Data("\"hook_".utf8)
+
+    static func isHidden(_ row: TranscriptRow) -> Bool {
+        guard row.kind == .system else { return false }
+        return row.payload.prefix(probeLength).range(of: hookMarker) != nil
+    }
+}

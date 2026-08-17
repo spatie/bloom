@@ -246,7 +246,10 @@ public actor AgentRunner {
                 $0.outputTokens += result.usage.outputTokens
                 $0.costUSD += result.usage.costUSD
                 $0.contextTokens = result.usage.contextUsedTokens
-                $0.state = result.isError ? .failed : .idle
+                // A cancelled turn also comes back as an error result, because SIGTERM makes the
+                // CLI report error_during_execution on its way out. That is the user pressing
+                // stop, not a failure, so cancellation wins over what the result says.
+                $0.state = cancelled ? .cancelled : (result.isError ? .failed : .idle)
                 $0.updatedAt = Date()
             }
             await save(session)

@@ -60,14 +60,16 @@ struct ComposerView: View {
                 menuIndex = 0
                 scheduleDraftSave()
             }
-            .onChange(of: activeMenu) { _, _ in
+            .onChange(of: menuTrigger) { old, new in
                 menuIndex = 0
-                isMenuDismissed = false
+                // Escape only dismisses the menu that was open. Starting a different one, or
+                // clearing the token entirely, makes the menu available again.
+                if old.kind != new.kind { isMenuDismissed = false }
             }
             .onDisappear {
                 draftSaveTask?.cancel()
-                let transcript = transcript
-                Task { await transcript.saveDraft() }
+                let current = transcript
+                Task { await current.saveDraft() }
             }
     }
 
@@ -295,15 +297,29 @@ struct ComposerView: View {
         case none
         case slash(String)
         case mention(String)
+
+        enum Kind { case none, slash, mention }
+
+        var kind: Kind {
+            switch self {
+            case .none: .none
+            case .slash: .slash
+            case .mention: .mention
+            }
+        }
+    }
+
+    /// What the text alone asks for, before Escape gets a say.
+    private var menuTrigger: ActiveMenu {
+        if let query = slashQuery { return .slash(query) }
+        if let token = mentionToken { return .mention(token.query) }
+        return .none
     }
 
     /// The draft plus the caret is enough to know which menu belongs on screen, so there is no
     /// separate "menu is open" flag to get out of step with the text.
     private var activeMenu: ActiveMenu {
-        if isMenuDismissed { return .none }
-        if let query = slashQuery { return .slash(query) }
-        if let token = mentionToken { return .mention(token.query) }
-        return .none
+        isMenuDismissed ? .none : menuTrigger
     }
 
     private var isMenuOpen: Bool { activeMenu != .none }
@@ -602,7 +618,7 @@ struct ComposerOption: Identifiable, Hashable {
     /// Falls back to the raw value so a model set in a settings file that Baton has never heard
     /// of is still shown rather than silently rewritten.
     static func label(for id: String, in options: [ComposerOption]) -> String {
-        options.first { $0.id == id }?.label ?? (id.isEmpty ? options[0].label : id.capitalizedFirst)
+        options.first { $0.id == id }?.label ?? (id.isEmpty ? options[0].label : id.capitalized)
     }
 }
 
@@ -669,7 +685,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         let storage = NSTextStorage()
         let layout = NSLayoutManager()
         storage.addLayoutManager(layout)
-        let container = NSTextContainer(size: CGSize(width: 0, height: .greatestFiniteMagnitude))
+        let container = NSTextContainer(size: CGSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
         container.widthTracksTextView = true
         layout.addTextContainer(container)
 
@@ -677,6 +693,17 @@ struct ComposerTextEditor: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.keyHandler = { [weak coordinator = context.coordinator] event in
             coordinator?.handle(event) ?? false
+        }
+        // Wrapping depends on the width, so the measurement is only valid until the window is
+        // resized. Re-measuring on the frame change is cheaper than laying out speculatively.
+        textView.onWidthChange = { [weak coordinator = context.coordinator, weak textView] in
+            guard let coordinator, let textView else { return }
+            coordinator.reportHeight(of: textView)
+        }
+        // Clicking straight into the text makes it first responder without SwiftUI asking, so
+        // the flag has to follow AppKit rather than the other way round.
+        textView.onFocusChange = { [weak coordinator = context.coordinator] focused in
+            coordinator?.focusChanged(to: focused)
         }
         textView.font = Self.font
         textView.textColor = NSColor.labelColor
@@ -692,7 +719,10 @@ struct ComposerTextEditor: NSViewRepresentable {
         textView.textContainerInset = .zero
         textView.autoresizingMask = [.width]
         textView.minSize = CGSize(width: 0, height: 0)
-        textView.maxSize = CGSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+        textView.maxSize = CGSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
         textView.string = text
 
         let scrollView = NSScrollView()
@@ -745,6 +775,16 @@ struct ComposerTextEditor: NSViewRepresentable {
             guard let textView = notification.object as? ComposerTextView else { return }
             let location = textView.selectedRange().location
             if parent.caret != location { parent.caret = location }
+        }
+
+        /// Deferred by one turn of the run loop: the responder change can land in the middle of a
+        /// SwiftUI update, and writing state there is how a view ends up fighting itself.
+        func focusChanged(to focused: Bool) {
+            guard parent.isFocused != focused else { return }
+            let binding = parent.$isFocused
+            DispatchQueue.main.async {
+                if binding.wrappedValue != focused { binding.wrappedValue = focused }
+            }
         }
 
         /// Maps a raw key event to composer intent. Shift+Return is deliberately not mapped: it

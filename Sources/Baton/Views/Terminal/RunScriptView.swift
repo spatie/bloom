@@ -78,12 +78,8 @@ final class RunScriptSession {
             start(environment: environment, port: port)
             return
         }
-        let pending = process
+        restartRequest = (environment, port)
         stop()
-        Task { [weak self] in
-            _ = await pending?.exitStatus
-            self?.start(environment: environment, port: port)
-        }
     }
 
     private func append(_ line: String) {
@@ -100,6 +96,11 @@ final class RunScriptSession {
         process = nil
         task = nil
         output += "\n[exited with status \(status)]\n"
+
+        if let request = restartRequest {
+            restartRequest = nil
+            start(environment: request.environment, port: request.port)
+        }
     }
 
     /// Matches the shapes dev servers actually print: `http://localhost:5173`, `0.0.0.0:8000`,

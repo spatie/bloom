@@ -83,7 +83,9 @@ private struct ProjectSettingsView: View {
         VStack(spacing: 0) {
             List(selection: $selectedRepoID) {
                 ForEach(app.repos) { repo in
-                    ProjectRow(repo: repo)
+                    ProjectRow(repo: repo) {
+                        repoPendingRemoval = repo
+                    }
                         .tag(repo.id)
                         .contextMenu {
                             Button("Remove Project", role: .destructive) {
@@ -172,12 +174,14 @@ private struct ProjectSettingsView: View {
 private struct ProjectRow: View {
     @Environment(AppModel.self) private var app
     let repo: Repo
+    let onRemove: () -> Void
 
     @State private var name: String
     @FocusState private var isEditingName: Bool
 
-    init(repo: Repo) {
+    init(repo: Repo, onRemove: @escaping () -> Void) {
         self.repo = repo
+        self.onRemove = onRemove
         _name = State(initialValue: repo.name)
     }
 
@@ -207,6 +211,13 @@ private struct ProjectRow: View {
             Spacer()
 
             Chip(text: repo.defaultBranch, systemImage: "arrow.triangle.branch", monospaced: true)
+
+            Button(action: onRemove) {
+                Image(systemName: "minus.circle")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(Palette.textSecondary)
+            .accessibilityLabel("Remove \(repo.name)")
         }
         .onChange(of: repo.name) { _, updated in
             if !isEditingName { name = updated }

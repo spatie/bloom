@@ -11,7 +11,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$PWD"
-WORK="${TMPDIR:-/tmp}/baton-core-tests"
+# Per-invocation, because two of these running at once would otherwise share one build database
+# and corrupt each other. Reuses a stable path when BATON_TEST_ID is set, so repeated runs by the
+# same caller stay incremental.
+WORK="${TMPDIR:-/tmp}/baton-core-tests-${BATON_TEST_ID:-$$}"
 
 rm -rf "$WORK"
 mkdir -p "$WORK/Sources" "$WORK/Tests"

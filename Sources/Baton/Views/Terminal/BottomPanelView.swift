@@ -29,7 +29,7 @@ struct BottomPanelView: View {
             }
         }
         .background(Palette.surfaceSunken)
-        .task(id: model.workspace.id) {
+        .task(id: "\(model.workspace.id)|\(model.repo?.path ?? "")") {
             await load()
         }
     }

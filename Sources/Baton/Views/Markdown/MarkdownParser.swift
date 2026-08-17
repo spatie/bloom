@@ -92,7 +92,8 @@ public enum MarkdownParser: Sendable {
     public static func parse(_ text: String) -> [MarkdownBlock] {
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
-        return BlockParser(lines: normalized.components(separatedBy: "\n"), allowIndentedCode: true).parse()
+        var parser = BlockParser(lines: normalized.components(separatedBy: "\n"), allowIndentedCode: true)
+        return parser.parse()
     }
 }
 
@@ -159,8 +160,7 @@ private struct BlockParser {
 
     private mutating func parseATXHeading() -> MarkdownBlock? {
         let line = trimUpToThreeSpaces(lines[index])
-        var count = 0
-        for character in line where character == "#" { count += 1; if count == 6 { break } }
+        let count = line.prefix(while: { $0 == "#" }).count
         guard count > 0, count <= 6 else { return nil }
         let markerEnd = line.index(line.startIndex, offsetBy: count)
         guard markerEnd == line.endIndex || line[markerEnd].isWhitespace else { return nil }
@@ -495,7 +495,7 @@ private enum InlineParser {
         mutating func consumeEscape(into result: inout [MarkdownInline]) -> Bool {
             guard source[cursor] == "\\" else { return false }
             let next = source.index(after: cursor)
-            guard next < source.endIndex, #"!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"#.contains(source[next]) else { return false }
+            guard next < source.endIndex, source[next].isPunctuation else { return false }
             result.append(.text(String(source[next])))
             cursor = source.index(after: next)
             return true
