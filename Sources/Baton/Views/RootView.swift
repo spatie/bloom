@@ -25,6 +25,26 @@ struct RootView: View {
         .sheet(isPresented: $isCreateSheetPresented) {
             CreateWorkspaceSheet(initialRepo: createTargetRepo)
         }
+        .confirmationDialog(
+            "Archive \(app.pendingArchive?.workspace.name ?? "")?",
+            isPresented: archiveBinding,
+            titleVisibility: .visible,
+            presenting: app.pendingArchive
+        ) { request in
+            Button("Archive and lose that work", role: .destructive) {
+                Task { await app.confirmPendingArchive() }
+            }
+            Button("Keep the workspace", role: .cancel) {
+                app.cancelPendingArchive()
+            }
+        } message: { request in
+            // Naming what disappears, rather than asking "are you sure?". The confirmation only
+            // exists because there is something specific to lose, so it should say what.
+            Text(
+                "Archiving deletes the worktree at \(request.workspace.path).\n\nThis would lose:\n"
+                + request.report.losses.map { "\u{2022} \($0)" }.joined(separator: "\n")
+            )
+        }
         .alert(item: alertBinding) { alert in
             Alert(
                 title: Text(alert.title),
@@ -127,6 +147,15 @@ struct RootView: View {
                 }
             }
         }
+    }
+
+    /// Dismissing the dialog by any route must clear the request, or a refused archive would sit
+    /// there and re-present itself on the next redraw.
+    private var archiveBinding: Binding<Bool> {
+        Binding(
+            get: { app.pendingArchive != nil },
+            set: { presented in if !presented { app.cancelPendingArchive() } }
+        )
     }
 
     private var alertBinding: Binding<BatonAlert?> {

@@ -13,6 +13,12 @@ enum BottomTab: Hashable {
     static let firstTerminal = BottomTab.terminal("")
 }
 
+/// A git failure carried back across a task boundary. `any Error` is not `Sendable`, and the only
+/// part of it the UI shows is the message.
+struct GitFailure: Error, Sendable {
+    var message: String
+}
+
 /// Which tab the top of the inspector is showing.
 enum InspectorTab: String, Hashable, CaseIterable {
     case allFiles = "All files"
@@ -40,6 +46,9 @@ final class WorkspaceModel {
     var changedFiles: [ChangedFile] = []
     var selectedFilePath: String?
     var isLoadingChanges = false
+    /// Why the last refresh could not answer. Non-nil means `changedFiles` is the last list git was
+    /// able to produce, not what the worktree looks like now.
+    var changesError: String?
     var pullRequest: PullRequest?
     var isLoadingPullRequest = false
 
@@ -57,7 +66,7 @@ final class WorkspaceModel {
     /// The in-flight refreshes, so a newer one can cancel the one it replaces. Two overlapping
     /// refreshes both claim `isLoadingChanges`, and the slower one finishing last would otherwise
     /// write its stale answer over the fresh one.
-    private var changesTask: Task<[ChangedFile], Never>?
+    private var changesTask: Task<Result<[ChangedFile], GitFailure>, Never>?
     private var pullRequestTask: Task<PullRequest?, Never>?
     /// A setup script can run for minutes (`composer install`, `npm ci`). Without a handle,
     /// archiving mid-setup cannot stop it and it outlives the app.
@@ -221,24 +230,39 @@ final class WorkspaceModel {
         let path = workspace.path
         let base = workspace.baseBranch
 
-        let task = Task.detached(priority: .userInitiated) {
-            (try? await Git.changedFiles(worktree: path, base: base)) ?? []
+        let task = Task.detached(priority: .userInitiated) { () -> Result<[ChangedFile], GitFailure> in
+            do {
+                return .success(try await Git.changedFiles(worktree: path, base: base))
+            } catch {
+                return .failure(GitFailure(message: "\(error)"))
+            }
         }
         changesTask = task
         isLoadingChanges = true
 
-        let files = await task.value
+        let outcome = await task.value
 
         // A newer refresh started while this one was in git, or the workspace is going away. Either
         // way this answer is the stale one, and writing it would undo the fresh one.
         guard changesTask == task, !task.isCancelled else { return }
         changesTask = nil
-        changedFiles = files
         isLoadingChanges = false
-        if let selectedFilePath, !files.contains(where: { $0.path == selectedFilePath }) {
-            self.selectedFilePath = files.first?.path
-        } else if selectedFilePath == nil {
-            selectedFilePath = files.first?.path
+
+        switch outcome {
+        case .failure(let failure):
+            // Git failing says nothing about the worktree. Replacing the list with an empty one
+            // would show the user a clean workspace, which is the one answer that is certainly
+            // wrong, so the last known list stays and the failure is reported instead.
+            changesError = failure.message
+
+        case .success(let files):
+            changesError = nil
+            changedFiles = files
+            if let selectedFilePath, !files.contains(where: { $0.path == selectedFilePath }) {
+                self.selectedFilePath = files.first?.path
+            } else if selectedFilePath == nil {
+                selectedFilePath = files.first?.path
+            }
         }
     }
 

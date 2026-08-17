@@ -20,6 +20,17 @@ struct BatonAlert: Identifiable {
     var message: String
 }
 
+/// An archive the app refused to carry out, waiting on the user.
+///
+/// It carries the report rather than a yes or no question, because "are you sure?" tells the user
+/// nothing, and the whole point of stopping is that there is something specific to lose.
+struct ArchiveRequest: Identifiable {
+    let id = UUID()
+    var workspace: Workspace
+    var report: WorkspaceSafetyReport
+    var deleteBranch: Bool?
+}
+
 /// The root of the app's state. Owns the store, the repo and workspace lists, and one
 /// `WorkspaceModel` per workspace the user has opened.
 ///
@@ -51,6 +62,9 @@ final class AppModel {
     private var storedSelection: SidebarSelection = .home
 
     var alert: BatonAlert?
+    /// Non-nil while an archive is waiting for the user to confirm that the work it would destroy
+    /// really is expendable. RootView presents the confirmation from this.
+    var pendingArchive: ArchiveRequest?
     var searchQuery = ""
     var isCreatingWorkspace = false
 
@@ -286,18 +300,85 @@ final class AppModel {
         }
     }
 
+    /// Archives when there is nothing to lose, and asks first when there is.
+    ///
+    /// Nothing is torn down before the decision: a refused archive used to take the workspace's
+    /// shells and dev servers with it anyway, which is a strange thing to happen after being told
+    /// the workspace was too valuable to remove.
     func archive(_ workspace: Workspace, deleteBranch: Bool? = nil) async {
         guard let manager, let repo = repo(for: workspace) else { return }
+
+        let report = try? await manager.safetyReport(workspace: workspace, repo: repo)
+        // No report means git could not answer, and that is not a licence to delete. Treat it the
+        // same as unsafe and let the user look at what it says.
+        guard let report, report.isSafeToDiscard else {
+            pendingArchive = ArchiveRequest(
+                workspace: workspace,
+                report: report ?? WorkspaceSafetyReport(hasUncommittedChanges: true),
+                deleteBranch: deleteBranch
+            )
+            return
+        }
+
+        await performArchive(workspace, repo: repo, deleteBranch: deleteBranch, force: false)
+    }
+
+    /// The user has seen exactly what would be destroyed and asked for it anyway.
+    func confirmPendingArchive() async {
+        guard let request = pendingArchive, let repo = repo(for: request.workspace) else { return }
+        pendingArchive = nil
+        await performArchive(
+            request.workspace, repo: repo, deleteBranch: request.deleteBranch, force: true
+        )
+    }
+
+    func cancelPendingArchive() {
+        pendingArchive = nil
+    }
+
+    private func performArchive(
+        _ workspace: Workspace,
+        repo: Repo,
+        deleteBranch: Bool?,
+        force: Bool
+    ) async {
+        guard let manager else { return }
+
+        // The agents go first: they are the ones writing to the worktree that is about to be
+        // removed. The shells and dev servers only go once the removal has actually happened, so a
+        // failing archive script does not cost the user their terminals for nothing.
         workspaceModels[workspace.id]?.teardown()
-        // The worktree is about to be deleted from disk. Its shells are still sitting in that
-        // directory and its dev servers are still holding their ports, and nothing else in the app
-        // will ever come back for them.
-        await TerminalSessionStore.shared.discard(workspaceID: workspace.id)
+
         do {
-            try await manager.archive(workspace: workspace, repo: repo, deleteBranch: deleteBranch)
+            try await manager.archive(
+                workspace: workspace, repo: repo, deleteBranch: deleteBranch, force: force
+            )
+            // The worktree is gone from disk now. Its shells are sitting in a directory that no
+            // longer exists and its dev servers are still holding their ports, and nothing else in
+            // the app will ever come back for them.
+            await TerminalSessionStore.shared.discard(workspaceID: workspace.id)
             workspaceModels[workspace.id] = nil
             if selection.workspaceID == workspace.id { selection = .home }
             await reload()
+        } catch let error as WorkspaceError {
+            switch error {
+            case .archiveScriptFailed(let status, let output):
+                // Worth its own wording: the manager stops before removing anything, so the user
+                // needs to hear that the workspace is still there rather than fear the worst.
+                alert = BatonAlert(
+                    title: "The archive script for \(workspace.name) failed",
+                    message: "Nothing was removed and the workspace is intact. "
+                        + "The script exited with status \(status).\n\n"
+                        + output.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+            case .unsafeToArchive(let report):
+                // Only reachable when the worktree changed between the check and the archive.
+                pendingArchive = ArchiveRequest(
+                    workspace: workspace, report: report, deleteBranch: deleteBranch
+                )
+            default:
+                alert = BatonAlert(title: "Could not archive the workspace", message: "\(error)")
+            }
         } catch {
             alert = BatonAlert(title: "Could not archive the workspace", message: "\(error)")
         }

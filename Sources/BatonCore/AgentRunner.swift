@@ -305,13 +305,17 @@ public actor AgentRunner {
     /// the insert, so two writers can never both reserve it. That is also why a failed write
     /// advances nothing: the number was never handed out.
     private func persist(kind: MessageKind, payload: Data, durationMS: Int? = nil, refID: String? = nil) async {
-        _ = try? await store.appendNext(
+        do {
+            try await store.appendNext(
                 sessionID: session.id,
                 kind: kind,
                 payload: payload,
                 durationMS: durationMS,
                 refID: refID
-        )
+            )
+        } catch {
+            report("Could not store a \(kind.rawValue) row", error)
+        }
     }
 
     private func save(_ session: Session) async {
@@ -512,19 +516,20 @@ private final class EventSink: @unchecked Sendable {
     private var nextToken = 0
     private var closed = false
 
-    private let shared: AsyncStream<AgentEvent>
-    private let sharedContinuation: AsyncStream<AgentEvent>.Continuation
-
-    init() {
-        var captured: AsyncStream<AgentEvent>.Continuation!
-        shared = AsyncStream(bufferingPolicy: .unbounded) { captured = $0 }
-        sharedContinuation = captured
+    var stream: AsyncStream<AgentEvent> {
+        AsyncStream(bufferingPolicy: .unbounded) { continuation in
+            guard let token = register(continuation) else {
+                continuation.finish()
+                return
+            }
+            continuation.onTermination = { [weak self] _ in
+                self?.unregister(token)
+            }
+        }
     }
 
-    var stream: AsyncStream<AgentEvent> { shared }
-
     func yield(_ event: AgentEvent) {
-        sharedContinuation.yield(event)
+        for continuation in subscribers() { continuation.yield(event) }
     }
 
     func finish() {

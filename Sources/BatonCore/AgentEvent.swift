@@ -31,7 +31,7 @@ public enum JSONValue: Sendable, Hashable, Codable {
     public init(from decoder: Decoder) throws {
         let counter = decoder.userInfo[Self.depthKey] as? DepthCounter
         let depth = counter?.depth ?? decoder.codingPath.count
-        guard depth < 100_000 else {
+        guard depth < Self.maximumNesting else {
             throw DecodingError.dataCorrupted(DecodingError.Context(
                 codingPath: decoder.codingPath,
                 debugDescription: "JSON nested deeper than \(Self.maximumNesting) levels"
@@ -69,7 +69,9 @@ public enum JSONValue: Sendable, Hashable, Codable {
     /// Counts nesting for one decode. `Decoder.codingPath` answers the same question, but it
     /// rebuilds an array on every value, which is not something to do once per byte of a hook
     /// payload. It is still the fallback for a decoder Baton did not build itself.
-    private final class DepthCounter {
+    /// Unchecked because a decode is single threaded: the counter is created in `parse`, used by
+    /// that one decoder, and dropped when it returns. It never crosses a thread.
+    private final class DepthCounter: @unchecked Sendable {
         var depth = 0
     }
 
@@ -109,7 +111,7 @@ public enum JSONValue: Sendable, Hashable, Codable {
     public var intValue: Int? {
         switch self {
         case .integer(let value): value
-        case .number(let value): value.isFinite ? Int(value) : nil
+        case .number(let value): Int(exactly: value.rounded(.towardZero))
         default: nil
         }
     }
