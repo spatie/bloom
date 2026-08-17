@@ -35,8 +35,16 @@ build, which is what you want while changing things.
 Run the core test suite, which does not need the app target to compile:
 
 ```sh
-./test-core.sh              # everything
+./test-core.sh              # everything, 188 tests
 ./test-core.sh DiffParser   # one suite
+```
+
+There is also a small set of live tests that drive the real `claude` binary end to end: a full
+turn with tool use, session resume across two runner instances, and cancellation. They spend
+tokens, so they are opt-in:
+
+```sh
+BATON_LIVE=1 ./test-core.sh LiveAgent
 ```
 
 ## It reads your existing Conductor config
