@@ -230,7 +230,7 @@ struct BottomPanelView: View {
         }
 
         await sessions.load(workspaceID: model.workspace.id, store: model.store)
-        if model.port == 0 { model.port = PortAllocator.allocate(taken: []) }
+        if model.port == 0 { model.port = (try? PortAllocator.allocate(taken: [])) ?? 0 }
 
         reconcileSelection()
     }

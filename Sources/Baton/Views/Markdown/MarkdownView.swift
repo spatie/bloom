@@ -189,9 +189,59 @@ private struct MarkdownBlockView: View {
     }
 }
 
+private final class InlineAttributesKey: NSObject {
+    let inline: [MarkdownInline]
+    let font: Font
+    let color: Color
+    private let cachedHash: Int
+
+    init(inline: [MarkdownInline], font: Font, color: Color) {
+        self.inline = inline
+        self.font = font
+        self.color = color
+        var hasher = Hasher()
+        hasher.combine(inline)
+        hasher.combine(font)
+        hasher.combine(color)
+        cachedHash = hasher.finalize()
+    }
+
+    override var hash: Int { cachedHash }
+
+    override func isEqual(_ object: Any?) -> Bool {
+        guard let other = object as? InlineAttributesKey else { return false }
+        return cachedHash == other.cachedHash
+            && inline == other.inline
+            && font == other.font
+            && color == other.color
+    }
+}
+
+private final class InlineAttributesBox {
+    let value: AttributedString
+
+    init(_ value: AttributedString) { self.value = value }
+}
+
+/// Keeps parsed paragraphs from rebuilding the same styled string on unrelated view updates.
+///
+/// Inline runs, font and foreground colour all participate in exact equality so a cached value
+/// cannot cross between structurally equal text rendered with different presentation.
+@MainActor
 private enum InlineAttributes {
+    private static let values: NSCache<InlineAttributesKey, InlineAttributesBox> = {
+        let cache = NSCache<InlineAttributesKey, InlineAttributesBox>()
+        cache.countLimit = 1_000
+        return cache
+    }()
+
     static func make(_ inline: [MarkdownInline], font: Font, color: Color) -> AttributedString {
-        render(inline, font: font, color: color, intents: [])
+        let key = InlineAttributesKey(inline: inline, font: font, color: color)
+        if let cached = values.object(forKey: key) { return cached.value }
+
+        let value = render(inline, font: font, color: color, intents: [])
+        values.setObject(InlineAttributesBox(value), forKey: key)
+        return value
     }
 
     private static func render(

@@ -113,6 +113,10 @@ struct TurnFooterView: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         copied = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            copied = false
+        }
     }
 }
 

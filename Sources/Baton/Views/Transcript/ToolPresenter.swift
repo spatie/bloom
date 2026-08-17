@@ -456,8 +456,14 @@ enum ToolPresenter {
     private static func scalar(_ value: JSONValue) -> String? {
         switch value {
         case .string(let text): return text.isEmpty ? nil : oneLine(text)
+        case .integer(let number): return String(number)
         case .number(let number):
-            return number == number.rounded() ? String(Int(number)) : String(number)
+            // Not `Int(number)`: a tool argument can legitimately hold a value past Int.max, and
+            // that conversion traps rather than failing.
+            guard number == number.rounded(), let exact = Int(exactly: number) else {
+                return String(number)
+            }
+            return String(exact)
         case .bool(let flag): return flag ? "true" : "false"
         case .null, .array, .object: return nil
         }

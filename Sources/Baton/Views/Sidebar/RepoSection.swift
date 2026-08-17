@@ -32,8 +32,8 @@ struct RepoSection: View {
     var body: some View {
         Section {
             if !repo.collapsed {
-                ForEach(Array(rows.enumerated()), id: \.element.id) { index, workspace in
-                    row(workspace, at: index)
+                ForEach(rows) { workspace in
+                    row(workspace)
                 }
                 if rows.isEmpty {
                     Text(filter == .all ? "No workspaces yet" : "Nothing matches the filter")
@@ -148,7 +148,7 @@ struct RepoSection: View {
 
     // MARK: - Rows
 
-    private func row(_ workspace: Workspace, at index: Int) -> some View {
+    private func row(_ workspace: Workspace) -> some View {
         WorkspaceRow(
             workspace: workspace,
             isSelected: app.selection.workspaceID == workspace.id,
@@ -170,6 +170,10 @@ struct RepoSection: View {
             guard let dragged = items.first, dragged != workspace.id else { return false }
             guard let moved = app.workspaces.first(where: { $0.id == dragged }),
                   moved.repoID == repo.id else { return false }
+            let unfiltered = app.workspaces(in: repo)
+            guard let index = unfiltered.firstIndex(where: { $0.id == workspace.id }) else {
+                return false
+            }
             Task { await app.reorder(moved, to: index) }
             return true
         }

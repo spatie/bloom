@@ -13,7 +13,9 @@ struct BatonCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Workspace") {
-                model.isCreatingWorkspace = true
+                // The sheet lives in RootView, and the sidebar and Home already open it this way.
+                // Setting a flag on the model instead would leave it stuck true with no sheet.
+                NotificationCenter.default.post(name: .batonNewWorkspace, object: nil)
             }
             .keyboardShortcut("n", modifiers: .command)
             .disabled(model.repos.isEmpty)
@@ -25,15 +27,9 @@ struct BatonCommands: Commands {
             .keyboardShortcut("t", modifiers: .command)
             .disabled(model.selectedModel == nil)
 
-            Divider()
-
-            Button("Add Project Folder") {
-                addProjectFolder()
-            }
-            .keyboardShortcut("o", modifiers: [.command, .shift])
-        }
-
-        CommandGroup(after: .saveItem) {
+            // Cmd+W belongs to the session, not the window. Baton has no Save item, so a group
+            // anchored after `.saveItem` is dropped whole and Cmd+W falls through to the system
+            // Close, which used to end the process and every agent with it.
             Button("Close Session") {
                 guard let workspace = model.selectedModel,
                       let session = workspace.activeSession else { return }
@@ -41,6 +37,13 @@ struct BatonCommands: Commands {
             }
             .keyboardShortcut("w", modifiers: .command)
             .disabled(model.selectedModel?.activeSession == nil)
+
+            Divider()
+
+            Button("Add Project Folder") {
+                addProjectFolder()
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
         }
 
         CommandGroup(after: .pasteboard) {
@@ -53,7 +56,10 @@ struct BatonCommands: Commands {
 
         CommandGroup(after: .sidebar) {
             Button("Toggle Sidebar") {
-                NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
+                // RootView lays the three panes out by hand, so there is no split view controller
+                // in the responder chain to answer `toggleSidebar(_:)`. RootView owns the flag and
+                // already listens for this.
+                NotificationCenter.default.post(name: .batonToggleSidebar, object: nil)
             }
             .keyboardShortcut("s", modifiers: [.command, .control])
 

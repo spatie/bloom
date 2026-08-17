@@ -146,15 +146,82 @@ final class TerminalSessionStore {
 
     /// Called when a workspace goes away for good. Nothing calls this on a plain tab switch, which
     /// is the entire point of this class.
-    func discard(workspaceID: String) {
+    ///
+    /// Awaitable because archiving deletes the worktree straight after. A shell whose cwd has just
+    /// been removed, or a dev server still holding its port, is exactly what should not outlive the
+    /// workspace it belonged to.
+    func discard(workspaceID: String) async {
+        var views: [BatonTerminalView] = []
         for tab in tabs(for: workspaceID) {
-            terminals[tab.id]?.shutdown()
+            if let view = terminals[tab.id] { views.append(view) }
             terminals[tab.id] = nil
         }
         tabsByWorkspace[workspaceID] = nil
+
+        var scripts: [RunScriptSession] = []
         for (key, session) in runSessions where key.hasPrefix("\(workspaceID)/") {
-            session.stop()
+            scripts.append(session)
             runSessions[key] = nil
+        }
+
+        await stop(terminals: views, runScripts: scripts)
+    }
+
+    /// The quit path: every shell and every run script this launch started, whichever workspace
+    /// they belong to. macOS does not kill a process's children, so anything still alive here gets
+    /// reparented to launchd and keeps its ports for the rest of the day.
+    func shutdownAll() async {
+        let views = Array(terminals.values)
+        let scripts = Array(runSessions.values)
+        terminals.removeAll()
+        runSessions.removeAll()
+        tabsByWorkspace.removeAll()
+        await stop(terminals: views, runScripts: scripts)
+    }
+
+    /// SIGTERM to every process group, a bounded wait, then SIGKILL to whatever is left.
+    private func stop(terminals views: [BatonTerminalView], runScripts scripts: [RunScriptSession]) async {
+        // Only shells that are still running get signalled. A shell the user exited long ago has had
+        // its pid reaped, and macOS hands pids out again, so signalling that number now could land
+        // on somebody else's process group.
+        let live = views.filter { $0.process?.running == true }
+        guard !live.isEmpty || !scripts.isEmpty else { return }
+
+        for view in live {
+            signal(SIGTERM, toGroupOf: view)
+            view.shutdown()
+        }
+        for script in scripts { script.stop() }
+
+        // A moment for SIGTERM to be taken. A shell goes immediately, a dev server usually wants to
+        // close its listeners first.
+        try? await Task.sleep(for: .milliseconds(250))
+        await waitForExit(of: scripts, upTo: .seconds(3.25))
+
+        // Anything that sat through SIGTERM is out of chances. A run script escalates to SIGKILL on
+        // its own after three seconds, so this second round is really for the shells. Their pids are
+        // still safe to name: `terminate()` stops the app from reaping them, so nothing has reused
+        // the number in the meantime.
+        for view in live { signal(SIGKILL, toGroupOf: view) }
+    }
+
+    /// Signals the shell's whole process group rather than the shell alone. A pty child is a
+    /// session leader, so its group holds everything the user started by hand in that terminal, and
+    /// those are the processes that survive a quit and keep a port bound.
+    private func signal(_ number: Int32, toGroupOf view: BatonTerminalView) {
+        let pid = view.process?.shellPid ?? 0
+        guard pid > 0 else { return }
+        killpg(pid, number)
+    }
+
+    /// Polls rather than awaits because a run script owns its process privately. It returns as soon
+    /// as everything has gone, which is the normal case within a frame or two.
+    private func waitForExit(of scripts: [RunScriptSession], upTo limit: Duration) async {
+        guard scripts.contains(where: \.isRunning) else { return }
+        let deadline = ContinuousClock.now.advanced(by: limit)
+        while ContinuousClock.now < deadline {
+            if !scripts.contains(where: \.isRunning) { return }
+            try? await Task.sleep(for: .milliseconds(50))
         }
     }
 }

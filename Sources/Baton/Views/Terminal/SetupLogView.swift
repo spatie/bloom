@@ -84,7 +84,7 @@ struct SetupLogView: View {
         model.isRunningSetup = true
         model.setupOutput = ""
         lastRunSucceeded = nil
-        if model.port == 0 { model.port = PortAllocator.allocate(taken: []) }
+        if model.port == 0 { model.port = (try? PortAllocator.allocate(taken: [])) ?? 0 }
 
         let manager = WorkspaceManager(store: store)
         let succeeded = await manager.runSetup(

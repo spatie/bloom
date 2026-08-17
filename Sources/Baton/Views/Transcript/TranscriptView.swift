@@ -68,11 +68,11 @@ struct TranscriptView: View {
                                 .id(row.seq)
                         }
 
-                        if transcript.isRunning || transcript.isStreaming {
-                            StreamingRowView(transcript: transcript)
-                                .padding(.horizontal, 6)
-                                .id(Self.streamingID)
+                        StreamingTailView(transcript: transcript) {
+                            follow(proxy, animated: false)
                         }
+                        .padding(.horizontal, 6)
+                        .id(Self.streamingID)
 
                         Color.clear
                             .frame(height: 1)
@@ -96,8 +96,6 @@ struct TranscriptView: View {
                 .onChange(of: transcript.rows.count, initial: true) { _, _ in
                     position(proxy, transcript)
                 }
-                .onChange(of: transcript.streamingText) { _, _ in follow(proxy, animated: false) }
-                .onChange(of: transcript.streamingThinking) { _, _ in follow(proxy, animated: false) }
                 .onChange(of: transcript.scrollTargetSeq) { _, target in
                     guard let target else { return }
                     withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(target, anchor: .center) }
@@ -185,6 +183,26 @@ struct TranscriptView: View {
         } else {
             expanded.insert(seq)
         }
+    }
+}
+
+/// Isolates token-by-token observation from the stored row list.
+///
+/// A stream delta changes several transcript properties many times per second. Keeping every read
+/// of those properties in this wrapper means SwiftUI invalidates only the live tail instead of
+/// rebuilding every visible stored row.
+private struct StreamingTailView: View {
+    let transcript: TranscriptModel
+    let onContentChange: @MainActor () -> Void
+
+    var body: some View {
+        Group {
+            if transcript.isRunning || transcript.isStreaming {
+                StreamingRowView(transcript: transcript)
+            }
+        }
+        .onChange(of: transcript.streamingText) { _, _ in onContentChange() }
+        .onChange(of: transcript.streamingThinking) { _, _ in onContentChange() }
     }
 }
 

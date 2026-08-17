@@ -11,6 +11,13 @@ struct HomeView: View {
 
     @State private var hovered: String?
 
+    /// Cards refresh together, so sharing one formatter avoids repeated ICU setup per card.
+    @MainActor private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
+
     private let columns = [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 10)]
 
     var body: some View {
@@ -169,9 +176,7 @@ struct HomeView: View {
     }
 
     private func relative(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
+        Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
 
     // MARK: - Empty

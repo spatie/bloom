@@ -31,6 +31,11 @@ struct FileTreeView: View {
         var id: String { node.path }
     }
 
+    private struct LoadID: Hashable {
+        var workspaceID: String
+        var workspacePath: String
+    }
+
     private var changedPaths: Set<String> {
         Set(model.changedFiles.map(\.path))
     }
@@ -60,7 +65,9 @@ struct FileTreeView: View {
             },
             hasBottom: selection != nil
         )
-        .task(id: model.workspace.path) { await load() }
+        .task(id: LoadID(workspaceID: model.workspace.id, workspacePath: model.workspace.path)) {
+            await load()
+        }
     }
 
     // MARK: - Tree
@@ -233,6 +240,11 @@ struct FilePreview: View {
     @State private var isTruncated = false
     @State private var isLoading = true
 
+    private struct LoadID: Hashable {
+        var workspaceID: String
+        var path: String
+    }
+
     var body: some View {
         Group {
             if isLoading {
@@ -249,7 +261,7 @@ struct FilePreview: View {
             }
         }
         .background(Palette.surface)
-        .task(id: path) { await load() }
+        .task(id: LoadID(workspaceID: model.workspace.id, path: path)) { await load() }
     }
 
     private var content: some View {

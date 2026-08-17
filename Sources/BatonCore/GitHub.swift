@@ -194,6 +194,11 @@ public enum GitHub {
         body: String,
         draft: Bool
     ) async throws -> PullRequest {
+        guard Git.isValidBranchName(base) else {
+            throw GitHubError("refusing to open a pull request against '\(base)': not a valid branch name")
+        }
+        // Title and body only ever travel as the value of a flag, so no content of theirs can be
+        // read as one.
         var arguments = ["pr", "create", "--base", base, "--title", title, "--body", body]
         if draft { arguments.append("--draft") }
         try await checkGH(arguments, worktree: worktree)
@@ -215,10 +220,22 @@ public enum GitHub {
         try await checkGH(arguments, worktree: worktree)
     }
 
+    /// Pushes the current HEAD to `branch` on origin.
+    ///
+    /// The branch never travels as a bare argument. Git will happily create a branch called
+    /// `--mirror`, and `git push origin --mirror` is not a push: it makes the remote match the
+    /// local repository exactly, deleting every remote branch and tag that is not here. Sending
+    /// an explicit `HEAD:refs/heads/<branch>` refspec after `--` means the name can only ever be
+    /// read as a ref, and the name is validated before we get that far.
     public static func push(worktree: String, branch: String, setUpstream: Bool) async throws {
+        guard Git.isValidBranchName(branch) else {
+            throw GitHubError("refusing to push to '\(branch)': not a valid branch name")
+        }
+
         var arguments = ["push"]
-        if setUpstream { arguments += ["--set-upstream", "origin"] }
-        arguments.append(branch)
+        if setUpstream { arguments.append("--set-upstream") }
+        arguments += ["--", "origin", "HEAD:refs/heads/\(branch)"]
+
         let result = try await Shell.run("git", arguments, cwd: worktree, timeout: .seconds(20))
         guard result.ok else {
             throw ShellError(
@@ -230,8 +247,9 @@ public enum GitHub {
     }
 
     public static func hasRemoteBranch(_ branch: String, worktree: String) async -> Bool {
+        guard Git.isValidBranchName(branch) else { return false }
         guard let result = try? await Shell.run(
-            "git", ["ls-remote", "--exit-code", "--heads", "origin", "refs/heads/\(branch)"],
+            "git", ["ls-remote", "--exit-code", "--heads", "--", "origin", "refs/heads/\(branch)"],
             cwd: worktree,
             timeout: .seconds(20)
         ) else { return false }
@@ -250,8 +268,11 @@ public enum GitHub {
         ).nameWithOwner
     }
 
+    /// Only http(s) is opened, so a value from gh JSON cannot become an argument to `open` or a
+    /// file:// path that launches something local.
     public static func openInBrowser(_ url: String) async {
-        _ = try? await Shell.run("/usr/bin/open", [url], timeout: .seconds(20))
+        guard url.hasPrefix("https://") || url.hasPrefix("http://") else { return }
+        _ = try? await Shell.run("/usr/bin/open", ["--", url], timeout: .seconds(20))
     }
 
     /// gh has no structured error code for a branch without a pull request.
@@ -264,6 +285,12 @@ public enum GitHub {
         worktree: String,
         maxAge: Duration
     ) async throws -> PullRequestSnapshot? {
+        // gh reads its positional argument with the same parser it uses for flags, so a branch
+        // called `--json` would rewrite the command.
+        guard Git.isValidBranchName(branch) else {
+            throw GitHubError("refusing to look up '\(branch)': not a valid branch name")
+        }
+
         let key = GitHubCache.Key(worktree: worktree, branch: branch)
         if let cached = await cache.value(for: key, maxAge: maxAge) { return cached }
 

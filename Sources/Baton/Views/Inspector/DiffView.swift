@@ -167,11 +167,16 @@ struct DiffView: View {
         case ready(DiffDocument)
     }
 
+    private struct LoadID: Hashable {
+        var workspaceID: String
+        var file: ChangedFile
+    }
+
     var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Palette.surface)
-            .task(id: file.path) { await load() }
+            .task(id: LoadID(workspaceID: model.workspace.id, file: file)) { await load() }
             .onChange(of: isSideBySide) { _, _ in rebuild() }
     }
 

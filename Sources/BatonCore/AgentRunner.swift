@@ -60,9 +60,10 @@ public actor AgentRunner {
     private var stderrTask: Task<Void, Never>?
     private var killTask: Task<Void, Never>?
     private var stderrTail: [String] = []
-    private var nextSeq: Int?
     private var alive = false
     private var cancelled = false
+    private var persistenceFailures = 0
+    private var lastFailure: String?
 
     /// Stream deltas are the same text arriving character by character, already superseded by the
     /// `assistant` event behind them. Storing them would multiply the row count and duplicate the
@@ -137,9 +138,22 @@ public actor AgentRunner {
 
     public var currentSession: Session { session }
 
+    /// The last thing that could not be written to disk, kept for as long as the runner lives.
+    /// A transcript that only exists on screen is worth saying out loud, and an `.error` event
+    /// scrolls away.
+    public var lastPersistenceFailure: String? { lastFailure }
+
+    /// How many rows never made it to the store.
+    public var persistenceFailureCount: Int { persistenceFailures }
+
     /// Decoded events for the UI. Nonisolated so a view can start consuming without hopping onto
-    /// the actor, which means it must not read actor state: the continuation lives in its own
-    /// reference box built at init.
+    /// the actor, which means it must not read actor state: the sink lives in its own reference
+    /// box built at init.
+    ///
+    /// Every access hands back a **new** stream. One shared stream made the first consumer to walk
+    /// away take the session with it: cancelling the task that iterates an `AsyncStream` finishes
+    /// that stream for good, so pressing Stop once left the UI staring at a runner that was still
+    /// working and still writing rows nobody would ever see.
     public nonisolated var events: AsyncStream<AgentEvent> { sink.stream }
 
     public func setPersistsStreamDeltas(_ value: Bool) {
@@ -150,6 +164,7 @@ public actor AgentRunner {
 
     /// Write one user turn. Starts the process on first use.
     public func send(_ text: String) async throws {
+        try await waitForCancelledRunToExit()
         try start()
 
         let line = try Self.encodeTurn(text)
@@ -170,14 +185,33 @@ public actor AgentRunner {
         return String(decoding: try encoder.encode(UserTurn(text: text)), as: UTF8.self)
     }
 
+    /// A cancelled process is still dying for up to three seconds, because SIGTERM comes first and
+    /// SIGKILL only follows if it was ignored. Writing the next turn into that process hands the
+    /// user's text to something on its way out, so the turn waits for the exit instead. Waiting on
+    /// the actor is safe: `finish` runs on it too and every sleep here is a suspension point.
+    private func waitForCancelledRunToExit() async throws {
+        guard handle.current != nil, handle.isCancelled(handle.generation) else { return }
+
+        for _ in 0..<Self.shutdownPolls {
+            try? await Task.sleep(for: Self.shutdownPollInterval)
+            if handle.current == nil { return }
+        }
+        throw AgentRunnerError.previousRunStillExiting
+    }
+
+    /// Long enough to cover SIGTERM, the three second grace period, and the SIGKILL behind it.
+    private static let shutdownPolls = 200
+    private static let shutdownPollInterval = Duration.milliseconds(25)
+
     private func start() throws {
         guard handle.current == nil else { return }
 
         cancelled = false
-        handle.cancelRequested = false
         stderrTail = []
         let process = makeProcess(launch())
-        handle.current = process
+        // Taking the process and bumping the run generation is one step, so a cancel racing this
+        // either belongs to the run that just ended (and is dropped) or to this one.
+        let generation = handle.beginRun(process)
         alive = true
 
         // Touching `lines` is what launches the process, so stderr has to be claimed before it or
@@ -187,7 +221,7 @@ public actor AgentRunner {
         let lines = process.lines
 
         readTask = Task { [weak self] in
-            await self?.consume(process, lines: lines)
+            await self?.consume(process, lines: lines, generation: generation)
         }
         stderrTask = Task { [weak self] in
             for await line in errors {
@@ -196,7 +230,11 @@ public actor AgentRunner {
         }
     }
 
-    private func consume(_ process: any AgentProcessing, lines: AsyncThrowingStream<String, Error>) async {
+    private func consume(
+        _ process: any AgentProcessing,
+        lines: AsyncThrowingStream<String, Error>,
+        generation: Int
+    ) async {
         var sawResult = false
         do {
             for try await line in lines {
@@ -209,7 +247,7 @@ public actor AgentRunner {
         }
 
         let status = await process.exitStatus
-        await finish(status: status, sawResult: sawResult)
+        await finish(status: status, sawResult: sawResult, generation: generation)
     }
 
     private func appendStderr(_ line: String) {
@@ -261,44 +299,53 @@ public actor AgentRunner {
         sink.yield(event)
     }
 
+    /// Write one row.
+    ///
+    /// The sequence number is allocated by the store, in the same call and the same transaction as
+    /// the insert, so two writers can never both reserve it. That is also why a failed write
+    /// advances nothing: the number was never handed out.
     private func persist(kind: MessageKind, payload: Data, durationMS: Int? = nil, refID: String? = nil) async {
-        let seq = await reserveSeq()
-        _ = try? await store.append(Message(
-            sessionID: session.id,
-            seq: seq,
-            kind: kind,
-            payload: payload,
-            durationMS: durationMS,
-            refID: refID
-        ))
-    }
-
-    /// Sequence numbers continue where the stored transcript left off, so a resumed session does
-    /// not restart at zero and reorder itself.
-    private func reserveSeq() async -> Int {
-        if let seq = nextSeq {
-            nextSeq = seq + 1
-            return seq
-        }
-        let stored = (try? await store.nextSeq(sessionID: session.id)) ?? 0
-        // Another turn may have initialised the counter while this one awaited the store.
-        if let seq = nextSeq {
-            nextSeq = seq + 1
-            return seq
-        }
-        nextSeq = stored + 1
-        return stored
+        _ = try? await store.appendNext(
+                sessionID: session.id,
+                kind: kind,
+                payload: payload,
+                durationMS: durationMS,
+                refID: refID
+        )
     }
 
     private func save(_ session: Session) async {
-        _ = try? await store.upsert(session)
+        do {
+            try await store.upsert(session)
+        } catch {
+            report("Could not save the session", error)
+        }
+    }
+
+    /// Say so when the store refuses a write.
+    ///
+    /// These used to be `try?`, and the event went out as though it had been stored: a failing
+    /// database threw the whole transcript away and told nobody. The failure now reaches the UI as
+    /// an `.error` event and stays readable on the runner afterwards. It goes straight to the sink
+    /// rather than through `ingest`, because storing a row is exactly what just failed.
+    private func report(_ what: String, _ error: Error) {
+        let message = "\(what): \(error)"
+        persistenceFailures += 1
+        lastFailure = message
+
+        let payload = (try? JSONEncoder().encode(StorageFailure(message: message)))
+            ?? Data(#"{"type":"error","subtype":"storage"}"#.utf8)
+        sink.yield(.error(AgentError(message: message, raw: payload)))
     }
 
     // MARK: Finishing
 
-    private func finish(status: Int32, sawResult: Bool) async {
+    private func finish(status: Int32, sawResult: Bool, generation: Int) async {
+        // A run that is no longer the current one has nothing left to say about the session.
+        guard generation == handle.generation else { return }
+
         alive = false
-        handle.current = nil
+        handle.endRun(generation)
         killTask?.cancel()
         killTask = nil
 
@@ -307,7 +354,7 @@ public actor AgentRunner {
         await stderrTask?.value
         stderrTask = nil
 
-        guard !cancelled, !handle.cancelRequested else {
+        guard !cancelled, !handle.isCancelled(generation) else {
             markCancelled()
             return
         }
@@ -342,10 +389,23 @@ public actor AgentRunner {
     /// SIGTERM now, SIGKILL in three seconds if the agent is still around. Claude Code usually
     /// wants a moment to flush, but it does not get to hang the app.
     public func cancel() {
-        let wasRunning = !cancelled
+        cancel(generation: handle.generation)
+    }
+
+    /// Cancel one specific run.
+    ///
+    /// A cancel queued by `cancelNow` reaches the actor whenever the actor gets round to it, which
+    /// can be after the user has already started the next turn. Acting on it then would SIGTERM
+    /// the turn they just asked for and file the whole thing as a failure, so a cancel that no
+    /// longer names the current run is dropped.
+    func cancel(generation: Int) {
+        guard generation == handle.generation else { return }
+        let request = handle.requestCancel(generation)
+
+        let wasCancelled = cancelled
         markCancelled()
 
-        guard wasRunning, let process = handle.current else { return }
+        guard !wasCancelled, let process = request.process ?? handle.current else { return }
         process.closeStdin()
         process.terminate()
 
@@ -361,7 +421,6 @@ public actor AgentRunner {
     private func markCancelled() {
         guard !cancelled else { return }
         cancelled = true
-        handle.cancelRequested = true
         alive = false
 
         session = session.with {
@@ -369,16 +428,20 @@ public actor AgentRunner {
             $0.updatedAt = Date()
         }
         let snapshot = session
-        Task { [store] in _ = try? await store.upsert(snapshot) }
+        Task { [weak self] in await self?.save(snapshot) }
     }
 
     /// Fire and forget, for a SwiftUI button that cannot await. The intent is recorded and the
     /// SIGTERM goes out synchronously, so a busy actor can neither delay the signal nor let the
     /// exit that follows be mistaken for a crash. The bookkeeping catches up a moment later.
+    ///
+    /// The run being cancelled is captured here rather than read again later, so the signal and
+    /// the bookkeeping both land on the run the user was looking at when they pressed Stop.
     public nonisolated func cancelNow() {
-        handle.cancelRequested = true
-        handle.current?.terminate()
-        Task { await self.cancel() }
+        let generation = handle.generation
+        let request = handle.requestCancel(generation)
+        if request.accepted { request.process?.terminate() }
+        Task { await self.cancel(generation: generation) }
     }
 
     // MARK: Wire formats
@@ -409,28 +472,91 @@ public actor AgentRunner {
         let status: Int
         let stderr: String
     }
+
+    /// The payload of the `.error` event a failed write emits. It never reaches the database, for
+    /// the obvious reason, so it only ever exists in flight.
+    private struct StorageFailure: Encodable {
+        let type = "error"
+        let subtype = "storage"
+        let message: String
+    }
+}
+
+// MARK: - Errors
+
+public enum AgentRunnerError: Error, Equatable, CustomStringConvertible, Sendable {
+    /// A turn was sent while the previous, cancelled process was still shutting down.
+    case previousRunStillExiting
+
+    public var description: String {
+        switch self {
+        case .previousRunStillExiting:
+            "The previous agent is still shutting down. Try again in a moment."
+        }
+    }
 }
 
 // MARK: - Boxes
 
-/// Holds the events continuation outside the actor so the `events` accessor can be nonisolated.
-/// An `AsyncStream.Continuation` is already thread safe, so there is nothing to guard here.
+/// Fans the runner's events out to every subscriber, outside the actor so the `events` accessor
+/// can stay nonisolated.
+///
+/// One shared `AsyncStream` cannot do this job. A stream is finished by its consumer going away,
+/// so the first view to cancel its iteration (pressing Stop does exactly that) took the only
+/// channel the session had with it, and every later event was yielded into nothing. Each
+/// subscriber gets its own stream and its own continuation instead, registered on access and
+/// dropped again by `onTermination`, so one consumer leaving is invisible to the rest.
 private final class EventSink: @unchecked Sendable {
-    let stream: AsyncStream<AgentEvent>
-    private let continuation: AsyncStream<AgentEvent>.Continuation
+    private let lock = NSLock()
+    private var continuations: [Int: AsyncStream<AgentEvent>.Continuation] = [:]
+    private var nextToken = 0
+    private var closed = false
+
+    private let shared: AsyncStream<AgentEvent>
+    private let sharedContinuation: AsyncStream<AgentEvent>.Continuation
 
     init() {
         var captured: AsyncStream<AgentEvent>.Continuation!
-        stream = AsyncStream(bufferingPolicy: .unbounded) { captured = $0 }
-        continuation = captured
+        shared = AsyncStream(bufferingPolicy: .unbounded) { captured = $0 }
+        sharedContinuation = captured
     }
 
+    var stream: AsyncStream<AgentEvent> { shared }
+
     func yield(_ event: AgentEvent) {
-        continuation.yield(event)
+        sharedContinuation.yield(event)
     }
 
     func finish() {
-        continuation.finish()
+        for continuation in removeAll() { continuation.finish() }
+    }
+
+    // The lock is only ever held across a dictionary access. Yielding happens after it is
+    // released, because a continuation can run arbitrary code and must never do so under a lock.
+
+    private func register(_ continuation: AsyncStream<AgentEvent>.Continuation) -> Int? {
+        lock.lock(); defer { lock.unlock() }
+        guard !closed else { return nil }
+        nextToken += 1
+        continuations[nextToken] = continuation
+        return nextToken
+    }
+
+    private func unregister(_ token: Int) {
+        lock.lock(); continuations[token] = nil; lock.unlock()
+    }
+
+    private func subscribers() -> [AsyncStream<AgentEvent>.Continuation] {
+        lock.lock(); defer { lock.unlock() }
+        return Array(continuations.values)
+    }
+
+    private func removeAll() -> [AsyncStream<AgentEvent>.Continuation] {
+        lock.lock(); defer { lock.unlock() }
+        closed = true
+        let all = Array(continuations.values)
+        continuations = [:]
+        return all
     }
 }
 
@@ -440,17 +566,47 @@ private final class ProcessHandle: @unchecked Sendable {
     private let lock = NSLock()
     private var process: (any AgentProcessing)?
     private var cancelled = false
+    private var run = 0
 
-    var current: (any AgentProcessing)? {
-        get { read() }
-        set { write(newValue) }
+    var current: (any AgentProcessing)? { read() }
+
+    /// Which run this handle is on. Stop is pressed against a particular run, and by the time the
+    /// intent reaches the actor the user may already have started the next one, so everything that
+    /// acts on a cancellation carries the generation it was meant for.
+    var generation: Int { readGeneration() }
+
+    /// Take ownership of a new process. Bumping the generation and clearing the previous run's
+    /// cancel intent happen inside the same lock as the swap, so a cancel racing a start either
+    /// belongs to the run that just ended, or to this one. It can never straddle both.
+    func beginRun(_ process: any AgentProcessing) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        run += 1
+        cancelled = false
+        self.process = process
+        return run
     }
 
-    /// Set before the signal goes out, so the exit it causes is not mistaken for a crash by the
-    /// read loop finishing on another thread.
-    var cancelRequested: Bool {
-        get { readCancelled() }
-        set { writeCancelled(newValue) }
+    /// Let go of the process for a run that has exited.
+    func endRun(_ generation: Int) {
+        lock.lock(); defer { lock.unlock() }
+        guard generation == run else { return }
+        process = nil
+    }
+
+    func isCancelled(_ generation: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return generation == run && cancelled
+    }
+
+    /// Record the intent and hand back the process to signal, in one lock, so a signal can never
+    /// end up going to a process from a later run. `accepted` is false when the generation is
+    /// stale or the run was already cancelled.
+    func requestCancel(_ generation: Int) -> (accepted: Bool, process: (any AgentProcessing)?) {
+        lock.lock(); defer { lock.unlock() }
+        guard generation == run else { return (false, nil) }
+        let accepted = !cancelled
+        cancelled = true
+        return (accepted, process)
     }
 
     private func read() -> (any AgentProcessing)? {
@@ -458,17 +614,9 @@ private final class ProcessHandle: @unchecked Sendable {
         return process
     }
 
-    private func write(_ value: (any AgentProcessing)?) {
-        lock.lock(); process = value; lock.unlock()
-    }
-
-    private func readCancelled() -> Bool {
+    private func readGeneration() -> Int {
         lock.lock(); defer { lock.unlock() }
-        return cancelled
-    }
-
-    private func writeCancelled(_ value: Bool) {
-        lock.lock(); cancelled = value; lock.unlock()
+        return run
     }
 }
 

@@ -32,11 +32,14 @@ struct InspectorView: View {
 
     private var tabs: some View {
         HStack(spacing: 2) {
-            ForEach(InspectorTab.allCases, id: \.self) { tab in
-                tabButton(tab)
+            ScrollView(.horizontal) {
+                HStack(spacing: 2) {
+                    ForEach(InspectorTab.allCases, id: \.self) { tab in
+                        tabButton(tab)
+                    }
+                }
             }
-
-            Spacer(minLength: 0)
+            .scrollIndicators(.never)
 
             iconButton(
                 isReviewing ? "eye.fill" : "eye",
@@ -97,11 +100,15 @@ struct InspectorView: View {
             HStack(spacing: 4) {
                 Text(tab.rawValue)
                     .font(isSelected ? Typo.labelEmphasis : Typo.label)
+                    .lineLimit(1)
+                    .fixedSize()
                 if tab == .changes, !model.changedFiles.isEmpty {
                     Text("\(model.changedFiles.count)")
                         .font(Typo.micro)
                         .monospacedDigit()
                         .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                        .fixedSize()
                 }
             }
             .foregroundStyle(isSelected ? Palette.textPrimary : Palette.textSecondary)

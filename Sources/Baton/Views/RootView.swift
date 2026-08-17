@@ -15,28 +15,8 @@ struct RootView: View {
     @State private var createTargetRepo: Repo?
 
     var body: some View {
-        HStack(spacing: 0) {
-            if isSidebarVisible {
-                SidebarView()
-                    .frame(width: sidebarWidth)
-                    .background(Palette.sidebar)
-                    .transition(.move(edge: .leading))
-
-                ResizeHandle(width: $sidebarWidth, range: 200...420, edge: .leading)
-            }
-
-            center
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Palette.surface)
-
-            if let model = app.selectedModel, model.isInspectorVisible {
-                ResizeHandle(width: $inspectorWidth, range: 280...760, edge: .trailing)
-
-                InspectorView(model: model)
-                    .frame(width: inspectorWidth)
-                    .background(Palette.surface)
-                    .transition(.move(edge: .trailing))
-            }
+        GeometryReader { proxy in
+            layout(containerWidth: proxy.size.width)
         }
         .background(Palette.windowBackground)
         .animation(.easeOut(duration: 0.16), value: isSidebarVisible)
@@ -64,6 +44,71 @@ struct RootView: View {
         }
     }
 
+    private func layout(containerWidth: CGFloat) -> some View {
+        let inspectorVisible = app.selectedModel?.isInspectorVisible == true
+        let sidebarRange = paneRange(
+            minimum: 200,
+            maximum: 420,
+            containerWidth: containerWidth,
+            otherPaneWidth: inspectorVisible ? max(inspectorWidth, 280) : 0,
+            visibleHandleCount: (isSidebarVisible ? 1 : 0) + (inspectorVisible ? 1 : 0)
+        )
+        let visibleSidebarWidth = isSidebarVisible
+            ? min(max(sidebarWidth, sidebarRange.lowerBound), sidebarRange.upperBound)
+            : 0
+        let inspectorRange = paneRange(
+            minimum: 280,
+            maximum: 760,
+            containerWidth: containerWidth,
+            otherPaneWidth: visibleSidebarWidth,
+            visibleHandleCount: (isSidebarVisible ? 1 : 0) + (inspectorVisible ? 1 : 0)
+        )
+        let visibleInspectorWidth = inspectorVisible
+            ? min(max(inspectorWidth, inspectorRange.lowerBound), inspectorRange.upperBound)
+            : 0
+
+        return HStack(spacing: 0) {
+            if isSidebarVisible {
+                SidebarView()
+                    .frame(width: visibleSidebarWidth)
+                    .background(Palette.sidebar)
+                    .transition(.move(edge: .leading))
+
+                ResizeHandle(width: $sidebarWidth, range: sidebarRange, edge: .leading)
+            }
+
+            center
+                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                .background(Palette.surface)
+
+            if let model = app.selectedModel, model.isInspectorVisible {
+                ResizeHandle(width: $inspectorWidth, range: inspectorRange, edge: .trailing)
+
+                InspectorView(model: model)
+                    .id(model.workspace.id)
+                    .frame(width: visibleInspectorWidth)
+                    .background(Palette.surface)
+                    .transition(.move(edge: .trailing))
+            }
+        }
+    }
+
+    /// Pane limits depend on the live window size so neither drag handle can consume the space
+    /// reserved for the session.
+    private func paneRange(
+        minimum: CGFloat,
+        maximum: CGFloat,
+        containerWidth: CGFloat,
+        otherPaneWidth: CGFloat,
+        visibleHandleCount: Int
+    ) -> ClosedRange<CGFloat> {
+        let available = containerWidth
+            - 420
+            - otherPaneWidth
+            - CGFloat(visibleHandleCount) * Metrics.hairline
+        return minimum...max(minimum, min(maximum, available))
+    }
+
     @ViewBuilder
     private var center: some View {
         if !app.isLoaded {
@@ -77,7 +122,6 @@ struct RootView: View {
             case .workspace:
                 if let workspace = app.selectedWorkspace {
                     WorkspaceDetailView(model: app.model(for: workspace))
-                        .id(workspace.id)
                 } else {
                     HomeView()
                 }

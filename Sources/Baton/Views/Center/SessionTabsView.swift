@@ -97,8 +97,13 @@ struct SessionTabsView: View {
                 .frame(height: 2)
         }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { startRename(session) }
-        .onTapGesture { model.activeSessionID = session.id }
+        .gesture(
+            TapGesture(count: 2)
+                .onEnded { startRename(session) }
+                .exclusively(
+                    before: TapGesture().onEnded { model.activeSessionID = session.id }
+                )
+        )
         .onHover { hovering in
             hoveredID = hovering ? session.id : (hoveredID == session.id ? nil : hoveredID)
         }
@@ -139,7 +144,11 @@ struct SessionTabsView: View {
     private func startRename(_ session: Session) {
         renameText = session.title
         renamingID = session.id
-        isRenameFocused = true
+        Task {
+            try? await Task.sleep(for: .milliseconds(30))
+            guard renamingID == session.id else { return }
+            isRenameFocused = true
+        }
     }
 
     private func commitRename(_ session: Session) {

@@ -17,9 +17,8 @@ public struct CodeBlockView: View {
     }
 
     public var body: some View {
-        let allLines = code.components(separatedBy: "\n")
-        let visibleCount = showsAllLines ? allLines.count : min(allLines.count, 2_000)
-        let highlighted = Self.highlight(lines: Array(allLines.prefix(visibleCount)), language: language)
+        let prepared = CodeBlockPreparationCache.prepared(code: code, language: language)
+        let visibleCount = showsAllLines ? prepared.lines.count : min(prepared.lines.count, 2_000)
 
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Metrics.corner) {
@@ -51,7 +50,7 @@ public struct CodeBlockView: View {
 
             ScrollView(.horizontal) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(highlighted.enumerated()), id: \.offset) { offset, line in
+                    ForEach(0..<visibleCount, id: \.self) { offset in
                         HStack(alignment: .firstTextBaseline, spacing: Metrics.gutter) {
                             if showsLineNumbers {
                                 Text(String(offset + 1))
@@ -60,7 +59,11 @@ public struct CodeBlockView: View {
                                     .monospacedDigit()
                                     .frame(minWidth: 24, alignment: .trailing)
                             }
-                            Text(line)
+                            Text(SyntaxCache.attributed(
+                                line: prepared.lines[offset],
+                                language: language,
+                                carry: prepared.carries[offset]
+                            ))
                                 .font(Typo.code)
                                 .foregroundStyle(Palette.textPrimary)
                                 .textSelection(.enabled)
@@ -71,9 +74,9 @@ public struct CodeBlockView: View {
                 .padding(Metrics.gutter)
             }
 
-            if allLines.count > 2_000, !showsAllLines {
+            if prepared.lines.count > 2_000, !showsAllLines {
                 Hairline()
-                Button("Show all \(allLines.count) lines") {
+                Button("Show all \(prepared.lines.count) lines") {
                     showsAllLines = true
                 }
                 .buttonStyle(.plain)
@@ -88,57 +91,6 @@ public struct CodeBlockView: View {
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.corner)
                 .stroke(Palette.border, lineWidth: Metrics.hairline)
-        }
-    }
-
-    private static func highlight(lines: [String], language: Language) -> [AttributedString] {
-        var state = LexState()
-        return lines.map { line in
-            let tokens = SyntaxHighlighter.tokenize(line: line, language: language, carry: &state)
-            var attributed = AttributedString(line)
-            attributed.font = Typo.code
-            attributed.foregroundColor = Palette.textPrimary
-            let utf16Count = line.utf16.count
-
-            for token in tokens {
-                guard token.range.lowerBound >= 0,
-                      token.range.upperBound <= utf16Count,
-                      token.range.lowerBound < token.range.upperBound else { continue }
-                let lowerString = String.Index(utf16Offset: token.range.lowerBound, in: line)
-                let upperString = String.Index(utf16Offset: token.range.upperBound, in: line)
-                guard let lower = AttributedString.Index(lowerString, within: attributed),
-                      let upper = AttributedString.Index(upperString, within: attributed),
-                      lower <= upper else { continue }
-                attributed[lower..<upper].foregroundColor = color(for: token.kind)
-            }
-            return attributed
-        }
-    }
-
-    static func color(for kind: TokenKind) -> Color {
-        switch kind {
-        case .plain, .punctuation:
-            Palette.textPrimary
-        case .keyword:
-            Palette.synKeyword
-        case .type:
-            Palette.synType
-        case .string, .regex:
-            Palette.synString
-        case .number:
-            Palette.synNumber
-        case .comment:
-            Palette.synComment
-        case .function:
-            Palette.synFunction
-        case .variable:
-            Palette.synVariable
-        case .attribute:
-            Palette.synAttribute
-        case .operator:
-            Palette.synOperator
-        case .constant:
-            Palette.synConstant
         }
     }
 
@@ -157,5 +109,66 @@ public struct CodeBlockView: View {
         case .php: "PHP"
         default: language.rawValue.capitalized
         }
+    }
+}
+
+private final class CodeBlockPreparationKey: NSObject {
+    let code: String
+    let language: Language
+    private let cachedHash: Int
+
+    init(code: String, language: Language) {
+        self.code = code
+        self.language = language
+        var hasher = Hasher()
+        hasher.combine(code)
+        hasher.combine(language)
+        cachedHash = hasher.finalize()
+    }
+
+    override var hash: Int { cachedHash }
+
+    override func isEqual(_ object: Any?) -> Bool {
+        guard let other = object as? CodeBlockPreparationKey else { return false }
+        return cachedHash == other.cachedHash
+            && code == other.code
+            && language == other.language
+    }
+}
+
+private final class CodeBlockPreparation {
+    let lines: [String]
+    let carries: [LexState]
+
+    init(lines: [String], carries: [LexState]) {
+        self.lines = lines
+        self.carries = carries
+    }
+}
+
+/// Avoids splitting and sequentially scanning the same code block on every SwiftUI body pass.
+///
+/// Code and language are both exact key fields because either can change line boundaries and the
+/// lexer state carried into every following line.
+@MainActor
+private enum CodeBlockPreparationCache {
+    private static let values: NSCache<CodeBlockPreparationKey, CodeBlockPreparation> = {
+        let cache = NSCache<CodeBlockPreparationKey, CodeBlockPreparation>()
+        cache.countLimit = 80
+        cache.totalCostLimit = 8 * 1_024 * 1_024
+        return cache
+    }()
+
+    static func prepared(code: String, language: Language) -> CodeBlockPreparation {
+        let key = CodeBlockPreparationKey(code: code, language: language)
+        if let cached = values.object(forKey: key) { return cached }
+
+        let lines = code.components(separatedBy: "\n")
+        let value = CodeBlockPreparation(
+            lines: lines,
+            carries: CarryPass.states(for: lines, language: language)
+        )
+        values.setObject(value, forKey: key, cost: code.utf8.count)
+        return value
     }
 }

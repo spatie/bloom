@@ -54,8 +54,14 @@ final class WorkspaceModel {
 
     var port: Int = 0
 
-    private var changesTask: Task<Void, Never>?
-    private var pullRequestTask: Task<Void, Never>?
+    /// The in-flight refreshes, so a newer one can cancel the one it replaces. Two overlapping
+    /// refreshes both claim `isLoadingChanges`, and the slower one finishing last would otherwise
+    /// write its stale answer over the fresh one.
+    private var changesTask: Task<[ChangedFile], Never>?
+    private var pullRequestTask: Task<PullRequest?, Never>?
+    /// A setup script can run for minutes (`composer install`, `npm ci`). Without a handle,
+    /// archiving mid-setup cannot stop it and it outlives the app.
+    private var setupTask: Task<Void, Never>?
 
     init(workspace: Workspace, app: AppModel) {
         self.workspace = workspace
@@ -97,7 +103,7 @@ final class WorkspaceModel {
 
     func closeSession(_ session: Session) async {
         guard let store else { return }
-        transcripts[session.id]?.stop()
+        transcripts[session.id]?.teardown()
         transcripts[session.id] = nil
         _ = try? await store.upsert(session.with {
             $0.archivedAt = Date()
@@ -127,11 +133,43 @@ final class WorkspaceModel {
 
     func stopEverything() {
         for transcript in transcripts.values { transcript.stop() }
+        setupTask?.cancel()
+        setupTask = nil
         changesTask?.cancel()
         pullRequestTask?.cancel()
     }
 
+    /// The workspace itself is going away, so the runners go too. `stopEverything` only ends the
+    /// turns, and a transcript left holding a live runner would keep it for the rest of the launch.
+    func teardown() {
+        stopEverything()
+        for transcript in transcripts.values { transcript.teardown() }
+        transcripts.removeAll()
+    }
+
+    /// The quit path: the same teardown, but it waits for the agents to actually be gone rather
+    /// than only asking them to leave.
+    func shutdown() async {
+        setupTask?.cancel()
+        setupTask = nil
+        changesTask?.cancel()
+        pullRequestTask?.cancel()
+        for transcript in transcripts.values {
+            await transcript.shutdown()
+        }
+    }
+
     // MARK: - First run
+
+    /// Owns the setup run so archiving, or quitting, can stop a `composer install` that is only
+    /// halfway through. Cancellation reaches the script itself through `StreamingProcess.lines`.
+    func startSetupThenSend(prompt: String, repo: Repo) {
+        setupTask?.cancel()
+        setupTask = Task { [weak self] in
+            await self?.runSetupThenSend(prompt: prompt, repo: repo)
+            self?.setupTask = nil
+        }
+    }
 
     /// Runs the setup script, streaming into the Setup tab, then sends the opening prompt.
     func runSetupThenSend(prompt: String, repo: Repo) async {
@@ -142,7 +180,9 @@ final class WorkspaceModel {
             isRunningSetup = true
             bottomTab = .setup
             setupOutput = ""
-            port = PortAllocator.allocate(taken: [])
+            // A machine with no free block left is not a reason to refuse to run setup. The script
+            // simply gets no port to bind, which it can decide for itself what to do about.
+            port = (try? PortAllocator.allocate(taken: [])) ?? 0
 
             let succeeded = await manager.runSetup(
                 workspace: workspace, repo: repo, port: port
@@ -153,6 +193,10 @@ final class WorkspaceModel {
                 }
             }
             isRunningSetup = false
+
+            // Archiving or quitting cancels this task. Starting an agent in a worktree that is on
+            // its way out is the one thing that must not happen here.
+            guard !Task.isCancelled else { return }
 
             if !succeeded {
                 app.alert = BatonAlert(
@@ -166,23 +210,29 @@ final class WorkspaceModel {
         }
 
         await reloadSessions()
-        if let session = activeSession {
-            await transcript(for: session).send(prompt)
-        }
+        guard !Task.isCancelled, let session = activeSession else { return }
+        await transcript(for: session).send(prompt)
     }
 
     // MARK: - Changes
 
     func refreshChanges() async {
         changesTask?.cancel()
-        isLoadingChanges = true
         let path = workspace.path
         let base = workspace.baseBranch
 
-        let files = await Task.detached(priority: .userInitiated) {
+        let task = Task.detached(priority: .userInitiated) {
             (try? await Git.changedFiles(worktree: path, base: base)) ?? []
-        }.value
+        }
+        changesTask = task
+        isLoadingChanges = true
 
+        let files = await task.value
+
+        // A newer refresh started while this one was in git, or the workspace is going away. Either
+        // way this answer is the stale one, and writing it would undo the fresh one.
+        guard changesTask == task, !task.isCancelled else { return }
+        changesTask = nil
         changedFiles = files
         isLoadingChanges = false
         if let selectedFilePath, !files.contains(where: { $0.path == selectedFilePath }) {
@@ -214,11 +264,21 @@ final class WorkspaceModel {
 
     func refreshPullRequest() async {
         pullRequestTask?.cancel()
+        let branch = workspace.branch
+        let path = workspace.path
+
+        let task = Task.detached(priority: .utility) {
+            await GitHubBridge.pullRequest(branch: branch, worktree: path)
+        }
+        pullRequestTask = task
         isLoadingPullRequest = true
-        defer { isLoadingPullRequest = false }
-        pullRequest = await GitHubBridge.pullRequest(
-            branch: workspace.branch, worktree: workspace.path
-        )
+
+        let fresh = await task.value
+
+        guard pullRequestTask == task, !task.isCancelled else { return }
+        pullRequestTask = nil
+        pullRequest = fresh
+        isLoadingPullRequest = false
     }
 
     // MARK: - Housekeeping

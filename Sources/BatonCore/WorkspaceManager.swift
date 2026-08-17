@@ -9,12 +9,21 @@ public enum WorkspaceError: Error, CustomStringConvertible {
     case notARepository(String)
     case pathInUse(String)
     case repoMissing
+    /// Archiving would destroy work that exists nowhere else. Carries the full report so the UI
+    /// can list what is at stake instead of asking "are you sure?" about nothing in particular.
+    case unsafeToArchive(WorkspaceSafetyReport)
+    case archiveScriptFailed(status: Int32, output: String)
 
     public var description: String {
         switch self {
         case .notARepository(let path): "\(path) is not a git repository"
         case .pathInUse(let path): "\(path) already exists"
         case .repoMissing: "the workspace has no repository"
+        case .unsafeToArchive(let report):
+            "archiving would permanently destroy " + report.losses.joined(separator: ", ")
+        case .archiveScriptFailed(let status, let output):
+            "the archive script exited \(status), so nothing was removed: "
+                + output.trimmingCharacters(in: .whitespacesAndNewlines).suffix(500)
         }
     }
 }
@@ -208,19 +217,70 @@ public struct WorkspaceManager: Sendable {
 
     // MARK: - Archiving
 
-    public func archive(workspace: Workspace, repo: Repo, deleteBranch: Bool? = nil) async throws {
-        let settings = SettingsLoader.load(repo: repo.path)
+    /// What archiving this workspace would throw away. Call it before `archive` to build a
+    /// confirmation the user can actually judge.
+    public func safetyReport(workspace: Workspace, repo: Repo) async throws -> WorkspaceSafetyReport {
+        try await Git.safetyReport(
+            worktree: workspace.path,
+            branch: workspace.branch,
+            base: workspace.baseBranch,
+            repo: repo.path
+        )
+    }
 
+    /// Removes the worktree and, optionally, the branch.
+    ///
+    /// Archiving is not undoable: once the worktree is gone the uncommitted files are gone, and
+    /// once the branch is gone commits nothing else points at are unreachable. So unless the
+    /// caller passes `force`, this refuses up front and throws a report of what is at stake,
+    /// before it has touched anything.
+    public func archive(
+        workspace: Workspace,
+        repo: Repo,
+        deleteBranch: Bool? = nil,
+        force: Bool = false
+    ) async throws {
+        let settings = SettingsLoader.load(repo: repo.path)
+        let shouldDeleteBranch = deleteBranch ?? settings.deleteBranchOnArchive
+
+        let report: WorkspaceSafetyReport?
+        if force {
+            // A forced archive still wants the report, to decide how hard to push on the branch,
+            // but must not be blocked by a repository too broken to answer.
+            report = try? await safetyReport(workspace: workspace, repo: repo)
+        } else {
+            let computed = try await safetyReport(workspace: workspace, repo: repo)
+            guard computed.isSafeToDiscard else { throw WorkspaceError.unsafeToArchive(computed) }
+            report = computed
+        }
+
+        // A failing archive script means the workspace was not wound down: containers still
+        // running, a database still there. Deleting the worktree anyway leaves that mess with
+        // nothing left to clean it up from.
         if let script = settings.archiveScript, !script.isEmpty,
            FileManager.default.fileExists(atPath: workspace.path) {
             let env = environment(for: workspace, repo: repo, port: 0)
-            _ = try? await Shell.script(script, cwd: workspace.path, env: env, timeout: .seconds(120))
+            let result = try await Shell.script(script, cwd: workspace.path, env: env, timeout: .seconds(120))
+            guard result.ok else {
+                throw WorkspaceError.archiveScriptFailed(
+                    status: result.status,
+                    output: result.stderr.isEmpty ? result.stdout : result.stderr
+                )
+            }
         }
 
-        try await Git.removeWorktree(repo: repo.path, path: workspace.path)
+        try await Git.removeWorktree(repo: repo.path, path: workspace.path, force: force)
 
-        if deleteBranch ?? settings.deleteBranchOnArchive {
-            try await Git.deleteBranch(workspace.branch, in: repo.path)
+        if shouldDeleteBranch {
+            do {
+                try await Git.deleteBranch(workspace.branch, in: repo.path)
+            } catch {
+                // `git branch -d` only looks at the upstream and at HEAD, so it refuses branches
+                // whose commits are safely on a remote or on another branch. The safety report
+                // checked every ref, so when it cleared the branch, -D destroys nothing.
+                guard force || report?.isSafeToDiscard == true else { throw error }
+                try await Git.deleteBranch(workspace.branch, in: repo.path, force: true)
+            }
         }
 
         try await store.upsert(workspace.with {
@@ -229,6 +289,8 @@ public struct WorkspaceManager: Sendable {
         })
     }
 
+    /// Deliberately leaves the stored counts alone when git fails, rather than writing zeroes.
+    /// A stale count is a small lie; "0 files changed" on a workspace full of work is a big one.
     public func refreshDiffStat(workspace: Workspace) async {
         guard let stat = try? await Git.diffStat(worktree: workspace.path, base: workspace.baseBranch) else {
             return
@@ -267,16 +329,41 @@ public extension Repo {
     }
 }
 
+public enum PortAllocatorError: Error, CustomStringConvertible {
+    case exhausted(start: Int, limit: Int)
+
+    public var description: String {
+        switch self {
+        case .exhausted(let start, let limit):
+            "no free block of ten ports between \(start) and \(limit)"
+        }
+    }
+}
+
 /// Assigns each active workspace a block of ten ports, the way Conductor does, so a run script
 /// can bind `$BATON_PORT` without colliding with a sibling workspace.
 public enum PortAllocator {
-    public static func allocate(taken: Set<Int>, start: Int = 3_100) -> Int {
+    public static let blockSize = 10
+
+    /// The first port of a free block of ten.
+    ///
+    /// Throws rather than falling back to `start`. Handing back a port something else is already
+    /// listening on sends a run script into a bind failure, or worse, into someone else's server.
+    /// Every port in the block is probed, because the block is the promise being made.
+    public static func allocate(taken: Set<Int>, start: Int = 3_100, limit: Int = 65_000) throws -> Int {
         var port = start
-        while taken.contains(port) || !isFree(port) {
-            port += 10
-            if port > 65_000 { return start }
+        while port + blockSize - 1 <= limit {
+            if isBlockAvailable(from: port, taken: taken) { return port }
+            port += blockSize
         }
-        return port
+        throw PortAllocatorError.exhausted(start: start, limit: limit)
+    }
+
+    static func isBlockAvailable(from start: Int, taken: Set<Int>) -> Bool {
+        for port in start..<(start + blockSize) {
+            if taken.contains(port) || !isFree(port) { return false }
+        }
+        return true
     }
 
     static func isFree(_ port: Int) -> Bool {

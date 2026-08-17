@@ -28,9 +28,17 @@ public actor Store {
 
     // MARK: - Migrations
 
+    /// One migration step. Most are a block of SQL, but a step that has to look at the rows it is
+    /// about to constrain needs real code, so the list holds closures rather than strings.
+    private typealias Migration = @Sendable (SQLiteDatabase) throws -> Void
+
+    private nonisolated static func sql(_ statements: String) -> Migration {
+        { try $0.execute(statements) }
+    }
+
     private nonisolated static func migrate(_ db: SQLiteDatabase) throws {
-        let migrations: [String] = [
-            """
+        let migrations: [Migration] = [
+            sql("""
             CREATE TABLE IF NOT EXISTS repos (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -114,15 +122,55 @@ public actor Store {
                 session_id TEXT PRIMARY KEY,
                 body TEXT NOT NULL
             );
-            """,
+            """),
+
+            // A transcript position belongs to exactly one row. Without this the database happily
+            // accepted two rows claiming seq 4, which reorders a transcript and makes
+            // `last_read_seq` point at whichever of them the query felt like returning.
+            //
+            // An existing database can already hold such a pair, and a unique index would refuse
+            // to build over it, so the duplicates are moved to the end of their session first.
+            // Renumbering rather than deleting: a row that made it to disk is transcript, and the
+            // position it claimed was never trustworthy anyway.
+            { db in
+                let duplicates = try db.query("""
+                    SELECT id, session_id FROM messages
+                    WHERE id NOT IN (SELECT MIN(id) FROM messages GROUP BY session_id, seq)
+                    ORDER BY session_id, id
+                    """)
+
+                var nextBySession: [String: Int64] = [:]
+                for row in duplicates {
+                    guard let id = row.int("id"), let sessionID = row.string("session_id") else { continue }
+                    let seq: Int64
+                    if let known = nextBySession[sessionID] {
+                        seq = known
+                    } else {
+                        seq = (try db.query(
+                            "SELECT COALESCE(MAX(seq), -1) AS m FROM messages WHERE session_id = ?",
+                            [.text(sessionID)]
+                        ).first?.int("m") ?? -1) + 1
+                    }
+                    try db.run("UPDATE messages SET seq = ? WHERE id = ?", [.int(seq), .int(id)])
+                    nextBySession[sessionID] = seq + 1
+                }
+
+                try db.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS messages_session_seq ON messages(session_id, seq);"
+                )
+            },
         ]
 
         let current = Int(db.userVersion)
         guard current < migrations.count else { return }
-        for index in current..<migrations.count {
-            try db.execute(migrations[index])
+        // One transaction for the lot: a migration that half ran would leave a schema no version
+        // number describes.
+        try db.transaction {
+            for index in current..<migrations.count {
+                try migrations[index](db)
+            }
+            db.userVersion = Int32(migrations.count)
         }
-        db.userVersion = Int32(migrations.count)
     }
 
     // MARK: - Repos
@@ -389,10 +437,73 @@ public actor Store {
         return Int(rows.first?.int("m") ?? -1) + 1
     }
 
+    /// Insert a row at a sequence number the caller chose. Prefer `appendNext`, which cannot hand
+    /// the same number to two writers.
     @discardableResult
     public func append(_ message: Message) throws -> Message {
         var stored = message
-        stored.id = try db.run(
+        stored.id = try insert(message)
+        return stored
+    }
+
+    /// Allocate the next sequence number and insert the row in one go.
+    ///
+    /// Reading `nextSeq` and then calling `append` is two hops onto this actor, and a second
+    /// writer that lands in between reserves the number that was just handed out: both rows then
+    /// claim the same position. Doing both inside one call, inside one transaction, is what makes
+    /// the allocation atomic. `UNIQUE(session_id, seq)` catches the case that outlives this
+    /// process (a second `Store` on the same file), and losing that race is a retry, not an error.
+    @discardableResult
+    public func appendNext(
+        sessionID: String,
+        kind: MessageKind,
+        payload: Data,
+        durationMS: Int? = nil,
+        refID: String? = nil,
+        createdAt: Date = Date()
+    ) throws -> Message {
+        var lastError: Error?
+        for _ in 0..<Self.seqAllocationAttempts {
+            do {
+                return try db.transaction {
+                    let seq = try nextSeqLocked(sessionID: sessionID)
+                    var message = Message(
+                        sessionID: sessionID,
+                        seq: seq,
+                        kind: kind,
+                        payload: payload,
+                        createdAt: createdAt,
+                        durationMS: durationMS,
+                        refID: refID
+                    )
+                    message.id = try insert(message)
+                    return message
+                }
+            } catch let error as SQLiteError where Self.isSeqConflict(error) {
+                lastError = error
+            }
+        }
+        throw lastError ?? SQLiteError(message: "could not allocate a sequence number", sql: nil)
+    }
+
+    /// Enough attempts to outlast a burst of writers, few enough that a genuinely stuck database
+    /// surfaces as an error instead of spinning.
+    private static let seqAllocationAttempts = 16
+
+    private static func isSeqConflict(_ error: SQLiteError) -> Bool {
+        error.message.contains("UNIQUE constraint failed: messages.session_id")
+    }
+
+    private func nextSeqLocked(sessionID: String) throws -> Int {
+        let rows = try db.query(
+            "SELECT COALESCE(MAX(seq), -1) AS m FROM messages WHERE session_id = ?",
+            [.text(sessionID)]
+        )
+        return Int(rows.first?.int("m") ?? -1) + 1
+    }
+
+    private func insert(_ message: Message) throws -> Int64 {
+        try db.run(
             """
             INSERT INTO messages (session_id, seq, kind, payload, created_at, duration_ms, ref_id)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -404,7 +515,6 @@ public actor Store {
                 message.refID.map { .text($0) } ?? .null,
             ]
         )
-        return stored
     }
 
     public func updateMessage(id: Int64, payload: Data, durationMS: Int? = nil) throws {

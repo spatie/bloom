@@ -47,26 +47,224 @@ public struct WorktreeEntry: Sendable, Hashable {
     public var isDetached: Bool
 }
 
+/// What throwing a workspace away would destroy.
+///
+/// Removing a worktree and deleting its branch leaves nothing to recover from: the files are
+/// gone from disk and, once no ref points at them, the commits are unreachable and eventually
+/// pruned. So every field here is computed and shown before anything is deleted.
+public struct WorkspaceSafetyReport: Sendable, Hashable {
+    /// Tracked files with modifications that were never committed.
+    public var hasUncommittedChanges: Bool
+    /// Files git has never seen. These are the easiest to lose and the hardest to notice.
+    public var untrackedFiles: [String]
+    /// Commits reachable from this branch and from no other ref in the repository. Nothing
+    /// else, local or remote, is holding on to them.
+    public var unpushedCommits: Int
+    /// Whether the base branch already contains this branch's history.
+    public var isBranchMerged: Bool
+
+    public init(
+        hasUncommittedChanges: Bool = false,
+        untrackedFiles: [String] = [],
+        unpushedCommits: Int = 0,
+        isBranchMerged: Bool = false
+    ) {
+        self.hasUncommittedChanges = hasUncommittedChanges
+        self.untrackedFiles = untrackedFiles
+        self.unpushedCommits = unpushedCommits
+        self.isBranchMerged = isBranchMerged
+    }
+
+    /// A merged branch's commits live on in the base branch, so they are not counted as a loss.
+    public var isSafeToDiscard: Bool {
+        !hasUncommittedChanges
+            && untrackedFiles.isEmpty
+            && (unpushedCommits == 0 || isBranchMerged)
+    }
+
+    /// One line per thing that would be destroyed, for an error message or a confirmation sheet.
+    public var losses: [String] {
+        var losses: [String] = []
+        if hasUncommittedChanges {
+            losses.append("uncommitted changes to tracked files")
+        }
+        if !untrackedFiles.isEmpty {
+            let sample = untrackedFiles.prefix(5).joined(separator: ", ")
+            let rest = untrackedFiles.count > 5 ? ", and \(untrackedFiles.count - 5) more" : ""
+            losses.append("\(untrackedFiles.count) untracked file(s): \(sample)\(rest)")
+        }
+        if unpushedCommits > 0, !isBranchMerged {
+            losses.append("\(unpushedCommits) commit(s) that exist on no other branch, tag or remote")
+        }
+        return losses
+    }
+}
+
+/// A finished git process whose stdout is kept as bytes.
+///
+/// Paths are byte strings on macOS and Linux, and git's `-z` output hands them back verbatim.
+/// Decoding stdout to a `String` first would silently rewrite anything that is not valid UTF-8,
+/// so the parsers work from `Data` and decode one field at a time.
+struct GitOutput: Sendable {
+    let status: Int32
+    let stdout: Data
+    let stderr: String
+
+    var ok: Bool { status == 0 }
+}
+
 public enum Git {
     @discardableResult
-    static func run(_ arguments: [String], in directory: String) async throws -> ShellResult {
+    static func run(
+        _ arguments: [String],
+        in directory: String,
+        stdin: String? = nil
+    ) async throws -> ShellResult {
         try await Shell.run("git", arguments, cwd: directory, env: [
             "GIT_TERMINAL_PROMPT": "0",
             "GIT_OPTIONAL_LOCKS": "0",
-        ])
+        ], stdin: stdin)
     }
 
     @discardableResult
-    static func check(_ arguments: [String], in directory: String) async throws -> ShellResult {
-        let result = try await run(arguments, in: directory)
+    static func check(
+        _ arguments: [String],
+        in directory: String,
+        stdin: String? = nil
+    ) async throws -> ShellResult {
+        let result = try await run(arguments, in: directory, stdin: stdin)
+        guard result.ok else { throw error(arguments, result.status, result.stderr, result.stdout) }
+        return result
+    }
+
+    static func error(_ arguments: [String], _ status: Int32, _ stderr: String, _ stdout: String) -> ShellError {
+        ShellError(
+            command: "git " + arguments.joined(separator: " "),
+            status: status,
+            stderr: stderr.isEmpty ? stdout : stderr
+        )
+    }
+
+    /// Same contract as `run`, but stdout is not decoded. Used for the `-z` parsers.
+    static func runRaw(_ arguments: [String], in directory: String) async throws -> GitOutput {
+        guard let executable = Shell.which("git") else {
+            throw ShellError(command: "git", status: 127, stderr: "git not found on PATH")
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.environment = Shell.environment(extra: [
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_OPTIONAL_LOCKS": "0",
+        ])
+        process.currentDirectoryURL = URL(fileURLWithPath: directory)
+
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+
+        let collector = ByteCollector()
+        // Both pipes have to be drained while the process runs, or a large diff fills the buffer
+        // and git blocks forever on write.
+        outPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty { handle.readabilityHandler = nil } else { collector.appendOut(data) }
+        }
+        errPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty { handle.readabilityHandler = nil } else { collector.appendErr(data) }
+        }
+
+        try process.run()
+
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                process.terminationHandler = { _ in continuation.resume() }
+            }
+        } onCancel: {
+            if process.isRunning { process.terminate() }
+        }
+
+        outPipe.fileHandleForReading.readabilityHandler = nil
+        errPipe.fileHandleForReading.readabilityHandler = nil
+        if let rest = try? outPipe.fileHandleForReading.readToEnd(), !rest.isEmpty {
+            collector.appendOut(rest)
+        }
+        if let rest = try? errPipe.fileHandleForReading.readToEnd(), !rest.isEmpty {
+            collector.appendErr(rest)
+        }
+
+        return GitOutput(
+            status: process.terminationStatus,
+            stdout: collector.out,
+            stderr: String(decoding: collector.err, as: UTF8.self)
+        )
+    }
+
+    /// `runRaw` that refuses to hand back output from a failed command.
+    ///
+    /// A broken repository, a base branch that no longer exists or a contended `index.lock` all
+    /// exit non-zero with empty stdout. Treating that as "no changes" shows a clean worktree to
+    /// someone who has plenty of work in it, which is the worst possible lie to tell here.
+    static func checkRaw(_ arguments: [String], in directory: String) async throws -> GitOutput {
+        let result = try await runRaw(arguments, in: directory)
         guard result.ok else {
-            throw ShellError(
-                command: "git " + arguments.joined(separator: " "),
-                status: result.status,
-                stderr: result.stderr.isEmpty ? result.stdout : result.stderr
-            )
+            throw error(arguments, result.status, result.stderr, String(decoding: result.stdout, as: UTF8.self))
         }
         return result
+    }
+
+    // MARK: - Ref safety
+
+    /// Whether git would accept this as a branch name, following `git check-ref-format --branch`.
+    ///
+    /// This is a guard, not a convenience. Git happily creates a branch literally called
+    /// `--mirror`, and a bare `git push origin --mirror` then deletes every remote ref that has
+    /// no local counterpart. Rejecting the name is cheaper than trusting every call site to
+    /// terminate its options correctly.
+    public static func isValidBranchName(_ name: String) -> Bool {
+        guard !name.isEmpty, name != "HEAD" else { return false }
+        // An argument starting with a dash is an option to nearly every git subcommand.
+        guard !name.hasPrefix("-") else { return false }
+        guard !name.hasPrefix("/"), !name.hasSuffix("/") else { return false }
+        guard !name.hasSuffix(".") else { return false }
+        guard !name.contains(".."), !name.contains("@{"), !name.contains("//") else { return false }
+
+        for scalar in name.unicodeScalars {
+            if scalar.value < 0x20 || scalar.value == 0x7F { return false }
+            if " ~^:?*[\\".unicodeScalars.contains(scalar) { return false }
+        }
+
+        for component in name.components(separatedBy: "/") {
+            if component.isEmpty || component.hasPrefix(".") || component.hasSuffix(".lock") {
+                return false
+            }
+        }
+        return true
+    }
+
+    /// Rejects a ref that git would read as an option. Refs reach us from settings files, from
+    /// branch names an agent invented and from the store, so none of them are trusted.
+    static func validate(ref: String, label: String = "ref") throws {
+        guard !ref.isEmpty, !ref.hasPrefix("-"), !ref.contains("\0") else {
+            throw ShellError(
+                command: "git",
+                status: 128,
+                stderr: "refusing to use \(ref.isEmpty ? "an empty" : "the unsafe") \(label) '\(ref)'"
+            )
+        }
+    }
+
+    static func validate(branch: String) throws {
+        guard isValidBranchName(branch) else {
+            throw ShellError(
+                command: "git",
+                status: 128,
+                stderr: "'\(branch)' is not a valid branch name"
+            )
+        }
     }
 
     // MARK: - Repository facts
@@ -108,7 +306,14 @@ public enum Git {
     }
 
     public static func branchExists(_ branch: String, in repo: String) async -> Bool {
-        let result = try? await run(["show-ref", "--verify", "--quiet", "refs/heads/\(branch)"], in: repo)
+        guard isValidBranchName(branch) else { return false }
+        let result = try? await run(["show-ref", "--verify", "--quiet", "--", "refs/heads/\(branch)"], in: repo)
+        return result?.ok ?? false
+    }
+
+    static func refExists(_ ref: String, in repo: String) async -> Bool {
+        guard (try? validate(ref: ref)) != nil else { return false }
+        let result = try? await run(["show-ref", "--verify", "--quiet", "--", ref], in: repo)
         return result?.ok ?? false
     }
 
@@ -122,10 +327,15 @@ public enum Git {
     }
 
     /// Commit the branch diverged from. Falls back to the base tip when there is no shared history.
+    ///
+    /// Throws when `base` cannot be resolved at all. A missing base branch used to surface as an
+    /// empty diff, which reads as "this workspace changed nothing".
     public static func mergeBase(_ base: String, _ head: String = "HEAD", in path: String) async throws -> String {
+        try validate(ref: base, label: "base branch")
+        try validate(ref: head, label: "revision")
         let result = try await run(["merge-base", base, head], in: path)
         if result.ok, !result.trimmed.isEmpty { return result.trimmed }
-        return try await check(["rev-parse", base], in: path).trimmed
+        return try await check(["rev-parse", "--verify", "\(base)^{commit}"], in: path).trimmed
     }
 
     // MARK: - Worktrees
@@ -175,82 +385,85 @@ public enum Git {
         branch: String,
         base: String
     ) async throws {
+        try validate(branch: branch)
+        try validate(ref: base, label: "base branch")
+        try validate(ref: path, label: "worktree path")
+
         let parent = (path as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
 
         if await branchExists(branch, in: repo) {
-            try await check(["worktree", "add", path, branch], in: repo)
+            try await check(["worktree", "add", "--", path, branch], in: repo)
         } else {
-            try await check(["worktree", "add", "-b", branch, path, base], in: repo)
+            try await check(["worktree", "add", "-b", branch, "--", path, base], in: repo)
         }
     }
 
-    public static func removeWorktree(repo: String, path: String, force: Bool = true) async throws {
-        var arguments = ["worktree", "remove"]
-        if force { arguments.append("--force") }
-        arguments.append(path)
-        let result = try await run(arguments, in: repo)
-        if !result.ok {
-            // A worktree whose directory is already gone only needs pruning.
-            try await run(["worktree", "prune"], in: repo)
-            if FileManager.default.fileExists(atPath: path) {
-                throw ShellError(
-                    command: "git worktree remove",
-                    status: result.status,
-                    stderr: result.stderr
-                )
-            }
+    /// Removes a worktree, refusing by default to throw away work.
+    ///
+    /// `force` defaults to false because `--force` makes git remove a dirty worktree without a
+    /// word, and the files it deletes were never committed anywhere.
+    public static func removeWorktree(repo: String, path: String, force: Bool = false) async throws {
+        try validate(ref: path, label: "worktree path")
+
+        // Always try the safe removal first, so a dirty worktree stops us even when the caller
+        // asked for force for some other reason.
+        var result = try await run(["worktree", "remove", "--", path], in: repo)
+        if !result.ok, force {
+            result = try await run(["worktree", "remove", "--force", "--", path], in: repo)
+        }
+
+        guard !result.ok else { return }
+
+        // A worktree whose directory is already gone only needs pruning.
+        try await run(["worktree", "prune"], in: repo)
+        if FileManager.default.fileExists(atPath: path) {
+            throw error(["worktree", "remove", path], result.status, result.stderr, result.stdout)
         }
     }
 
-    public static func deleteBranch(_ branch: String, in repo: String, force: Bool = true) async throws {
-        try await run(["branch", force ? "-D" : "-d", branch], in: repo)
+    /// Deletes a branch and reports whether git actually did it.
+    ///
+    /// The safe `-d` is the default: it refuses to delete a branch whose commits are not merged
+    /// anywhere, which is exactly the case where the commits become unreachable. Swallowing the
+    /// non-zero exit, as this used to, told the caller the branch was gone when it was not.
+    public static func deleteBranch(_ branch: String, in repo: String, force: Bool = false) async throws {
+        try validate(branch: branch)
+        try await check(["branch", force ? "-D" : "-d", "--", branch], in: repo)
     }
 
     // MARK: - Diffs
 
     /// Files changed on this worktree relative to where it diverged from `base`, including
     /// uncommitted work and untracked files.
+    ///
+    /// Everything here runs with `-z` and is parsed from bytes. Git's default output C-quotes any
+    /// path that is not plain ASCII and separates fields with tab and newline, both of which a
+    /// path is allowed to contain. Splitting that text gave `"caf\303\251.txt"` for `café.txt`
+    /// and cut a path containing a tab in half.
+    ///
+    /// Throws if any of the git calls fail, because an empty list has to mean "nothing changed"
+    /// and never "we could not find out".
     public static func changedFiles(worktree: String, base: String) async throws -> [ChangedFile] {
         let mergeBase = try await mergeBase(base, in: worktree)
 
-        var byPath: [String: ChangedFile] = [:]
+        let nameStatus = try await checkRaw(
+            ["diff", "--name-status", "-M", "-z", mergeBase, "--"], in: worktree
+        )
+        let numstat = try await checkRaw(
+            ["diff", "--numstat", "-M", "-z", mergeBase, "--"], in: worktree
+        )
+        let untracked = try await checkRaw(
+            ["ls-files", "--others", "--exclude-standard", "-z"], in: worktree
+        )
 
-        let numstat = try await run(["diff", "--numstat", "-M", mergeBase, "--"], in: worktree)
-        let nameStatus = try await run(["diff", "--name-status", "-M", mergeBase, "--"], in: worktree)
-
-        var changeByPath: [String: (ChangedFile.Change, String?)] = [:]
-        for line in nameStatus.lines {
-            let parts = line.components(separatedBy: "\t")
-            guard let code = parts.first?.first.map(String.init) else { continue }
-            if code == "R", parts.count >= 3 {
-                changeByPath[parts[2]] = (.renamed, parts[1])
-            } else if parts.count >= 2 {
-                changeByPath[parts[1]] = (ChangedFile.Change(rawValue: code) ?? .modified, nil)
-            }
-        }
-
-        for line in numstat.lines {
-            let parts = line.components(separatedBy: "\t")
-            guard parts.count >= 3 else { continue }
-            let isBinary = parts[0] == "-"
-            let path = parts.count > 3 ? parts[3] : parts[2]
-            let (change, oldPath) = changeByPath[path] ?? (.modified, nil)
-            byPath[path] = ChangedFile(
-                path: path,
-                oldPath: oldPath,
-                change: change,
-                additions: Int(parts[0]) ?? 0,
-                deletions: Int(parts[1]) ?? 0,
-                isBinary: isBinary
-            )
-        }
+        let changeByPath = parseNameStatus(nameStatus.stdout)
+        var byPath = parseNumstat(numstat.stdout, changes: changeByPath)
 
         // Untracked files never appear in `git diff`, but they are absolutely part of the change.
-        let untracked = try await run(
-            ["ls-files", "--others", "--exclude-standard"], in: worktree
-        )
-        for path in untracked.lines where byPath[path] == nil {
+        for record in nulRecords(untracked.stdout) {
+            let path = String(decoding: record, as: UTF8.self)
+            guard !path.isEmpty, byPath[path] == nil else { continue }
             let full = (worktree as NSString).appendingPathComponent(path)
             let lineCount = (try? String(contentsOfFile: full, encoding: .utf8))
                 .map { $0.isEmpty ? 0 : $0.components(separatedBy: "\n").count } ?? 0
@@ -261,6 +474,94 @@ public enum Git {
         }
 
         return byPath.values.sorted { $0.path < $1.path }
+    }
+
+    /// `diff --name-status -z` records: a status field, then one path, except for `R`/`C` where
+    /// the similarity score is glued to the status (`R100`) and TWO paths follow, old then new.
+    static func parseNameStatus(_ data: Data) -> [String: (ChangedFile.Change, String?)] {
+        var changes: [String: (ChangedFile.Change, String?)] = [:]
+        var records = nulRecords(data)[...]
+
+        while let status = records.popFirst() {
+            guard let code = String(decoding: status.prefix(1), as: UTF8.self).first else { continue }
+            if code == "R" || code == "C" {
+                guard let old = records.popFirst(), let new = records.popFirst() else { break }
+                changes[String(decoding: new, as: UTF8.self)] = (
+                    code == "R" ? .renamed : .copied, String(decoding: old, as: UTF8.self)
+                )
+            } else {
+                guard let path = records.popFirst() else { break }
+                changes[String(decoding: path, as: UTF8.self)] =
+                    (ChangedFile.Change(rawValue: String(code)) ?? .modified, nil)
+            }
+        }
+        return changes
+    }
+
+    /// `diff --numstat -z` records: `additions TAB deletions TAB path`, except for a rename or
+    /// copy where the path field is empty and the old and new paths follow as their own records.
+    static func parseNumstat(
+        _ data: Data,
+        changes: [String: (ChangedFile.Change, String?)]
+    ) -> [String: ChangedFile] {
+        var files: [String: ChangedFile] = [:]
+        var records = nulRecords(data)[...]
+
+        while let record = records.popFirst() {
+            // Only the first two tabs are separators. Any further tab belongs to the path.
+            let fields = split(record, on: 0x09, limit: 2)
+            guard fields.count == 3 else { continue }
+
+            let additions = String(decoding: fields[0], as: UTF8.self)
+            let deletions = String(decoding: fields[1], as: UTF8.self)
+
+            var path = String(decoding: fields[2], as: UTF8.self)
+            var oldPath: String?
+            if fields[2].isEmpty {
+                guard let old = records.popFirst(), let new = records.popFirst() else { break }
+                oldPath = String(decoding: old, as: UTF8.self)
+                path = String(decoding: new, as: UTF8.self)
+            }
+
+            let recorded = changes[path]
+            files[path] = ChangedFile(
+                path: path,
+                oldPath: recorded?.1 ?? oldPath,
+                change: recorded?.0 ?? (oldPath == nil ? .modified : .renamed),
+                additions: Int(additions) ?? 0,
+                deletions: Int(deletions) ?? 0,
+                isBinary: additions == "-"
+            )
+        }
+        return files
+    }
+
+    /// The NUL-terminated records of a `-z` stream, with the trailing empty record dropped.
+    static func nulRecords(_ data: Data) -> [Data] {
+        var records: [Data] = []
+        var start = data.startIndex
+        for index in data.indices where data[index] == 0 {
+            records.append(data[start..<index])
+            start = data.index(after: index)
+        }
+        if start < data.endIndex { records.append(data[start...]) }
+        return records
+    }
+
+    /// Splits on the first `limit` occurrences of `byte`, leaving the remainder intact.
+    static func split(_ data: Data, on byte: UInt8, limit: Int) -> [Data] {
+        var pieces: [Data] = []
+        var start = data.startIndex
+        var index = data.startIndex
+        while index < data.endIndex, pieces.count < limit {
+            if data[index] == byte {
+                pieces.append(data[start..<index])
+                start = data.index(after: index)
+            }
+            index = data.index(after: index)
+        }
+        pieces.append(data[start...])
+        return pieces
     }
 
     public static func diffStat(worktree: String, base: String) async throws -> (files: Int, additions: Int, deletions: Int) {
@@ -276,29 +577,108 @@ public enum Git {
     public static func patch(worktree: String, base: String, file: ChangedFile) async throws -> String {
         if file.change == .untracked {
             let result = try await run(
-                ["diff", "--no-index", "--no-color", "/dev/null", file.path], in: worktree
+                ["diff", "--no-index", "--no-color", "--", "/dev/null", file.path], in: worktree
             )
             // --no-index exits 1 whenever there is a difference, which is the normal case here.
             return result.stdout
         }
         let mergeBase = try await mergeBase(base, in: worktree)
-        return try await run(
+        return try await check(
             ["diff", "--no-color", "-M", mergeBase, "--", file.path], in: worktree
         ).stdout
     }
 
     public static func fullPatch(worktree: String, base: String) async throws -> String {
         let mergeBase = try await mergeBase(base, in: worktree)
-        return try await run(["diff", "--no-color", "-M", mergeBase], in: worktree).stdout
+        return try await check(["diff", "--no-color", "-M", mergeBase, "--"], in: worktree).stdout
     }
 
     public static func hasUncommittedChanges(worktree: String) async throws -> Bool {
         !(try await check(["status", "--porcelain"], in: worktree).trimmed.isEmpty)
     }
 
+    /// Commits on HEAD that `base` does not have. Throws rather than answering 0 when git cannot
+    /// resolve the base, because 0 reads as "this branch is in sync".
     public static func commitsAhead(worktree: String, base: String) async throws -> Int {
-        let result = try await run(["rev-list", "--count", "\(base)..HEAD"], in: worktree)
-        return Int(result.trimmed) ?? 0
+        try validate(ref: base, label: "base branch")
+        let result = try await check(["rev-list", "--count", "\(base)..HEAD", "--"], in: worktree)
+        guard let count = Int(result.trimmed) else {
+            throw error(["rev-list", "--count", "\(base)..HEAD"], 0, "unreadable count '\(result.trimmed)'", "")
+        }
+        return count
+    }
+
+    // MARK: - Safety
+
+    /// Everything archiving this workspace would destroy, gathered before anything is removed.
+    ///
+    /// `unpushedCommits` deliberately means "reachable from this branch and from no other ref",
+    /// not "ahead of the base branch". A commit that also lives on a remote, on a tag or on
+    /// another branch survives deleting this one, and refusing to archive over it would be
+    /// noise. A commit nothing else points at does not survive.
+    public static func safetyReport(
+        worktree: String,
+        branch: String,
+        base: String,
+        repo: String
+    ) async throws -> WorkspaceSafetyReport {
+        try validate(branch: branch)
+
+        var report = WorkspaceSafetyReport()
+
+        if FileManager.default.fileExists(atPath: worktree), await isRepository(worktree) {
+            let status = try await checkRaw(["status", "--porcelain", "-z"], in: worktree)
+            (report.hasUncommittedChanges, report.untrackedFiles) = parseStatus(status.stdout)
+        }
+
+        guard await branchExists(branch, in: repo) else { return report }
+
+        let refs = try await check(
+            ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes", "refs/tags"],
+            in: repo
+        ).lines
+        // Feeding the other refs in on stdin rather than as arguments, because a repository with
+        // thousands of tags would otherwise blow past the argument limit.
+        let negated = refs
+            .filter { $0 != "refs/heads/\(branch)" }
+            .map { "^\($0)" }
+            .joined(separator: "\n")
+        let unique = try await check(
+            ["rev-list", "--count", "--stdin", "refs/heads/\(branch)"],
+            in: repo,
+            stdin: negated.isEmpty ? "\n" : negated + "\n"
+        )
+        report.unpushedCommits = Int(unique.trimmed) ?? 0
+
+        if (try? validate(ref: base, label: "base branch")) != nil {
+            let merged = try await run(
+                ["merge-base", "--is-ancestor", "refs/heads/\(branch)", base], in: repo
+            )
+            report.isBranchMerged = merged.ok
+        }
+
+        return report
+    }
+
+    /// `status --porcelain -z` records: `XY path`, and for a rename or copy the new path is
+    /// followed by a second record holding the old path.
+    static func parseStatus(_ data: Data) -> (dirty: Bool, untracked: [String]) {
+        var dirty = false
+        var untracked: [String] = []
+        var records = nulRecords(data)[...]
+
+        while let record = records.popFirst() {
+            guard record.count > 3 else { continue }
+            let code = String(decoding: record.prefix(2), as: UTF8.self)
+            let path = String(decoding: record.dropFirst(3), as: UTF8.self)
+            if code == "??" {
+                untracked.append(path)
+            } else {
+                dirty = true
+                if code.contains("R") || code.contains("C") { _ = records.popFirst() }
+            }
+        }
+        return (dirty, untracked)
     }
 
     // MARK: - Naming
@@ -391,5 +771,30 @@ public enum Git {
         var suffix = 2
         while taken.contains("\(desired)-\(suffix)") { suffix += 1 }
         return "\(desired)-\(suffix)"
+    }
+}
+
+/// Thread-safe accumulator for `runRaw`, which keeps stdout as bytes.
+private final class ByteCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stdout = Data()
+    private var stderr = Data()
+
+    func appendOut(_ data: Data) {
+        lock.lock(); stdout.append(data); lock.unlock()
+    }
+
+    func appendErr(_ data: Data) {
+        lock.lock(); stderr.append(data); lock.unlock()
+    }
+
+    var out: Data {
+        lock.lock(); defer { lock.unlock() }
+        return stdout
+    }
+
+    var err: Data {
+        lock.lock(); defer { lock.unlock() }
+        return stderr
     }
 }

@@ -59,6 +59,9 @@ final class TranscriptModel {
     private var runner: AgentRunner?
     private var pumpTask: Task<Void, Never>?
     private var indexByRefID: [String: Int] = [:]
+    /// When the current turn was handed to the runner, so a session row written before that can be
+    /// recognised as belonging to the previous turn.
+    private var turnStartedAt: Date?
 
     init(session: Session, workspace: Workspace, app: AppModel) {
         self.session = session
@@ -119,6 +122,15 @@ final class TranscriptModel {
     func refreshSession() async {
         guard let store, let fresh = try? await store.session(id: session.id) else { return }
         session = fresh
+        // The runner owns the state column, and it writes a terminal state from paths that do not
+        // always reach the UI as an event. Trusting the row here is what keeps the composer from
+        // spinning against an agent that is already gone. A row last written before the current
+        // turn started still describes the previous one, so it says nothing about this turn.
+        let isStale = turnStartedAt.map { fresh.updatedAt < $0 } ?? false
+        if !isStale, fresh.state == .failed || fresh.state == .cancelled {
+            isRunning = false
+            statusLabel = nil
+        }
     }
 
     /// The pickers in the composer write through here so they touch only their own columns.
@@ -149,6 +161,7 @@ final class TranscriptModel {
         try? await store.saveDraft(sessionID: session.id, body: "")
 
         let runner = ensureRunner()
+        turnStartedAt = Date()
         isRunning = true
         statusLabel = "Starting"
 
@@ -166,31 +179,61 @@ final class TranscriptModel {
         try? await store.saveDraft(sessionID: session.id, body: draft)
     }
 
+    /// The UI stops looking busy right away, but the pump is deliberately left running: a cancelled
+    /// turn still emits its own result, and that event is what writes the final state back into the
+    /// session row. Tearing the pump down here used to strand the session until the next launch.
     func stop() {
         runner?.cancelNow()
-        pumpTask?.cancel()
-        pumpTask = nil
         isRunning = false
         statusLabel = nil
         clearStreaming()
     }
 
-    /// Starts the runner and the event pump on first use.
+    /// The session itself is going away, so the pump goes with it. The event stream never ends on
+    /// its own, and a pump left iterating one holds its runner alive for the rest of the launch.
+    func teardown() {
+        stop()
+        pumpTask?.cancel()
+        pumpTask = nil
+    }
+
+    /// Quit path. Signals the agent and waits, briefly, for it to actually be gone, because macOS
+    /// hands our children to launchd rather than killing them.
+    func shutdown() async {
+        guard let runner else { return }
+        runner.cancelNow()
+        isRunning = false
+        statusLabel = nil
+        clearStreaming()
+
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3.5))
+        while ContinuousClock.now < deadline {
+            let alive = await runner.isRunning
+            if !alive { return }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
+    /// Starts the runner and the event pump on first use. The pump is rebuilt whenever it is
+    /// missing, so no path can leave a live runner with nothing reading its events.
     private func ensureRunner() -> AgentRunner {
-        if let runner { return runner }
-        let runner = AgentRunner(
+        let runner = self.runner ?? AgentRunner(
             workspacePath: workspace.path,
             session: session,
             store: app.store!
         )
         self.runner = runner
+        if pumpTask == nil { startPump(on: runner) }
+        return runner
+    }
+
+    private func startPump(on runner: AgentRunner) {
         pumpTask = Task { [weak self] in
             for await event in runner.events {
                 guard let self else { return }
                 await self.handle(event)
             }
         }
-        return runner
     }
 
     // MARK: - Event handling
@@ -218,9 +261,23 @@ final class TranscriptModel {
             case .blockFinished: break
             }
 
-        case .assistantText, .thinking, .toolUse, .toolResult, .error:
+        case .assistantText, .thinking, .toolUse, .toolResult:
             clearStreaming()
             await appendLatestMessages()
+
+        case .error(let failure):
+            // The agent died without ever producing a result: a model it does not know, expired
+            // credentials, a crash. Nothing else will arrive, so the turn ends here or the composer
+            // stays locked for the rest of the launch.
+            clearStreaming()
+            await appendLatestMessages()
+            isRunning = false
+            statusLabel = nil
+            await refreshSession()
+            app.alert = BatonAlert(
+                title: "The agent stopped in \(workspace.name)",
+                message: failure.message.isEmpty ? "It exited without finishing the turn." : failure.message
+            )
 
         case .result(let result):
             clearStreaming()

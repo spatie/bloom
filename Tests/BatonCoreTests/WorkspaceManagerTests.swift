@@ -249,9 +249,9 @@ struct WorkspaceManagerTests {
     }
 
     @Test("allocates a free port and does not hand out the same one twice")
-    func allocatesPorts() {
-        let first = PortAllocator.allocate(taken: [])
-        let second = PortAllocator.allocate(taken: [first])
+    func allocatesPorts() throws {
+        let first = try PortAllocator.allocate(taken: [])
+        let second = try PortAllocator.allocate(taken: [first])
         #expect(first >= 3_100)
         #expect(second != first)
         #expect((second - first) % 10 == 0)

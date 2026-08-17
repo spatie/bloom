@@ -180,17 +180,33 @@ public final class StreamingProcess: @unchecked Sendable {
     }
 
     public func terminate() {
-        if process.isRunning {
-            process.terminate()
-        }
+        signalGroup(SIGTERM)
         closeStdin()
     }
 
     /// SIGKILL, for a process that ignored SIGTERM.
     public func kill() {
-        if process.isRunning {
-            Foundation.kill(process.processIdentifier, SIGKILL)
-        }
+        signalGroup(SIGKILL)
+    }
+
+    /// Signal the whole process group, not just the child.
+    ///
+    /// Foundation launches the child in a process group of its own, so every grandchild it forks
+    /// lands in that same group. Signalling the pid alone kills `claude` and leaves the test run
+    /// or the dev server it started holding a port, reparented to launchd. `killpg` reaches the
+    /// lot of them.
+    ///
+    /// The guards matter more than the signal: group 0 means "my own group", and so does our own
+    /// pgid, so either one would have Baton signal itself. Both fall back to the single pid.
+    private func signalGroup(_ signal: Int32) {
+        guard process.isRunning else { return }
+        let pid = process.processIdentifier
+        guard pid > 0 else { return }
+
+        let group = getpgid(pid)
+        if group > 0, group != getpgrp(), killpg(group, signal) == 0 { return }
+
+        Foundation.kill(pid, signal)
     }
 
     public var exitStatus: Int32 {

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import Observation
 import BatonCore
@@ -34,14 +35,33 @@ final class AppModel {
     private(set) var workspaces: [Workspace] = []
     private(set) var isLoaded = false
 
-    var selection: SidebarSelection = .home
+    /// Selecting a workspace is the moment its live model should come into existence, rather than
+    /// the moment some view body happens to ask for it. Doing it here keeps model creation out of
+    /// the render pass entirely.
+    var selection: SidebarSelection {
+        get { storedSelection }
+        set {
+            storedSelection = newValue
+            guard let id = newValue.workspaceID, workspaceModels[id] == nil,
+                  let workspace = workspaces.first(where: { $0.id == id }) else { return }
+            _ = model(for: workspace)
+        }
+    }
+
+    private var storedSelection: SidebarSelection = .home
+
     var alert: BatonAlert?
     var searchQuery = ""
     var isCreatingWorkspace = false
 
     /// Live models for workspaces the user has visited this launch. Kept around so switching
     /// back to a workspace does not lose scroll position or a running agent.
-    private var workspaceModels: [String: WorkspaceModel] = [:]
+    ///
+    /// Deliberately outside observation. A view body asks for a model it has not seen before, and
+    /// creating one has to be invisible to SwiftUI: a tracked write here would invalidate, from
+    /// inside its own body, every view that had just read the dictionary. What the UI actually
+    /// watches is the state inside each model, which stays observable.
+    @ObservationIgnored private var workspaceModels: [String: WorkspaceModel] = [:]
 
     private var refreshTask: Task<Void, Never>?
 
@@ -65,6 +85,27 @@ final class AppModel {
         startBackgroundRefresh()
     }
 
+    /// Quitting Baton has to take everything it started with it. macOS does not kill a process's
+    /// children, so without this an agent keeps editing a worktree, a dev server keeps its port and
+    /// a login shell keeps running, all reparented to launchd. Worse, the next launch marks those
+    /// sessions idle and happily resumes them, which puts two `claude` processes on one session.
+    func shutdownEverything() async {
+        refreshTask?.cancel()
+        refreshTask = nil
+
+        let models = Array(workspaceModels.values)
+        // Signal every agent first, so the SIGTERM escalations all run at the same time rather than
+        // one after another.
+        for model in models { model.stopEverything() }
+
+        // The shells and the agents wait on their own escalations, so the two waits overlap rather
+        // than queue. Each model returns as soon as its agent is gone, which is immediately for all
+        // but the one that ignored SIGTERM.
+        async let terminals: Void = TerminalSessionStore.shared.shutdownAll()
+        for model in models { await model.shutdown() }
+        await terminals
+    }
+
     func reload() async {
         guard let store else { return }
         do {
@@ -83,6 +124,10 @@ final class AppModel {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(6))
                 guard let self else { return }
+                // Nothing here is worth a git subprocess while the user is in another app, and an
+                // agent editing the worktree is exactly when this loop is most likely to collide
+                // with a lock it has no business waiting for.
+                guard NSApp?.isActive ?? true else { continue }
                 await self.refreshDiffStats()
             }
         }
@@ -92,11 +137,33 @@ final class AppModel {
         guard let manager, let store else { return }
         let current = workspaces
         for workspace in current {
-            await manager.refreshDiffStat(workspace: workspace)
+            guard !Task.isCancelled else { return }
+            // A worktree that has been removed outside Baton would make git walk up to the parent
+            // repository and answer about the wrong tree.
+            guard FileManager.default.fileExists(atPath: workspace.path) else { continue }
+            await Self.withTimeLimit(.seconds(5)) {
+                await manager.refreshDiffStat(workspace: workspace)
+            }
         }
         if let updated = try? await store.workspaces() {
             // Only reassign when something actually changed, to avoid pointless view updates.
             if updated != workspaces { workspaces = updated }
+        }
+    }
+
+    /// Runs work with a deadline. One `git` blocked on an `index.lock`, which is routine while an
+    /// agent commits, would otherwise stall the refresh loop for every workspace forever.
+    /// Cancellation reaches the subprocess itself: `Shell.run` terminates it when its task is
+    /// cancelled.
+    private static func withTimeLimit(
+        _ limit: Duration,
+        _ work: @escaping @Sendable () async -> Void
+    ) async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await work() }
+            group.addTask { try? await Task.sleep(for: limit) }
+            await group.next()
+            group.cancelAll()
         }
     }
 
@@ -121,9 +188,13 @@ final class AppModel {
     }
 
     /// The live model for a workspace, created on first use.
+    ///
+    /// Called straight from view bodies, so it has to be free of observable writes on the hit path.
+    /// The row is only pushed into the model when it differs, because assigning an identical
+    /// `Workspace` still counts as a mutation to the Observation runtime.
     func model(for workspace: Workspace) -> WorkspaceModel {
         if let existing = workspaceModels[workspace.id] {
-            existing.workspace = workspace
+            if existing.workspace != workspace { existing.workspace = workspace }
             return existing
         }
         let model = WorkspaceModel(workspace: workspace, app: self)
@@ -207,7 +278,7 @@ final class AppModel {
             await model.reloadSessions()
             model.activeSessionID = session.id
 
-            Task { await model.runSetupThenSend(prompt: prompt, repo: repo) }
+            model.startSetupThenSend(prompt: prompt, repo: repo)
             return workspace
         } catch {
             alert = BatonAlert(title: "Could not create the workspace", message: "\(error)")
@@ -217,7 +288,11 @@ final class AppModel {
 
     func archive(_ workspace: Workspace, deleteBranch: Bool? = nil) async {
         guard let manager, let repo = repo(for: workspace) else { return }
-        workspaceModels[workspace.id]?.stopEverything()
+        workspaceModels[workspace.id]?.teardown()
+        // The worktree is about to be deleted from disk. Its shells are still sitting in that
+        // directory and its dev servers are still holding their ports, and nothing else in the app
+        // will ever come back for them.
+        await TerminalSessionStore.shared.discard(workspaceID: workspace.id)
         do {
             try await manager.archive(workspace: workspace, repo: repo, deleteBranch: deleteBranch)
             workspaceModels[workspace.id] = nil

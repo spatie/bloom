@@ -14,6 +14,9 @@ struct BatonApp: App {
                 .environment(model)
                 .frame(minWidth: 1_000, minHeight: 620)
                 .handlesBatonURLs(using: model)
+                // The delegate needs the state to shut it down on quit, and this is the first
+                // moment both exist. Handing it over explicitly keeps the app free of a global.
+                .onAppear { appDelegate.attach(model) }
         }
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))

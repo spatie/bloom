@@ -10,16 +10,42 @@ import Foundation
 /// into a payload nobody thought to decode today.
 public enum JSONValue: Sendable, Hashable, Codable {
     case string(String)
+    /// A whole number that fits in `Int`. Kept apart from `.number` because `Double` silently
+    /// rewrites anything past 2^53: `9007199254740993` comes back as `...992`, which is not the
+    /// raw JSON the store promises to hand back.
+    case integer(Int)
     case number(Double)
     case bool(Bool)
     case null
     case array([JSONValue])
     case object([String: JSONValue])
 
+    /// How deep a document may nest before it is refused.
+    ///
+    /// Decoding recurses once per level, and a Swift concurrency thread has a small stack: a line
+    /// nested two hundred deep took the whole process down with a stack overflow, which no line
+    /// off a subprocess gets to do. Real payloads sit around ten levels deep, tool input included,
+    /// so this is far out of the way of anything the CLI actually emits.
+    public static let maximumNesting = 64
+
     public init(from decoder: Decoder) throws {
+        let counter = decoder.userInfo[Self.depthKey] as? DepthCounter
+        let depth = counter?.depth ?? decoder.codingPath.count
+        guard depth < 100_000 else {
+            throw DecodingError.dataCorrupted(DecodingError.Context(
+                codingPath: decoder.codingPath,
+                debugDescription: "JSON nested deeper than \(Self.maximumNesting) levels"
+            ))
+        }
+        counter?.depth = depth + 1
+        defer { counter?.depth = depth }
+
         let container = try decoder.singleValueContainer()
         if container.decodeNil() { self = .null; return }
         if let value = try? container.decode(Bool.self) { self = .bool(value); return }
+        // Integer first: a `Double` round trip is lossy above 2^53, and token counts, durations
+        // and exit codes are all integers to begin with.
+        if let value = try? container.decode(Int.self) { self = .integer(value); return }
         if let value = try? container.decode(Double.self) { self = .number(value); return }
         if let value = try? container.decode(String.self) { self = .string(value); return }
         if let value = try? container.decode([JSONValue].self) { self = .array(value); return }
@@ -31,6 +57,7 @@ public enum JSONValue: Sendable, Hashable, Codable {
         var container = encoder.singleValueContainer()
         switch self {
         case .string(let value): try container.encode(value)
+        case .integer(let value): try container.encode(value)
         case .number(let value): try container.encode(value)
         case .bool(let value): try container.encode(value)
         case .null: try container.encodeNil()
@@ -39,10 +66,22 @@ public enum JSONValue: Sendable, Hashable, Codable {
         }
     }
 
+    /// Counts nesting for one decode. `Decoder.codingPath` answers the same question, but it
+    /// rebuilds an array on every value, which is not something to do once per byte of a hook
+    /// payload. It is still the fallback for a decoder Baton did not build itself.
+    private final class DepthCounter {
+        var depth = 0
+    }
+
+    private static let depthKey = CodingUserInfoKey(rawValue: "be.spatie.baton.jsonDepth")!
+
     /// Parse one JSON document. Returns nil instead of throwing, because every caller in Baton is
-    /// on a path that must never abort the stream.
+    /// on a path that must never abort the stream. Documents nested past `maximumNesting` are
+    /// refused the same way malformed bytes are.
     public static func parse(_ data: Data) -> JSONValue? {
-        try? JSONDecoder().decode(JSONValue.self, from: data)
+        let decoder = JSONDecoder()
+        decoder.userInfo[depthKey] = DepthCounter()
+        return try? decoder.decode(JSONValue.self, from: data)
     }
 
     public static func parse(_ text: String) -> JSONValue? {
@@ -57,13 +96,22 @@ public enum JSONValue: Sendable, Hashable, Codable {
     }
 
     public var doubleValue: Double? {
-        if case .number(let value) = self { return value }
-        return nil
+        switch self {
+        case .integer(let value): Double(value)
+        case .number(let value): value
+        default: nil
+        }
     }
 
+    /// Nil rather than a trap for anything `Int` cannot hold. A single valid `thinking_tokens`
+    /// line carrying `1e100` used to kill the process here, and no line off a subprocess is ever
+    /// allowed to do that.
     public var intValue: Int? {
-        guard case .number(let value) = self, value.isFinite else { return nil }
-        return Int(value)
+        switch self {
+        case .integer(let value): value
+        case .number(let value): value.isFinite ? Int(value) : nil
+        default: nil
+        }
     }
 
     public var boolValue: Bool? {

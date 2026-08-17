@@ -222,7 +222,7 @@ struct RunScriptView: View {
     /// Run scripts bind `$BATON_PORT`, so a workspace that has not been through setup still needs
     /// a port before its first run.
     private func ensurePort() -> Int {
-        if model.port == 0 { model.port = PortAllocator.allocate(taken: []) }
+        if model.port == 0 { model.port = (try? PortAllocator.allocate(taken: [])) ?? 0 }
         return model.port
     }
 

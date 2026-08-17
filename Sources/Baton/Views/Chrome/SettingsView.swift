@@ -251,10 +251,7 @@ private struct ProjectRow: View {
 /// Shows the merged configuration because layered settings are otherwise difficult to reason about.
 private struct EffectiveSettingsView: View {
     let repo: Repo
-
-    private var settings: RepoSettings {
-        SettingsLoader.load(repo: repo.path)
-    }
+    @State private var settings = RepoSettings()
 
     var body: some View {
         ScrollView {
@@ -287,6 +284,15 @@ private struct EffectiveSettingsView: View {
                 SettingValue(title: "Branch prefix", value: settings.branchPrefix ?? "None")
             }
             .padding(Metrics.gutter)
+        }
+        .task(id: repo.path) {
+            settings = RepoSettings()
+            let path = repo.path
+            let loaded = await Task.detached {
+                SettingsLoader.load(repo: path)
+            }.value
+            guard !Task.isCancelled else { return }
+            settings = loaded
         }
     }
 }
