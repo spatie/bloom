@@ -178,6 +178,7 @@ struct GitTests {
         #expect(Git.slug(from: "Please can you fix the 404 health check error")
             == "fix-404-health-check-error")
         #expect(Git.slug(from: "Fix it.\nSecond line is ignored") == "fix")
+        #expect(Git.slug(from: "Fix the thing. It is broken.") == "fix-thing-broken")
         #expect(Git.slug(from: "   ") == "workspace")
         #expect(Git.slug(from: "!!! ???") == "workspace")
         #expect(Git.slug(from: String(repeating: "verylongword ", count: 20)).count <= 60)
@@ -190,6 +191,42 @@ struct GitTests {
         let long = Git.title(from: String(repeating: "word ", count: 40))
         #expect(long.count <= 72)
         #expect(!long.hasSuffix(" "))
+    }
+
+    @Test("keeps the file a prompt names, so sibling workspaces stay distinguishable")
+    func slugKeepsTheDistinguishingFile() {
+        let invoice = Git.slug(from: "Add a class-level docblock to app/Domain/Invoice.php saying what it represents")
+        let contact = Git.slug(from: "Add a class-level docblock to app/Domain/Contact.php saying what it represents")
+        #expect(invoice != contact)
+        #expect(invoice.hasSuffix("invoice"))
+        #expect(contact.hasSuffix("contact"))
+
+        // A short prompt already keeps the filename through the ordinary word budget, so the
+        // token is not appended a second time.
+        #expect(Git.slug(from: "Update Ticket.php") == "update-ticket-php")
+        #expect(Git.slug(from: "Refactor invoice handling in Invoice.php") == "refactor-invoice-handling-invoice-php")
+        // A sentence that merely ends in a full stop is not a filename.
+        #expect(Git.distinguishingToken(from: "Fix the login.") == nil)
+        #expect(Git.distinguishingToken(from: "no paths here at all") == nil)
+        #expect(Git.distinguishingToken(from: "see tests/Feature/LoginTest.php") == "logintest")
+    }
+
+    @Test("produces branch names git will accept")
+    func slugsAreValidRefs() async throws {
+        let prompts = [
+            "Fix ~the~ thing^ with: weird? chars*",
+            "Update [Invoice].php and {Contact}.php",
+            "...leading dots and trailing dots...",
+            "a/b/c refs/heads/@{now}",
+            "  ",
+            "🎉 emoji only 🎉",
+            String(repeating: "long ", count: 60),
+        ]
+        for prompt in prompts {
+            let slug = Git.slug(from: prompt)
+            let result = try await Shell.run("git", ["check-ref-format", "--branch", slug])
+            #expect(result.ok, "git rejected the branch name \(slug) from prompt \(prompt)")
+        }
     }
 
     @Test("suffixes a branch name until it is free")

@@ -325,8 +325,43 @@ public enum Git {
         if kept.isEmpty { kept = words }
         if kept.isEmpty { return "workspace" }
 
-        let slug = kept.prefix(maxWords).joined(separator: "-")
-        return String(slug.prefix(60))
+        var parts = Array(kept.prefix(maxWords))
+
+        // A file path is usually the most distinguishing thing in a prompt, and it is exactly
+        // what falls off the end of the word budget. Without this, "add a docblock to Invoice.php"
+        // and "... to Contact.php" produce the same branch, and the collision suffix (-2, -3)
+        // leaves a sidebar full of names that say nothing about which is which.
+        if let token = distinguishingToken(from: firstLine), !parts.contains(token) {
+            parts.append(token)
+        }
+
+        return String(parts.joined(separator: "-").prefix(60))
+    }
+
+    /// The basename of the first path-like token in a line, lowercased and hyphenated.
+    static func distinguishingToken(from line: String) -> String? {
+        let separators = CharacterSet(charactersIn: " \t,;()[]{}\"'`")
+        for token in line.components(separatedBy: separators) where !token.isEmpty {
+            let trimmed = token.trimmingCharacters(in: CharacterSet(charactersIn: ".:"))
+            let base = (trimmed as NSString).lastPathComponent
+            let stem = (base as NSString).deletingPathExtension
+            let ext = (base as NSString).pathExtension
+
+            // Either an actual path, or something that really looks like a filename. A bare
+            // sentence ending in a full stop must not qualify.
+            let looksLikePath = trimmed.contains("/")
+            let looksLikeFile = !ext.isEmpty && ext.count <= 5
+                && ext.allSatisfy(\.isLetter) && stem.count >= 3
+            guard looksLikePath || looksLikeFile else { continue }
+
+            let cleaned = stem
+                .lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { !$0.isEmpty }
+                .joined(separator: "-")
+            if cleaned.count >= 2 { return cleaned }
+        }
+        return nil
     }
 
     /// A human-facing workspace name: the first line, trimmed and sentence-cased.
