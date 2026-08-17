@@ -1,0 +1,525 @@
+import Foundation
+
+/// All persistence. One actor, one SQLite file.
+public actor Store {
+    private let db: SQLiteDatabase
+    public nonisolated let path: String
+
+    public static var defaultDirectory: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("Baton", isDirectory: true)
+    }
+
+    public static func defaultPath() throws -> String {
+        let directory = defaultDirectory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("baton.sqlite").path
+    }
+
+    public init(path: String) throws {
+        self.path = path
+        self.db = try SQLiteDatabase(path: path)
+        try Self.migrate(db)
+    }
+
+    public static func inMemory() throws -> Store {
+        try Store(path: ":memory:")
+    }
+
+    // MARK: - Migrations
+
+    private nonisolated static func migrate(_ db: SQLiteDatabase) throws {
+        let migrations: [String] = [
+            """
+            CREATE TABLE IF NOT EXISTS repos (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                path TEXT NOT NULL UNIQUE,
+                default_branch TEXT NOT NULL DEFAULT 'main',
+                accent TEXT NOT NULL DEFAULT '4C8DF6',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                collapsed INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS workspaces (
+                id TEXT PRIMARY KEY,
+                repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                branch TEXT NOT NULL,
+                path TEXT NOT NULL,
+                base_branch TEXT NOT NULL,
+                state TEXT NOT NULL DEFAULT 'active',
+                setup_state TEXT NOT NULL DEFAULT 'pending',
+                setup_log TEXT NOT NULL DEFAULT '',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                last_activity_at REAL NOT NULL,
+                archived_at REAL,
+                additions INTEGER NOT NULL DEFAULT 0,
+                deletions INTEGER NOT NULL DEFAULT 0,
+                changed_files INTEGER NOT NULL DEFAULT 0,
+                unread INTEGER NOT NULL DEFAULT 0,
+                pinned INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS workspaces_repo ON workspaces(repo_id, state);
+
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                agent_session_id TEXT,
+                model TEXT NOT NULL DEFAULT 'opus',
+                effort TEXT NOT NULL DEFAULT 'high',
+                permission_mode TEXT NOT NULL DEFAULT 'acceptEdits',
+                state TEXT NOT NULL DEFAULT 'idle',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                archived_at REAL,
+                last_read_seq INTEGER NOT NULL DEFAULT 0,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cost_usd REAL NOT NULL DEFAULT 0,
+                context_tokens INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS sessions_workspace ON sessions(workspace_id);
+
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                seq INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                payload BLOB NOT NULL,
+                created_at REAL NOT NULL,
+                duration_ms INTEGER,
+                ref_id TEXT
+            );
+            CREATE INDEX IF NOT EXISTS messages_session ON messages(session_id, seq);
+            CREATE INDEX IF NOT EXISTS messages_ref ON messages(session_id, ref_id);
+
+            CREATE TABLE IF NOT EXISTS terminal_tabs (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS drafts (
+                session_id TEXT PRIMARY KEY,
+                body TEXT NOT NULL
+            );
+            """,
+        ]
+
+        let current = Int(db.userVersion)
+        guard current < migrations.count else { return }
+        for index in current..<migrations.count {
+            try db.execute(migrations[index])
+        }
+        db.userVersion = Int32(migrations.count)
+    }
+
+    // MARK: - Repos
+
+    public func repos() throws -> [Repo] {
+        try db.query("SELECT * FROM repos ORDER BY sort_order, created_at").map(Self.repo(from:))
+    }
+
+    public func repo(id: String) throws -> Repo? {
+        try db.query("SELECT * FROM repos WHERE id = ?", [.text(id)]).first.map(Self.repo(from:))
+    }
+
+    public func repo(path: String) throws -> Repo? {
+        try db.query("SELECT * FROM repos WHERE path = ?", [.text(path)]).first.map(Self.repo(from:))
+    }
+
+    @discardableResult
+    public func upsert(_ repo: Repo) throws -> Repo {
+        try db.run(
+            """
+            INSERT INTO repos (id, name, path, default_branch, accent, sort_order, collapsed, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                path = excluded.path,
+                default_branch = excluded.default_branch,
+                accent = excluded.accent,
+                sort_order = excluded.sort_order,
+                collapsed = excluded.collapsed
+            """,
+            [
+                .text(repo.id), .text(repo.name), .text(repo.path), .text(repo.defaultBranch),
+                .text(repo.accent), .int(Int64(repo.sortOrder)), .int(repo.collapsed ? 1 : 0),
+                .double(repo.createdAt.timeIntervalSince1970),
+            ]
+        )
+        return repo
+    }
+
+    public func deleteRepo(id: String) throws {
+        try db.run("DELETE FROM repos WHERE id = ?", [.text(id)])
+    }
+
+    // MARK: - Workspaces
+
+    public func workspaces(includeArchived: Bool = false) throws -> [Workspace] {
+        let sql = includeArchived
+            ? "SELECT * FROM workspaces ORDER BY sort_order, created_at"
+            : "SELECT * FROM workspaces WHERE state = 'active' ORDER BY sort_order, created_at"
+        return try db.query(sql).map(Self.workspace(from:))
+    }
+
+    public func workspaces(repoID: String, includeArchived: Bool = false) throws -> [Workspace] {
+        let sql = includeArchived
+            ? "SELECT * FROM workspaces WHERE repo_id = ? ORDER BY sort_order, created_at"
+            : "SELECT * FROM workspaces WHERE repo_id = ? AND state = 'active' ORDER BY sort_order, created_at"
+        return try db.query(sql, [.text(repoID)]).map(Self.workspace(from:))
+    }
+
+    public func workspace(id: String) throws -> Workspace? {
+        try db.query("SELECT * FROM workspaces WHERE id = ?", [.text(id)]).first.map(Self.workspace(from:))
+    }
+
+    @discardableResult
+    public func upsert(_ workspace: Workspace) throws -> Workspace {
+        try db.run(
+            """
+            INSERT INTO workspaces (
+                id, repo_id, name, branch, path, base_branch, state, setup_state, setup_log,
+                sort_order, created_at, last_activity_at, archived_at,
+                additions, deletions, changed_files, unread, pinned
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                branch = excluded.branch,
+                path = excluded.path,
+                base_branch = excluded.base_branch,
+                state = excluded.state,
+                setup_state = excluded.setup_state,
+                setup_log = excluded.setup_log,
+                sort_order = excluded.sort_order,
+                last_activity_at = excluded.last_activity_at,
+                archived_at = excluded.archived_at,
+                additions = excluded.additions,
+                deletions = excluded.deletions,
+                changed_files = excluded.changed_files,
+                unread = excluded.unread,
+                pinned = excluded.pinned
+            """,
+            [
+                .text(workspace.id), .text(workspace.repoID), .text(workspace.name),
+                .text(workspace.branch), .text(workspace.path), .text(workspace.baseBranch),
+                .text(workspace.state.rawValue), .text(workspace.setupState.rawValue),
+                .text(workspace.setupLog), .int(Int64(workspace.sortOrder)),
+                .double(workspace.createdAt.timeIntervalSince1970),
+                .double(workspace.lastActivityAt.timeIntervalSince1970),
+                workspace.archivedAt.map { .double($0.timeIntervalSince1970) } ?? .null,
+                .int(Int64(workspace.additions)), .int(Int64(workspace.deletions)),
+                .int(Int64(workspace.changedFiles)),
+                .int(workspace.unread ? 1 : 0), .int(workspace.pinned ? 1 : 0),
+            ]
+        )
+        return workspace
+    }
+
+    public func deleteWorkspace(id: String) throws {
+        try db.run("DELETE FROM workspaces WHERE id = ?", [.text(id)])
+    }
+
+    public func updateDiffStat(workspaceID: String, additions: Int, deletions: Int, files: Int) throws {
+        try db.run(
+            "UPDATE workspaces SET additions = ?, deletions = ?, changed_files = ? WHERE id = ?",
+            [.int(Int64(additions)), .int(Int64(deletions)), .int(Int64(files)), .text(workspaceID)]
+        )
+    }
+
+    public func touch(workspaceID: String, unread: Bool? = nil) throws {
+        if let unread {
+            try db.run(
+                "UPDATE workspaces SET last_activity_at = ?, unread = ? WHERE id = ?",
+                [.double(Date().timeIntervalSince1970), .int(unread ? 1 : 0), .text(workspaceID)]
+            )
+        } else {
+            try db.run(
+                "UPDATE workspaces SET last_activity_at = ? WHERE id = ?",
+                [.double(Date().timeIntervalSince1970), .text(workspaceID)]
+            )
+        }
+    }
+
+    public func nextWorkspaceSortOrder(repoID: String) throws -> Int {
+        let rows = try db.query(
+            "SELECT COALESCE(MAX(sort_order), -1) AS m FROM workspaces WHERE repo_id = ?",
+            [.text(repoID)]
+        )
+        return Int(rows.first?.int("m") ?? -1) + 1
+    }
+
+    // MARK: - Sessions
+
+    public func sessions(workspaceID: String) throws -> [Session] {
+        try db.query(
+            "SELECT * FROM sessions WHERE workspace_id = ? AND archived_at IS NULL ORDER BY sort_order, created_at",
+            [.text(workspaceID)]
+        ).map(Self.session(from:))
+    }
+
+    public func session(id: String) throws -> Session? {
+        try db.query("SELECT * FROM sessions WHERE id = ?", [.text(id)]).first.map(Self.session(from:))
+    }
+
+    @discardableResult
+    public func upsert(_ session: Session) throws -> Session {
+        try db.run(
+            """
+            INSERT INTO sessions (
+                id, workspace_id, title, agent_session_id, model, effort, permission_mode,
+                state, sort_order, created_at, updated_at, archived_at, last_read_seq,
+                input_tokens, output_tokens, cost_usd, context_tokens
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                agent_session_id = excluded.agent_session_id,
+                model = excluded.model,
+                effort = excluded.effort,
+                permission_mode = excluded.permission_mode,
+                state = excluded.state,
+                sort_order = excluded.sort_order,
+                updated_at = excluded.updated_at,
+                archived_at = excluded.archived_at,
+                last_read_seq = excluded.last_read_seq,
+                input_tokens = excluded.input_tokens,
+                output_tokens = excluded.output_tokens,
+                cost_usd = excluded.cost_usd,
+                context_tokens = excluded.context_tokens
+            """,
+            [
+                .text(session.id), .text(session.workspaceID), .text(session.title),
+                session.agentSessionID.map { .text($0) } ?? .null,
+                .text(session.model), .text(session.effort), .text(session.permissionMode.rawValue),
+                .text(session.state.rawValue), .int(Int64(session.sortOrder)),
+                .double(session.createdAt.timeIntervalSince1970),
+                .double(session.updatedAt.timeIntervalSince1970),
+                session.archivedAt.map { .double($0.timeIntervalSince1970) } ?? .null,
+                .int(Int64(session.lastReadSeq)),
+                .int(Int64(session.inputTokens)), .int(Int64(session.outputTokens)),
+                .double(session.costUSD), .int(Int64(session.contextTokens)),
+            ]
+        )
+        return session
+    }
+
+    public func deleteSession(id: String) throws {
+        try db.run("DELETE FROM sessions WHERE id = ?", [.text(id)])
+    }
+
+    /// Any session left `running` when the app died is not actually running.
+    public func resetRunningSessions() throws {
+        try db.run("UPDATE sessions SET state = 'idle' WHERE state = 'running'")
+    }
+
+    // MARK: - Messages
+
+    public func messages(sessionID: String, afterSeq: Int = -1, limit: Int = 100_000) throws -> [Message] {
+        try db.query(
+            "SELECT * FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq LIMIT ?",
+            [.text(sessionID), .int(Int64(afterSeq)), .int(Int64(limit))]
+        ).map(Self.message(from:))
+    }
+
+    public func messageCount(sessionID: String) throws -> Int {
+        Int(try db.query(
+            "SELECT COUNT(*) AS c FROM messages WHERE session_id = ?",
+            [.text(sessionID)]
+        ).first?.int("c") ?? 0)
+    }
+
+    public func nextSeq(sessionID: String) throws -> Int {
+        let rows = try db.query(
+            "SELECT COALESCE(MAX(seq), -1) AS m FROM messages WHERE session_id = ?",
+            [.text(sessionID)]
+        )
+        return Int(rows.first?.int("m") ?? -1) + 1
+    }
+
+    @discardableResult
+    public func append(_ message: Message) throws -> Message {
+        var stored = message
+        stored.id = try db.run(
+            """
+            INSERT INTO messages (session_id, seq, kind, payload, created_at, duration_ms, ref_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                .text(message.sessionID), .int(Int64(message.seq)), .text(message.kind.rawValue),
+                .blob(message.payload), .double(message.createdAt.timeIntervalSince1970),
+                message.durationMS.map { .int(Int64($0)) } ?? .null,
+                message.refID.map { .text($0) } ?? .null,
+            ]
+        )
+        return stored
+    }
+
+    public func updateMessage(id: Int64, payload: Data, durationMS: Int? = nil) throws {
+        try db.run(
+            "UPDATE messages SET payload = ?, duration_ms = COALESCE(?, duration_ms) WHERE id = ?",
+            [.blob(payload), durationMS.map { .int(Int64($0)) } ?? .null, .int(id)]
+        )
+    }
+
+    /// Find the stored toolUse row a tool_result belongs to.
+    public func message(sessionID: String, refID: String) throws -> Message? {
+        try db.query(
+            "SELECT * FROM messages WHERE session_id = ? AND ref_id = ? ORDER BY seq DESC LIMIT 1",
+            [.text(sessionID), .text(refID)]
+        ).first.map(Self.message(from:))
+    }
+
+    public func deleteMessages(sessionID: String) throws {
+        try db.run("DELETE FROM messages WHERE session_id = ?", [.text(sessionID)])
+    }
+
+    // MARK: - Drafts
+
+    public func draft(sessionID: String) throws -> String {
+        try db.query("SELECT body FROM drafts WHERE session_id = ?", [.text(sessionID)])
+            .first?.string("body") ?? ""
+    }
+
+    public func saveDraft(sessionID: String, body: String) throws {
+        if body.isEmpty {
+            try db.run("DELETE FROM drafts WHERE session_id = ?", [.text(sessionID)])
+        } else {
+            try db.run(
+                "INSERT INTO drafts (session_id, body) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET body = excluded.body",
+                [.text(sessionID), .text(body)]
+            )
+        }
+    }
+
+    // MARK: - Settings
+
+    public func setting(_ key: String) throws -> String? {
+        try db.query("SELECT value FROM settings WHERE key = ?", [.text(key)]).first?.string("value")
+    }
+
+    public func setSetting(_ key: String, _ value: String?) throws {
+        if let value {
+            try db.run(
+                "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [.text(key), .text(value)]
+            )
+        } else {
+            try db.run("DELETE FROM settings WHERE key = ?", [.text(key)])
+        }
+    }
+
+    // MARK: - Terminal tabs
+
+    public func terminalTabs(workspaceID: String) throws -> [TerminalTab] {
+        try db.query(
+            "SELECT * FROM terminal_tabs WHERE workspace_id = ? ORDER BY sort_order",
+            [.text(workspaceID)]
+        ).map {
+            TerminalTab(
+                id: $0.string("id") ?? newID(),
+                workspaceID: $0.string("workspace_id") ?? "",
+                title: $0.string("title") ?? "Terminal",
+                sortOrder: Int($0.int("sort_order") ?? 0)
+            )
+        }
+    }
+
+    public func upsert(_ tab: TerminalTab) throws {
+        try db.run(
+            """
+            INSERT INTO terminal_tabs (id, workspace_id, title, sort_order) VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET title = excluded.title, sort_order = excluded.sort_order
+            """,
+            [.text(tab.id), .text(tab.workspaceID), .text(tab.title), .int(Int64(tab.sortOrder))]
+        )
+    }
+
+    public func deleteTerminalTab(id: String) throws {
+        try db.run("DELETE FROM terminal_tabs WHERE id = ?", [.text(id)])
+    }
+
+    // MARK: - Row mapping
+
+    private static func repo(from row: Row) -> Repo {
+        Repo(
+            id: row.string("id") ?? newID(),
+            name: row.string("name") ?? "",
+            path: row.string("path") ?? "",
+            defaultBranch: row.string("default_branch") ?? "main",
+            accent: row.string("accent") ?? Accent.all[0],
+            sortOrder: Int(row.int("sort_order") ?? 0),
+            collapsed: row.bool("collapsed"),
+            createdAt: row.date("created_at") ?? Date()
+        )
+    }
+
+    private static func workspace(from row: Row) -> Workspace {
+        Workspace(
+            id: row.string("id") ?? newID(),
+            repoID: row.string("repo_id") ?? "",
+            name: row.string("name") ?? "",
+            branch: row.string("branch") ?? "",
+            path: row.string("path") ?? "",
+            baseBranch: row.string("base_branch") ?? "main",
+            state: WorkspaceState(rawValue: row.string("state") ?? "active") ?? .active,
+            setupState: SetupState(rawValue: row.string("setup_state") ?? "pending") ?? .pending,
+            setupLog: row.string("setup_log") ?? "",
+            sortOrder: Int(row.int("sort_order") ?? 0),
+            createdAt: row.date("created_at") ?? Date(),
+            lastActivityAt: row.date("last_activity_at") ?? Date(),
+            archivedAt: row.date("archived_at"),
+            additions: Int(row.int("additions") ?? 0),
+            deletions: Int(row.int("deletions") ?? 0),
+            changedFiles: Int(row.int("changed_files") ?? 0),
+            unread: row.bool("unread"),
+            pinned: row.bool("pinned")
+        )
+    }
+
+    private static func session(from row: Row) -> Session {
+        Session(
+            id: row.string("id") ?? newID(),
+            workspaceID: row.string("workspace_id") ?? "",
+            title: row.string("title") ?? "Session",
+            agentSessionID: row.string("agent_session_id"),
+            model: row.string("model") ?? "opus",
+            effort: row.string("effort") ?? "high",
+            permissionMode: PermissionMode(rawValue: row.string("permission_mode") ?? "") ?? .acceptEdits,
+            state: SessionState(rawValue: row.string("state") ?? "idle") ?? .idle,
+            sortOrder: Int(row.int("sort_order") ?? 0),
+            createdAt: row.date("created_at") ?? Date(),
+            updatedAt: row.date("updated_at") ?? Date(),
+            archivedAt: row.date("archived_at"),
+            lastReadSeq: Int(row.int("last_read_seq") ?? 0),
+            inputTokens: Int(row.int("input_tokens") ?? 0),
+            outputTokens: Int(row.int("output_tokens") ?? 0),
+            costUSD: row.double("cost_usd") ?? 0,
+            contextTokens: Int(row.int("context_tokens") ?? 0)
+        )
+    }
+
+    private static func message(from row: Row) -> Message {
+        Message(
+            id: row.int("id") ?? 0,
+            sessionID: row.string("session_id") ?? "",
+            seq: Int(row.int("seq") ?? 0),
+            kind: MessageKind(rawValue: row.string("kind") ?? "") ?? .system,
+            payload: row.data("payload") ?? Data(),
+            createdAt: row.date("created_at") ?? Date(),
+            durationMS: row.int("duration_ms").map(Int.init),
+            refID: row.string("ref_id")
+        )
+    }
+}

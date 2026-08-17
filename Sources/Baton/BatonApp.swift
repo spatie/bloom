@@ -1,0 +1,23 @@
+import SwiftUI
+
+@main
+struct BatonApp: App {
+    @State private var model = AppModel()
+
+    var body: some Scene {
+        WindowGroup {
+            RootView()
+                .environment(model)
+                .frame(minWidth: 1_000, minHeight: 620)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified(showsTitle: false))
+        .defaultSize(width: 1_440, height: 900)
+        .commands { BatonCommands(model: model) }
+
+        Settings {
+            SettingsView()
+                .environment(model)
+        }
+    }
+}
