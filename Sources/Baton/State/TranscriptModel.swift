@@ -111,7 +111,28 @@ final class TranscriptModel {
     func markAllRead() async {
         guard let store, let last = rows.last?.seq, last != session.lastReadSeq else { return }
         session.lastReadSeq = last
-        _ = try? await store.upsert(session)
+        try? await store.updateLastReadSeq(sessionID: session.id, seq: last)
+    }
+
+    /// Pulls the session row back from the store. Anything the runner owns (the agent session
+    /// id, the state, the counters) only ever travels in this direction.
+    func refreshSession() async {
+        guard let store, let fresh = try? await store.session(id: session.id) else { return }
+        session = fresh
+    }
+
+    /// The pickers in the composer write through here so they touch only their own columns.
+    func updatePreferences(
+        title: String? = nil,
+        model: String? = nil,
+        effort: String? = nil,
+        permissionMode: PermissionMode? = nil
+    ) async {
+        guard let store else { return }
+        try? await store.updateSessionPreferences(
+            id: session.id, title: title, model: model, effort: effort, permissionMode: permissionMode
+        )
+        await refreshSession()
     }
 
     func jumpToNextUnread() {
@@ -176,8 +197,10 @@ final class TranscriptModel {
 
     private func handle(_ event: AgentEvent) async {
         switch event {
-        case .initialized(let info):
-            session.agentSessionID = info.sessionID
+        case .initialized:
+            // The runner persists the agent session id itself. Read it back rather than writing
+            // our own copy, which would be a second writer racing the runner on the same row.
+            await refreshSession()
             statusLabel = "Working"
 
         case .status(let label):
@@ -204,10 +227,9 @@ final class TranscriptModel {
             await appendLatestMessages()
             isRunning = false
             statusLabel = nil
-            session.costUSD += result.usage.costUSD
-            session.inputTokens += result.usage.inputTokens
-            session.outputTokens += result.usage.outputTokens
-            session.contextTokens = result.usage.contextTokens
+            // Token counts, cost and state are all written by the runner as part of handling the
+            // same result. Reading them back keeps one writer and avoids double counting.
+            await refreshSession()
             await notifyFinished(result: result)
 
         case .hook, .rateLimit, .unknown:
@@ -236,7 +258,6 @@ final class TranscriptModel {
 
     private func notifyFinished(result: AgentResult) async {
         guard let store else { return }
-        _ = try? await store.upsert(session)
         try? await store.touch(workspaceID: workspace.id, unread: app.selection.workspaceID != workspace.id)
 
         let model = app.model(for: workspace)

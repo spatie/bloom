@@ -21,7 +21,7 @@ struct WorkspaceDetailView: View {
             SessionTabsView(model: model)
 
             if let transcript = model.activeTranscript {
-                TranscriptView(transcript: transcript)
+                TranscriptView(transcript: transcript) { isTranscriptScrolledUp = $0 }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 ComposerView(

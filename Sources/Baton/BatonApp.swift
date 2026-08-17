@@ -3,12 +3,14 @@ import SwiftUI
 @main
 struct BatonApp: App {
     @State private var model = AppModel()
+    @NSApplicationDelegateAdaptor(BatonAppDelegate.self) private var appDelegate
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(model)
                 .frame(minWidth: 1_000, minHeight: 620)
+                .handlesBatonURLs(using: model)
         }
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))

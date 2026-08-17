@@ -517,8 +517,16 @@ struct ComposerView: View {
         if let model, let index = model.sessions.firstIndex(where: { $0.id == session.id }) {
             model.sessions[index] = session
         }
-        if let store = app.store {
-            Task { _ = try? await store.upsert(session) }
+        // Only the columns this view owns are written. A whole-row upsert here would race the
+        // agent runner, which writes the agent session id, the state and the token counters on
+        // the same row, and the losing write silently breaks resume.
+        Task {
+            await transcript.updatePreferences(
+                title: session.title,
+                model: session.model,
+                effort: session.effort,
+                permissionMode: session.permissionMode
+            )
         }
     }
 

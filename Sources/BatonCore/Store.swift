@@ -315,6 +315,47 @@ public actor Store {
         return session
     }
 
+    /// Targeted updates for the fields the UI owns.
+    ///
+    /// A session row has two writers: `AgentRunner` owns `agent_session_id`, `state` and the
+    /// token counters, while the UI owns the title and the pickers. Writing a whole `Session`
+    /// struct from the UI would clobber whatever the runner persisted since that copy was read,
+    /// which is how the agent session id (and therefore resume) gets lost.
+    public func updateSessionPreferences(
+        id: String,
+        title: String? = nil,
+        model: String? = nil,
+        effort: String? = nil,
+        permissionMode: PermissionMode? = nil
+    ) throws {
+        try db.run(
+            """
+            UPDATE sessions SET
+                title = COALESCE(?, title),
+                model = COALESCE(?, model),
+                effort = COALESCE(?, effort),
+                permission_mode = COALESCE(?, permission_mode),
+                updated_at = ?
+            WHERE id = ?
+            """,
+            [
+                title.map { .text($0) } ?? .null,
+                model.map { .text($0) } ?? .null,
+                effort.map { .text($0) } ?? .null,
+                permissionMode.map { .text($0.rawValue) } ?? .null,
+                .double(Date().timeIntervalSince1970),
+                .text(id),
+            ]
+        )
+    }
+
+    public func updateLastReadSeq(sessionID: String, seq: Int) throws {
+        try db.run(
+            "UPDATE sessions SET last_read_seq = ? WHERE id = ?",
+            [.int(Int64(seq)), .text(sessionID)]
+        )
+    }
+
     public func deleteSession(id: String) throws {
         try db.run("DELETE FROM sessions WHERE id = ?", [.text(id)])
     }

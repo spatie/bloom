@@ -189,11 +189,16 @@ struct TranscriptView: View {
 }
 
 /// Reports where the end of the content sits inside the scroll view's own coordinate space.
+///
+/// The default is deliberately enormous. The probe lives at the end of a `LazyVStack`, so once the
+/// user scrolls far enough up the probe stops being built and no value is reported at all. Reading
+/// that silence as "infinitely far below the fold" is exactly right: it is the state where the
+/// transcript must stop dragging the user back down.
 private struct BottomOffsetKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
+    static let defaultValue: CGFloat = .greatestFiniteMagnitude
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+        value = min(value, nextValue())
     }
 }
 

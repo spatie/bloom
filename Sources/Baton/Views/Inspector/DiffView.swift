@@ -46,6 +46,9 @@ struct DiffDocument: Sendable {
     /// lines of the next hunk may highlight as if it were never opened.
     static func prepare(file: FileDiff, path: String) -> DiffDocument {
         let language = Language.detect(path: path)
+        // Plain text has no construct that can span a line, so the whole sequential pass would
+        // only ever hand back a clean state. Skipping it makes an unrecognised file free.
+        let needsCarry = language != .plainText
         var carries: [Int: LexState] = [:]
         var emphasis: [Int: [Range<String.Index>]] = [:]
         var oldState = LexState()
@@ -78,6 +81,7 @@ struct DiffDocument: Sendable {
                 switch line.kind {
                 case .context:
                     flushPairs()
+                    guard needsCarry else { continue }
                     carries[line.index] = newState
                     var oldCopy = oldState
                     _ = SyntaxHighlighter.tokenize(line: line.text, language: language, carry: &oldCopy)
@@ -85,10 +89,12 @@ struct DiffDocument: Sendable {
                     _ = SyntaxHighlighter.tokenize(line: line.text, language: language, carry: &newState)
                 case .deletion:
                     deletions.append(line)
+                    guard needsCarry else { continue }
                     carries[line.index] = oldState
                     _ = SyntaxHighlighter.tokenize(line: line.text, language: language, carry: &oldState)
                 case .addition:
                     additions.append(line)
+                    guard needsCarry else { continue }
                     carries[line.index] = newState
                     _ = SyntaxHighlighter.tokenize(line: line.text, language: language, carry: &newState)
                 case .noNewline:
