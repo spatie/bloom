@@ -8,6 +8,7 @@ import BatonCore
 /// all of it lives in `TerminalSessionStore`.
 struct BottomPanelView: View {
     @Bindable var model: WorkspaceModel
+    @Environment(AppModel.self) private var app
 
     @State private var settings = RepoSettings()
     @State private var renamingTabID: String?
@@ -23,7 +24,7 @@ struct BottomPanelView: View {
         VStack(spacing: 0) {
             Hairline()
             tabStrip
-            if model.isBottomPanelVisible {
+            if app.isBottomPanelVisible {
                 Hairline()
                 content
             }
@@ -62,15 +63,15 @@ struct BottomPanelView: View {
                         workspaceID: model.workspace.id, store: model.store
                     )
                     model.bottomTab = .terminal(tab.id)
-                    model.isBottomPanelVisible = true
+                    app.isBottomPanelVisible = true
                 }
             }
 
             iconButton(
-                model.isBottomPanelVisible ? "chevron.down" : "chevron.up",
-                help: model.isBottomPanelVisible ? "Collapse the panel" : "Expand the panel"
+                app.isBottomPanelVisible ? "chevron.down" : "chevron.up",
+                help: app.isBottomPanelVisible ? "Collapse the panel" : "Expand the panel"
             ) {
-                model.isBottomPanelVisible.toggle()
+                app.isBottomPanelVisible.toggle()
             }
             .padding(.trailing, Metrics.cornerSmall)
         }
@@ -205,7 +206,7 @@ struct BottomPanelView: View {
 
     private func select(_ tab: BottomTab) {
         model.bottomTab = tab
-        model.isBottomPanelVisible = true
+        app.isBottomPanelVisible = true
         renamingTabID = nil
     }
 

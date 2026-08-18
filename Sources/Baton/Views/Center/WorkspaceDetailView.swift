@@ -9,6 +9,7 @@ import BatonCore
 /// composer follow the active session, which is why they are handed a transcript instead of
 /// reaching for one themselves.
 struct WorkspaceDetailView: View {
+    @Environment(AppModel.self) private var app
     @Bindable var model: WorkspaceModel
 
     /// The transcript reports whether the user has scrolled away from the newest row. Until it
@@ -36,7 +37,7 @@ struct WorkspaceDetailView: View {
             // stack and only its content takes room. The sidebar and inspector are placed by
             // RootView, which is why neither appears here.
             BottomPanelView(model: model)
-                .frame(height: model.isBottomPanelVisible ? Metrics.sidebarWidth : nil)
+                .frame(height: app.isBottomPanelVisible ? Metrics.sidebarWidth : nil)
         }
         .background(Palette.windowBackground)
         .task(id: model.workspace.id) { await model.onAppear() }

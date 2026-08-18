@@ -65,14 +65,14 @@ struct BatonCommands: Commands {
 
             Button("Toggle Inspector") {
                 guard let workspace = model.selectedModel else { return }
-                workspace.isInspectorVisible.toggle()
+                model.isInspectorVisible.toggle()
             }
             .keyboardShortcut("i", modifiers: [.command, .option])
             .disabled(model.selectedModel == nil)
 
             Button("Toggle Bottom Panel") {
                 guard let workspace = model.selectedModel else { return }
-                workspace.isBottomPanelVisible.toggle()
+                model.isBottomPanelVisible.toggle()
             }
             .keyboardShortcut("b", modifiers: [.command, .option])
             .disabled(model.selectedModel == nil)

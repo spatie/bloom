@@ -64,6 +64,17 @@ final class AppModel {
 
     private var storedSelection: SidebarSelection = .home
 
+    /// Window chrome, not per-workspace state.
+    ///
+    /// These used to live on `WorkspaceModel`, which meant the only way to bind them was a
+    /// `Binding(get:set:)` reading through an optional selected model. That binding's value
+    /// flipped as the selection resolved, and `.inspector(isPresented:)` reacting to it mid layout
+    /// put the window into an unbounded Update Constraints loop that AppKit eventually turned into
+    /// a crash. Owning them here makes them a plain bindable value. It also matches how a Mac app
+    /// behaves: an inspector is shown or hidden for the window, not remembered per document.
+    var isInspectorVisible = true
+    var isBottomPanelVisible = true
+
     var alert: BatonAlert?
     /// Non-nil while an archive is waiting for the user to confirm that the work it would destroy
     /// really is expendable. RootView presents the confirmation from this.

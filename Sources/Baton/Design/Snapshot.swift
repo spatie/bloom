@@ -53,6 +53,26 @@ enum Snapshot {
     /// come out as the user sees them, and it needs no screen recording permission.
     ///
     ///     Baton --snapshot-window /tmp/shots/window.png
+    /// Opens a `baton://` URL in THIS process, a few seconds after launch.
+    ///
+    /// `open baton://...` from a shell goes through LaunchServices, which picks whichever copy of
+    /// the app it feels like and does not carry `BATON_DB_PATH`, so a test that drives a deep link
+    /// that way can silently exercise a different instance against a different database. This
+    /// posts the URL straight into the running process instead, so a repro is deterministic.
+    ///
+    ///     Baton --open-url "baton://prompt=...&path=..."
+    static func scheduleURLIfRequested() {
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: "--open-url"), index + 1 < arguments.count,
+              let url = URL(string: arguments[index + 1]) else { return }
+
+        Task { @MainActor in
+            // After `bootstrap`, or the repo list it needs is not loaded yet.
+            try? await Task.sleep(for: .seconds(3))
+            NotificationCenter.default.post(name: .batonHandleURL, object: url)
+        }
+    }
+
     static var isWindowCaptureRequested: Bool {
         CommandLine.arguments.contains("--snapshot-window")
     }

@@ -54,7 +54,6 @@ final class WorkspaceModel {
 
     // Bottom panel.
     var bottomTab: BottomTab = .firstTerminal
-    var isBottomPanelVisible = true
     var setupOutput: String = ""
     /// The tail Baton keeps in memory. A setup script that prints a megabyte is not unusual, and
     /// none of it is worth re-rendering on every append.
@@ -62,7 +61,6 @@ final class WorkspaceModel {
     var isRunningSetup = false
 
     // Layout.
-    var isInspectorVisible = true
 
     var port: Int = 0
 

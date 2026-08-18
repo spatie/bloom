@@ -11,6 +11,7 @@ struct BatonApp: App {
         // before any scene exists, which is why it lives in the initialiser.
         if Snapshot.isRequested { Snapshot.runAndExit() }
         if Snapshot.isWindowCaptureRequested { Snapshot.scheduleWindowCapture() }
+        Snapshot.scheduleURLIfRequested()
     }
 
     var body: some Scene {

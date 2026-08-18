@@ -17,7 +17,9 @@ struct RootView: View {
     @State private var createTargetRepo: Repo?
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        @Bindable var app = app
+
+        return NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView()
                 .navigationSplitViewColumnWidth(
                     min: 200, ideal: Metrics.sidebarWidth, max: 420
@@ -25,6 +27,18 @@ struct RootView: View {
         } detail: {
             center
                 .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                // Attached to the DETAIL column, not to the `NavigationSplitView`.
+                //
+                // On the split view it crashes the window. The toolbar also belongs to the detail
+                // column, and an inspector on the split view makes a second owner of the same
+                // toolbar: the two keep re-vending items at each other, the window is marked as
+                // needing another Update Constraints pass every pass, and AppKit eventually throws
+                // "more Update Constraints in Window passes than there are views in the window".
+                // Reproduced on every launch, gone the moment both live on the same column.
+                .inspector(isPresented: $app.isInspectorVisible) {
+                    InspectorPane(model: app.selectedModel)
+                        .inspectorColumnWidth(min: 280, ideal: Metrics.inspectorWidth, max: 760)
+                }
                 // The toolbar belongs to the detail column, not to the split view. Attached to
                 // the split view, AppKit lays every item out in the sidebar's slice of the
                 // toolbar, which is narrow, so everything past the first item falls into the
@@ -34,7 +48,7 @@ struct RootView: View {
         // The window title is hidden in the toolbar (see BatonApp), but it still names the window
         // in the Window menu and in Mission Control, so it is worth setting.
         .navigationTitle(windowTitle)
-        .inspector(isPresented: isInspectorVisible) { inspector }
+
         .task { await app.bootstrap() }
         .sheet(isPresented: $isCreateSheetPresented) {
             CreateWorkspaceSheet(initialRepo: createTargetRepo)
@@ -107,20 +121,13 @@ struct RootView: View {
         }
     }
 
-    @ViewBuilder
-    private var inspector: some View {
-        if let model = app.selectedModel {
-            InspectorView(model: model)
-                // Rebuilt per workspace, so a diff selection never leaks across a switch.
-                .id(model.workspace.id)
-                .inspectorColumnWidth(min: 280, ideal: Metrics.inspectorWidth, max: 760)
-        }
-    }
 
     // MARK: - Toolbar
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
+        @Bindable var app = app
+
         ToolbarItem(placement: .navigation) {
             // A split button: the common case is one click, and the folder picker that used to
             // hide in the account row lives behind the arrow.
@@ -146,14 +153,14 @@ struct RootView: View {
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
-            Toggle(isOn: isBottomPanelVisible) {
+            Toggle(isOn: $app.isBottomPanelVisible) {
                 Label("Terminal panel", systemImage: "rectangle.bottomthird.inset.filled")
             }
             .toggleStyle(.button)
             .disabled(app.selectedModel == nil)
             .help("Show the terminal panel")
 
-            Toggle(isOn: isInspectorVisible) {
+            Toggle(isOn: $app.isInspectorVisible) {
                 Label("Inspector", systemImage: "sidebar.right")
             }
             .toggleStyle(.button)
@@ -214,19 +221,7 @@ struct RootView: View {
 
     /// The inspector belongs to the selected workspace, so its visibility is stored there rather
     /// than in the window. Home and Search have nothing to inspect and read as false.
-    private var isInspectorVisible: Binding<Bool> {
-        Binding(
-            get: { app.selectedModel?.isInspectorVisible ?? false },
-            set: { visible in app.selectedModel?.isInspectorVisible = visible }
-        )
-    }
 
-    private var isBottomPanelVisible: Binding<Bool> {
-        Binding(
-            get: { app.selectedModel?.isBottomPanelVisible ?? false },
-            set: { visible in app.selectedModel?.isBottomPanelVisible = visible }
-        )
-    }
 
     /// Dismissing the dialog by any route must clear the request, or a refused archive would sit
     /// there and re-present itself on the next redraw.
