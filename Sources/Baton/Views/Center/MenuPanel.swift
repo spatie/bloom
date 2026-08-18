@@ -13,16 +13,21 @@ struct MenuPanel<Content: View>: View {
         // The panel floats outside the composer, so it must size itself from its rows rather than
         // from the space the composer happens to occupy.
         .fixedSize(horizontal: false, vertical: true)
-        .headerMaterial()
+        // The menu material, not the header material this used to borrow. `.headerView` is the
+        // vibrancy of a toolbar strip; a thing that floats over content is a menu and reads wrong
+        // in anything else.
+        .background(VisualEffectBackground(material: .menu, blending: .withinWindow))
         .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.corner)
-                .stroke(Palette.border, lineWidth: Metrics.hairline)
+                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
         }
+        // Black, not the label colour: a shadow tinted with `labelColor` turns into a white glow
+        // in dark mode, which is the opposite of what a shadow is for.
         .shadow(
-            color: Palette.textPrimary.opacity(0.18),
+            color: .black.opacity(0.24),
             radius: Metrics.gutter,
-            y: Metrics.corner
+            y: Metrics.spacingSmall
         )
     }
 }

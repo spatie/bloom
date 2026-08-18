@@ -155,7 +155,7 @@ struct RunScriptView: View {
     }
 
     private var header: some View {
-        HStack(spacing: Metrics.corner) {
+        HStack(spacing: Metrics.spacing) {
             ActivityDot(isActive: session.isRunning)
 
             Text(script.name)
@@ -179,41 +179,44 @@ struct RunScriptView: View {
                 .buttonStyle(.plain)
             }
 
-            Spacer(minLength: Metrics.corner)
+            Spacer(minLength: Metrics.spacing)
 
             if session.isRunning {
-                action("Stop", icon: "stop.fill", tint: Palette.negative) { session.stop() }
-                action("Restart", icon: "arrow.clockwise") {
+                action("Stop", icon: "stop.fill", help: "Stop \(script.name)") {
+                    session.stop()
+                }
+                action("Restart", icon: "arrow.clockwise", help: "Restart \(script.name)") {
                     session.restart(environment: environment(), port: ensurePort())
                 }
             } else {
-                action("Start", icon: "play.fill", tint: Palette.positive) {
+                action("Start", icon: "play.fill", help: "Run \(script.command)") {
                     session.start(environment: environment(), port: ensurePort())
                 }
             }
         }
         .padding(.horizontal, Metrics.gutter)
-        .padding(.vertical, Metrics.cornerSmall)
+        // The fixed height the tab strip above it uses, so the panel keeps one bar height
+        // whichever tab is selected.
+        .frame(height: Metrics.barHeight)
         .headerMaterial()
     }
 
+    /// A plain bordered button with a plain `Label`. The font and the glyph size come from the
+    /// control size rather than from fonts set by hand, and the title keeps the label colour: a
+    /// red word inside a bordered button is not something this platform does, and it made Stop
+    /// look disabled next to Restart.
     private func action(
         _ title: String,
         icon: String,
-        tint: Color = Palette.textSecondary,
+        help: String,
         run: @escaping () -> Void
     ) -> some View {
         Button(action: run) {
-            HStack(spacing: Metrics.cornerSmall) {
-                Image(systemName: icon)
-                    .font(Typo.micro)
-                    .imageScale(.small)
-                Text(title).font(Typo.label)
-            }
-            .foregroundStyle(tint)
+            Label(title, systemImage: icon)
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
+        .help(help)
     }
 
     private var serverURL: URL? {

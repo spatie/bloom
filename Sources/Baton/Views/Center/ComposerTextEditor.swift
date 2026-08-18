@@ -46,6 +46,9 @@ struct ComposerTextEditor: NSViewRepresentable {
         storage.addLayoutManager(layout)
         let container = NSTextContainer(size: CGSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
         container.widthTracksTextView = true
+        // The default five points would inset the typed text but not the SwiftUI placeholder that
+        // sits behind it, so the hint and the first character the user types did not line up.
+        container.lineFragmentPadding = 0
         layout.addTextContainer(container)
 
         let textView = ComposerTextView(frame: .zero, textContainer: container)
@@ -66,7 +69,9 @@ struct ComposerTextEditor: NSViewRepresentable {
         }
         textView.font = Self.font
         textView.textColor = .labelColor
-        textView.insertionPointColor = .controlAccentColor
+        // The colour macOS uses for a caret, which is not always the accent colour: it stays
+        // fixed when the user picks a graphite or multicolour accent.
+        textView.insertionPointColor = .textInsertionPointColor
         textView.drawsBackground = false
         textView.isRichText = false
         textView.allowsUndo = true

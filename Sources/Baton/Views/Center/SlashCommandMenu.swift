@@ -33,11 +33,14 @@ struct SlashCommandMenu: View {
                                 .id(index)
                             }
                         }
-                        .padding(Metrics.cornerSmall)
+                        .padding(Metrics.spacingSmall)
                     }
                     .frame(maxHeight: MenuLayout.maxHeight)
+                    // No anchor, so the arrow keys scroll the least they can get away with.
+                    // Pinning to the bottom threw the highlighted row to the far edge every time
+                    // the user stepped upwards, which no Mac menu does.
                     .onChange(of: selectedIndex) { _, index in
-                        proxy.scrollTo(index, anchor: .bottom)
+                        proxy.scrollTo(index)
                     }
                 }
             }

@@ -17,6 +17,12 @@ struct SessionTabView: View {
     var onCancelRename: @MainActor () -> Void
     var onClose: @MainActor () -> Void
 
+    /// A tab stops growing here so one long title cannot push every other tab out of the strip.
+    private static let maximumWidth: CGFloat = 200
+    /// Wide enough for the titles sessions actually get, and the same width whichever tab is
+    /// being renamed, so the strip does not jump as the editor opens.
+    private static let renameWidth: CGFloat = 140
+
     @State private var isHovered = false
     @State private var renameText = ""
     @FocusState private var isRenameFocused: Bool
@@ -26,7 +32,7 @@ struct SessionTabView: View {
     }
 
     var body: some View {
-        HStack(spacing: Metrics.cornerSmall) {
+        HStack(spacing: Metrics.spacingSmall) {
             if isRunning {
                 ActivityDot(isActive: true)
                     .accessibilityLabel("Running")
@@ -37,7 +43,7 @@ struct SessionTabView: View {
                     .textFieldStyle(.plain)
                     .font(Typo.label)
                     .focused($isRenameFocused)
-                    .frame(width: Metrics.sidebarWidth / 2)
+                    .frame(width: Self.renameWidth)
                     .onSubmit { onCommitRename(renameText) }
                     .onExitCommand(perform: onCancelRename)
             } else {
@@ -49,12 +55,13 @@ struct SessionTabView: View {
 
             closeButton
         }
-        .padding(.horizontal, Metrics.corner)
-        .frame(height: Metrics.rowHeight)
-        .background(
-            isActive ? Palette.selected : (isHovered ? Palette.hover : .clear),
-            in: .capsule
-        )
+        .padding(.horizontal, Metrics.inset)
+        .frame(maxWidth: Self.maximumWidth)
+        .frame(height: Metrics.barHeight)
+        // The selected tab takes the content colour and fills the strip's full height, the way an
+        // editor tab bar on this platform does. A rounded capsule of selection grey floating in a
+        // strip is a browser chrome idiom, and it read as a solid block rather than as a tab.
+        .background(background)
         .contentShape(Rectangle())
         // A single click selects and a double click renames, which is one gesture with two
         // meanings rather than a button, so it cannot be expressed as one.
@@ -64,6 +71,7 @@ struct SessionTabView: View {
                 .exclusively(before: TapGesture().onEnded { onSelect() })
         )
         .onHover { isHovered = $0 }
+        .help(title)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
         .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
@@ -77,21 +85,32 @@ struct SessionTabView: View {
         .task(id: isRenaming) { await startEditing() }
     }
 
+    private var background: Color {
+        if isActive { return Palette.surface }
+        return isHovered ? Palette.hover : .clear
+    }
+
     /// Kept in the layout even when it is invisible, so no label moves when the pointer enters.
+    /// Shown on the selected tab as well as the hovered one, because the tab you are looking at is
+    /// the one you are most likely to want to close.
     private var closeButton: some View {
         Button(action: onClose) {
             Label("Close session", systemImage: "xmark")
                 .labelStyle(.iconOnly)
-                .font(Typo.micro)
+                .font(Typo.caption)
                 .foregroundStyle(Palette.textTertiary)
-                .frame(width: Metrics.rowHeight / 2, height: Metrics.rowHeight / 2)
+                .frame(width: Metrics.glyph, height: Metrics.glyph)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
-        .opacity(isHovered && canClose ? 1 : 0)
-        .allowsHitTesting(isHovered && canClose)
+        .opacity(isVisible ? 1 : 0)
+        .allowsHitTesting(isVisible)
         .accessibilityHidden(!canClose)
         .help("Close session")
+    }
+
+    private var isVisible: Bool {
+        canClose && (isHovered || isActive)
     }
 
     /// The field only exists from the moment the strip says so, and a brand new field cannot take

@@ -37,25 +37,18 @@ struct BottomPanelView: View {
 
     // MARK: - Tab strip
 
+    /// Wide enough for the names terminals actually get, and the same width for every tab so the
+    /// strip does not jump as the rename editor opens.
+    private static let renameWidth: CGFloat = 90
+
     private var tabStrip: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal) {
-                HStack(spacing: Metrics.cornerSmall) {
-                    if settings.setupScript != nil {
-                        tabButton(.setup, title: "Setup", icon: "wrench.and.screwdriver")
-                    }
-                    ForEach(settings.runScripts) { script in
-                        tabButton(.run(script.id), title: script.name, icon: "play")
-                    }
-                    ForEach(terminalTabs) { tab in
-                        terminalTabButton(tab)
-                    }
-                }
-                .padding(.horizontal, Metrics.cornerSmall)
+                tabRow
             }
             .scrollIndicators(.never)
 
-            Divider()
+            Hairline(axis: .vertical)
 
             iconButton("plus", help: "New terminal tab") {
                 Task {
@@ -73,73 +66,88 @@ struct BottomPanelView: View {
             ) {
                 app.isBottomPanelVisible.toggle()
             }
-            .padding(.trailing, Metrics.cornerSmall)
         }
-        .frame(minHeight: Metrics.rowHeight)
+        .frame(height: Metrics.barHeight)
         .headerMaterial()
+    }
+
+    /// A rule between neighbours and never before the first tab, which is what makes a run of
+    /// labels read as tabs now that the selected one is no longer a coloured pill.
+    private var tabRow: some View {
+        let hasSetup = settings.setupScript != nil
+        let hasScripts = !settings.runScripts.isEmpty
+
+        return HStack(spacing: 0) {
+            if hasSetup {
+                tabButton(.setup, title: "Setup", icon: "wrench.and.screwdriver")
+            }
+
+            ForEach(Array(settings.runScripts.enumerated()), id: \.element.id) { index, script in
+                if hasSetup || index > 0 { Hairline(axis: .vertical) }
+                tabButton(.run(script.id), title: script.name, icon: "play")
+            }
+
+            ForEach(Array(terminalTabs.enumerated()), id: \.element.id) { index, tab in
+                if hasSetup || hasScripts || index > 0 { Hairline(axis: .vertical) }
+                terminalTabButton(tab)
+            }
+        }
     }
 
     private func tabButton(_ tab: BottomTab, title: String, icon: String) -> some View {
         Button {
             select(tab)
         } label: {
-            HStack(spacing: Metrics.cornerSmall) {
+            HStack(spacing: Metrics.spacingSmall) {
                 Image(systemName: icon)
-                    .font(Typo.micro)
                     .imageScale(.small)
-                Text(title).font(Typo.label).lineLimit(1)
+                Text(title).lineLimit(1)
             }
+            .font(Typo.label)
             .foregroundStyle(model.bottomTab == tab ? Palette.textPrimary : Palette.textSecondary)
-            .padding(.horizontal, Metrics.corner)
-            .padding(.vertical, Metrics.cornerSmall)
-            .background(
-                RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                    .fill(model.bottomTab == tab ? Palette.selected : .clear)
-            )
+            .tabChrome(isSelected: model.bottomTab == tab)
         }
         .buttonStyle(.plain)
+        .help(title)
     }
 
     private func terminalTabButton(_ tab: TerminalTab) -> some View {
         let isSelected = model.bottomTab == .terminal(tab.id)
 
-        return HStack(spacing: Metrics.cornerSmall) {
+        return HStack(spacing: Metrics.spacingSmall) {
             Image(systemName: "terminal")
-                .font(Typo.micro)
                 .imageScale(.small)
 
             if renamingTabID == tab.id {
                 TextField("Name", text: $draftName)
                     .textFieldStyle(.plain)
-                    .font(Typo.label)
-                    .frame(width: Metrics.sidebarWidth / 3)
+                    .frame(width: Self.renameWidth)
                     .onSubmit { commitRename(tab) }
+                    .onExitCommand { renamingTabID = nil }
             } else {
-                Text(tab.title).font(Typo.label).lineLimit(1)
+                Text(tab.title).lineLimit(1)
             }
 
             Button {
                 Task { await close(tab) }
             } label: {
                 Image(systemName: "xmark")
-                    .font(Typo.micro)
                     .imageScale(.small)
                     .foregroundStyle(Palette.textTertiary)
+                    .frame(width: Metrics.glyph, height: Metrics.glyph)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
             .help("Close this terminal")
         }
+        .font(Typo.label)
         .foregroundStyle(isSelected ? Palette.textPrimary : Palette.textSecondary)
-        .padding(.leading, Metrics.corner)
-        .padding(.trailing, Metrics.cornerSmall)
-        .padding(.vertical, Metrics.cornerSmall)
-        .background(
-            RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                .fill(isSelected ? Palette.selected : .clear)
-        )
-        .contentShape(Rectangle())
+        .tabChrome(isSelected: isSelected)
         .onTapGesture { select(.terminal(tab.id)) }
+        .help(tab.title)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(tab.title)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .contextMenu {
             Button("Rename") {
                 draftName = tab.title
@@ -155,10 +163,10 @@ struct BottomPanelView: View {
                 .font(Typo.labelEmphasis)
                 .imageScale(.small)
                 .foregroundStyle(Palette.textSecondary)
+                .frame(width: Metrics.barHeight, height: Metrics.barHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
-        .controlSize(.small)
         .help(help)
     }
 
@@ -187,6 +195,9 @@ struct BottomPanelView: View {
             // a placeholder id before any tab exists. Reconciling only on load left the panel
             // stuck on the spinner whenever the selection was set again afterwards.
             if let tab = terminalTabs.first(where: { $0.id == id }) ?? terminalTabs.first {
+                // SwiftTerm draws its first glyph on the view's own edge, so without this the
+                // shell's prompt sits flush against the tab strip above it and the window edge to
+                // its left. Every terminal on this platform insets its text.
                 TerminalView(
                     tab: tab,
                     workspace: model.workspace,
@@ -194,6 +205,9 @@ struct BottomPanelView: View {
                     port: model.port
                 )
                 .id(tab.id)
+                .padding(Metrics.spacing)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Palette.surfaceSunken)
             } else {
                 LoadingView("Opening a terminal")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -255,5 +269,32 @@ struct BottomPanelView: View {
     private func selectFirstTerminal() {
         guard let first = terminalTabs.first else { return }
         model.bottomTab = .terminal(first.id)
+    }
+}
+
+/// The shape every tab in this strip shares: the full height of the bar, the panel's own colour
+/// when it is the selected one, and nothing at all when it is not.
+///
+/// A rounded rectangle of selection grey floating inside the strip is a browser idiom. Filling the
+/// bar and taking the colour of the surface below is what an editor tab does on this platform, and
+/// it is what stops the selected tab reading as a painted block.
+private struct BottomTabChrome: ViewModifier {
+    var isSelected: Bool
+
+    @State private var isHovered = false
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, Metrics.inset)
+            .frame(height: Metrics.barHeight)
+            .background(isSelected ? Palette.surfaceSunken : (isHovered ? Palette.hover : .clear))
+            .contentShape(Rectangle())
+            .onHover { isHovered = $0 }
+    }
+}
+
+private extension View {
+    func tabChrome(isSelected: Bool) -> some View {
+        modifier(BottomTabChrome(isSelected: isSelected))
     }
 }

@@ -29,7 +29,7 @@ struct ComposerView: View {
     @State private var isMenuDismissed = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.corner) {
+        VStack(alignment: .leading, spacing: Metrics.spacingWide) {
             ComposerEditor(
                 text: $transcript.draft,
                 caret: $caret,
@@ -60,17 +60,17 @@ struct ComposerView: View {
                 onPickFile: pick(file:),
                 onHighlight: { menuIndex = $0 }
             )
-            .alignmentGuide(.top) { $0[.bottom] + Metrics.corner }
+            .alignmentGuide(.top) { $0[.bottom] + Metrics.spacing }
         }
         .overlay(alignment: .top) {
             if isScrolledUp, transcript.unreadCount > 0 {
                 NextUnreadPill(count: transcript.unreadCount, action: transcript.jumpToNextUnread)
-                    .alignmentGuide(.top) { $0[.bottom] + Metrics.corner }
+                    .alignmentGuide(.top) { $0[.bottom] + Metrics.spacing }
             }
         }
         .padding(.horizontal, Metrics.gutter)
         .padding(.bottom, Metrics.gutter)
-        .padding(.top, Metrics.cornerSmall)
+        .padding(.top, Metrics.spacingWide)
         .background(Palette.surface)
         .task(id: transcript.session.id) { await prepare() }
         .task(id: transcript.workspace.path) {

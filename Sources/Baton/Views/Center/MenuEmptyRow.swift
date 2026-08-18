@@ -7,9 +7,13 @@ struct MenuEmptyRow: View {
 
     var body: some View {
         Text(text)
-            .font(Typo.label)
+            .font(Typo.body)
             .foregroundStyle(Palette.textTertiary)
-            .padding(.horizontal, Metrics.gutter)
+            .lineLimit(1)
+            // The same two insets a populated menu applies, one from the panel and one from the
+            // row, so the message starts exactly where a file name would.
+            .padding(.horizontal, Metrics.spacing)
             .frame(height: Metrics.rowHeight)
+            .padding(Metrics.spacingSmall)
     }
 }

@@ -8,28 +8,22 @@ struct NextUnreadPill: View {
     var count: Int
     var action: @MainActor () -> Void
 
-    @State private var isHovered = false
-
     var body: some View {
+        // A real prominent button rather than a hand-painted capsule: it then gets the pressed
+        // and disabled states, the hover response and the accent tint from the system instead of
+        // from an opacity that only changed on hover.
         Button(action: action) {
-            Label {
-                Text(count == 1 ? "Next unread" : "Next unread (\(count))")
-                    .font(Typo.captionEmphasis)
-            } icon: {
-                Image(systemName: "arrow.down")
-                    .font(Typo.micro)
-            }
-            .foregroundStyle(Palette.textInverted)
-            .padding(.horizontal, Metrics.gutter)
-            .frame(height: Metrics.rowHeight)
-            .background(Palette.accent.opacity(isHovered ? 1 : 0.9), in: .capsule)
-            .shadow(
-                color: Palette.textPrimary.opacity(0.2),
-                radius: Metrics.corner,
-                y: Metrics.hairline * 2
+            Label(
+                count == 1 ? "Next unread" : "Next unread (\(count))",
+                systemImage: "arrow.down"
             )
         }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
+        .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.capsule)
+        .controlSize(.small)
+        .tint(Palette.accent)
+        // Black rather than the label colour, which would be a white glow in dark mode.
+        .shadow(color: .black.opacity(0.2), radius: Metrics.spacingSmall, y: Metrics.spacingTight)
+        .help("Jump to the next unread reply")
     }
 }

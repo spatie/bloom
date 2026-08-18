@@ -7,6 +7,11 @@ import SwiftUI
 struct ComposerBox: ViewModifier {
     @Binding var isFocused: Bool
 
+    /// What AppKit draws around a focused control. Not a token, because nothing else in Baton
+    /// draws a focus ring and a three point line is the ring's definition rather than a spacing
+    /// choice.
+    private static let ringWidth: CGFloat = 3
+
     func body(content: Content) -> some View {
         content
             .padding(Metrics.gutter)
@@ -18,15 +23,18 @@ struct ComposerBox: ViewModifier {
             }
             .overlay {
                 RoundedRectangle(cornerRadius: Metrics.corner)
-                    .stroke(
-                        isFocused ? Palette.accent : Palette.border,
-                        lineWidth: isFocused ? Metrics.hairline * 2 : Metrics.hairline
-                    )
+                    .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
             }
-            .shadow(
-                color: isFocused ? Palette.accent.opacity(0.24) : .clear,
-                radius: Metrics.cornerSmall
-            )
+            .overlay {
+                // The ring sits outside the border rather than replacing it, in the colour macOS
+                // reserves for focus. What was here before was an accent hairline plus an accent
+                // drop shadow: a web focus glow wearing a Mac's border, and one that ignored the
+                // system's focus ring colour entirely.
+                RoundedRectangle(cornerRadius: Metrics.corner + Self.ringWidth / 2)
+                    .strokeBorder(Palette.focusRing, lineWidth: Self.ringWidth)
+                    .padding(-Self.ringWidth / 2)
+                    .opacity(isFocused ? 1 : 0)
+            }
     }
 }
 

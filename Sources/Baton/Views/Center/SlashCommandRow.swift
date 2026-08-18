@@ -8,20 +8,26 @@ struct SlashCommandRow: View {
     var onPick: @MainActor () -> Void
     var onHover: @MainActor () -> Void
 
+    @Environment(\.controlActiveState) private var activeState
+
     @State private var isHovered = false
 
     var body: some View {
         Button(action: onPick) {
-            HStack(spacing: Metrics.corner) {
+            HStack(spacing: Metrics.spacing) {
                 Text("/\(command.name)")
                     .font(Typo.code)
-                    .foregroundStyle(Palette.textPrimary)
+                    .foregroundStyle(isEmphasized ? Palette.selectedEmphasizedText : Palette.textPrimary)
                     .lineLimit(1)
 
                 if !command.detail.isEmpty {
                     Text(command.detail)
-                        .font(Typo.caption)
-                        .foregroundStyle(Palette.textTertiary)
+                        .font(Typo.label)
+                        .foregroundStyle(
+                            isEmphasized
+                                ? Palette.selectedEmphasizedText.opacity(0.75)
+                                : Palette.textTertiary
+                        )
                         .lineLimit(1)
                 }
 
@@ -31,7 +37,7 @@ struct SlashCommandRow: View {
                     Chip(text: command.origin.label)
                 }
             }
-            .padding(.horizontal, Metrics.corner)
+            .padding(.horizontal, Metrics.spacing)
             .frame(height: Metrics.rowHeight)
             .contentShape(Rectangle())
         }
@@ -41,5 +47,11 @@ struct SlashCommandRow: View {
             isHovered = hovering
             if hovering { onHover() }
         }
+    }
+
+    /// See `FileMentionRow`: the labels set their own colour, so they have to know when the row
+    /// underneath them has gone accent coloured or they stay unreadable on it.
+    private var isEmphasized: Bool {
+        isSelected && activeState != .inactive
     }
 }

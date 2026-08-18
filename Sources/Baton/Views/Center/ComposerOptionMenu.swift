@@ -28,13 +28,25 @@ struct ComposerOptionMenu: View {
                 }
             }
         } label: {
-            Label(ComposerOption.label(for: selection, in: options), systemImage: systemImage)
-                .font(Typo.caption)
-                .foregroundStyle(tint)
+            ComposerControlLabel(
+                systemImage: systemImage,
+                text: label,
+                tint: tint,
+                showsMenuIndicator: true
+            )
         }
-        .menuStyle(.borderlessButton)
+        // `.button` plus `.plain` is the only combination that lets the label keep its own height.
+        // The indicator is hidden because the label already draws one on the row's baseline.
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
         .fixedSize()
         .help(help)
         .accessibilityLabel(help)
+        .accessibilityValue(label)
+    }
+
+    private var label: String {
+        ComposerOption.label(for: selection, in: options)
     }
 }

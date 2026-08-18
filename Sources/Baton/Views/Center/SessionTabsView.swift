@@ -18,7 +18,11 @@ struct SessionTabsView: View {
             HStack(spacing: 0) {
                 ScrollView(.horizontal) {
                     HStack(spacing: 0) {
-                        ForEach(model.sessions) { session in
+                        ForEach(Array(model.sessions.enumerated()), id: \.element.id) { index, session in
+                            // A rule between neighbours, which is what makes a row of labels read
+                            // as tabs at all once the selected one is no longer a coloured pill.
+                            if index > 0 { Hairline(axis: .vertical) }
+
                             SessionTabView(
                                 session: session,
                                 isActive: session.id == model.activeSession?.id,
@@ -36,19 +40,20 @@ struct SessionTabsView: View {
                 }
                 .scrollIndicators(.never)
 
+                Hairline(axis: .vertical)
+
                 Button(action: createSession) {
                     Label("New session", systemImage: "plus")
                         .labelStyle(.iconOnly)
-                        .font(Typo.captionEmphasis)
+                        .font(Typo.labelEmphasis)
                         .foregroundStyle(Palette.textSecondary)
-                        .frame(width: Metrics.rowHeight, height: Metrics.rowHeight)
+                        .frame(width: Metrics.barHeight, height: Metrics.barHeight)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
                 .help("New session in this workspace")
-                .padding(.trailing, Metrics.corner)
             }
-            .frame(height: Metrics.rowHeight)
+            .frame(height: Metrics.barHeight)
             .headerMaterial()
             .overlay(alignment: .bottom) { Hairline() }
         }

@@ -8,6 +8,12 @@ struct ComposerSendButton: View {
     var onSend: @MainActor () -> Void
     var onStop: @MainActor () -> Void
 
+    /// The bordered styles add four points of padding on every edge, so the glyph box has to be
+    /// that much smaller than the row for the finished circle to match the controls beside it.
+    /// Sizing the glyph at `rowHeight` instead is what made the send button eight points taller
+    /// than everything else in the footer.
+    private static let glyph = Metrics.rowHeight - Metrics.spacingSmall * 2
+
     var body: some View {
         Button(action: activate) {
             Label(
@@ -15,8 +21,8 @@ struct ComposerSendButton: View {
                 systemImage: isRunning ? "stop.fill" : "arrow.up"
             )
             .labelStyle(.iconOnly)
-            .font(Typo.captionEmphasis)
-            .frame(width: Metrics.rowHeight, height: Metrics.rowHeight)
+            .font(Typo.labelEmphasis)
+            .frame(width: Self.glyph, height: Self.glyph)
         }
         .buttonStyle(.borderedProminent)
         .buttonBorderShape(.circle)

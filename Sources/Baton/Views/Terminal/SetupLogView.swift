@@ -20,13 +20,13 @@ struct SetupLogView: View {
     }
 
     private var header: some View {
-        HStack(spacing: Metrics.corner) {
+        HStack(spacing: Metrics.spacing) {
             statusIcon
             Text(statusText)
                 .font(Typo.labelEmphasis)
                 .foregroundStyle(Palette.textSecondary)
 
-            Spacer(minLength: Metrics.corner)
+            Spacer(minLength: Metrics.spacing)
 
             Button(model.isRunningSetup ? "Running" : "Run setup again") {
                 Task { await runSetup() }
@@ -34,9 +34,12 @@ struct SetupLogView: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
             .disabled(model.isRunningSetup || model.repo == nil)
+            .help("Run this repository's setup script in the workspace again")
         }
         .padding(.horizontal, Metrics.gutter)
-        .padding(.vertical, Metrics.cornerSmall)
+        // The fixed height the tab strip above it uses, rather than padding around whichever
+        // control happens to be tallest, so the two bars line up whatever the tab is showing.
+        .frame(height: Metrics.barHeight)
         .headerMaterial()
     }
 
@@ -123,13 +126,15 @@ struct LogOutputView: View {
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 0) {
+                    // The same size the terminal in the next tab draws at, because two tabs of
+                    // the same panel printing the same kind of output at two sizes reads as a bug.
                     Text(text.isEmpty ? placeholder : text)
-                        .font(Typo.codeSmall)
+                        .font(Typo.code)
                         .foregroundStyle(text.isEmpty ? Palette.textTertiary : Palette.textPrimary)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, Metrics.gutter)
-                        .padding(.vertical, Metrics.corner)
+                        .padding(.horizontal, Metrics.spacing)
+                        .padding(.vertical, Metrics.spacing)
 
                     Color.clear
                         .frame(height: Metrics.hairline)

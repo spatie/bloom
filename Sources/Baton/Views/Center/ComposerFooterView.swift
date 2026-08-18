@@ -15,7 +15,7 @@ struct ComposerFooterView: View {
     var onStop: @MainActor () -> Void
 
     var body: some View {
-        HStack(spacing: Metrics.cornerSmall) {
+        HStack(spacing: Metrics.spacingTight) {
             ComposerOptionMenu(
                 options: ComposerOption.models,
                 selection: session.model,
@@ -23,8 +23,6 @@ struct ComposerFooterView: View {
                 help: "Choose the model",
                 onSelect: selectModel
             )
-
-            fastToggle
 
             ComposerOptionMenu(
                 options: ComposerOption.efforts,
@@ -45,17 +43,20 @@ struct ComposerFooterView: View {
                 onSelect: selectPermissionMode
             )
 
-            Spacer(minLength: Metrics.corner)
+            // After the three pickers rather than between them: the pickers all answer "which",
+            // and a toggle wedged into that run made the row read as four unrelated controls.
+            fastToggle
 
+            Spacer(minLength: Metrics.spacing)
+
+            // A paperclip, not the plus that used to sit here: a plus already means "new session"
+            // in the tab strip directly above, and it says nothing about what is being added.
             Button(action: onAttach) {
-                Label("Attach a file", systemImage: "plus")
-                    .labelStyle(.iconOnly)
-                    .font(Typo.captionEmphasis)
-                    .foregroundStyle(Palette.textSecondary)
-                    .frame(width: Metrics.rowHeight, height: Metrics.rowHeight)
+                ComposerControlLabel(systemImage: "paperclip", text: nil)
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
             .help("Attach a file")
+            .accessibilityLabel("Attach a file")
 
             ComposerSendButton(
                 isRunning: isRunning,
@@ -77,7 +78,7 @@ struct ComposerFooterView: View {
                 isActive: isFastMode
             )
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.plain)
         .help("Fast mode trades some reasoning for a quicker reply")
         .accessibilityLabel("Fast mode")
         .accessibilityAddTraits(isFastMode ? .isSelected : [])

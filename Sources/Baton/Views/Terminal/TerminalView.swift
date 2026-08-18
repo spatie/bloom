@@ -57,6 +57,11 @@ final class BatonTerminalView: LocalProcessTerminalView {
         NSFont.preferredFont(forTextStyle: .callout).pointSize
     }
 
+    /// One point per press, the way every other terminal steps. This used to be `Metrics.hairline`,
+    /// which is half a point on a Retina display and a whole one everywhere else, so the shortcut
+    /// did almost nothing and did a different almost-nothing depending on the screen.
+    private static let fontStep: CGFloat = 1
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         configure()
@@ -134,33 +139,56 @@ final class BatonTerminalView: LocalProcessTerminalView {
     /// ANSI slots and the default foreground and background are replaced here.
     func applyAppearanceColors() {
         installColors(ansiColors.map(swiftTermColor))
-        nativeForegroundColor = resolved(Palette.textPrimary)
-        nativeBackgroundColor = resolved(Palette.surface)
-        caretColor = resolved(Palette.accent)
-        selectedTextBackgroundColor = resolved(Palette.selected)
+        // Flattened to opaque. `labelColor` is 85% ink, and a terminal foreground that is not
+        // fully opaque prints every character faintly over the panel behind it.
+        nativeForegroundColor = resolved(Palette.textPrimary).withAlphaComponent(1)
+        // The panel's own surface, so the shell sits on the same colour as the setup and run logs
+        // it shares a tab strip with.
+        nativeBackgroundColor = resolved(Palette.surfaceSunken)
+        caretColor = .textInsertionPointColor
+        selectedTextBackgroundColor = .selectedTextBackgroundColor
         needsDisplay = true
     }
 
+    /// The sixteen ANSI slots.
+    ///
+    /// The six hues stay Baton's, so a red in the terminal is the same red as a failed step
+    /// everywhere else in the window. The four greyscale slots cannot be: they were the label
+    /// colours, which differ from each other in alpha and in nothing else, and SwiftTerm stores a
+    /// colour as three opaque bytes. Dropping the alpha collapsed black, white, bright black and
+    /// bright white to one identical value, so black-on-white, which is most of what a Powerline
+    /// prompt draws, came out as a solid block with nothing legible inside it.
+    ///
+    /// They stay ordered dark to light within each appearance, because every program that colours
+    /// its own output assumes slot 8 is a lighter slot 0 and slot 15 a lighter slot 7.
     private var ansiColors: [SwiftUI.Color] {
         [
-            Palette.textTertiary,
+            Self.black,
             Palette.negative,
             Palette.positive,
             Palette.warning,
             Palette.accent,
             Color(nsColor: .systemPurple),
             Color(nsColor: .systemTeal),
-            Palette.textSecondary,
-            Palette.textSecondary,
+            Self.white,
+            Self.brightBlack,
             Palette.negative,
             Palette.positive,
             Palette.warning,
             Palette.accent,
             Color(nsColor: .systemPurple),
             Color(nsColor: .systemTeal),
-            Palette.textPrimary,
+            Self.brightWhite,
         ]
     }
+
+    // Per appearance, because the terminal's background follows the system: a fixed #FFFFFF for
+    // bright white would be invisible on a light panel, and a fixed #000000 black unreadable on a
+    // dark one.
+    private static let black = Palette.dynamic(light: 0x000000, dark: 0x1C1C1E)
+    private static let brightBlack = Palette.dynamic(light: 0x4D4D4D, dark: 0x636366)
+    private static let white = Palette.dynamic(light: 0x8E8E93, dark: 0xAEAEB2)
+    private static let brightWhite = Palette.dynamic(light: 0xB0B0B5, dark: 0xFFFFFF)
 
     private func resolved(_ color: SwiftUI.Color) -> NSColor {
         var native = NSColor(color)
@@ -170,8 +198,9 @@ final class BatonTerminalView: LocalProcessTerminalView {
         return native
     }
 
-    /// SwiftTerm stores terminal colours as byte channels, while Baton keeps dynamic AppKit
-    /// colours so they follow appearance, contrast and accent changes.
+    /// SwiftTerm stores terminal colours as three opaque byte channels, while Baton keeps dynamic
+    /// AppKit colours so they follow appearance, contrast and accent changes. Alpha is lost in the
+    /// crossing, which is why nothing in `ansiColors` may rely on it to tell two slots apart.
     private func swiftTermColor(_ color: SwiftUI.Color) -> SwiftTerm.Color {
         let resolved = resolved(color)
         let native = resolved.usingColorSpace(NSColorSpace.deviceRGB) ?? resolved
@@ -203,12 +232,12 @@ final class BatonTerminalView: LocalProcessTerminalView {
             paste(self)
         case "+", "=":
             fontSize = min(
-                fontSize + Metrics.hairline,
+                fontSize + Self.fontStep,
                 NSFont.preferredFont(forTextStyle: .largeTitle).pointSize
             )
         case "-":
             fontSize = max(
-                fontSize - Metrics.hairline,
+                fontSize - Self.fontStep,
                 NSFont.preferredFont(forTextStyle: .caption2).pointSize
             )
         case "0":

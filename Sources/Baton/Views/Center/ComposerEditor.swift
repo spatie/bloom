@@ -18,9 +18,12 @@ struct ComposerEditor: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             if text.isEmpty {
+                // `textPlaceholder`, not the tertiary label: they are different colours, and
+                // the tertiary label at 26% is faint enough that the prompt hint read as a
+                // rendering fault rather than as a hint.
                 Text(Self.placeholder)
                     .font(Typo.body)
-                    .foregroundStyle(Palette.textTertiary)
+                    .foregroundStyle(Palette.textPlaceholder)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
