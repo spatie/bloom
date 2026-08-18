@@ -2,18 +2,20 @@ import SwiftUI
 
 /// The text of the next turn, plus the placeholder that sits under it.
 ///
-/// The measured height lives here rather than in `ComposerView`: nothing outside this view needs
-/// to know how tall the text currently is, and keeping it local means a keystroke that grows the
-/// box invalidates the box and not the whole composer.
+/// The height used to be measured and applied here. It is now handed in, because the divider above
+/// the composer feeds the same number and two sources for one frame have to be reconciled in one
+/// place. That place is `ComposerView`, which owns the rule. What the wrapped text occupies is
+/// still measured here, where the text is, and reported outwards.
 struct ComposerEditor: View {
     @Binding var text: String
     @Binding var caret: Int
     @Binding var isFocused: Bool
+    /// What to draw at, already clamped by the caller.
+    var height: CGFloat
+    var onContentHeightChange: @MainActor (CGFloat) -> Void
     var onKey: @MainActor (ComposerKey) -> Bool
 
     private static let placeholder = "Ask to make changes, @mention files, run /commands"
-
-    @State private var height: CGFloat = 0
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -32,7 +34,7 @@ struct ComposerEditor: View {
                 text: $text,
                 caret: $caret,
                 isFocused: $isFocused,
-                onHeightChange: { height = $0 },
+                onHeightChange: onContentHeightChange,
                 onKey: onKey
             )
             .frame(height: max(height, ComposerTextEditor.lineHeight))

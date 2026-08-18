@@ -20,22 +20,35 @@ struct WorkspaceDetailView: View {
     /// does, the unread pill is offered whenever there is anything unread.
     @State private var isTranscriptScrolledUp = true
 
+    /// What the transcript and the composer were given between them, which is what caps how far
+    /// the divider between the two can be dragged.
+    @State private var conversationHeight: CGFloat = 0
+
     var body: some View {
         VStack(spacing: 0) {
             SessionTabsView(model: model)
 
             if let transcript = model.activeTranscript {
-                TranscriptView(
-                    transcript: transcript,
-                    isRunningSetup: model.isRunningSetup
-                ) { isTranscriptScrolledUp = $0 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Nested so the two views that share a draggable divider also share one measured
+                // height. It is the composer that needs the number, to know when it has taken all
+                // the room it may take, and only this level knows what the pair were given.
+                VStack(spacing: 0) {
+                    TranscriptView(
+                        transcript: transcript,
+                        isRunningSetup: model.isRunningSetup
+                    ) { isTranscriptScrolledUp = $0 }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                ComposerView(
-                    transcript: transcript,
-                    model: model,
-                    isScrolledUp: isTranscriptScrolledUp
-                )
+                    ComposerView(
+                        transcript: transcript,
+                        model: model,
+                        isScrolledUp: isTranscriptScrolledUp,
+                        availableHeight: conversationHeight
+                    )
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                    conversationHeight = $0
+                }
             } else if model.isRunningSetup {
                 setupState
             } else {

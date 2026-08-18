@@ -15,8 +15,31 @@ struct ComposerView: View {
     var model: WorkspaceModel?
     /// The transcript owns the scroll position, so it decides whether the unread pill is useful.
     var isScrolledUp: Bool = true
+    /// How tall the region the transcript and the composer share is, so a drag can be stopped
+    /// before the transcript is squeezed out of it. Zero reads as "not laid out yet, no cap".
+    var availableHeight: CGFloat = 0
 
     @Environment(AppModel.self) private var app
+
+    /// What the transcript keeps whatever the divider is dragged to. Three or four rows: enough
+    /// that the conversation is still readable, rather than a strip above a wall of prompt.
+    private static let minTranscriptHeight: CGFloat = 120
+
+    /// The height the user dragged the editor to, or zero for automatic. App-wide rather than per
+    /// session on purpose: it is a preference about how you like to write, not a property of one
+    /// conversation, and a box that changed height as you switched tabs would read as a bug.
+    @AppStorage("composer.editorHeight") private var manualHeight = 0.0
+
+    /// What the wrapped text occupies, already clamped by `ComposerTextEditor` to its line window.
+    @State private var contentHeight = ComposerTextEditor.lineHeight
+    /// Everything in the composer that is not the editor: the divider, the footer, the box and the
+    /// padding. Measured rather than assumed, because the footer's height comes from its controls.
+    @State private var chromeHeight: CGFloat = 0
+    /// The height the drag started from, and the marker for "a drag is under way".
+    @State private var resizeOrigin: CGFloat?
+    /// Where the drag has got to so far. Held here rather than written straight to storage, so one
+    /// gesture does not rewrite a preference sixty times a second.
+    @State private var liveHeight: CGFloat?
 
     @State private var caret = 0
     @State private var isFocused = false
@@ -29,11 +52,31 @@ struct ComposerView: View {
     @State private var isMenuDismissed = false
 
     var body: some View {
+        VStack(spacing: 0) {
+            ComposerResizeHandle(
+                onDrag: resize(by:),
+                onDragEnd: endResize,
+                onReset: resetHeight
+            )
+
+            composer
+        }
+        .background(Palette.surface)
+        // The chrome is whatever is left once the editor's share is taken off, so this settles on
+        // the first pass and only moves again when the footer's controls change size.
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { total in
+            chromeHeight = total - editorHeight
+        }
+    }
+
+    private var composer: some View {
         VStack(alignment: .leading, spacing: Metrics.spacingWide) {
             ComposerEditor(
                 text: $transcript.draft,
                 caret: $caret,
                 isFocused: $isFocused,
+                height: editorHeight,
+                onContentHeightChange: { contentHeight = $0 },
                 onKey: handle(key:)
             )
 
@@ -70,8 +113,6 @@ struct ComposerView: View {
         }
         .padding(.horizontal, Metrics.gutter)
         .padding(.bottom, Metrics.gutter)
-        .padding(.top, Metrics.spacingWide)
-        .background(Palette.surface)
         .task(id: transcript.session.id) { await prepare() }
         .task(id: transcript.workspace.path) {
             await slashCatalog.load(workspacePath: transcript.workspace.path)
@@ -88,6 +129,53 @@ struct ComposerView: View {
             if old.kind != new.kind { isMenuDismissed = false }
         }
         .onDisappear(perform: saveDraftNow)
+    }
+
+    // MARK: - Height
+
+    /// How tall the editor is drawn, and the whole of the rule.
+    ///
+    /// Two modes, and the divider is what switches between them. Left alone, the box grows with the
+    /// text from one line to `ComposerTextEditor.maxLines` and then scrolls, exactly as it always
+    /// has. Once the divider has been dragged the height belongs to the user and stops following
+    /// the text, until they drag again or double click the divider to hand it back. The alternative
+    /// (a manual height that content could still push past) would mean the box never stays where it
+    /// was put, which is the one thing a resize has to promise.
+    private var editorHeight: CGFloat {
+        let stored = manualHeight > 0 ? CGFloat(manualHeight) : contentHeight
+        let wanted = liveHeight ?? stored
+        return min(max(wanted, ComposerTextEditor.lineHeight), maxEditorHeight)
+    }
+
+    /// The tallest the editor may be drawn without leaving the transcript nowhere to go. Applied on
+    /// every render and not only while dragging, so shrinking the window shrinks the composer back
+    /// rather than pushing the transcript off the top.
+    private var maxEditorHeight: CGFloat {
+        guard availableHeight > 0 else { return .greatestFiniteMagnitude }
+        let room = availableHeight - chromeHeight - Self.minTranscriptHeight
+        return max(room, ComposerTextEditor.lineHeight)
+    }
+
+    /// The drag begins from whatever is on screen, so switching out of automatic sizing never jumps.
+    private func resize(by translation: CGFloat) {
+        let origin = resizeOrigin ?? editorHeight
+        resizeOrigin = origin
+        // Down is positive in view coordinates, and dragging the top edge up is what makes the box
+        // taller, so the translation is subtracted rather than added.
+        let wanted = origin - translation
+        liveHeight = min(max(wanted, ComposerTextEditor.lineHeight), maxEditorHeight)
+    }
+
+    private func endResize() {
+        if let liveHeight { manualHeight = Double(liveHeight) }
+        liveHeight = nil
+        resizeOrigin = nil
+    }
+
+    private func resetHeight() {
+        manualHeight = 0
+        liveHeight = nil
+        resizeOrigin = nil
     }
 
     // MARK: - Derived state

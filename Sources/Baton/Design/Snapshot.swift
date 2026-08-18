@@ -116,10 +116,16 @@ enum Snapshot {
             }
 
             guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
-                  let content = window.contentView else {
+                  let contentView = window.contentView else {
                 FileHandle.standardError.write(Data("no window to capture\n".utf8))
                 exit(1)
             }
+
+            // The frame view above the content view, because the toolbar and the title bar live
+            // there and not in the content view. Capturing the content view alone cropped off the
+            // exact strip that a toolbar bug shows up in, which made every toolbar change
+            // unverifiable without asking a human to take a screenshot.
+            let content = contentView.superview ?? contentView
 
             // A capture at one comfortable width proves nothing about the width the user actually
             // drags a pane down to. `--window-size 900x700` reproduces the cramped case on demand,
@@ -141,11 +147,14 @@ enum Snapshot {
             // includes the NSTableView behind a SwiftUI `List`: the sidebar came out blank.
             // Rendering the layer tree instead captures what is actually composited on screen.
             if let layer = content.layer, let context = NSGraphicsContext(bitmapImageRep: rep) {
-                // A CALayer's geometry has its origin at the top left, the opposite of the
-                // AppKit view it backs, so the context has to be flipped before it is rendered.
+                // Only a flipped view's layer needs the context flipped. SwiftUI's hosting view
+                // is flipped, the window's frame view above it is not, so flipping
+                // unconditionally captured the title bar upside down.
                 context.cgContext.saveGState()
-                context.cgContext.translateBy(x: 0, y: bounds.height)
-                context.cgContext.scaleBy(x: 1, y: -1)
+                if content.isFlipped {
+                    context.cgContext.translateBy(x: 0, y: bounds.height)
+                    context.cgContext.scaleBy(x: 1, y: -1)
+                }
                 layer.render(in: context.cgContext)
                 context.cgContext.restoreGState()
                 context.flushGraphics()
