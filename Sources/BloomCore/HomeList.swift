@@ -1,5 +1,4 @@
 import Foundation
-import BloomCore
 
 /// One line of Home's list: a workspace, and the project it belongs to.
 ///
@@ -7,23 +6,34 @@ import BloomCore
 /// its project's heading and needs no mark of its own; here every row is a different project's,
 /// and looking the repository up per row while drawing would be a linear scan of the project list
 /// once per visible row.
-struct HomeRow: Identifiable, Hashable {
-    var workspace: Workspace
-    var repo: Repo?
+public struct HomeRow: Identifiable, Hashable, Sendable {
+    public var workspace: Workspace
+    public var repo: Repo?
 
-    var id: String { workspace.id }
+    public init(workspace: Workspace, repo: Repo? = nil) {
+        self.workspace = workspace
+        self.repo = repo
+    }
 
-    var isArchived: Bool { workspace.state != .active }
+    public var id: String { workspace.id }
+
+    public var isArchived: Bool { workspace.state != .active }
 }
 
 /// One date heading and the rows under it.
-struct HomeGroup: Identifiable, Hashable {
+public struct HomeGroup: Identifiable, Hashable, Sendable {
     /// Stable across redraws and unique per bucket, so the list keeps its scroll position when a
     /// diff stat updates. Deliberately not the title: two different months would collide on
     /// "August" once the year rolls over.
-    var id: String
-    var title: String
-    var rows: [HomeRow]
+    public var id: String
+    public var title: String
+    public var rows: [HomeRow]
+
+    public init(id: String, title: String, rows: [HomeRow]) {
+        self.id = id
+        self.title = title
+        self.rows = rows
+    }
 }
 
 /// What Home is showing, and enough about what it is not showing to explain itself.
@@ -32,34 +42,50 @@ struct HomeGroup: Identifiable, Hashable {
 /// empty screens are reachable (nothing exists, nothing matches the search, nothing is in the
 /// chosen projects, everything is archived and archived is hidden), and telling them apart from
 /// an empty array alone is impossible.
-struct HomeListing {
-    var groups: [HomeGroup]
+public struct HomeListing: Sendable {
+    public var groups: [HomeGroup]
     /// Rows in the list, after every filter.
-    var shown: Int
+    public var shown: Int
     /// Workspaces the filters were applied to, archived ones included only when they are on.
-    var considered: Int
+    public var considered: Int
     /// Archived workspaces that exist, whether or not they are being shown.
-    var archived: Int
+    public var archived: Int
     /// Rows in the list that are archived.
-    var shownArchived: Int
+    public var shownArchived: Int
 
-    static let empty = HomeListing(
+    public init(
+        groups: [HomeGroup], shown: Int, considered: Int, archived: Int, shownArchived: Int
+    ) {
+        self.groups = groups
+        self.shown = shown
+        self.considered = considered
+        self.archived = archived
+        self.shownArchived = shownArchived
+    }
+
+    public static let empty = HomeListing(
         groups: [], shown: 0, considered: 0, archived: 0, shownArchived: 0
     )
 
-    var isEmpty: Bool { groups.isEmpty }
+    public var isEmpty: Bool { groups.isEmpty }
 }
 
 /// The filter Home's controls add up to.
-struct HomeFilter: Equatable {
-    var query = ""
+public struct HomeFilter: Equatable, Sendable {
+    public var query = ""
     /// Empty means every project. A set rather than an optional so "all" and "none chosen" are
     /// the same state, which is what stops the menu from reaching a configuration that shows
     /// nothing and offers no way back.
-    var projects: Set<String> = []
-    var showsArchived = false
+    public var projects: Set<String> = []
+    public var showsArchived = false
 
-    var isNarrowed: Bool {
+    public init(query: String = "", projects: Set<String> = [], showsArchived: Bool = false) {
+        self.query = query
+        self.projects = projects
+        self.showsArchived = showsArchived
+    }
+
+    public var isNarrowed: Bool {
         !query.trimmingCharacters(in: .whitespaces).isEmpty || !projects.isEmpty
     }
 }
@@ -70,8 +96,13 @@ struct HomeFilter: Equatable {
 /// whole judgement Home makes, and a judgement that lives inside a `body` can only be checked by
 /// taking a screenshot of it. It also runs over every workspace on the machine, which is hundreds
 /// of rows on a real install, so it is called when its inputs change rather than while drawing.
-enum HomeList {
-    static func build(
+///
+/// It lives in the core rather than beside the view for the same reason: date bucketing and
+/// relative ages are exactly the arithmetic that goes wrong by one at a boundary, and the app
+/// target has no test target of its own. Every date input is injected, so the suite can stand a
+/// workspace either side of midnight without waiting for midnight.
+public enum HomeList {
+    public static func build(
         repos: [Repo],
         workspaces: [Workspace],
         archived: [Workspace],
@@ -147,15 +178,24 @@ enum HomeList {
     }
 
     /// A date heading: what it is called, and the key that decides where one group ends.
-    struct Bucket: Hashable {
-        var id: String
-        var title: String
+    public struct Bucket: Hashable, Sendable {
+        public var id: String
+        public var title: String
+
+        public init(id: String, title: String) {
+            self.id = id
+            self.title = title
+        }
     }
 
     /// Fine near today and coarse further back, because that is how the question changes. Within
     /// the last week the user is asking which day; a month out they are asking which month, and
     /// twenty separate "23 days ago" headings would be a list of headings rather than of work.
-    static func bucket(for date: Date, now: Date, calendar: Calendar) -> Bucket {
+    ///
+    /// Counted in calendar days in the user's own time zone rather than in elapsed hours. Half
+    /// past eleven last night and half past midnight this morning are an hour apart and belong
+    /// under two different headings, because "yesterday" is a thing the calendar decides.
+    public static func bucket(for date: Date, now: Date, calendar: Calendar) -> Bucket {
         let day = calendar.startOfDay(for: date)
         let today = calendar.startOfDay(for: now)
         let days = calendar.dateComponents([.day], from: day, to: today).day ?? 0
@@ -187,10 +227,28 @@ enum HomeList {
 
         return Bucket(
             id: "month-\(year)-\(month)",
-            title: year == current.year
-                ? day.formatted(.dateTime.month(.wide))
-                : day.formatted(.dateTime.month(.wide).year())
+            title: monthName(of: day, calendar: calendar, includingYear: year != current.year)
         )
+    }
+
+    /// The month heading, spelled in the same calendar the bucket was worked out in.
+    ///
+    /// The calendar is pushed into the format style rather than left to the process default. The
+    /// two are the same thing on a running Mac, but a caller that hands in a calendar in another
+    /// time zone would otherwise get an id worked out in one zone and a title worked out in
+    /// another, and on the first or last day of a month those name two different months.
+    private static func monthName(
+        of day: Date, calendar: Calendar, includingYear: Bool
+    ) -> String {
+        var style = includingYear
+            ? Date.FormatStyle.dateTime.month(.wide).year()
+            : Date.FormatStyle.dateTime.month(.wide)
+        style.calendar = calendar
+        style.timeZone = calendar.timeZone
+        // The month is still spelled in the caller's language: `Calendar.current` carries the
+        // user's locale, so nothing about the running app changes.
+        if let locale = calendar.locale { style.locale = locale }
+        return day.formatted(style)
     }
 }
 
@@ -199,9 +257,12 @@ enum HomeList {
 /// Hand written rather than `Date.RelativeFormatStyle`, whose shortest form is still "1d ago".
 /// Under a heading that already says "2 days ago", the word "ago" is on every row of the group
 /// saying nothing, and the trailing column has to be narrow enough to leave the name its width.
-enum HomeAge {
-    static func short(for date: Date, now: Date = Date()) -> String {
+public enum HomeAge {
+    public static func short(for date: Date, now: Date = Date()) -> String {
         let seconds = now.timeIntervalSince(date)
+        // Also catches a timestamp from the future, which a clock change or a restore from backup
+        // produces. "now" is the least wrong thing to say about it, and it is what the "Today"
+        // bucket such a row lands in already implies.
         if seconds < 60 { return "now" }
 
         let minutes = Int(seconds / 60)
@@ -216,9 +277,12 @@ enum HomeAge {
         let weeks = days / 7
         if weeks < 5 { return "\(weeks)w" }
 
-        let months = days / 30
-        if months < 12 { return "\(months)mo" }
+        // Gated on whole years rather than on `days / 30 < 12`. Thirty-day months run ahead of the
+        // calendar, so a year is reached at day 360 by that reckoning and at day 365 by this one:
+        // the five days in between fell through to the year branch and printed "0y".
+        let years = days / 365
+        if years < 1 { return "\(days / 30)mo" }
 
-        return "\(days / 365)y"
+        return "\(years)y"
     }
 }
