@@ -63,7 +63,7 @@ struct InspectorToolbar: View {
                 }
                 .labelStyle(.iconOnly)
                 .toggleStyle(.button)
-                .controlSize(.small)
+                .inspectorBarControl()
                 .disabled(model.changedFiles.isEmpty)
                 .help("Review the changes one file at a time")
                 .onChange(of: isReviewing) { _, reviewing in
@@ -76,7 +76,7 @@ struct InspectorToolbar: View {
                 }
                 .labelStyle(.iconOnly)
                 .toggleStyle(.button)
-                .controlSize(.small)
+                .inspectorBarControl()
                 .disabled(model.changedFiles.isEmpty)
                 .help(
                     isTree

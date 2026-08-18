@@ -32,7 +32,7 @@ struct ViewedToggle: View {
             }
         }
         .toggleStyle(.button)
-        .controlSize(.small)
+        .inspectorBarControl()
         .help(isViewed ? "Mark this file as not yet reviewed" : "Mark this file as reviewed")
     }
 

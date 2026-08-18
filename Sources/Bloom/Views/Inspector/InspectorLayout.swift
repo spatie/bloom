@@ -1,4 +1,4 @@
-import CoreGraphics
+import SwiftUI
 
 /// The inspector's spacing scale.
 ///
@@ -33,4 +33,23 @@ enum InspectorLayout {
     /// How much room a list keeps once a detail pane has opened beneath it, until the reader
     /// drags the boundary somewhere else.
     static let listHeight: CGFloat = 220
+}
+
+extension View {
+    /// A small control in one of the inspector's strips: the pull request bar, the tab row, the
+    /// file header.
+    ///
+    /// Flat until it is on or under the pointer, which is what `.accessoryBar` draws and what a
+    /// strip of small controls looks like everywhere else on this platform. The default button
+    /// toggle style boxes each control in its own bordered rectangle, so a header carrying four of
+    /// them read as a row of buttons parked on top of the file it is about rather than as part of
+    /// the bar, and the boxes outweighed the filename beside them.
+    ///
+    /// `.borderless` is flat too, but it draws its glyph in the accent colour, which makes a
+    /// resting toggle look pressed. This keeps every glyph in the strip at label weight and lets
+    /// the fill alone say which of them is on.
+    func inspectorBarControl() -> some View {
+        buttonStyle(.accessoryBar)
+            .controlSize(.small)
+    }
 }

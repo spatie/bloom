@@ -13,11 +13,23 @@ enum CodeMetrics {
         return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
     }()
 
-    /// Width of one character in `Typo.code`.
-    static let advance: CGFloat = {
-        let width = ("0" as NSString).size(withAttributes: [.font: font]).width
-        return width > 0 ? width : 7.2
+    /// The font the gutter numbers are set in: `Typo.codeTiny`, one rung below the code, which is
+    /// why the columns cannot be measured off `font` above.
+    nonisolated(unsafe) static let numberFont: NSFont = {
+        let size = NSFont.preferredFont(forTextStyle: .footnote).pointSize
+        return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
     }()
+
+    /// Width of one character in `Typo.code`.
+    static let advance: CGFloat = advance(of: font, fallback: 7.2)
+
+    /// Width of one digit in the gutter.
+    static let numberAdvance: CGFloat = advance(of: numberFont, fallback: 6)
+
+    private static func advance(of font: NSFont, fallback: CGFloat) -> CGFloat {
+        let width = ("0" as NSString).size(withAttributes: [.font: font]).width
+        return width > 0 ? width : fallback
+    }
 
     /// One line of code, plus the small amount of air that keeps a wall of them readable. Floored
     /// at the height the diff was designed around so the default appearance is unchanged.
@@ -27,7 +39,11 @@ enum CodeMetrics {
     static let markerWidth: CGFloat = ceil(advance) + 4
 
     /// Four digits, which covers every file anyone reads a diff of by hand.
-    static let numberWidth: CGFloat = ceil(advance * 4) + gutterPadding
+    ///
+    /// Measured in the font the numbers are actually set in. Measured in the code font instead, a
+    /// unified diff spent ten points of a 380 point column on slack either side of a four digit
+    /// number, and those points come off the end of every line of code in the file.
+    static let numberWidth: CGFloat = ceil(numberAdvance * 4) + gutterPadding
 
     /// Between a line number and whatever sits next to it.
     static let gutterPadding: CGFloat = 4

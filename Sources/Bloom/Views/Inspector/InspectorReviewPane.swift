@@ -20,13 +20,13 @@ struct InspectorReviewPane: View {
             HStack(spacing: InspectorLayout.gap) {
                 Button("Previous file", systemImage: "chevron.left") { step(-1) }
                     .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
+                    .inspectorBarControl()
                     .disabled(index == 0)
                     .help("Previous file")
 
                 Button("Next file", systemImage: "chevron.right") { step(1) }
                     .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
+                    .inspectorBarControl()
                     .disabled(index >= total - 1)
                     .help("Next file")
 

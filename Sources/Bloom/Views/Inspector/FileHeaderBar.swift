@@ -141,8 +141,7 @@ struct FileHeaderBar: View {
             isConfirmingRevert = true
         }
         .labelStyle(.iconOnly)
-        .buttonStyle(.borderless)
-        .controlSize(.small)
+        .inspectorBarControl()
         .help("Throw away the changes to \(file.filename)")
     }
 
@@ -160,7 +159,7 @@ struct FileHeaderBar: View {
         }
         .labelStyle(.iconOnly)
         .toggleStyle(.button)
-        .controlSize(.small)
+        .inspectorBarControl()
         .disabled(mode == .edit)
     }
 
@@ -176,7 +175,7 @@ struct FileHeaderBar: View {
         }
         .labelStyle(.iconOnly)
         .toggleStyle(.button)
-        .controlSize(.small)
+        .inspectorBarControl()
         .disabled(mode == .edit)
         .help(
             ignoresWhitespace
@@ -188,8 +187,7 @@ struct FileHeaderBar: View {
     private var copyButton: some View {
         Button(copyTitle, systemImage: didCopy ? "checkmark" : "doc.on.doc", action: copy)
             .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
-            .controlSize(.small)
+            .inspectorBarControl()
             .help(copyTitle)
     }
 
@@ -198,8 +196,7 @@ struct FileHeaderBar: View {
     private var shareButton: some View {
         Button("Share the diff", systemImage: "square.and.arrow.up", action: share)
             .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
-            .controlSize(.small)
+            .inspectorBarControl()
             .help("Share the diff for \(file.filename)")
     }
 

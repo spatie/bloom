@@ -18,6 +18,11 @@ struct BottomPanelView: View {
     /// permanent crosses is noise, and no tab strip on this platform draws one.
     @State private var hoveredTabID: String?
 
+    /// Read here as well as in the terminal itself, because the selected tab takes its colour from
+    /// the pane it opens and that pane is only the user's theme while this is on.
+    @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
+    @Environment(\.colorScheme) private var colorScheme
+
     private var sessions: TerminalSessionStore { .shared }
 
     private var terminalTabs: [TerminalTab] {
@@ -105,7 +110,10 @@ struct BottomPanelView: View {
     }
 
     private func tabButton(_ tab: BottomTab, title: String, icon: String) -> some View {
-        Button {
+        let isSelected = model.bottomTab == tab
+        let pane = surface(of: tab)
+
+        return Button {
             select(tab)
         } label: {
             HStack(spacing: Metrics.spacingSmall) {
@@ -114,8 +122,8 @@ struct BottomPanelView: View {
                 Text(title).lineLimit(1)
             }
             .font(Typo.label)
-            .foregroundStyle(model.bottomTab == tab ? Palette.textPrimary : Palette.textSecondary)
-            .tabChrome(isSelected: model.bottomTab == tab)
+            .foregroundStyle(isSelected ? pane.ink : Palette.textSecondary)
+            .tabChrome(isSelected: isSelected, fill: pane.fill)
         }
         .buttonStyle(.plain)
         .help(title)
@@ -123,6 +131,7 @@ struct BottomPanelView: View {
 
     private func terminalTabButton(_ tab: TerminalTab) -> some View {
         let isSelected = model.bottomTab == .terminal(tab.id)
+        let pane = surface(of: .terminal(tab.id))
 
         return HStack(spacing: Metrics.spacingSmall) {
             Image(systemName: "terminal")
@@ -149,12 +158,16 @@ struct BottomPanelView: View {
             // The size the tab's own glyph is drawn at. Without it the cross came out larger than
             // the terminal mark it sits beside.
             .imageScale(.small)
+            // `.accessoryBar` tints its glyph with the label colour, which is the one colour that
+            // is guaranteed NOT to read once the selected tab is carrying a dark terminal's ground
+            // in a light window.
+            .foregroundStyle(isSelected ? pane.ink : Palette.textSecondary)
             .opacity(hoveredTabID == tab.id || isSelected ? 1 : 0)
             .help("Close this terminal")
         }
         .font(Typo.label)
-        .foregroundStyle(isSelected ? Palette.textPrimary : Palette.textSecondary)
-        .tabChrome(isSelected: isSelected)
+        .foregroundStyle(isSelected ? pane.ink : Palette.textSecondary)
+        .tabChrome(isSelected: isSelected, fill: pane.fill)
         .onHoverChange { inside in
             hoveredTabID = inside ? tab.id : (hoveredTabID == tab.id ? nil : hoveredTabID)
         }
@@ -182,6 +195,31 @@ struct BottomPanelView: View {
             .buttonStyle(.accessoryBar)
             .frame(width: Metrics.barHeight, height: Metrics.barHeight)
             .help(help)
+    }
+
+    /// What the pane under the strip is actually painted with, and the ink that sits on it.
+    ///
+    /// A selected tab is the top of the pane it opens rather than a lid laid over it, which is
+    /// what the fill is for. Every pane here draws the sunken surface except a terminal running
+    /// the user's own Ghostty theme, which draws whatever that theme says: a light grey tab above
+    /// a black shell is the seam that gave the panel away as two views stacked by accident.
+    ///
+    /// The pairing is taken whole or not at all. A theme that names a ground but no ink leaves
+    /// nothing that is guaranteed to read on it, and a tab whose own name has disappeared is
+    /// worse than one that does not match the shell below it.
+    private func surface(of tab: BottomTab) -> (fill: Color, ink: Color) {
+        let panel = (fill: Palette.surfaceSunken, ink: Palette.textPrimary)
+
+        guard case .terminal = tab, usesGhosttyTheme else { return panel }
+
+        let appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
+        guard let appearance,
+              let theme = TerminalGhostty.theme(for: appearance),
+              let background = theme.background,
+              let foreground = theme.foreground
+        else { return panel }
+
+        return (Color(nsColor: NSColor(background)), Color(nsColor: NSColor(foreground)))
     }
 
     // MARK: - Content
@@ -291,6 +329,8 @@ struct BottomPanelView: View {
 /// it is what stops the selected tab reading as a painted block.
 private struct BottomTabChrome: ViewModifier {
     var isSelected: Bool
+    /// The colour of the pane this tab opens. See `BottomPanelView.surface(of:)`.
+    var fill: Color
 
     @State private var isHovered = false
 
@@ -298,14 +338,14 @@ private struct BottomTabChrome: ViewModifier {
         content
             .padding(.horizontal, Metrics.inset)
             .frame(height: Metrics.barHeight)
-            .background(isSelected ? Palette.surfaceSunken : (isHovered ? Palette.hover : .clear))
+            .background(isSelected ? fill : (isHovered ? Palette.hover : .clear))
             .contentShape(Rectangle())
             .onHover { isHovered = $0 }
     }
 }
 
 private extension View {
-    func tabChrome(isSelected: Bool) -> some View {
-        modifier(BottomTabChrome(isSelected: isSelected))
+    func tabChrome(isSelected: Bool, fill: Color) -> some View {
+        modifier(BottomTabChrome(isSelected: isSelected, fill: fill))
     }
 }
