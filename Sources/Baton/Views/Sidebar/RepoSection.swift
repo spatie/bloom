@@ -20,7 +20,6 @@ struct RepoSection: View {
     /// Only used to say why the section is empty, which is a different sentence when a filter is
     /// hiding rows than when the project has none.
     var isFiltered: Bool
-    @Binding var hovered: String?
     @Binding var renaming: String?
     /// Raised to the sidebar, which owns the create sheet.
     var onCreateWorkspace: (Repo) -> Void
@@ -33,6 +32,9 @@ struct RepoSection: View {
 
     @State private var archiveTarget: Workspace?
     @State private var isConfirmingRemove = false
+    /// Only the `+` reacts to it, so it belongs to this header rather than to a hover id shared
+    /// across the whole list.
+    @State private var isHeaderHovered = false
 
     var body: some View {
         Section(isExpanded: isExpanded) {
@@ -42,7 +44,7 @@ struct RepoSection: View {
             if rows.isEmpty {
                 Text(isFiltered ? "Nothing matches the filter" : "No workspaces yet")
                     .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
+                    .foregroundStyle(.tertiary)
             }
         } header: {
             header
@@ -63,17 +65,15 @@ struct RepoSection: View {
 
     // MARK: - Header
 
-    private var headerID: String { "repo:\(repo.id)" }
-
     /// The confirmations hang off the header rather than off the `Section`, because a section is
     /// a layout instruction to the list rather than a view that can present anything. That also
     /// keeps them anchored to the project they are about, which is where the menus that trigger
     /// them live.
     private var header: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Metrics.spacing) {
             RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                 .fill(Color(hexString: repo.accent))
-                .frame(width: Self.swatch, height: Self.swatch)
+                .frame(width: Metrics.swatch, height: Metrics.swatch)
                 .accessibilityHidden(true)
 
             if isRenamingRepo {
@@ -87,22 +87,20 @@ struct RepoSection: View {
                     .lineLimit(1)
             }
 
-            Spacer(minLength: 4)
+            Spacer(minLength: Metrics.spacingSmall)
 
             Button("New workspace in \(repo.name)", systemImage: "plus") {
                 onCreateWorkspace(repo)
             }
             .labelStyle(.iconOnly)
             .imageScale(.small)
-            .foregroundStyle(hovered == headerID ? Palette.textSecondary : Palette.textTertiary)
+            .foregroundStyle(isHeaderHovered ? Palette.textSecondary : Palette.textTertiary)
             .buttonStyle(.plain)
             .contentShape(Rectangle())
             .help("New workspace in \(repo.name)")
         }
         .contentShape(Rectangle())
-        .onHoverChange { inside in
-            hovered = inside ? headerID : (hovered == headerID ? nil : hovered)
-        }
+        .onHoverChange { isHeaderHovered = $0 }
         .contextMenu {
             Button("New workspace") { onCreateWorkspace(repo) }
             Button("Rename", action: beginRepoRename)
@@ -137,9 +135,6 @@ struct RepoSection: View {
             Text("Baton forgets this project and its workspaces. Nothing on disk is deleted.")
         }
     }
-
-    /// Small enough to read as a project marker rather than as a control.
-    private static let swatch: CGFloat = 9
 
     // MARK: - Rows
 

@@ -14,29 +14,29 @@ struct HomeWorkspaceCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: Metrics.spacingWide) {
+                HStack(spacing: Metrics.spacing) {
                     Text(workspace.name)
                         .font(Typo.bodyEmphasis)
                         .foregroundStyle(Palette.textPrimary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
-                    Spacer(minLength: 4)
+                    Spacer(minLength: Metrics.spacingSmall)
                     if workspace.unread {
                         Circle()
                             .fill(Palette.accent)
-                            .frame(width: 6, height: 6)
+                            .frame(width: Metrics.dot, height: Metrics.dot)
                             .accessibilityLabel("Unread")
                     }
                 }
 
-                HStack(spacing: 6) {
+                HStack(spacing: Metrics.spacing) {
                     Chip(
                         text: workspace.branch,
                         systemImage: "arrow.triangle.branch",
                         monospaced: true
                     )
-                    Spacer(minLength: 4)
+                    Spacer(minLength: Metrics.spacingSmall)
                     if workspace.hasDiff {
                         DiffStatLabel(
                             additions: workspace.additions,
@@ -52,7 +52,7 @@ struct HomeWorkspaceCard: View {
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textTertiary)
             }
-            .padding(10)
+            .padding(Metrics.inset)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metrics.corner))
             .overlay {

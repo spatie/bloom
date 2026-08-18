@@ -3,39 +3,42 @@ import AppKit
 
 /// One row of the worktree tree: a disclosure chevron or a document icon, the name, and a dot if
 /// the agent touched it.
+///
+/// As with `ChangedFileRow`, the tree paints the selection fill and this row reads it back out of
+/// the environment, which is the only way its own body can invert the marks that carry meaning.
 struct FileTreeRow: View {
     var item: FileTreeRowItem
     var isExpanded: Bool
     var isChanged: Bool
-    var isSelected: Bool
-    var isHovered: Bool
     /// The node's location on disk, for the menu items that hand it to another app.
     var fullPath: String
     var action: () -> Void
+
+    @Environment(\.isOnEmphasizedSelection) private var isOnSelection
 
     /// The dot marking a file the agent touched. Punctuation, not a badge.
     private static let changedDotSize: CGFloat = 5
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: InspectorLayout.tight * 2) {
+            HStack(spacing: Metrics.spacingSmall) {
                 Image(systemName: symbol)
                     .font(Typo.micro)
                     .imageScale(.small)
-                    .foregroundStyle(Palette.textTertiary)
+                    .foregroundStyle(.tertiary)
                     .frame(width: InspectorLayout.glyphWidth)
                     .accessibilityHidden(true)
+                // A directory is one step quieter than a file, said with the hierarchical style so
+                // it still inverts on a selected row.
                 Text(item.node.name)
-                    .font(Typo.label)
-                    .foregroundStyle(
-                        item.node.isDirectory ? Palette.textSecondary : Palette.textPrimary
-                    )
+                    .font(Typo.body)
+                    .foregroundStyle(item.node.isDirectory ? .secondary : .primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 0)
                 if isChanged {
                     Circle()
-                        .fill(Palette.warning)
+                        .fill(isOnSelection ? Palette.selectedEmphasizedText : Palette.warning)
                         .frame(width: Self.changedDotSize, height: Self.changedDotSize)
                         .accessibilityLabel("Changed")
                 }
@@ -49,8 +52,6 @@ struct FileTreeRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .rowBackground(isSelected: isSelected, isHovered: isHovered)
-        .padding(.horizontal, InspectorLayout.tight * 2)
         .contextMenu {
             Button("Open in Editor") { Reveal.inEditor(fullPath) }
             Button("Reveal in Finder") { Reveal.inFinder(fullPath) }

@@ -54,6 +54,24 @@ enum Palette {
     static let textTertiary = Color(nsColor: .tertiaryLabelColor)
     static let textInverted = Color(nsColor: .alternateSelectedControlTextColor)
 
+    /// What a field says before anything is typed into it. Half ink, where the tertiary label is
+    /// a quarter, which is why a placeholder written as `textTertiary` reads as disabled.
+    static let textPlaceholder = Color(nsColor: .placeholderTextColor)
+
+    // MARK: Text editing
+    //
+    // The three colours AppKit uses inside a text view. Each of them tracks something the accent
+    // colour alone does not: the focus ring follows the Full Keyboard Access setting, the caret
+    // follows the text colour on high contrast, and the selection is the paler fill a text run
+    // gets rather than the solid one a list row gets.
+
+    /// The focus ring around the control that has keyboard focus.
+    static let focusRing = Color(nsColor: .keyboardFocusIndicatorColor)
+    /// The caret.
+    static let caret = Color(nsColor: .textInsertionPointColor)
+    /// Selected text inside an editable or selectable text view.
+    static let textSelection = Color(nsColor: .selectedTextBackgroundColor)
+
     // MARK: Meaning
 
     /// The user's chosen accent colour, not a blue we picked for them.
@@ -140,13 +158,48 @@ enum Metrics {
     static let inspectorWidth: CGFloat = 380
     /// Matches the row height AppKit uses for a source list.
     static let rowHeight: CGFloat = 28
+    /// Corner radii. Radii only: a gap between two views comes from the spacing scale below, even
+    /// where the number happens to match.
     static let corner: CGFloat = 6
     static let cornerSmall: CGFloat = 4
+
     static let gutter: CGFloat = 12
     /// One physical pixel on the display the window is actually on.
     static var hairline: CGFloat { 1 / (NSScreen.main?.backingScaleFactor ?? 2) }
     /// Clearance for the traffic lights when the title bar is hidden.
     static let titleBarHeight: CGFloat = 28
+
+    // MARK: Spacing
+    //
+    // One scale for the whole window. These used to be literals at every call site, so the
+    // sidebar and the inspector drifted a point or two apart on every row they both draw, and
+    // where there was no literal a corner radius was borrowed instead, which tied a gap to a
+    // rounding for no reason other than the two numbers happening to match.
+
+    /// Between two things that read as one thing, such as a glyph and its count.
+    static let spacingTight: CGFloat = 2
+    /// Between a label and the number beside it.
+    static let spacingSmall: CGFloat = 4
+    /// Between controls in a row.
+    static let spacing: CGFloat = 6
+    /// Between the groups a row falls into.
+    static let spacingWide: CGFloat = 8
+    /// What a row keeps from the edge of its pane.
+    static let inset: CGFloat = 10
+
+    // MARK: Marks
+
+    /// The project colour marker, in the sidebar, in search results and in the toolbar title.
+    /// Small enough to read as a marker rather than as a control.
+    static let swatch: CGFloat = 9
+    /// The box a sidebar row's state glyph sits in, matching the cap height of the text beside
+    /// it so the glyphs line up down the column whichever state each row is in.
+    static let glyph: CGFloat = 13
+    /// A status dot, sized to sit on a text baseline rather than to be noticed on its own.
+    static let dot: CGFloat = 6
+    /// A strip of small controls along the edge of a pane: the sidebar's status bar, the
+    /// inspector's pull request strip and its tab row.
+    static let barHeight: CGFloat = 32
 }
 
 // MARK: - Materials
@@ -237,7 +290,7 @@ struct DiffStatLabel: View {
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Metrics.spacingSmall) {
             if additions > 0 {
                 Text("+\(Self.abbreviate(additions))")
                     .foregroundStyle(isOnSelection ? Palette.selectedEmphasizedText : Palette.positive)
@@ -337,7 +390,7 @@ struct ActivityDot: View {
     var body: some View {
         Circle()
             .fill(isActive ? tint : Palette.textTertiary)
-            .frame(width: 6, height: 6)
+            .frame(width: Metrics.dot, height: Metrics.dot)
             .scaleEffect(isActive && pulse ? 1.35 : 1)
             .opacity(isActive && pulse ? 0.5 : 1)
             .animation(

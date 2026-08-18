@@ -15,8 +15,6 @@ import BatonCore
 struct SidebarView: View {
     @Environment(AppModel.self) private var app
 
-    /// One hover id for the entire list. See `WorkspaceRow` for why this is not per row.
-    @State private var hovered: String?
     @State private var renaming: String?
     @State private var filter: SidebarFilter = .all
 
@@ -38,7 +36,6 @@ struct SidebarView: View {
                     repo: group.repo,
                     rows: group.workspaces,
                     isFiltered: filter != .all,
-                    hovered: $hovered,
                     renaming: $renaming,
                     onCreateWorkspace: presentCreate
                 )

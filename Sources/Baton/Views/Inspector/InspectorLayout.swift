@@ -4,15 +4,19 @@ import CoreGraphics
 ///
 /// One set of numbers rather than a literal per call site, because three stacked panes only read
 /// as one column if their rows, insets and gutters agree.
+///
+/// The shared values are the window's, not the inspector's own: a file row and a sidebar row are
+/// the same kind of thing and used to sit a point or two apart because each column kept its own
+/// copy of the number. What is left here is genuinely local to a diff.
 enum InspectorLayout {
     /// Between two things that belong to each other.
-    static let tight: CGFloat = 2
+    static let tight = Metrics.spacingTight
     /// Between controls in a row.
-    static let gap: CGFloat = 6
+    static let gap = Metrics.spacing
     /// The inset a list row keeps from the edge of the pane.
-    static let inset: CGFloat = 10
+    static let inset = Metrics.inset
     /// The pull request strip and the toolbar under it.
-    static let barHeight: CGFloat = 32
+    static let barHeight = Metrics.barHeight
     /// A meaning colour used as a background rather than as ink. One value, so a green badge and a
     /// blue chip carry the same weight.
     static let tintOpacity: Double = 0.12

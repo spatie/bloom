@@ -3,25 +3,31 @@ import AppKit
 import BatonCore
 
 /// One changed file: git's own status letter, the filename, and what it cost in lines.
+///
+/// The selection and hover fill is painted by the list, not here, so this row can read
+/// `isOnEmphasizedSelection` and flip the colours that carry meaning. A row that sets the fill on
+/// itself only puts that value into its own children's environment, never into its own body.
 struct ChangedFileRow: View {
     var file: ChangedFile
     var isSelected: Bool
-    var isHovered: Bool
     /// The file's location in the worktree, for the menu items that hand it to another app.
     var fullPath: String
     var onSelect: () -> Void
     var onRevert: () -> Void
 
+    @Environment(\.isOnEmphasizedSelection) private var isOnSelection
+
     var body: some View {
         Button(action: onSelect) {
             HStack(spacing: InspectorLayout.gap) {
                 glyph
+                // No colour of its own: the list already set the row's foreground, and a pinned
+                // label colour would stay dark on the accent fill.
                 Text(file.filename)
-                    .font(Typo.label)
-                    .foregroundStyle(Palette.textPrimary)
+                    .font(Typo.body)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Spacer(minLength: InspectorLayout.tight * 2)
+                Spacer(minLength: Metrics.spacingSmall)
                 if file.isBinary {
                     Chip(text: "bin")
                 } else {
@@ -34,7 +40,7 @@ struct ChangedFileRow: View {
                 Image(systemName: isSelected ? "chevron.down" : "chevron.right")
                     .font(Typo.micro)
                     .imageScale(.small)
-                    .foregroundStyle(Palette.textTertiary)
+                    .foregroundStyle(.tertiary)
                     .accessibilityHidden(true)
             }
             .padding(.horizontal, InspectorLayout.gap)
@@ -42,8 +48,6 @@ struct ChangedFileRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .rowBackground(isSelected: isSelected, isHovered: isHovered)
-        .padding(.horizontal, InspectorLayout.tight * 2)
         .contextMenu {
             Button("Open in Editor") { Reveal.inEditor(fullPath) }
             Button("Reveal in Finder") { Reveal.inFinder(fullPath) }
@@ -64,14 +68,20 @@ struct ChangedFileRow: View {
             .foregroundStyle(tint)
             .frame(width: InspectorLayout.glyphWidth, height: InspectorLayout.glyphWidth)
             .background(
-                tint.opacity(InspectorLayout.tintOpacity),
+                isOnSelection
+                    ? Palette.selectedEmphasizedText.opacity(0.2)
+                    : tint.opacity(InspectorLayout.tintOpacity),
                 in: RoundedRectangle(cornerRadius: Metrics.cornerSmall)
             )
             .accessibilityLabel(Self.description(of: file.change))
     }
 
+    /// Green on the accent fill is unreadable, so on a selected row the letter borrows the row's
+    /// own foreground and lets its shape carry the meaning instead.
     private var tint: Color {
-        switch file.change {
+        guard !isOnSelection else { return Palette.selectedEmphasizedText }
+
+        return switch file.change {
         case .added, .untracked: Palette.positive
         case .deleted: Palette.negative
         case .modified: Palette.warning

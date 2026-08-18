@@ -14,10 +14,10 @@ struct HomeRepoSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 7) {
-                RoundedRectangle(cornerRadius: 3)
+            HStack(spacing: Metrics.spacing) {
+                RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                     .fill(Color(hexString: repo.accent))
-                    .frame(width: 10, height: 10)
+                    .frame(width: Metrics.swatch, height: Metrics.swatch)
                     .accessibilityHidden(true)
                 Text(repo.name)
                     .font(Typo.title)
@@ -26,7 +26,7 @@ struct HomeRepoSection: View {
                     .font(Typo.codeTiny)
                     .foregroundStyle(Palette.textTertiary)
 
-                Spacer(minLength: 8)
+                Spacer(minLength: Metrics.spacingWide)
 
                 // "New" is enough beside the project's own name; VoiceOver and Voice Control get
                 // the unambiguous version, because out of context "New" names nothing.

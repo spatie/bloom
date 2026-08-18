@@ -8,7 +8,7 @@ struct HomeWelcomeHeader: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
                 Text(greeting)
                     .font(.title2)
                     .bold()
@@ -18,7 +18,7 @@ struct HomeWelcomeHeader: View {
                     .foregroundStyle(Palette.textSecondary)
             }
 
-            Spacer(minLength: 12)
+            Spacer(minLength: Metrics.gutter)
 
             Button("New workspace", systemImage: "plus", action: onCreateWorkspace)
                 .font(Typo.bodyEmphasis)

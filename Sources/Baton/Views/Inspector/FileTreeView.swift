@@ -73,11 +73,13 @@ struct FileTreeView: View {
             item: item,
             isExpanded: expanded.contains(path),
             isChanged: changedPaths.contains(path),
-            isSelected: selection == path,
-            isHovered: hovered == path,
             fullPath: fullPath(path),
             action: { activate(item.node) }
         )
+        // Applied here rather than inside the row, so the row can read the selection back out of
+        // the environment and invert the dot that marks a changed file.
+        .rowBackground(isSelected: selection == path, isHovered: hovered == path)
+        .padding(.horizontal, Metrics.spacingSmall)
         .onHoverChange { hovering in
             hovered = hovering ? path : (hovered == path ? nil : hovered)
         }

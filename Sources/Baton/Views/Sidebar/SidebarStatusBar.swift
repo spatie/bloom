@@ -16,10 +16,10 @@ struct SidebarStatusBar: View {
         VStack(spacing: 0) {
             Divider()
 
-            HStack(spacing: 4) {
+            HStack(spacing: Metrics.spacingSmall) {
                 statusChip
 
-                Spacer(minLength: 4)
+                Spacer(minLength: Metrics.spacingSmall)
 
                 Menu {
                     Picker("Filter", selection: $filter) {
@@ -65,8 +65,8 @@ struct SidebarStatusBar: View {
             }
             .imageScale(.medium)
             .foregroundStyle(Palette.textSecondary)
-            .padding(.horizontal, 10)
-            .frame(height: 28)
+            .padding(.horizontal, Metrics.inset)
+            .frame(height: Metrics.barHeight)
         }
         .background(.bar)
     }

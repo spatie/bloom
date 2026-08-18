@@ -1,6 +1,12 @@
 import SwiftUI
 
-/// Keeps low-information screens visually consistent so every feature does not invent its own placeholder.
+/// Keeps low-information screens visually consistent so every feature does not invent its own
+/// placeholder.
+///
+/// A thin skin over `ContentUnavailableView`, which is the system's own empty state: it wraps its
+/// message instead of demanding one long line (the hand-built stack this replaced forced the
+/// inspector wider than its own pane and was then clipped), and it follows the platform's spacing
+/// and text styles for free.
 struct EmptyStateView: View {
     let glyph: String
     let title: String
@@ -23,27 +29,15 @@ struct EmptyStateView: View {
     }
 
     var body: some View {
-        VStack(spacing: Metrics.gutter) {
-            Image(systemName: glyph)
-                .font(Typo.title)
-                .imageScale(.large)
-                .foregroundStyle(Palette.textTertiary)
-
-            Text(title)
-                .font(Typo.title)
-                .foregroundStyle(Palette.textPrimary)
-
+        ContentUnavailableView {
+            Label(title, systemImage: glyph)
+        } description: {
             Text(message)
-                .font(Typo.label)
-                .foregroundStyle(Palette.textSecondary)
-                .multilineTextAlignment(.center)
-
+        } actions: {
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

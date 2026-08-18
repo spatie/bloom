@@ -101,7 +101,6 @@ struct AgentsSettingsView: View {
 
                 Text(stateTitle(status.connection))
                     .font(Typo.bodyEmphasis)
-                    .foregroundStyle(Palette.textPrimary)
 
                 if let version = status.version {
                     Chip(text: version, monospaced: true)
@@ -189,10 +188,11 @@ struct AgentsSettingsView: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
 
+                        // Two peer actions on one row, so they are the same kind of button. One
+                        // of them used to be a link, which read as a different sort of thing.
                         Button("Open") { Reveal.inEditor(path) }
 
                         Button("Reveal in Finder") { Reveal.inFinder(path) }
-                            .buttonStyle(.link)
                     }
                 }
             }
@@ -350,14 +350,14 @@ struct AgentsSettingsView: View {
     }
 }
 
-/// The status dot, sized to sit on a text baseline rather than to be noticed on its own.
+/// The status dot, the same mark and the same size as the one beside a running workspace.
 private struct StateDot: View {
     let connection: AgentStatus.Connection
 
     var body: some View {
         Circle()
             .fill(tint)
-            .frame(width: 8, height: 8)
+            .frame(width: Metrics.dot, height: Metrics.dot)
             .accessibilityHidden(true)
     }
 

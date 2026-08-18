@@ -8,14 +8,13 @@ import BatonCore
 struct ChecksView: View {
     let model: WorkspaceModel
 
-    /// The rollup dot. Small enough to read as punctuation next to the summary line.
-    private static let dotSize: CGFloat = 6
     /// How often GitHub is asked again while the tab is on screen.
     private static let pollInterval = Duration.seconds(20)
 
     @State private var runs: [CheckRun] = []
     @State private var groups: [CheckRunGroup] = []
     @State private var hasLoaded = false
+    @State private var hovered: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -37,15 +36,26 @@ struct ChecksView: View {
                 ForEach(groups) { group in
                     Section {
                         ForEach(group.runs) { run in
-                            CheckRunRow(run: run)
+                            row(run)
                         }
                     } header: {
                         header(group)
                     }
                 }
             }
-            .padding(.bottom, InspectorLayout.tight * 2)
+            .padding(.bottom, Metrics.spacingSmall)
         }
+    }
+
+    private func row(_ run: CheckRun) -> some View {
+        CheckRunRow(run: run)
+            // Nothing here is selectable, but a row that opens a browser has to say so on hover,
+            // which is what the rest of the inspector's lists do.
+            .rowBackground(isSelected: false, isHovered: hovered == run.id)
+            .padding(.horizontal, Metrics.spacingSmall)
+            .onHoverChange { hovering in
+                hovered = hovering ? run.id : (hovered == run.id ? nil : hovered)
+            }
     }
 
     // MARK: - Header
@@ -55,12 +65,13 @@ struct ChecksView: View {
         return HStack(spacing: InspectorLayout.gap) {
             Circle()
                 .fill(color(for: rollup.0))
-                .frame(width: Self.dotSize, height: Self.dotSize)
+                .frame(width: Metrics.dot, height: Metrics.dot)
                 .accessibilityHidden(true)
             Text(runs.isEmpty && !hasLoaded ? "Loading checks" : rollup.1)
-                .font(Typo.label)
+                .font(Typo.body)
                 .foregroundStyle(Palette.textSecondary)
                 .lineLimit(1)
+                .truncationMode(.tail)
             Spacer(minLength: 0)
             Text("\(runs.count)")
                 .font(Typo.micro)
@@ -87,7 +98,7 @@ struct ChecksView: View {
     }
 
     private func header(_ group: CheckRunGroup) -> some View {
-        HStack(spacing: InspectorLayout.tight * 2) {
+        HStack(spacing: Metrics.spacingSmall) {
             Text(group.workflow)
                 .font(Typo.micro)
                 .lineLimit(1)
@@ -98,7 +109,7 @@ struct ChecksView: View {
         }
         .foregroundStyle(Palette.textTertiary)
         .padding(.horizontal, InspectorLayout.inset)
-        .padding(.vertical, InspectorLayout.tight * 2)
+        .padding(.vertical, Metrics.spacingSmall)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.surfaceSunken)
     }

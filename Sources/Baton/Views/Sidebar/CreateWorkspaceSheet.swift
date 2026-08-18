@@ -24,6 +24,11 @@ struct CreateWorkspaceSheet: View {
 
     @FocusState private var promptFocused: Bool
 
+    /// Wide enough for two branch pickers side by side without the sheet reading as a window.
+    private static let width: CGFloat = 560
+    private static let headerHeight: CGFloat = 38
+    private static let footerHeight: CGFloat = 46
+
     private var repo: Repo? { app.repos.first { $0.id == repoID } }
 
     private var trimmedPrompt: String {
@@ -46,7 +51,7 @@ struct CreateWorkspaceSheet: View {
             Hairline()
             buttons
         }
-        .frame(width: 560)
+        .frame(width: Self.width)
         .background(Palette.surface)
         .task { await load() }
         .onChange(of: repoID) { _, _ in
@@ -57,7 +62,7 @@ struct CreateWorkspaceSheet: View {
     // MARK: - Pieces
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Metrics.spacingWide) {
             Image(systemName: "plus.rectangle.on.folder")
                 .font(Typo.bodyEmphasis)
                 .foregroundStyle(Palette.accent)
@@ -67,19 +72,17 @@ struct CreateWorkspaceSheet: View {
             Spacer(minLength: 0)
             if isLoading {
                 ProgressView()
-                    .progressViewStyle(.circular)
                     .controlSize(.small)
-                    .scaleEffect(0.6)
                     .accessibilityLabel("Loading branches")
             }
         }
         .padding(.horizontal, Metrics.gutter)
-        .frame(height: 38)
+        .frame(height: Self.headerHeight)
     }
 
     private var form: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: Metrics.gutter) {
+            HStack(spacing: Metrics.gutter) {
                 Picker("Project", selection: $repoID) {
                     ForEach(app.repos) { candidate in
                         Text(candidate.name).tag(Optional(candidate.id))
@@ -97,7 +100,7 @@ struct CreateWorkspaceSheet: View {
             }
             .font(Typo.body)
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
                 Text("What should the agent do?")
                     .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
@@ -105,24 +108,23 @@ struct CreateWorkspaceSheet: View {
                 // A vertical `TextField` rather than a `TextEditor`: it takes a placeholder, it
                 // grows with the user's text size instead of clipping inside a pinned 150pt box,
                 // and it is still a multi-line field.
+                //
+                // `.roundedBorder` rather than a plain field inside a stroked rectangle we draw
+                // ourselves: the bezel and, more importantly, the focus ring are then the system's,
+                // so the field shows focus the way every other text field on the Mac does and
+                // follows increased contrast and the accent colour without being told.
                 TextField(
                     "Fix the flaky upload test, and say why it was flaky",
                     text: $prompt,
                     axis: .vertical
                 )
-                    .textFieldStyle(.plain)
+                    .textFieldStyle(.roundedBorder)
                     .font(Typo.body)
                     .lineLimit(6...12)
-                    .padding(6)
-                    .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: Metrics.corner)
-                            .stroke(promptFocused ? Palette.accent.opacity(0.6) : Palette.border, lineWidth: Metrics.hairline)
-                    }
                     .focused($promptFocused)
             }
 
-            HStack(spacing: 6) {
+            HStack(spacing: Metrics.spacing) {
                 Text("Branch")
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textTertiary)
@@ -137,22 +139,18 @@ struct CreateWorkspaceSheet: View {
     }
 
     private var noProjects: some View {
-        VStack(spacing: 8) {
-            Text("No projects yet")
-                .font(Typo.bodyEmphasis)
-                .foregroundStyle(Palette.textPrimary)
+        ContentUnavailableView {
+            Label("No projects yet", systemImage: "folder.badge.plus")
+        } description: {
             Text("Add a git repository before starting a workspace.")
-                .font(Typo.label)
-                .foregroundStyle(Palette.textSecondary)
+        } actions: {
             Button("Add a Folder", action: addProject)
                 .buttonStyle(.borderedProminent)
         }
-        .frame(maxWidth: .infinity)
-        .padding(28)
     }
 
     private var buttons: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Metrics.spacingWide) {
             Spacer(minLength: 0)
             Button("Cancel", role: .cancel) { dismiss() }
                 .keyboardShortcut(.cancelAction)
@@ -162,7 +160,7 @@ struct CreateWorkspaceSheet: View {
                 .disabled(!canCreate)
         }
         .padding(.horizontal, Metrics.gutter)
-        .frame(height: 46)
+        .frame(height: Self.footerHeight)
     }
 
     // MARK: - Derived

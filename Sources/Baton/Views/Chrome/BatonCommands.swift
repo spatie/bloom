@@ -54,9 +54,9 @@ struct BatonCommands: Commands {
 
         CommandGroup(after: .sidebar) {
             Button("Toggle Sidebar") {
-                // RootView lays the three panes out by hand, so there is no split view controller
-                // in the responder chain to answer `toggleSidebar(_:)`. RootView owns the flag and
-                // already listens for this.
+                // `NavigationSplitView` owns the sidebar's visibility through the binding RootView
+                // holds, not through `toggleSidebar(_:)` on the responder chain, so this goes to
+                // RootView rather than to first responder.
                 NotificationCenter.default.post(name: .batonToggleSidebar, object: nil)
             }
             .keyboardShortcut("s", modifiers: [.command, .control])

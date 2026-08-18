@@ -11,17 +11,16 @@ import BatonCore
 struct WindowTitleLabel: View {
     @Environment(AppModel.self) private var app
 
-    /// The one measurement here that no semantic constant covers: a colour swatch small enough to
-    /// read as a marker rather than a control.
-    private static let accentDot: CGFloat = 8
-
     var body: some View {
         if let workspace = app.selectedWorkspace {
-            HStack(spacing: 6) {
+            HStack(spacing: Metrics.spacing) {
                 if let repo = app.repo(for: workspace) {
-                    Circle()
+                    // The same mark, at the same size, as the one in front of the project in the
+                    // sidebar and in a search result. It was a circle here and a rounded square
+                    // there, which read as two different things.
+                    RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                         .fill(Color(hexString: repo.accent))
-                        .frame(width: Self.accentDot, height: Self.accentDot)
+                        .frame(width: Metrics.swatch, height: Metrics.swatch)
                         .accessibilityHidden(true)
                     Text(repo.name)
                         .font(Typo.label)

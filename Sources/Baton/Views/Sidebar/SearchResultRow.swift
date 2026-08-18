@@ -11,28 +11,28 @@ struct SearchResultRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                RoundedRectangle(cornerRadius: 3)
+            HStack(spacing: Metrics.spacingWide) {
+                RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                     .fill(hit.repo.map { Color(hexString: $0.accent) } ?? Palette.textTertiary)
-                    .frame(width: 9, height: 9)
+                    .frame(width: Metrics.swatch, height: Metrics.swatch)
                     .accessibilityHidden(true)
 
                 Text(hit.repo?.name ?? "Unknown project")
-                    .font(Typo.label)
-                    .foregroundStyle(Palette.textTertiary)
+                    .font(Typo.body)
+                    .foregroundStyle(.tertiary)
                     .lineLimit(1)
+                    .layoutPriority(-1)
 
                 Image(systemName: "chevron.right")
                     .font(Typo.micro)
-                    .foregroundStyle(Palette.textTertiary)
+                    .foregroundStyle(.tertiary)
                     .accessibilityHidden(true)
 
                 Text(hit.workspace.name)
                     .font(Typo.bodyEmphasis)
-                    .foregroundStyle(Palette.textPrimary)
                     .lineLimit(1)
 
-                Spacer(minLength: 8)
+                Spacer(minLength: Metrics.spacingWide)
 
                 Chip(
                     text: hit.workspace.branch,
@@ -48,8 +48,8 @@ struct SearchResultRow: View {
                     )
                 }
             }
-            .padding(.horizontal, 10)
-            .frame(height: 32)
+            .padding(.horizontal, Metrics.inset)
+            .frame(height: Metrics.rowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -29,16 +29,21 @@ struct WorkspaceRow: View {
     @Binding var renaming: String?
 
     @Environment(AppModel.self) private var app
+    /// Selection only paints the accent colour while the window is active. Anything that inverts
+    /// has to follow that, or a background window shows white marks on a grey bar.
+    @Environment(\.controlActiveState) private var activeState
 
     @State private var draft = ""
     @FocusState private var fieldFocused: Bool
 
     private var isRenaming: Bool { renaming == workspace.id }
 
+    private var isEmphasized: Bool { isSelected && activeState != .inactive }
+
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Metrics.spacing) {
             glyph
-                .frame(width: Self.glyphSize, height: Self.glyphSize)
+                .frame(width: Metrics.glyph, height: Metrics.glyph)
                 // The glyph is the row's whole state in one mark, so VoiceOver has to be told
                 // what it means rather than being handed an unlabelled image.
                 .accessibilityLabel(glyphState.description)
@@ -62,7 +67,7 @@ struct WorkspaceRow: View {
                     .truncationMode(.tail)
             }
 
-            Spacer(minLength: 4)
+            Spacer(minLength: Metrics.spacingSmall)
 
             if !isRenaming {
                 if workspace.pinned {
@@ -81,11 +86,10 @@ struct WorkspaceRow: View {
             }
         }
         .contentShape(Rectangle())
+        // The list inverts the row's text for us, but a label that carries its own colour, such as
+        // the green plus count, has to be told. This is the same signal the inspector's lists send.
+        .environment(\.isOnEmphasizedSelection, isEmphasized)
     }
-
-    /// Matches the cap height of the surrounding text, so the glyphs line up down the column
-    /// whichever state each row happens to be in.
-    private static let glyphSize: CGFloat = 13
 
     // MARK: - Glyph
 
@@ -124,17 +128,17 @@ struct WorkspaceRow: View {
                 .progressViewStyle(.circular)
                 .controlSize(.mini)
         case .running:
-            ActivityDot(isActive: true, tint: isSelected ? Palette.textInverted : Palette.running)
+            ActivityDot(isActive: true, tint: isEmphasized ? Palette.textInverted : Palette.running)
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(Typo.caption)
-                .foregroundStyle(Palette.warning)
+                .foregroundStyle(isEmphasized ? Palette.textInverted : Palette.warning)
         case .unread:
             // The unread marker is the accent colour, which is also the selection fill, so on a
             // selected row it has to borrow the row's own foreground to stay visible at all.
             Image(systemName: "circle.fill")
                 .font(Typo.micro)
-                .foregroundStyle(isSelected ? Color.primary : Palette.accent)
+                .foregroundStyle(isEmphasized ? Palette.textInverted : Palette.accent)
         case .idle:
             Image(systemName: "arrow.triangle.branch")
                 .font(Typo.caption)

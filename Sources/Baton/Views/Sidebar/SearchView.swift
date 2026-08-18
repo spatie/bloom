@@ -19,7 +19,7 @@ struct SearchView: View {
         @Bindable var app = app
 
         return VStack(spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: Metrics.spacingWide) {
                 Image(systemName: "magnifyingglass")
                     .font(Typo.bodyEmphasis)
                     .foregroundStyle(Palette.textTertiary)
@@ -35,12 +35,13 @@ struct SearchView: View {
                     Button("Clear the search", systemImage: "xmark.circle.fill", action: clear)
                         .labelStyle(.iconOnly)
                         .font(Typo.body)
-                        .foregroundStyle(Palette.textTertiary)
+                        .foregroundStyle(.tertiary)
                         .buttonStyle(.plain)
+                        .help("Clear the search")
                 }
             }
-            .padding(.horizontal, 16)
-            .frame(height: 46)
+            .padding(.horizontal, Self.fieldInset)
+            .frame(height: Self.fieldHeight)
 
             Hairline()
 
@@ -53,12 +54,24 @@ struct SearchView: View {
         .onChange(of: app.workspaces) { _, _ in match() }
     }
 
+    /// A search field is the one thing on this screen, so it is given the room a window's search
+    /// field gets rather than the height of a list row.
+    private static let fieldHeight: CGFloat = 46
+    private static let fieldInset: CGFloat = 16
+    /// A search result reads as a line, so the column is capped rather than run out to the width
+    /// of the window.
+    private static let resultWidth: CGFloat = 760
+
     @ViewBuilder
     private var results: some View {
         if app.searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
-            placeholder("Type to search", "Names, branches and project names are all matched.")
+            ContentUnavailableView(
+                "Type to search",
+                systemImage: "magnifyingglass",
+                description: Text("Names, branches and project names are all matched.")
+            )
         } else if hits.isEmpty {
-            placeholder("Nothing found", "No workspace matches \"\(app.searchQuery)\".")
+            ContentUnavailableView.search(text: app.searchQuery)
         } else {
             ScrollView {
                 LazyVStack(spacing: 2) {
@@ -73,25 +86,11 @@ struct SearchView: View {
                         }
                     }
                 }
-                .padding(10)
-                .frame(maxWidth: 760)
+                .padding(Metrics.inset)
+                .frame(maxWidth: Self.resultWidth)
                 .frame(maxWidth: .infinity, alignment: .center)
             }
         }
-    }
-
-    private func placeholder(_ title: String, _ detail: String) -> some View {
-        VStack(spacing: 6) {
-            Text(title)
-                .font(Typo.title)
-                .foregroundStyle(Palette.textSecondary)
-            Text(detail)
-                .font(Typo.body)
-                .foregroundStyle(Palette.textTertiary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(40)
     }
 
     // MARK: - Actions

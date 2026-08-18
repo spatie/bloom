@@ -31,13 +31,17 @@ struct PullRequestSummary: View {
                 Chip(text: "Draft")
             }
 
+            // The one thing in the strip that can be any length, so it is the one that gives way
+            // rather than pushing the merge button off the edge of a narrow pane.
             Text(statusText)
                 .font(Typo.caption)
                 .foregroundStyle(statusColor)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .layoutPriority(-1)
+                .help(statusText)
 
-            Spacer(minLength: InspectorLayout.tight * 2)
+            Spacer(minLength: Metrics.spacingSmall)
 
             if isWorking {
                 ProgressView()

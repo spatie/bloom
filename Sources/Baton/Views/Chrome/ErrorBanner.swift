@@ -11,12 +11,16 @@ struct ErrorBanner: View {
         if isVisible {
             HStack(alignment: .top, spacing: Metrics.gutter) {
                 Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Palette.negative)
+                    .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: Metrics.cornerSmall) {
+                VStack(alignment: .leading, spacing: Metrics.spacingTight) {
                     Text(title)
                         .font(Typo.labelEmphasis)
                     Text(message)
                         .font(Typo.label)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer(minLength: Metrics.gutter)
@@ -25,11 +29,15 @@ struct ErrorBanner: View {
                     isVisible = false
                 }
                 .labelStyle(.iconOnly)
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("Dismiss")
             }
-            .foregroundStyle(Palette.negative)
             .padding(Metrics.gutter)
-            .background(Palette.hover, in: RoundedRectangle(cornerRadius: Metrics.corner))
+            .background(
+                Palette.negative.opacity(0.12),
+                in: RoundedRectangle(cornerRadius: Metrics.corner)
+            )
         }
     }
 }

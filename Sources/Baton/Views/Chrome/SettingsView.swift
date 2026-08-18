@@ -15,6 +15,11 @@ private enum AppearancePreference {
 
 /// Collects global and repository preferences in one window so configuration stays discoverable.
 struct SettingsView: View {
+    /// Enough for the widest form row without the window feeling like a second main window. Its
+    /// own numbers, rather than the sidebar and inspector widths that happened to add up to
+    /// something plausible.
+    private static let minSize = CGSize(width: 640, height: 420)
+
     /// Which tab is showing. An enum rather than an index, so the value says what it selects.
     @State private var tab: SettingsTab = .general
 
@@ -48,10 +53,7 @@ struct SettingsView: View {
                 AboutSettingsView()
             }
         }
-        .frame(
-            minWidth: Metrics.sidebarWidth + Metrics.inspectorWidth,
-            minHeight: Metrics.inspectorWidth
-        )
+        .frame(minWidth: Self.minSize.width, minHeight: Self.minSize.height)
         .background(Palette.windowBackground)
         // RootView is the single presenter for `app.alert`. Binding it here too gave one alert
         // two presenters, and the loser leaves an empty dialog shell on screen.
@@ -104,6 +106,9 @@ private struct ProjectSettingsView: View {
         app.repos.first { $0.id == selectedRepoID }
     }
 
+    /// Enough rows to scan a project list without the form below it disappearing.
+    private static let listHeight: CGFloat = 260
+
     var body: some View {
         Form {
             Section("Projects") {
@@ -120,7 +125,7 @@ private struct ProjectSettingsView: View {
                         }
                     }
                 }
-                .frame(minHeight: Metrics.sidebarWidth)
+                .frame(minHeight: Self.listHeight)
 
                 HStack {
                     Button("Add Project", systemImage: "plus", action: addProjectFolder)
@@ -199,9 +204,8 @@ private struct ProjectRow: View {
         HStack(spacing: Metrics.gutter) {
             ColorPicker("Accent", selection: accentBinding, supportsOpacity: false)
                 .labelsHidden()
-                .frame(width: Metrics.rowHeight)
 
-            VStack(alignment: .leading, spacing: Metrics.cornerSmall) {
+            VStack(alignment: .leading, spacing: Metrics.spacingTight) {
                 TextField("Project name", text: $name)
                     .textFieldStyle(.plain)
                     .font(Typo.bodyEmphasis)
@@ -332,7 +336,7 @@ private struct ScriptValue: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(Metrics.cornerSmall)
+            .padding(Metrics.spacingSmall)
             .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
         }
     }

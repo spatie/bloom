@@ -5,8 +5,11 @@ import SwiftUI
 /// The glyph is the densest thing in the window, and a legend is cheaper than making every state
 /// self-explanatory at 13 points. Shown from the status bar's help button as a popover.
 struct SidebarLegend: View {
+    /// Wide enough for the longest explanation on one line, narrow enough to read as a legend.
+    private static let width: CGFloat = 220
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Metrics.spacingWide) {
             Text("Workspace states")
                 .font(Typo.captionEmphasis)
                 .foregroundStyle(Palette.textSecondary)
@@ -24,8 +27,8 @@ struct SidebarLegend: View {
                 Image(systemName: "arrow.triangle.branch").font(Typo.caption)
             }
         }
-        .padding(12)
-        .frame(width: 220)
+        .padding(Metrics.gutter)
+        .frame(width: Self.width)
     }
 
     private func row<Glyph: View>(
@@ -33,10 +36,10 @@ struct SidebarLegend: View {
         _ text: String,
         @ViewBuilder glyph: () -> Glyph
     ) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Metrics.spacingWide) {
             glyph()
                 .foregroundStyle(tint)
-                .frame(width: 13, height: 13)
+                .frame(width: Metrics.glyph, height: Metrics.glyph)
                 // The glyph is the thing being explained, so the explanation beside it is the
                 // whole accessible content of the row.
                 .accessibilityHidden(true)

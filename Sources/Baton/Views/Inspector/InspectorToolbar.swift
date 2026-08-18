@@ -7,7 +7,12 @@ import BatonCore
 ///
 /// A real segmented control rather than three hand drawn buttons. It is the AppKit control for
 /// exactly this choice, so it gets the right metrics, the right selection colour and the right
-/// behaviour when the window goes inactive, at every width, for free.
+/// behaviour when the window goes inactive, for free.
+///
+/// It is only the right control while all three segments fit. Dragged down to the pane's minimum
+/// width there is no room for them, and a segmented control does not truncate: it overflows and is
+/// clipped by the split view, which is how the tab row ended up cut off at both ends. `ViewThatFits`
+/// falls back to a pop-up button, which is what AppKit uses for the same choice in a narrow place.
 struct InspectorToolbar: View {
     @Bindable var model: WorkspaceModel
     @Binding var isReviewing: Bool
@@ -18,12 +23,10 @@ struct InspectorToolbar: View {
 
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {
-            Picker("Inspector view", selection: $model.inspectorTab) {
-                ForEach(InspectorTab.allCases, id: \.self) { tab in
-                    Text(title(for: tab)).tag(tab)
-                }
+            ViewThatFits(in: .horizontal) {
+                tabPicker.pickerStyle(.segmented)
+                tabPicker.pickerStyle(.menu).fixedSize()
             }
-            .pickerStyle(.segmented)
             .labelsHidden()
             .controlSize(.small)
 
@@ -61,7 +64,7 @@ struct InspectorToolbar: View {
                     Button("Open pull request") { GitHubBridge.open(pullRequest.url) }
                 }
             } label: {
-                Label("More for this worktree", systemImage: "ellipsis")
+                Label("More for this worktree", systemImage: "ellipsis.circle")
             }
             .labelStyle(.iconOnly)
             .menuStyle(.borderlessButton)
@@ -72,6 +75,14 @@ struct InspectorToolbar: View {
         }
         .padding(.horizontal, InspectorLayout.gap)
         .frame(height: InspectorLayout.barHeight)
+    }
+
+    private var tabPicker: some View {
+        Picker("Inspector view", selection: $model.inspectorTab) {
+            ForEach(InspectorTab.allCases, id: \.self) { tab in
+                Text(title(for: tab)).tag(tab)
+            }
+        }
     }
 
     private func title(for tab: InspectorTab) -> String {

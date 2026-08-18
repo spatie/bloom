@@ -96,12 +96,11 @@ private struct SettingLabel: View {
     let subtitle: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.cornerSmall / 2) {
+        VStack(alignment: .leading, spacing: Metrics.spacingTight) {
             Text(title)
-                .foregroundStyle(Palette.textPrimary)
             Text(subtitle)
                 .font(Typo.caption)
-                .foregroundStyle(Palette.textSecondary)
+                .foregroundStyle(.secondary)
         }
     }
 }

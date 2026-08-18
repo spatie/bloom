@@ -31,10 +31,12 @@ struct InspectorReviewPane: View {
                     .help("Next file")
 
                 Text(file.filename)
-                    .font(Typo.labelEmphasis)
+                    .font(Typo.bodyEmphasis)
                     .foregroundStyle(Palette.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .layoutPriority(-1)
+                    .help(file.path)
 
                 Spacer(minLength: InspectorLayout.tight)
 

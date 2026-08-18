@@ -54,7 +54,7 @@ struct ChangedFileList: View {
                     }
                 }
             }
-            .padding(.bottom, InspectorLayout.tight * 2)
+            .padding(.bottom, Metrics.spacingSmall)
         }
     }
 
@@ -83,7 +83,7 @@ struct ChangedFileList: View {
     }
 
     private func header(_ directory: String) -> some View {
-        HStack(spacing: InspectorLayout.tight * 2) {
+        HStack(spacing: Metrics.spacingSmall) {
             Image(systemName: "folder")
                 .font(Typo.micro)
                 .imageScale(.small)
@@ -96,7 +96,7 @@ struct ChangedFileList: View {
         }
         .foregroundStyle(Palette.textTertiary)
         .padding(.horizontal, InspectorLayout.inset)
-        .padding(.vertical, InspectorLayout.tight * 2)
+        .padding(.vertical, Metrics.spacingSmall)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.surfaceSunken)
     }
@@ -107,11 +107,14 @@ struct ChangedFileList: View {
         return ChangedFileRow(
             file: file,
             isSelected: isSelected,
-            isHovered: hoveredPath == file.path,
             fullPath: fullPath(of: file),
             onSelect: { model.selectedFilePath = isSelected ? nil : file.path },
             onRevert: { pendingRevert = file }
         )
+        // The fill is applied here rather than inside the row so that the row's own body can read
+        // the selection out of the environment and invert its status letter accordingly.
+        .rowBackground(isSelected: isSelected, isHovered: hoveredPath == file.path)
+        .padding(.horizontal, Metrics.spacingSmall)
         .onHoverChange { hovering in
             hoveredPath = hovering ? file.path : (hoveredPath == file.path ? nil : hoveredPath)
         }
