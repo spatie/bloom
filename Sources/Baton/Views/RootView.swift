@@ -17,6 +17,9 @@ struct RootView: View {
     @Environment(AppModel.self) private var app
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    /// Survives relaunch, because an inspector that forgets how wide you made it is worse than
+    /// one that cannot be resized at all.
+    @AppStorage("inspector.width") private var inspectorWidth: Double = Metrics.inspectorWidth
     @State private var isCreateSheetPresented = false
     @State private var createTargetRepo: Repo?
 
@@ -29,27 +32,29 @@ struct RootView: View {
                 min: 200, ideal: Metrics.sidebarWidth, max: 420
             )
         } detail: {
-            // An `HSplitView` rather than `.inspector()`.
+            // An `HStack` and our own divider, rather than `.inspector()` or `HSplitView`.
             //
             // `.inspector` cannot be used in this window. With it presented, the window is marked
             // as needing another Update Constraints pass on every pass, and AppKit throws "more
             // Update Constraints in Window passes than there are views in the window" within a
             // second of launch. Reproduced with the real inspector, with a bare `Text` inside it,
             // attached to the split view and attached to the detail column, and clean every time
-            // the inspector is simply not presented. `HSplitView` is the AppKit split view, so the
-            // divider stays native and draggable, and it does not go near the toolbar.
-            HSplitView {
+            // the inspector is simply not presented.
+            //
+            // `HSplitView` was the next attempt and it did not crash, but it is an AppKit split
+            // view that draws its divider down its whole bounds while the SwiftUI content inside
+            // each pane respects the safe area. Under a unified toolbar that put a hard rule
+            // through the title. A divider we lay out ourselves sits in the same safe area as the
+            // panes, so it starts below the toolbar where a pane boundary belongs.
+            HStack(spacing: 0) {
                 DetailColumn()
                     .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
 
                 if app.isInspectorVisible {
+                    InspectorDivider(width: $inspectorWidth)
                     InspectorPane(model: app.selectedModel)
-                        .frame(
-                            minWidth: 280,
-                            idealWidth: Metrics.inspectorWidth,
-                            maxWidth: 760,
-                            maxHeight: .infinity
-                        )
+                        .frame(width: inspectorWidth)
+                        .frame(maxHeight: .infinity)
                 }
             }
                 // The toolbar belongs to the detail column, not to the split view. Attached to
