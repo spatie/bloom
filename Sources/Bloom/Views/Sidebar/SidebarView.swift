@@ -39,6 +39,14 @@ struct SidebarView: View {
                 navRow(.search, title: "Search", icon: "magnifyingglass")
             }
 
+            // A plain row rather than a `Section` header, because the things it heads are
+            // themselves sections and a list cannot nest one inside another. It carries no tag
+            // and refuses selection, so it stays a label. Home and Search keep their own section
+            // above it, which is what stops them reading as the first two projects.
+            SidebarProjectsHeader(onAddProject: addProject)
+                .selectionDisabled()
+                .listRowSeparator(.hidden)
+
             ForEach(groups) { group in
                 RepoSection(
                     repo: group.repo,

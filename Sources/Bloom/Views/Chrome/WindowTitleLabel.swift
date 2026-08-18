@@ -29,13 +29,11 @@ struct WindowTitleLabel: View {
         if let workspace = app.selectedWorkspace {
             HStack(spacing: Metrics.spacing) {
                 if let repo = app.repo(for: workspace) {
-                    // The same mark, at the same size, as the one in front of the project in the
-                    // sidebar and in a search result. It was a circle here and a rounded square
-                    // there, which read as two different things.
-                    RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                        .fill(Color(hexString: repo.accent))
-                        .frame(width: Metrics.swatch, height: Metrics.swatch)
-                        .accessibilityHidden(true)
+                    // The same mark as the one in front of the project in the sidebar and in a
+                    // search result. It was a circle here and a rounded square there, which read
+                    // as two different things. The inline size, because the label beside it is a
+                    // toolbar label rather than a heading.
+                    RepoIcon(repo: repo, size: Metrics.repoIconSmall)
                     Text(repo.name)
                         .font(Typo.labelEmphasis)
                         .foregroundStyle(Palette.textPrimary)

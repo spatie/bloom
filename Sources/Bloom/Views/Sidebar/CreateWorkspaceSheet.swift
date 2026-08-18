@@ -109,6 +109,11 @@ struct CreateWorkspaceSheet: View {
     /// own popup, so nothing in the sheet lined up with anything else.
     private var form: some View {
         Form {
+            // No `RepoIcon` here, though every other place a project is named now carries one.
+            // A picker on macOS is an `NSPopUpButton`, and an `NSMenuItem` draws a title and an
+            // `NSImage`: a `Label` whose icon is a SwiftUI view has the icon dropped, verified in
+            // isolation rather than assumed. Rendering the tile to a bitmap to get it in would be
+            // a second drawing of a mark this change exists to have exactly one of.
             Picker("Project", selection: $repoID) {
                 ForEach(app.repos) { candidate in
                     Text(candidate.name).tag(Optional(candidate.id))

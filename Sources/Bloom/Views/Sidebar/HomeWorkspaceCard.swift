@@ -110,9 +110,7 @@ struct HomeWorkspaceCard: View {
             if let repo = entry.repo {
                 Spacer(minLength: Metrics.spacingSmall)
                 HStack(spacing: Metrics.spacingSmall) {
-                    RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                        .fill(Color(hexString: repo.accent))
-                        .frame(width: Metrics.swatch, height: Metrics.swatch)
+                    RepoIcon(repo: repo, size: Metrics.repoIconSmall)
                     Text(repo.name)
                         .font(Typo.caption)
                         .foregroundStyle(Palette.textSecondary)

@@ -226,9 +226,13 @@ enum Metrics {
 
     // MARK: Marks
 
-    /// The project colour marker, in the sidebar, in search results and in the toolbar title.
-    /// Small enough to read as a marker rather than as a control.
-    static let swatch: CGFloat = 9
+    /// The project's mark: `RepoIcon`, in the sidebar header, on Home, in search results and in
+    /// the toolbar title. It was a 9 point dot, which is the size of a bullet and could only ever
+    /// carry a colour; at source list icon size it carries the project's initials as well.
+    static let repoIcon: CGFloat = 16
+    /// The same mark set inline in a line of caption text, where the full size outweighs the
+    /// words beside it.
+    static let repoIconSmall: CGFloat = 13
     /// The box a sidebar row's state glyph sits in, matching the cap height of the text beside
     /// it so the glyphs line up down the column whichever state each row is in.
     static let glyph: CGFloat = 13

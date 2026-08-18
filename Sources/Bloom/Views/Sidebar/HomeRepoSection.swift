@@ -27,10 +27,7 @@ struct HomeRepoSection: View {
 
     private var heading: some View {
         HStack(spacing: Metrics.spacing) {
-            RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                .fill(Color(hexString: project.repo.accent))
-                .frame(width: Metrics.swatch, height: Metrics.swatch)
-                .accessibilityHidden(true)
+            RepoIcon(repo: project.repo)
 
             Text(project.repo.name)
                 .font(Typo.title)

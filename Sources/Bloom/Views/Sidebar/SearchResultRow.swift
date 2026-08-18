@@ -17,10 +17,7 @@ struct SearchResultRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: Metrics.spacingWide) {
-                RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                    .fill(hit.repo.map { Color(hexString: $0.accent) } ?? Palette.textTertiary)
-                    .frame(width: Metrics.swatch, height: Metrics.swatch)
-                    .accessibilityHidden(true)
+                RepoIcon(repo: hit.repo)
 
                 VStack(alignment: .leading, spacing: Metrics.spacingTight) {
                     Text(hit.workspace.name)
