@@ -58,15 +58,15 @@ struct BloomCommands: Commands {
         // owns it for splitting shells, and one keystroke that splits two different things
         // depending on where the pointer last was is worse than two that each mean one thing.
         CommandGroup(after: .sidebar) {
-            Button("Split Right") { splitCentre(.horizontal) }
+            Button("Split Right", systemImage: PaneSymbol.splitRight) { splitCentre(.horizontal) }
                 .keyboardShortcut("\\", modifiers: .command)
                 .disabled(model.selectedModel == nil)
 
-            Button("Split Down") { splitCentre(.vertical) }
+            Button("Split Down", systemImage: PaneSymbol.splitDown) { splitCentre(.vertical) }
                 .keyboardShortcut("\\", modifiers: [.command, .shift])
                 .disabled(model.selectedModel == nil)
 
-            Button("Close Pane") { closeCentrePane() }
+            Button("Close Pane", systemImage: PaneSymbol.closePane) { closeCentrePane() }
                 .keyboardShortcut("w", modifiers: [.command, .control])
                 .disabled(model.selectedModel == nil)
 

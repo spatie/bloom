@@ -22,18 +22,20 @@ enum TerminalPaneMenu {
         let menu = OwningMenu(target: target)
 
         menu.addItem(item(
-            "Split Right", key: "d", modifiers: .command,
+            "Split Right", symbol: PaneSymbol.splitRight, key: "d", modifiers: .command,
             command: .split(.horizontal), target: target
         ))
         menu.addItem(item(
-            "Split Down", key: "d", modifiers: [.command, .shift],
+            "Split Down", symbol: PaneSymbol.splitDown, key: "d", modifiers: [.command, .shift],
             command: .split(.vertical), target: target
         ))
 
         menu.addItem(.separator())
 
         menu.addItem(item(
-            isZoomed ? "Zoom Out" : "Zoom Pane", key: "\r", modifiers: [.command, .shift],
+            isZoomed ? "Zoom Out" : "Zoom Pane",
+            symbol: isZoomed ? PaneSymbol.zoomOut : PaneSymbol.zoomIn,
+            key: "\r", modifiers: [.command, .shift],
             command: .toggleZoom, target: target
         ))
 
@@ -41,7 +43,10 @@ enum TerminalPaneMenu {
 
         // Closing the only pane closes the tab, which is a different and larger action than the
         // one this item names, so it is offered only when it really does close a pane.
-        let close = item("Close Pane", key: "w", modifiers: .command, command: .close, target: target)
+        let close = item(
+            "Close Pane", symbol: PaneSymbol.closePane, key: "w", modifiers: .command,
+            command: .close, target: target
+        )
         close.isEnabled = canClose
         menu.addItem(close)
 
@@ -50,6 +55,7 @@ enum TerminalPaneMenu {
 
     private static func item(
         _ title: String,
+        symbol: String,
         key: String,
         modifiers: NSEvent.ModifierFlags,
         command: TerminalPaneCommand,
@@ -57,6 +63,10 @@ enum TerminalPaneMenu {
     ) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: #selector(ActionTarget.fire(_:)), keyEquivalent: key)
         item.keyEquivalentModifierMask = modifiers
+        // `NSMenuItem` has no `Label`, so the glyph is set as the item's own image. It carries the
+        // title as its accessibility description because VoiceOver reads the image before the
+        // title, and an unnamed one is announced as "image".
+        item.image = PaneSymbol.image(symbol, label: title)
         item.target = target
         item.representedObject = Box(command)
         return item

@@ -40,6 +40,15 @@ struct ComposerTextEditor: NSViewRepresentable {
     static var font: NSFont { NSFont.preferredFont(forTextStyle: .body) }
     static var lineHeight: CGFloat { NSLayoutManager().defaultLineHeight(for: font) }
 
+    /// How far the writing starts from the sides of the box.
+    ///
+    /// Five points, which is what `NSTextContainer` gives every native field through
+    /// `lineFragmentPadding`, and what a caret sitting hard against a border looks wrong without.
+    /// The padding is taken here rather than there so that one number covers the text view and the
+    /// SwiftUI placeholder drawn behind it: they are two views showing what reads as one line, and
+    /// a point of drift between them makes the hint jump as the first character is typed.
+    static let textInset: CGFloat = 5
+
     /// Rounded to a whole point for the same reason `ScaledFont` rounds, and built from the body
     /// style so an unscaled composer in the system face is byte for byte the font it was before.
     static func font(scale: CGFloat, face: ChatFont) -> NSFont {
@@ -60,8 +69,9 @@ struct ComposerTextEditor: NSViewRepresentable {
         storage.addLayoutManager(layout)
         let container = NSTextContainer(size: CGSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
         container.widthTracksTextView = true
-        // The default five points would inset the typed text but not the SwiftUI placeholder that
-        // sits behind it, so the hint and the first character the user types did not line up.
+        // Padding is taken as a container inset instead, because `lineFragmentPadding` insets the
+        // typed text without insetting the SwiftUI placeholder that sits behind it, and the hint
+        // and the first character the user types have to land on the same column.
         container.lineFragmentPadding = 0
         layout.addTextContainer(container)
 
@@ -94,7 +104,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         textView.isAutomaticTextReplacementEnabled = false
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
-        textView.textContainerInset = .zero
+        textView.textContainerInset = CGSize(width: Self.textInset, height: 0)
         textView.autoresizingMask = [.width]
         textView.minSize = CGSize(width: 0, height: 0)
         textView.maxSize = CGSize(

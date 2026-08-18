@@ -119,11 +119,11 @@ struct CenterTabView: View {
         .accessibilityAction(named: "Select", onSelect)
         .accessibilityAction(named: "Rename", onStartRename)
         .contextMenu {
-            Button("Open in Split Right", action: onSplitRight)
-            Button("Open in Split Down", action: onSplitDown)
+            Button("Open in Split Right", systemImage: PaneSymbol.splitRight, action: onSplitRight)
+            Button("Open in Split Down", systemImage: PaneSymbol.splitDown, action: onSplitDown)
             Divider()
-            Button("Rename", action: onStartRename)
-            Button("Close", action: onClose)
+            Button("Rename", systemImage: PaneSymbol.rename, action: onStartRename)
+            Button("Close", systemImage: PaneSymbol.closeTab, action: onClose)
                 .disabled(!canClose)
         }
         .task(id: isRenaming) { await startEditing() }

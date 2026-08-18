@@ -45,7 +45,12 @@ struct DiffLineView: View {
                 number(line?.newNumber)
             }
         }
-        .background(Palette.diffGutter)
+        // The row's own tint, not a gutter colour of its own. A grey column against the white the
+        // code sits on put a hard vertical edge down the left of every diff, and a hard edge is
+        // read as a boundary between two things rather than as the margin of one. Sharing the
+        // ground leaves the numbers to be told apart by being dimmed and monospaced, which is what
+        // separates a ruler from content anyway.
+        .background(background)
     }
 
     /// Right aligned, dimmed and monospaced, so a column of numbers reads as a ruler rather than
