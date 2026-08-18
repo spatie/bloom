@@ -6,6 +6,9 @@ import BloomCore
 struct ComposerFooterView: View {
     var session: Session
     var editor: ComposerSessionEditor
+    /// Nil until the session has run a turn, because that is the first moment the agent says
+    /// anything about the window. Absent rather than zero: a gauge reading 0% would be a claim.
+    var context: ContextWindowUsage?
     var isRunning: Bool
     var isFastMode: Bool
     var canSend: Bool
@@ -48,6 +51,12 @@ struct ComposerFooterView: View {
             fastToggle
 
             Spacer(minLength: Metrics.spacing)
+
+            // On the far side of the spacer, away from the pickers. It is a reading rather than
+            // something to choose, and among the three menus it read as a fourth one.
+            if let context {
+                ComposerContextGauge(usage: context)
+            }
 
             // A paperclip, not the plus that used to sit here: a plus already means "new session"
             // in the tab strip directly above, and it says nothing about what is being added.

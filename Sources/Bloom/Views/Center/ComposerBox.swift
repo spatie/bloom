@@ -16,8 +16,12 @@ struct ComposerBox: ViewModifier {
         content
             .padding(Metrics.gutter)
             .background {
+                // Sunken rather than raised. `surfaceRaised` resolves to the same white as the
+                // transcript above it, so the box read as a hairline drawn on nothing rather than
+                // as somewhere to write. `surfaceSunken` is a step away from the content ground in
+                // both appearances, which is the whole of what makes a field look like a field.
                 RoundedRectangle(cornerRadius: Metrics.corner)
-                    .fill(Palette.surfaceRaised)
+                    .fill(Palette.surfaceSunken)
                     .onTapGesture { isFocused = true }
                     .accessibilityHidden(true)
             }

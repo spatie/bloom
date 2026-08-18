@@ -95,11 +95,13 @@ struct CenterPaneView: View {
 
     @ViewBuilder
     private var menu: some View {
-        Button("Split Right") { split(.horizontal) }
-        Button("Split Down") { split(.vertical) }
+        Button("Split Right", systemImage: PaneSymbol.splitRight) { split(.horizontal) }
+        Button("Split Down", systemImage: PaneSymbol.splitDown) { split(.vertical) }
         if isSplit {
             Divider()
-            Button("Close Pane") { _ = panes.close(pane: pane, in: model.workspace.id) }
+            Button("Close Pane", systemImage: PaneSymbol.closePane) {
+                _ = panes.close(pane: pane, in: model.workspace.id)
+            }
         }
     }
 

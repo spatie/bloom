@@ -26,6 +26,9 @@ struct ComposerEditor: View {
                 Text(Self.placeholder)
                     .font(Typo.body)
                     .foregroundStyle(Palette.textPlaceholder)
+                    // The text view's own container inset, so the hint and the first character
+                    // typed over it start on the same column.
+                    .padding(.horizontal, ComposerTextEditor.textInset)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }

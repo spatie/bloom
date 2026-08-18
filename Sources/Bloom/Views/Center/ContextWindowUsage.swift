@@ -1,0 +1,94 @@
+import Foundation
+import BloomCore
+
+/// How full the model's context window is, and everything the protocol will say about it.
+///
+/// Two numbers, from two different lines of the stream, because Claude Code reports them nowhere
+/// together.
+///
+/// **The limit** comes from `result.modelUsage.<model>.contextWindow`, which only appears on the
+/// line that closes a turn.
+///
+/// **What is in the window** comes from the last `assistant` event, whose `usage` describes the one
+/// API call that produced it: `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`
+/// is exactly what the model was handed. The `usage` on the `result` line cannot be used for this.
+/// It is the SUM over every API call the turn made, so a turn with ten tool calls reports roughly
+/// ten times the context it actually had, and the fuller the window the worse it reads.
+///
+/// There is no breakdown. The protocol never says how much of the window is the system prompt, or
+/// skills, or memory files, or MCP tool definitions, so this deliberately carries a total and
+/// nothing that would have to be guessed at.
+struct ContextWindowUsage: Equatable {
+    /// Tokens the model had in front of it on the last call.
+    var used: Int
+    /// The size of the window, as the model reported it.
+    var limit: Int
+
+    var fraction: Double {
+        limit > 0 ? min(1, Double(used) / Double(limit)) : 0
+    }
+
+    var remaining: Int { max(0, limit - used) }
+
+    /// The most recent reading a transcript holds, or nil when the session has not run a turn yet
+    /// and so has never been told either number.
+    ///
+    /// Walked backwards and stopped as soon as both numbers are in hand, because the answer is
+    /// almost always in the last few rows and this is read on every composer render.
+    ///
+    /// Rows from inside a subagent are skipped: the Agent tool runs its own conversation with its
+    /// own window, and its usage says nothing about the one the composer is about to add to.
+    @MainActor
+    static func latest(in rows: [TranscriptRow]) -> Self? {
+        var used = 0
+        var limit = 0
+
+        for row in rows.reversed() {
+            guard row.parentToolUseID == nil else { continue }
+            switch row.kind {
+            case .result where limit == 0:
+                if case .result(let result)? = event(of: row) {
+                    limit = result.usage.contextTokens
+                }
+            case .assistantText, .thinking:
+                guard used == 0 else { continue }
+                switch event(of: row) {
+                case .assistantText(let block)?, .thinking(let block)?:
+                    used = block.usage.contextUsedTokens
+                default:
+                    break
+                }
+            default:
+                continue
+            }
+            if used > 0, limit > 0 { break }
+        }
+
+        guard used > 0, limit > 0 else { return nil }
+        return Self(used: used, limit: limit)
+    }
+
+    @MainActor
+    private static func event(of row: TranscriptRow) -> AgentEvent? {
+        TranscriptEventCache.event(rowID: row.id, payload: row.payload)
+    }
+
+    /// `174.0k`, `1.0M`, `820`. The shape Claude Code's own status line uses, so a number read here
+    /// and a number read there are the same number.
+    static func format(_ tokens: Int) -> String {
+        switch tokens {
+        case 1_000_000...:
+            "\((Double(tokens) / 1_000_000).formatted(.number.precision(.fractionLength(1))))M"
+        case 1_000...:
+            "\((Double(tokens) / 1_000).formatted(.number.precision(.fractionLength(1))))k"
+        default:
+            "\(tokens)"
+        }
+    }
+
+    /// Rounded to whole points. A gauge that reads 6.3% claims a precision the numbers behind it
+    /// do not have, since the next turn's prompt is not in them yet.
+    static func percent(_ fraction: Double) -> String {
+        (fraction).formatted(.percent.precision(.fractionLength(0)))
+    }
+}

@@ -52,7 +52,7 @@ enum Snapshot {
     /// bitmap goes through the real AppKit rendering path, so materials, toolbars and lists all
     /// come out as the user sees them, and it needs no screen recording permission.
     ///
-    ///     Bloom --snapshot-window /tmp/shots/window.png [--window-size 900x700]
+    ///     Bloom --snapshot-window /tmp/shots/window.png [--window-size 900x700] [--appearance dark]
     /// Opens a `bloom://` URL in THIS process, a few seconds after launch.
     ///
     /// `open bloom://...` from a shell goes through LaunchServices, which picks whichever copy of
@@ -98,10 +98,28 @@ enum Snapshot {
         return arguments[index + 1]
     }
 
+    /// Which appearance to capture in, from `--appearance light|dark`.
+    ///
+    /// Nothing else forces one. The app follows the system unless the Settings window has been
+    /// opened, so without this a capture run can only ever show whichever appearance the machine
+    /// happens to be in, and half of every colour change goes unverified.
+    private static var requestedAppearance: NSAppearance? {
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: "--appearance"), index + 1 < arguments.count
+        else { return nil }
+
+        return switch arguments[index + 1] {
+        case "light": NSAppearance(named: .aqua)
+        case "dark": NSAppearance(named: .darkAqua)
+        default: nil
+        }
+    }
+
     /// Waits for the window to exist and settle, captures it, then exits.
     static func scheduleWindowCapture() {
         Task { @MainActor in
             let path = windowCapturePath
+            if let appearance = requestedAppearance { NSApp.appearance = appearance }
             // Long enough for the first layout pass and any `.task` that populates the sidebar.
             try? await Task.sleep(for: .seconds(3))
 

@@ -83,6 +83,7 @@ struct ComposerView: View {
             ComposerFooterView(
                 session: transcript.session,
                 editor: sessionEditor,
+                context: ContextWindowUsage.latest(in: transcript.rows),
                 isRunning: transcript.isRunning,
                 isFastMode: isFastMode,
                 canSend: hasBody,
