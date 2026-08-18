@@ -1,5 +1,5 @@
 #!/usr/bin/env swift
-// Draws Baton's app icon and writes Resources/AppIcon.icns.
+// Draws Bloom's app icon and writes Resources/AppIcon.icns.
 //
 // Kept as source rather than a checked-in binary blob so the icon can be adjusted by editing
 // numbers here and re-running:  swift Resources/make-icon.swift

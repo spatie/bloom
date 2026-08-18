@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Builds Baton and assembles a launchable .app bundle.
+# Builds Bloom and assembles a launchable .app bundle.
 #
 #   ./build.sh            debug build
 #   ./build.sh -r         release build
@@ -18,25 +18,32 @@ for arg in "$@"; do
 done
 
 echo "==> swift build -c $CONFIG"
-swift build -c "$CONFIG" --product Baton
+swift build -c "$CONFIG" --product Bloom
 
 BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
-APP="$BIN_DIR/Baton.app"
+APP="$BIN_DIR/Bloom.app"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-cp "$BIN_DIR/Baton" "$APP/Contents/MacOS/Baton"
+cp "$BIN_DIR/Bloom" "$APP/Contents/MacOS/Bloom"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 [[ -f Resources/AppIcon.icns ]] && cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+
+# The About pane reads these out of the bundle by name. PDFs rather than bitmaps, because AppKit
+# redraws a PDF as vector art at whatever scale the display asks for. The .svg beside each one is
+# the source it was generated from and is not needed at runtime.
+for logo in Resources/Spatie*.pdf(N); do
+  cp "$logo" "$APP/Contents/Resources/"
+done
 
 # SwiftTerm and friends ship as dylibs in a debug build; carry them along.
 for lib in "$BIN_DIR"/*.dylib(N); do
   cp "$lib" "$APP/Contents/MacOS/"
 done
 
-if [[ -d "$BIN_DIR/Baton_Baton.bundle" ]]; then
-  cp -R "$BIN_DIR/Baton_Baton.bundle" "$APP/Contents/Resources/"
+if [[ -d "$BIN_DIR/Bloom_Bloom.bundle" ]]; then
+  cp -R "$BIN_DIR/Bloom_Bloom.bundle" "$APP/Contents/Resources/"
 fi
 
 # App Intents. Shortcuts and Spotlight do not read the binary: they read a Metadata.appintents
@@ -47,7 +54,7 @@ fi
 # The extraction is its own typecheck pass rather than a flag on `swift build`, because
 # -emit-const-values-path names ONE file and is only honoured by a whole-module frontend job: on a
 # debug build it is silently dropped, and passing it to `swift build` would hand the same path to
-# SwiftTerm and BatonCore as well. A separate pass over the app target alone costs a few seconds
+# SwiftTerm and BloomCore as well. A separate pass over the app target alone costs a few seconds
 # and answers about exactly the module that owns the intents.
 emit_app_intents_metadata() {
   local toolchain processor sdk deployment triple sources constvalues protocols
@@ -65,19 +72,19 @@ emit_app_intents_metadata() {
   sdk="$(xcrun --sdk macosx --show-sdk-path)"
   deployment="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Resources/Info.plist)"
   triple="$(uname -m)-apple-macos$deployment"
-  sources="$BIN_DIR/Baton.appintents.sources"
-  constvalues="$BIN_DIR/Baton.swiftconstvalues"
+  sources="$BIN_DIR/Bloom.appintents.sources"
+  constvalues="$BIN_DIR/Bloom.swiftconstvalues"
 
-  find Sources/Baton -name '*.swift' > "$sources"
+  find Sources/Bloom -name '*.swift' > "$sources"
 
   # The frontend wants a bare array of protocol names. The file Xcode ships wraps the same list in
   # an object, which it rejects as malformed.
-  local protocolList="$BIN_DIR/Baton.appintents.protocols.json"
+  local protocolList="$BIN_DIR/Bloom.appintents.protocols.json"
   /usr/bin/python3 -c "import json,sys; json.dump(json.load(open(sys.argv[1]))['constValueProtocols'], open(sys.argv[2],'w'))" \
     "$protocols" "$protocolList"
 
   swiftc -typecheck -wmo \
-    -module-name Baton \
+    -module-name Bloom \
     -swift-version 6 \
     -target "$triple" \
     -sdk "$sdk" \
@@ -86,19 +93,19 @@ emit_app_intents_metadata() {
     -Xfrontend -const-gather-protocols-file -Xfrontend "$protocolList" \
     "@$sources"
 
-  echo "$constvalues" > "$BIN_DIR/Baton.appintents.constvalues"
+  echo "$constvalues" > "$BIN_DIR/Bloom.appintents.constvalues"
 
   "$processor" \
     --output "$APP/Contents/Resources" \
     --toolchain-dir "$toolchain" \
-    --module-name Baton \
+    --module-name Bloom \
     --sdk-root "$sdk" \
     --xcode-version "$(xcodebuild -version 2>/dev/null | tail -1 | awk '{print $3}')" \
     --platform-family macOS \
     --deployment-target "$deployment" \
     --target-triple "$triple" \
     --source-file-list "$sources" \
-    --swift-const-vals-list "$BIN_DIR/Baton.appintents.constvalues" \
+    --swift-const-vals-list "$BIN_DIR/Bloom.appintents.constvalues" \
     --force >/dev/null
 }
 
@@ -112,12 +119,15 @@ emit_app_intents_metadata
 # is the only thing that fixes it, and there is no honest default for one, so it is named by the
 # environment.
 #
-#   BATON_CODESIGN_IDENTITY="Apple Development: You (TEAMID)" ./build.sh
-SIGN_IDENTITY="${BATON_CODESIGN_IDENTITY:--}"
+#   BLOOM_CODESIGN_IDENTITY="Apple Development: You (TEAMID)" ./build.sh
+#
+# The pre-rename spelling is still read, so a shell profile or CI job that exports
+# BATON_CODESIGN_IDENTITY keeps producing a signed build rather than silently dropping to ad-hoc.
+SIGN_IDENTITY="${BLOOM_CODESIGN_IDENTITY:-${BATON_CODESIGN_IDENTITY:--}}"
 codesign --force --deep --sign "$SIGN_IDENTITY" "$APP" >/dev/null 2>&1 || true
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
   echo "==> ad-hoc signed: App Intents will be listed in Shortcuts but will not run."
-  echo "    Set BATON_CODESIGN_IDENTITY to a real identity to make them runnable."
+  echo "    Set BLOOM_CODESIGN_IDENTITY to a real identity to make them runnable."
 fi
 
 echo "==> $APP"

@@ -1,15 +1,15 @@
-# Baton
+# Bloom
 
 A native macOS app for running Claude Code agents in parallel, each in its own git worktree.
 
 It is a rebuild of [Conductor](https://conductor.build) in Swift, so it can be changed to taste.
-Conductor itself is a Tauri app: Rust with a WebKit view. Baton is SwiftUI with one dependency
+Conductor itself is a Tauri app: Rust with a WebKit view. Bloom is SwiftUI with one dependency
 (SwiftTerm, for the embedded terminal) and everything else on the system frameworks.
 
 ## What it does
 
 - Add a git repository as a project.
-- Describe a task. Baton creates a branch, a worktree under `~/baton/workspaces`, copies your
+- Describe a task. Bloom creates a branch, a worktree under `~/bloom/workspaces`, copies your
   `.env` files, runs your setup script, and starts an agent in it.
 - Watch the agent work in a dense transcript: one line per tool call, expandable.
 - See what changed, as a syntax-highlighted diff against the merge base.
@@ -29,7 +29,7 @@ Conductor itself is a Tauri app: Rust with a WebKit view. Baton is SwiftUI with 
 ./build.sh --release --run
 ```
 
-That produces `.build/release/Baton.app` and launches it. Without `--release` you get a debug
+That produces `.build/release/Bloom.app` and launches it. Without `--release` you get a debug
 build, which is what you want while changing things.
 
 Run the core test suite, which does not need the app target to compile:
@@ -44,24 +44,24 @@ turn with tool use, session resume across two runner instances, and cancellation
 tokens, so they are opt-in:
 
 ```sh
-BATON_LIVE=1 ./test-core.sh LiveAgent
+BLOOM_LIVE=1 ./test-core.sh LiveAgent
 ```
 
 ## It reads your existing Conductor config
 
-Baton reads `.conductor/settings.toml` from a repository as-is, so a project already set up for
+Bloom reads `.conductor/settings.toml` from a repository as-is, so a project already set up for
 Conductor works with no changes. It layers settings files in this order, later winning:
 
 ```
 ~/.conductor/settings.toml
-~/.baton/settings.toml
+~/.bloom/settings.toml
 <repo>/.conductor/settings.toml
-<repo>/.baton/settings.toml
+<repo>/.bloom/settings.toml
 <repo>/.conductor/settings.local.toml
-<repo>/.baton/settings.local.toml
+<repo>/.bloom/settings.local.toml
 ```
 
-Setup and run scripts get both `CONDUCTOR_*` and `BATON_*` environment variables, with the same
+Setup and run scripts get both `CONDUCTOR_*` and `BLOOM_*` environment variables, with the same
 meanings, so a script written for Conductor runs unchanged:
 
 | Variable | Meaning |
@@ -81,7 +81,7 @@ of named scripts with a `command`), `scripts.run_mode`, `files_to_copy`, `git.br
 ## Deep links
 
 ```sh
-open "baton://prompt=<urlencoded>&path=<urlencoded repo root>"
+open "bloom://prompt=<urlencoded>&path=<urlencoded repo root>"
 ```
 
 Same shape as Conductor's, so existing scripts keep working.
@@ -89,7 +89,7 @@ Same shape as Conductor's, so existing scripts keep working.
 ## How it is put together
 
 ```
-Sources/BatonCore/     No SwiftUI. Everything testable lives here.
+Sources/BloomCore/     No SwiftUI. Everything testable lives here.
   Shell.swift            Every subprocess goes through here
   StreamingProcess.swift Long-lived process with a live stdout and an open stdin
   SQLite.swift           Thin wrapper over the system sqlite3
@@ -104,7 +104,7 @@ Sources/BatonCore/     No SwiftUI. Everything testable lives here.
   DiffParser.swift       Unified diffs into something renderable
   SyntaxHighlighter.swift Per-line lexers, no dependency, no regex
 
-Sources/Baton/         SwiftUI.
+Sources/Bloom/         SwiftUI.
   Design/Theme.swift     Every colour, font and metric, defined once
   State/                 AppModel, WorkspaceModel, TranscriptModel
   Views/                 Sidebar, Center, Transcript, Inspector, Terminal, Markdown, Chrome

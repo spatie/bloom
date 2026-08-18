@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>Baton</string>
+	<string>Bloom</string>
 	<key>CFBundleDisplayName</key>
-	<string>Baton</string>
+	<string>Bloom</string>
 	<key>CFBundleIdentifier</key>
-	<string>be.spatie.baton</string>
+	<string>be.spatie.bloom</string>
 	<key>CFBundleExecutable</key>
-	<string>Baton</string>
+	<string>Bloom</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -34,12 +34,12 @@
 			<key>NSMenuItem</key>
 			<dict>
 				<key>default</key>
-				<string>New Baton Workspace</string>
+				<string>New Bloom Workspace</string>
 			</dict>
 			<key>NSMessage</key>
 			<string>createWorkspaceFromSelection</string>
 			<key>NSPortName</key>
-			<string>Baton</string>
+			<string>Bloom</string>
 			<key>NSSendTypes</key>
 			<array>
 				<string>NSStringPboardType</string>
@@ -51,10 +51,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>be.spatie.baton.deeplink</string>
+			<string>be.spatie.bloom.deeplink</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>baton</string>
+				<string>bloom</string>
 			</array>
 		</dict>
 	</array>

@@ -5,7 +5,7 @@ Ground truth, captured from `claude` on this machine on 2026-08-18. A real captu
 result). Hook payloads in that file were trimmed because they were enormous, nothing else was
 touched.
 
-## How Baton invokes it
+## How Bloom invokes it
 
 ```
 claude
@@ -37,7 +37,7 @@ Every line has `type`. Every line except a few carries `uuid` and `session_id`.
 
 ### `system` / `init`
 
-First line of the session. Carries the fields Baton needs to bind a session:
+First line of the session. Carries the fields Bloom needs to bind a session:
 
 ```json
 {"type":"system","subtype":"init","session_id":"f93932c9-...","cwd":"/path",
@@ -151,7 +151,7 @@ Occasional. Carries rate limit state. Surface it quietly, never as an error.
 
 1. **Never fail the stream on an unknown event.** New `type` and `subtype` values ship
    regularly. Decode what is recognised, keep the raw JSON for everything else, carry on.
-2. **Keep the raw line.** Baton stores the original JSON for every row so a renderer added later
+2. **Keep the raw line.** Bloom stores the original JSON for every row so a renderer added later
    can show detail that was not decoded at the time.
 3. Lines can be very large (a hook response, a big tool result). No length assumptions.
 4. A malformed line is possible if the CLI crashes mid-write. Skip it, do not abort.

@@ -2,31 +2,31 @@
 import PackageDescription
 
 let package = Package(
-    name: "Baton",
+    name: "Bloom",
     platforms: [.macOS(.v15)],
     products: [
-        .executable(name: "Baton", targets: ["Baton"]),
-        .library(name: "BatonCore", targets: ["BatonCore"]),
+        .executable(name: "Bloom", targets: ["Bloom"]),
+        .library(name: "BloomCore", targets: ["BloomCore"]),
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.2.0"),
     ],
     targets: [
         .target(
-            name: "BatonCore",
+            name: "BloomCore",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
-            name: "Baton",
+            name: "Bloom",
             dependencies: [
-                "BatonCore",
+                "BloomCore",
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
             ],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
-            name: "BatonCoreTests",
-            dependencies: ["BatonCore"],
+            name: "BloomCoreTests",
+            dependencies: ["BloomCore"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]

@@ -6,7 +6,7 @@ guessed. Anything not listed here should be treated as unknown rather than inven
 ## Security rule
 
 `~/.claude.json` and `~/.codex/auth.json` contain live credentials: OAuth access tokens, refresh
-tokens and possibly an API key. Baton reads them ONLY to show non-secret, derived facts (email,
+tokens and possibly an API key. Bloom reads them ONLY to show non-secret, derived facts (email,
 organisation, plan, auth method, expiry). A token must never be rendered in the UI, written to a
 log, put on the pasteboard, or included in an error message. When a field is missing, say
 "unknown", never fall back to printing raw file contents.
@@ -38,7 +38,7 @@ An `ANTHROPIC_API_KEY` in the environment means API key auth instead, and takes 
 what is displayed. Config file to offer for opening: `~/.claude/settings.json` (a symlink into
 the user's dotfiles here, so resolve symlinks before revealing it).
 
-Login command: `claude /login`. Baton cannot run that inline because it is interactive, so the
+Login command: `claude /login`. Bloom cannot run that inline because it is interactive, so the
 button must open it in a terminal, the way `Reveal.inTerminal(_:)` already does.
 
 ## Codex
@@ -67,7 +67,7 @@ is real evidence, otherwise show that the CLI was found and leave the account bl
 config directory is `~/.cursor` (exists here, holds `hooks.json`). OpenCode's is `~/.opencode`
 (absent here).
 
-## What Baton can actually run
+## What Bloom can actually run
 
 Only Claude Code. The stream-json protocol in `PROTOCOL.md` is the Claude Code one, and
 `AgentRunner` speaks it. Codex, Cursor and OpenCode are detected and configurable, and a
