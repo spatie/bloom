@@ -76,7 +76,7 @@ struct SettingsView: View {
 /// Keeps operating-system behavior and safety choices separate from agent configuration.
 private struct GeneralSettingsView: View {
     @AppStorage("confirmBeforeArchiving") private var confirmBeforeArchiving = true
-    @AppStorage(MenuBarStatusItem.settingKey) private var showsMenuBarStatus = false
+    @AppStorage(MenuBarStatusItem.settingKey) private var showsMenuBarStatus = MenuBarStatusItem.isOnByDefault
 
     var body: some View {
         Form {
@@ -89,6 +89,8 @@ private struct GeneralSettingsView: View {
                 Text("Show agent status in the menu bar")
                 Text("Which agents are running and which are waiting for you, without raising the window.")
             }
+
+            SleepSettingsSection()
 
             LabeledContent("New workspaces") {
                 HStack(spacing: Metrics.gutter) {
