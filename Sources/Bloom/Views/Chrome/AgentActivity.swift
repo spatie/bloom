@@ -1,10 +1,11 @@
 import AppKit
 import Foundation
+import BloomCore
 
-/// What the rest of macOS is told while agents are working: the App Nap assertion and the dock
-/// badge.
+/// What the rest of macOS is told about the agents: the App Nap assertion while they are working,
+/// and the dock badge once they have stopped.
 ///
-/// Both answer the same question, so they are held by one object rather than two that could
+/// Both come from the same place, so they are held by one object rather than two that could
 /// disagree. A singleton because there is one process and one dock tile.
 @MainActor
 final class AgentActivity {
@@ -21,15 +22,21 @@ final class AgentActivity {
     /// idle afternoon.
     private var assertion: (any NSObjectProtocol)?
 
-    private var count = 0
+    private var runningCount = 0
+    private var unreadCount = 0
+    private var isBadgeEnabled = true
 
     private init() {}
 
     /// How many agents are mid turn. Idempotent, so the reporter can call it on every change
     /// without checking whether anything moved.
+    ///
+    /// This no longer touches the badge. A running agent is not news: the user started it, and it
+    /// is on screen in the sidebar. What is news is the one that finished while they were in
+    /// another app, which is what `setUnreadCount` counts.
     func setRunningCount(_ newCount: Int) {
-        guard newCount != count else { return }
-        count = newCount
+        guard newCount != runningCount else { return }
+        runningCount = newCount
 
         if newCount > 0, assertion == nil {
             assertion = ProcessInfo.processInfo.beginActivity(
@@ -40,10 +47,28 @@ final class AgentActivity {
             ProcessInfo.processInfo.endActivity(held)
             assertion = nil
         }
+    }
 
-        // Nil, never "0". An empty badge is a red dot on the dock icon saying nothing happened,
-        // which is worse than no badge at all.
-        NSApp?.dockTile.badgeLabel = newCount > 0 ? "\(newCount)" : nil
+    /// How many workspaces finished something nobody has read. See `DockBadge`.
+    func setUnreadCount(_ newCount: Int) {
+        guard newCount != unreadCount else { return }
+        unreadCount = newCount
+        applyBadge()
+    }
+
+    /// Whether the user wants a badge at all. Applied immediately in both directions: turning it
+    /// off takes the badge away now rather than at the next change, and turning it back on puts
+    /// the current count back rather than waiting for one.
+    func setBadgeEnabled(_ isEnabled: Bool) {
+        guard isEnabled != isBadgeEnabled else { return }
+        isBadgeEnabled = isEnabled
+        applyBadge()
+    }
+
+    private func applyBadge() {
+        NSApp?.dockTile.badgeLabel = DockBadge.label(
+            unread: unreadCount, isEnabled: isBadgeEnabled
+        )
     }
 
     /// Whether the assertion is currently held. Reachable so the behaviour can be asserted on from

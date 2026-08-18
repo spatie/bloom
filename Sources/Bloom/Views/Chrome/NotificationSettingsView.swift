@@ -13,6 +13,8 @@ import BloomCore
 /// with its own state a tab of its own, which is what Models, Agents, Prompts and Tools are.
 struct NotificationSettingsView: View {
     @AppStorage(NotificationPreferences.enabledKey) private var isEnabled = false
+    /// Default on, and matched by `AgentActivityReporter`, which is what actually applies it.
+    @AppStorage(DockBadge.settingKey) private var badgesUnread = true
 
     /// The singleton rather than an `@Environment` value: there is one Notification Center, the
     /// app delegate already talks to the same instance, and a second one would answer a different
@@ -41,6 +43,18 @@ struct NotificationSettingsView: View {
                 }
             }
             .disabled(!isEnabled)
+
+            // Outside the master switch, and outside the "tell me when" list, because the badge
+            // is not a notification: it needs no permission, macOS cannot revoke it, and it says
+            // nothing while Bloom is in front of you. It belongs on this pane all the same, since
+            // this is the pane about being told things.
+            Section {
+                Toggle("Badge the Dock icon with unread agent results", isOn: $badgesUnread)
+            } footer: {
+                Text("The number is how many workspaces an agent has finished in and nobody has read yet. It clears as you read them, and there is no badge when there is nothing waiting.")
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textSecondary)
+            }
 
             Section {
                 Button("Send a Test Notification", action: service.sendTestNotification)
