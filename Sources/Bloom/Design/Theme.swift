@@ -292,6 +292,21 @@ extension Color {
         let cleaned = hexString.hasPrefix("#") ? String(hexString.dropFirst()) : hexString
         self.init(nsColor: NSColor(rgb: UInt32(cleaned, radix: 16) ?? 0x4C8DF6))
     }
+
+    /// The way back, for a colour the user picked in a colour well.
+    ///
+    /// Lives here rather than in whichever feature view happens to need it, because the two
+    /// directions have to agree about the colour space and about upper case, and they can only be
+    /// held to that if they can be read together. Two feature views had a copy each.
+    var hexString: String? {
+        guard let color = NSColor(self).usingColorSpace(.sRGB) else { return nil }
+        return [color.redComponent, color.greenComponent, color.blueComponent]
+            .map { component in
+                let byte = String(Int((component * 255).rounded()), radix: 16, uppercase: true)
+                return byte.count == 1 ? "0" + byte : byte
+            }
+            .joined()
+    }
 }
 
 /// Type scale, built on the system text styles so it follows the user's text size rather than

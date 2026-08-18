@@ -488,16 +488,3 @@ private struct SpatieCredit: View {
         .padding(.vertical, Metrics.spacingSmall)
     }
 }
-
-private extension Color {
-    /// Converts an editable SwiftUI colour back to the repository's portable storage format.
-    var hexString: String? {
-        guard let color = NSColor(self).usingColorSpace(.sRGB) else { return nil }
-        return [color.redComponent, color.greenComponent, color.blueComponent]
-            .map { component in
-                let byte = String(Int((component * 255).rounded()), radix: 16, uppercase: true)
-                return byte.count == 1 ? "0" + byte : byte
-            }
-            .joined()
-    }
-}

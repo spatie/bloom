@@ -106,6 +106,8 @@ struct RepoSection: View {
             // gets a pointer near it, which is the whole of Full Keyboard Access and VoiceOver.
             // At the old size it was a hairline glyph that hover had to rescue; now hover only
             // has to say which project the click would land in.
+            RepoSettingsButton(repo: repo, isHighlighted: isHeaderHovered)
+
             Button {
                 onCreateWorkspace(repo)
             } label: {

@@ -149,7 +149,7 @@ struct RepoSettingsView: View {
         Binding(
             get: { Color(hexString: repo.accent) },
             set: { color in
-                guard let hex = Self.hex(color), hex != repo.accent else { return }
+                guard let hex = color.hexString, hex != repo.accent else { return }
                 Task {
                     guard let store = app.store else { return }
                     _ = try? await store.upsert(repo.with { $0.accent = hex })
@@ -157,21 +157,6 @@ struct RepoSettingsView: View {
                 }
             }
         )
-    }
-
-    /// The repository's portable storage format for a colour.
-    ///
-    /// A second copy of the same six lines that the Projects tab keeps to itself. `Color(hexString:)`
-    /// is in `Theme.swift` and the way back is not, so this belongs next to it rather than in two
-    /// feature views. Left here only because Design is another agent's file this week.
-    static func hex(_ color: Color) -> String? {
-        guard let converted = NSColor(color).usingColorSpace(.sRGB) else { return nil }
-        return [converted.redComponent, converted.greenComponent, converted.blueComponent]
-            .map { component in
-                let byte = String(Int((component * 255).rounded()), radix: 16, uppercase: true)
-                return byte.count == 1 ? "0" + byte : byte
-            }
-            .joined()
     }
 
     private func saveName() {
