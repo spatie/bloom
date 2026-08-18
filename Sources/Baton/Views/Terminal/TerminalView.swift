@@ -48,13 +48,25 @@ final class BatonTerminalView: LocalProcessTerminalView {
 
     private let processObserver = TerminalProcessObserver()
 
-    /// Kept separate from `font` so Cmd+Plus and Cmd+Minus have something to step.
-    private var fontSize: CGFloat = BatonTerminalView.defaultFontSize {
-        didSet { font = Self.monospacedFont(size: fontSize) }
+    /// Whether the user's Ghostty configuration is in charge of the font and the colours. Owned by
+    /// SwiftUI through `@AppStorage`, so flipping the switch in Settings reaches every live shell.
+    var usesGhosttyTheme = true {
+        didSet {
+            guard usesGhosttyTheme != oldValue else { return }
+            applyFont()
+            applyAppearanceColors()
+        }
     }
 
-    private static var defaultFontSize: CGFloat {
-        NSFont.preferredFont(forTextStyle: .callout).pointSize
+    /// Kept separate from `font` so Cmd+Plus and Cmd+Minus have something to step.
+    private var fontSize: CGFloat = NSFont.preferredFont(forTextStyle: .callout).pointSize {
+        didSet { font = terminalFont(size: fontSize) }
+    }
+
+    /// Ghostty's `font-size` when it has one, so a terminal opens at the size the user reads
+    /// everywhere else rather than at Baton's own body size.
+    private var defaultFontSize: CGFloat {
+        ghostty?.fontSize.map { CGFloat($0) } ?? NSFont.preferredFont(forTextStyle: .callout).pointSize
     }
 
     /// One point per press, the way every other terminal steps. This used to be `Metrics.hairline`,
@@ -75,12 +87,20 @@ final class BatonTerminalView: LocalProcessTerminalView {
     private func configure() {
         processObserver.owner = self
         processDelegate = processObserver
-        font = Self.monospacedFont(size: fontSize)
+        applyFont()
         applyAppearanceColors()
     }
 
-    static func monospacedFont(size: CGFloat) -> NSFont {
-        NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    /// Goes through `fontSize` rather than `font` so Cmd+Plus and Cmd+Minus keep stepping from
+    /// the size that is on screen.
+    private func applyFont() {
+        fontSize = defaultFontSize
+    }
+
+    /// Ghostty's `font-family` when there is one and it is installed, the monospaced system font
+    /// otherwise.
+    private func terminalFont(size: CGFloat) -> NSFont {
+        TerminalGhostty.font(family: ghostty?.fontFamily, size: size)
     }
 
     // MARK: - Process
@@ -135,9 +155,49 @@ final class BatonTerminalView: LocalProcessTerminalView {
         applyAppearanceColors()
     }
 
+    /// The user's Ghostty configuration, when they have one and have not turned this off.
+    ///
+    /// Read through `effectiveAppearance` rather than the app's, because a `theme = light:…,dark:…`
+    /// has to follow the window the terminal is actually in.
+    private var ghostty: GhosttyTheme? {
+        usesGhosttyTheme ? TerminalGhostty.theme(for: effectiveAppearance) : nil
+    }
+
     /// SwiftTerm ships a palette that looks nothing like the rest of Baton, so both the sixteen
     /// ANSI slots and the default foreground and background are replaced here.
     func applyAppearanceColors() {
+        if let ghostty {
+            applyGhosttyColors(ghostty)
+        } else {
+            applyBatonColors()
+        }
+        needsDisplay = true
+    }
+
+    /// Whatever Ghostty says, with Ghostty's own defaults behind it. Baton's colours are not
+    /// blended in: a terminal that is half the user's theme and half something else reads as a bug,
+    /// not as a compromise.
+    private func applyGhosttyColors(_ theme: GhosttyTheme) {
+        installColors(theme.ansiColors().map(SwiftTerm.Color.init))
+
+        let foreground = theme.foreground.map(NSColor.init)
+        let background = theme.background.map(NSColor.init)
+        nativeForegroundColor = foreground ?? resolved(Palette.textPrimary).withAlphaComponent(1)
+        nativeBackgroundColor = background ?? resolved(Palette.surfaceSunken)
+        // Ghostty falls back to the foreground for the cursor, and to the system for a selection it
+        // was never told about.
+        caretColor = theme.cursorColor.map(NSColor.init) ?? foreground ?? .textInsertionPointColor
+        if let cursorText = theme.cursorTextColor {
+            caretTextColor = NSColor(cursorText)
+        }
+        selectedTextBackgroundColor = theme.selectionBackground.map(NSColor.init)
+            ?? .selectedTextBackgroundColor
+        if let selectionForeground = theme.selectionForeground {
+            selectedTextForegroundColor = NSColor(selectionForeground)
+        }
+    }
+
+    private func applyBatonColors() {
         installColors(ansiColors.map(swiftTermColor))
         // Flattened to opaque. `labelColor` is 85% ink, and a terminal foreground that is not
         // fully opaque prints every character faintly over the panel behind it.
@@ -147,7 +207,6 @@ final class BatonTerminalView: LocalProcessTerminalView {
         nativeBackgroundColor = resolved(Palette.surfaceSunken)
         caretColor = .textInsertionPointColor
         selectedTextBackgroundColor = .selectedTextBackgroundColor
-        needsDisplay = true
     }
 
     /// The sixteen ANSI slots.
@@ -241,7 +300,7 @@ final class BatonTerminalView: LocalProcessTerminalView {
                 NSFont.preferredFont(forTextStyle: .caption2).pointSize
             )
         case "0":
-            fontSize = Self.defaultFontSize
+            fontSize = defaultFontSize
         default:
             return super.performKeyEquivalent(with: event)
         }
@@ -322,14 +381,20 @@ struct TerminalView: NSViewRepresentable {
     var repo: Repo?
     var port: Int
 
+    /// Read here rather than inside the terminal so SwiftUI reruns `updateNSView` when the switch
+    /// in Settings moves, which is what pushes the change into a shell that is already running.
+    @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
+
     func makeNSView(context: Context) -> TerminalHostView {
         let host = TerminalHostView()
         host.attach(session)
+        session.usesGhosttyTheme = usesGhosttyTheme
         return host
     }
 
     func updateNSView(_ nsView: TerminalHostView, context: Context) {
         nsView.attach(session)
+        session.usesGhosttyTheme = usesGhosttyTheme
     }
 
     @MainActor private var session: BatonTerminalView {

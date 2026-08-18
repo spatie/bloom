@@ -64,6 +64,7 @@ struct SettingsView: View {
 private struct GeneralSettingsView: View {
     @AppStorage("appearance") private var appearance = "system"
     @AppStorage("confirmBeforeArchiving") private var confirmBeforeArchiving = true
+    @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
 
     var body: some View {
         Form {
@@ -75,6 +76,9 @@ private struct GeneralSettingsView: View {
             .pickerStyle(.segmented)
 
             Toggle("Confirm before archiving", isOn: $confirmBeforeArchiving)
+
+            Toggle("Use Ghostty terminal theme", isOn: $usesGhosttyTheme)
+                .help("Reads the font and colours from your Ghostty configuration. Off uses Baton's own palette.")
 
             LabeledContent("Workspaces root") {
                 HStack(spacing: Metrics.gutter) {
