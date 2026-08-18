@@ -227,8 +227,19 @@ enum Palette {
     // red carries further than green at the same alpha. The emphasis pair is roughly double, for
     // the run of characters inside a changed line.
 
-    static let diffAddBackground = positive.opacity(0.13)
-    static let diffAddEmphasis = positive.opacity(0.28)
+    /// Added lines, and only added lines. The window's one green is `positive`, which is the
+    /// accent, and a wash is the one place it cannot be used. At thirteen percent over the deep
+    /// blue ground the ground wins: the result measures `#13333A`, whose dominant channel is
+    /// blue, and on the light ground it comes out at three percent saturation, a neutral grey
+    /// sitting next to a clearly pink deletion. A wash with no chroma cannot carry a meaning.
+    ///
+    /// Teal against red does separate better than green against red under deuteranopia, which is
+    /// a real argument and was weighed. It loses to two things: green for an added line is close
+    /// to universal across git tooling, and this is the diff the owner looked at and approved.
+    static let diffPositive = dynamic(light: 0x28CD41, dark: 0x30D158)
+
+    static let diffAddBackground = diffPositive.opacity(0.13)
+    static let diffAddEmphasis = diffPositive.opacity(0.28)
     static let diffDeleteBackground = negative.opacity(0.14)
     static let diffDeleteEmphasis = negative.opacity(0.30)
     /// The line number column, which is the sunken step and nothing else.
