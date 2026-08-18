@@ -335,7 +335,23 @@ final class WorkspaceModel {
 
     // MARK: - Changes
 
-    func refreshChanges() async {
+    /// Why a refresh of the changed file list was asked for, which is what decides how loud it is
+    /// allowed to be.
+    enum ChangesRefresh {
+        /// The reader did something that changed the worktree, or the pane has just opened.
+        /// Reports progress, and opens the first file when nothing is open.
+        case requested
+        /// The poll that keeps the list honest while an agent writes. It has to be invisible: a
+        /// spinner every six seconds says less than a list one tick out of date, and moving the
+        /// selection would reopen a diff the reader had just closed.
+        case quiet
+    }
+
+    func refreshChanges(_ reason: ChangesRefresh = .requested) async {
+        // A refresh already on its way is about to answer about this same worktree, so the poll
+        // stands down rather than cancelling work the reader asked for and starting again.
+        if reason == .quiet, changesTask != nil { return }
+
         changesTask?.cancel()
         let path = workspace.path
         let base = workspace.baseBranch
@@ -348,7 +364,7 @@ final class WorkspaceModel {
             }
         }
         changesTask = task
-        isLoadingChanges = true
+        if reason == .requested { isLoadingChanges = true }
 
         let outcome = await task.value
 
@@ -356,6 +372,8 @@ final class WorkspaceModel {
         // way this answer is the stale one, and writing it would undo the fresh one.
         guard changesTask == task, !task.isCancelled else { return }
         changesTask = nil
+        // Cleared whatever this refresh asked for, because a quiet one can be the last to land
+        // after a requested one raised the flag, and then only it can put the flag down again.
         isLoadingChanges = false
 
         switch outcome {
@@ -366,13 +384,26 @@ final class WorkspaceModel {
             changesError = failure.message
 
         case .success(let files):
-            changesError = nil
-            changedFiles = files
-            if let selectedFilePath, !files.contains(where: { $0.path == selectedFilePath }) {
-                self.selectedFilePath = files.first?.path
-            } else if selectedFilePath == nil {
-                selectedFilePath = files.first?.path
-            }
+            // Only when it actually moved. `AppModel`'s poll lands here every six seconds, and a
+            // write of an identical list is still a write as far as Observation is concerned,
+            // which would rerun the inspector's body and rebuild the tree for nothing.
+            if changesError != nil { changesError = nil }
+            if changedFiles != files { changedFiles = files }
+            adoptSelection(among: files, reason: reason)
+        }
+    }
+
+    /// A refresh can drop the file the reader had open, and the first one arrives with nothing
+    /// open at all.
+    ///
+    /// The poll only ever takes a selection away, never hands one out. A reader who closed the
+    /// diff by clicking the open row would otherwise have it reopened under them a few seconds
+    /// later, and an agent adding a file would move them off the one they were reading.
+    private func adoptSelection(among files: [ChangedFile], reason: ChangesRefresh) {
+        if let selectedFilePath, !files.contains(where: { $0.path == selectedFilePath }) {
+            self.selectedFilePath = reason == .requested ? files.first?.path : nil
+        } else if selectedFilePath == nil, reason == .requested {
+            selectedFilePath = files.first?.path
         }
     }
 

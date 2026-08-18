@@ -43,12 +43,7 @@ struct FileTreeRow: View {
                         .accessibilityLabel("Changed")
                 }
             }
-            .padding(
-                .leading,
-                CGFloat(item.depth) * InspectorLayout.indentStep + InspectorLayout.gap
-            )
-            .padding(.trailing, InspectorLayout.gap)
-            .frame(height: Metrics.rowHeight)
+            .treeIndent(depth: item.depth)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

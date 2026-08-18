@@ -85,9 +85,11 @@ struct InspectorToolbar: View {
                 )
             }
 
+            // No Refresh. The list keeps itself current: `AppModel`'s poll re-reads the selected
+            // workspace's changed files while the app is frontmost, and a finished turn re-reads
+            // them at once. A button asking the reader to do the app's job was only ever covering
+            // for that not being true.
             Menu {
-                Button("Refresh", action: refresh)
-                Divider()
                 Button("Copy branch name", action: copyBranch)
                 Button("Reveal worktree in Finder") { Reveal.inFinder(model.workspace.path) }
                 Button("Open worktree in Editor") { Reveal.inEditor(model.workspace.path) }
@@ -130,13 +132,6 @@ struct InspectorToolbar: View {
     }
 
     // MARK: - Actions
-
-    private func refresh() {
-        Task {
-            await model.refreshChanges()
-            await model.refreshPullRequest()
-        }
-    }
 
     private func copyBranch() {
         NSPasteboard.general.clearContents()

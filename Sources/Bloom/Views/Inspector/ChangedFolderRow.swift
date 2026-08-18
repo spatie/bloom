@@ -15,7 +15,8 @@ struct ChangedFolderRow: View {
     var name: String
     var path: String
     var isExpanded: Bool
-    var indent: CGFloat
+    /// How many levels down the tree this row is drawn.
+    var depth: Int
     /// The folder's location in the worktree, for the menu items that hand it to another app.
     var fullPath: String
     var action: () -> Void
@@ -40,9 +41,7 @@ struct ChangedFolderRow: View {
                     .truncationMode(.head)
                 Spacer(minLength: 0)
             }
-            .padding(.leading, indent + InspectorLayout.gap)
-            .padding(.trailing, InspectorLayout.gap)
-            .frame(height: Metrics.rowHeight)
+            .treeIndent(depth: depth)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

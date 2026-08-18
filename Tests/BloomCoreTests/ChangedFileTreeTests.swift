@@ -169,6 +169,44 @@ struct ChangedFileTreeTests {
         #expect(rows.map(\.node.name) == ["app / Domain"])
     }
 
+    /// The case the tree exists for, and the one a flat list cannot say: a change that branches
+    /// twice on the way down. Collapsing has to stop at every branch point and nowhere else, or
+    /// the rows either lose the shape or repeat a directory nobody needed to be told about.
+    @Test("A change that branches keeps a row at every point it branches at")
+    func branchesAreKept() {
+        let nodes = ChangedFileTree.build(from: [
+            file("app/Domain/Tickets/Actions/Contacts/UndoContactMergeAction.php"),
+            file("app/Domain/Tickets/Exceptions/CouldNotUndoContactMerge.php"),
+            file("app/Domain/Tickets/Models/ContactMerge.php"),
+            file("app/Http/Controllers/Contacts/UndoContactMergeController.php"),
+            file("tests/Domain/Tickets/Contacts/UndoContactMergeActionTest.php"),
+            file("tests/Http/Contacts/UndoContactMergeControllerTest.php"),
+        ])
+
+        let rows = ChangedFileTree.rows(from: nodes, collapsed: [])
+
+        #expect(rows.map(\.node.name) == [
+            "app",
+            "Domain / Tickets",
+            "Actions / Contacts",
+            "UndoContactMergeAction.php",
+            "Exceptions",
+            "CouldNotUndoContactMerge.php",
+            "Models",
+            "ContactMerge.php",
+            "Http / Controllers / Contacts",
+            "UndoContactMergeController.php",
+            "tests",
+            "Domain / Tickets / Contacts",
+            "UndoContactMergeActionTest.php",
+            "Http / Contacts",
+            "UndoContactMergeControllerTest.php",
+        ])
+        // The depth is what the guides and the indent are drawn from, so it is asserted rather
+        // than left to the view to get right.
+        #expect(rows.map(\.depth) == [0, 1, 2, 3, 2, 3, 2, 3, 1, 2, 0, 1, 2, 1, 2])
+    }
+
     @Test("Every row has a unique identity, so the list can key on it")
     func rowIdentitiesAreUnique() {
         let nodes = ChangedFileTree.build(from: [

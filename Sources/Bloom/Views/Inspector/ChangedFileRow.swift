@@ -12,8 +12,9 @@ struct ChangedFileRow: View {
     var isSelected: Bool
     /// The file's location in the worktree, for the menu items that hand it to another app.
     var fullPath: String
-    /// How far the tree has pushed this row in. Zero in the flat list.
-    var indent: CGFloat = 0
+    /// How many levels down the tree this row is drawn. Zero in the flat list, which is what
+    /// leaves that shape with no indent and no guides while both shapes run this same row.
+    var depth: Int = 0
     var onSelect: () -> Void
     var onRevert: () -> Void
 
@@ -45,9 +46,7 @@ struct ChangedFileRow: View {
                     .foregroundStyle(.tertiary)
                     .accessibilityHidden(true)
             }
-            .padding(.leading, indent + InspectorLayout.gap)
-            .padding(.trailing, InspectorLayout.gap)
-            .frame(height: Metrics.rowHeight)
+            .treeIndent(depth: depth)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

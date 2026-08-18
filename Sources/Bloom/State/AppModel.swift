@@ -240,8 +240,29 @@ final class AppModel {
                 // with a lock it has no business waiting for.
                 guard NSApp?.isActive ?? true else { continue }
                 await self.refreshDiffStats()
+                await self.refreshSelectedChangedFiles()
             }
         }
+    }
+
+    /// Keeps the inspector's list of changed files current while an agent is writing.
+    ///
+    /// The diff stat above is a per-workspace total held in the store. The list of files is
+    /// `WorkspaceModel`'s own and used to be re-read only when the reader did something, so a turn
+    /// that ran for two minutes showed a file list from two minutes ago and the only way out was a
+    /// Refresh button, which is a chore the app should not be handing anyone.
+    ///
+    /// Only the selected workspace pays for it. It is the one on screen, and every other one would
+    /// be a `git diff` nobody is looking at. The commands are the same read-only plumbing the diff
+    /// stat runs, with `GIT_OPTIONAL_LOCKS=0`, so they do not queue behind the index lock an agent
+    /// takes while it commits.
+    private func refreshSelectedChangedFiles() async {
+        guard let id = selection.workspaceID, let model = workspaceModels[id] else { return }
+        // A worktree removed outside Bloom would make git walk up to the parent repository and
+        // answer about the wrong tree, exactly as above.
+        guard FileManager.default.fileExists(atPath: model.workspace.path) else { return }
+
+        await model.refreshChanges(.quiet)
     }
 
     func refreshDiffStats() async {

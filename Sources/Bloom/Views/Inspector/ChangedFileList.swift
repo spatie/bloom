@@ -146,16 +146,14 @@ struct ChangedFileList: View {
 
     @ViewBuilder
     private func treeRow(_ item: ChangedFileTreeRow) -> some View {
-        let indent = CGFloat(item.depth) * InspectorLayout.indentStep
-
         if let file = item.node.file {
-            row(file, indent: indent)
+            row(file, depth: item.depth)
         } else {
             ChangedFolderRow(
                 name: item.node.name,
                 path: item.node.path,
                 isExpanded: !collapsed.contains(item.node.path),
-                indent: indent,
+                depth: item.depth,
                 fullPath: fullPath(item.node.path),
                 action: { toggle(item.node.path) }
             )
@@ -165,14 +163,14 @@ struct ChangedFileList: View {
         }
     }
 
-    private func row(_ file: ChangedFile, indent: CGFloat = 0) -> some View {
+    private func row(_ file: ChangedFile, depth: Int = 0) -> some View {
         let isSelected = model.selectedFilePath == file.path
 
         return ChangedFileRow(
             file: file,
             isSelected: isSelected,
             fullPath: fullPath(file.path),
-            indent: indent,
+            depth: depth,
             onSelect: {
                 model.selectedFilePath = isSelected ? nil : file.path
                 quickLookArm += 1

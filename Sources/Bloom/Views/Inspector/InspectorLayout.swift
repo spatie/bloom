@@ -25,8 +25,11 @@ enum InspectorLayout {
     static let tintOpacityStrong: Double = 0.24
     /// Status glyphs share one box, so the names beside them line up whichever symbol lands in it.
     static let glyphWidth: CGFloat = 16
-    /// One level of indent in the file tree.
-    static let indentStep: CGFloat = 12
+    /// One level of indent in the file tree. Exactly one glyph box, so a row's chevron starts
+    /// where its parent's chevron ended and the column of names steps in visibly. It was 12, which
+    /// is less than the glyph it is meant to clear and read as a ragged margin rather than as a
+    /// level. Any wider and a path three deep leaves no room for a filename at 280pt.
+    static let indentStep: CGFloat = 16
     /// How much room a list keeps once a detail pane has opened beneath it, until the reader
     /// drags the boundary somewhere else.
     static let listHeight: CGFloat = 220
