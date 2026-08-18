@@ -250,9 +250,11 @@ struct WorkspaceManagerTests {
 
     @Test("allocates a free port and does not hand out the same one twice")
     func allocatesPorts() throws {
-        let first = try PortAllocator.allocate(taken: [])
-        let second = try PortAllocator.allocate(taken: [first])
-        #expect(first >= 3_100)
+        // Its own range, away from the other port test. See the note in GitSafetyTests.
+        let base = 42_000
+        let first = try PortAllocator.allocate(taken: [], start: base)
+        let second = try PortAllocator.allocate(taken: [first], start: base)
+        #expect(first >= base)
         #expect(second != first)
         #expect((second - first) % 10 == 0)
     }

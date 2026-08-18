@@ -22,8 +22,18 @@ public struct RepoSettings: Sendable, Hashable {
     public var filesToCopy: [String] = [".env*"]
     public var branchPrefix: String?
     public var deleteBranchOnArchive: Bool = false
+    /// Set by a file inside the repository. Ranks ABOVE the app-level defaults, because pinning
+    /// a model in a project's own settings is a deliberate statement about that project.
     public var defaultModel: String?
     public var defaultEffort: String?
+    /// Set by a machine-wide file (`~/.conductor/settings.toml`, `~/.baton/settings.toml`).
+    ///
+    /// Kept apart from the repo-scoped values because it ranks BELOW the Models screen. Both are
+    /// "what this user generally wants", and when they disagree the one the user just used in the
+    /// UI should win over a file they wrote once and forgot. Merging the two layers meant a global
+    /// Conductor file silently overrode every choice made in Settings.
+    public var homeDefaultModel: String?
+    public var homeDefaultEffort: String?
     /// Paths of the settings files that contributed, newest last. Shown in the settings UI.
     public var sources: [String] = []
 
@@ -33,12 +43,18 @@ public struct RepoSettings: Sendable, Hashable {
 }
 
 public enum SettingsLoader {
-    /// Lowest precedence first.
-    public static func candidatePaths(repo: String) -> [String] {
+    /// Machine-wide files, lowest precedence first.
+    public static func homePaths() -> [String] {
         let home = NSHomeDirectory()
         return [
             "\(home)/.conductor/settings.toml",
             "\(home)/.baton/settings.toml",
+        ]
+    }
+
+    /// Files inside the repository, lowest precedence first.
+    public static func repoPaths(repo: String) -> [String] {
+        [
             "\(repo)/.conductor/settings.toml",
             "\(repo)/.baton/settings.toml",
             "\(repo)/.conductor/settings.local.toml",
@@ -46,10 +62,28 @@ public enum SettingsLoader {
         ]
     }
 
+    /// Lowest precedence first.
+    public static func candidatePaths(repo: String) -> [String] {
+        homePaths() + repoPaths(repo: repo)
+    }
+
     public static func load(repo: String) -> RepoSettings {
         var settings = RepoSettings()
 
-        for path in candidatePaths(repo: repo) {
+        for path in homePaths() {
+            guard let toml = try? TOML.parse(contentsOf: path) else { continue }
+            settings.sources.append(path)
+            apply(toml, to: &settings)
+        }
+
+        // Everything a home file said about the model belongs to the home layer. Moving it aside
+        // before the repo files are read is what keeps the two layers from collapsing into one.
+        settings.homeDefaultModel = settings.defaultModel
+        settings.homeDefaultEffort = settings.defaultEffort
+        settings.defaultModel = nil
+        settings.defaultEffort = nil
+
+        for path in repoPaths(repo: repo) {
             guard let toml = try? TOML.parse(contentsOf: path) else { continue }
             settings.sources.append(path)
             apply(toml, to: &settings)
@@ -202,6 +236,12 @@ public struct AppDefaults: Sendable, Hashable {
     public var planMode: Bool
     public var fastMode: Bool
 
+    /// Nil when the user has never chosen one in Settings. `model` always holds a usable value,
+    /// so it cannot answer "did they pick this, or is it just the fallback?", and that question is
+    /// what decides whether a machine-wide settings file gets a say.
+    public var storedModel: String?
+    public var storedEffort: String?
+
     public init(
         model: String = AppDefaults.fallbackModel,
         effort: String = AppDefaults.fallbackEffort,
@@ -229,8 +269,10 @@ public struct AppDefaults: Sendable, Hashable {
         }
 
         var defaults = AppDefaults()
-        defaults.model = await value(Key.model) ?? fallbackModel
-        defaults.effort = await value(Key.effort) ?? fallbackEffort
+        defaults.storedModel = await value(Key.model)
+        defaults.storedEffort = await value(Key.effort)
+        defaults.model = defaults.storedModel ?? fallbackModel
+        defaults.effort = defaults.storedEffort ?? fallbackEffort
         defaults.reviewModel = await value(Key.reviewModel) ?? defaults.model
         defaults.reviewEffort = await value(Key.reviewEffort) ?? defaults.effort
         if let raw = await value(Key.permissionMode), let mode = PermissionMode(rawValue: raw) {

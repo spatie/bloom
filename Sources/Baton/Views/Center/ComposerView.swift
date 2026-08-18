@@ -575,8 +575,22 @@ struct ComposerView: View {
         }
         guard !Task.isCancelled else { return }
 
-        let model = Self.firstNonEmpty(repoSettings.defaultModel, defaults.model)
-        let effort = Self.firstNonEmpty(repoSettings.defaultEffort, defaults.effort)
+        // Repo file, then what the user chose in Settings, then a machine-wide settings file,
+        // then the built-in. The home file sits below the Settings screen deliberately: a global
+        // Conductor file used to outrank every choice made in the UI, which made the Models screen
+        // look broken on a machine that had one.
+        let model = Self.firstNonEmpty(
+            repoSettings.defaultModel,
+            defaults.storedModel,
+            repoSettings.homeDefaultModel,
+            fallback: defaults.model
+        )
+        let effort = Self.firstNonEmpty(
+            repoSettings.defaultEffort,
+            defaults.storedEffort,
+            repoSettings.homeDefaultEffort,
+            fallback: defaults.effort
+        )
         // "Start in plan mode" is the more specific instruction of the two, so it beats the
         // permission mode picker when both are set rather than the two fighting over one column.
         let permissionMode = defaults.planMode ? PermissionMode.plan : defaults.permissionMode
@@ -607,11 +621,16 @@ struct ComposerView: View {
 
     /// A settings file with an empty value in it is a missing value, not an instruction to blank
     /// the session's model out.
-    private static func firstNonEmpty(_ preferred: String?, _ fallback: String) -> String {
-        guard let preferred, !preferred.trimmingCharacters(in: .whitespaces).isEmpty else {
-            return fallback
+    /// The first candidate that is actually set, in precedence order. An empty string counts as
+    /// unset, because a settings file with `default = ""` means "I did not choose", not "choose
+    /// nothing".
+    private static func firstNonEmpty(_ candidates: String?..., fallback: String) -> String {
+        for candidate in candidates {
+            if let candidate, !candidate.trimmingCharacters(in: .whitespaces).isEmpty {
+                return candidate
+            }
         }
-        return preferred
+        return fallback
     }
 
     /// Records that a session has been through `prepare()`, so reopening it never re-applies the

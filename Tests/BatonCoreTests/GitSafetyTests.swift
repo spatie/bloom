@@ -427,12 +427,19 @@ struct GitSafetyTests {
 
     @Test("allocates a whole free block and fails loudly when there is none")
     func allocatesWholeBlocks() throws {
-        let first = try PortAllocator.allocate(taken: [])
-        #expect(first >= 3_100)
-        #expect(PortAllocator.isBlockAvailable(from: first, taken: []))
+        // Its own range. Availability is probed by actually binding a socket, so two tests
+        // sharing the default range invalidate each other when the suite runs in parallel.
+        let base = 41_000
+        let first = try PortAllocator.allocate(taken: [], start: base)
+        #expect(first >= base)
+        // Deliberately not re-probing the block with `isBlockAvailable` here. `allocate` only
+        // returns a port whose whole block passed that check, so asking again asserts that no
+        // other process on the machine grabbed a port in the meantime, which is not what this
+        // test is about and made it flake. The logic below uses explicit `taken` sets instead,
+        // which is deterministic.
 
         // A single port inside the block being taken disqualifies the whole block.
-        let second = try PortAllocator.allocate(taken: [first + 3])
+        let second = try PortAllocator.allocate(taken: [first + 3], start: base)
         #expect(second == first + PortAllocator.blockSize)
 
         #expect(throws: PortAllocatorError.self) {

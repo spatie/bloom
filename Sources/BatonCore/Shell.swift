@@ -111,24 +111,32 @@ public enum Shell {
 
         let collector = OutputCollector()
 
-        outPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if data.isEmpty {
-                handle.readabilityHandler = nil
-            } else {
-                collector.appendOut(data)
-            }
+        // Read each pipe to EOF on its own thread rather than through `readabilityHandler`.
+        //
+        // The handler approach has a race that loses output: clearing the handler after the
+        // process exits can discard whatever the dispatch source had already buffered, and
+        // draining with `readToEnd` afterwards then returns nothing. It is rare and load
+        // dependent, which is the worst kind: under a parallel test run it turned up as an empty
+        // `git diff`, and in the app it would have been an empty diff shown as though the file
+        // had not changed. Reading to EOF cannot lose anything, and EOF is also the signal that
+        // the child is done writing.
+        let outReader = Thread {
+            let data = outPipe.fileHandleForReading.readDataToEndOfFile()
+            collector.appendOut(data)
+            collector.finishOut()
         }
-        errPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if data.isEmpty {
-                handle.readabilityHandler = nil
-            } else {
-                collector.appendErr(data)
-            }
+        let errReader = Thread {
+            let data = errPipe.fileHandleForReading.readDataToEndOfFile()
+            collector.appendErr(data)
+            collector.finishErr()
         }
+        outReader.stackSize = 512 * 1_024
+        errReader.stackSize = 512 * 1_024
 
         try process.run()
+
+        outReader.start()
+        errReader.start()
 
         if let inPipe, let stdin {
             inPipe.fileHandleForWriting.write(Data(stdin.utf8))
@@ -152,15 +160,9 @@ public enum Shell {
 
         timeoutTask?.cancel()
 
-        // Drain anything the readability handlers have not picked up yet.
-        outPipe.fileHandleForReading.readabilityHandler = nil
-        errPipe.fileHandleForReading.readabilityHandler = nil
-        if let rest = try? outPipe.fileHandleForReading.readToEnd(), !rest.isEmpty {
-            collector.appendOut(rest)
-        }
-        if let rest = try? errPipe.fileHandleForReading.readToEnd(), !rest.isEmpty {
-            collector.appendErr(rest)
-        }
+        // The child has exited, but its output is only complete once both pipes have reached EOF.
+        // Returning before that is exactly how output goes missing.
+        await collector.waitForEOF()
 
         return ShellResult(
             status: process.terminationStatus,
@@ -202,11 +204,18 @@ public enum Shell {
     }
 }
 
-/// Thread-safe accumulator for the two output streams.
+/// Thread-safe accumulator for the two output streams, and the gate that says both are complete.
 private final class OutputCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var out = Data()
     private var err = Data()
+    /// One count per stream. Waiting on both is what guarantees nothing is still in flight.
+    private let eof = DispatchGroup()
+
+    init() {
+        eof.enter()
+        eof.enter()
+    }
 
     func appendOut(_ data: Data) {
         lock.lock(); out.append(data); lock.unlock()
@@ -214,6 +223,15 @@ private final class OutputCollector: @unchecked Sendable {
 
     func appendErr(_ data: Data) {
         lock.lock(); err.append(data); lock.unlock()
+    }
+
+    func finishOut() { eof.leave() }
+    func finishErr() { eof.leave() }
+
+    func waitForEOF() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            eof.notify(queue: .global()) { continuation.resume() }
+        }
     }
 
     var stdoutString: String {

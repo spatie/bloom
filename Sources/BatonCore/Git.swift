@@ -167,17 +167,25 @@ public enum Git {
 
         let collector = ByteCollector()
         // Both pipes have to be drained while the process runs, or a large diff fills the buffer
-        // and git blocks forever on write.
-        outPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if data.isEmpty { handle.readabilityHandler = nil } else { collector.appendOut(data) }
+        // and git blocks forever on write. A reader thread per pipe rather than a
+        // `readabilityHandler`, because clearing the handler once the process exits can discard
+        // what the dispatch source had already buffered. That showed up as `git diff` returning
+        // nothing at all, which `changedFiles` would have reported as a clean worktree.
+        let outReader = Thread {
+            collector.appendOut(outPipe.fileHandleForReading.readDataToEndOfFile())
+            collector.finishOut()
         }
-        errPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if data.isEmpty { handle.readabilityHandler = nil } else { collector.appendErr(data) }
+        let errReader = Thread {
+            collector.appendErr(errPipe.fileHandleForReading.readDataToEndOfFile())
+            collector.finishErr()
         }
+        outReader.stackSize = 512 * 1_024
+        errReader.stackSize = 512 * 1_024
 
         try process.run()
+
+        outReader.start()
+        errReader.start()
 
         await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -187,14 +195,8 @@ public enum Git {
             if process.isRunning { process.terminate() }
         }
 
-        outPipe.fileHandleForReading.readabilityHandler = nil
-        errPipe.fileHandleForReading.readabilityHandler = nil
-        if let rest = try? outPipe.fileHandleForReading.readToEnd(), !rest.isEmpty {
-            collector.appendOut(rest)
-        }
-        if let rest = try? errPipe.fileHandleForReading.readToEnd(), !rest.isEmpty {
-            collector.appendErr(rest)
-        }
+        // Exit does not mean the output is complete. Both pipes have to reach EOF first.
+        await collector.waitForEOF()
 
         return GitOutput(
             status: process.terminationStatus,
@@ -779,6 +781,13 @@ private final class ByteCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var stdout = Data()
     private var stderr = Data()
+    /// One count per stream, so a caller can wait until both have genuinely finished.
+    private let eof = DispatchGroup()
+
+    init() {
+        eof.enter()
+        eof.enter()
+    }
 
     func appendOut(_ data: Data) {
         lock.lock(); stdout.append(data); lock.unlock()
@@ -786,6 +795,15 @@ private final class ByteCollector: @unchecked Sendable {
 
     func appendErr(_ data: Data) {
         lock.lock(); stderr.append(data); lock.unlock()
+    }
+
+    func finishOut() { eof.leave() }
+    func finishErr() { eof.leave() }
+
+    func waitForEOF() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            eof.notify(queue: .global()) { continuation.resume() }
+        }
     }
 
     var out: Data {
