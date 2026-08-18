@@ -27,6 +27,15 @@ final class PaneViewController: NSViewController {
     override func loadView() {
         view = NSView()
         host.translatesAutoresizingMaskIntoConstraints = false
+        // No size travels out of SwiftUI. An `NSHostingView` publishes its content's ideal size as
+        // an intrinsic content size, and the split view's autolayout then refuses to make the pane
+        // any narrower than that. Measured on this branch: the inspector pane published 622 and the
+        // centre column 519, so the split view stopped shrinking at 801 and overflowed a 702 point
+        // container, hanging the inspector's trailing edge and its Create Pull Request button off
+        // the side of the window at the window's own minimum size. `minimumThickness` on the two
+        // items is the real floor and it is a required constraint, so nothing is lost by silencing
+        // this one.
+        host.sizingOptions = []
         view.addSubview(host)
         NSLayoutConstraint.activate([
             host.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -59,9 +68,16 @@ final class DetailSplitViewController: NSSplitViewController {
     /// same coin, and AppKit derives it rather than us: with both minimums declared a drag simply
     /// stops, where the SwiftUI version had to recompute a ceiling from a measured width on every
     /// layout to stop the split view squeezing the sidebar instead.
-    private static let detailMinimum: CGFloat = 420
-    private static let inspectorMinimum: CGFloat = 280
+    static let detailMinimum: CGFloat = 420
+    static let inspectorMinimum: CGFloat = 280
     private static let inspectorMaximum: CGFloat = 760
+
+    /// The narrowest the detail half of the window can be drawn, divider included.
+    ///
+    /// Public because the window's own minimum has to be built out of it. These are hard AppKit
+    /// constraints: below this the split view stops laying out and starts clipping, and nothing
+    /// above it in SwiftUI negotiates the difference away.
+    static var minimumWidth: CGFloat { detailMinimum + inspectorMinimum + 1 }
 
     private static let autosaveName = "bloom.detail.split"
 
@@ -105,8 +121,12 @@ final class DetailSplitViewController: NSSplitViewController {
         inspectorItem.maximumThickness = Self.inspectorMaximum
         inspectorItem.canCollapse = true
         // Higher than the centre column's, so a window resize moves the centre boundary and leaves
-        // the inspector at the width it was dragged to.
-        inspectorItem.holdingPriority = .init(NSLayoutConstraint.Priority.defaultHigh.rawValue)
+        // the inspector at the width it was dragged to. A hair higher, not `defaultHigh`: a
+        // holding priority is a width constraint at that priority, and at 750 it outranked the pin
+        // SwiftUI's representable host puts on this view, so the split view kept the width it had
+        // and overflowed the column instead of shrinking the inspector to its minimum. 260 is what
+        // AppKit itself gives a sidebar item.
+        inspectorItem.holdingPriority = .init(260)
 
         addSplitViewItem(detailItem)
         addSplitViewItem(inspectorItem)
@@ -156,6 +176,30 @@ struct DetailSplitView: NSViewControllerRepresentable {
 
     func makeNSViewController(context: Context) -> DetailSplitViewController {
         DetailSplitViewController(detail: detail, inspector: inspector)
+    }
+
+    /// What this pane will accept, rather than what it currently measures.
+    ///
+    /// Without it SwiftUI asks the controller's view for its `fittingSize`, and an `NSSplitView`
+    /// answers that with the width it is at: the inspector holds its thickness at a high priority,
+    /// so the fitting size came back as "the centre column's minimum plus whatever the inspector
+    /// was last dragged to". `NavigationSplitView` took that for the detail column's MINIMUM, and
+    /// since it will not shrink its sidebar to satisfy one, the whole split view was laid out 121
+    /// points wider than the window and centred in it: the sidebar's rows were clipped off their
+    /// leading edge and the inspector's Create Pull Request button off the trailing one, at the
+    /// window's own minimum size. Measured on this branch at 1000x700.
+    ///
+    /// The honest minimum is the sum of the two panes' minimum thicknesses, which is a constant.
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsViewController: DetailSplitViewController,
+        context: Context
+    ) -> CGSize? {
+        CGSize(
+            width: max(proposal.width ?? DetailSplitViewController.minimumWidth,
+                       DetailSplitViewController.minimumWidth),
+            height: proposal.height ?? 0
+        )
     }
 
     func updateNSViewController(_ controller: DetailSplitViewController, context: Context) {

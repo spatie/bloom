@@ -9,6 +9,9 @@ struct ComposerOptionMenu: View {
     var selection: String
     var systemImage: String
     var tint: Color = Palette.textSecondary
+    /// Drops the word and keeps the glyph, for a footer that has run out of room. The tooltip and
+    /// the accessibility label still say which picker this is, so nothing is lost but the width.
+    var isCompact: Bool = false
     var help: String
     var onSelect: @MainActor (String) -> Void
 
@@ -30,7 +33,7 @@ struct ComposerOptionMenu: View {
         } label: {
             ComposerControlLabel(
                 systemImage: systemImage,
-                text: label,
+                text: isCompact ? nil : label,
                 tint: tint,
                 showsMenuIndicator: true
             )
@@ -40,7 +43,12 @@ struct ComposerOptionMenu: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .fixedSize()
+        // Vertically fixed only. Fixed in both axes the three pickers were incompressible, and an
+        // HStack whose children all refuse to shrink overflows rather than truncating: in a split
+        // pane the model picker fell off the leading edge while the attach and send buttons fell
+        // off the trailing one. `ComposerFooterView` drops the words first; this is what lets what
+        // is left give a few more points before anything is pushed off the row.
+        .fixedSize(horizontal: false, vertical: true)
         .help(help)
         .accessibilityLabel(help)
         .accessibilityValue(label)

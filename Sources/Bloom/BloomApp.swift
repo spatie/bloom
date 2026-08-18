@@ -21,6 +21,22 @@ struct BloomApp: App {
         Snapshot.scheduleURLIfRequested()
     }
 
+    /// The narrowest the window may be dragged.
+    ///
+    /// Derived rather than a literal. It used to be a flat 1000, which was chosen before the
+    /// centre column and the inspector became an `NSSplitViewController` with real minimum
+    /// thicknesses. Those minimums do not negotiate: at 1000 the split view needed 121 points more
+    /// than it was given and simply overflowed, so a window dragged to its own minimum clipped the
+    /// sidebar's rows off their leading edge and the inspector's Create Pull Request button off
+    /// the trailing one. `NavigationSplitView` does not shrink its sidebar to make room either, so
+    /// the sidebar's MAXIMUM is what the rest has to be added to.
+    private static let minimumWindowWidth =
+        Self.sidebarMaximumWidth + DetailSplitViewController.minimumWidth + 1
+
+    /// What the sidebar column may be dragged out to. Shared with `RootView`, which declares it on
+    /// the column, so the window minimum above can never fall out of step with it.
+    static let sidebarMaximumWidth: CGFloat = 420
+
     var body: some Scene {
         // A single `Window` rather than a `WindowGroup`. Bloom's whole model is one window
         // listing every workspace, and a WindowGroup opens an extra window every time a
@@ -28,7 +44,7 @@ struct BloomApp: App {
         Window("Bloom", id: "main") {
             RootView()
                 .environment(model)
-                .frame(minWidth: 1_000, minHeight: 620)
+                .frame(minWidth: Self.minimumWindowWidth, minHeight: 620)
                 .handlesBloomURLs(using: model)
                 // What the rest of the OS is told: the App Nap assertion and the dock badge,
                 // the worktree behind the title bar, and the optional menu bar item. All three

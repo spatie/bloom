@@ -27,7 +27,7 @@ struct RootView: View {
         return NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView()
             .navigationSplitViewColumnWidth(
-                min: 200, ideal: Metrics.sidebarWidth, max: 420
+                min: 200, ideal: Metrics.sidebarWidth, max: BloomApp.sidebarMaximumWidth
             )
         } detail: {
             // An `NSSplitViewController`, not `.inspector()` and not `HSplitView`.

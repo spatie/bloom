@@ -181,19 +181,42 @@ enum Snapshot {
             if let size = requestedWindowSize {
                 window.setContentSize(size)
                 window.layoutIfNeeded()
-                try? await Task.sleep(for: .seconds(1))
+                // Two seconds, not one. A resize walks a SwiftUI `NavigationSplitView`, an AppKit
+                // split controller and two hosting views, and a capture taken while that is still
+                // settling showed a sidebar whose rows had slid out of their own column: a
+                // transient that reads exactly like a layout bug and cost an hour to disbelieve.
+                try? await Task.sleep(for: .seconds(2))
+                window.layoutIfNeeded()
+                window.displayIfNeeded()
             }
 
+            // The window server holds the only complete picture of this window.
+            //
+            // Drawing the hierarchy in process cannot be trusted here. `cacheDisplay` misses
+            // anything whose content lives in a layer rather than in `draw(_:)`, and
+            // `layer.render(in:)` misses whole AppKit view-controller hierarchies: with the
+            // sidebar and the detail held by an `NSSplitViewController` it captured a blank
+            // sidebar while instrumentation proved the layout was correct. A capture that is
+            // wrong in exactly the areas that changed most is worse than no capture, so this
+            // asks the window server for the composited window instead.
+            //
+            // `-l` names one window by number, so nothing else on the desktop is ever in the
+            // file; `-o` drops the drop shadow; `-x` keeps it silent.
+            if captureWindowServerImage(windowNumber: window.windowNumber, to: path) {
+                print(path)
+                exit(0)
+            }
+
+            // Screen recording is not granted to every run. Rather than exit with nothing, fall
+            // back to the in-process draw and say plainly that the result is partial.
+            FileHandle.standardError.write(Data(
+                "screencapture failed; falling back to an in-process draw, which omits AppKit panes\n".utf8
+            ))
             let bounds = content.bounds
             guard let rep = content.bitmapImageRepForCachingDisplay(in: bounds) else {
                 FileHandle.standardError.write(Data("could not allocate a bitmap\n".utf8))
                 exit(1)
             }
-
-            // `cacheDisplay` walks the view hierarchy and asks each view to draw. That misses
-            // anything whose content lives in a layer rather than in `draw(_:)`, which on macOS
-            // includes the NSTableView behind a SwiftUI `List`: the sidebar came out blank.
-            // Rendering the layer tree instead captures what is actually composited on screen.
             if let layer = content.layer, let context = NSGraphicsContext(bitmapImageRep: rep) {
                 // Only a flipped view's layer needs the context flipped. SwiftUI's hosting view
                 // is flipped, the window's frame view above it is not, so flipping
@@ -218,6 +241,31 @@ enum Snapshot {
             print(path)
             exit(0)
         }
+    }
+
+
+    /// Asks the window server for one window, by number, as a PNG on disk.
+    ///
+    /// Returns false when the file did not appear, which is what a run without screen recording
+    /// permission looks like. Nothing here can ever capture another application: `-l` takes a
+    /// single window number and the file is written straight to `path`.
+    private static func captureWindowServerImage(windowNumber: Int, to path: String) -> Bool {
+        try? FileManager.default.removeItem(atPath: path)
+
+        let capture = Process()
+        capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        capture.arguments = ["-o", "-x", "-l\(windowNumber)", path]
+        do {
+            try capture.run()
+        } catch {
+            return false
+        }
+        capture.waitUntilExit()
+
+        guard capture.terminationStatus == 0 else { return false }
+        // screencapture reports success and writes nothing when the window number is stale.
+        let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int ?? 0
+        return size > 0
     }
 
     /// Opens the `Settings` scene from outside a view.
