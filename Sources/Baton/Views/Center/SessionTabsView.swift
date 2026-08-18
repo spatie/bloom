@@ -116,12 +116,15 @@ struct SessionTabsView: View {
 
     // MARK: - Rules
 
-    /// A workspace starts with one session nobody named. Showing a tab strip for it would only
-    /// tell the user something they can already see.
+    /// Hidden whenever there is a single session.
+    ///
+    /// A tab strip exists to switch between things. With one session there is nothing to switch
+    /// to, and the title it would show is derived from the opening prompt, so it duplicates the
+    /// workspace name already in the toolbar, truncated to whatever the tab happens to be wide.
+    /// One tab reading "Show me the" under a toolbar reading the whole sentence is worse than no
+    /// tab at all.
     private var isHidden: Bool {
-        guard model.sessions.count <= 1 else { return false }
-        guard let session = model.sessions.first else { return true }
-        return Self.isUnnamed(session)
+        model.sessions.count <= 1
     }
 
     static func isUnnamed(_ session: Session) -> Bool {

@@ -56,6 +56,9 @@ final class WorkspaceModel {
     var bottomTab: BottomTab = .firstTerminal
     var isBottomPanelVisible = true
     var setupOutput: String = ""
+    /// The tail Baton keeps in memory. A setup script that prints a megabyte is not unusual, and
+    /// none of it is worth re-rendering on every append.
+    static let setupLogLimit = 200_000
     var isRunningSetup = false
 
     // Layout.
@@ -184,7 +187,13 @@ final class WorkspaceModel {
     func runSetupThenSend(prompt: String, repo: Repo) async {
         guard let manager = app.manager else { return }
 
-        let settings = SettingsLoader.load(repo: repo.path)
+        // Off the main actor: this reads and parses up to six files from disk, and it runs at the
+        // moment a workspace is created, which is exactly when the window must stay responsive.
+        let repoPath = repo.path
+        let settings = await Task.detached(priority: .userInitiated) {
+            SettingsLoader.load(repo: repoPath)
+        }.value
+
         if settings.setupScript != nil {
             isRunningSetup = true
             bottomTab = .setup
@@ -193,14 +202,27 @@ final class WorkspaceModel {
             // simply gets no port to bind, which it can decide for itself what to do about.
             port = (try? PortAllocator.allocate(taken: [])) ?? 0
 
-            let succeeded = await manager.runSetup(
-                workspace: workspace, repo: repo, port: port
-            ) { [weak self] line in
-                Task { @MainActor in
+            // Setup scripts are chatty: `composer install` and `bun install` together are
+            // thousands of lines. Hopping to the main actor once per line, each time appending to
+            // a string that keeps growing, is quadratic work on the main queue and it beachballs
+            // the whole window. Lines are collected off-actor and flushed a few times a second.
+            let buffer = LineBuffer()
+            let flusher = Task { @MainActor [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(120))
                     guard let self else { return }
-                    self.setupOutput += line + "\n"
+                    self.appendSetupOutput(buffer.drain())
                 }
             }
+
+            let succeeded = await manager.runSetup(
+                workspace: workspace, repo: repo, port: port
+            ) { line in
+                buffer.append(line)
+            }
+
+            flusher.cancel()
+            appendSetupOutput(buffer.drain())
             isRunningSetup = false
 
             // Archiving or quitting cancels this task. Starting an agent in a worktree that is on
@@ -221,6 +243,15 @@ final class WorkspaceModel {
         await reloadSessions()
         guard !Task.isCancelled, let session = activeSession else { return }
         await transcript(for: session).send(prompt)
+    }
+
+    /// Appends a batch, keeping only the tail. Called from the flusher, never per line.
+    func appendSetupOutput(_ lines: [String]) {
+        guard !lines.isEmpty else { return }
+        setupOutput += lines.joined(separator: "\n") + "\n"
+        if setupOutput.count > Self.setupLogLimit {
+            setupOutput = String(setupOutput.suffix(Self.setupLogLimit))
+        }
     }
 
     // MARK: - Changes
@@ -322,5 +353,25 @@ final class WorkspaceModel {
         }
         await app.reload()
         Task { await refreshPullRequest() }
+    }
+}
+
+
+/// A thread-safe hand-off for streamed output.
+///
+/// The producer is a subprocess reader on some background thread and the consumer is the main
+/// actor. Batching between them is what keeps a chatty script from swamping the UI.
+final class LineBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: [String] = []
+
+    func append(_ line: String) {
+        lock.lock(); pending.append(line); lock.unlock()
+    }
+
+    func drain() -> [String] {
+        lock.lock()
+        defer { pending.removeAll(keepingCapacity: true); lock.unlock() }
+        return pending
     }
 }

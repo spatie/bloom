@@ -128,6 +128,13 @@ final class AppModel {
         do {
             repos = try await store.repos()
             workspaces = try await store.workspaces()
+            // The models hold a copy of their `Workspace`, and this is where those copies go
+            // stale. Refreshing here keeps `model(for:)` out of every view body.
+            for workspace in workspaces {
+                if let existing = workspaceModels[workspace.id], existing.workspace != workspace {
+                    existing.workspace = workspace
+                }
+            }
         } catch {
             alert = BatonAlert(title: "Could not read workspaces", message: "\(error)")
         }
@@ -209,6 +216,14 @@ final class AppModel {
     /// Called straight from view bodies, so it has to be free of observable writes on the hit path.
     /// The row is only pushed into the model when it differs, because assigning an identical
     /// `Workspace` still counts as a mutation to the Observation runtime.
+    /// Creates the model if needed and refreshes the workspace value it holds.
+    ///
+    /// Both are mutations, so this MUST NOT be called from a view body. Doing so crashed the app:
+    /// the toolbar reads the selected model several times per update, each read wrote
+    /// `existing.workspace`, that invalidated the toolbar from inside its own update, and SwiftUI
+    /// recursed through `setNeedsUpdateConstraints` until AppKit threw. Views use `selectedModel`
+    /// or `existingModel(for:)`, which only read.
+    @discardableResult
     func model(for workspace: Workspace) -> WorkspaceModel {
         if let existing = workspaceModels[workspace.id] {
             if existing.workspace != workspace { existing.workspace = workspace }
@@ -219,8 +234,22 @@ final class AppModel {
         return model
     }
 
+    /// A pure lookup, safe from a view body.
+    func existingModel(for id: String) -> WorkspaceModel? {
+        workspaceModels[id]
+    }
+
+    /// The selected workspace's model, if it has been prepared. Reading this never mutates.
     var selectedModel: WorkspaceModel? {
-        selectedWorkspace.map { model(for: $0) }
+        guard let id = storedSelection.workspaceID else { return nil }
+        return workspaceModels[id]
+    }
+
+    /// Brings the selected workspace's model up to date, away from the render pass. Called after
+    /// a reload, because a reload replaces the `Workspace` values the models are holding.
+    func syncSelectedModel() {
+        guard let workspace = selectedWorkspace else { return }
+        model(for: workspace)
     }
 
     /// Workspaces with an agent currently running, for the dock badge and the window title.

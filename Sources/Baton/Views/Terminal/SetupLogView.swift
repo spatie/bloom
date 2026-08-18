@@ -86,14 +86,25 @@ struct SetupLogView: View {
         if model.port == 0 { model.port = (try? PortAllocator.allocate(taken: [])) ?? 0 }
 
         let manager = WorkspaceManager(store: store)
-        let succeeded = await manager.runSetup(
-            workspace: model.workspace, repo: repo, port: model.port
-        ) { line in
-            Task { @MainActor in
-                model.setupOutput += line + "\n"
+
+        // Batched for the same reason the first run is: a line at a time on the main actor is
+        // enough to beachball the window on a verbose script. See `WorkspaceModel.appendSetupOutput`.
+        let buffer = LineBuffer()
+        let flusher = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(120))
+                model.appendSetupOutput(buffer.drain())
             }
         }
 
+        let succeeded = await manager.runSetup(
+            workspace: model.workspace, repo: repo, port: model.port
+        ) { line in
+            buffer.append(line)
+        }
+
+        flusher.cancel()
+        model.appendSetupOutput(buffer.drain())
         model.isRunningSetup = false
         lastRunSucceeded = succeeded
     }

@@ -92,7 +92,14 @@ struct RootView: View {
                 SearchView()
             case .workspace:
                 if let workspace = app.selectedWorkspace {
-                    WorkspaceDetailView(model: app.model(for: workspace))
+                    // `existingModel` rather than `model(for:)`: creating one here would mutate
+                    // observable state during the render pass. The selection setter has already
+                    // made it.
+                    if let model = app.existingModel(for: workspace.id) {
+                        WorkspaceDetailView(model: model)
+                    } else {
+                        LoadingView()
+                    }
                 } else {
                     HomeView()
                 }
