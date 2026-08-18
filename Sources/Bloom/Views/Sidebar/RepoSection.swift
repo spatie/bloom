@@ -34,8 +34,8 @@ struct RepoSection: View {
 
     @State private var archiveTarget: Workspace?
     @State private var isConfirmingRemove = false
-    /// The `+` lights and the project's tile turns into a caret on it, together, so it belongs to
-    /// this header rather than to a hover id shared across the whole list.
+    /// Lights the `+`. It belongs to this header rather than to a hover id shared across the whole
+    /// list, so crossing the pane lights one project at a time.
     @State private var isHeaderHovered = false
 
     var body: some View {
@@ -74,6 +74,8 @@ struct RepoSection: View {
     private var header: some View {
         HStack(spacing: Metrics.spacing) {
             disclosure
+
+            RepoIcon(repo: repo)
 
             if isRenamingRepo {
                 TextField("Project name", text: $repoDraft)
@@ -120,9 +122,15 @@ struct RepoSection: View {
             } label: {
                 Label("New workspace in \(repo.name)", systemImage: "plus")
                     .labelStyle(.iconOnly)
-                    .font(Typo.title)
-                    .frame(width: Metrics.repoIcon, height: Metrics.repoIcon)
-                    .padding(Metrics.spacingSmall)
+                    // One rung down from the project's name. It was set at the name's size to
+                    // bracket the header with two marks of the tile's size, but the leading end of
+                    // the header now carries two marks of its own, and a `+` that matches the
+                    // heading is the loudest thing in a column it is the least important part of.
+                    .font(Typo.label)
+                    .frame(
+                        width: SidebarMetrics.headerButton.width,
+                        height: SidebarMetrics.headerButton.height
+                    )
                     .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
                     .background(
                         isHeaderHovered ? Palette.hover : .clear,
@@ -133,7 +141,6 @@ struct RepoSection: View {
             .foregroundStyle(isHeaderHovered ? Palette.textPrimary : Palette.textSecondary)
             .help("New workspace in \(repo.name)")
         }
-        .padding(.vertical, Metrics.spacingTight)
         .contentShape(Rectangle())
         .onHoverChange { isHeaderHovered = $0 }
         .contextMenu {
@@ -174,51 +181,43 @@ struct RepoSection: View {
         }
     }
 
-    /// The project's mark, which becomes the control that collapses it while the pointer is on
-    /// the header.
+    /// The control that folds the project away, in a gutter of its own at the leading edge.
     ///
-    /// The two things a header's leading slot could hold are wanted at different moments: the
-    /// tile is what you read while scanning a column of projects, the caret is what you reach for
-    /// once you have decided to fold one away. Sharing one slot spends no width on a chevron that
-    /// is idle almost all the time, and it puts the control under the pointer that is already
-    /// there. Both are drawn in the same box and centred on the same point, so the name beside
-    /// them does not move by a pixel when they trade places, and they cross fade rather than
-    /// snapping, which is what makes it read as one mark changing rather than two marks blinking.
+    /// It used to share the tile's box and appear only under the pointer, which spent no width on
+    /// a chevron that is idle almost all the time. The cost was that it took the project's mark
+    /// away to do it: the one thing in the header worth scanning vanished exactly when you looked
+    /// at the header. A gutter costs eleven points and gives the tile back for good.
     ///
-    /// The same `isHeaderHovered` lights the `+` at the other end, so the header has one hover
-    /// behaviour rather than two controls each appearing on their own terms.
+    /// Eleven points is also what sets the column relationship the rest of the pane hangs off.
+    /// With the chevron at the leading edge and the tile behind it, a workspace row's status mark
+    /// falls between the two: right of the chevron, left of the tile. That is what makes a project
+    /// read as containing its rows. With the tile at the leading edge instead, as it was, the rows
+    /// started right of the project's own mark and the column read the other way round.
     ///
-    /// This is the only disclosure control the header has. `Section(isExpanded:)` was documented
-    /// here as the list drawing its own triangle for us; captured with the pointer on a header
-    /// and with it off, the list draws nothing at all, so collapsing a project had no affordance
-    /// in the window and the stored flag could only ever be set by restoring a session. The
-    /// binding stays because it is what tells the list to fold the rows away.
+    /// The chevron is the smallest mark in the pane on purpose. It is furniture: it says the thing
+    /// beside it opens, and then it should get out of the way of everything that has something to
+    /// say. Measured off the reference render at roughly five points across in a secondary ink.
     ///
-    /// The button is present at rest, not conjured by hover: only its drawing changes. That is
-    /// what keeps it reachable by Full Keyboard Access and announced to VoiceOver, which a
-    /// control that exists only under a pointer never is.
+    /// `Section(isExpanded:)` draws no triangle of its own here, captured with the pointer on a
+    /// header and with it off, so this is the only disclosure control the header has. The binding
+    /// stays because it is what tells the list to fold the rows away.
+    ///
+    /// A real `Button`, present at rest, so Full Keyboard Access can reach it and VoiceOver reads
+    /// it with its expanded state as a value.
     private var disclosure: some View {
         Button {
             Task { await app.toggleCollapsed(repo) }
         } label: {
-            ZStack {
-                RepoIcon(repo: repo)
-                    .opacity(isHeaderHovered ? 0 : 1)
-
-                Image(systemName: "chevron.right")
-                    .font(Typo.label)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(Palette.textSecondary)
-                    .rotationEffect(.degrees(repo.collapsed ? 0 : 90))
-                    .opacity(isHeaderHovered ? 1 : 0)
-            }
-            .frame(width: Metrics.repoIcon, height: Metrics.repoIcon)
-            .contentShape(Rectangle())
+            Image(systemName: "chevron.right")
+                .font(.system(size: SidebarMetrics.caretSize, weight: .medium))
+                .foregroundStyle(Palette.textSecondary)
+                .rotationEffect(.degrees(repo.collapsed ? 0 : 90))
+                .frame(width: SidebarMetrics.caretGutter, height: Metrics.repoIcon)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .animation(.easeInOut(duration: 0.12), value: isHeaderHovered)
-        // The turn is movement, so it goes when Reduce Motion is on. The cross fade stays: a fade
-        // is what that setting asks for in place of a movement, not something it also forbids.
+        // The turn is movement, so it goes when Reduce Motion is on. Without it the chevron still
+        // changes direction, it just arrives there rather than travelling.
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: repo.collapsed)
         .accessibilityLabel(repo.collapsed ? "Show workspaces in \(repo.name)" : "Hide workspaces in \(repo.name)")
         .accessibilityValue(repo.collapsed ? "Collapsed" : "Expanded")

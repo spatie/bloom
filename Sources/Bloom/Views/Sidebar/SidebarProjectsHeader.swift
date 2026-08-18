@@ -37,8 +37,10 @@ struct SidebarProjectsHeader: View {
                 Label("Add project", systemImage: "folder.badge.plus")
                     .labelStyle(.iconOnly)
                     .font(Typo.label)
-                    .frame(width: Metrics.repoIcon, height: Metrics.repoIcon)
-                    .padding(Metrics.spacingSmall)
+                    .frame(
+                        width: SidebarMetrics.headerButton.width,
+                        height: SidebarMetrics.headerButton.height
+                    )
                     .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
                     .background(
                         isHovered ? Palette.hover : .clear,
@@ -53,7 +55,6 @@ struct SidebarProjectsHeader: View {
             .keyboardShortcut("a", modifiers: [.command, .option])
             .help("Add a project folder (⌥⌘A)")
         }
-        .padding(.top, Metrics.spacingWide)
         .contentShape(Rectangle())
         .onHoverChange { isHovered = $0 }
     }
