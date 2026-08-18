@@ -88,7 +88,13 @@ struct TerminalSplitView: View {
             isFocusedPane: isFocused,
             focusRequest: focusRequest,
             onFocus: { splits.focus(id, in: ownerID) },
-            onCommand: { handle($0, from: id) }
+            onCommand: { handle($0, from: id) },
+            onContextMenu: {
+                TerminalPaneMenu.make(
+                    canClose: layout.paneCount > 1,
+                    isZoomed: layout.zoomed == id
+                ) { _ = handle($0, from: id) }
+            }
         )
         .padding(Self.paneInset)
         .overlay {

@@ -2,17 +2,25 @@ import SwiftUI
 import Observation
 import BatonCore
 
-/// The buffers behind Edit mode, one per file, for as long as the inspector is showing this
-/// workspace.
+/// The buffers behind Edit mode, one per file, for as long as the app is running.
 ///
-/// Drafts are kept per path rather than thrown away when the pane changes, because the pane
-/// changes for reasons that have nothing to do with the user being finished: clicking the next
-/// file, flipping back to the diff to check something, the file list refreshing underneath. None
-/// of those should silently discard typed text. Nothing here writes to disk on its own; the only
-/// write is `save`, and it is always the user asking.
+/// Drafts are kept per absolute path rather than thrown away when the pane changes, because the
+/// pane changes for reasons that have nothing to do with the user being finished: clicking the
+/// next file, flipping back to the diff to check something, switching workspace, the file list
+/// refreshing underneath. None of those should silently discard typed text, and every one of them
+/// tears a view down, which is why this is one store for the launch rather than `@State` on a
+/// view that comes and goes.
+///
+/// Nothing here writes to disk on its own. The only write is `save`, and it is always the user
+/// asking.
 @MainActor
 @Observable
 final class FileEditSession {
+    /// Absolute paths are unique across workspaces, so one store serves all of them.
+    static let shared = FileEditSession()
+
+    private init() {}
+
     /// One file's editing state. `baseline` is the exact bytes the text was loaded from, which is
     /// what makes a save checkable rather than hopeful.
     struct Draft {

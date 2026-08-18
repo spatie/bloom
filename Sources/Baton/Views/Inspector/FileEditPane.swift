@@ -70,7 +70,7 @@ struct FileEditPane: View {
                     .help("Throw away your unsaved edits and read the file again")
             }
 
-            Button("Save") { Task { await session.save(path: path) } }
+            Button("Save", action: save)
                 .controlSize(.small)
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(!isDirty)
@@ -89,6 +89,16 @@ struct FileEditPane: View {
             Button("Keep editing", role: .cancel) {}
         } message: {
             Text("The file on disk replaces what you typed. There is no undo for this.")
+        }
+    }
+
+    /// A save changes the worktree, so the file list's counts and the diff behind this pane are
+    /// both stale the moment it lands.
+    private func save() {
+        Task {
+            await session.save(path: path)
+            guard case .saved = session.status(for: path) else { return }
+            await model.refreshChanges()
         }
     }
 

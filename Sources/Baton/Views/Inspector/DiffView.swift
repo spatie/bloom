@@ -35,9 +35,9 @@ struct DiffView: View {
     @State private var mode: FileViewMode = .diff
     @State private var isEditable = false
     @State private var revertProblem: String?
-    /// Editing buffers live for as long as the inspector is showing this workspace, so flipping
-    /// back to the diff to check something cannot discard what the user typed.
-    @State private var session = FileEditSession()
+    /// Editing buffers outlive this view, so flipping back to the diff, walking to the next file
+    /// or switching workspace cannot discard what the user typed.
+    private let session = FileEditSession.shared
 
     private enum Phase {
         case loading

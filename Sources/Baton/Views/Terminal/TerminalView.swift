@@ -54,6 +54,10 @@ final class BatonTerminalView: LocalProcessTerminalView {
     /// keystroke fall through to the app menu instead of being swallowed.
     var onCommand: (@MainActor (TerminalPaneCommand) -> Bool)?
 
+    /// Asked when AppKit wants a contextual menu. `.contextMenu` in SwiftUI never fires here:
+    /// SwiftTerm's view consumes the right mouse event before SwiftUI sees it.
+    var onContextMenu: (@MainActor () -> NSMenu?)?
+
     private let processObserver = TerminalProcessObserver()
 
     /// Whether the user's Ghostty configuration is in charge of the font and the colours. Owned by
@@ -152,6 +156,15 @@ final class BatonTerminalView: LocalProcessTerminalView {
     override func mouseDown(with event: NSEvent) {
         super.mouseDown(with: event)
         onFocus?()
+
+    }
+
+    /// A right click is also a claim on the keyboard: acting on a menu item means acting on this
+    /// pane, so it becomes the focused one before the menu is even drawn.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        onFocus?()
+        return onContextMenu?() ?? super.menu(for: event)
+
     }
 
     /// Keystrokes on their way to the shell. When the shell is gone they are swallowed, except a
@@ -429,6 +442,7 @@ struct TerminalView: NSViewRepresentable {
     var focusRequest = 0
     var onFocus: (@MainActor () -> Void)?
     var onCommand: (@MainActor (TerminalPaneCommand) -> Bool)?
+    var onContextMenu: (@MainActor () -> NSMenu?)?
 
     /// Read here rather than inside the terminal so SwiftUI reruns `updateNSView` when the switch
     /// in Settings moves, which is what pushes the change into a shell that is already running.
@@ -450,6 +464,7 @@ struct TerminalView: NSViewRepresentable {
         session.usesGhosttyTheme = usesGhosttyTheme
         session.onFocus = onFocus
         session.onCommand = onCommand
+        session.onContextMenu = onContextMenu
         // Before the request, whose `didSet` reads it.
         host.isFocusedPane = isFocusedPane
         host.focusRequest = focusRequest

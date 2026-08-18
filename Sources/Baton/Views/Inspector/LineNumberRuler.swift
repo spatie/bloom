@@ -71,21 +71,25 @@ final class LineNumberRuler: NSRulerView {
         let text = textView.string as NSString
         rebuildIfNeeded(text)
 
-        // The gutter is painted here rather than left to the ruler's default, both so it matches
-        // the diff's gutter and so it is guaranteed opaque: the text view runs underneath it.
-        // The two AppKit colours `Palette.diffGutter` and `Palette.border` resolve to, used
-        // directly: converting a SwiftUI `Color` inside an AppKit draw pass drags the SwiftUI
-        // graph into it, and doing that broke the app's own offscreen window capture.
-        // Intersected with `bounds`, and `clipsToBounds` set in the initialiser. On macOS a view
-        // does not clip its own drawing by default, and the rect handed to a ruler during an
-        // offscreen render of the whole window is the whole window: filling it painted over every
-        // other view in the app.
+        // Painted rather than left to the ruler's own background, both so it matches the diff's
+        // gutter and so it is certainly opaque: the text view runs underneath it.
+        //
+        // The fill is clipped to `bounds` by hand. On macOS a view does not clip its own drawing,
+        // and the rect a ruler is handed during an offscreen render of the whole window is the
+        // whole window, so filling it painted over every other view in the app.
+        //
+        // AppKit colours rather than `Palette.diffGutter` and `Palette.border`, which are the same
+        // two colours: converting a SwiftUI `Color` inside a draw pass drags the SwiftUI graph
+        // into it, and that broke the window capture in a different way again.
         let gutter = rect.intersection(bounds)
         NSColor.underPageBackgroundColor.setFill()
         gutter.fill()
+
         NSColor.separatorColor.setFill()
         let hairline = 1 / (window?.backingScaleFactor ?? 2)
-        NSRect(x: bounds.maxX - hairline, y: gutter.minY, width: hairline, height: gutter.height).fill()
+        NSRect(
+            x: bounds.maxX - hairline, y: gutter.minY, width: hairline, height: gutter.height
+        ).fill()
 
         let inset = textView.textContainerInset.height
         let origin = convert(NSPoint.zero, from: textView).y + inset
