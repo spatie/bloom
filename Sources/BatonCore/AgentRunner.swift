@@ -113,7 +113,9 @@ public actor AgentRunner {
             "--include-partial-messages",
             "--verbose",
             "--permission-mode", session.permissionMode.cliValue,
-            "--model", session.model,
+            // Translated, because a model id can come from a Conductor settings file and the
+            // CLI does not accept Conductor's names. See `ModelAlias`.
+            "--model", ModelAlias.cliValue(for: session.model),
         ]
         if let resume, !resume.isEmpty {
             arguments += ["--resume", resume]
