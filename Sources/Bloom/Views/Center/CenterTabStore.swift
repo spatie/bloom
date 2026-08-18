@@ -35,6 +35,21 @@ final class CenterTabStore {
         tabsByWorkspace[workspaceID] ?? []
     }
 
+    /// The workspace's one review tab, if it has been opened. There is never a second: see the
+    /// note on `CenterTab`.
+    func review(for workspaceID: String) -> CenterTab? {
+        tabs(for: workspaceID).first { $0.kind == .review }
+    }
+
+    /// What the strip calls a tab. Only a review tab needs asking: it is named after what it is
+    /// showing rather than after itself, so that a file nobody changed is not filed under "All
+    /// changes", and the answer moves as the reader walks the list.
+    func displayTitle(of tab: CenterTab, in model: WorkspaceModel) -> String {
+        guard tab.kind == .review, !tab.path.isEmpty else { return tab.title }
+        if model.changedFiles.contains(where: { $0.path == tab.path }) { return tab.title }
+        return (tab.path as NSString).lastPathComponent
+    }
+
     // MARK: - Writing
 
     /// Reads the workspace's tabs back from user defaults, once per launch. Called from a task
@@ -75,6 +90,29 @@ final class CenterTabStore {
         update(tab) { $0.title = trimmed }
     }
 
+    /// Opens the workspace's review tab on a file, or points the one it already has at it.
+    ///
+    /// Returns the tab either way, so the caller can decide where to show it. It does not decide
+    /// that itself: a review already open in one half of a split column must not be dragged into
+    /// the half the reader is typing in just because they clicked a filename.
+    @discardableResult
+    func showReview(path: String, workspaceID: String) -> CenterTab {
+        if let existing = review(for: workspaceID) {
+            if existing.path != path { update(existing) { $0.path = path } }
+            return review(for: workspaceID) ?? existing
+        }
+        var tabs = tabs(for: workspaceID)
+        let tab = CenterTab(
+            workspaceID: workspaceID,
+            kind: .review,
+            title: CenterTab.reviewTitle,
+            path: path
+        )
+        tabs.append(tab)
+        apply(tabs, to: workspaceID)
+        return tab
+    }
+
     /// Called as the page navigates, so the tab remembers where it got to.
     func setURL(_ url: String, for tab: CenterTab) {
         guard !url.isEmpty, url != tab.url else { return }
@@ -93,6 +131,10 @@ final class CenterTabStore {
             browsers[tab.id] = nil
         case .terminal:
             stopShell(for: tab)
+        // A review holds nothing: the diff is re-read from git whenever it is drawn, and any
+        // unsaved edit belongs to `FileEditSession`, which outlives every view that shows it.
+        case .review:
+            break
         }
     }
 
@@ -152,7 +194,11 @@ final class CenterTabStore {
     /// "Terminal", then "Terminal 2". The bare first name matches what the bottom panel calls its
     /// own first shell, and numbering from the count skips a name only when one is already taken.
     private static func nextTitle(for kind: CenterTab.Kind, in tabs: [CenterTab]) -> String {
-        let base = kind == .terminal ? "Terminal" : "Browser"
+        let base = switch kind {
+        case .terminal: "Terminal"
+        case .browser: "Browser"
+        case .review: CenterTab.reviewTitle
+        }
         let taken = Set(tabs.filter { $0.kind == kind }.map(\.title))
         guard taken.contains(base) else { return base }
         var index = taken.count + 1

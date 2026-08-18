@@ -1,7 +1,7 @@
 import SwiftUI
 import BloomCore
 
-/// A terminal or a page, filling one pane of the centre column.
+/// A terminal, a page or a review, filling one pane of the centre column.
 ///
 /// It used to replace the conversation for the whole column, on the grounds that a shell given a
 /// third of the height is a shell nobody can read. Panes make that a choice rather than a rule: put
@@ -39,6 +39,13 @@ struct ToolPaneView: View {
         case .browser:
             BrowserTabView(tab: tab)
                 .id(tab.id)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+        // No `.id(tab.id)`: a review is one long lived tab that is repointed rather than
+        // replaced, and rebuilding it on every file would throw away the scroll position of the
+        // list it is drawn from. `ReviewPaneView` keys its own content on the path instead.
+        case .review:
+            ReviewPaneView(model: model, tab: tab)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }

@@ -193,13 +193,14 @@ struct SessionTabsView: View {
 
     private func toolTab(_ tab: CenterTab) -> some View {
         CenterTabView(
-            title: tab.title,
+            title: tabs.displayTitle(of: tab, in: model),
             icon: tab.icon,
             isActive: isSelected(tab),
             isRenaming: renamingID == tab.id,
             editableTitle: tab.title,
             canClose: true,
-            closeTitle: tab.kind == .terminal ? "Close terminal" : "Close browser",
+            canRename: tab.kind != .review,
+            closeTitle: closeTitle(for: tab),
             onSelect: { panes.show(.tool(tab.id), in: model) },
             onStartRename: { renamingID = tab.id },
             onCommitRename: {
@@ -216,7 +217,15 @@ struct SessionTabsView: View {
         .dropDestination(for: String.self) { items, _ in move(items.first, before: tab) }
     }
 
-    /// One control for all three kinds, because they differ in what they open and in nothing else.
+    private func closeTitle(for tab: CenterTab) -> String {
+        switch tab.kind {
+        case .terminal: "Close terminal"
+        case .browser: "Close browser"
+        case .review: "Close the review"
+        }
+    }
+
+    /// One control for all four kinds, because they differ in what they open and in nothing else.
     /// The shortcuts are shown here and fired from `shortcuts`, for the reason spelled out there.
     private var newTabMenu: some View {
         Menu {
@@ -226,6 +235,10 @@ struct SessionTabsView: View {
                 .keyboardShortcut("t", modifiers: [.command, .shift])
             Button("Browser", systemImage: "globe", action: newBrowser)
                 .keyboardShortcut("b", modifiers: [.command, .shift])
+            Divider()
+            Button("Changes", systemImage: "doc.text") { FileReview.open(in: model) }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+                .disabled(model.changedFiles.isEmpty)
         } label: {
             Label("New tab", systemImage: "plus")
                 .labelStyle(.iconOnly)
@@ -277,6 +290,10 @@ struct SessionTabsView: View {
                 .keyboardShortcut("t", modifiers: [.command, .shift])
             Button("New Browser Tab", action: newBrowser)
                 .keyboardShortcut("b", modifiers: [.command, .shift])
+            // The same key both ways, because it is one question: show me the change, or give me
+            // the conversation back. Shift+Cmd+D is what Conductor binds its own diff view to.
+            Button("Show Changes") { FileReview.toggle(in: model) }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
         }
         .frame(width: 0, height: 0)
         .opacity(0)

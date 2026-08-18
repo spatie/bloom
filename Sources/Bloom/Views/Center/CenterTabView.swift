@@ -22,6 +22,10 @@ struct CenterTabView: View {
     /// name they never chose.
     var editableTitle: String
     var canClose: Bool
+    /// Whether double clicking the tab opens a name field. A review is named after the file it is
+    /// showing, so a name of the reader's own would be overwritten the moment they clicked
+    /// another one.
+    var canRename = true
     /// What the close button and its context menu item call this tab, for VoiceOver and tooltips.
     var closeTitle: String
     var onSelect: @MainActor () -> Void
@@ -139,19 +143,21 @@ struct CenterTabView: View {
         // on the first click and the rename on the second, which is also what the Finder does: the
         // second click of a rename lands on the row the first one already selected.
         .simultaneousGesture(TapGesture().onEnded { onSelect() })
-        .simultaneousGesture(TapGesture(count: 2).onEnded { onStartRename() })
+        .simultaneousGesture(TapGesture(count: 2).onEnded { if canRename { onStartRename() } })
         .onHover { isHovered = $0 }
         .help(title)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
         .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction(named: "Select", onSelect)
-        .accessibilityAction(named: "Rename", onStartRename)
+        .accessibilityActions { if canRename { Button("Rename", action: onStartRename) } }
         .contextMenu {
             Button("Open in Split Right", systemImage: PaneSymbol.splitRight, action: onSplitRight)
             Button("Open in Split Down", systemImage: PaneSymbol.splitDown, action: onSplitDown)
             Divider()
-            Button("Rename", systemImage: PaneSymbol.rename, action: onStartRename)
+            if canRename {
+                Button("Rename", systemImage: PaneSymbol.rename, action: onStartRename)
+            }
             Button("Close", systemImage: PaneSymbol.closeTab, action: onClose)
                 .disabled(!canClose)
         }
