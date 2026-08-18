@@ -376,6 +376,69 @@ final class WorkspaceModel {
         isLoadingPullRequest = false
     }
 
+    /// Asks the workspace's agent to open the pull request, instead of running `gh` from here.
+    ///
+    /// The agent already holds the things a pull request needs and Baton does not: this project's
+    /// commit message conventions, its PR template, and the ability to answer a rejected push
+    /// rather than surfacing it as a failed shell command. So the button composes a turn and sends
+    /// it down exactly the path the composer uses, which is also why the request appears in the
+    /// transcript and streams back like anything else the user typed.
+    ///
+    /// Returns nil on success, or the sentence to put in front of the user.
+    func requestPullRequest(overrides: PromptOverrides = PromptOverrides()) async -> String? {
+        // One agent, one turn. Sending into a running turn would interleave with whatever the user
+        // asked for a moment ago, and the runner writes both into the same transcript.
+        guard !isRunning else {
+            return "\(workspace.name) is still working. Wait for the turn to finish, then ask again."
+        }
+
+        // The list of changed files goes into the prompt, so it has to describe the worktree now
+        // rather than whenever the inspector last looked at it.
+        await refreshChanges()
+
+        guard let session = await sessionForPullRequest() else {
+            return "Could not open a session in \(workspace.name) to send the request to."
+        }
+
+        let context = PullRequestPromptContext(
+            workspaceName: workspace.name,
+            branch: workspace.branch,
+            baseBranch: workspace.baseBranch,
+            task: await openingPrompt(),
+            changes: PullRequestPromptContext.changeSummary(changedFiles)
+        )
+        let render = context.render(template: overrides.template(for: .createPullRequest))
+
+        // Bring the session forward first: the turn is about to start streaming, and a user who
+        // pressed a button in the inspector should be looking at the answer to it.
+        activeSessionID = session.id
+        await transcript(for: session).send(render.text)
+        return nil
+    }
+
+    /// A workspace whose agent was never started still has a button to press. Rather than doing
+    /// nothing, it gets the session it would have got the first time somebody typed into it.
+    private func sessionForPullRequest() async -> Session? {
+        if let activeSession { return activeSession }
+        await reloadSessions()
+        if let activeSession { return activeSession }
+        return await createSession(title: "Create pull request")
+    }
+
+    /// What this workspace was created to do, read back out of the oldest session's first user
+    /// turn. Sessions come back in sort order, so the first one that has a user turn is the one
+    /// the workspace opened with.
+    private func openingPrompt() async -> String {
+        guard let store else { return "" }
+        for session in sessions {
+            let messages = (try? await store.messages(sessionID: session.id, limit: 200)) ?? []
+            guard let first = messages.first(where: { $0.kind == .user }),
+                  let text = UserTurnPayload.text(from: first.payload) else { continue }
+            return text
+        }
+        return ""
+    }
+
     // MARK: - Housekeeping
 
     func onAppear() async {

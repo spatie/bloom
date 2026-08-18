@@ -45,6 +45,10 @@ struct SettingsView: View {
                 AgentsSettingsView()
             }
 
+            Tab("Prompts", systemImage: "text.bubble", value: SettingsTab.prompts) {
+                PromptSettingsView()
+            }
+
             Tab("Tools", systemImage: "wrench.and.screwdriver", value: SettingsTab.tools) {
                 ToolSettingsView()
             }

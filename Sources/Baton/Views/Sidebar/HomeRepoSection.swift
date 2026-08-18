@@ -10,10 +10,10 @@ struct HomeRepoSection: View {
     var onCreateWorkspace: (Repo) -> Void
     var onSelect: (Workspace) -> Void
 
-    private static let columns = [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 10)]
+    private static let columns = [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: Metrics.gutter)]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Metrics.inset) {
             HStack(spacing: Metrics.spacing) {
                 RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                     .fill(Color(hexString: repo.accent))
@@ -39,7 +39,7 @@ struct HomeRepoSection: View {
                 .accessibilityLabel("New workspace in \(repo.name)")
             }
 
-            LazyVGrid(columns: Self.columns, alignment: .leading, spacing: 10) {
+            LazyVGrid(columns: Self.columns, alignment: .leading, spacing: Metrics.gutter) {
                 ForEach(workspaces) { workspace in
                     HomeWorkspaceCard(
                         workspace: workspace,

@@ -7,6 +7,7 @@ enum SettingsTab: Hashable {
     case projects
     case models
     case agents
+    case prompts
     case tools
     case about
 }

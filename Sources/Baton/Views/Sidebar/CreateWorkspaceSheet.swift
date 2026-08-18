@@ -26,6 +26,7 @@ struct CreateWorkspaceSheet: View {
 
     /// Wide enough for two branch pickers side by side without the sheet reading as a window.
     private static let width: CGFloat = 560
+    /// Minimums, not fixed heights, so the bars still fit their contents at larger text sizes.
     private static let headerHeight: CGFloat = 38
     private static let footerHeight: CGFloat = 46
 
@@ -62,14 +63,26 @@ struct CreateWorkspaceSheet: View {
     // MARK: - Pieces
 
     private var header: some View {
-        HStack(spacing: Metrics.spacingWide) {
+        HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingWide) {
             Image(systemName: "plus.rectangle.on.folder")
                 .font(Typo.bodyEmphasis)
                 .foregroundStyle(Palette.accent)
-            Text("New workspace")
-                .font(Typo.title)
-                .foregroundStyle(Palette.textPrimary)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: Metrics.spacingTight) {
+                Text("New workspace")
+                    .font(Typo.title)
+                    .foregroundStyle(Palette.textPrimary)
+                // The question the sheet is really asking. It sat on the prompt field as a label,
+                // where it stretched the form's label column far wider than the two pickers above
+                // it needed and pushed every control out of line with every other.
+                Text("Describe the task. Baton cuts a branch and a worktree for it.")
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textSecondary)
+            }
+
             Spacer(minLength: 0)
+
             if isLoading {
                 ProgressView()
                     .controlSize(.small)
@@ -77,64 +90,69 @@ struct CreateWorkspaceSheet: View {
             }
         }
         .padding(.horizontal, Metrics.gutter)
-        .frame(height: Self.headerHeight)
+        .padding(.vertical, Metrics.inset)
+        .frame(minHeight: Self.headerHeight)
     }
 
+    /// A `Form` in its column style, so every label sits in one column and every control starts
+    /// on the same edge. The hand-stacked version put each picker's label immediately before its
+    /// own popup, so nothing in the sheet lined up with anything else.
     private var form: some View {
-        VStack(alignment: .leading, spacing: Metrics.gutter) {
-            HStack(spacing: Metrics.gutter) {
-                Picker("Project", selection: $repoID) {
-                    ForEach(app.repos) { candidate in
-                        Text(candidate.name).tag(Optional(candidate.id))
-                    }
+        Form {
+            Picker("Project", selection: $repoID) {
+                ForEach(app.repos) { candidate in
+                    Text(candidate.name).tag(Optional(candidate.id))
                 }
-                .frame(maxWidth: .infinity)
-
-                Picker("From", selection: $baseBranch) {
-                    ForEach(branchOptions, id: \.self) { branch in
-                        Text(branch).tag(branch)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .disabled(branchOptions.isEmpty)
             }
-            .font(Typo.body)
 
-            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                Text("What should the agent do?")
-                    .font(Typo.label)
-                    .foregroundStyle(Palette.textSecondary)
+            Picker("Start from", selection: $baseBranch) {
+                ForEach(branchOptions, id: \.self) { branch in
+                    Text(branch).tag(branch)
+                }
+            }
+            .disabled(branchOptions.isEmpty)
 
-                // A vertical `TextField` rather than a `TextEditor`: it takes a placeholder, it
-                // grows with the user's text size instead of clipping inside a pinned 150pt box,
-                // and it is still a multi-line field.
-                //
-                // `.roundedBorder` rather than a plain field inside a stroked rectangle we draw
-                // ourselves: the bezel and, more importantly, the focus ring are then the system's,
-                // so the field shows focus the way every other text field on the Mac does and
-                // follows increased contrast and the accent colour without being told.
+            // A vertical `TextField` rather than a `TextEditor`: it takes a placeholder, it
+            // grows with the user's text size instead of clipping inside a pinned 150pt box,
+            // and it is still a multi-line field.
+            //
+            // `.roundedBorder` rather than a plain field inside a stroked rectangle we draw
+            // ourselves: the bezel and, more importantly, the focus ring are then the system's,
+            // so the field shows focus the way every other text field on the Mac does and
+            // follows increased contrast and the accent colour without being told.
+            LabeledContent("Task") {
+                // The example goes in `prompt:`, not in the title. On macOS a text field's title
+                // is a visible label, so passing the example there draws it beside the field
+                // instead of inside it.
                 TextField(
-                    "Fix the flaky upload test, and say why it was flaky",
+                    "Task",
                     text: $prompt,
+                    prompt: Text("Fix the flaky upload test, and say why it was flaky"),
                     axis: .vertical
                 )
-                    .textFieldStyle(.roundedBorder)
-                    .font(Typo.body)
-                    .lineLimit(6...12)
-                    .focused($promptFocused)
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+                .font(Typo.body)
+                .lineLimit(6...12)
+                .focused($promptFocused)
             }
 
-            HStack(spacing: Metrics.spacing) {
-                Text("Branch")
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                Chip(text: branchPreview, systemImage: "arrow.triangle.branch", monospaced: true)
-                Spacer(minLength: 0)
-                Text("worktree in ~/baton/workspaces")
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
+            LabeledContent("Branch") {
+                HStack(spacing: Metrics.spacing) {
+                    Chip(
+                        text: branchPreview,
+                        systemImage: "arrow.triangle.branch",
+                        monospaced: true
+                    )
+                    Spacer(minLength: Metrics.spacingWide)
+                    Text("worktree in ~/baton/workspaces")
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                }
             }
         }
+        .formStyle(.columns)
         .padding(Metrics.gutter)
     }
 
@@ -144,7 +162,7 @@ struct CreateWorkspaceSheet: View {
         } description: {
             Text("Add a git repository before starting a workspace.")
         } actions: {
-            Button("Add a Folder", action: addProject)
+            Button("Choose a folder", systemImage: "folder", action: addProject)
                 .buttonStyle(.borderedProminent)
         }
     }
@@ -160,7 +178,8 @@ struct CreateWorkspaceSheet: View {
                 .disabled(!canCreate)
         }
         .padding(.horizontal, Metrics.gutter)
-        .frame(height: Self.footerHeight)
+        .padding(.vertical, Metrics.spacingWide)
+        .frame(minHeight: Self.footerHeight)
     }
 
     // MARK: - Derived

@@ -29,11 +29,14 @@ struct AgentsSettingsView: View {
     var body: some View {
         Form {
             Section {
+                // Plain labels. A segmented control paints its own text colour and takes either a
+                // title or an image per segment, so a coloured state dot cannot ride along inside
+                // it; the mark that used to be prefixed here came out as black debris on every
+                // segment. The state of the chosen agent is spelled out in the section below.
                 Picker("Agent", selection: $selection) {
                     ForEach(AgentKind.allCases) { kind in
-                        Text(tabTitle(for: kind))
+                        Text(kind.label)
                             .tag(kind)
-                            .accessibilityLabel(kind.label)
                             .accessibilityValue(
                                 statuses[kind].map { stateTitle($0.connection) } ?? "Checking"
                             )
@@ -69,7 +72,9 @@ struct AgentsSettingsView: View {
                                         .font(Typo.label)
                                         .foregroundStyle(Palette.textSecondary)
                                         .textSelection(.enabled)
-                                        .multilineTextAlignment(.trailing)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                        .help(detail.value)
                                 }
                             }
                         }
@@ -108,6 +113,12 @@ struct AgentsSettingsView: View {
 
                 Spacer()
 
+                if isRefreshing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityHidden(true)
+                }
+
                 Button("Refresh") {
                     Task { await refresh() }
                 }
@@ -119,36 +130,75 @@ struct AgentsSettingsView: View {
         }
     }
 
-    /// A missing CLI is the normal state on a fresh machine, so it gets an empty state rather
-    /// than the error treatment. The executable field stays visible underneath it, because
-    /// pointing Baton at a binary outside PATH is the one repair the user can make from here.
+    /// A missing CLI is the normal state on a fresh machine, so it is stated in one row rather
+    /// than given the full `ContentUnavailableView` treatment, which centres a large glyph in
+    /// whatever height it is offered and ate most of the window for one sentence. The section
+    /// below stays visible, because pointing Baton at a binary outside PATH is the one repair
+    /// the user can make from here.
     private var notInstalledSection: some View {
         Section {
-            EmptyStateView(
-                glyph: "magnifyingglass",
-                title: "\(selection.label) was not found",
-                message: "Baton looked for \(selection.executableName) on your PATH and did not find it. Install the CLI, or point Baton at the executable below."
-            )
-            .padding(.vertical, Metrics.gutter)
+            Label {
+                Text("Baton looked for \(selection.executableName) on your PATH and did not find it. Install the CLI, or point Baton at the executable below.")
+                    .font(Typo.label)
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(Palette.textTertiary)
+            }
         }
     }
 
     private var loginSection: some View {
         Section("Sign in") {
             Button("Run \(selection.loginCommand)", action: runLogin)
-            .help("Opens Terminal and runs \(selection.loginCommand). The login flow asks questions, so Baton cannot run it inline.")
+                .help("Opens Terminal and runs \(selection.loginCommand). The login flow asks questions, so Baton cannot run it inline.")
         }
     }
 
+    /// Two rows, because "where is Baton running this from" and "where have you told it to look"
+    /// are different questions. The resolved path used to be passed as the text field's title,
+    /// which on macOS is a visible label rather than a placeholder, so it was drawn as loose
+    /// centred text beside the field and wrapped across two lines mid-path. As its own value row
+    /// it gets the trailing alignment every other value in the window has, one line, and the
+    /// middle of a long path elided so both the home directory and the binary name survive.
     private func executableSection(_ status: AgentStatus) -> some View {
         Section {
             LabeledContent("Executable") {
-                HStack(spacing: Metrics.gutter) {
+                if let path = status.executablePath {
+                    Text(path)
+                        .font(Typo.codeSmall)
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                        .help(path)
+                } else {
+                    // Prose, so it does not read as a path that happens to be spelled oddly.
+                    Text("Not found on your PATH")
+                        .font(Typo.label)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+            }
+
+            LabeledContent("Custom path") {
+                HStack(spacing: Metrics.spacing) {
+                    // `prompt:` and `labelsHidden()`, because on macOS the first argument of a
+                    // `TextField` is a visible label, not a placeholder. Passing the path there
+                    // is what drew it as loose centred text beside the field, wrapped mid-path.
                     TextField(
-                        status.executablePath ?? "Not found on PATH",
-                        text: $pathDraft
+                        "Custom path",
+                        text: $pathDraft,
+                        prompt: Text("Leave empty to use your PATH")
                     )
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
                     .font(Typo.codeSmall)
+                    // The form's trailing alignment reaches into the field otherwise, and a text
+                    // field whose text starts at the right edge is not a Mac text field.
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity)
                     .focused($isEditingPath)
                     .onSubmit { commitPathDraft() }
                     .onChange(of: isEditingPath) { wasEditing, editing in
@@ -161,18 +211,17 @@ struct AgentsSettingsView: View {
                 }
             }
 
-            Button("Use system \(selection.executableName)") {
-                pathDraft = ""
-                commitPathDraft()
+            // Only offered when there is something to undo. Shown always, it was a permanently
+            // dimmed button that read as a broken label rather than as a control.
+            if overrides[selection] != nil {
+                Button("Use system \(selection.executableName)") {
+                    pathDraft = ""
+                    commitPathDraft()
+                }
+                .help("Clears the custom path and goes back to whatever is first on your PATH.")
             }
-            .disabled(overrides[selection] == nil)
-            .help("Clears the override and goes back to whatever is first on your PATH.")
         } header: {
             Text("Location")
-        } footer: {
-            Text("Leave this empty to use the copy found on your PATH.")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textSecondary)
         }
     }
 
@@ -206,14 +255,14 @@ struct AgentsSettingsView: View {
     private var capabilitySection: some View {
         if !selection.canRunWorkspaces {
             Section {
-                HStack(alignment: .top, spacing: Metrics.gutter) {
-                    Image(systemName: "info.circle")
-                        .foregroundStyle(Palette.textTertiary)
-
+                Label {
                     Text("Baton can detect and configure \(selection.label), but cannot run a workspace with it yet. Workspaces run on Claude Code.")
                         .font(Typo.label)
                         .foregroundStyle(Palette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(Palette.textTertiary)
                 }
             }
         }
@@ -235,18 +284,6 @@ struct AgentsSettingsView: View {
         case .installed: "Installed"
         case .notInstalled: "Not installed"
         }
-    }
-
-    /// A leading dot in the segment title, so the row of tabs answers "which of these are wired
-    /// up" without four clicks. Segmented controls draw their own text colour, so the state is
-    /// carried by the glyph rather than by a tint that would be overridden.
-    private func tabTitle(for kind: AgentKind) -> String {
-        let mark = switch statuses[kind]?.connection {
-        case .connected: "\u{25CF} "
-        case .installed: "\u{25CB} "
-        case .notInstalled, nil: ""
-        }
-        return mark + kind.label
     }
 
     // MARK: - Actions

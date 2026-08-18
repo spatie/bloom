@@ -1,17 +1,22 @@
 import SwiftUI
+import AppKit
 import BatonCore
 
-/// What the toolbar says you are looking at: the project, the workspace and the branch you are
-/// about to push.
+/// What the toolbar says you are looking at: the project and the workspace, followed by the
+/// actions that apply to the whole worktree.
 ///
-/// Those are the three facts people keep needing, and the toolbar is where a Mac app puts them.
 /// It is always present, even on Home, where it is one word. That began as a workaround, because
 /// an empty principal item collapsed the flexible space that pins the trailing toggles to the
 /// right, which `ToolbarSpacer(.flexible)` would now express directly on macOS 26. It stays
 /// because controls that move as you navigate are worse than a redundant word.
 ///
-/// It draws its own swatch, spacing and chip, so on macOS 26 the toolbar is told not to put a
-/// glass background behind it. See `BatonWindowToolbar`.
+/// The branch used to sit here as a chip, and the inspector's pull request strip repeats it a
+/// centimetre lower, so the window showed the same branch name twice above itself. The inspector
+/// keeps it, since that is where the pull request it belongs to lives, and the menu below carries
+/// the one thing the chip was still good for: reading the branch name off the screen.
+///
+/// It draws its own swatch and spacing, so on macOS 26 the toolbar is told not to put a glass
+/// background behind it. See `BatonWindowToolbar`.
 struct WindowTitleLabel: View {
     @Environment(AppModel.self) private var app
 
@@ -41,13 +46,7 @@ struct WindowTitleLabel: View {
                     .foregroundStyle(Palette.textPrimary)
                     .lineLimit(1)
 
-                Chip(
-                    text: workspace.branch,
-                    systemImage: "arrow.triangle.branch",
-                    monospaced: true
-                )
-                .help(workspace.branch)
-                .accessibilityLabel("Branch \(workspace.branch)")
+                menu(for: workspace)
             }
             .fixedSize()
         } else {
@@ -55,5 +54,41 @@ struct WindowTitleLabel: View {
                 .font(Typo.labelEmphasis)
                 .foregroundStyle(Palette.textSecondary)
         }
+    }
+
+    /// The sidebar's row menu, minus the two entries that cannot travel: renaming is the sidebar
+    /// editing its own row in place, and archiving asks about the branch there. Archiving from
+    /// here goes through the model instead, which applies the user's branch setting and raises the
+    /// window's own confirmation when there is unsaved work at stake.
+    ///
+    /// Drawn like the inspector's overflow menu, because it is the same kind of button one strip
+    /// away.
+    private func menu(for workspace: Workspace) -> some View {
+        Menu {
+            Button("Copy Branch Name") { copy(workspace.branch) }
+            Divider()
+            Button("Open in Editor") { Reveal.inEditor(workspace.path) }
+            Button("Reveal in Finder") { Reveal.inFinder(workspace.path) }
+            Divider()
+            Button(workspace.pinned ? "Unpin" : "Pin") {
+                Task { await app.togglePinned(workspace) }
+            }
+            Divider()
+            Button("Archive", role: .destructive) {
+                Task { await app.archive(workspace) }
+            }
+        } label: {
+            Label("More for this workspace", systemImage: "ellipsis.circle")
+        }
+        .labelStyle(.iconOnly)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("More for this workspace")
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 }

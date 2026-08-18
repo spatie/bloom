@@ -41,7 +41,8 @@ struct SearchView: View {
                 }
             }
             .padding(.horizontal, Self.fieldInset)
-            .frame(height: Self.fieldHeight)
+            .padding(.vertical, Metrics.inset)
+            .frame(minHeight: Self.fieldHeight)
 
             Hairline()
 
@@ -55,9 +56,10 @@ struct SearchView: View {
     }
 
     /// A search field is the one thing on this screen, so it is given the room a window's search
-    /// field gets rather than the height of a list row.
+    /// field gets rather than the height of a list row. A minimum, not a fixed height, so it
+    /// still fits its text at larger text sizes.
     private static let fieldHeight: CGFloat = 46
-    private static let fieldInset: CGFloat = 16
+    private static let fieldInset = Metrics.pane
     /// A search result reads as a line, so the column is capped rather than run out to the width
     /// of the window.
     private static let resultWidth: CGFloat = 760

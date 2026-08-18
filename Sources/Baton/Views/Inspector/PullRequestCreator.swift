@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The strip before there is a pull request: which branch you are on, and the button that pushes
-/// it and opens one.
+/// The strip before there is a pull request: which branch you are on, and the button that asks the
+/// agent to open one.
 ///
 /// The branch name is the part that gives way. It is given a lower layout priority than the
 /// button so a long branch truncates from the head, which keeps the readable end of it, rather
@@ -11,6 +11,9 @@ struct PullRequestCreator: View {
     var branch: String
     var baseBranch: String
     var isWorking: Bool
+    /// The workspace's agent is mid turn. The request is a turn of its own, so it has to wait
+    /// rather than interleave with whatever was asked a moment ago.
+    var isAgentBusy: Bool
     var action: () -> Void
 
     /// Whether gh can be used at all. Held here rather than passed in because it is a fact about
@@ -65,6 +68,13 @@ struct PullRequestCreator: View {
         Button("Create pull request", systemImage: "arrow.triangle.pull", action: action)
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .help("Push this branch and open a pull request against \(baseBranch)")
+            .disabled(isAgentBusy)
+            .help(helpText)
+    }
+
+    private var helpText: String {
+        isAgentBusy
+            ? "The agent is working. The request is sent as a turn, so it has to wait for this one."
+            : "Ask this workspace's agent to push the branch and open a pull request against \(baseBranch). Edit the wording in Settings, Prompts."
     }
 }

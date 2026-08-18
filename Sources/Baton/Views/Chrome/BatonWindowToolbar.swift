@@ -34,7 +34,7 @@ struct BatonWindowToolbar: ToolbarContent {
         // On macOS 26 every toolbar item is handed its own Liquid Glass background. This one
         // draws its whole content itself, so the system capsule is a second background on top of
         // it: a circle around the single word on Home, and a rim with no clearance around the
-        // project swatch and the branch chip on a workspace.
+        // project swatch and the overflow menu on a workspace.
         if #available(macOS 26.0, *) {
             ToolbarItem(placement: .principal) {
                 WindowTitleLabel()

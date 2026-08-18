@@ -36,7 +36,7 @@ struct HomeView: View {
 
     private var content: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: Metrics.spacingSection) {
                 HomeWelcomeHeader(
                     greeting: greeting,
                     summary: summary,
@@ -53,7 +53,7 @@ struct HomeView: View {
                     )
                 }
             }
-            .padding(28)
+            .padding(Metrics.pane)
             .frame(maxWidth: 1_100, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
         }
@@ -69,7 +69,10 @@ struct HomeView: View {
         let unread = app.workspaces.count(where: \.unread)
         if active == 0 { return "No workspaces yet. Start one and an agent gets to work." }
         let workspaces = active == 1 ? "1 workspace" : "\(active) workspaces"
-        if unread == 0 { return "\(workspaces) across \(app.repos.count) projects." }
+        if unread == 0 {
+            let projects = app.repos.count == 1 ? "1 project" : "\(app.repos.count) projects"
+            return "\(workspaces) across \(projects)."
+        }
         return "\(workspaces), \(unread) waiting to be read."
     }
 

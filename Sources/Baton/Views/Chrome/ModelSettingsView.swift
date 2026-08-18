@@ -27,7 +27,8 @@ struct ModelSettingsView: View {
                         effort: $defaults.effort
                     )
                 } label: {
-                    SettingLabel(title: "Default model", subtitle: "Model for new sessions")
+                    Text("Default model")
+                    Text("Model for new sessions")
                 }
 
                 LabeledContent {
@@ -36,7 +37,8 @@ struct ModelSettingsView: View {
                         effort: $defaults.reviewEffort
                     )
                 } label: {
-                    SettingLabel(title: "Review model", subtitle: "Model for code reviews")
+                    Text("Review model")
+                    Text("Model for code reviews")
                 }
             }
 
@@ -46,34 +48,30 @@ struct ModelSettingsView: View {
                         Text(mode.label).tag(mode)
                     }
                 } label: {
-                    SettingLabel(
-                        title: "Default permission mode",
-                        subtitle: "How much a new session may do without asking"
-                    )
+                    Text("Default permission mode")
+                    Text("How much a new session may do without asking")
                 }
 
                 Toggle(isOn: $defaults.planMode) {
-                    SettingLabel(
-                        title: "Default to plan mode",
-                        subtitle: "Start new sessions in plan mode"
-                    )
+                    Text("Default to plan mode")
+                    Text("Start new sessions in plan mode")
                 }
 
                 Toggle(isOn: $defaults.fastMode) {
-                    SettingLabel(
-                        title: "Default to fast mode",
-                        subtitle: "Start new sessions in fast mode"
-                    )
+                    Text("Default to fast mode")
+                    Text("Start new sessions in fast mode")
                 }
-            }
-
-            Section {
+            } footer: {
+                // A footer rather than a section of its own. A group holding nothing but a
+                // sentence draws a card around the sentence, which makes an aside look like a
+                // setting the user has failed to find the control for.
                 Text(
                     "A repository that pins a model in its own settings file wins over these. "
                     + "Sessions that already exist keep whatever they were opened with."
                 )
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
         .formStyle(.grouped)
@@ -85,22 +83,6 @@ struct ModelSettingsView: View {
         .onChange(of: defaults) { _, updated in
             guard isLoaded, let store = app.store else { return }
             Task { await updated.save(to: store) }
-        }
-    }
-}
-
-/// Conductor's rows carry a second line of explanation under the title, and the explanation is
-/// what makes "fast mode" mean anything to someone reading it for the first time.
-private struct SettingLabel: View {
-    let title: String
-    let subtitle: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.spacingTight) {
-            Text(title)
-            Text(subtitle)
-                .font(Typo.caption)
-                .foregroundStyle(.secondary)
         }
     }
 }

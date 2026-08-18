@@ -11,7 +11,6 @@ struct LoadingView: View {
     var body: some View {
         HStack(spacing: Metrics.gutter) {
             ProgressView()
-                .controlSize(.regular)
 
             if let label {
                 Text(label)
@@ -19,5 +18,8 @@ struct LoadingView: View {
                     .foregroundStyle(Palette.textSecondary)
             }
         }
+        // One announcement rather than "progress indicator" followed by a stray sentence.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(label ?? "Loading")
     }
 }

@@ -115,8 +115,38 @@ enum Snapshot {
                 try? await Task.sleep(for: .seconds(3))
             }
 
-            guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
-                  let contentView = window.contentView else {
+            // `--settings` captures the Settings window instead of the main one. Without it the
+            // only way to look at a preferences pane was to ask a human for a screenshot, which
+            // meant every change to that window went in unverified.
+            //
+            // Pass it LAST, after `--window-size`. `NSUserDefaults` claims every `-flag value`
+            // pair on the command line for its argument domain, so a flag that takes no value
+            // swallows the flag after it and the app starts with a preference nobody set. With
+            // `--settings --window-size 900x1150` no window is ever created at all.
+            let wantsSettings = arguments.contains("--settings")
+            // What `BatonApp` names its one `Window` scene.
+            let mainWindowTitle = "Baton"
+
+            // Polled rather than slept through, and the settings action is re-sent each time round.
+            // How long the first window takes depends on how much the store has to read, and a
+            // fixed wait that is long enough on a small database is a coin toss on a real one.
+            var candidate: NSWindow?
+            for _ in 0..<40 {
+                let visible = NSApp.windows.filter { $0.isVisible && $0.contentView != nil }
+                if wantsSettings {
+                    // "Anything but the main window", because SwiftUI titles the settings window
+                    // after whichever pane is showing rather than "Settings", and it does not
+                    // reliably take key focus in a headless capture run either.
+                    candidate = visible.first { $0.title != mainWindowTitle }
+                    if candidate == nil, !visible.isEmpty { openSettingsWindow() }
+                } else {
+                    candidate = visible.first
+                }
+                if candidate != nil { break }
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+
+            guard let window = candidate, let contentView = window.contentView else {
                 FileHandle.standardError.write(Data("no window to capture\n".utf8))
                 exit(1)
             }
@@ -170,6 +200,20 @@ enum Snapshot {
             print(path)
             exit(0)
         }
+    }
+
+    /// Opens the `Settings` scene from outside a view.
+    ///
+    /// `NSApp.sendAction(Selector(("showSettingsWindow:")))` is the answer usually given for this
+    /// and it does nothing here: SwiftUI installs the action on the menu item rather than on the
+    /// responder chain. Driving the menu item itself is what actually opens the window.
+    private static func openSettingsWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        guard let appMenu = NSApp.mainMenu?.items.first?.submenu else { return }
+        // Matched by prefix because the item is titled "Settings…" with an ellipsis.
+        guard let index = appMenu.items.firstIndex(where: { $0.title.hasPrefix("Settings") })
+        else { return }
+        appMenu.performActionForItem(at: index)
     }
 
     private static func render() async {

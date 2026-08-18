@@ -21,18 +21,6 @@ enum GitHubBridge {
         )
     }
 
-    static func createPullRequest(
-        worktree: String, base: String, title: String, body: String, draft: Bool
-    ) async throws -> PullRequest {
-        try await GitHub.createPullRequest(
-            worktree: worktree, base: base, title: title, body: body, draft: draft
-        )
-    }
-
-    static func push(worktree: String, branch: String) async throws {
-        try await GitHub.push(worktree: worktree, branch: branch, setUpstream: true)
-    }
-
     static func open(_ url: String) {
         guard let target = URL(string: url) else { return }
         NSWorkspace.shared.open(target)

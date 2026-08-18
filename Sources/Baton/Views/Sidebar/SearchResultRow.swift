@@ -1,6 +1,11 @@
 import SwiftUI
 
-/// One search hit: the project it belongs to, the workspace name, its branch and its diff stat.
+/// One search hit: the workspace name, then the project it belongs to and the branch it is on.
+///
+/// Two lines rather than one. On one line the project name, the workspace name and the branch all
+/// competed for the same width, and the project collapsed to a letter and a half while the name
+/// was still elided. The name leads because it is what was searched for; everything that places
+/// it sits underneath in one quiet line, which is how Spotlight and Mail lay a result out.
 ///
 /// A `Button` rather than a tapped `HStack`, so keyboard users can reach it and VoiceOver reads it
 /// as one actionable row instead of five loose labels.
@@ -17,28 +22,28 @@ struct SearchResultRow: View {
                     .frame(width: Metrics.swatch, height: Metrics.swatch)
                     .accessibilityHidden(true)
 
-                Text(hit.repo?.name ?? "Unknown project")
-                    .font(Typo.body)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .layoutPriority(-1)
+                VStack(alignment: .leading, spacing: Metrics.spacingTight) {
+                    Text(hit.workspace.name)
+                        .font(Typo.bodyEmphasis)
+                        .lineLimit(1)
 
-                Image(systemName: "chevron.right")
-                    .font(Typo.micro)
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
+                    HStack(spacing: Metrics.spacingSmall) {
+                        Text(hit.repo?.name ?? "Unknown project")
+                            .lineLimit(1)
 
-                Text(hit.workspace.name)
-                    .font(Typo.bodyEmphasis)
-                    .lineLimit(1)
+                        Text(verbatim: "·")
+                            .accessibilityHidden(true)
+
+                        Text(hit.workspace.branch)
+                            .font(Typo.codeTiny)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .font(Typo.caption)
+                    .foregroundStyle(.secondary)
+                }
 
                 Spacer(minLength: Metrics.spacingWide)
-
-                Chip(
-                    text: hit.workspace.branch,
-                    systemImage: "arrow.triangle.branch",
-                    monospaced: true
-                )
 
                 if hit.workspace.hasDiff {
                     DiffStatLabel(
@@ -49,7 +54,10 @@ struct SearchResultRow: View {
                 }
             }
             .padding(.horizontal, Metrics.inset)
-            .frame(height: Metrics.rowHeight)
+            .padding(.vertical, Metrics.spacing)
+            // A minimum rather than a fixed height, so a row grows with the user's text size
+            // instead of clipping its own contents at larger settings.
+            .frame(minHeight: Metrics.rowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

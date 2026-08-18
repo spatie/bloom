@@ -42,6 +42,7 @@ struct PullRequestBar: View {
                 branch: model.workspace.branch,
                 baseBranch: model.workspace.baseBranch,
                 isWorking: isWorking || model.isLoadingPullRequest,
+                isAgentBusy: model.isRunning,
                 action: createPullRequest
             )
         }
@@ -56,28 +57,16 @@ struct PullRequestBar: View {
         }
     }
 
-    /// Pushing first is not optional: gh refuses to open a pull request for a branch the remote
-    /// has never heard of, and the agent's work only ever exists locally until now.
+    /// Creation is the agent's job now: it pushes, writes the description and calls `gh` with the
+    /// project's own conventions in context. Baton only composes the request. Reading the pull
+    /// request's status afterwards, and merging it, still go through `gh` from here, because those
+    /// are questions with one right answer rather than work that needs judgement.
     private func createPullRequest() {
         isWorking = true
-        let workspace = model.workspace
 
         Task {
             defer { isWorking = false }
-            do {
-                try await GitHubBridge.push(worktree: workspace.path, branch: workspace.branch)
-                let created = try await GitHubBridge.createPullRequest(
-                    worktree: workspace.path,
-                    base: workspace.baseBranch,
-                    title: workspace.name,
-                    body: "",
-                    draft: false
-                )
-                model.pullRequest = created
-            } catch {
-                errorMessage = "\(error)"
-            }
-            await model.refreshPullRequest()
+            errorMessage = await model.requestPullRequest()
         }
     }
 

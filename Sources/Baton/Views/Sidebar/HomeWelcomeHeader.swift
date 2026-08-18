@@ -7,7 +7,7 @@ struct HomeWelcomeHeader: View {
     var onCreateWorkspace: () -> Void
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 16) {
+        HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSection) {
             VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
                 Text(greeting)
                     .font(.title2)
@@ -20,8 +20,10 @@ struct HomeWelcomeHeader: View {
 
             Spacer(minLength: Metrics.gutter)
 
+            // No `font` of its own. A large bordered button already picks the weight and size
+            // AppKit uses at that control size, and overriding it desynchronised the label from
+            // the capsule drawn around it.
             Button("New workspace", systemImage: "plus", action: onCreateWorkspace)
-                .font(Typo.bodyEmphasis)
                 .controlSize(.large)
                 .buttonStyle(.borderedProminent)
         }

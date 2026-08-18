@@ -186,6 +186,11 @@ enum Metrics {
     static let spacingWide: CGFloat = 8
     /// What a row keeps from the edge of its pane.
     static let inset: CGFloat = 10
+    /// Between the blocks of a full-width pane, such as one project's block on Home.
+    static let spacingSection: CGFloat = 20
+    /// What a full-width pane of content keeps from the window edge. Larger than `inset`, which
+    /// is a row's margin inside a narrow column.
+    static let pane: CGFloat = 24
 
     // MARK: Marks
 
