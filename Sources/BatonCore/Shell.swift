@@ -47,6 +47,12 @@ public enum Shell {
             "/usr/sbin",
             "/sbin",
             "\(home)/.local/bin",
+            // Node installs put binaries wherever the user's package manager decided. `codex`
+            // lives in .npm-packages/bin on this machine, and a Finder launch would otherwise
+            // report it as not installed while a terminal launch found it.
+            "\(home)/.npm-packages/bin",
+            "\(home)/.volta/bin",
+            "\(home)/.yarn/bin",
             "\(home)/.bun/bin",
             "\(home)/.cargo/bin",
             "\(home)/.composer/vendor/bin",

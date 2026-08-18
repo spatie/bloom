@@ -170,3 +170,84 @@ public extension String {
         isEmpty ? self : prefix(1).uppercased() + dropFirst()
     }
 }
+
+/// The application-wide defaults a brand new session inherits, edited in Settings, Models.
+///
+/// These live in the store's key value table rather than in a settings file, because they are the
+/// user's own preference across every repository, and a repository's own file is allowed to
+/// override them (see `resolve` on the composer side for the full precedence).
+public struct AppDefaults: Sendable, Hashable {
+    /// Store keys. Kept next to the type so a rename cannot leave a stale string behind in a view.
+    public enum Key {
+        public static let model = "defaults.model"
+        public static let effort = "defaults.effort"
+        public static let reviewModel = "defaults.review.model"
+        public static let reviewEffort = "defaults.review.effort"
+        public static let permissionMode = "defaults.permissionMode"
+        public static let planMode = "defaults.planMode"
+        public static let fastMode = "defaults.fastMode"
+    }
+
+    /// The built-in fallbacks, which match `Session`'s own initialiser. Nothing else may invent a
+    /// second set of hard-coded defaults.
+    public static let fallbackModel = "opus"
+    public static let fallbackEffort = "high"
+    public static let fallbackPermissionMode = PermissionMode.acceptEdits
+
+    public var model: String
+    public var effort: String
+    public var reviewModel: String
+    public var reviewEffort: String
+    public var permissionMode: PermissionMode
+    public var planMode: Bool
+    public var fastMode: Bool
+
+    public init(
+        model: String = AppDefaults.fallbackModel,
+        effort: String = AppDefaults.fallbackEffort,
+        reviewModel: String = AppDefaults.fallbackModel,
+        reviewEffort: String = AppDefaults.fallbackEffort,
+        permissionMode: PermissionMode = AppDefaults.fallbackPermissionMode,
+        planMode: Bool = false,
+        fastMode: Bool = false
+    ) {
+        self.model = model
+        self.effort = effort
+        self.reviewModel = reviewModel
+        self.reviewEffort = reviewEffort
+        self.permissionMode = permissionMode
+        self.planMode = planMode
+        self.fastMode = fastMode
+    }
+
+    /// A missing row means "never chosen", so every read falls back rather than failing.
+    public static func load(from store: Store) async -> AppDefaults {
+        func value(_ key: String) async -> String? {
+            let raw = try? await store.setting(key)
+            guard let raw, !raw.isEmpty else { return nil }
+            return raw
+        }
+
+        var defaults = AppDefaults()
+        defaults.model = await value(Key.model) ?? fallbackModel
+        defaults.effort = await value(Key.effort) ?? fallbackEffort
+        defaults.reviewModel = await value(Key.reviewModel) ?? defaults.model
+        defaults.reviewEffort = await value(Key.reviewEffort) ?? defaults.effort
+        if let raw = await value(Key.permissionMode), let mode = PermissionMode(rawValue: raw) {
+            defaults.permissionMode = mode
+        }
+        defaults.planMode = await value(Key.planMode) == "1"
+        defaults.fastMode = await value(Key.fastMode) == "1"
+        return defaults
+    }
+
+    public func save(to store: Store) async {
+        try? await store.setSetting(Key.model, model)
+        try? await store.setSetting(Key.effort, effort)
+        try? await store.setSetting(Key.reviewModel, reviewModel)
+        try? await store.setSetting(Key.reviewEffort, reviewEffort)
+        try? await store.setSetting(Key.permissionMode, permissionMode.rawValue)
+        try? await store.setSetting(Key.planMode, planMode ? "1" : "0")
+        try? await store.setSetting(Key.fastMode, fastMode ? "1" : "0")
+    }
+}

@@ -17,7 +17,6 @@ struct WorkspaceDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            WorkspaceHeaderView(model: model)
             SessionTabsView(model: model)
 
             if let transcript = model.activeTranscript {

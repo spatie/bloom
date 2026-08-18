@@ -533,39 +533,91 @@ struct ComposerView: View {
         }
     }
 
-    /// First run for a session: adopt the repository's configured defaults and read back the
-    /// fast mode flag. Both are only interesting once, hence the `task(id:)`.
+    /// First open of a session: settle what it starts out as, and read back the fast mode flag.
+    /// Both are only interesting once, hence the `task(id:)`.
+    ///
+    /// Precedence, most specific first:
+    ///
+    /// 1. **The session itself.** Once it has been prepared, or once it has run an agent, nothing
+    ///    here touches it again. A choice the user made in the footer is never overwritten.
+    /// 2. **The repository's settings file**, via `SettingsLoader.load(repo:)`. A repo that pins
+    ///    `models.default` means it, and it means it more than a global preference does.
+    /// 3. **The app-level defaults** from Settings, Models (`AppDefaults`).
+    /// 4. **The built-in fallbacks**, which `AppDefaults` holds and `Session.init` matches.
+    ///
+    /// The repository file has no say over permission mode, plan mode or fast mode, because it
+    /// has no keys for them, so those fall straight from level 3 to level 4.
     private func prepare() async {
         isFocused = true
         caret = (transcript.draft as NSString).length
 
-        if let store = app.store {
-            let key = Self.fastModeKey(sessionID: transcript.session.id)
-            isFastMode = (try? await store.setting(key)) == "1"
-        }
+        guard let store = app.store else { return }
+        let sessionID = transcript.session.id
+        isFastMode = (try? await store.setting(Self.fastModeKey(sessionID: sessionID))) == "1"
 
-        guard let repo = app.repo(for: transcript.workspace) else { return }
-        let path = repo.path
-        let settings = await Task.detached(priority: .utility) {
-            SettingsLoader.load(repo: path)
-        }.value
+        // Level 1. The marker is what separates "never opened" from "opened and left alone",
+        // which the column values cannot express: a session created with the built-in defaults
+        // looks exactly like one the user deliberately set to the same values.
+        let appliedKey = Self.defaultsAppliedKey(sessionID: sessionID)
+        let wasPrepared = (try? await store.setting(appliedKey)) == "1"
+        guard !wasPrepared, transcript.session.agentSessionID == nil else { return }
+
+        // Level 3, read first because level 2 only overrides two of its fields.
+        let defaults = await AppDefaults.load(from: store)
+
+        // Level 2. Off the main actor because it reads up to six files from disk.
+        var repoSettings = RepoSettings()
+        if let repo = app.repo(for: transcript.workspace) {
+            let path = repo.path
+            repoSettings = await Task.detached(priority: .utility) {
+                SettingsLoader.load(repo: path)
+            }.value
+        }
+        guard !Task.isCancelled else { return }
+
+        let model = Self.firstNonEmpty(repoSettings.defaultModel, defaults.model)
+        let effort = Self.firstNonEmpty(repoSettings.defaultEffort, defaults.effort)
+        // "Start in plan mode" is the more specific instruction of the two, so it beats the
+        // permission mode picker when both are set rather than the two fighting over one column.
+        let permissionMode = defaults.planMode ? PermissionMode.plan : defaults.permissionMode
+
+        if defaults.fastMode != isFastMode {
+            isFastMode = defaults.fastMode
+            try? await store.setSetting(
+                Self.fastModeKey(sessionID: sessionID),
+                defaults.fastMode ? "1" : nil
+            )
+        }
 
         var session = transcript.session
-        var changed = false
-        if let model = settings.defaultModel, session.model.isEmpty {
+        if session.model != model || session.effort != effort || session.permissionMode != permissionMode {
             session.model = model
-            changed = true
-        }
-        if let effort = settings.defaultEffort, session.effort.isEmpty {
             session.effort = effort
-            changed = true
+            session.permissionMode = permissionMode
+            update { $0 = session }
         }
-        guard changed else { return }
-        update { $0 = session }
+
+        // Written last, so a cancelled preparation is retried rather than silently skipped.
+        try? await store.setSetting(appliedKey, "1")
     }
 
     private static func fastModeKey(sessionID: String) -> String {
         "session.\(sessionID).fastMode"
+    }
+
+    /// A settings file with an empty value in it is a missing value, not an instruction to blank
+    /// the session's model out.
+    private static func firstNonEmpty(_ preferred: String?, _ fallback: String) -> String {
+        guard let preferred, !preferred.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return fallback
+        }
+        return preferred
+    }
+
+    /// Records that a session has been through `prepare()`, so reopening it never re-applies the
+    /// defaults over choices the user has since made in the footer.
+    private static func defaultsAppliedKey(sessionID: String) -> String {
+        "session.\(sessionID).defaultsApplied"
     }
 
     private static func permissionGlyph(_ mode: PermissionMode) -> String {

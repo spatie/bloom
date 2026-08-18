@@ -314,3 +314,65 @@ public struct PullRequest: Sendable, Hashable, Codable {
         self.reviewDecision = reviewDecision
     }
 }
+
+// MARK: - Agent CLIs
+
+/// The coding agent CLIs Baton knows how to talk about.
+///
+/// Only Claude Code can actually drive a workspace today, but the others are detected and
+/// configurable so the settings screen can be honest about what is installed and what is not.
+public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
+    case claudeCode
+    case codex
+    case cursor
+    case openCode
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .claudeCode: "Claude Code"
+        case .codex: "Codex"
+        case .cursor: "Cursor"
+        case .openCode: "OpenCode"
+        }
+    }
+
+    public var executableName: String {
+        switch self {
+        case .claudeCode: "claude"
+        case .codex: "codex"
+        case .cursor: "cursor-agent"
+        case .openCode: "opencode"
+        }
+    }
+
+    /// Absolute path to the file the settings screen offers to open.
+    ///
+    /// Claude Code and Codex point at a real config file. Cursor and OpenCode point at their
+    /// config directory instead, because their file layout is not verified and guessing a
+    /// filename would send the user to something that does not exist.
+    public var configPath: String {
+        let home = NSHomeDirectory()
+        switch self {
+        case .claudeCode: return "\(home)/.claude/settings.json"
+        case .codex: return "\(home)/.codex/config.toml"
+        case .cursor: return "\(home)/.cursor"
+        case .openCode: return "\(home)/.opencode"
+        }
+    }
+
+    /// Interactive, so it has to be handed to a terminal rather than run inline.
+    public var loginCommand: String {
+        switch self {
+        case .claudeCode: "claude /login"
+        case .codex: "codex login"
+        case .cursor: "cursor-agent login"
+        case .openCode: "opencode auth login"
+        }
+    }
+
+    /// Whether Baton can actually drive a workspace with it. Only Claude Code today, because
+    /// `AgentRunner` speaks the Claude Code stream-json protocol and nothing else.
+    public var canRunWorkspaces: Bool { self == .claudeCode }
+}

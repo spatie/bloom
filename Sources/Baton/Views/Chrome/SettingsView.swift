@@ -29,8 +29,14 @@ struct SettingsView: View {
             ProjectSettingsView()
                 .tabItem { Label("Projects", systemImage: "folder") }
 
-            AgentSettingsView()
-                .tabItem { Label("Agent", systemImage: "terminal") }
+            ModelSettingsView()
+                .tabItem { Label("Models", systemImage: "sparkle") }
+
+            AgentsSettingsView()
+                .tabItem { Label("Agents", systemImage: "person.2") }
+
+            ToolSettingsView()
+                .tabItem { Label("Tools", systemImage: "wrench.and.screwdriver") }
 
             AboutSettingsView()
                 .tabItem { Label("About", systemImage: "info.circle") }
@@ -340,14 +346,16 @@ private struct ScriptValue: View {
     }
 }
 
-/// Surfaces missing command-line tools before an agent launch fails without a useful explanation.
-private struct AgentSettingsView: View {
+/// Surfaces missing command-line tools before an operation fails without a useful explanation.
+///
+/// The agent CLIs themselves moved to the Agents tab, which detects far more about them than a
+/// path. What is left is the plumbing Baton shells out to on its own behalf.
+private struct ToolSettingsView: View {
     var body: some View {
         Form {
             Section("Command-line tools") {
-                ToolPathRow(name: "claude", path: Shell.which("claude"))
-                ToolPathRow(name: "gh", path: Shell.which("gh"))
                 ToolPathRow(name: "git", path: Shell.which("git"))
+                ToolPathRow(name: "gh", path: Shell.which("gh"))
             }
         }
         .formStyle(.grouped)
