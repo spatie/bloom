@@ -61,14 +61,17 @@ final class FileEditSession {
         )
     }
 
-    /// Read the file, unless there is already a draft for it.
+    /// Read the file, unless there is a draft with unsaved changes in it.
     ///
-    /// An existing draft wins on purpose: reloading over one would be the data loss this whole
-    /// type exists to avoid. Re-reading the file to see whether it moved on underneath is the
-    /// save's job, where there is a user to tell about it.
+    /// A dirty draft wins on purpose: reloading over one would be the data loss this whole type
+    /// exists to avoid, and finding out whether the file moved on underneath is the save's job,
+    /// where there is a user to tell about it. A clean draft is only a cached read, so it is
+    /// re-read instead, which is how reopening a file shows what the agent did to it since.
     func load(path absolutePath: String) async {
-        guard drafts[absolutePath] == nil else { return }
-        status[absolutePath] = .loading
+        guard drafts[absolutePath]?.isDirty != true else { return }
+        // Only the first read shows a spinner. Re-reading a clean draft has something to display
+        // the whole time, and flashing the pane empty for it would read as a glitch.
+        if drafts[absolutePath] == nil { status[absolutePath] = .loading }
 
         let outcome = await Task.detached(priority: .userInitiated) {
             Self.reading(absolutePath)

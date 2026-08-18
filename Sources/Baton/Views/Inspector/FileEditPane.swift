@@ -28,7 +28,11 @@ struct FileEditPane: View {
                 LoadingView("Reading the file")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case let .unavailable(reason):
-                EmptyStateView(glyph: "doc.badge.gearshape", title: "Cannot edit this file", message: reason)
+                EmptyStateView(
+                    glyph: "doc.badge.gearshape",
+                    title: "Cannot edit this file",
+                    message: reason
+                )
             default:
                 editor
             }

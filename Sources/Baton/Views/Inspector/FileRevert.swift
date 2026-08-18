@@ -83,7 +83,9 @@ enum FileRevert {
         }
     }
 
-    private static func exists(_ path: String, at ref: String, in worktree: String) async throws -> Bool {
+    private static func exists(
+        _ path: String, at ref: String, in worktree: String
+    ) async throws -> Bool {
         let result = try await Shell.run(
             "git", ["cat-file", "-e", "\(ref):\(path)"], cwd: worktree, env: environment
         )

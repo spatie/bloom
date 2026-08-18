@@ -47,7 +47,9 @@ struct SourceEditor: NSViewRepresentable {
         textView.allowsUndo = true
         textView.isHorizontallyResizable = true
         textView.isVerticallyResizable = true
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+        textView.maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude
+        )
         textView.minSize = NSSize(width: 0, height: 0)
         textView.textContainerInset = NSSize(width: CodeMetrics.textInset, height: 6)
         textView.font = CodeMetrics.font
@@ -140,7 +142,9 @@ struct SourceEditor: NSViewRepresentable {
         /// Load a whole buffer. Distinct from an edit: the undo stack is meaningless across a
         /// different file, and the colour pass has to run before the first frame rather than
         /// after a debounce, or the file flashes up unhighlighted.
-        func replace(text value: String, language newLanguage: Language, appearance scheme: ColorScheme) {
+        func replace(
+            text value: String, language newLanguage: Language, appearance scheme: ColorScheme
+        ) {
             guard let textView else { return }
             language = newLanguage
             appearance = scheme

@@ -137,7 +137,9 @@ public enum FileEditor {
     /// Returns the new baseline, so the caller can keep editing without a round trip that would
     /// reopen the same race it just closed.
     @discardableResult
-    public static func write(_ text: String, over baseline: EditableFile) throws(FileEditorError) -> EditableFile {
+    public static func write(
+        _ text: String, over baseline: EditableFile
+    ) throws(FileEditorError) -> EditableFile {
         let current = try read(baseline.path)
         guard current.text == baseline.text else {
             throw FileEditorError.changedOnDisk(path: baseline.path, at: current.modifiedAt)

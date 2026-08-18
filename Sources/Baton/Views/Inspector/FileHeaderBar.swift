@@ -187,7 +187,11 @@ struct FileHeaderBar: View {
         .controlSize(.small)
         .fixedSize()
         .disabled(!isEditable && mode == .diff)
-        .help(isEditable ? "Switch between the diff and the file" : "\(file.filename) cannot be edited here")
+        .help(
+            isEditable
+                ? "Switch between the diff and the file"
+                : "\(file.filename) cannot be edited here"
+        )
     }
 
     // MARK: - Actions
