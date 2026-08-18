@@ -15,6 +15,7 @@ struct ChecksView: View {
     @State private var groups: [CheckRunGroup] = []
     @State private var hasLoaded = false
     @State private var hovered: String?
+    @State private var github: GitHubAvailability.State = .unknown
 
     var body: some View {
         VStack(spacing: 0) {
@@ -67,7 +68,7 @@ struct ChecksView: View {
                 .fill(color(for: rollup.0))
                 .frame(width: Metrics.dot, height: Metrics.dot)
                 .accessibilityHidden(true)
-            Text(runs.isEmpty && !hasLoaded ? "Loading checks" : rollup.1)
+            Text(summaryText(rollup.1))
                 .font(Typo.body)
                 .foregroundStyle(Palette.textSecondary)
                 .lineLimit(1)
@@ -85,7 +86,15 @@ struct ChecksView: View {
 
     @ViewBuilder
     private var empty: some View {
-        if hasLoaded {
+        if github == .unavailable {
+            // Honest rather than alarming: an empty list here means Baton could not ask, not that
+            // GitHub reported nothing.
+            EmptyStateView(
+                glyph: "questionmark.circle",
+                title: "GitHub CLI unavailable",
+                message: "Install gh and run gh auth login to see this branch's checks."
+            )
+        } else if hasLoaded {
             EmptyStateView(
                 glyph: "checkmark.seal",
                 title: "No checks",
@@ -114,6 +123,13 @@ struct ChecksView: View {
         .background(Palette.surfaceSunken)
     }
 
+    /// The header says which of the three things is true: nobody has asked yet, gh cannot be
+    /// asked, or this is what GitHub said.
+    private func summaryText(_ rollup: String) -> String {
+        if github == .unavailable { return "GitHub CLI unavailable" }
+        return runs.isEmpty && !hasLoaded ? "Loading checks" : rollup
+    }
+
     private func color(for checks: PullRequest.Checks) -> Color {
         switch checks {
         case .passing: Palette.positive
@@ -127,11 +143,19 @@ struct ChecksView: View {
 
     private func poll() async {
         while !Task.isCancelled {
-            let found = await GitHubBridge.checks(
-                branch: model.workspace.branch, worktree: model.workspace.path
-            )
-            runs = found
-            groups = CheckRunGroup.build(from: found)
+            // Asked every pass rather than once: gh can be signed in from a terminal while this
+            // tab is open, and the answer is cached, so this costs a subprocess only when it
+            // has actually expired.
+            let ready = await GitHubAvailability.shared.isReady()
+            github = ready ? .ready : .unavailable
+
+            if ready {
+                let found = await GitHubBridge.checks(
+                    branch: model.workspace.branch, worktree: model.workspace.path
+                )
+                runs = found
+                groups = CheckRunGroup.build(from: found)
+            }
             hasLoaded = true
             try? await Task.sleep(for: Self.pollInterval)
         }

@@ -1,7 +1,8 @@
 import SwiftUI
 import BatonCore
 
-/// The panel under the inspector: setup output, run scripts and real shells, behind one tab strip.
+/// The panel at the bottom of the inspector: setup output, run scripts and real shells, behind one
+/// tab strip.
 ///
 /// The tab strip is the only part of this file that owns anything. Everything a tab shows keeps
 /// running whether or not the tab is selected, and whether or not the panel is expanded, because
@@ -21,8 +22,9 @@ struct BottomPanelView: View {
     }
 
     var body: some View {
+        // No rule above the strip: the boundary between the files and the panel is the inspector's
+        // divider, and a second hairline under it reads as a double rule.
         VStack(spacing: 0) {
-            Hairline()
             tabStrip
             if app.isBottomPanelVisible {
                 Hairline()
@@ -42,7 +44,19 @@ struct BottomPanelView: View {
     private static let renameWidth: CGFloat = 90
 
     private var tabStrip: some View {
+        // Collapse first, then the tabs, then the one control that adds to them. The chevron leads
+        // because it acts on the whole panel rather than on any tab, and it stays put as tabs come
+        // and go, which a control at the end of a scrolling row does not.
         HStack(spacing: 0) {
+            iconButton(
+                app.isBottomPanelVisible ? "chevron.down" : "chevron.up",
+                help: app.isBottomPanelVisible ? "Collapse the panel" : "Expand the panel"
+            ) {
+                app.isBottomPanelVisible.toggle()
+            }
+
+            Hairline(axis: .vertical)
+
             ScrollView(.horizontal) {
                 tabRow
             }
@@ -58,13 +72,6 @@ struct BottomPanelView: View {
                     model.bottomTab = .terminal(tab.id)
                     app.isBottomPanelVisible = true
                 }
-            }
-
-            iconButton(
-                app.isBottomPanelVisible ? "chevron.down" : "chevron.up",
-                help: app.isBottomPanelVisible ? "Collapse the panel" : "Expand the panel"
-            ) {
-                app.isBottomPanelVisible.toggle()
             }
         }
         .frame(height: Metrics.barHeight)

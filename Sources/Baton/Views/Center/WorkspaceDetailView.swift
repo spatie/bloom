@@ -1,20 +1,15 @@
 import SwiftUI
 import BatonCore
 
-/// The centre column: where you are, which conversation you are in, what was said, and what you are
-/// about to say.
+/// The centre column: which conversation you are in, what was said, and what you are about to say.
 ///
-/// The four pieces are stacked rather than nested because each one owns a different lifetime. The
-/// header follows the workspace, the tabs follow the session list, and the transcript and the
-/// composer follow the active session, which is why they are handed a transcript instead of
-/// reaching for one themselves.
+/// The three pieces are stacked rather than nested because each one owns a different lifetime. The
+/// tabs follow the session list, and the transcript and the composer follow the active session,
+/// which is why they are handed a transcript instead of reaching for one themselves. The terminal
+/// panel used to sit under all of it and now lives at the bottom of the inspector, where you can
+/// watch a build without the transcript giving up a third of its height.
 struct WorkspaceDetailView: View {
-    @Environment(AppModel.self) private var app
     @Bindable var model: WorkspaceModel
-
-    /// How much room the bottom panel takes when it is open. Roughly fifteen lines of terminal,
-    /// which is enough to watch a build without burying the transcript.
-    private static let bottomPanelHeight: CGFloat = 260
 
     /// The transcript reports whether the user has scrolled away from the newest row. Until it
     /// does, the unread pill is offered whenever there is anything unread.
@@ -54,12 +49,6 @@ struct WorkspaceDetailView: View {
             } else {
                 emptyState
             }
-
-            // The panel keeps its own tab strip visible while collapsed, so it is always in the
-            // stack and only its content takes room. The sidebar and inspector are placed by
-            // RootView, which is why neither appears here.
-            BottomPanelView(model: model)
-                .frame(height: app.isBottomPanelVisible ? Self.bottomPanelHeight : nil)
         }
         .background(Palette.windowBackground)
         .task(id: model.workspace.id) { await model.onAppear() }

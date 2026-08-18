@@ -59,6 +59,7 @@ private struct PullRequestPayload: Decodable {
     let mergeable: String?
     let mergeStateStatus: String?
     let reviewDecision: String?
+    let headRefName: String?
     let statusCheckRollup: [CheckPayload]?
 }
 
@@ -134,7 +135,7 @@ public enum GitHub {
     private static let cache = GitHubCache()
     private static let fields = [
         "number", "title", "url", "state", "isDraft", "mergeable",
-        "mergeStateStatus", "reviewDecision", "statusCheckRollup",
+        "mergeStateStatus", "reviewDecision", "headRefName", "statusCheckRollup",
     ].joined(separator: ",")
 
     public static func isAvailable() async -> Bool {
@@ -333,7 +334,8 @@ public enum GitHub {
                 mergeable: payload.mergeable ?? payload.mergeStateStatus,
                 checks: checks,
                 checksSummary: summary,
-                reviewDecision: payload.reviewDecision
+                reviewDecision: payload.reviewDecision,
+                branch: payload.headRefName ?? ""
             ),
             runs: runs
         )

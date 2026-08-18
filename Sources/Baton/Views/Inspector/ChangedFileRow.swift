@@ -12,6 +12,8 @@ struct ChangedFileRow: View {
     var isSelected: Bool
     /// The file's location in the worktree, for the menu items that hand it to another app.
     var fullPath: String
+    /// How far the tree has pushed this row in. Zero in the flat list.
+    var indent: CGFloat = 0
     var onSelect: () -> Void
     var onRevert: () -> Void
 
@@ -43,7 +45,8 @@ struct ChangedFileRow: View {
                     .foregroundStyle(.tertiary)
                     .accessibilityHidden(true)
             }
-            .padding(.horizontal, InspectorLayout.gap)
+            .padding(.leading, indent + InspectorLayout.gap)
+            .padding(.trailing, InspectorLayout.gap)
             .frame(height: Metrics.rowHeight)
             .contentShape(Rectangle())
         }

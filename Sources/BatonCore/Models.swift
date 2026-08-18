@@ -291,6 +291,10 @@ public struct PullRequest: Sendable, Hashable, Codable {
     public var checks: Checks
     public var checksSummary: String
     public var reviewDecision: String?
+    /// The head branch as GitHub knows it. Empty when the gh version in use did not report it.
+    /// This is the branch merging deletes, so the confirmation names this one rather than the
+    /// local checkout's idea of it.
+    public var branch: String
 
     public init(
         number: Int,
@@ -301,7 +305,8 @@ public struct PullRequest: Sendable, Hashable, Codable {
         mergeable: String? = nil,
         checks: Checks = .none,
         checksSummary: String = "",
-        reviewDecision: String? = nil
+        reviewDecision: String? = nil,
+        branch: String = ""
     ) {
         self.number = number
         self.title = title
@@ -312,6 +317,7 @@ public struct PullRequest: Sendable, Hashable, Codable {
         self.checks = checks
         self.checksSummary = checksSummary
         self.reviewDecision = reviewDecision
+        self.branch = branch
     }
 }
 

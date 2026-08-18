@@ -13,6 +13,10 @@ struct PullRequestCreator: View {
     var isWorking: Bool
     var action: () -> Void
 
+    /// Whether gh can be used at all. Held here rather than passed in because it is a fact about
+    /// the machine, not about this branch, and it is asked once for the whole app.
+    @State private var github: GitHubAvailability.State = .unknown
+
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {
             Image(systemName: "arrow.triangle.branch")
@@ -36,6 +40,14 @@ struct PullRequestCreator: View {
                 ProgressView()
                     .controlSize(.small)
                     .accessibilityLabel("Working")
+            } else if github == .unavailable {
+                // A button that can only fail is worse than no button. The state is stated
+                // plainly instead, with the one command that fixes it in the tooltip.
+                Text("GitHub CLI unavailable")
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+                    .help("Install gh and run gh auth login to open pull requests from Baton.")
             } else {
                 ViewThatFits(in: .horizontal) {
                     createButton.labelStyle(.titleOnly)
@@ -44,6 +56,9 @@ struct PullRequestCreator: View {
                 .fixedSize()
             }
         }
+        // Optimistic while the probe runs: the button is shown until gh is known to be missing,
+        // so the common case never flickers through a disabled state.
+        .task { github = await GitHubAvailability.shared.isReady() ? .ready : .unavailable }
     }
 
     private var createButton: some View {

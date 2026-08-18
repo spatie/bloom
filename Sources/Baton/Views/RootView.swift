@@ -68,6 +68,13 @@ struct RootView: View {
         .navigationTitle(app.selectedWorkspace?.name ?? "Baton")
 
         .task { await app.bootstrap() }
+        // The terminal panel lives at the bottom of the inspector now, so the toolbar's panel
+        // toggle has to bring the inspector with it. Without this, asking for the panel while the
+        // inspector is closed does nothing at all, and the toggle would light up over a pane that
+        // is not on screen.
+        .onChange(of: app.isBottomPanelVisible) {
+            if app.isBottomPanelVisible { app.isInspectorVisible = true }
+        }
         .sheet(isPresented: $isCreateSheetPresented) {
             CreateWorkspaceSheet(initialRepo: createTargetRepo)
         }

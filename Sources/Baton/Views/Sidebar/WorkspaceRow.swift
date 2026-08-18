@@ -8,6 +8,12 @@ import BatonCore
 /// without a click, which of them is working, which needs reading and which fell over. Everything
 /// else on the row is secondary and is allowed to truncate.
 ///
+/// What the mark distinguishes is decided by `WorkspaceStatus`, not here: this file only turns a
+/// verdict into a shape and a colour. The verdict spans both halves of a workspace's life, the
+/// local one (setting up, running, unread, changed) and GitHub's (draft, checks, merged), because
+/// a column that shows only the local half cannot answer the question the user actually has,
+/// which is which of these is finished.
+///
 /// The row draws no background of its own. It lives in a `List` with `.listStyle(.sidebar)`, and
 /// that list already draws AppKit selection: the accent colour while the window is key, a quiet
 /// grey when it is not. Painting a second highlight underneath was what produced the solid dark
@@ -45,8 +51,10 @@ struct WorkspaceRow: View {
             glyph
                 .frame(width: Metrics.glyph, height: Metrics.glyph)
                 // The glyph is the row's whole state in one mark, so VoiceOver has to be told
-                // what it means rather than being handed an unlabelled image.
-                .accessibilityLabel(glyphState.description)
+                // what it means rather than being handed an unlabelled image, and a pointer
+                // resting on it gets the same sentence.
+                .accessibilityLabel(statusDescription)
+                .help(statusDescription)
 
             if isRenaming {
                 TextField("Workspace name", text: $draft)
@@ -86,6 +94,11 @@ struct WorkspaceRow: View {
             }
         }
         .contentShape(Rectangle())
+        // Only rows that exist ask GitHub anything, and the id carries the branch and whether
+        // there is any work at all, because both change what is worth asking about.
+        .task(id: "\(workspace.id)|\(workspace.branch)|\(workspace.hasDiff)") {
+            await WorkspacePullRequests.shared.track(workspace)
+        }
         // The list inverts the row's text for us, but a label that carries its own colour, such as
         // the green plus count, has to be told. This is the same signal the inspector's lists send.
         .environment(\.isOnEmphasizedSelection, isEmphasized)
@@ -93,56 +106,76 @@ struct WorkspaceRow: View {
 
     // MARK: - Glyph
 
-    /// The states a single glyph has to distinguish, in the order they matter to the user.
-    private enum Glyph {
-        case settingUp
-        case running
-        case failed
-        case unread
-        case idle
+    /// GitHub's answer for this branch, if anything has asked yet. Read straight from the shared
+    /// store rather than passed in, because the sidebar's row builder has no way to reach it.
+    private var pullRequest: PullRequest? {
+        WorkspacePullRequests.shared.pullRequest(for: workspace.id)
+    }
 
-        var description: String {
-            switch self {
-            case .settingUp: "Setting up"
-            case .running: "Agent running"
-            case .failed: "Setup failed"
-            case .unread: "Unread"
-            case .idle: "Idle"
-            }
+    private var status: WorkspaceStatus {
+        WorkspaceStatus.resolve(
+            workspace: workspace, isRunning: isRunning, pullRequest: pullRequest
+        )
+    }
+
+    /// What the mark means, in one sentence, for the tooltip and for VoiceOver. Both get the same
+    /// words on purpose: a sighted user hovering and a VoiceOver user landing on the row are
+    /// asking the identical question.
+    private var statusDescription: String {
+        status.summary(pullRequest: pullRequest)
+    }
+
+    /// Every state is a different shape, not only a different colour, so the column can be read
+    /// at a glance and by someone who cannot tell the red one from the green one.
+    private var glyphSymbol: String {
+        switch status {
+        case .settingUp, .running: ""
+        case .setupFailed: "exclamationmark.triangle.fill"
+        case .unread: "circle.fill"
+        case .merged: "arrow.triangle.merge"
+        case .closed: "xmark.circle"
+        case .checksFailing: "xmark.circle.fill"
+        case .checksRunning: "clock"
+        case .checksPassed: "checkmark.circle.fill"
+        case .draft, .pullRequestOpen: "arrow.triangle.pull"
+        case .changed: "arrow.triangle.branch"
+        case .clean: "circle.dotted"
         }
     }
 
-    private var glyphState: Glyph {
-        if workspace.setupState == .running { return .settingUp }
-        if isRunning { return .running }
-        if workspace.setupState == .failed { return .failed }
-        if workspace.unread { return .unread }
-        return .idle
+    /// A selected row is filled with the accent colour, and every meaning colour in the palette is
+    /// unreadable on it. On selection the shape carries the meaning alone and the mark borrows the
+    /// row's own foreground, which is the same trade the diff counts make.
+    private var glyphTint: AnyShapeStyle {
+        if isEmphasized { return AnyShapeStyle(Palette.textInverted) }
+        return switch status {
+        case .setupFailed, .checksRunning: AnyShapeStyle(Palette.warning)
+        case .checksFailing: AnyShapeStyle(Palette.negative)
+        // Green is the palette's "this went well", and a merge landing is the best outcome a
+        // workspace has, so it shares the colour with passing checks and differs in shape.
+        case .checksPassed, .merged: AnyShapeStyle(Palette.positive)
+        // The accent is what the app uses for "this is waiting for you" rather than for a
+        // machine, which is exactly what an unread turn and an open pull request are.
+        case .unread, .pullRequestOpen: AnyShapeStyle(Palette.accent)
+        case .changed: AnyShapeStyle(.secondary)
+        default: AnyShapeStyle(.tertiary)
+        }
     }
 
     @ViewBuilder
     private var glyph: some View {
-        switch glyphState {
+        switch status {
         case .settingUp:
             ProgressView()
                 .progressViewStyle(.circular)
                 .controlSize(.mini)
         case .running:
             ActivityDot(isActive: true, tint: isEmphasized ? Palette.textInverted : Palette.running)
-        case .failed:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(Typo.caption)
-                .foregroundStyle(isEmphasized ? Palette.textInverted : Palette.warning)
-        case .unread:
-            // The unread marker is the accent colour, which is also the selection fill, so on a
-            // selected row it has to borrow the row's own foreground to stay visible at all.
-            Image(systemName: "circle.fill")
-                .font(Typo.micro)
-                .foregroundStyle(isEmphasized ? Palette.textInverted : Palette.accent)
-        case .idle:
-            Image(systemName: "arrow.triangle.branch")
-                .font(Typo.caption)
-                .foregroundStyle(.tertiary)
+        default:
+            Image(systemName: glyphSymbol)
+                // The unread dot is a mark rather than a symbol, so it is drawn a size down.
+                .font(status == .unread ? Typo.micro : Typo.caption)
+                .foregroundStyle(glyphTint)
         }
     }
 

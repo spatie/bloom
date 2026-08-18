@@ -31,7 +31,13 @@ struct DetailColumn: View {
             // `existingModel` rather than `model(for:)`: creating one here would mutate observable
             // state during the render pass. The selection setter has already made it.
             if let model = app.existingModel(for: workspace.id) {
-                WorkspaceDetailView(model: model)
+                // A terminal or a browser tab takes the whole column, tab strip included, so it
+                // replaces the conversation here rather than being squeezed in under it.
+                if let tab = CenterTabStore.shared.selection(for: workspace.id) {
+                    CenterToolColumn(model: model, tab: tab)
+                } else {
+                    WorkspaceDetailView(model: model)
+                }
             } else {
                 LoadingView()
             }

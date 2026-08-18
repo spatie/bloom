@@ -20,6 +20,9 @@ struct InspectorToolbar: View {
     /// Shared with `DiffView` through the same defaults key, so the toggle and the diff can never
     /// disagree about which layout is showing.
     @AppStorage(DiffLayoutSetting.storageKey) private var isSideBySide = false
+    /// Shared with `ChangedFileList` the same way, and outliving the launch because a user who
+    /// thinks in folders thinks in folders tomorrow too.
+    @AppStorage(ChangedFilePresentation.storageKey) private var isTree = false
 
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {
@@ -44,6 +47,15 @@ struct InspectorToolbar: View {
                 guard reviewing, model.selectedFilePath == nil else { return }
                 model.selectedFilePath = model.changedFiles.first?.path
             }
+
+            Toggle(isOn: $isTree) {
+                Label("Group changes by folder", systemImage: "folder")
+            }
+            .labelStyle(.iconOnly)
+            .toggleStyle(.button)
+            .controlSize(.small)
+            .disabled(model.changedFiles.isEmpty)
+            .help(isTree ? "Show the changed files as a flat list" : "Group the changed files by folder")
 
             Toggle(isOn: $isSideBySide) {
                 Label("Side by side diff", systemImage: "rectangle.split.2x1")
