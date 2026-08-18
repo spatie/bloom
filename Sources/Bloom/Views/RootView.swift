@@ -26,6 +26,19 @@ struct RootView: View {
 
         return NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView()
+            // The sidebar's ground is set here rather than inside `SidebarView`, because what has
+            // to be replaced is the `List`'s own scroll background, and that is a property of the
+            // column rather than of anything the sidebar draws. See `sidebarMaterial` for why a
+            // named colour beats the system's vibrant one in a window with a themed ramp.
+            .scrollContentBackground(.hidden)
+            .sidebarMaterial()
+            // The rule down the sidebar's trailing edge.
+            //
+            // `NavigationSplitView` draws none: measured across the boundary, the sidebar's last
+            // pixel is followed directly by the centre column's first, in both appearances. That
+            // is survivable while both columns are the system's own white, and it is not once
+            // they are two steps of a ramp, because then the two panes simply run into each other.
+            .overlay(alignment: .trailing) { Hairline(axis: .vertical) }
             .navigationSplitViewColumnWidth(
                 min: 200, ideal: Metrics.sidebarWidth, max: BloomApp.sidebarMaximumWidth
             )

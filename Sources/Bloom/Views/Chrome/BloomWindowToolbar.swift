@@ -13,8 +13,12 @@ import BloomCore
 /// says nothing about which of them it moves, and on macOS 26 a `.button` toggle's on state is a
 /// saturated accent fill, which made two permanently-on panes read as two alarms. Both controls
 /// now live on the boundary they open: the inspector's on the end of the centre tab strip, the
-/// terminal panel's on the panel's own strip. What is left is the one thing that belongs to the
-/// window rather than to a pane, which is starting work.
+/// terminal panel's on the panel's own strip. What is left is starting work, on the leading edge,
+/// and which project you are in, on the trailing one.
+///
+/// There is no Refresh Changes either. The changed file list polls every six seconds and redraws
+/// itself, so the command could only ever do what had already happened, and a control that does
+/// nothing teaches the user that the list is not to be trusted.
 struct BloomWindowToolbar: ToolbarContent {
     let app: AppModel
 
@@ -26,8 +30,6 @@ struct BloomWindowToolbar: ToolbarContent {
                 Button("New Workspace", action: presentCreate)
                     .disabled(app.repos.isEmpty)
                 Button("Add Project Folder\u{2026}", action: addProject)
-                Divider()
-                Button("Refresh Changes", action: refreshChanges)
             } label: {
                 Label("New workspace", systemImage: "plus")
             } primaryAction: {
@@ -36,17 +38,26 @@ struct BloomWindowToolbar: ToolbarContent {
             .help("Start a workspace")
         }
 
+        // Trailing, not principal.
+        //
+        // Principal placement drops an item next to the window title, which put the project mark
+        // and its menu in the middle of the toolbar, over the transcript, a few millimetres from
+        // the workspace name it was already sitting beside. It reads as a second title. Every
+        // other Mac app puts the thing you are signed in as, or working under, at the far right
+        // of the toolbar, and that is also where it lines up with the inspector below it: the
+        // project the changes belong to, directly above the changes.
+        //
         // On macOS 26 every toolbar item is handed its own Liquid Glass background. This one
         // draws its whole content itself, so the system capsule is a second background on top of
         // it: a circle around the single word on Home, and a rim with no clearance around the
         // project swatch and the overflow menu on a workspace.
         if #available(macOS 26.0, *) {
-            ToolbarItem(placement: .principal) {
+            ToolbarItem(placement: .primaryAction) {
                 WindowTitleLabel()
             }
             .sharedBackgroundVisibility(.hidden)
         } else {
-            ToolbarItem(placement: .principal) {
+            ToolbarItem(placement: .primaryAction) {
                 WindowTitleLabel()
             }
         }
@@ -63,9 +74,5 @@ struct BloomWindowToolbar: ToolbarContent {
     private func addProject() {
         guard let path = ProjectFolderPicker.choose() else { return }
         Task { await app.addRepository(at: path) }
-    }
-
-    private func refreshChanges() {
-        Task { await app.refreshDiffStats() }
     }
 }

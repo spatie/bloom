@@ -3,31 +3,72 @@ import AppKit
 
 /// Bloom's colours.
 ///
-/// Almost everything here resolves to an AppKit semantic colour rather than a hand-picked hex
-/// value. That is deliberate: semantic colours already track light and dark, the user's accent
-/// colour, increased contrast, reduce transparency, and the vibrancy of whatever material they
-/// are drawn on. Hard-coded hexes track none of that, which is what made the first version of
-/// this app look like a web page pretending to be a Mac.
+/// Two kinds of colour live here, and the split is the whole design.
 ///
-/// The exceptions are the diff and syntax colours, which have to be specific hues, and even
-/// those are defined once here rather than at their call sites.
+/// **Ink, selection and meaning stay semantic.** Text, the focus ring, the caret, the accent and
+/// the system reds and greens all resolve to an AppKit semantic colour, because those already
+/// track the user's accent choice, Increase Contrast, Differentiate Without Colour and the
+/// keyboard access setting. Hard-coding them is what made the first version of this app look like
+/// a web page pretending to be a Mac.
+///
+/// **Ground is Bloom's own.** The five surfaces and the rule between them are named colours, not
+/// `windowBackgroundColor` and friends. On macOS 26 every one of those semantic grounds resolves
+/// to the same value: window, text and control backgrounds are all pure white in light and all
+/// `#1E1E1E` in dark. An app built on them has exactly one surface wearing five names, so nothing
+/// separates from anything and the only thing left to divide a pane from its neighbour is a
+/// separator at ten percent ink, which on white is very nearly nothing at all. That is the
+/// "everything is white and it feels heavy" complaint, stated in numbers.
+///
+/// The ramp below is a small, deliberate set instead: a body, a panel one step off it, a sidebar
+/// one step the other way, and a raised control. In light they carry a slight cool cast so the
+/// greys read as one family rather than as camera noise. In dark they are a deep blue rather than
+/// a neutral charcoal, which is the appearance this app was designed in and the reason its dark
+/// mode does not read as an unlit light mode.
+///
+/// Every value is a step of a single ramp, so the relationships hold: body to panel is small,
+/// body to sidebar is small, and the rule carries the actual separation. Adding a sixth surface
+/// is how this gets heavy again, so do not.
 enum Palette {
     // MARK: Surfaces
+    //
+    // Four values and one rule. Measured light: FFFFFF / F7FAFA / F1F5F6 / FFFFFF, rule D6E0E4.
+    // Measured dark: 0A1A25 / 0C1E2A / 0E202D / 16303F, rule 1E3F53.
 
-    /// Behind everything. The sidebar draws a real material over this.
-    static let windowBackground = Color(nsColor: .windowBackgroundColor)
+    /// The ground the centre column stands on: the transcript, Home, Search, Settings.
+    ///
+    /// Identical to `surface` on purpose. They are two names for the reading ground because the
+    /// call sites mean different things by them, not because the colour differs; if they ever
+    /// diverge the window has grown a surface it does not need.
+    static let windowBackground = dynamic(light: 0xFFFFFF, dark: 0x0A1A25)
 
-    /// Only used as a fallback where a material cannot be installed. Prefer `SidebarMaterial`.
-    static let sidebar = Color(nsColor: .windowBackgroundColor)
+    /// The chrome: the sidebar column, the title bar, and every strip of small controls.
+    ///
+    /// One value for all of them, which is what macOS itself does. A unified toolbar and a sidebar
+    /// are the same material on a real Mac window, and giving each strip a step of its own is how
+    /// a window ends up with seven grounds and no shape.
+    ///
+    /// A named colour rather than a translucent material. A material samples the desktop, so the
+    /// sidebar's colour is whatever wallpaper is behind the window: measured on this machine it
+    /// came out `#232833` in dark, a blue nobody chose, and it moves when the wallpaper does. A
+    /// themed ramp cannot survive that.
+    static let sidebar = Color(nsColor: sidebarNSColor)
+
+    /// The same colour as an `NSColor`, because the window's own background is set in AppKit and
+    /// has to keep tracking the appearance after it is set. See `WindowChrome`.
+    static let sidebarNSColor = dynamicNSColor(light: 0xF1F5F6, dark: 0x0E202D)
 
     /// Content areas: the transcript, the inspector, anything holding text.
-    static let surface = Color(nsColor: .textBackgroundColor)
+    static let surface = dynamic(light: 0xFFFFFF, dark: 0x0A1A25)
 
-    /// A card or control sitting on `surface`, such as the composer box.
-    static let surfaceRaised = Color(nsColor: .controlBackgroundColor)
+    /// A raised control: a segmented control's selected cell, a bordered button, a browser chip.
+    static let surfaceRaised = dynamic(light: 0xFFFFFF, dark: 0x16303F)
 
-    /// A recessed strip: gutters, tool detail blocks, the bottom panel.
-    static let surfaceSunken = Color(nsColor: .underPageBackgroundColor)
+    /// A recessed strip: gutters, hunk headers, tool detail blocks, the composer box, the panel.
+    ///
+    /// The step off `surface` is deliberately small, five units at most. It reads as recessed
+    /// because it has a rule under it, not because it is a different colour, which is what keeps
+    /// a window holding a dozen of these from looking like a stack of cards.
+    static let surfaceSunken = dynamic(light: 0xF7FAFA, dark: 0x0C1E2A)
 
     // MARK: Overlays
     //
@@ -36,22 +77,54 @@ enum Palette {
     // 0xRRGGBBAA was the original bug behind the solid black selection bar: 0x00000014 is the
     // number 20, indistinguishable from an opaque dark blue, so the alpha was never applied.
 
-    static let hover = Color.primary.opacity(0.06)
-    static let selected = Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
+    /// Measured off the mockup: four percent ink in light, five and a half in dark. It was six in
+    /// both, and six percent black on white is a visibly grey slab under the pointer where the
+    /// same figure in dark is barely a lift.
+    static let hover = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(white: 1, alpha: 0.055)
+            : NSColor(white: 0, alpha: 0.04)
+    })
+
+    /// A selected row in a list that is not the key window's focus.
+    ///
+    /// Named rather than `unemphasizedSelectedContentBackgroundColor`, which is a neutral grey:
+    /// `#DCDCDC` on the light ramp and `#464646` on the dark one. On the deep blue ground that
+    /// grey is the one thing in the window with no blue in it at all, so a resting selection read
+    /// as a smudge. These are the same two steps, taken along Bloom's ramp instead.
+    static let selected = dynamic(light: 0xDCE7EA, dark: 0x1D4054)
     /// Selection in a focused list inside the key window, where macOS uses the accent colour.
     static let selectedEmphasized = Color(nsColor: .selectedContentBackgroundColor)
     static let selectedEmphasizedText = Color(nsColor: .alternateSelectedControlTextColor)
 
     // MARK: Lines
 
-    static let border = Color(nsColor: .separatorColor)
-    static let borderStrong = Color(nsColor: .gridColor)
+    /// The rule between two panes, and under every strip.
+    ///
+    /// `separatorColor` is ten percent ink, which composites to `#E6E6E6` on white: a 25 unit step
+    /// that the eye reads as nothing, drawn at half a point. That is why the window used to have
+    /// no edges. This is a 40 unit step in light and a 30 unit step in dark, and `Metrics.hairline`
+    /// draws it at a full point, which is what AppKit's own split view divider has always been.
+    static let border = dynamic(light: 0xD6E0E4, dark: 0x1E3F53)
+
+    /// The same rule where it has to be noticed: a card under the pointer, a focused boundary.
+    static let borderStrong = dynamic(light: 0xBCCDD4, dark: 0x2C5872)
 
     // MARK: Text
 
     static let textPrimary = Color(nsColor: .labelColor)
     static let textSecondary = Color(nsColor: .secondaryLabelColor)
-    static let textTertiary = Color(nsColor: .tertiaryLabelColor)
+    /// Named rather than `tertiaryLabelColor`.
+    ///
+    /// The system's third rung is 26 percent ink, which is `#BDBDBD` on white: a contrast ratio of
+    /// 1.9 to 1, below anything readable, and it is used sixty times in this app for content that
+    /// is meant to be read rather than ignored. The system means it for a disabled control. This
+    /// is the rung the interface actually wanted, measured off the mockup and sitting between the
+    /// system's second and third.
+    static let textTertiary = dynamic(light: 0x8A9AA2, dark: 0x62808E)
+
+    /// The system's third rung, kept for the one thing it is right for: something switched off.
+    static let textDisabled = Color(nsColor: .tertiaryLabelColor)
     static let textInverted = Color(nsColor: .alternateSelectedControlTextColor)
 
     /// What a field says before anything is typed into it. Half ink, where the tertiary label is
@@ -93,11 +166,12 @@ enum Palette {
     // Tinted backgrounds, kept low in saturation so a wall of them is still readable, and
     // defined per appearance because a light green that works on white is invisible on charcoal.
 
-    static let diffAddBackground = dynamic(light: 0xE6F4EA, dark: 0x14301E)
-    static let diffAddEmphasis = dynamic(light: 0xB7E3C4, dark: 0x1F5233)
-    static let diffDeleteBackground = dynamic(light: 0xFCEAEA, dark: 0x35191A)
-    static let diffDeleteEmphasis = dynamic(light: 0xF5C6C6, dark: 0x5C2527)
-    static let diffGutter = Color(nsColor: .underPageBackgroundColor)
+    static let diffAddBackground = dynamic(light: 0xE4F3EA, dark: 0x0F322C)
+    static let diffAddEmphasis = dynamic(light: 0xB7E3C4, dark: 0x17503B)
+    static let diffDeleteBackground = dynamic(light: 0xFBE9E7, dark: 0x2C2029)
+    static let diffDeleteEmphasis = dynamic(light: 0xF5C6C6, dark: 0x4F252D)
+    /// The line number column, which is the sunken step and nothing else.
+    static let diffGutter = surfaceSunken
 
     // MARK: Syntax
 
@@ -115,10 +189,15 @@ enum Palette {
     /// A colour that differs between appearances, for the few cases where no semantic colour
     /// means the right thing. Both arguments are plain 0xRRGGBB.
     static func dynamic(light: UInt32, dark: UInt32) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
+        Color(nsColor: dynamicNSColor(light: light, dark: dark))
+    }
+
+    /// The same thing as an `NSColor`, for the handful of places that talk to AppKit directly.
+    static func dynamicNSColor(light: UInt32, dark: UInt32) -> NSColor {
+        NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             return NSColor(rgb: isDark ? dark : light)
-        })
+        }
     }
 }
 
@@ -196,8 +275,14 @@ enum Metrics {
     static let cornerSmall: CGFloat = 4
 
     static let gutter: CGFloat = 12
-    /// One physical pixel on the display the window is actually on.
-    static var hairline: CGFloat { 1 / (NSScreen.main?.backingScaleFactor ?? 2) }
+    /// One point, which on Retina is two physical pixels.
+    ///
+    /// It was one physical pixel, which is an iOS and web idea rather than a Mac one: AppKit's own
+    /// split view divider, the rule under a table header and the line under a toolbar are all a
+    /// full point. At half a point, drawn in a separator colour that is already only a 25 unit
+    /// step, the rules in this window were not so much subtle as absent, and every pane floated.
+    /// The name stays because a one point rule is still what everyone calls a hairline.
+    static let hairline: CGFloat = 1
     /// Clearance for the traffic lights when the title bar is hidden.
     static let titleBarHeight: CGFloat = 28
 
@@ -280,12 +365,26 @@ struct VisualEffectBackground: NSViewRepresentable {
 }
 
 extension View {
+    /// The sidebar's ground.
+    ///
+    /// A named colour rather than `NSVisualEffectView(.sidebar)`, and this is the one place where
+    /// dropping a system material is the right call. Sidebar vibrancy blends with the desktop
+    /// behind the window, so the column's colour is set by whatever wallpaper the user happens to
+    /// have: measured on this machine it rendered `#232833` in dark, a blue nobody picked, and it
+    /// would render green over a green wallpaper. A themed ramp cannot survive that. Everything
+    /// vibrancy was buying beyond the tint, the rounded window corner and the toolbar unification,
+    /// belongs to the window rather than to this view and is unaffected.
     func sidebarMaterial() -> some View {
-        background(VisualEffectBackground(material: .sidebar))
+        background(Palette.sidebar)
     }
 
+    /// The ground under a strip of small controls: a panel's tab bar, a run script's header.
+    ///
+    /// `NSVisualEffectView(.headerView)` measured `#292C33` over a `#0A1A25` pane, a neutral grey
+    /// with nothing to do with what was behind it, so every strip in the window read as a piece of
+    /// a different app laid on top. The chrome colour is what the material was standing in for.
     func headerMaterial() -> some View {
-        background(VisualEffectBackground(material: .headerView, blending: .withinWindow))
+        background(Palette.sidebar)
     }
 
     /// The strip a tab bar sits in: the header material with the pane's top edge already on it.
@@ -297,7 +396,7 @@ extension View {
     func tabStripMaterial() -> some View {
         background {
             ZStack(alignment: .bottom) {
-                VisualEffectBackground(material: .headerView, blending: .withinWindow)
+                Palette.sidebar
                 Hairline()
             }
         }

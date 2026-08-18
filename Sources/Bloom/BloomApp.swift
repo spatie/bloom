@@ -52,6 +52,10 @@ struct BloomApp: App {
                 .reportsAgentActivity(model)
                 .showsWorktreeInTitleBar(model)
                 .showsAgentsInMenuBar(model)
+                // The title bar is painted in Bloom's chrome rather than in the system's window
+                // material, so the strip across the top belongs to the same window as everything
+                // under it. See `WindowChrome`.
+                .paintsTitleBar()
                 // The delegate needs the state to shut it down on quit, and this is the first
                 // moment both exist. Handing it over explicitly keeps the app free of a global.
                 .onAppear { appDelegate.attach(model) }
