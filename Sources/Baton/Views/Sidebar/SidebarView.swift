@@ -14,6 +14,10 @@ import BatonCore
 /// custom label away and draws only the indicator, which is why it rendered as a lone letter.
 struct SidebarView: View {
     @Environment(AppModel.self) private var app
+    /// The window's undo manager. Only a view can see it, and `AppModel` is where the archive
+    /// that wants it happens, so the sidebar hands it over. Any view in the window would do; this
+    /// is the one that is always on screen.
+    @Environment(\.undoManager) private var undoManager
 
     @State private var renaming: String?
     @State private var filter: SidebarFilter = .all
@@ -63,6 +67,10 @@ struct SidebarView: View {
         .onChange(of: app.selection, initial: true) { _, target in
             renaming = nil
             listSelection = target
+        }
+        // Not observed state, so this write invalidates nothing and is safe from an update.
+        .onChange(of: undoManager, initial: true) { _, manager in
+            app.undoManager = manager
         }
     }
 

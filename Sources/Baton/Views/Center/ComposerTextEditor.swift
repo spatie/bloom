@@ -30,8 +30,19 @@ struct ComposerTextEditor: NSViewRepresentable {
     var onHeightChange: @MainActor (CGFloat) -> Void
     var onKey: @MainActor (ComposerKey) -> Bool
 
+    /// The conversation's text size, so what you type is set at the size you read. Without it the
+    /// SwiftUI placeholder behind this view would grow and the typed text would not.
+    @Environment(\.fontScale) private var fontScale
+
     static var font: NSFont { NSFont.preferredFont(forTextStyle: .body) }
     static var lineHeight: CGFloat { NSLayoutManager().defaultLineHeight(for: font) }
+
+    /// Rounded to a whole point for the same reason `ScaledFont` rounds, and built from the body
+    /// style so an unscaled composer is byte for byte the font it was before.
+    static func font(scale: CGFloat) -> NSFont {
+        guard scale != 1 else { return font }
+        return .systemFont(ofSize: (font.pointSize * scale).rounded())
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -67,7 +78,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         textView.onFocusChange = { [weak coordinator = context.coordinator] focused in
             coordinator?.focusChanged(to: focused)
         }
-        textView.font = Self.font
+        textView.font = Self.font(scale: fontScale)
         textView.textColor = .labelColor
         // The colour macOS uses for a caret, which is not always the accent colour: it stays
         // fixed when the user picks a graphite or multicolour accent.
@@ -103,9 +114,15 @@ struct ComposerTextEditor: NSViewRepresentable {
         guard let textView = scrollView.documentView as? ComposerTextView else { return }
         context.coordinator.parent = self
 
+        // Ahead of the text, because setting the string re-reads the typing attributes.
+        let font = Self.font(scale: fontScale)
+        if textView.font != font {
+            textView.font = font
+        }
+
         if textView.string != text {
             textView.string = text
-            textView.font = Self.font
+            textView.font = font
             textView.textColor = .labelColor
             let location = min(max(caret, 0), (text as NSString).length)
             textView.setSelectedRange(NSRange(location: location, length: 0))

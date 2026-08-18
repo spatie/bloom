@@ -2,8 +2,13 @@ import SwiftUI
 import AppKit
 import BatonCore
 
-/// What the toolbar says you are looking at: the project and the workspace, followed by the
-/// actions that apply to the whole worktree.
+/// What the toolbar says you are looking at: the project, followed by the actions that apply to
+/// the whole worktree.
+///
+/// The workspace's own name is not here. It is the window's title, one row up and a few
+/// millimetres to the left, where it comes with the proxy icon that lets the worktree be dragged
+/// out of the title bar and the path above it be reached with a Command-click. Repeating the name
+/// here would have been the same word twice on one row.
 ///
 /// It is always present, even on Home, where it is one word. That began as a workaround, because
 /// an empty principal item collapsed the flexible space that pins the trailing toggles to the
@@ -32,19 +37,10 @@ struct WindowTitleLabel: View {
                         .frame(width: Metrics.swatch, height: Metrics.swatch)
                         .accessibilityHidden(true)
                     Text(repo.name)
-                        .font(Typo.label)
-                        .foregroundStyle(Palette.textSecondary)
+                        .font(Typo.labelEmphasis)
+                        .foregroundStyle(Palette.textPrimary)
                         .lineLimit(1)
-                    Image(systemName: "chevron.right")
-                        .font(Typo.micro)
-                        .foregroundStyle(Palette.textTertiary)
-                        .accessibilityHidden(true)
                 }
-
-                Text(workspace.name)
-                    .font(Typo.labelEmphasis)
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
 
                 menu(for: workspace)
             }

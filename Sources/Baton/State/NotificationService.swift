@@ -23,6 +23,15 @@ final class NotificationService {
     /// is delivered to the app delegate off the main actor and has to be read before hopping.
     nonisolated private static let workspaceKey = "batonWorkspaceID"
 
+    /// The category carrying Reply and Open. Only ever set on a banner that names one workspace,
+    /// because a reply box on "6 agents finished" would silently send to whichever of the six the
+    /// digest happened to point at.
+    nonisolated private static let workspaceCategory = "baton.workspace"
+    /// Open only, for a digest and for the test banner.
+    nonisolated private static let summaryCategory = "baton.summary"
+    nonisolated private static let replyAction = "baton.reply"
+    nonisolated private static let openAction = "baton.open"
+
     /// How often the pull requests with pending checks get looked at again. Slow on purpose: each
     /// one is a `gh` subprocess, and CI takes minutes rather than seconds.
     private static let checksInterval = Duration.seconds(30)
@@ -59,6 +68,37 @@ final class NotificationService {
         self.app = app
         Task { await refreshAuthorization() }
         startWatchingChecks()
+    }
+
+    /// Declares the buttons a banner can carry. Called once, on launch, because macOS keeps the
+    /// registration for the app rather than for a request: a category named by a notification that
+    /// was never registered arrives as a plain banner with no buttons at all.
+    func registerCategories() {
+        let reply = UNTextInputNotificationAction(
+            identifier: Self.replyAction,
+            title: "Reply",
+            options: [],
+            textInputButtonTitle: "Send",
+            textInputPlaceholder: "Reply to the agent"
+        )
+        let open = UNNotificationAction(
+            identifier: Self.openAction,
+            title: "Open",
+            options: [.foreground]
+        )
+
+        UNUserNotificationCenter.current().setNotificationCategories([
+            UNNotificationCategory(
+                identifier: Self.workspaceCategory,
+                actions: [reply, open],
+                intentIdentifiers: []
+            ),
+            UNNotificationCategory(
+                identifier: Self.summaryCategory,
+                actions: [open],
+                intentIdentifiers: []
+            ),
+        ])
     }
 
     // MARK: - Permission
@@ -190,10 +230,55 @@ final class NotificationService {
         content.sound = .default
         content.threadIdentifier = prepared.threadIdentifier
         content.userInfo = [Self.workspaceKey: prepared.workspaceID]
+        // `NotificationDigest` threads a single banner under the workspace it is about and a digest
+        // under its event, so the two are told apart by whether the thread IS the workspace. That
+        // is the same fact the reply box needs: exactly one agent to send to.
+        content.categoryIdentifier = prepared.threadIdentifier == prepared.workspaceID
+            ? Self.workspaceCategory
+            : Self.summaryCategory
 
         UNUserNotificationCenter.current().add(UNNotificationRequest(
             identifier: prepared.identifier, content: content, trigger: nil
         ))
+    }
+
+    // MARK: - Replying from the banner
+
+    /// Sends text typed into a banner down the same path a composer submit takes.
+    ///
+    /// Deliberately `TranscriptModel.send`, not a second route to the runner: the composer's
+    /// submit is one line calling exactly this, and everything either of them needs to do (clear
+    /// the draft, mark the turn's start, raise the alert when the agent will not start) lives
+    /// inside it.
+    ///
+    /// The one thing the banner has to decide for itself is which session, because a banner names
+    /// a workspace and a workspace can hold several. The active one is the right answer: it is the
+    /// conversation the notification came out of, and the one the window would show if the click
+    /// had opened it instead.
+    func reply(_ text: String, toWorkspace workspaceID: String) async {
+        guard let app, let workspace = app.workspaces.first(where: { $0.id == workspaceID }) else { return }
+
+        let model = app.model(for: workspace)
+        // A workspace nobody opened this launch has no sessions loaded. Replying to a banner is
+        // one of the few ways to reach a workspace without ever selecting it.
+        if model.sessions.isEmpty { await model.reloadSessions() }
+        guard let session = model.activeSession else { return }
+
+        let transcript = model.transcript(for: session)
+
+        // A turn that started between the banner arriving and the reply being typed. Dropping the
+        // text would be the worst outcome, so it is parked in the composer and the window is
+        // raised to show it sitting there.
+        guard !transcript.isRunning else {
+            transcript.draft = text
+            await transcript.saveDraft()
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows.first?.makeKeyAndOrderFront(nil)
+            NotificationCenter.default.post(name: .batonOpenWorkspace, object: workspaceID)
+            return
+        }
+
+        await transcript.send(text)
     }
 
     /// Which workspace a click should select. Nil for a banner that names none, which only the

@@ -63,20 +63,23 @@ private struct MarkdownBlockView: View {
     /// A heading only claims space above it when there is something above it to be separated from.
     var isFirst = false
 
-    /// The marker column follows the user's text size, otherwise a raised body size pushes "10."
-    /// straight out of a column sized for the default one.
-    @ScaledMetric(relativeTo: .body) private var markerWidth = MarkdownMetrics.markerWidth
+    /// The marker column follows the conversation's text size, otherwise a raised body size pushes
+    /// "10." straight out of a column sized for the default one. This was a `@ScaledMetric`, which
+    /// on macOS never moves: there is no Dynamic Type for it to track.
+    @Environment(\.fontScale) private var fontScale
+
+    private var markerWidth: CGFloat { MarkdownMetrics.markerWidth * fontScale }
 
     @ViewBuilder
     var body: some View {
         switch block {
         case let .paragraph(inline):
-            inlineText(inline, font: Typo.body, color: foreground)
+            inlineText(inline, font: resolved(Typo.body), color: foreground)
         case let .heading(level, inline):
             // Three real steps rather than one. Every level used to land on reading size and
             // differ only in weight, so an agent that structured its answer with headings got a
             // wall of bold sentences and no structure at all.
-            inlineText(inline, font: Self.headingFont(level), color: foreground)
+            inlineText(inline, font: resolved(Self.headingFont(level)), color: foreground)
                 .padding(.top, isFirst ? 0 : MarkdownMetrics.headingLead)
         case let .codeBlock(code, language, _):
             CodeBlockView(code: code, language: language)
@@ -100,12 +103,18 @@ private struct MarkdownBlockView: View {
         }
     }
 
-    private static func headingFont(_ level: Int) -> Font {
+    private static func headingFont(_ level: Int) -> ScaledFont {
         switch level {
         case 1: Typo.heading
         case 2: Typo.title
         default: Typo.bodyEmphasis
         }
+    }
+
+    /// An attributed string needs a real `Font`, so the rung is resolved here rather than left to
+    /// the `.font(ScaledFont)` modifier the rest of the app leans on.
+    private func resolved(_ font: ScaledFont) -> Font {
+        font.resolved(scale: fontScale)
     }
 
     private func inlineText(_ inline: [MarkdownInline], font: Font, color: Color) -> some View {
@@ -151,7 +160,7 @@ private struct MarkdownBlockView: View {
                         .foregroundStyle(item.checked ? Palette.positive : Palette.textTertiary)
                         .frame(width: markerWidth, alignment: .trailing)
                         .accessibilityLabel(item.checked ? "Done" : "Not done")
-                    inlineText(item.inline, font: Typo.body, color: foreground)
+                    inlineText(item.inline, font: resolved(Typo.body), color: foreground)
                 }
             }
         }
@@ -166,7 +175,7 @@ private struct MarkdownBlockView: View {
                         // Same size, heavier, on a fill: that is what makes it read as a header.
                         tableCell(
                             header,
-                            font: Typo.bodyEmphasis,
+                            font: resolved(Typo.bodyEmphasis),
                             alignment: alignment(at: column, in: alignments),
                             isLastColumn: column == headers.count - 1,
                             isLastRow: false
@@ -179,7 +188,7 @@ private struct MarkdownBlockView: View {
                         ForEach(Array(row.enumerated()), id: \.offset) { column, cell in
                             tableCell(
                                 cell,
-                                font: Typo.body,
+                                font: resolved(Typo.body),
                                 alignment: alignment(at: column, in: alignments),
                                 isLastColumn: column == row.count - 1,
                                 isLastRow: index == rows.count - 1

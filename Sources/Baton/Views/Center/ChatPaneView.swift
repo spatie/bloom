@@ -20,6 +20,11 @@ struct ChatPaneView: View {
     /// the divider between the two can be dragged.
     @State private var conversationHeight: CGFloat = 0
 
+    /// The conversation's text size, applied here because this pane is exactly what the setting is
+    /// scoped to: what was said and what you are about to say. The sidebar, the inspector and the
+    /// toolbar are chrome and keep the size macOS gives them.
+    @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.standard
+
     var body: some View {
         VStack(spacing: 0) {
             TranscriptView(
@@ -39,5 +44,6 @@ struct ChatPaneView: View {
             conversationHeight = $0
         }
         .background(Palette.windowBackground)
+        .environment(\.fontScale, textSize.scale)
     }
 }

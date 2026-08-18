@@ -92,15 +92,25 @@ struct CenterTabView: View {
         // The fill is opaque and reaches the bottom of the strip on purpose: the rule that closes
         // the strip off from the pane is painted BEHIND the tabs, so this covers it and the
         // selected tab runs into the content underneath rather than sitting in a box above it.
-        .background(background)
+        //
+        // A closure rather than `.background(background)`. Handed a `Color`, that call resolves to
+        // the `ShapeStyle` overload, whose `ignoresSafeAreaEdges` defaults to every edge, and the
+        // strip sits directly under a unified toolbar. The selected tab's fill was therefore drawn
+        // up through the whole toolbar inset, a block of it floating above the strip. The `View`
+        // overload paints the tab's own bounds and nothing else.
+        .background { background }
         .contentShape(Rectangle())
         // A single click selects and a double click renames, which is one gesture with two
         // meanings rather than a button, so it cannot be expressed as one.
-        .gesture(
-            TapGesture(count: 2)
-                .onEnded { onStartRename() }
-                .exclusively(before: TapGesture().onEnded { onSelect() })
-        )
+        //
+        // Simultaneous, not `.exclusively(before:)`. Exclusively made the select wait for the
+        // double tap to FAIL, and a double tap only fails once the system's double click interval
+        // has run out, so every click on a tab sat there for about 350ms before anything happened.
+        // That was most of what switching tabs felt like. Recognised side by side, the select fires
+        // on the first click and the rename on the second, which is also what the Finder does: the
+        // second click of a rename lands on the row the first one already selected.
+        .simultaneousGesture(TapGesture().onEnded { onSelect() })
+        .simultaneousGesture(TapGesture(count: 2).onEnded { onStartRename() })
         .onHover { isHovered = $0 }
         .help(title)
         .accessibilityElement(children: .contain)

@@ -139,6 +139,10 @@ extension Color {
 /// Type scale, built on the system text styles so it follows the user's text size rather than
 /// pinning everything to a point size we happened to like.
 ///
+/// The rungs are `ScaledFont` rather than `Font` so that a subtree can be set larger without every
+/// call site being rewritten; see that type for why macOS forces the question. Outside a
+/// conversation the scale is one and each rung resolves to the same `Font` it always was.
+///
 /// Five rungs, and every name lands on one of them: 15 / 13 / 12 / 11 / 10, where 15 only ever
 /// appears inside prose. There used to be three, because on macOS `.caption`, `.caption2` and
 /// `.footnote` all resolve to 10 points: `caption` and `micro` were one size wearing two names,
@@ -148,30 +152,30 @@ extension Color {
 enum Typo {
     /// 15. The only rung above reading size, and only for a heading inside agent prose, where a
     /// heading set at body size with a weight on it is not a heading, it is a bold sentence.
-    static let heading = Font.system(.title3).weight(.bold)
+    static let heading = ScaledFont(.title3, weight: .bold)
     /// 13 bold. `.headline` is the system's own heading style at reading size, so saying so lets
     /// macOS treat it as a heading rather than as body with a weight bolted on.
-    static let title = Font.headline
+    static let title = ScaledFont(.headline)
     /// 13. Reading size: prose, and anything the user is meant to read rather than scan.
-    static let body = Font.system(.body)
-    static let bodyEmphasis = Font.system(.body).weight(.medium)
+    static let body = ScaledFont(.body)
+    static let bodyEmphasis = ScaledFont(.body, weight: .medium)
     /// 12. The workhorse: row labels, controls, anything scanned rather than read.
-    static let label = Font.system(.callout)
-    static let labelEmphasis = Font.system(.callout).weight(.medium)
+    static let label = ScaledFont(.callout)
+    static let labelEmphasis = ScaledFont(.callout, weight: .medium)
     /// 11. Supporting text that still has to be legible: a hint under a field, a link out of a
     /// block, the name on a chip.
-    static let caption = Font.system(.subheadline)
-    static let captionEmphasis = Font.system(.subheadline).weight(.medium)
+    static let caption = ScaledFont(.subheadline)
+    static let captionEmphasis = ScaledFont(.subheadline, weight: .medium)
     /// 10, the floor, and the reason it is medium rather than regular. Only for something that is
     /// read off the thing beside it: a count, a duration, a unit.
-    static let micro = Font.system(.footnote).weight(.medium)
+    static let micro = ScaledFont(.footnote, weight: .medium)
 
     /// The same rungs in monospace, for anything whose columns have to line up: code, a path, a
     /// diff stat. They step with their proportional twins so a filename set beside a label does
     /// not read as a size apart from it.
-    static let code = Font.system(.callout, design: .monospaced)
-    static let codeSmall = Font.system(.subheadline, design: .monospaced)
-    static let codeTiny = Font.system(.footnote, design: .monospaced)
+    static let code = ScaledFont(.callout, design: .monospaced)
+    static let codeSmall = ScaledFont(.subheadline, design: .monospaced)
+    static let codeTiny = ScaledFont(.footnote, design: .monospaced)
 }
 
 enum Metrics {

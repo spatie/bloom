@@ -58,10 +58,12 @@ enum TranscriptLayout {
 /// size. The glyph and detail columns stay pinned, so an expanded body still lands under the label
 /// it belongs to whatever size the text is set at.
 struct TranscriptLabelColumn: ViewModifier {
-    @ScaledMetric(relativeTo: .callout) private var width = TranscriptLayout.labelWidth
+    /// Was a `@ScaledMetric`, which on macOS never moves because there is no Dynamic Type for it to
+    /// track, so the column stayed at 176 however large the conversation was set.
+    @Environment(\.fontScale) private var fontScale
 
     func body(content: Content) -> some View {
-        content.frame(width: width, alignment: .leading)
+        content.frame(width: TranscriptLayout.labelWidth * fontScale, alignment: .leading)
     }
 }
 

@@ -3,20 +3,20 @@ import BatonCore
 
 /// The centre pane when nothing is selected.
 ///
-/// Home answers one question: what is going on across every project right now. It is grouped by
-/// project rather than sorted purely by time, because a developer thinks in projects first and
-/// the grouping is what makes a screen of twenty workspaces readable.
+/// Home answers three questions in the order a developer running several agents actually asks them:
+/// what has stopped and needs me, what is moving, and what is here. The shortlist at the top is the
+/// first, the marks and totals on the blocks below are the second and third, and the grouping by
+/// project is what keeps a screen of twenty workspaces readable, because a developer thinks in
+/// projects before they think in branches.
+///
+/// Everything drawn here comes out of `HomeDigest`, which resolves each workspace through
+/// `WorkspaceStatus` exactly once per pass. That is deliberate: the sidebar, this pane and the
+/// legend all describe the same thirteen states, and the moment Home decides for itself what counts
+/// as interesting, the two halves of the window start disagreeing about the same workspace.
 struct HomeView: View {
     @Environment(AppModel.self) private var app
 
     @State private var hovered: String?
-
-    /// The recent workspaces per project, sorted once when the data changes rather than on every
-    /// redraw. Home is on screen while agents are running, so `body` runs constantly.
-    @State private var sections: [SidebarRepoGroup] = []
-
-    /// Enough to fill the grid without turning Home into a second sidebar.
-    private static let perProject = 9
 
     var body: some View {
         Group {
@@ -28,34 +28,82 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.windowBackground)
-        .onChange(of: app.repos, initial: true) { _, _ in rebuild() }
-        .onChange(of: app.workspaces) { _, _ in rebuild() }
     }
 
     // MARK: - Populated
 
     private var content: some View {
-        ScrollView {
+        let digest = digest
+
+        return ScrollView {
             VStack(alignment: .leading, spacing: Metrics.spacingSection) {
                 HomeWelcomeHeader(
                     greeting: greeting,
-                    summary: summary,
+                    summary: summary(digest),
+                    counts: counts(digest),
                     onCreateWorkspace: { requestWorkspace(in: nil) }
                 )
 
-                ForEach(sections) { section in
+                if !digest.attention.isEmpty {
+                    HomeAttentionSection(
+                        workspaces: digest.attention,
+                        hovered: $hovered,
+                        onSelect: select
+                    )
+                }
+
+                ForEach(digest.projects) { project in
                     HomeRepoSection(
-                        repo: section.repo,
-                        workspaces: section.workspaces,
+                        project: project,
                         hovered: $hovered,
                         onCreateWorkspace: { requestWorkspace(in: $0) },
                         onSelect: select
                     )
                 }
+
+                if digest.workspaceCount < Self.settledIn {
+                    HomeNextSteps(
+                        repo: app.repos.first,
+                        onCreateWorkspace: { requestWorkspace(in: nil) },
+                        onAddProject: addProject
+                    )
+                }
             }
             .padding(Metrics.pane)
-            .frame(maxWidth: 1_100, alignment: .leading)
+            .frame(maxWidth: Self.readableWidth, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
+        }
+    }
+
+    /// Past this many workspaces the user has plainly worked out what a workspace is, and the
+    /// getting-started block stops being help and starts being clutter.
+    private static let settledIn = 3
+
+    /// A ceiling on the content, so a full-screen window lays out three or four cards across
+    /// instead of stretching one row of them to a metre wide.
+    private static let readableWidth: CGFloat = 1_100
+
+    // MARK: - Derived
+
+    /// Worked out in `body` rather than cached in `@State`, because the verdict on a workspace
+    /// depends on things `app.workspaces` does not carry: whether an agent has a turn open, and what
+    /// GitHub last said about the branch. A cached digest keyed on the workspace list alone showed
+    /// stale marks for exactly the workspaces the user cares about most. One grouped pass over the
+    /// list is cheap; what was expensive, and what this replaced, was filtering and sorting the
+    /// whole list once per project per redraw.
+    private var digest: HomeDigest {
+        HomeDigest.build(repos: app.repos, workspaces: app.workspaces) { workspace in
+            // Read, never requested. The sidebar rows already keep this cache warm for every
+            // workspace on screen, and a second poller would double the `gh` subprocesses for the
+            // same answer. With the sidebar collapsed the lookup simply misses, and `resolve` falls
+            // back to what git alone can say, which is what it is built to do.
+            let pullRequest = WorkspacePullRequests.shared.pullRequest(for: workspace.id)
+            let status = WorkspaceStatus.resolve(
+                workspace: workspace,
+                isRunning: app.isRunning(workspace),
+                pullRequest: pullRequest
+            )
+            return HomeVerdict(status: status, summary: status.summary(pullRequest: pullRequest))
         }
     }
 
@@ -64,16 +112,51 @@ struct HomeView: View {
         return name.isEmpty ? "Welcome back" : "Welcome back, \(name)"
     }
 
-    private var summary: String {
-        let active = app.workspaces.count
-        let unread = app.workspaces.count(where: \.unread)
-        if active == 0 { return "No workspaces yet. Start one and an agent gets to work." }
-        let workspaces = active == 1 ? "1 workspace" : "\(active) workspaces"
-        if unread == 0 {
-            let projects = app.repos.count == 1 ? "1 project" : "\(app.repos.count) projects"
-            return "\(workspaces) across \(projects)."
+    private func summary(_ digest: HomeDigest) -> String {
+        guard digest.workspaceCount > 0 else {
+            return "No workspaces yet. Start one and an agent gets to work."
         }
-        return "\(workspaces), \(unread) waiting to be read."
+        let workspaces = digest.workspaceCount == 1
+            ? "1 workspace"
+            : "\(digest.workspaceCount) workspaces"
+        let projects = digest.projectCount == 1 ? "1 project" : "\(digest.projectCount) projects"
+        return "\(workspaces) across \(projects)"
+    }
+
+    /// Only the counts that are not zero. A strip reading "0 running, 0 waiting" is a report that
+    /// nothing is happening dressed up as a dashboard.
+    private func counts(_ digest: HomeDigest) -> [HomeCount] {
+        var counts: [HomeCount] = []
+        if digest.runningCount > 0 {
+            counts.append(
+                HomeCount(
+                    text: "\(digest.runningCount) running",
+                    systemImage: "bolt.fill",
+                    tint: Palette.running
+                )
+            )
+        }
+        if digest.settingUpCount > 0 {
+            counts.append(
+                HomeCount(
+                    text: "\(digest.settingUpCount) setting up",
+                    systemImage: "gearshape",
+                    tint: Palette.textSecondary
+                )
+            )
+        }
+        if digest.waitingCount > 0 {
+            // The accent is what this app uses for "this is waiting for you" rather than for a
+            // machine, which is exactly what this count is.
+            counts.append(
+                HomeCount(
+                    text: "\(digest.waitingCount) need you",
+                    systemImage: "exclamationmark.circle",
+                    tint: Palette.accent
+                )
+            )
+        }
+        return counts
     }
 
     // MARK: - Empty
@@ -90,24 +173,10 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Derived
-
-    /// Most recently active first, capped, and only for projects that have anything to show.
-    private func rebuild() {
-        sections = app.repos.compactMap { repo in
-            let recent = app.workspaces
-                .filter { $0.repoID == repo.id }
-                .sorted { $0.lastActivityAt > $1.lastActivityAt }
-                .prefix(Self.perProject)
-            guard !recent.isEmpty else { return nil }
-            return SidebarRepoGroup(repo: repo, workspaces: Array(recent))
-        }
-    }
-
     // MARK: - Actions
 
-    private func select(_ workspace: Workspace) {
-        app.selection = .workspace(workspace.id)
+    private func select(_ entry: HomeWorkspace) {
+        app.selection = .workspace(entry.id)
     }
 
     /// Handed to `RootView`, which owns the only create sheet in the app.

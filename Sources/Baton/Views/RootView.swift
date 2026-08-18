@@ -58,7 +58,7 @@ struct RootView: View {
                         maxHeight: .infinity
                     )
 
-                if app.isInspectorVisible {
+                if isInspectorPresented {
                     // The divider and the pane move as one, because the boundary is part of the
                     // pane rather than a thing the detail column keeps when the pane leaves.
                     HStack(spacing: 0) {
@@ -74,7 +74,7 @@ struct RootView: View {
             // is clamped to as the window narrows both stay instant. A pane that eased its way
             // after the pointer would feel broken, and animating on every layout is exactly the
             // churn that used to crash this window.
-            .animation(reduceMotion ? nil : Motion.pane, value: app.isInspectorVisible)
+            .animation(reduceMotion ? nil : Motion.pane, value: isInspectorPresented)
             // The stored width is what the user asked for, `fittedInspectorWidth` is what fits.
             // Measured on every layout rather than only while dragging, so narrowing the window
             // narrows the inspector instead of squeezing the sidebar out of view.
@@ -151,6 +151,18 @@ struct RootView: View {
         return min(inspectorWidth, max(InspectorDivider.minimum, ceiling))
     }
 
+    /// The inspector answers one question, what this workspace's agent changed, so on Home it has
+    /// nothing to say. It used to sit there as a 380pt column holding a single "No workspace
+    /// selected" glyph, and because its divider hairline is almost invisible on white that glyph
+    /// read as a stray mark floating in the middle of the window. Hiding it also hands those
+    /// points back to Home, which is what lets its grid run three cards wide rather than two.
+    ///
+    /// Keyed on `selectedWorkspace` rather than on `selection`, because `DetailColumn` already
+    /// falls back to Home when a selected id no longer resolves to a workspace.
+    private var isInspectorPresented: Bool {
+        app.isInspectorVisible && app.selectedWorkspace != nil
+    }
+
     // MARK: - Actions
 
     private func confirmArchive() {
@@ -172,8 +184,8 @@ struct RootView: View {
 }
 
 extension Notification.Name {
-    // batonOpenWorkspace is declared in AppChrome.swift, next to the notification delegate that
-    // posts it. These two are only ever posted by views, so they live here.
+    // batonOpenWorkspace is declared in BatonAppDelegate.swift, next to the delegate that posts
+    // it. These two are only ever posted by views, so they live here.
     static let batonToggleSidebar = Notification.Name("baton.toggleSidebar")
     static let batonNewWorkspace = Notification.Name("baton.newWorkspace")
 }

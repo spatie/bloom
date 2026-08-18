@@ -15,7 +15,13 @@ public extension Error {
     var readableMessage: String {
         // Value types only. Every Swift error answers `is NSError` because it bridges on demand,
         // so that is no way to tell one of ours from one of Foundation's: the metatype is.
-        if let described = self as? CustomStringConvertible, !(type(of: self) is AnyClass) {
+        //
+        // Cast through `Any`, because `self as? CustomStringConvertible` on a constrained `Self`
+        // is a cast the compiler can prove always succeeds and warns about. Going through `Any`
+        // asks the same question at runtime without the static claim. It cannot be dropped for
+        // `String(describing:)`: that reaches the same `description`, but it also invents one by
+        // reflection for a type that never wrote a sentence, and those must stay unshaped.
+        if !(type(of: self) is AnyClass), let described = (self as Any) as? CustomStringConvertible {
             return Self.asSentence(described.description)
         }
         if let localized = self as? LocalizedError, let description = localized.errorDescription {

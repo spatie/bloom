@@ -23,6 +23,12 @@ struct BatonApp: App {
                 .environment(model)
                 .frame(minWidth: 1_000, minHeight: 620)
                 .handlesBatonURLs(using: model)
+                // What the rest of the OS is told: the App Nap assertion and the dock badge,
+                // the worktree behind the title bar, and the optional menu bar item. All three
+                // follow the same state, and none of it is any feature view's business.
+                .reportsAgentActivity(model)
+                .showsWorktreeInTitleBar(model)
+                .showsAgentsInMenuBar(model)
                 // The delegate needs the state to shut it down on quit, and this is the first
                 // moment both exist. Handing it over explicitly keeps the app free of a global.
                 .onAppear { appDelegate.attach(model) }
@@ -30,9 +36,15 @@ struct BatonApp: App {
         // A normal titled window, not `.hiddenTitleBar`. Hiding the title bar was what left the
         // traffic lights floating on a bare strip with the sidebar starting underneath them. A
         // unified toolbar puts them back where AppKit expects, on the same row as the toolbar,
-        // and the split view gets its sidebar toggle for free. The title itself stays hidden
-        // because the toolbar already names the workspace and its branch.
-        .windowToolbarStyle(.unified(showsTitle: false))
+        // and the split view gets its sidebar toggle for free.
+        //
+        // The title is shown, where it used to be hidden because the toolbar named the workspace
+        // itself. A hidden title also hides the proxy icon, and with it the two things every
+        // document window on the Mac can do: drag the folder out of the title bar, and
+        // Command-click the title for the path above it. Baton's workspaces are folders, so that
+        // is worth more than a second copy of the name. `WindowTitleLabel` gave the name up in
+        // return, and now shows only the project the workspace belongs to.
+        .windowToolbarStyle(.unified(showsTitle: true))
         .defaultSize(width: 1_440, height: 900)
         .commands { BatonCommands(model: model) }
 

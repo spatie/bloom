@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 import BatonCore
 
+/// Shared with the Appearance pane, which owns the picker that writes the preference.
 @MainActor
-private enum AppearancePreference {
+enum AppearancePreference {
     static func apply(_ value: String) {
         NSApp.appearance = switch value {
         case "light": NSAppearance(named: .aqua)
@@ -31,6 +32,10 @@ struct SettingsView: View {
         TabView(selection: $tab) {
             Tab("General", systemImage: "gear", value: SettingsTab.general) {
                 GeneralSettingsView()
+            }
+
+            Tab("Appearance", systemImage: "paintbrush", value: SettingsTab.appearance) {
+                AppearanceSettingsView()
             }
 
             Tab("Notifications", systemImage: "bell", value: SettingsTab.notifications) {
@@ -70,23 +75,21 @@ struct SettingsView: View {
 
 /// Keeps operating-system behavior and safety choices separate from agent configuration.
 private struct GeneralSettingsView: View {
-    @AppStorage("appearance") private var appearance = "system"
     @AppStorage("confirmBeforeArchiving") private var confirmBeforeArchiving = true
-    @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
+    @AppStorage(MenuBarStatusItem.settingKey) private var showsMenuBarStatus = false
 
     var body: some View {
         Form {
-            Picker("Appearance", selection: $appearance) {
-                Text("System").tag("system")
-                Text("Light").tag("light")
-                Text("Dark").tag("dark")
-            }
-            .pickerStyle(.segmented)
-
             Toggle("Confirm before archiving", isOn: $confirmBeforeArchiving)
 
-            Toggle("Use Ghostty terminal theme", isOn: $usesGhosttyTheme)
-                .help("Reads the font and colours from your Ghostty configuration. Off uses Baton's own palette.")
+            LabeledContent("Menu bar") {
+                VStack(alignment: .leading, spacing: Metrics.spacingTight) {
+                    Toggle("Show agent status in the menu bar", isOn: $showsMenuBarStatus)
+                    Text("Which agents are running and which are waiting for you, without raising the window.")
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                }
+            }
 
             LabeledContent("Workspaces root") {
                 HStack(spacing: Metrics.gutter) {
@@ -103,8 +106,6 @@ private struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { AppearancePreference.apply(appearance) }
-        .onChange(of: appearance) { _, value in AppearancePreference.apply(value) }
     }
 }
 

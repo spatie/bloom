@@ -8,12 +8,14 @@ import SwiftUI
 /// 28 points clips its own label the moment someone raises it. The columns themselves stay fixed,
 /// so an expanded body still lands under the label it belongs to at any text size.
 struct TranscriptRowFrame: ViewModifier {
-    @ScaledMetric(relativeTo: .callout) private var height = Metrics.rowHeight
+    /// Was a `@ScaledMetric`, which on macOS never moves because there is no Dynamic Type for it to
+    /// track, so the height the comment above promises was never actually delivered.
+    @Environment(\.fontScale) private var fontScale
 
     func body(content: Content) -> some View {
         content
             .padding(.horizontal, TranscriptLayout.inset)
-            .frame(height: height)
+            .frame(height: Metrics.rowHeight * fontScale)
     }
 }
 

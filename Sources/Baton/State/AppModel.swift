@@ -108,6 +108,12 @@ final class AppModel {
     var searchQuery = ""
     var isCreatingWorkspace = false
 
+    /// The window's undo manager, handed over by the sidebar because only a view can see it.
+    ///
+    /// Outside observation on purpose: nothing draws from it, and a tracked write from a view
+    /// update is exactly the kind of mid-update mutation this file already avoids elsewhere.
+    @ObservationIgnored var undoManager: UndoManager?
+
     /// Live models for workspaces the user has visited this launch. Kept around so switching
     /// back to a workspace does not lose scroll position or a running agent.
     ///
@@ -181,8 +187,18 @@ final class AppModel {
     func reload() async {
         guard let store else { return }
         do {
-            repos = try await store.repos()
-            workspaces = try await store.workspaces()
+            // Both lists are read before either is published, because the `await` between two
+            // assignments is a suspension point the sidebar renders in. Publishing the projects
+            // first drew every section with its "No workspaces yet" placeholder, and the next
+            // update then deleted that placeholder and inserted the real rows in every section at
+            // once. That is an insert above existing rows in an `NSTableView`, which makes
+            // AppKit's row span cache call back into itself while it recomputes the table height:
+            // the "reentrant operation in its NSTableView delegate" warning on every launch.
+            // Assigning both at once turns the whole reload into a single row diff.
+            let loadedRepos = try await store.repos()
+            let loadedWorkspaces = try await store.workspaces()
+            repos = loadedRepos
+            workspaces = loadedWorkspaces
             // The models hold a copy of their `Workspace`, and this is where those copies go
             // stale. Refreshing here keeps `model(for:)` out of every view body.
             for workspace in workspaces {
@@ -455,15 +471,23 @@ final class AppModel {
             return
         }
 
-        await performArchive(workspace, repo: repo, deleteBranch: deleteBranch, force: false)
+        await performArchive(
+            workspace, repo: repo, deleteBranch: deleteBranch, force: false, report: report
+        )
     }
 
     /// The user has seen exactly what would be destroyed and asked for it anyway.
     func confirmPendingArchive() async {
         guard let request = pendingArchive, let repo = repo(for: request.workspace) else { return }
         pendingArchive = nil
+        // A request that carries a problem has no report at all, only the reason git could not be
+        // asked. Passing it on would let an empty report be read as "nothing was at stake".
         await performArchive(
-            request.workspace, repo: repo, deleteBranch: request.deleteBranch, force: true
+            request.workspace,
+            repo: repo,
+            deleteBranch: request.deleteBranch,
+            force: true,
+            report: request.problem == nil ? request.report : nil
         )
     }
 
@@ -475,7 +499,8 @@ final class AppModel {
         _ workspace: Workspace,
         repo: Repo,
         deleteBranch: Bool?,
-        force: Bool
+        force: Bool,
+        report: WorkspaceSafetyReport?
     ) async {
         guard let manager else { return }
 
@@ -495,6 +520,7 @@ final class AppModel {
             workspaceModels[workspace.id] = nil
             if selection.workspaceID == workspace.id { selection = .home }
             await reload()
+            await offerUndo(of: workspace, repo: repo, report: report)
         } catch let error as WorkspaceError {
             switch error {
             case .archiveScriptFailed(let status, let output):
@@ -507,16 +533,81 @@ final class AppModel {
                         // The tail is where a script says why it gave up.
                         + String(output.trimmingCharacters(in: .whitespacesAndNewlines).suffix(1_000))
                 )
-            case .unsafeToArchive(let report):
+            case .unsafeToArchive(let fresh):
                 // Only reachable when the worktree changed between the check and the archive.
                 pendingArchive = ArchiveRequest(
-                    workspace: workspace, report: report, deleteBranch: deleteBranch
+                    workspace: workspace, report: fresh, deleteBranch: deleteBranch
                 )
             default:
                 alert = BatonAlert(title: "Could not archive the workspace", message: error.readableMessage)
             }
         } catch {
             alert = BatonAlert(title: "Could not archive the workspace", message: error.readableMessage)
+        }
+    }
+
+    // MARK: - Undoing an archive
+
+    /// Offers Edit > Undo for an archive that really can be taken back.
+    ///
+    /// The test is not "was this archive safe". `WorkspaceSafetyReport.isSafeToDiscard` also weighs
+    /// the commits, because deleting the branch would strand them, and an archive that keeps the
+    /// branch strands nothing: the branch holds the commits and the worktree is a checkout of it.
+    /// What decides is `isRestorableFromBranch`, which asks only whether anything lived in that
+    /// directory and nowhere else. The other two guards are about the same promise:
+    ///
+    /// - The branch is checked on disk rather than inferred from `deleteBranch`, which can also be
+    ///   decided by the repository's settings file. A deleted branch takes the commits with it.
+    /// - An archive script has already wound the workspace down, and Baton has no idea what it
+    ///   did. Rebuilding the checkout would hand back a workspace whose containers, databases and
+    ///   ports are gone, which is not the workspace that was archived.
+    ///
+    /// A missing report means git could not be asked what was at stake, which is never a reason to
+    /// claim there was nothing.
+    private func offerUndo(
+        of workspace: Workspace, repo: Repo, report: WorkspaceSafetyReport?
+    ) async {
+        guard let manager, undoManager != nil else { return }
+        guard let report, report.isRestorableFromBranch else { return }
+        guard SettingsLoader.load(repo: repo.path).archiveScript == nil else { return }
+        guard await manager.canRestore(workspace: workspace, repo: repo) else { return }
+        registerArchiveUndo(workspace, repo: repo)
+    }
+
+    private func registerArchiveUndo(_ workspace: Workspace, repo: Repo) {
+        guard let undoManager else { return }
+        // The handler runs on the main thread, from the Edit menu or Command+Z, so the isolation
+        // is real rather than assumed away.
+        undoManager.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated { model.beginRestore(of: workspace, repo: repo) }
+        }
+        // Named for the action being reversed, which is what every other Mac app puts after
+        // "Undo". SwiftUI's stock Edit menu draws a fixed "Undo" title and only takes the enabled
+        // state from the manager, so this currently shows up in `undoActionName` rather than in
+        // the menu. Spelling it out anyway is what makes the menu title correct the moment that
+        // group is replaced.
+        undoManager.setActionName("Archive Workspace")
+    }
+
+    private func beginRestore(of workspace: Workspace, repo: Repo) {
+        Task { await restoreArchived(workspace, repo: repo) }
+    }
+
+    /// Puts the worktree back and selects it again.
+    ///
+    /// No redo is registered. Redo of an archive would delete a worktree from a menu item, with no
+    /// safety report in front of it, which is the one thing this app is careful never to do.
+    private func restoreArchived(_ workspace: Workspace, repo: Repo) async {
+        guard let manager else { return }
+        do {
+            let restored = try await manager.restore(workspace: workspace, repo: repo)
+            await reload()
+            selection = .workspace(restored.id)
+        } catch {
+            alert = BatonAlert(
+                title: "Could not bring \(workspace.name) back",
+                message: error.readableMessage
+            )
         }
     }
 

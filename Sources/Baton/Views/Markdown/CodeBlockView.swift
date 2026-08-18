@@ -13,10 +13,12 @@ public struct CodeBlockView: View {
     @State private var copied = false
     @State private var showsAllLines = false
 
-    /// The gutter follows the user's text size, otherwise a raised size runs the numbers into the
-    /// code beside them. Relative to the style the numbers are actually set in, which is what makes
-    /// the two grow together.
-    @ScaledMetric(relativeTo: .subheadline) private var lineNumberWidth = MarkdownMetrics.lineNumberWidth
+    /// The gutter follows the conversation's text size, otherwise a raised size runs the numbers
+    /// into the code beside them. This was a `@ScaledMetric`, which on macOS never moves: there is
+    /// no Dynamic Type for it to track.
+    @Environment(\.fontScale) private var fontScale
+
+    private var lineNumberWidth: CGFloat { MarkdownMetrics.lineNumberWidth * fontScale }
 
     public init(code: String, language: Language, showsLineNumbers: Bool = false) {
         self.code = code

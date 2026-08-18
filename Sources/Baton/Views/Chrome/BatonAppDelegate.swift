@@ -22,8 +22,12 @@ final class BatonAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
     /// the first one is still waiting on the escalations.
     private var isTerminating = false
 
+    /// Kept alive here because `NSApp.servicesProvider` is an unowned reference.
+    private let servicesProvider = BatonServicesProvider()
+
     func attach(_ model: AppModel) {
         appModel = model
+        servicesProvider.attach(model)
         // The suppression rule needs to know which workspace the window is showing, and this is
         // the first moment there is a window to ask.
         NotificationService.shared.attach(model)
@@ -44,6 +48,22 @@ final class BatonAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
+        NotificationService.shared.registerCategories()
+        // The provider is retained by this delegate, which lives for the process. AppKit only
+        // holds it weakly, and a provider that has been deallocated is a Services entry that
+        // silently does nothing.
+        NSApp.servicesProvider = servicesProvider
+        // Tells macOS the app is here and what it offers, so the entry shows up in other apps'
+        // Services menus without waiting for the periodic rescan.
+        NSUpdateDynamicServices()
+    }
+
+    /// Required on macOS 14 and later. Without it AppKit logs "Secure coding is not enabled for
+    /// restorable state" on every launch and quietly declines to restore the window. Baton's
+    /// restorable state is window geometry and split positions, none of which needs a legacy
+    /// unarchiver.
+    func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+        true
     }
 
     @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, withReply reply: NSAppleEventDescriptor) {
@@ -129,6 +149,45 @@ final class BatonAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         return alert.runModal() == .alertFirstButtonReturn
     }
 
+    /// The dock icon's menu. Only the workspaces with an agent actually running, because the dock
+    /// is where somebody looks while Baton is behind three other windows, and the question they
+    /// have there is "is anything still going, and can I get to it". A full workspace list would
+    /// be the sidebar, badly, in a place with no room for it.
+    ///
+    /// Nil when nothing is running, so macOS shows its own standard menu rather than an empty
+    /// section above it.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        guard let appModel else { return nil }
+        let running = appModel.workspaces.filter(appModel.isRunning)
+        guard !running.isEmpty else { return nil }
+
+        let menu = NSMenu()
+        for workspace in running {
+            let item = NSMenuItem(
+                title: workspace.name,
+                action: #selector(openWorkspaceFromDock(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = workspace.id
+            // The same glyph the sidebar uses for a running agent, so the two lists read as one
+            // fact told twice rather than as two different states.
+            item.image = NSImage(
+                systemSymbolName: "circle.fill",
+                accessibilityDescription: "Agent running"
+            )
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @objc private func openWorkspaceFromDock(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.windows.first?.makeKeyAndOrderFront(nil)
+        NotificationCenter.default.post(name: .batonOpenWorkspace, object: id)
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
             sender.windows.first?.makeKeyAndOrderFront(nil)
@@ -149,13 +208,29 @@ final class BatonAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         completionHandler([.banner, .sound, .list])
     }
 
+    /// A click, an Open, or a reply typed into the banner itself.
+    ///
+    /// The reply is the one branch that does not raise the window: the whole point of typing into
+    /// a banner is to answer an agent without leaving the app you are in, and stealing focus to
+    /// show the answer being sent undoes that. Everything else brings Baton forward.
+    ///
+    /// The response is read here, before the hop, because it is delivered off the main actor and
+    /// is not `Sendable`.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping @Sendable () -> Void
     ) {
         let workspaceID = NotificationService.workspaceID(from: response)
+        let reply = (response as? UNTextInputNotificationResponse)?.userText
+
         Task { @MainActor in
+            if let reply, let workspaceID, !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                await NotificationService.shared.reply(reply, toWorkspace: workspaceID)
+                completionHandler()
+                return
+            }
+
             NSApp.activate(ignoringOtherApps: true)
             NSApp.windows.first?.makeKeyAndOrderFront(nil)
             if let workspaceID {
