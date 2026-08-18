@@ -17,6 +17,9 @@ struct CreateWorkspaceSheet: View {
 
     @State private var repoID: String?
     @State private var prompt = ""
+    @State private var mode: WorkspaceStartMode = .chat
+    /// Only used in terminal mode, where there is no task to derive a branch name from.
+    @State private var branchName = ""
     @State private var baseBranch = ""
     @State private var branches: [String] = []
     @State private var branchPrefix: String?
@@ -36,7 +39,14 @@ struct CreateWorkspaceSheet: View {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var canCreate: Bool { repo != nil && !trimmedPrompt.isEmpty }
+    private var trimmedBranchName: String {
+        branchName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canCreate: Bool {
+        guard repo != nil else { return false }
+        return mode == .chat ? !trimmedPrompt.isEmpty : !trimmedBranchName.isEmpty
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -112,6 +122,30 @@ struct CreateWorkspaceSheet: View {
             }
             .disabled(branchOptions.isEmpty)
 
+            // A starting layout, not a mode: both kinds are the same workspace, and either can
+            // gain the other kind of tab afterwards. See `WorkspaceStartMode`.
+            Picker("Opens with", selection: $mode) {
+                ForEach(WorkspaceStartMode.allCases) { candidate in
+                    Text(candidate.label).tag(candidate)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            if mode == .terminal {
+                // Terminal workspaces name their own branch, because there is no task to slug.
+                LabeledContent("Branch") {
+                    TextField(
+                        "Branch",
+                        text: $branchName,
+                        prompt: Text("try-out-new-caching")
+                    )
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                    .font(Typo.body)
+                    .focused($promptFocused)
+                }
+            }
+
             // A vertical `TextField` rather than a `TextEditor`: it takes a placeholder, it
             // grows with the user's text size instead of clipping inside a pinned 150pt box,
             // and it is still a multi-line field.
@@ -120,6 +154,7 @@ struct CreateWorkspaceSheet: View {
             // ourselves: the bezel and, more importantly, the focus ring are then the system's,
             // so the field shows focus the way every other text field on the Mac does and
             // follows increased contrast and the accent colour without being told.
+            if mode == .chat {
             LabeledContent("Task") {
                 // The example goes in `prompt:`, not in the title. On macOS a text field's title
                 // is a visible label, so passing the example there draws it beside the field
@@ -136,8 +171,9 @@ struct CreateWorkspaceSheet: View {
                 .lineLimit(6...12)
                 .focused($promptFocused)
             }
+            }
 
-            LabeledContent("Branch") {
+            LabeledContent(mode == .chat ? "Branch" : "Worktree") {
                 HStack(spacing: Metrics.spacing) {
                     Chip(
                         text: branchPreview,
@@ -192,10 +228,17 @@ struct CreateWorkspaceSheet: View {
 
     /// Mirrors `WorkspaceManager.createWorkspace`, minus the uniquing suffix which depends on
     /// branches that could appear between now and Create.
+    /// In terminal mode the branch is what was typed, so the preview shows the slug git will
+    /// actually accept rather than repeating the raw text back.
     private var branchPreview: String {
-        guard !trimmedPrompt.isEmpty else { return "named from your prompt" }
-        let slug = Git.slug(from: trimmedPrompt)
-        guard let prefix = branchPrefix, !prefix.isEmpty else { return slug }
+        let source = mode == .chat ? trimmedPrompt : trimmedBranchName
+        guard !source.isEmpty else {
+            return mode == .chat ? "named from your prompt" : "name it above"
+        }
+        let slug = Git.slug(from: source)
+        // A branch typed by hand is taken as typed: the prefix exists to label branches a prompt
+        // named, and silently prefixing an explicit name would be overruling the user.
+        guard mode == .chat, let prefix = branchPrefix, !prefix.isEmpty else { return slug }
         return "\(prefix)/\(slug)"
     }
 
@@ -238,7 +281,13 @@ struct CreateWorkspaceSheet: View {
         guard let repo, canCreate else { return }
         let text = trimmedPrompt
         let base = baseBranch.isEmpty ? repo.defaultBranch : baseBranch
+        let chosen = mode
+        let branch = chosen == .terminal ? Git.slug(from: trimmedBranchName) : nil
         dismiss()
-        Task { await app.createWorkspace(in: repo, prompt: text, baseBranch: base) }
+        Task {
+            await app.createWorkspace(
+                in: repo, prompt: text, baseBranch: base, opensWith: chosen, branch: branch
+            )
+        }
     }
 }

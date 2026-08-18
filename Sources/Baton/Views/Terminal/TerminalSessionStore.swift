@@ -67,8 +67,7 @@ final class TerminalSessionStore {
     /// in it is a dead end.
     @discardableResult
     func closeTab(_ tab: TerminalTab, store: Store?) async -> [TerminalTab] {
-        terminals[tab.id]?.shutdown()
-        terminals[tab.id] = nil
+        closePanes(of: tab.id)
 
         var tabs = tabs(for: tab.workspaceID).filter { $0.id != tab.id }
         tabsByWorkspace[tab.workspaceID] = tabs
@@ -99,6 +98,22 @@ final class TerminalSessionStore {
     }
 
     // MARK: - Terminals
+
+    /// Stops one split pane. The shell's whole process group goes, not just the shell: a pty child
+    /// is a session leader, so the group is where the `npm run dev` the user started in that pane
+    /// actually lives, and it would otherwise be reparented to launchd still holding its port.
+    func closePane(id: String) {
+        guard let view = terminals[id] else { return }
+        signal(SIGTERM, toGroupOf: view)
+        view.shutdown()
+        terminals[id] = nil
+    }
+
+    /// Every pane of a tab that is going away, and the shape it was split into.
+    func closePanes(of ownerID: String) {
+        for pane in TerminalSplitStore.shared.panes(of: ownerID) { closePane(id: pane) }
+        TerminalSplitStore.shared.discard(ownerID: ownerID)
+    }
 
     /// The live shell for a tab, forked on first use and reused forever after.
     func terminal(
@@ -153,8 +168,12 @@ final class TerminalSessionStore {
     func discard(workspaceID: String) async {
         var views: [BatonTerminalView] = []
         for tab in tabs(for: workspaceID) {
-            if let view = terminals[tab.id] { views.append(view) }
-            terminals[tab.id] = nil
+            // Every pane of the tab, which for a tab nobody split is the tab's own shell.
+            for pane in TerminalSplitStore.shared.panes(of: tab.id) {
+                if let view = terminals[pane] { views.append(view) }
+                terminals[pane] = nil
+            }
+            TerminalSplitStore.shared.discard(ownerID: tab.id)
         }
         tabsByWorkspace[workspaceID] = nil
 

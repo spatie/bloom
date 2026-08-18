@@ -15,6 +15,7 @@ import BatonCore
 /// split view, the inspector, the create sheet, the archive confirmation and the alert.
 struct RootView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     /// Survives relaunch, because an inspector that forgets how wide you made it is worse than
@@ -58,12 +59,22 @@ struct RootView: View {
                     )
 
                 if app.isInspectorVisible {
-                    InspectorDivider(width: $inspectorWidth, available: detailWidth)
-                    InspectorPane(model: app.selectedModel)
-                        .frame(width: fittedInspectorWidth)
-                        .frame(maxHeight: .infinity)
+                    // The divider and the pane move as one, because the boundary is part of the
+                    // pane rather than a thing the detail column keeps when the pane leaves.
+                    HStack(spacing: 0) {
+                        InspectorDivider(width: $inspectorWidth, available: detailWidth)
+                        InspectorPane(model: app.selectedModel)
+                            .frame(width: fittedInspectorWidth)
+                    }
+                    .frame(maxHeight: .infinity)
+                    .transition(.move(edge: .trailing))
                 }
             }
+            // Keyed on the visibility alone, so the width the pane is dragged to and the width it
+            // is clamped to as the window narrows both stay instant. A pane that eased its way
+            // after the pointer would feel broken, and animating on every layout is exactly the
+            // churn that used to crash this window.
+            .animation(reduceMotion ? nil : Motion.pane, value: app.isInspectorVisible)
             // The stored width is what the user asked for, `fittedInspectorWidth` is what fits.
             // Measured on every layout rather than only while dragging, so narrowing the window
             // narrows the inspector instead of squeezing the sidebar out of view.
@@ -81,10 +92,9 @@ struct RootView: View {
         .navigationTitle(app.selectedWorkspace?.name ?? "Baton")
 
         .task { await app.bootstrap() }
-        // The terminal panel lives at the bottom of the inspector now, so the toolbar's panel
-        // toggle has to bring the inspector with it. Without this, asking for the panel while the
-        // inspector is closed does nothing at all, and the toggle would light up over a pane that
-        // is not on screen.
+        // The terminal panel lives at the bottom of the inspector now, so anything that asks for
+        // the panel has to bring the inspector with it. Without this, Toggle Bottom Panel from the
+        // menu bar while the inspector is closed does nothing at all.
         .onChange(of: app.isBottomPanelVisible) {
             if app.isBottomPanelVisible { app.isInspectorVisible = true }
         }

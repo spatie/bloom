@@ -202,17 +202,14 @@ struct BottomPanelView: View {
             // a placeholder id before any tab exists. Reconciling only on load left the panel
             // stuck on the spinner whenever the selection was set again afterwards.
             if let tab = terminalTabs.first(where: { $0.id == id }) ?? terminalTabs.first {
-                // SwiftTerm draws its first glyph on the view's own edge, so without this the
-                // shell's prompt sits flush against the tab strip above it and the window edge to
-                // its left. Every terminal on this platform insets its text.
-                TerminalView(
-                    tab: tab,
+                TerminalSplitView(
+                    ownerID: tab.id,
                     workspace: model.workspace,
                     repo: model.repo,
-                    port: model.port
+                    port: model.port,
+                    onCloseTab: { Task { await close(tab) } }
                 )
                 .id(tab.id)
-                .padding(Metrics.spacing)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Palette.surfaceSunken)
             } else {

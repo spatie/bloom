@@ -25,7 +25,8 @@ struct ChangedFileList: View {
     /// files wants on first sight.
     @State private var collapsed: Set<String> = []
 
-    @AppStorage(ChangedFilePresentation.storageKey) private var isTree = false
+    @AppStorage(ChangedFilePresentation.storageKey)
+    private var isTree = ChangedFilePresentation.defaultsToTree
 
     var body: some View {
         Group {

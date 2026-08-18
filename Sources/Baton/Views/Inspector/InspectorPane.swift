@@ -15,6 +15,7 @@ struct InspectorPane: View {
     let model: WorkspaceModel?
 
     @Environment(AppModel.self) private var app
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Survives relaunch, for the same reason the inspector's width does: a panel that forgets how
     /// tall you made it is worse than one that cannot be resized at all.
@@ -67,13 +68,28 @@ struct InspectorPane: View {
                     Hairline()
                 }
 
-                // Collapsed, the panel keeps its tab strip and takes only what that needs, which is
-                // why the height is dropped rather than set to zero.
+                // Collapsed, the panel keeps its tab strip, which is why the closed height is the
+                // strip's rather than zero. Both ends are a real number so there is something to
+                // interpolate: against `nil` for the collapsed state SwiftUI has no two heights to
+                // move between, and the panel jumped rather than slid.
+                //
+                // Aligned to the top, so the strip rides the panel's top edge up and down and the
+                // panel reads as sliding out of the bottom of the window. The sunken fill is
+                // applied outside the frame rather than inside the panel, so the strip has
+                // somewhere to slide over while the panel is shorter than the space it is leaving.
                 BottomPanelView(model: model)
-                    .frame(height: app.isBottomPanelVisible ? currentHeight : nil)
+                    .frame(
+                        height: app.isBottomPanelVisible ? currentHeight : Metrics.barHeight,
+                        alignment: .top
+                    )
+                    .background(Palette.surfaceSunken)
+                    .clipped()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Keyed on the visibility alone, so dragging the divider and clamping to a shorter window
+        // both stay instant.
+        .animation(reduceMotion ? nil : Motion.pane, value: app.isBottomPanelVisible)
         .onGeometryChange(for: Double.self) { Double($0.size.height) } action: { columnHeight = $0 }
     }
 

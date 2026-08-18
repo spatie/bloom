@@ -207,6 +207,16 @@ enum Metrics {
     static let barHeight: CGFloat = 32
 }
 
+/// How a pane arrives and leaves.
+///
+/// One curve for the inspector and for the terminal panel, because two panes that move at
+/// different speeds read as two apps. Short and without overshoot: a pane is furniture, and
+/// furniture that springs is a toy. Call sites drop it for Reduce Motion rather than substituting
+/// a slower one, because the setting is about movement, not about speed.
+enum Motion {
+    static let pane: Animation = .easeOut(duration: 0.18)
+}
+
 // MARK: - Materials
 
 /// A real AppKit material, so the sidebar is translucent and vibrant the way every other Mac

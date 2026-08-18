@@ -99,7 +99,7 @@ final class CenterTabStore {
             browsers[tab.id]?.stop()
             browsers[tab.id] = nil
         case .terminal:
-            await stopShell(for: tab)
+            stopShell(for: tab)
         }
     }
 
@@ -113,20 +113,15 @@ final class CenterTabStore {
         return session
     }
 
-    /// `TerminalSessionStore.closeTab` is the only way in to a shell's teardown, and a centre tab
-    /// is not one of the bottom panel's rows: it has no `terminal_tabs` row, hence no store, and
-    /// the filter below is a no-op that leaves the panel's own list exactly as it was.
+    /// A centre tab is not one of the bottom panel's rows: it has no `terminal_tabs` record and no
+    /// place in that panel's list, so there is nothing to delete and only shells to stop. Every
+    /// pane goes, which for a tab the user never split is the one shell it opened with.
     ///
-    /// The guard is what keeps that harmless. Closing the last tab in an empty list makes that
-    /// store open a replacement one, so a centre tab could otherwise conjure a bottom panel
-    /// terminal for a workspace whose panel had not loaded yet.
-    private func stopShell(for tab: CenterTab) async {
-        let terminals = TerminalSessionStore.shared
-        guard !terminals.tabs(for: tab.workspaceID).isEmpty else { return }
-        await terminals.closeTab(
-            TerminalTab(id: tab.id, workspaceID: tab.workspaceID, title: tab.title),
-            store: nil
-        )
+    /// It deliberately does not go through `closeTab`. That one opens a replacement tab when it
+    /// empties a workspace's list, so a centre tab could conjure a bottom panel terminal for a
+    /// workspace whose panel had not loaded yet.
+    private func stopShell(for tab: CenterTab) {
+        TerminalSessionStore.shared.closePanes(of: tab.id)
     }
 
     // MARK: - Persistence

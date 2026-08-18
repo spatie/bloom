@@ -51,6 +51,10 @@ struct SessionTabsView: View {
             Hairline(axis: .vertical)
 
             newTabMenu
+
+            Hairline(axis: .vertical)
+
+            inspectorToggle
         }
         .frame(height: Metrics.barHeight)
         .headerMaterial()
@@ -117,6 +121,32 @@ struct SessionTabsView: View {
         .frame(width: Metrics.barHeight, height: Metrics.barHeight)
         .contentShape(Rectangle())
         .help("New tab in this workspace")
+    }
+
+    /// The right pane's control, at the trailing end of the strip that borders it.
+    ///
+    /// It used to be a toolbar item, where it sat above all three columns and so said nothing
+    /// about which of them it would move. On the boundary it opens, the target is the thing it is
+    /// pointing at.
+    ///
+    /// `.accessoryBar` rather than the default `.button` fill: on macOS 26 that fill is the
+    /// saturated accent colour, and a pane that is on almost all the time then shouts all the
+    /// time. `.accessoryBar` marks on with the same neutral raised capsule Finder gives its own
+    /// toolbar items, which is legible without being an alarm. It stays a `Toggle` so VoiceOver
+    /// still reads it as one and announces the on state without being told to.
+    private var inspectorToggle: some View {
+        @Bindable var app = app
+
+        return Toggle(isOn: $app.isInspectorVisible) {
+            Label("Inspector", systemImage: "sidebar.right")
+                .labelStyle(.iconOnly)
+                .font(Typo.labelEmphasis)
+        }
+        .toggleStyle(.button)
+        .buttonStyle(.accessoryBar)
+        .padding(.horizontal, Metrics.spacing)
+        .frame(height: Metrics.barHeight)
+        .help(app.isInspectorVisible ? "Hide the changed files" : "Show the changed files")
     }
 
     /// The menu above shows the shortcuts; it cannot fire them. A `Menu` in a view becomes an

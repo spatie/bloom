@@ -166,6 +166,31 @@ public actor Store {
                     "CREATE UNIQUE INDEX IF NOT EXISTS messages_session_seq ON messages(session_id, seq);"
                 )
             },
+
+            // Inline review comments. In the database rather than user defaults because they are
+            // per-workspace working state, there can be dozens of them per review, and they have to
+            // die with the workspace, which the foreign key does for free.
+            //
+            // The anchor is spread over four columns rather than stored as one JSON blob: line and
+            // file are the two things every query filters or orders by, and burying them in JSON
+            // would mean reading every row of a workspace to draw one file's gutter.
+            sql("""
+            CREATE TABLE IF NOT EXISTS review_comments (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                file_path TEXT NOT NULL,
+                side TEXT NOT NULL DEFAULT 'new',
+                line INTEGER NOT NULL,
+                line_text TEXT NOT NULL DEFAULT '',
+                context_before TEXT NOT NULL DEFAULT '[]',
+                context_after TEXT NOT NULL DEFAULT '[]',
+                body TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                attached INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE INDEX IF NOT EXISTS review_comments_workspace
+                ON review_comments(workspace_id, file_path, line);
+            """),
         ]
 
         let current = Int(db.userVersion)
@@ -599,6 +624,99 @@ public actor Store {
         }
     }
 
+    // MARK: - Review comments
+
+    public func reviewComments(workspaceID: String) throws -> [ReviewComment] {
+        try db.query(
+            "SELECT * FROM review_comments WHERE workspace_id = ? ORDER BY file_path, line, created_at, id",
+            [.text(workspaceID)]
+        ).map(Self.reviewComment(from:))
+    }
+
+    public func reviewComments(workspaceID: String, filePath: String) throws -> [ReviewComment] {
+        try db.query(
+            """
+            SELECT * FROM review_comments WHERE workspace_id = ? AND file_path = ?
+            ORDER BY line, created_at, id
+            """,
+            [.text(workspaceID), .text(filePath)]
+        ).map(Self.reviewComment(from:))
+    }
+
+    /// The ones that actually go out with the next message.
+    public func attachedReviewComments(workspaceID: String) throws -> [ReviewComment] {
+        try db.query(
+            """
+            SELECT * FROM review_comments WHERE workspace_id = ? AND attached = 1
+            ORDER BY file_path, line, created_at, id
+            """,
+            [.text(workspaceID)]
+        ).map(Self.reviewComment(from:))
+    }
+
+    /// Upsert rather than insert, so the composer can save an edited comment by writing the value
+    /// it already holds instead of having to know whether that value has been to disk before.
+    @discardableResult
+    public func upsert(_ comment: ReviewComment) throws -> ReviewComment {
+        try db.run(
+            """
+            INSERT INTO review_comments (
+                id, workspace_id, file_path, side, line, line_text,
+                context_before, context_after, body, created_at, attached
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                file_path = excluded.file_path,
+                side = excluded.side,
+                line = excluded.line,
+                line_text = excluded.line_text,
+                context_before = excluded.context_before,
+                context_after = excluded.context_after,
+                body = excluded.body,
+                attached = excluded.attached
+            """,
+            [
+                .text(comment.id), .text(comment.workspaceID), .text(comment.filePath),
+                .text(comment.side.rawValue), .int(Int64(comment.anchor.line)),
+                .text(comment.anchor.text),
+                .text(Self.encodeContext(comment.anchor.before)),
+                .text(Self.encodeContext(comment.anchor.after)),
+                .text(comment.body), .double(comment.createdAt.timeIntervalSince1970),
+                .int(comment.isAttached ? 1 : 0),
+            ]
+        )
+        return comment
+    }
+
+    /// Only the body, because that is the only thing an edit changes. Rewriting the whole row would
+    /// let a stale copy held by the editor put the anchor back to where the line used to be.
+    public func updateReviewCommentBody(id: String, body: String) throws {
+        try db.run("UPDATE review_comments SET body = ? WHERE id = ?", [.text(body), .text(id)])
+    }
+
+    public func setReviewCommentAttached(id: String, attached: Bool) throws {
+        try db.run(
+            "UPDATE review_comments SET attached = ? WHERE id = ?",
+            [.int(attached ? 1 : 0), .text(id)]
+        )
+    }
+
+    /// What "Remove from chat" does to the whole set once the message has gone out. The comments
+    /// stay readable in the diff, they just stop being sent again with every following turn.
+    public func detachReviewComments(workspaceID: String) throws {
+        try db.run(
+            "UPDATE review_comments SET attached = 0 WHERE workspace_id = ?",
+            [.text(workspaceID)]
+        )
+    }
+
+    public func deleteReviewComment(id: String) throws {
+        try db.run("DELETE FROM review_comments WHERE id = ?", [.text(id)])
+    }
+
+    public func deleteReviewComments(workspaceID: String) throws {
+        try db.run("DELETE FROM review_comments WHERE workspace_id = ?", [.text(workspaceID)])
+    }
+
     // MARK: - Settings
 
     public func setting(_ key: String) throws -> String? {
@@ -704,6 +822,38 @@ public actor Store {
             costUSD: row.double("cost_usd") ?? 0,
             contextTokens: Int(row.int("context_tokens") ?? 0)
         )
+    }
+
+    private static func reviewComment(from row: Row) -> ReviewComment {
+        ReviewComment(
+            id: row.string("id") ?? newID(),
+            workspaceID: row.string("workspace_id") ?? "",
+            filePath: row.string("file_path") ?? "",
+            side: ReviewCommentSide(rawValue: row.string("side") ?? "") ?? .new,
+            anchor: ReviewCommentAnchor(
+                line: Int(row.int("line") ?? 1),
+                text: row.string("line_text") ?? "",
+                before: decodeContext(row.string("context_before")),
+                after: decodeContext(row.string("context_after"))
+            ),
+            body: row.string("body") ?? "",
+            createdAt: row.date("created_at") ?? Date(),
+            isAttached: row.bool("attached")
+        )
+    }
+
+    /// JSON rather than newline-joined text. A context line is a line of source, so joining on
+    /// newlines cannot tell an empty list from a list holding one empty line, and getting that
+    /// wrong shifts every stored snippet by one.
+    private static func encodeContext(_ lines: [String]) -> String {
+        guard let data = try? JSONEncoder().encode(lines) else { return "[]" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func decodeContext(_ raw: String?) -> [String] {
+        guard let raw, let data = raw.data(using: .utf8),
+              let lines = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return lines
     }
 
     private static func message(from row: Row) -> Message {

@@ -3,15 +3,20 @@ import BatonCore
 
 /// The window toolbar.
 ///
-/// A `ToolbarContent` type rather than a `@ToolbarContentBuilder` property on `RootView`. The
-/// builder had to open with a local `@Bindable var app = app` to get at the two toggles, which is
-/// the tell that the toolbar wanted the model as an input rather than as ambient environment. Here
-/// it is handed one, and the toggles bind straight to it.
+/// A `ToolbarContent` type rather than a `@ToolbarContentBuilder` property on `RootView`, so the
+/// toolbar takes the model as an input rather than reaching for it as ambient environment.
 ///
 /// It is attached to the DETAIL column, never to the `NavigationSplitView`. See `RootView` for the
 /// crash that taught us the difference.
+///
+/// There are no pane toggles here any more. A toolbar item sits above all three columns and so
+/// says nothing about which of them it moves, and on macOS 26 a `.button` toggle's on state is a
+/// saturated accent fill, which made two permanently-on panes read as two alarms. Both controls
+/// now live on the boundary they open: the inspector's on the end of the centre tab strip, the
+/// terminal panel's on the panel's own strip. What is left is the one thing that belongs to the
+/// window rather than to a pane, which is starting work.
 struct BatonWindowToolbar: ToolbarContent {
-    @Bindable var app: AppModel
+    let app: AppModel
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
@@ -40,50 +45,11 @@ struct BatonWindowToolbar: ToolbarContent {
                 WindowTitleLabel()
             }
             .sharedBackgroundVisibility(.hidden)
-
-            // Adjacent items share one glass capsule, and a toggle inside a shared capsule has to
-            // paint its own "on" fill inside it. With two panel symbols, both usually on, that
-            // reads as a filled rectangle inside a rounded fill inside a pill. A spacer gives each
-            // toggle a capsule of its own, where being on tints that capsule instead.
-            ToolbarItem(placement: .primaryAction) {
-                bottomPanelToggle
-            }
-            ToolbarSpacer(.fixed, placement: .primaryAction)
-            ToolbarItem(placement: .primaryAction) {
-                inspectorToggle
-            }
         } else {
             ToolbarItem(placement: .principal) {
                 WindowTitleLabel()
             }
-
-            ToolbarItemGroup(placement: .primaryAction) {
-                bottomPanelToggle
-                inspectorToggle
-            }
         }
-    }
-
-    // MARK: - Toggles
-    //
-    // Shared by both branches above, which differ only in how the toolbar groups them.
-
-    private var bottomPanelToggle: some View {
-        Toggle(isOn: $app.isBottomPanelVisible) {
-            Label("Terminal panel", systemImage: "rectangle.bottomthird.inset.filled")
-        }
-        .toggleStyle(.button)
-        .disabled(app.selectedModel == nil)
-        .help("Show the terminal panel")
-    }
-
-    private var inspectorToggle: some View {
-        Toggle(isOn: $app.isInspectorVisible) {
-            Label("Inspector", systemImage: "sidebar.right")
-        }
-        .toggleStyle(.button)
-        .disabled(app.selectedModel == nil)
-        .help("Show the changed files")
     }
 
     // MARK: - Actions

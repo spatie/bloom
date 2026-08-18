@@ -46,6 +46,14 @@ final class BatonTerminalView: LocalProcessTerminalView {
     private(set) var launch: TerminalLaunch?
     private(set) var hasExited = false
 
+    /// Called when this shell takes the keyboard, so the tab it is a pane of can dim the others.
+    var onFocus: (@MainActor () -> Void)?
+
+    /// The split commands, answered by whatever owns this pane. It returns false for a command it
+    /// cannot serve, such as an arrow with no pane beyond it, which is what lets the same
+    /// keystroke fall through to the app menu instead of being swallowed.
+    var onCommand: (@MainActor (TerminalPaneCommand) -> Bool)?
+
     private let processObserver = TerminalProcessObserver()
 
     /// Whether the user's Ghostty configuration is in charge of the font and the colours. Owned by
@@ -136,6 +144,14 @@ final class BatonTerminalView: LocalProcessTerminalView {
         let suffix = (code ?? 0) == 0 ? "" : " (exit \(code ?? 0))"
         // SGR 2 is faint, which is exactly the dimmed treatment this line wants.
         feed(text: "\r\n\u{1b}[2mProcess finished\(suffix), press Return to restart\u{1b}[0m\r\n")
+    }
+
+    /// A click is the one way a pane takes the keyboard that the tab does not already know about,
+    /// so it is where the tab is told. `becomeFirstResponder` would be the truer hook, but
+    /// SwiftTerm overrides it as `public` rather than `open`, which puts it out of reach here.
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        onFocus?()
     }
 
     /// Keystrokes on their way to the shell. When the shell is gone they are swallowed, except a
@@ -282,6 +298,13 @@ final class BatonTerminalView: LocalProcessTerminalView {
             return super.performKeyEquivalent(with: event)
         }
 
+        // Splitting comes first, because Cmd+W here means the pane and not the session the app
+        // menu would close, and because the menu only ever sees a key this hands back.
+        if let command = TerminalPaneCommand(key: key, modifiers: event.modifierFlags),
+           onCommand?(command) == true {
+            return true
+        }
+
         switch key {
         case "k":
             clearScreen()
@@ -346,6 +369,21 @@ private final class TerminalProcessObserver: LocalProcessTerminalViewDelegate {
 final class TerminalHostView: NSView {
     private weak var terminal: BatonTerminalView?
 
+    /// Whether this is the pane the tab says holds the keyboard. Only that one reaches for it when
+    /// the tab appears: four shells all grabbing first responder as they are drawn would leave the
+    /// keyboard wherever the last layout pass happened to end.
+    var isFocusedPane = true
+
+    /// Changes when the user moves focus with the keyboard, and is compared rather than acted on,
+    /// because `updateNSView` also runs for redraws that have nothing to do with focus. A pane that
+    /// took first responder on every one of those would pull the caret out of the composer.
+    var focusRequest = 0 {
+        didSet {
+            guard oldValue != focusRequest, isFocusedPane else { return }
+            takeKeyboard()
+        }
+    }
+
     func attach(_ view: BatonTerminalView) {
         guard terminal !== view || view.superview !== self else { return }
         terminal?.removeFromSuperview()
@@ -364,12 +402,16 @@ final class TerminalHostView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard let terminal, window != nil else { return }
+        guard window != nil, isFocusedPane else { return }
         // Give the shell the keyboard as soon as the tab is shown.
         DispatchQueue.main.async { [weak self] in
-            guard self?.window != nil else { return }
-            terminal.window?.makeFirstResponder(terminal)
+            self?.takeKeyboard()
         }
+    }
+
+    private func takeKeyboard() {
+        guard let terminal, let window, window.firstResponder !== terminal else { return }
+        window.makeFirstResponder(terminal)
     }
 }
 
@@ -381,20 +423,36 @@ struct TerminalView: NSViewRepresentable {
     var repo: Repo?
     var port: Int
 
+    /// Split panes only. A tab holding one terminal is always its own focused pane and never moves
+    /// the keyboard, so it leaves all four of these alone.
+    var isFocusedPane = true
+    var focusRequest = 0
+    var onFocus: (@MainActor () -> Void)?
+    var onCommand: (@MainActor (TerminalPaneCommand) -> Bool)?
+
     /// Read here rather than inside the terminal so SwiftUI reruns `updateNSView` when the switch
     /// in Settings moves, which is what pushes the change into a shell that is already running.
     @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
 
     func makeNSView(context: Context) -> TerminalHostView {
         let host = TerminalHostView()
-        host.attach(session)
-        session.usesGhosttyTheme = usesGhosttyTheme
+        configure(host)
         return host
     }
 
     func updateNSView(_ nsView: TerminalHostView, context: Context) {
-        nsView.attach(session)
+        configure(nsView)
+    }
+
+    private func configure(_ host: TerminalHostView) {
+        let session = self.session
+        host.attach(session)
         session.usesGhosttyTheme = usesGhosttyTheme
+        session.onFocus = onFocus
+        session.onCommand = onCommand
+        // Before the request, whose `didSet` reads it.
+        host.isFocusedPane = isFocusedPane
+        host.focusRequest = focusRequest
     }
 
     @MainActor private var session: BatonTerminalView {

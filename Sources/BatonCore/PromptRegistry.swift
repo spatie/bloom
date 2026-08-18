@@ -6,6 +6,7 @@ import Foundation
 /// override at a different prompt. The raw value is also the storage key suffix.
 public enum PromptID: String, Sendable, Hashable, CaseIterable, Codable {
     case createPullRequest
+    case review
 }
 
 /// A substitution a prompt may use, and the one line of help shown beside it in Settings.
@@ -54,7 +55,7 @@ public struct PromptDefinition: Sendable, Hashable, Identifiable {
 /// context, and it can react when a push is rejected. A `gh pr create` fired from the app knows
 /// none of that and can only fail.
 public enum PromptRegistry {
-    public static let all: [PromptDefinition] = [createPullRequest]
+    public static let all: [PromptDefinition] = [createPullRequest, review]
 
     public static func definition(for id: PromptID) -> PromptDefinition {
         // Total by construction: every case is in `all`, and the test suite pins that.
@@ -69,6 +70,13 @@ public enum PromptRegistry {
         public static let baseBranch = "base_branch"
         public static let task = "task"
         public static let changes = "changes"
+    }
+
+    /// The names the review prompt may use.
+    public enum Review {
+        public static let message = "message"
+        public static let comments = "comments"
+        public static let count = "count"
     }
 
     static let createPullRequest = PromptDefinition(
@@ -127,6 +135,41 @@ public enum PromptRegistry {
         ## Changed files
 
         {{changes}}
+        """
+    )
+
+    static let review = PromptDefinition(
+        id: .review,
+        title: "Send review comments",
+        summary: """
+        Sent when you have left inline comments on the diff and press send. Each comment already \
+        carries its file, its line and the code around it, so this prompt only has to say what to \
+        do with them.
+        """,
+        variables: [
+            PromptVariable(
+                name: Review.message,
+                summary: "What you typed in the composer alongside the comments."
+            ),
+            PromptVariable(
+                name: Review.comments,
+                summary: "Every attached comment, with its file, line and surrounding code."
+            ),
+            PromptVariable(name: Review.count, summary: "How many comments are attached."),
+        ],
+        defaultTemplate: """
+        {{message}}
+
+        I reviewed the diff and left {{count}} inline comment(s). Each one below names the file it \
+        is about, the line it points at, and the code around that line, with the commented line \
+        marked `>`.
+
+        Work through them in order. Read the surrounding code before you change anything, because \
+        a comment is about the line it points at and not about the whole file. Where a comment \
+        says the line has moved or is gone, find what it is actually about before acting on it, \
+        and tell me if you cannot. If you disagree with one, say so instead of changing the code.
+
+        {{comments}}
         """
     )
 }

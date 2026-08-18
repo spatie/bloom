@@ -3,6 +3,11 @@ import BatonCore
 
 /// The pull request strip above the inspector tabs.
 ///
+/// The bar owns the state colour rather than its contents doing, so the tint runs the full width
+/// of the pane including the insets its rows keep. A wash painted by the row inside had to grow
+/// itself back out with a negative margin, which is a number that has to be kept in step with the
+/// inset by hand.
+///
 /// It polls while it is on screen and stops when the inspector is hidden, because the state it
 /// shows changes on GitHub's schedule rather than the user's.
 struct PullRequestBar: View {
@@ -19,13 +24,27 @@ struct PullRequestBar: View {
             .padding(.horizontal, InspectorLayout.inset)
             .frame(height: InspectorLayout.barHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Palette.surface)
+            .background {
+                // A tint over the surface rather than instead of it, so the strip keeps the
+                // pane's own colour underneath and the state only ever adds to it.
+                ZStack {
+                    Palette.surface
+                    if let tint {
+                        tint.opacity(InspectorLayout.tintOpacity)
+                    }
+                }
+            }
             .task(id: model.workspace.id) { await poll() }
             .alert("Something went wrong", isPresented: $errorMessage.isPresent()) {
                 // A lone OK that only dismisses is the system default.
             } message: {
                 Text(errorMessage ?? "")
             }
+    }
+
+    /// Nil until there is a pull request, and for the states that have nothing to signal.
+    private var tint: Color? {
+        model.pullRequest?.status.tone.color
     }
 
     @ViewBuilder

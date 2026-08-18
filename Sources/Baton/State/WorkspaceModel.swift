@@ -206,7 +206,9 @@ final class WorkspaceModel {
 
     /// Owns the setup run so archiving, or quitting, can stop a `composer install` that is only
     /// halfway through. Cancellation reaches the script itself through `StreamingProcess.lines`.
-    func startSetupThenSend(prompt: String, repo: Repo) {
+    /// `prompt` is optional because a terminal workspace has no opening message: it still runs
+    /// the setup script, it simply has nothing to say to an agent afterwards.
+    func startSetupThenSend(prompt: String?, repo: Repo) {
         setupTask?.cancel()
         setupGeneration += 1
         let generation = setupGeneration
@@ -224,7 +226,7 @@ final class WorkspaceModel {
     private var setupGeneration = 0
 
     /// Runs the setup script, streaming into the Setup tab, then sends the opening prompt.
-    func runSetupThenSend(prompt: String, repo: Repo) async {
+    func runSetupThenSend(prompt: String?, repo: Repo) async {
         guard let manager = app.manager else { return }
 
         // Off the main actor: this reads and parses up to six files from disk, and it runs at the
@@ -281,7 +283,7 @@ final class WorkspaceModel {
         }
 
         await reloadSessions()
-        guard !Task.isCancelled, let session = activeSession else { return }
+        guard !Task.isCancelled, let prompt, let session = activeSession else { return }
         await transcript(for: session).send(prompt)
     }
 

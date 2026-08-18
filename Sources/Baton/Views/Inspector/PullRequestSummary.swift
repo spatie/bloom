@@ -5,9 +5,10 @@ import BatonCore
 /// button that finishes the job.
 ///
 /// Reading left to right it is the same order as the question a user is asking: which pull
-/// request is this, where do I read it, what is wrong with it, and can I land it. The whole strip
-/// carries the state's colour rather than only the sentence, because a red bar at the top of the
-/// inspector is visible from across the room and a red word is not.
+/// request is this, where do I read it, what is wrong with it, and can I land it. The chip, the
+/// sentence and the merge button all take the state's colour, and `PullRequestBar` washes the bar
+/// behind them with it, because a red bar at the top of the inspector is visible from across the
+/// room and a red word is not.
 struct PullRequestSummary: View {
     var pullRequest: PullRequest
     var baseBranch: String
@@ -55,7 +56,6 @@ struct PullRequestSummary: View {
                 Chip(text: status.text)
             }
         }
-        .background(alignment: .center) { tintWash }
         // Attached to the merge button's own row, so the dialog animates out of the control that
         // asked for it.
         .confirmationDialog(
@@ -87,11 +87,13 @@ struct PullRequestSummary: View {
     // MARK: - Parts
 
     private var numberChip: some View {
+        // The number alone. A pull request glyph here repeats what the arrow button beside it and
+        // the whole column around it already say, and the chip is meant to be read at a glance as
+        // an identifier rather than parsed as a badge.
         Chip(
             text: "#\(pullRequest.number)",
-            systemImage: "arrow.triangle.pull",
             tint: tint ?? Palette.accent,
-            background: (tint ?? Palette.accent).opacity(InspectorLayout.tintOpacity)
+            background: (tint ?? Palette.accent).opacity(InspectorLayout.tintOpacityStrong)
         )
         .help(pullRequest.title)
         .accessibilityLabel("Pull request \(pullRequest.number), \(pullRequest.title)")
@@ -110,24 +112,37 @@ struct PullRequestSummary: View {
         .help("Open #\(pullRequest.number) on GitHub")
     }
 
-    /// The one prominent control in the inspector. It is a real bordered prominent button, so it
-    /// carries the user's accent colour and the pressed and disabled states that come with it,
-    /// rather than a rectangle painted to look like a button.
+    /// The one prominent control in the inspector, and the only solid colour in the strip.
     ///
-    /// Every path through it opens the confirmation. The primary action is a squash merge because
-    /// that is what the button says, but it still only proposes it.
+    /// A real `Button` rather than a `Menu` with a primary action. A menu styled `.button` ignores
+    /// `.borderedProminent` and the tint under it on this SDK and comes out as the same neutral
+    /// capsule as every other control in the bar, which is exactly the signal this control exists
+    /// to carry. The other two methods moved to the chevron beside it, which stays a menu and stays
+    /// quiet because it is not the thing being pointed at.
+    ///
+    /// The fill is the state's colour rather than the accent, so the strip is one decision from end
+    /// to end: failing checks do not block merging, so a red bar has to end in a red button.
+    ///
+    /// Every path through it opens the confirmation. The button proposes a squash merge because
+    /// that is what it says; nothing here ever performs one.
     private var mergeButton: some View {
-        Menu {
-            ForEach(GitHub.MergeMethod.allCases, id: \.self) { method in
-                Button(method.label) { pendingMerge = method }
+        HStack(spacing: Metrics.spacingTight) {
+            Button("Merge", systemImage: "arrow.triangle.merge") { pendingMerge = .squash }
+                .buttonStyle(.borderedProminent)
+                .tint(tint ?? Palette.accent)
+
+            Menu {
+                ForEach(GitHub.MergeMethod.allCases, id: \.self) { method in
+                    Button(method.label) { pendingMerge = method }
+                }
+            } label: {
+                Label("Choose a merge method", systemImage: "chevron.down")
             }
-        } label: {
-            Label("Merge", systemImage: "arrow.triangle.merge")
-        } primaryAction: {
-            pendingMerge = .squash
+            .labelStyle(.iconOnly)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .foregroundStyle(Palette.textSecondary)
         }
-        .menuStyle(.button)
-        .buttonStyle(.borderedProminent)
         .controlSize(.small)
         .fixedSize()
         .disabled(!status.canMerge)
@@ -138,27 +153,9 @@ struct PullRequestSummary: View {
 
     // MARK: - Tint
 
-    /// Nil for the neutral state, so a pull request with nothing to report is a plain strip rather
-    /// than a grey wash. Every colour comes from the palette, so it tracks appearance and contrast.
+    /// The same colour `PullRequestBar` washes the strip with, so the parts and the bar under
+    /// them cannot drift apart.
     private var tint: Color? {
-        switch status.tone {
-        case .neutral: nil
-        case .positive: Palette.positive
-        case .negative: Palette.negative
-        case .warning: Palette.warning
-        case .accent: Palette.accent
-        }
-    }
-
-    /// The strip's own background, grown back out to the edges of the pane that insets it, so the
-    /// state reads as a bar across the top of the inspector rather than as a card floating in one.
-    @ViewBuilder
-    private var tintWash: some View {
-        if let tint {
-            tint.opacity(InspectorLayout.tintOpacity)
-                .frame(height: InspectorLayout.barHeight)
-                .padding(.horizontal, -InspectorLayout.inset)
-                .accessibilityHidden(true)
-        }
+        status.tone.color
     }
 }

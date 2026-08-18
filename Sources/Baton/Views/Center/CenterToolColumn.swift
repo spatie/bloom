@@ -33,17 +33,14 @@ struct CenterToolColumn: View {
         case .terminal:
             Group {
                 if isTerminalReady {
-                    // SwiftTerm draws its first glyph on the view's own edge, so without this the
-                    // shell's prompt sits flush against the tab strip above it and the window edge
-                    // to its left. Every terminal on this platform insets its text.
-                    TerminalView(
-                        tab: TerminalTab(id: tab.id, workspaceID: tab.workspaceID, title: tab.title),
+                    TerminalSplitView(
+                        ownerID: tab.id,
                         workspace: model.workspace,
                         repo: model.repo,
-                        port: model.port
+                        port: model.port,
+                        onCloseTab: { Task { await CenterTabStore.shared.close(tab) } }
                     )
                     .id(tab.id)
-                    .padding(Metrics.spacing)
                 } else {
                     LoadingView("Opening a terminal")
                 }

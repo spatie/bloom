@@ -56,6 +56,7 @@ final class AppModel {
         get { storedSelection }
         set {
             storedSelection = newValue
+            Self.rememberSelection(newValue)
             guard let id = newValue.workspaceID, workspaceModels[id] == nil,
                   let workspace = workspaces.first(where: { $0.id == id }) else { return }
             _ = model(for: workspace)
@@ -63,6 +64,31 @@ final class AppModel {
     }
 
     private var storedSelection: SidebarSelection = .home
+
+    // MARK: - Remembering where you were
+
+    private static let lastWorkspaceKey = "sidebar.lastWorkspaceID"
+
+    /// Only a workspace is worth remembering. Home and Search are where you go when you are
+    /// looking for something, so reopening on them would be reopening on a question rather than
+    /// on the work.
+    private static func rememberSelection(_ selection: SidebarSelection) {
+        guard let id = selection.workspaceID else { return }
+        UserDefaults.standard.set(id, forKey: lastWorkspaceKey)
+    }
+
+    /// Reselects the workspace this window was last on.
+    ///
+    /// Validated against the loaded list rather than trusted: the workspace may have been archived
+    /// since, either from here or by someone deleting the worktree, and selecting an id that no
+    /// longer exists would leave the window on an empty detail column with a sidebar that agrees
+    /// with nothing.
+    private func restoreLastSelection() {
+        guard case .home = storedSelection else { return }
+        guard let id = UserDefaults.standard.string(forKey: Self.lastWorkspaceKey),
+              workspaces.contains(where: { $0.id == id }) else { return }
+        selection = .workspace(id)
+    }
 
     /// Window chrome, not per-workspace state.
     ///
@@ -113,6 +139,10 @@ final class AppModel {
             // otherwise spin in the sidebar forever.
             try await store.recoverInterruptedSetups()
             await reload()
+            // After `reload`, because the stored id is only trustworthy once there is a list to
+            // check it against. Before `isLoaded`, so the window never paints Home first and then
+            // jumps to the workspace.
+            restoreLastSelection()
             isLoaded = true
         } catch {
             alert = BatonAlert(title: "Could not open the Baton database", message: "\(error)")
@@ -290,6 +320,23 @@ final class AppModel {
         workspaceModels[workspace.id]?.isRunning ?? false
     }
 
+    /// How many agents are mid turn, for the confirmation shown on quit.
+    ///
+    /// Counted over the live models rather than the stored sessions, because a session row says
+    /// what was true when it was written and this question is about processes running right now.
+    var runningAgentCount: Int {
+        workspaceModels.values.count(where: \.isRunning)
+    }
+
+    /// The workspaces those agents are working in, named so the confirmation can say where the
+    /// work would be interrupted rather than only how much of it there is.
+    var runningAgentWorkspaceNames: [String] {
+        workspaceModels.values
+            .filter(\.isRunning)
+            .map(\.workspace.name)
+            .sorted()
+    }
+
     // MARK: - Repos
 
     func addRepository(at path: String) async {
@@ -329,19 +376,40 @@ final class AppModel {
     /// Creates the worktree, selects it, kicks off setup, and sends the first prompt once setup
     /// finishes. The whole flow is one call because that is how it reads to the user.
     @discardableResult
-    func createWorkspace(in repo: Repo, prompt: String, baseBranch: String? = nil) async -> Workspace? {
+    /// `opensWith` decides the starting layout, not a mode: see `WorkspaceStartMode`. A terminal
+    /// workspace skips the session and the opening message, because there is nobody to send one
+    /// to, and names its own branch since there is no task to derive one from.
+    func createWorkspace(
+        in repo: Repo,
+        prompt: String,
+        baseBranch: String? = nil,
+        opensWith: WorkspaceStartMode = .chat,
+        branch: String? = nil
+    ) async -> Workspace? {
         guard let manager, let store else { return nil }
         isCreatingWorkspace = true
         defer { isCreatingWorkspace = false }
 
         do {
             let workspace = try await manager.createWorkspace(
-                repo: repo, prompt: prompt, baseBranch: baseBranch
+                repo: repo,
+                prompt: prompt,
+                name: opensWith == .terminal ? branch : nil,
+                branch: branch,
+                baseBranch: baseBranch
             )
             await reload()
             selection = .workspace(workspace.id)
+            WorkspaceStartMode.record(opensWith, workspaceID: workspace.id)
 
             let model = model(for: workspace)
+
+            guard opensWith == .chat else {
+                // Setup still runs. Only the agent turn is skipped.
+                model.startSetupThenSend(prompt: nil, repo: repo)
+                return workspace
+            }
+
             let session = try await store.upsert(Session(
                 workspaceID: workspace.id,
                 title: Git.title(from: prompt, maxLength: 40)

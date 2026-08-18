@@ -22,7 +22,8 @@ struct InspectorToolbar: View {
     @AppStorage(DiffLayoutSetting.storageKey) private var isSideBySide = false
     /// Shared with `ChangedFileList` the same way, and outliving the launch because a user who
     /// thinks in folders thinks in folders tomorrow too.
-    @AppStorage(ChangedFilePresentation.storageKey) private var isTree = false
+    @AppStorage(ChangedFilePresentation.storageKey)
+    private var isTree = ChangedFilePresentation.defaultsToTree
 
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {

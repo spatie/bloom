@@ -20,6 +20,9 @@ enum InspectorLayout {
     /// A meaning colour used as a background rather than as ink. One value, so a green badge and a
     /// blue chip carry the same weight.
     static let tintOpacity: Double = 0.12
+    /// The same meaning colour on something that sits ON the wash above, such as the pull request
+    /// number. One step denser, or the chip disappears into the bar it is drawn on.
+    static let tintOpacityStrong: Double = 0.24
     /// Status glyphs share one box, so the names beside them line up whichever symbol lands in it.
     static let glyphWidth: CGFloat = 16
     /// One level of indent in the file tree.

@@ -65,6 +65,15 @@ final class BatonAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
     /// alive while the SIGTERM to SIGKILL escalation plays out.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !isTerminating else { return .terminateLater }
+
+        // Asked before anything is torn down, because quitting kills the agents rather than
+        // pausing them: a turn interrupted here is work the agent has already paid for and
+        // cannot resume. Only asked when there is something to lose, so a quiet quit stays one
+        // keystroke.
+        if let running = appModel?.runningAgentCount, running > 0, !confirmQuit(running: running) {
+            return .terminateCancel
+        }
+
         isTerminating = true
 
         Task { @MainActor in
@@ -80,6 +89,41 @@ final class BatonAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         }
 
         return .terminateLater
+    }
+
+    /// Names the workspaces rather than only counting them, so the answer to "which one was that?"
+    /// is on screen at the moment it is needed. Long lists are capped: past a handful the count is
+    /// the useful fact and the names are noise.
+    @MainActor
+    private func confirmQuit(running: Int) -> Bool {
+        let names = appModel?.runningAgentWorkspaceNames ?? []
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = running == 1
+            ? "An agent is still running"
+            : "\(running) agents are still running"
+
+        var detail = running == 1
+            ? "Quitting stops it. The turn it is in the middle of will not be finished, and it cannot be resumed."
+            : "Quitting stops them. The turns they are in the middle of will not be finished, and they cannot be resumed."
+        let shown = names.prefix(5)
+        if !shown.isEmpty {
+            detail += "\n\n" + shown.map { "\u{2022} \($0)" }.joined(separator: "\n")
+            if names.count > shown.count {
+                detail += "\n\u{2022} and \(names.count - shown.count) more"
+            }
+        }
+        alert.informativeText = detail
+
+        alert.addButton(withTitle: "Quit anyway")
+        alert.addButton(withTitle: "Keep working")
+        // So Return keeps working rather than quitting: the destructive answer should cost a
+        // deliberate click, not the key your hand is already on.
+        alert.buttons.last?.keyEquivalent = "\r"
+        alert.buttons.first?.keyEquivalent = ""
+
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

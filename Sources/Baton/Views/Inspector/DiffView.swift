@@ -1,7 +1,12 @@
 import SwiftUI
 import BatonCore
 
-/// The diff for one file, in either layout.
+/// One file, under a bar that says which file it is: the diff in either layout, or the file
+/// itself, editable.
+///
+/// The bar lives here rather than in the panes above, because this is the one view every route to
+/// a file goes through: the changes tab, the file tree and the review pane all end up in it, and a
+/// header bar bolted onto each of them would be three bars to keep in step.
 struct DiffView: View {
     let model: WorkspaceModel
     let file: ChangedFile
@@ -16,12 +21,23 @@ struct DiffView: View {
     private static let keptContext = 3
 
     @AppStorage(DiffLayoutSetting.storageKey) private var isSideBySide = false
+    @AppStorage(DiffWhitespaceSetting.storageKey) private var ignoresWhitespace = false
 
     @State private var phase: Phase = .loading
     @State private var rows: [DiffRow] = []
     @State private var expandedRuns: Set<Int> = []
     @State private var revealedGaps: [Int: Int] = [:]
     @State private var fileLines: [String]?
+
+    /// The patch as git wrote it, kept so the whitespace toggle can refold it without going back
+    /// to git for a diff it has already been given.
+    @State private var source: FileDiff?
+    @State private var mode: FileViewMode = .diff
+    @State private var isEditable = false
+    @State private var revertProblem: String?
+    /// Editing buffers live for as long as the inspector is showing this workspace, so flipping
+    /// back to the diff to check something cannot discard what the user typed.
+    @State private var session = FileEditSession()
 
     private enum Phase {
         case loading
@@ -35,12 +51,49 @@ struct DiffView: View {
         var file: ChangedFile
     }
 
+    private var absolutePath: String {
+        (model.workspace.path as NSString).appendingPathComponent(file.path)
+    }
+
     var body: some View {
-        content
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(Palette.surface)
-            .task(id: LoadID(workspaceID: model.workspace.id, file: file)) { await load() }
-            .onChange(of: isSideBySide) { _, _ in rebuild() }
+        VStack(spacing: 0) {
+            FileHeaderBar(
+                model: model,
+                file: file,
+                session: session,
+                mode: $mode,
+                isEditable: isEditable,
+                onRevert: revert
+            )
+            Hairline()
+
+            switch mode {
+            case .diff:
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            case .edit:
+                FileEditPane(model: model, file: file, session: session)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(Palette.surface)
+        .task(id: LoadID(workspaceID: model.workspace.id, file: file)) { await load() }
+        .onChange(of: isSideBySide) { _, _ in rebuild() }
+        .onChange(of: ignoresWhitespace) { _, _ in refold() }
+        // Only the path, not the whole file: a refresh that changes nothing but the line counts
+        // must not throw the user out of the editor they are typing in.
+        .onChange(of: file.path) { _, _ in mode = .diff }
+        .onChange(of: isEditable) { _, editable in
+            if !editable { mode = .diff }
+        }
+        .alert(
+            "Could not revert \(file.filename)",
+            isPresented: $revertProblem.isPresent(),
+            presenting: revertProblem
+        ) { _ in
+        } message: { problem in
+            Text(problem)
+        }
     }
 
     @ViewBuilder
@@ -66,11 +119,22 @@ struct DiffView: View {
         expandedRuns = []
         revealedGaps = [:]
         fileLines = nil
+        source = nil
 
         let patch = await model.patch(for: file)
         let path = file.path
         let parsed = await Task.detached(priority: .userInitiated) {
             DiffDocument.parse(patch: patch, path: path)
+        }.value
+
+        guard !Task.isCancelled else { return }
+
+        // Whether Edit mode is even offered is a question about the bytes on disk, not about the
+        // patch, so it is asked once here and off the main thread.
+        let absolute = absolutePath
+        let binary = file.isBinary
+        isEditable = await Task.detached(priority: .utility) {
+            !binary && FileEditor.isEditable(absolute)
         }.value
 
         guard !Task.isCancelled else { return }
@@ -83,17 +147,52 @@ struct DiffView: View {
             )
             return
         }
-        if let notice = Self.notice(for: parsed, file: file) {
+        source = parsed
+        await apply(parsed)
+    }
+
+    /// Turn the parsed patch into whatever the current settings say it should be.
+    private func apply(_ raw: FileDiff) async {
+        let fileDiff = ignoresWhitespace ? raw.ignoringWhitespace() : raw
+
+        if ignoresWhitespace, fileDiff.hunks.isEmpty, !raw.hunks.isEmpty {
+            phase = .notice(
+                symbol: "paragraphsign",
+                title: "Only whitespace changed",
+                detail: "Every change to \(file.filename) is indentation or trailing space."
+            )
+            return
+        }
+        if let notice = Self.notice(for: fileDiff, file: file) {
             phase = notice
             return
         }
 
-        let changed = parsed.additions + parsed.deletions
+        let changed = fileDiff.additions + fileDiff.deletions
         if changed > Self.largeDiffLimit {
-            phase = .gated(parsed, changed: changed)
+            phase = .gated(fileDiff, changed: changed)
             return
         }
-        await present(parsed)
+        await present(fileDiff)
+    }
+
+    /// Refolding drops what the reader expanded, because a run that was expanded no longer exists
+    /// once whitespace-only changes have folded back into context.
+    private func refold() {
+        guard let source else { return }
+        expandedRuns = []
+        revealedGaps = [:]
+        Task { await apply(source) }
+    }
+
+    /// Throw the file's changes away. Only ever reached through the confirmation in the header
+    /// bar, which names what is about to go.
+    private func revert() {
+        Task {
+            session.discard(path: absolutePath)
+            revertProblem = await FileRevert.revert(file: file, in: model.workspace)
+            await model.refreshChanges()
+        }
     }
 
     private func present(_ fileDiff: FileDiff) async {

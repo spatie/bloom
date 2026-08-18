@@ -26,6 +26,18 @@ enum TerminalGhostty {
         return loaded
     }
 
+    /// How Ghostty fades the panes that do not have the keyboard. Read once per launch, because
+    /// `unfocused-split-opacity` and `unfocused-split-fill` do not vary by appearance and every
+    /// unfocused pane on screen asks for them on every redraw.
+    static func splitAppearance() -> GhosttySplitAppearance {
+        if let splitCache { return splitCache }
+        let loaded = GhosttySplitAppearance.load()
+        splitCache = loaded
+        return loaded
+    }
+
+    private static var splitCache: GhosttySplitAppearance?
+
     /// The named font at the given size, or the monospaced system font when the user's font is not
     /// installed. `NSFont(name:)` returns nil rather than substituting, so an uninstalled font
     /// would otherwise leave the terminal without a font at all.
