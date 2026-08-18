@@ -16,6 +16,7 @@ struct SessionTabsView: View {
 
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var renamingID: String?
     /// Which workspace's strip has finished arriving, so the first draw of a workspace is not
@@ -96,7 +97,7 @@ struct SessionTabsView: View {
         // its bold text said anything. An opacity on the primary label colour rather than a colour
         // of its own, so it darkens the strip in a light appearance and lightens it in a dark one,
         // which is the direction each of them needs.
-        .background { Color.primary.opacity(Self.recess) }
+        .background { Color.primary.opacity(recess) }
         .tabStripMaterial()
         .background { shortcuts }
         .task(id: model.workspace.id) {
@@ -112,10 +113,25 @@ struct SessionTabsView: View {
 
     // MARK: - Motion
 
-    /// How far the strip is tinted away from the tab that is selected on it: darker under a light
-    /// appearance, lighter under a dark one, because the tint is an opacity on the primary label
-    /// colour rather than a colour of its own.
-    private static let recess: Double = 0.045
+    /// How far the strip is tinted away from the tab that is selected on it: lighter under a dark
+    /// appearance, because the tint is an opacity on the primary label colour rather than a
+    /// colour of its own.
+    ///
+    /// Nothing in light, and this is a measurement rather than a preference. Safari's strip sits
+    /// about twelve units out of 255 off the tab selected on it. A selected tab is filled with
+    /// `Palette.surface` and the strip is `Palette.sidebar`, and in a light appearance those two
+    /// are already `#FFFFFF` against `#F1F5F6`: a step of 14, 10 and 9, which is Safari's figure
+    /// without any tint at all. Adding 0.045 of black on top took it to 25, 21 and 20, roughly
+    /// double, and that read as a grey band under the tabs rather than as a recess.
+    ///
+    /// Dark keeps it. There `#0A1A25` against `#0E202D` is a step of 4, 6 and 8, which is nothing,
+    /// and 0.045 of white brings it to 15, 16 and 17.
+    ///
+    /// Re-measure rather than trust these numbers if either ground moves: what is being kept is
+    /// the twelve unit step, not the 0.045.
+    private var recess: Double {
+        colorScheme == .dark ? 0.045 : 0
+    }
 
     /// `Motion.pane`, not a curve of this strip's own. It is the one movement the window has, it
     /// is short and it does not overshoot, and a tab highlight that travelled at a different speed
