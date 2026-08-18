@@ -92,13 +92,19 @@ final class AppModel {
     @ObservationIgnored private var workspaceModels: [String: WorkspaceModel] = [:]
 
     private var refreshTask: Task<Void, Never>?
+    private var identityTask: Task<Void, Never>?
 
     // MARK: - Lifecycle
 
     func bootstrap() async {
         guard store == nil else { return }
         do {
-            let store = try Store(path: try Store.defaultPath())
+            // Off the main actor. Opening the database creates directories, opens the file and
+            // runs every migration, and one of those migrations walks the whole messages table.
+            // On the main actor that is a beachball on the very first frame.
+            let store = try await Task.detached(priority: .userInitiated) {
+                try Store(path: try Store.defaultPath())
+            }.value
             self.store = store
             self.manager = WorkspaceManager(store: store)
             try await store.resetRunningSessions()
@@ -109,7 +115,9 @@ final class AppModel {
             isLoaded = true
         }
 
-        Task { await GitHubIdentity.resolve() }
+        // Held so quitting takes it with us: it is a `gh` subprocess with a ten second timeout,
+        // and `Shell.run` terminates the child when its task is cancelled.
+        identityTask = Task { await GitHubIdentity.resolve() }
         startBackgroundRefresh()
     }
 
@@ -120,6 +128,8 @@ final class AppModel {
     func shutdownEverything() async {
         refreshTask?.cancel()
         refreshTask = nil
+        identityTask?.cancel()
+        identityTask = nil
 
         let models = Array(workspaceModels.values)
         // Signal every agent first, so the SIGTERM escalations all run at the same time rather than

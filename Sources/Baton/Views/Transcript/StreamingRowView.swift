@@ -1,5 +1,4 @@
 import SwiftUI
-import BatonCore
 
 /// The live tail of the turn: what is arriving right now, before the CLI emits the finished block.
 ///
@@ -14,15 +13,19 @@ import BatonCore
 struct StreamingRowView: View {
     let transcript: TranscriptModel
 
-    /// Streaming thinking is a scroll of consciousness. Only the tail is interesting, and only the
-    /// tail is cheap.
-    private static let thinkingTailLimit = 600
+    private var hasVisibleStream: Bool {
+        !transcript.streamingThinking.isEmpty || !transcript.streamingText.isEmpty
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: TranscriptLayout.inset) {
             if !transcript.streamingThinking.isEmpty {
-                thinking
+                StreamingThinkingView(
+                    text: transcript.streamingThinking,
+                    tokens: transcript.thinkingTokens
+                )
             }
+
             if !transcript.streamingText.isEmpty {
                 Text(transcript.streamingText)
                     .font(Typo.body)
@@ -31,71 +34,16 @@ struct StreamingRowView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, TranscriptLayout.inset)
             }
+
             if let tool = transcript.streamingToolName {
-                status(glyph: "gearshape", text: "Running \(tool)")
+                StreamingStatusView(glyph: "gearshape", text: "Running \(tool)")
             } else if transcript.isRunning, !hasVisibleStream {
-                status(glyph: nil, text: transcript.statusLabel ?? "Working")
+                StreamingStatusView(glyph: nil, text: transcript.statusLabel ?? "Working")
             }
         }
         .padding(.vertical, TranscriptLayout.tight * 2)
+        // Streamed text arrives many times a second. Animating it would mean a new implicit
+        // animation per token, all of them fighting over the same layout.
         .transaction { $0.animation = nil }
-    }
-
-    private var hasVisibleStream: Bool {
-        !transcript.streamingThinking.isEmpty || !transcript.streamingText.isEmpty
-    }
-
-    private var thinking: some View {
-        VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
-            HStack(spacing: TranscriptLayout.glyphGap) {
-                TranscriptGlyph(symbol: "sparkle")
-                Text("Thinking")
-                    .font(Typo.labelEmphasis)
-                    .foregroundStyle(Palette.textSecondary)
-                    .italic()
-                if transcript.thinkingTokens > 0 {
-                    Text("\(transcript.thinkingTokens) tokens")
-                        .font(Typo.micro)
-                        .foregroundStyle(Palette.textTertiary)
-                        .monospacedDigit()
-                }
-                Spacer(minLength: 0)
-            }
-
-            Text(tail(transcript.streamingThinking))
-                .font(Typo.label)
-                .foregroundStyle(Palette.textTertiary)
-                .italic()
-                .lineSpacing(TranscriptLayout.tight)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, TranscriptLayout.detailIndent)
-        }
-        .padding(.horizontal, TranscriptLayout.inset)
-    }
-
-    private func status(glyph: String?, text: String) -> some View {
-        HStack(spacing: TranscriptLayout.glyphGap) {
-            Group {
-                if let glyph {
-                    TranscriptGlyph(symbol: glyph, tint: Palette.running)
-                } else {
-                    ActivityDot(isActive: true)
-                        .frame(width: TranscriptLayout.glyphWidth)
-                }
-            }
-
-            Text(text)
-                .font(Typo.label)
-                .foregroundStyle(Palette.textSecondary)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, TranscriptLayout.inset)
-        .frame(height: Metrics.rowHeight)
-    }
-
-    private func tail(_ text: String) -> String {
-        text.count <= Self.thinkingTailLimit
-            ? text
-            : "\u{2026}" + String(text.suffix(Self.thinkingTailLimit))
     }
 }

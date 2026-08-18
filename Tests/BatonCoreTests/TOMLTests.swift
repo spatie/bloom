@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import BatonCore
 
-@Suite("TOML")
+@Suite("TOML", .scratchDirectory)
 struct TOMLTests {
     @Test("parses the shape of a real conductor settings file")
     func parsesConductorSettings() throws {
@@ -28,7 +28,7 @@ struct TOMLTests {
         #expect(setup.hasPrefix("set -e"))
         #expect(setup.contains("composer install"))
         // The newline right after ''' is trimmed, the rest is literal.
-        #expect(!setup.hasPrefix("\n"))
+        #expect(setup.hasPrefix("\n") == false)
     }
 
     @Test("does not interpret escapes inside literal strings")
@@ -111,21 +111,51 @@ struct TOMLTests {
         #expect(toml["scripts.run.dev"]?.stringValue == "b")
     }
 
+    @Test("reads a file from disk, including one that is not there")
+    func parsesFromDisk() throws {
+        let path = TestScratch.unique("settings") + ".toml"
+        try """
+        [scripts]
+        setup = "composer install"
+        """.write(toFile: path, atomically: true, encoding: .utf8)
+
+        let value = try #require(try TOML.parse(contentsOf: path))
+        #expect(value["scripts.setup"]?.stringValue == "composer install")
+        // A repository with no settings file is the normal case, not an error.
+        #expect(try TOML.parse(contentsOf: TestScratch.unique("absent") + ".toml") == nil)
+    }
+}
+
+/// Parses the `.conductor/settings.toml` files that actually exist on this machine.
+///
+/// Everything above is hermetic. This is not: what it reads depends on which repositories the
+/// developer has checked out, so it cannot pass or fail the same way twice and is opt in.
+///
+///     BATON_LOCAL_SETTINGS=1 ./test-core.sh TOMLOnDisk
+///
+/// It earns its place because real settings files contain shapes nobody would think to write a
+/// fixture for, which is how several of the parser bugs above were found in the first place.
+private let localSettingsEnabled = ProcessInfo.processInfo.environment["BATON_LOCAL_SETTINGS"] == "1"
+
+@Suite("TOMLOnDisk", .enabled(if: localSettingsEnabled))
+struct TOMLOnDiskTests {
     @Test("reads every settings file already on this machine")
     func parsesRealFilesOnDisk() throws {
-        let candidates = ((try? FileManager.default.contentsOfDirectory(
-            atPath: NSHomeDirectory() + "/dev/code"
-        )) ?? []).prefix(400).map {
-            NSHomeDirectory() + "/dev/code/\($0)/.conductor/settings.toml"
-        }
+        let root = NSHomeDirectory() + "/dev/code"
+        let candidates = ((try? FileManager.default.contentsOfDirectory(atPath: root)) ?? [])
+            .map { "\(root)/\($0)/.conductor/settings.toml" }
+            .filter { FileManager.default.fileExists(atPath: $0) }
 
-        var parsed = 0
-        for path in candidates where FileManager.default.fileExists(atPath: path) {
-            let value = try TOML.parse(contentsOf: path)
-            #expect(value != nil, "failed to parse \(path)")
-            parsed += 1
+        // A silent zero would make this test a no-op that looks like coverage. It used to print
+        // the count and assert nothing.
+        try #require(candidates.isEmpty == false, "no settings files under \(root) to read")
+
+        for path in candidates {
+            do {
+                #expect(try TOML.parse(contentsOf: path) != nil, "\(path) parsed to nothing")
+            } catch {
+                Issue.record(error, "failed to parse \(path)")
+            }
         }
-        // Nothing to assert about the count, but a silent zero would make this test meaningless.
-        print("parsed \(parsed) real settings files")
     }
 }

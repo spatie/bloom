@@ -113,6 +113,7 @@ struct AgentsSettingsView: View {
                     Task { await refresh() }
                 }
                 .disabled(isRefreshing)
+                .accessibilityLabel("Refresh \(selection.label)")
             }
         } header: {
             Text(selection.label)
@@ -135,9 +136,7 @@ struct AgentsSettingsView: View {
 
     private var loginSection: some View {
         Section("Sign in") {
-            Button("Run \(selection.loginCommand)") {
-                runLogin()
-            }
+            Button("Run \(selection.loginCommand)", action: runLogin)
             .help("Opens Terminal and runs \(selection.loginCommand). The login flow asks questions, so Baton cannot run it inline.")
         }
     }
@@ -157,13 +156,9 @@ struct AgentsSettingsView: View {
                         if wasEditing && !editing { commitPathDraft() }
                     }
 
-                    Button {
-                        chooseExecutable()
-                    } label: {
-                        Image(systemName: "folder")
-                    }
-                    .accessibilityLabel("Choose executable")
-                    .help("Choose the \(selection.executableName) executable")
+                    Button("Choose executable", systemImage: "folder", action: chooseExecutable)
+                        .labelStyle(.iconOnly)
+                        .help("Choose the \(selection.executableName) executable")
                 }
             }
 

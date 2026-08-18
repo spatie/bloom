@@ -70,6 +70,7 @@ struct CreateWorkspaceSheet: View {
                     .progressViewStyle(.circular)
                     .controlSize(.small)
                     .scaleEffect(0.6)
+                    .accessibilityLabel("Loading branches")
             }
         }
         .padding(.horizontal, Metrics.gutter)
@@ -101,11 +102,18 @@ struct CreateWorkspaceSheet: View {
                     .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
 
-                TextEditor(text: $prompt)
+                // A vertical `TextField` rather than a `TextEditor`: it takes a placeholder, it
+                // grows with the user's text size instead of clipping inside a pinned 150pt box,
+                // and it is still a multi-line field.
+                TextField(
+                    "Fix the flaky upload test, and say why it was flaky",
+                    text: $prompt,
+                    axis: .vertical
+                )
+                    .textFieldStyle(.plain)
                     .font(Typo.body)
-                    .scrollContentBackground(.hidden)
+                    .lineLimit(6...12)
                     .padding(6)
-                    .frame(height: 150)
                     .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
                     .overlay {
                         RoundedRectangle(cornerRadius: Metrics.corner)
@@ -136,11 +144,8 @@ struct CreateWorkspaceSheet: View {
             Text("Add a git repository before starting a workspace.")
                 .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
-            Button("Add a Folder") {
-                guard let path = ProjectFolderPicker.choose() else { return }
-                Task { await app.addRepository(at: path) }
-            }
-            .buttonStyle(.borderedProminent)
+            Button("Add a Folder", action: addProject)
+                .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity)
         .padding(28)
@@ -151,7 +156,7 @@ struct CreateWorkspaceSheet: View {
             Spacer(minLength: 0)
             Button("Cancel", role: .cancel) { dismiss() }
                 .keyboardShortcut(.cancelAction)
-            Button("Create") { create() }
+            Button("Create", action: create)
                 .keyboardShortcut(.return, modifiers: .command)
                 .buttonStyle(.borderedProminent)
                 .disabled(!canCreate)
@@ -205,6 +210,11 @@ struct CreateWorkspaceSheet: View {
                 ? repo.defaultBranch
                 : (branches.first ?? repo.defaultBranch)
         }
+    }
+
+    private func addProject() {
+        guard let path = ProjectFolderPicker.choose() else { return }
+        Task { await app.addRepository(at: path) }
     }
 
     private func create() {

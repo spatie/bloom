@@ -5,12 +5,8 @@ import Foundation
 /// Every test here reproduces something that used to destroy work, lie about work, or hand a
 /// hostile branch name to git as an option. They all drive real git, because the bugs were in
 /// how git was invoked and how its output was read.
-@Suite("Git safety")
+@Suite("Git safety", .tags(.git, .destructive), .scratchDirectory)
 struct GitSafetyTests {
-    private func makeStore() throws -> Store {
-        try Store(path: NSTemporaryDirectory() + "baton-safety-\(UUID().uuidString).sqlite")
-    }
-
     /// A repo plus a registered workspace, the shape every archiving test needs.
     private func makeWorkspace(
         settings: String? = nil,
@@ -18,7 +14,7 @@ struct GitSafetyTests {
     ) async throws -> (repo: TempRepo, registered: Repo, manager: WorkspaceManager, workspace: Workspace) {
         let repo = try await TempRepo()
         if let settings { try repo.write(".conductor/settings.toml", settings) }
-        let manager = WorkspaceManager(store: try makeStore())
+        let manager = WorkspaceManager(store: try makeTestStore("safety"))
         let registered = try await manager.addRepository(at: repo.path)
         let workspace = try await manager.createWorkspace(repo: registered, prompt: prompt)
         return (repo, registered, manager, workspace)
@@ -26,7 +22,7 @@ struct GitSafetyTests {
 
     // MARK: - Bug 1: archiving destroyed uncommitted and unpublished work
 
-    @Test("archiving a dirty worktree refuses and loses nothing")
+    @Test("archiving a dirty worktree refuses, and forcing is still possible")
     func refusesToArchiveDirtyWorktree() async throws {
         let (repo, registered, manager, workspace) = try await makeWorkspace()
         defer { repo.cleanUp() }
@@ -38,11 +34,19 @@ struct GitSafetyTests {
         let report = try await manager.safetyReport(workspace: workspace, repo: registered)
         #expect(report.hasUncommittedChanges)
         #expect(report.untrackedFiles == ["notes.txt"])
-        #expect(!report.isSafeToDiscard)
+        #expect(report.isSafeToDiscard == false)
 
-        await #expect(throws: WorkspaceError.self) {
+        let error = await #expect(throws: WorkspaceError.self) {
             try await manager.archive(workspace: workspace, repo: registered)
         }
+        // The error carries the report, so the UI can say what is at stake rather than "are you
+        // sure?" about nothing in particular.
+        guard case .unsafeToArchive(let carried)? = error else {
+            Issue.record("expected unsafeToArchive, got \(String(describing: error))")
+            return
+        }
+        #expect(carried == report)
+        #expect(carried.losses.count == 2)
 
         // Nothing was touched: the files, the worktree and the store row all survive.
         #expect(worktree.read("README.md") == "hello\nedited by the agent\n")
@@ -52,7 +56,27 @@ struct GitSafetyTests {
 
         // Forcing is still possible, which is the whole point of asking first.
         try await manager.archive(workspace: workspace, repo: registered, force: true)
-        #expect(!FileManager.default.fileExists(atPath: workspace.path))
+        #expect(FileManager.default.fileExists(atPath: workspace.path) == false)
+    }
+
+    @Test("untracked work alone is enough to refuse")
+    func refusesForUntrackedFilesAlone() async throws {
+        let (repo, registered, manager, workspace) = try await makeWorkspace()
+        defer { repo.cleanUp() }
+
+        // No tracked file is touched, so only the untracked list can save this file. `git status`
+        // collapses an untracked directory to a single `dir/` entry, which is still enough.
+        try TempRepo(existing: workspace.path).write("scratch/plan.md", "the whole plan\n")
+
+        let report = try await manager.safetyReport(workspace: workspace, repo: registered)
+        #expect(report.hasUncommittedChanges == false)
+        #expect(report.untrackedFiles == ["scratch/"])
+        #expect(report.isSafeToDiscard == false)
+
+        await #expect(throws: WorkspaceError.self) {
+            try await manager.archive(workspace: workspace, repo: registered)
+        }
+        #expect(FileManager.default.fileExists(atPath: workspace.path + "/scratch/plan.md"))
     }
 
     @Test("archiving with commits no other ref holds refuses")
@@ -67,8 +91,8 @@ struct GitSafetyTests {
 
         let report = try await manager.safetyReport(workspace: workspace, repo: registered)
         #expect(report.unpushedCommits == 1)
-        #expect(!report.isBranchMerged)
-        #expect(!report.isSafeToDiscard)
+        #expect(report.isBranchMerged == false)
+        #expect(report.isSafeToDiscard == false)
         #expect(report.losses.contains { $0.contains("no other branch") })
 
         await #expect(throws: WorkspaceError.self) {
@@ -95,9 +119,10 @@ struct GitSafetyTests {
         #expect(report.unpushedCommits == 0)
         #expect(report.isBranchMerged)
         #expect(report.isSafeToDiscard)
+        #expect(report.losses.isEmpty)
 
         try await manager.archive(workspace: workspace, repo: registered, deleteBranch: true)
-        #expect(await !Git.branchExists(workspace.branch, in: repo.path))
+        #expect(await Git.branchExists(workspace.branch, in: repo.path) == false)
     }
 
     @Test("a branch whose commits are on a remote is safe to archive")
@@ -105,10 +130,7 @@ struct GitSafetyTests {
         let (repo, registered, manager, workspace) = try await makeWorkspace()
         defer { repo.cleanUp() }
 
-        let remote = NSTemporaryDirectory() + "baton-remote-\(UUID().uuidString).git"
-        try await Shell.check("git", ["init", "-q", "--bare", remote])
-        defer { try? FileManager.default.removeItem(atPath: remote) }
-        try await Shell.check("git", ["remote", "add", "origin", remote], cwd: repo.path)
+        let remote = try await makeBareRemote(for: repo)
 
         let worktree = TempRepo(existing: workspace.path)
         try worktree.write("feature.txt", "published work\n")
@@ -121,11 +143,36 @@ struct GitSafetyTests {
 
         // The branch is not merged into main, so plain `git branch -d` would refuse. Archiving
         // still has to succeed, because the commits are safely on origin.
+        #expect(report.isBranchMerged == false)
         try await manager.archive(workspace: workspace, repo: registered, deleteBranch: true)
-        #expect(await !Git.branchExists(workspace.branch, in: repo.path))
+        #expect(await Git.branchExists(workspace.branch, in: repo.path) == false)
+        let refs = try await Shell.check("git", ["ls-remote", "--heads", remote])
+        #expect(refs.stdout.contains("refs/heads/\(workspace.branch)"))
     }
 
-    @Test("a failing archive script aborts the archive")
+    @Test("a commit only a tag holds still counts as safe")
+    func taggedCommitIsSafe() async throws {
+        let (repo, registered, manager, workspace) = try await makeWorkspace()
+        defer { repo.cleanUp() }
+
+        // The report deliberately means "reachable from this branch and from no other ref", not
+        // "ahead of the base branch". A tag is a ref, so the commit survives the branch going.
+        try TempRepo(existing: workspace.path).write("feature.txt", "tagged work\n")
+        try await commit(in: workspace.path, message: "work")
+        let sha = try await Git.headSHA(of: workspace.path)
+        try await Shell.check("git", ["tag", "keepsake", sha], cwd: repo.path)
+
+        let report = try await manager.safetyReport(workspace: workspace, repo: registered)
+        #expect(report.unpushedCommits == 0)
+        #expect(report.isSafeToDiscard)
+
+        try await manager.archive(workspace: workspace, repo: registered, deleteBranch: true)
+        #expect(await Git.branchExists(workspace.branch, in: repo.path) == false)
+        let tagged = try await Shell.check("git", ["rev-parse", "keepsake^{commit}"], cwd: repo.path)
+        #expect(tagged.trimmed == sha)
+    }
+
+    @Test("a failing archive script aborts the archive and keeps the branch")
     func failingArchiveScriptAborts() async throws {
         let (repo, registered, manager, workspace) = try await makeWorkspace(settings: """
         [scripts]
@@ -136,9 +183,17 @@ struct GitSafetyTests {
         """)
         defer { repo.cleanUp() }
 
-        await #expect(throws: WorkspaceError.self) {
-            try await manager.archive(workspace: workspace, repo: registered)
+        // deleteBranch is on, so this also pins the ordering: the script runs before anything is
+        // removed, and a failed wind-down must not reach the branch either.
+        let error = await #expect(throws: WorkspaceError.self) {
+            try await manager.archive(workspace: workspace, repo: registered, deleteBranch: true)
         }
+        guard case .archiveScriptFailed(let status, let output)? = error else {
+            Issue.record("expected archiveScriptFailed, got \(String(describing: error))")
+            return
+        }
+        #expect(status == 3)
+        #expect(output.contains("could not stop the container"))
 
         // The worktree, the branch and the store row all have to survive a failed wind-down.
         #expect(FileManager.default.fileExists(atPath: workspace.path))
@@ -168,7 +223,7 @@ struct GitSafetyTests {
         #expect(await Git.branchExists("unmerged", in: repo.path))
 
         try await Git.deleteBranch("unmerged", in: repo.path, force: true)
-        #expect(await !Git.branchExists("unmerged", in: repo.path))
+        #expect(await Git.branchExists("unmerged", in: repo.path) == false)
     }
 
     @Test("removing a dirty worktree needs force")
@@ -176,9 +231,8 @@ struct GitSafetyTests {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
 
-        let path = NSTemporaryDirectory() + "baton-wt-\(UUID().uuidString)"
+        let path = TestScratch.unique("baton-wt")
         try await Git.addWorktree(repo: repo.path, path: path, branch: "dirty", base: "main")
-        defer { try? FileManager.default.removeItem(atPath: path) }
         try TempRepo(existing: path).write("README.md", "changed\n")
 
         await #expect(throws: ShellError.self) {
@@ -187,43 +241,38 @@ struct GitSafetyTests {
         #expect(FileManager.default.fileExists(atPath: path))
 
         try await Git.removeWorktree(repo: repo.path, path: path, force: true)
-        #expect(!FileManager.default.fileExists(atPath: path))
+        #expect(FileManager.default.fileExists(atPath: path) == false)
     }
 
     // MARK: - Bug 2: a hostile branch name became a git option
 
-    @Test("rejects branch names git would read as options")
-    func validatesBranchNames() async throws {
-        let valid = ["main", "feature/x", "freek/use-settings-file", "café", "a-b_c.d"]
-        let invalid = [
-            "--mirror", "-x", "", "a..b", "a b", "a~1", "a^", "a:b", "a?", "a*", "a[",
-            "a\\b", "a.lock", ".hidden", "a/.hidden", "a/", "/a", "a//b", "a.", "a@{1}",
-            "HEAD", "a\nb", "a\tb", "x.lock/y",
-        ]
-
-        for name in valid {
-            #expect(Git.isValidBranchName(name), "should accept \(name)")
-        }
-        for name in invalid {
-            #expect(!Git.isValidBranchName(name), "should reject \(name)")
-        }
-
+    @Test("accepts the branch names git accepts", arguments: [
+        "main", "feature/x", "freek/use-settings-file", "café", "a-b_c.d",
+    ])
+    func acceptsValidBranchNames(name: String) async throws {
+        #expect(Git.isValidBranchName(name), "should accept \(name)")
         // Agree with git itself, which is the definition being copied.
-        for name in valid + invalid where !name.isEmpty {
-            let git = try await Shell.run("git", ["check-ref-format", "--branch", name])
-            #expect(git.ok == Git.isValidBranchName(name), "disagreed with git about \(name)")
-        }
+        let git = try await Shell.run("git", ["check-ref-format", "--branch", name])
+        #expect(git.ok, "git disagreed about \(name)")
     }
 
-    @Test("a branch named --mirror cannot mirror on push")
+    @Test("rejects branch names git would read as options or refuse outright", arguments: [
+        "--mirror", "-x", "", "a..b", "a b", "a~1", "a^", "a:b", "a?", "a*", "a[",
+        "a\\b", "a.lock", ".hidden", "a/.hidden", "a/", "/a", "a//b", "a.", "a@{1}",
+        "HEAD", "a\nb", "a\tb", "x.lock/y",
+    ])
+    func rejectsInvalidBranchNames(name: String) async throws {
+        #expect(Git.isValidBranchName(name) == false, "should reject \(name)")
+        guard name.isEmpty == false else { return }
+        let git = try await Shell.run("git", ["check-ref-format", "--branch", name])
+        #expect(git.ok == false, "git disagreed about \(name)")
+    }
+
+    @Test("a branch named --mirror cannot mirror on push", .tags(.security))
     func hostileBranchNameCannotMirror() async throws {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
-
-        let remote = NSTemporaryDirectory() + "baton-remote-\(UUID().uuidString).git"
-        try await Shell.check("git", ["init", "-q", "--bare", remote])
-        defer { try? FileManager.default.removeItem(atPath: remote) }
-        try await Shell.check("git", ["remote", "add", "origin", remote], cwd: repo.path)
+        let remote = try await makeBareRemote(for: repo)
 
         // A branch that exists only on the remote is exactly what --mirror deletes.
         try await Shell.check("git", ["push", "-q", "origin", "HEAD:refs/heads/keep-me"], cwd: repo.path)
@@ -240,15 +289,11 @@ struct GitSafetyTests {
         #expect(refs.stdout.contains("refs/heads/keep-me"))
     }
 
-    @Test("pushing sends an explicit refspec, so the branch is only ever a ref")
+    @Test("pushing sends an explicit refspec, so the branch is only ever a ref", .tags(.security))
     func pushUsesRefspec() async throws {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
-
-        let remote = NSTemporaryDirectory() + "baton-remote-\(UUID().uuidString).git"
-        try await Shell.check("git", ["init", "-q", "--bare", remote])
-        defer { try? FileManager.default.removeItem(atPath: remote) }
-        try await Shell.check("git", ["remote", "add", "origin", remote], cwd: repo.path)
+        let remote = try await makeBareRemote(for: repo)
         try await Shell.check("git", ["checkout", "-q", "-b", "feature/push-me"], cwd: repo.path)
 
         try await GitHub.push(worktree: repo.path, branch: "feature/push-me", setUpstream: true)
@@ -256,10 +301,10 @@ struct GitSafetyTests {
         let refs = try await Shell.check("git", ["ls-remote", "--heads", remote])
         #expect(refs.stdout.contains("refs/heads/feature/push-me"))
         #expect(await GitHub.hasRemoteBranch("feature/push-me", worktree: repo.path))
-        #expect(await !GitHub.hasRemoteBranch("--mirror", worktree: repo.path))
+        #expect(await GitHub.hasRemoteBranch("--mirror", worktree: repo.path) == false)
     }
 
-    @Test("git helpers refuse a ref that looks like an option")
+    @Test("git helpers refuse a ref that looks like an option", .tags(.security))
     func refusesOptionLikeRefs() async throws {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
@@ -270,14 +315,13 @@ struct GitSafetyTests {
         await #expect(throws: ShellError.self) {
             _ = try await Git.changedFiles(worktree: repo.path, base: "--all")
         }
+        let never = TestScratch.unique("baton-never")
         await #expect(throws: ShellError.self) {
             try await Git.addWorktree(
-                repo: repo.path,
-                path: NSTemporaryDirectory() + "baton-never-\(UUID().uuidString)",
-                branch: "--mirror",
-                base: "main"
+                repo: repo.path, path: never, branch: "--mirror", base: "main"
             )
         }
+        #expect(FileManager.default.fileExists(atPath: never) == false)
     }
 
     // MARK: - Bug 3: changedFiles misparsed ordinary Unicode paths
@@ -295,9 +339,8 @@ struct GitSafetyTests {
         try repo.write("before.txt", "a\nb\nc\n")
         try await repo.commit("awkward paths")
 
-        let worktree = NSTemporaryDirectory() + "baton-wt-\(UUID().uuidString)"
+        let worktree = TestScratch.unique("baton-wt")
         try await Git.addWorktree(repo: repo.path, path: worktree, branch: "awkward", base: "main")
-        defer { try? FileManager.default.removeItem(atPath: worktree) }
 
         let workspace = TempRepo(existing: worktree)
         try workspace.write("café.txt", "one\ntwo\n")
@@ -324,8 +367,8 @@ struct GitSafetyTests {
         #expect(renamed.change == .renamed)
         #expect(renamed.oldPath == "before.txt")
         #expect(renamed.additions == 1)
-        #expect(!byPath.keys.contains { $0.contains("=>") })
-        #expect(!byPath.keys.contains { $0.contains("\\303") })
+        #expect(byPath.keys.contains(where: { $0.contains("=>") }) == false)
+        #expect(byPath.keys.contains(where: { $0.contains("\\303") }) == false)
     }
 
     @Test("a pure rename keeps both sides of the move")
@@ -335,9 +378,8 @@ struct GitSafetyTests {
         try repo.write("old-name.txt", "unchanged content\n")
         try await repo.commit("add")
 
-        let worktree = NSTemporaryDirectory() + "baton-wt-\(UUID().uuidString)"
+        let worktree = TestScratch.unique("baton-wt")
         try await Git.addWorktree(repo: repo.path, path: worktree, branch: "moved", base: "main")
-        defer { try? FileManager.default.removeItem(atPath: worktree) }
         try await Shell.check("git", ["mv", "old-name.txt", "new-name.txt"], cwd: worktree)
 
         let files = try await Git.changedFiles(worktree: worktree, base: "main")
@@ -354,9 +396,8 @@ struct GitSafetyTests {
         try repo.write("doomed.txt", "goodbye\n")
         try await repo.commit("add")
 
-        let worktree = NSTemporaryDirectory() + "baton-wt-\(UUID().uuidString)"
+        let worktree = TestScratch.unique("baton-wt")
         try await Git.addWorktree(repo: repo.path, path: worktree, branch: "deleting", base: "main")
-        defer { try? FileManager.default.removeItem(atPath: worktree) }
 
         try await Shell.check("git", ["rm", "-q", "doomed.txt"], cwd: worktree)
         let binary = (worktree as NSString).appendingPathComponent("blob.bin")
@@ -401,57 +442,37 @@ struct GitSafetyTests {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
 
-        await #expect(throws: (any Error).self) {
+        await #expect(throws: ShellError.self) {
             _ = try await Git.changedFiles(worktree: repo.path, base: "no-such-base")
         }
-        await #expect(throws: (any Error).self) {
+        await #expect(throws: ShellError.self) {
             _ = try await Git.diffStat(worktree: repo.path, base: "no-such-base")
         }
-        await #expect(throws: (any Error).self) {
+        await #expect(throws: ShellError.self) {
             _ = try await Git.commitsAhead(worktree: repo.path, base: "no-such-base")
         }
     }
 
     @Test("a directory that is not a repository surfaces an error")
     func brokenRepositoryThrows() async throws {
-        let plain = NSTemporaryDirectory() + "baton-plain-\(UUID().uuidString)"
+        let plain = TestScratch.unique("baton-plain")
         try FileManager.default.createDirectory(atPath: plain, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(atPath: plain) }
 
-        await #expect(throws: (any Error).self) {
+        await #expect(throws: ShellError.self) {
             _ = try await Git.changedFiles(worktree: plain, base: "main")
         }
     }
 
-    // MARK: - Bug 5: PortAllocator
-
-    @Test("allocates a whole free block and fails loudly when there is none")
-    func allocatesWholeBlocks() throws {
-        // Its own range. Availability is probed by actually binding a socket, so two tests
-        // sharing the default range invalidate each other when the suite runs in parallel.
-        let base = 41_000
-        let first = try PortAllocator.allocate(taken: [], start: base)
-        #expect(first >= base)
-        // Deliberately not re-probing the block with `isBlockAvailable` here. `allocate` only
-        // returns a port whose whole block passed that check, so asking again asserts that no
-        // other process on the machine grabbed a port in the meantime, which is not what this
-        // test is about and made it flake. The logic below uses explicit `taken` sets instead,
-        // which is deterministic.
-
-        // A single port inside the block being taken disqualifies the whole block.
-        let second = try PortAllocator.allocate(taken: [first + 3], start: base)
-        #expect(second == first + PortAllocator.blockSize)
-
-        #expect(throws: PortAllocatorError.self) {
-            _ = try PortAllocator.allocate(taken: [], start: 3_100, limit: 3_105)
-        }
-        // The old code answered `start` here even though `start` was explicitly taken.
-        #expect(throws: PortAllocatorError.self) {
-            _ = try PortAllocator.allocate(taken: Set(3_100...3_200), start: 3_100, limit: 3_150)
-        }
-    }
-
     // MARK: - Helpers
+
+    /// A bare repository wired up as `origin`, which several tests need to prove that commits
+    /// live somewhere other than the branch being deleted.
+    private func makeBareRemote(for repo: TempRepo) async throws -> String {
+        let remote = TestScratch.unique("baton-remote") + ".git"
+        try await Shell.check("git", ["init", "-q", "--bare", remote])
+        try await Shell.check("git", ["remote", "add", "origin", remote], cwd: repo.path)
+        return remote
+    }
 
     private func commit(in worktree: String, message: String) async throws {
         try await Shell.check("git", ["add", "-A"], cwd: worktree)

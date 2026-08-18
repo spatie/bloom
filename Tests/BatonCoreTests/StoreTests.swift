@@ -2,16 +2,11 @@ import Testing
 import Foundation
 @testable import BatonCore
 
-private func makeStore() throws -> Store {
-    let path = NSTemporaryDirectory() + "baton-test-\(UUID().uuidString).sqlite"
-    return try Store(path: path)
-}
-
-@Suite("Store")
+@Suite("Store", .tags(.persistence), .scratchDirectory)
 struct StoreTests {
     @Test("round-trips a repo")
     func roundTripsRepo() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("store")
         let repo = Repo(name: "there-there", path: "/tmp/there-there", defaultBranch: "main")
         try await store.upsert(repo)
 
@@ -24,7 +19,7 @@ struct StoreTests {
 
     @Test("updates a repo on conflicting id")
     func updatesRepo() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("store")
         var repo = Repo(name: "old", path: "/tmp/x")
         try await store.upsert(repo)
         repo.name = "new"
@@ -36,7 +31,7 @@ struct StoreTests {
 
     @Test("cascades workspace deletion from its repo")
     func cascadesDelete() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("store")
         let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r"))
         try await store.upsert(Workspace(
             repoID: repo.id, name: "w", branch: "b", path: "/tmp/r-w", baseBranch: "main"
@@ -49,7 +44,7 @@ struct StoreTests {
 
     @Test("hides archived workspaces unless asked")
     func hidesArchived() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("store")
         let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r"))
         var workspace = Workspace(repoID: repo.id, name: "w", branch: "b", path: "/p", baseBranch: "main")
         try await store.upsert(workspace)
@@ -64,7 +59,7 @@ struct StoreTests {
 
     @Test("appends messages with increasing sequence numbers")
     func appendsMessages() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("store")
         let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r"))
         let workspace = try await store.upsert(Workspace(
             repoID: repo.id, name: "w", branch: "b", path: "/p", baseBranch: "main"
@@ -89,7 +84,7 @@ struct StoreTests {
 
     @Test("finds a tool use row by its reference id")
     func findsByRefID() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("store")
         let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r"))
         let workspace = try await store.upsert(Workspace(
             repoID: repo.id, name: "w", branch: "b", path: "/p", baseBranch: "main"
@@ -108,7 +103,7 @@ struct StoreTests {
 
     @Test("stores and clears drafts")
     func storesDrafts() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("store")
         try await store.saveDraft(sessionID: "s1", body: "hello")
         #expect(try await store.draft(sessionID: "s1") == "hello")
         try await store.saveDraft(sessionID: "s1", body: "")
@@ -117,7 +112,7 @@ struct StoreTests {
 
     @Test("resets sessions that were running when the app died")
     func resetsRunningSessions() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("store")
         let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r"))
         let workspace = try await store.upsert(Workspace(
             repoID: repo.id, name: "w", branch: "b", path: "/p", baseBranch: "main"
@@ -132,7 +127,7 @@ struct StoreTests {
 
     @Test("survives a reopen")
     func survivesReopen() async throws {
-        let path = NSTemporaryDirectory() + "baton-persist-\(UUID().uuidString).sqlite"
+        let path = TestScratch.unique("baton-persist") + ".sqlite"
         let first = try Store(path: path)
         try await first.upsert(Repo(name: "persisted", path: "/tmp/p"))
 

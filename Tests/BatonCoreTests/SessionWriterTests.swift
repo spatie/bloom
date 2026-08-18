@@ -6,10 +6,10 @@ import Foundation
 /// counters. The UI owns the title and the composer's pickers. The first version of Baton had
 /// the UI write the whole struct, which silently dropped the agent session id and broke resume
 /// without any visible error. These tests exist so that cannot come back.
-@Suite("Session writers")
+@Suite("Session writers", .tags(.persistence), .scratchDirectory)
 struct SessionWriterTests {
     private func makeSession() async throws -> (Store, Session) {
-        let store = try Store(path: NSTemporaryDirectory() + "baton-sw-\(UUID().uuidString).sqlite")
+        let store = try makeTestStore("sw")
         let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r-\(UUID().uuidString)"))
         let workspace = try await store.upsert(Workspace(
             repoID: repo.id, name: "w", branch: "b", path: "/p", baseBranch: "main"

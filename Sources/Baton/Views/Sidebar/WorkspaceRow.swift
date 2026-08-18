@@ -39,9 +39,12 @@ struct WorkspaceRow: View {
         HStack(spacing: 6) {
             glyph
                 .frame(width: Self.glyphSize, height: Self.glyphSize)
+                // The glyph is the row's whole state in one mark, so VoiceOver has to be told
+                // what it means rather than being handed an unlabelled image.
+                .accessibilityLabel(glyphState.description)
 
             if isRenaming {
-                TextField("", text: $draft)
+                TextField("Workspace name", text: $draft)
                     .textFieldStyle(.plain)
                     .focused($fieldFocused)
                     .onSubmit { commit() }
@@ -66,6 +69,7 @@ struct WorkspaceRow: View {
                     Image(systemName: "pin.fill")
                         .font(Typo.micro)
                         .foregroundStyle(.tertiary)
+                        .accessibilityLabel("Pinned")
                 }
                 if workspace.hasDiff {
                     DiffStatLabel(
@@ -92,6 +96,16 @@ struct WorkspaceRow: View {
         case failed
         case unread
         case idle
+
+        var description: String {
+            switch self {
+            case .settingUp: "Setting up"
+            case .running: "Agent running"
+            case .failed: "Setup failed"
+            case .unread: "Unread"
+            case .idle: "Idle"
+            }
+        }
     }
 
     private var glyphState: Glyph {

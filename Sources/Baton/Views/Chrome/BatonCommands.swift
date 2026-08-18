@@ -40,9 +40,7 @@ struct BatonCommands: Commands {
 
             Divider()
 
-            Button("Add Project Folder") {
-                addProjectFolder()
-            }
+            Button("Add Project Folder", action: addProjectFolder)
             .keyboardShortcut("o", modifiers: [.command, .shift])
         }
 
@@ -64,14 +62,14 @@ struct BatonCommands: Commands {
             .keyboardShortcut("s", modifiers: [.command, .control])
 
             Button("Toggle Inspector") {
-                guard let workspace = model.selectedModel else { return }
+                guard model.selectedModel != nil else { return }
                 model.isInspectorVisible.toggle()
             }
             .keyboardShortcut("i", modifiers: [.command, .option])
             .disabled(model.selectedModel == nil)
 
             Button("Toggle Bottom Panel") {
-                guard let workspace = model.selectedModel else { return }
+                guard model.selectedModel != nil else { return }
                 model.isBottomPanelVisible.toggle()
             }
             .keyboardShortcut("b", modifiers: [.command, .option])
@@ -154,13 +152,8 @@ struct BatonCommands: Commands {
     }
 
     private func addProjectFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Add Project"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await model.addRepository(at: url.path) }
+        guard let path = ProjectFolderPicker.choose() else { return }
+        Task { await model.addRepository(at: path) }
     }
 
     private func archiveSelectedWorkspace() {

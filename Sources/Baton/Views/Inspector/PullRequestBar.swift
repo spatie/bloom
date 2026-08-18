@@ -1,165 +1,60 @@
 import SwiftUI
 import BatonCore
 
-/// The pull request strip above the inspector tabs: what number it is, how CI feels about it,
-/// and the one button that finishes the job.
+/// The pull request strip above the inspector tabs.
 ///
 /// It polls while it is on screen and stops when the inspector is hidden, because the state it
 /// shows changes on GitHub's schedule rather than the user's.
 struct PullRequestBar: View {
     let model: WorkspaceModel
 
-    @State private var pendingMerge: GitHub.MergeMethod?
+    /// How often GitHub is asked again while the bar is on screen.
+    private static let pollInterval = Duration.seconds(20)
+
     @State private var isWorking = false
     @State private var errorMessage: String?
 
     var body: some View {
-        HStack(spacing: InspectorLayout.gap) {
-            if let pullRequest = model.pullRequest {
-                existing(pullRequest)
-            } else {
-                creator
+        content
+            .padding(.horizontal, InspectorLayout.inset)
+            .frame(height: InspectorLayout.barHeight)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.surface)
+            .task(id: model.workspace.id) { await poll() }
+            .alert("Something went wrong", isPresented: $errorMessage.isPresent()) {
+                // A lone OK that only dismisses is the system default.
+            } message: {
+                Text(errorMessage ?? "")
             }
-        }
-        .padding(.horizontal, InspectorLayout.inset)
-        .frame(height: InspectorLayout.barHeight)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.surface)
-        .task(id: model.workspace.id) {
-            while !Task.isCancelled {
-                await model.refreshPullRequest()
-                try? await Task.sleep(for: .seconds(20))
-            }
-        }
-        .confirmationDialog(
-            "Merge pull request #\(model.pullRequest?.number ?? 0)?",
-            isPresented: Binding(
-                get: { pendingMerge != nil },
-                set: { if !$0 { pendingMerge = nil } }
-            ),
-            presenting: pendingMerge
-        ) { method in
-            Button(Self.label(for: method), role: .destructive) { merge(method) }
-            Button("Cancel", role: .cancel) {}
-        } message: { method in
-            Text("\(Self.label(for: method)) into \(model.workspace.baseBranch) and delete the branch.")
-        }
-        .alert(
-            "Something went wrong",
-            isPresented: Binding(
-                get: { errorMessage != nil },
-                set: { if !$0 { errorMessage = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(errorMessage ?? "")
-        }
     }
-
-    // MARK: - With a pull request
 
     @ViewBuilder
-    private func existing(_ pullRequest: PullRequest) -> some View {
-        Button {
-            GitHubBridge.open(pullRequest.url)
-        } label: {
-            Chip(
-                text: "#\(pullRequest.number)",
-                systemImage: "arrow.triangle.pull",
-                tint: Palette.accent,
-                background: Palette.accent.opacity(InspectorLayout.tintOpacity)
+    private var content: some View {
+        if let pullRequest = model.pullRequest {
+            PullRequestSummary(
+                pullRequest: pullRequest,
+                baseBranch: model.workspace.baseBranch,
+                isWorking: isWorking,
+                onMerge: merge
             )
-        }
-        .buttonStyle(.plain)
-        .help(pullRequest.title)
-
-        if pullRequest.isDraft {
-            Chip(text: "Draft")
-        }
-
-        Text(statusText(pullRequest))
-            .font(Typo.caption)
-            .foregroundStyle(statusColor(pullRequest))
-            .lineLimit(1)
-            .truncationMode(.tail)
-
-        Spacer(minLength: InspectorLayout.tight * 2)
-
-        if isWorking {
-            ProgressView().controlSize(.small)
-        } else if pullRequest.state.uppercased() == "OPEN" {
-            mergeButton
         } else {
-            Chip(text: pullRequest.state.capitalized)
-        }
-    }
-
-    /// The one prominent control in the inspector. It is a real bordered prominent button, so it
-    /// carries the user's accent colour and the pressed and disabled states that come with it,
-    /// rather than a rectangle painted to look like a button.
-    private var mergeButton: some View {
-        Menu {
-            Button("Merge commit") { pendingMerge = .merge }
-            Button("Squash and merge") { pendingMerge = .squash }
-            Button("Rebase and merge") { pendingMerge = .rebase }
-        } label: {
-            Text("Merge")
-        } primaryAction: {
-            pendingMerge = .squash
-        }
-        .menuStyle(.button)
-        .buttonStyle(.borderedProminent)
-        .controlSize(.small)
-        .fixedSize()
-        .help("Squash and merge, or choose another method")
-    }
-
-    private func statusText(_ pullRequest: PullRequest) -> String {
-        if !pullRequest.checksSummary.isEmpty { return pullRequest.checksSummary }
-        if let decision = pullRequest.reviewDecision, !decision.isEmpty {
-            return decision.replacingOccurrences(of: "_", with: " ").capitalized
-        }
-        return pullRequest.title
-    }
-
-    private func statusColor(_ pullRequest: PullRequest) -> Color {
-        switch pullRequest.checks {
-        case .passing: Palette.positive
-        case .failing: Palette.negative
-        case .pending: Palette.warning
-        case .none: Palette.textSecondary
-        }
-    }
-
-    // MARK: - Without one
-
-    @ViewBuilder
-    private var creator: some View {
-        Image(systemName: "arrow.triangle.pull")
-            .font(Typo.caption)
-            .imageScale(.medium)
-            .foregroundStyle(Palette.textTertiary)
-
-        Text(model.workspace.branch)
-            .font(Typo.caption)
-            .foregroundStyle(Palette.textSecondary)
-            .lineLimit(1)
-            .truncationMode(.head)
-
-        Spacer(minLength: InspectorLayout.tight * 2)
-
-        if isWorking || model.isLoadingPullRequest {
-            ProgressView().controlSize(.small)
-        } else {
-            Button("Create pull request") { createPullRequest() }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Push this branch and open a pull request against \(model.workspace.baseBranch)")
+            PullRequestCreator(
+                branch: model.workspace.branch,
+                baseBranch: model.workspace.baseBranch,
+                isWorking: isWorking || model.isLoadingPullRequest,
+                action: createPullRequest
+            )
         }
     }
 
     // MARK: - Actions
+
+    private func poll() async {
+        while !Task.isCancelled {
+            await model.refreshPullRequest()
+            try? await Task.sleep(for: Self.pollInterval)
+        }
+    }
 
     /// Pushing first is not optional: gh refuses to open a pull request for a branch the remote
     /// has never heard of, and the agent's work only ever exists locally until now.
@@ -199,14 +94,6 @@ struct PullRequestBar: View {
                 errorMessage = "\(error)"
             }
             await model.refreshPullRequest()
-        }
-    }
-
-    private static func label(for method: GitHub.MergeMethod) -> String {
-        switch method {
-        case .merge: "Merge commit"
-        case .squash: "Squash and merge"
-        case .rebase: "Rebase and merge"
         }
     }
 }

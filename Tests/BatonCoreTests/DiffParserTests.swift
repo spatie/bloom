@@ -10,7 +10,7 @@ private struct GitFixture {
     let path: String
 
     init() throws {
-        path = NSTemporaryDirectory() + "baton-diff-\(UUID().uuidString)"
+        path = TestScratch.unique("baton-diff")
         try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
         try git("init", "-q", ".")
         try git("config", "user.email", "test@example.com")
@@ -72,7 +72,7 @@ private func numbered(_ prefix: String, _ range: ClosedRange<Int>) -> String {
     range.map { "\(prefix)\($0)\n" }.joined()
 }
 
-@Suite("DiffParser")
+@Suite("DiffParser", .tags(.git), .scratchDirectory)
 struct DiffParserTests {
 
     // MARK: Real git fixtures
@@ -375,7 +375,7 @@ struct DiffParserTests {
         #expect(DiffParser.stats("   \n\n") == (0, 0))
     }
 
-    @Test("survives garbage without hanging")
+    @Test("invents no changed lines out of garbage, and does not hang on it")
     func garbageInput() {
         let garbage = """
         @@@@@@
@@ -387,9 +387,13 @@ struct DiffParserTests {
         \\ dangling
         +++++
         """
+        // `count >= 0` used to stand here, which is true of every array ever made. `--- \0` is a
+        // legal enough header that a file entry for it is fair, but nothing in this input
+        // describes a single changed line, so no hunk and no count may be invented from it.
         let files = DiffParser.parse(garbage)
-        #expect(files.count >= 0)
-        _ = DiffParser.stats(garbage)
+        #expect(files.allSatisfy { $0.hunks.isEmpty })
+        #expect(files.allSatisfy { $0.additions == 0 && $0.deletions == 0 })
+        #expect(DiffParser.stats(garbage) == (0, 0))
     }
 
     @Test("parses a patch truncated mid hunk")

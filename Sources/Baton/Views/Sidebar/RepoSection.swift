@@ -9,11 +9,17 @@ import BatonCore
 /// this way keeps the row cheap to redraw, which matters because a running agent updates its diff
 /// stat every few seconds.
 ///
+/// The rows are handed in already filtered and sorted (see `SidebarRepoGroup`), so nothing here
+/// walks the workspace list.
+///
 /// Collapsing is the list's own disclosure triangle bound to the repo's stored `collapsed` flag,
 /// rather than a chevron we draw and a tap gesture we interpret.
 struct RepoSection: View {
     var repo: Repo
-    var filter: SidebarFilter
+    var rows: [Workspace]
+    /// Only used to say why the section is empty, which is a different sentence when a filter is
+    /// hiding rows than when the project has none.
+    var isFiltered: Bool
     @Binding var hovered: String?
     @Binding var renaming: String?
     /// Raised to the sidebar, which owns the create sheet.
@@ -28,17 +34,13 @@ struct RepoSection: View {
     @State private var archiveTarget: Workspace?
     @State private var isConfirmingRemove = false
 
-    private var rows: [Workspace] {
-        app.workspaces(in: repo).filter { filter.accepts($0) }
-    }
-
     var body: some View {
         Section(isExpanded: isExpanded) {
             ForEach(rows) { workspace in
                 row(workspace)
             }
             if rows.isEmpty {
-                Text(filter == .all ? "No workspaces yet" : "Nothing matches the filter")
+                Text(isFiltered ? "Nothing matches the filter" : "No workspaces yet")
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textTertiary)
             }
@@ -64,18 +66,21 @@ struct RepoSection: View {
     private var headerID: String { "repo:\(repo.id)" }
 
     /// The confirmations hang off the header rather than off the `Section`, because a section is
-    /// a layout instruction to the list rather than a view that can present anything.
+    /// a layout instruction to the list rather than a view that can present anything. That also
+    /// keeps them anchored to the project they are about, which is where the menus that trigger
+    /// them live.
     private var header: some View {
         HStack(spacing: 6) {
             RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                 .fill(Color(hexString: repo.accent))
                 .frame(width: Self.swatch, height: Self.swatch)
+                .accessibilityHidden(true)
 
             if isRenamingRepo {
-                TextField("", text: $repoDraft)
+                TextField("Project name", text: $repoDraft)
                     .textFieldStyle(.plain)
                     .focused($repoFieldFocused)
-                    .onSubmit { commitRepoRename() }
+                    .onSubmit(commitRepoRename)
                     .onExitCommand { isRenamingRepo = false }
             } else {
                 Text(repo.name)
@@ -84,15 +89,14 @@ struct RepoSection: View {
 
             Spacer(minLength: 4)
 
-            Button {
+            Button("New workspace in \(repo.name)", systemImage: "plus") {
                 onCreateWorkspace(repo)
-            } label: {
-                Image(systemName: "plus")
-                    .imageScale(.small)
-                    .foregroundStyle(hovered == headerID ? Palette.textSecondary : Palette.textTertiary)
-                    .contentShape(Rectangle())
             }
+            .labelStyle(.iconOnly)
+            .imageScale(.small)
+            .foregroundStyle(hovered == headerID ? Palette.textSecondary : Palette.textTertiary)
             .buttonStyle(.plain)
+            .contentShape(Rectangle())
             .help("New workspace in \(repo.name)")
         }
         .contentShape(Rectangle())
@@ -101,41 +105,33 @@ struct RepoSection: View {
         }
         .contextMenu {
             Button("New workspace") { onCreateWorkspace(repo) }
-            Button("Rename") { beginRepoRename() }
+            Button("Rename", action: beginRepoRename)
             Button("Reveal in Finder") { Reveal.inFinder(repo.path) }
             Divider()
             Button("Remove project", role: .destructive) { isConfirmingRemove = true }
         }
         .confirmationDialog(
             archiveTarget.map { "Archive \($0.name)?" } ?? "Archive workspace?",
-            isPresented: Binding(
-                get: { archiveTarget != nil },
-                set: { if !$0 { archiveTarget = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            if let target = archiveTarget {
-                Button("Archive, keep \(target.branch)", role: .destructive) {
-                    archive(target, deleteBranch: false)
-                }
-                Button("Archive and delete \(target.branch)", role: .destructive) {
-                    archive(target, deleteBranch: true)
-                }
+            isPresented: $archiveTarget.isPresent(),
+            titleVisibility: .visible,
+            presenting: archiveTarget
+        ) { target in
+            Button("Archive, keep \(target.branch)", role: .destructive) {
+                archive(target, deleteBranch: false)
+            }
+            Button("Archive and delete \(target.branch)", role: .destructive) {
+                archive(target, deleteBranch: true)
             }
             Button("Cancel", role: .cancel) { archiveTarget = nil }
-        } message: {
-            if let target = archiveTarget {
-                Text("The worktree at \(target.path) is removed. The branch \(target.branch) is kept unless you delete it here.")
-            }
+        } message: { target in
+            Text("The worktree at \(target.path) is removed. The branch \(target.branch) is kept unless you delete it here.")
         }
         .confirmationDialog(
             "Remove \(repo.name)?",
             isPresented: $isConfirmingRemove,
             titleVisibility: .visible
         ) {
-            Button("Remove project", role: .destructive) {
-                Task { await app.removeRepository(repo) }
-            }
+            Button("Remove project", role: .destructive, action: removeRepo)
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Baton forgets this project and its workspaces. Nothing on disk is deleted.")
@@ -157,17 +153,7 @@ struct RepoSection: View {
         .tag(SidebarSelection.workspace(workspace.id))
         .draggable(workspace.id)
         .dropDestination(for: String.self) { items, _ in
-            guard let dragged = items.first, dragged != workspace.id else { return false }
-            guard let moved = app.workspaces.first(where: { $0.id == dragged }),
-                  moved.repoID == repo.id else { return false }
-            // The visible list can be filtered, so the drop target's position has to be
-            // translated back into the unfiltered order the store actually stores.
-            let unfiltered = app.workspaces(in: repo)
-            guard let index = unfiltered.firstIndex(where: { $0.id == workspace.id }) else {
-                return false
-            }
-            Task { await app.reorder(moved, to: index) }
-            return true
+            move(items.first, above: workspace)
         }
         .contextMenu {
             Button("Open in Editor") { Reveal.inEditor(workspace.path) }
@@ -185,9 +171,28 @@ struct RepoSection: View {
 
     // MARK: - Actions
 
+    /// The visible list can be filtered, so the drop target's position has to be translated back
+    /// into the unfiltered order the store actually stores.
+    private func move(_ draggedID: String?, above workspace: Workspace) -> Bool {
+        guard let draggedID, draggedID != workspace.id else { return false }
+        guard let moved = app.workspaces.first(where: { $0.id == draggedID }),
+              moved.repoID == repo.id else { return false }
+
+        let unfiltered = app.workspaces(in: repo)
+        guard let index = unfiltered.firstIndex(where: { $0.id == workspace.id }) else {
+            return false
+        }
+        Task { await app.reorder(moved, to: index) }
+        return true
+    }
+
     private func archive(_ workspace: Workspace, deleteBranch: Bool) {
         archiveTarget = nil
         Task { await app.archive(workspace, deleteBranch: deleteBranch) }
+    }
+
+    private func removeRepo() {
+        Task { await app.removeRepository(repo) }
     }
 
     private func beginRepoRename() {

@@ -1,0 +1,109 @@
+import SwiftUI
+import BatonCore
+
+/// Everything the user can change about the next turn: the model, the effort, the permission mode,
+/// whether it runs fast, what it has attached, and whether it goes now.
+struct ComposerFooterView: View {
+    var session: Session
+    var editor: ComposerSessionEditor
+    var isRunning: Bool
+    var isFastMode: Bool
+    var canSend: Bool
+    var onToggleFastMode: @MainActor () -> Void
+    var onAttach: @MainActor () -> Void
+    var onSend: @MainActor () -> Void
+    var onStop: @MainActor () -> Void
+
+    var body: some View {
+        HStack(spacing: Metrics.cornerSmall) {
+            ComposerOptionMenu(
+                options: ComposerOption.models,
+                selection: session.model,
+                systemImage: "sparkle",
+                help: "Choose the model",
+                onSelect: selectModel
+            )
+
+            fastToggle
+
+            ComposerOptionMenu(
+                options: ComposerOption.efforts,
+                selection: session.effort,
+                systemImage: "chart.bar.fill",
+                help: "Choose reasoning effort",
+                onSelect: selectEffort
+            )
+
+            ComposerOptionMenu(
+                options: ComposerOption.permissionModes,
+                selection: session.permissionMode.rawValue,
+                systemImage: Self.permissionGlyph(session.permissionMode),
+                tint: session.permissionMode == .bypassPermissions
+                    ? Palette.warning
+                    : Palette.textSecondary,
+                help: "Choose permission mode",
+                onSelect: selectPermissionMode
+            )
+
+            Spacer(minLength: Metrics.corner)
+
+            Button(action: onAttach) {
+                Label("Attach a file", systemImage: "plus")
+                    .labelStyle(.iconOnly)
+                    .font(Typo.captionEmphasis)
+                    .foregroundStyle(Palette.textSecondary)
+                    .frame(width: Metrics.rowHeight, height: Metrics.rowHeight)
+            }
+            .buttonStyle(.borderless)
+            .help("Attach a file")
+
+            ComposerSendButton(
+                isRunning: isRunning,
+                canSend: canSend,
+                onSend: onSend,
+                onStop: onStop
+            )
+        }
+    }
+
+    /// Fast mode has no column on `Session`, so the composer keeps it in the store's key value
+    /// table. It is still per session and it still survives a relaunch, which is all it promises.
+    private var fastToggle: some View {
+        Button(action: onToggleFastMode) {
+            ComposerControlLabel(
+                systemImage: "bolt.fill",
+                text: "Fast",
+                tint: isFastMode ? Palette.accent : Palette.textSecondary,
+                isActive: isFastMode
+            )
+        }
+        .buttonStyle(.borderless)
+        .help("Fast mode trades some reasoning for a quicker reply")
+        .accessibilityLabel("Fast mode")
+        .accessibilityAddTraits(isFastMode ? .isSelected : [])
+    }
+
+    // MARK: - Edits
+
+    private func selectModel(_ id: String) {
+        editor.apply { $0.model = id }
+    }
+
+    private func selectEffort(_ id: String) {
+        editor.apply { $0.effort = id }
+    }
+
+    private func selectPermissionMode(_ id: String) {
+        guard let mode = PermissionMode(rawValue: id) else { return }
+        editor.apply { $0.permissionMode = mode }
+    }
+
+    private static func permissionGlyph(_ mode: PermissionMode) -> String {
+        switch mode {
+        case .auto: "hand.raised"
+        case .acceptEdits: "checkmark.shield"
+        case .bypassPermissions: "exclamationmark.shield"
+        case .plan: "list.bullet.rectangle"
+        }
+    }
+}

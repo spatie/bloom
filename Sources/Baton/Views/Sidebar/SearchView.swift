@@ -11,14 +11,19 @@ struct SearchView: View {
     @FocusState private var fieldFocused: Bool
     @State private var hovered: String?
 
+    /// Matching runs when the query or the workspace list changes, not on every redraw. A search
+    /// stays on screen while agents run, and each of them updates its diff stat every few seconds.
+    @State private var hits: [AppModel.SearchHit] = []
+
     var body: some View {
         @Bindable var app = app
 
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(Typo.bodyEmphasis)
                     .foregroundStyle(Palette.textTertiary)
+                    .accessibilityHidden(true)
 
                 TextField("Search workspaces, branches and projects", text: $app.searchQuery)
                     .textFieldStyle(.plain)
@@ -27,15 +32,11 @@ struct SearchView: View {
                     .focused($fieldFocused)
 
                 if !app.searchQuery.isEmpty {
-                    Button {
-                        app.searchQuery = ""
-                        fieldFocused = true
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(Typo.body)
-                            .foregroundStyle(Palette.textTertiary)
-                    }
-                    .buttonStyle(.plain)
+                    Button("Clear the search", systemImage: "xmark.circle.fill", action: clear)
+                        .labelStyle(.iconOnly)
+                        .font(Typo.body)
+                        .foregroundStyle(Palette.textTertiary)
+                        .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 16)
@@ -48,12 +49,12 @@ struct SearchView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Palette.windowBackground)
         .task { fieldFocused = true }
+        .onChange(of: app.searchQuery, initial: true) { _, _ in match() }
+        .onChange(of: app.workspaces) { _, _ in match() }
     }
 
     @ViewBuilder
     private var results: some View {
-        let hits = app.search(app.searchQuery)
-
         if app.searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
             placeholder("Type to search", "Names, branches and project names are all matched.")
         } else if hits.isEmpty {
@@ -62,7 +63,14 @@ struct SearchView: View {
             ScrollView {
                 LazyVStack(spacing: 2) {
                     ForEach(hits) { hit in
-                        row(hit)
+                        SearchResultRow(
+                            hit: hit,
+                            isHovered: hovered == hit.id,
+                            action: { select(hit) }
+                        )
+                        .onHoverChange { inside in
+                            hovered = inside ? hit.id : (hovered == hit.id ? nil : hovered)
+                        }
                     }
                 }
                 .padding(10)
@@ -70,48 +78,6 @@ struct SearchView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
             }
         }
-    }
-
-    private func row(_ hit: AppModel.SearchHit) -> some View {
-        HStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 3)
-                .fill(hit.repo.map { Color(hexString: $0.accent) } ?? Palette.textTertiary)
-                .frame(width: 9, height: 9)
-
-            Text(hit.repo?.name ?? "Unknown project")
-                .font(Typo.label)
-                .foregroundStyle(Palette.textTertiary)
-                .lineLimit(1)
-
-            Image(systemName: "chevron.right")
-                .font(Typo.micro)
-                .foregroundStyle(Palette.textTertiary)
-
-            Text(hit.workspace.name)
-                .font(Typo.bodyEmphasis)
-                .foregroundStyle(Palette.textPrimary)
-                .lineLimit(1)
-
-            Spacer(minLength: 8)
-
-            Chip(text: hit.workspace.branch, systemImage: "arrow.triangle.branch", monospaced: true)
-
-            if hit.workspace.hasDiff {
-                DiffStatLabel(
-                    additions: hit.workspace.additions,
-                    deletions: hit.workspace.deletions,
-                    compact: true
-                )
-            }
-        }
-        .padding(.horizontal, 10)
-        .frame(height: 32)
-        .rowBackground(isSelected: false, isHovered: hovered == hit.id)
-        .contentShape(Rectangle())
-        .onHoverChange { inside in
-            hovered = inside ? hit.id : (hovered == hit.id ? nil : hovered)
-        }
-        .onTapGesture { app.selection = .workspace(hit.workspace.id) }
     }
 
     private func placeholder(_ title: String, _ detail: String) -> some View {
@@ -126,5 +92,20 @@ struct SearchView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)
+    }
+
+    // MARK: - Actions
+
+    private func match() {
+        hits = app.search(app.searchQuery)
+    }
+
+    private func clear() {
+        app.searchQuery = ""
+        fieldFocused = true
+    }
+
+    private func select(_ hit: AppModel.SearchHit) {
+        app.selection = .workspace(hit.workspace.id)
     }
 }

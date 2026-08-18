@@ -2,26 +2,34 @@ import Foundation
 import Testing
 @testable import BatonCore
 
+/// Tokenizes a line and checks the invariants every language has to satisfy: tokens in order,
+/// none empty, none reaching past the line. `sourceLocation` is threaded through so a violation
+/// is reported against the test that tokenized the line, not against this function.
 private func checked(
     _ line: String,
     language: Language,
-    state: inout LexState
+    state: inout LexState,
+    sourceLocation: SourceLocation = #_sourceLocation
 ) -> [Token] {
     let tokens = SyntaxHighlighter.tokenize(line: line, language: language, carry: &state)
     var previousEnd = 0
     for token in tokens {
-        #expect(token.range.lowerBound >= previousEnd)
-        #expect(token.range.lowerBound >= 0)
-        #expect(token.range.upperBound <= line.utf16.count)
-        #expect(!token.range.isEmpty)
+        #expect(token.range.lowerBound >= previousEnd, sourceLocation: sourceLocation)
+        #expect(token.range.lowerBound >= 0, sourceLocation: sourceLocation)
+        #expect(token.range.upperBound <= line.utf16.count, sourceLocation: sourceLocation)
+        #expect(token.range.isEmpty == false, sourceLocation: sourceLocation)
         previousEnd = token.range.upperBound
     }
     return tokens
 }
 
-private func checked(_ line: String, language: Language) -> [Token] {
+private func checked(
+    _ line: String,
+    language: Language,
+    sourceLocation: SourceLocation = #_sourceLocation
+) -> [Token] {
     var state = LexState()
-    return checked(line, language: language, state: &state)
+    return checked(line, language: language, state: &state, sourceLocation: sourceLocation)
 }
 
 private func text(of token: Token, in line: String) -> String {
@@ -33,7 +41,7 @@ private func has(_ kind: TokenKind, text expected: String, in line: String, toke
     tokens.contains { $0.kind == kind && text(of: $0, in: line) == expected }
 }
 
-@Suite("Syntax highlighter")
+@Suite("Syntax highlighter", .tags(.agentProtocol))
 struct SyntaxHighlighterTests {
     @Test("detects languages from paths")
     func detectsPaths() {
@@ -85,7 +93,7 @@ struct SyntaxHighlighterTests {
         let doubleTokens = checked(doubleLine, language: .php)
         let singleTokens = checked(singleLine, language: .php)
         #expect(has(.variable, text: "$name", in: doubleLine, tokens: doubleTokens))
-        #expect(!singleTokens.contains { $0.kind == .variable })
+        #expect(singleTokens.contains(where: { $0.kind == .variable }) == false)
     }
 
     @Test("threads heredoc and nowdoc state")
@@ -147,7 +155,7 @@ struct SyntaxHighlighterTests {
         #expect(checked(template, language: .javascript).contains { $0.kind == .variable })
         #expect(has(.operator, text: "=>", in: arrow, tokens: checked(arrow, language: .typescript)))
         #expect(checked(regex, language: .javascript).contains { $0.kind == .regex })
-        #expect(!checked(division, language: .javascript).contains { $0.kind == .regex })
+        #expect(checked(division, language: .javascript).contains(where: { $0.kind == .regex }) == false)
     }
 
     @Test("threads block comments across lines")

@@ -192,7 +192,7 @@ public actor AgentRunner {
     /// user's text to something on its way out, so the turn waits for the exit instead. Waiting on
     /// the actor is safe: `finish` runs on it too and every sleep here is a suspension point.
     private func waitForCancelledRunToExit() async throws {
-        guard handle.current != nil, handle.isCancelled(handle.generation) else { return }
+        guard handle.isCancelledRunStillAlive else { return }
 
         for _ in 0..<Self.shutdownPolls {
             try? await Task.sleep(for: Self.shutdownPollInterval)
@@ -357,8 +357,17 @@ public actor AgentRunner {
 
         // The last stderr lines are usually the reason the process died, and they can still be in
         // flight when stdout closes. Waiting for that task is what makes the tail complete.
-        await stderrTask?.value
+        //
+        // Taken off the actor before the await, so a run that starts during the suspension puts
+        // its own task there and does not have it cleared out from under it.
+        let stderr = stderrTask
         stderrTask = nil
+        await stderr?.value
+
+        // That await is a suspension point, and `send` only needs the handle to be free to start
+        // the next turn, which it now is. Everything below writes the session row, so a stale run
+        // reaching it would file the turn the user just started as finished.
+        guard generation == handle.generation else { return }
 
         guard !cancelled, !handle.isCancelled(generation) else {
             markCancelled()
@@ -433,8 +442,15 @@ public actor AgentRunner {
             $0.state = .cancelled
             $0.updatedAt = Date()
         }
-        let snapshot = session
-        Task { [weak self] in await self?.save(snapshot) }
+        // The write has to be deferred, because this is reached from synchronous paths, but it
+        // deliberately does not carry a snapshot: by the time it runs the user may already have
+        // started the next turn, and writing a copy taken now would put that turn back to
+        // `cancelled`. Saving whatever the session is at that point cannot go backwards.
+        Task { [weak self] in await self?.saveCurrentSession() }
+    }
+
+    private func saveCurrentSession() async {
+        await save(session)
     }
 
     /// Fire and forget, for a SwiftUI button that cannot await. The intent is recorded and the
@@ -603,6 +619,16 @@ private final class ProcessHandle: @unchecked Sendable {
     func isCancelled(_ generation: Int) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return generation == run && cancelled
+    }
+
+    /// Whether the current run has been cancelled and its process has not been let go of yet.
+    ///
+    /// One lock rather than three separate reads of `current`, `generation` and `cancelled`: a
+    /// run can end between any two of them, and the answer assembled from three moments describes
+    /// no moment at all.
+    var isCancelledRunStillAlive: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return process != nil && cancelled
     }
 
     /// Record the intent and hand back the process to signal, in one lock, so a signal can never

@@ -91,6 +91,11 @@ public enum Shell {
         stdin: String? = nil,
         timeout: Duration? = nil
     ) async throws -> ShellResult {
+        // Spawning a process the caller has already given up on is pure cost: the cancellation
+        // handler below would fork it and SIGTERM it in the same breath. The refresh loop's five
+        // second deadline cancels a whole queue of these at once.
+        try Task.checkCancellation()
+
         guard let path = which(executable) else {
             throw ShellError(command: executable, status: 127, stderr: "\(executable) not found on PATH")
         }

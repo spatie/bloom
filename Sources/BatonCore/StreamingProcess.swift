@@ -12,13 +12,31 @@ public final class StreamingProcess: @unchecked Sendable {
     private let lock = NSLock()
     private var stdoutBuffer = Data()
     private var stderrBuffer = Data()
-    private var stdoutContinuation: AsyncThrowingStream<String, Error>.Continuation?
-    private var stderrContinuation: AsyncStream<String>.Continuation?
     private var exitWaiters: [CheckedContinuation<Int32, Never>] = []
     private var status: Int32?
     private var launchError: Error?
     private var stdinClosed = false
     private var started = false
+    /// Whether each pipe has reported end of file, which is the only trustworthy signal that the
+    /// child is done writing to it.
+    private var stdoutAtEOF = false
+    private var stderrAtEOF = false
+    /// When the last byte arrived on either pipe, used to tell "still flushing" from "finished".
+    private var lastOutputAt = DispatchTime.now()
+    /// When the child exited, recorded the first time `settle` runs for that exit.
+    private var exitedAt: DispatchTime?
+
+    /// Both streams are built here rather than in a `lazy var`.
+    ///
+    /// A `lazy var` on a class carries no synchronisation, so two threads reaching `lines` at the
+    /// same time can each build a stream and store its continuation over the other's. One of the
+    /// two consumers then waits forever on a stream nothing yields into. Building them up front
+    /// also means the continuations exist before the fork, so no output can arrive with nowhere
+    /// to put it, and `start()` failing before anyone touched `lines` still finishes the stream.
+    private let linesStream: AsyncThrowingStream<String, Error>
+    private let linesContinuation: AsyncThrowingStream<String, Error>.Continuation
+    private let errorStream: AsyncStream<String>
+    private let errorContinuation: AsyncStream<String>.Continuation
 
     public let mergeStderr: Bool
 
@@ -26,6 +44,14 @@ public final class StreamingProcess: @unchecked Sendable {
     private let arguments: [String]
     private let cwd: String?
     private let environment: [String: String]
+
+    /// How long after the child exits the pipes may stay silent before the streams are closed
+    /// anyway. A grandchild that inherited stdout holds the pipe open after its parent is gone,
+    /// so waiting for a real EOF alone could wait forever.
+    private static let eofQuietPeriod = DispatchTimeInterval.milliseconds(200)
+    /// The hard stop, for a grandchild that not only holds the pipe but keeps writing to it.
+    private static let eofHardLimit = DispatchTimeInterval.seconds(5)
+    private static let eofPollInterval = DispatchTimeInterval.milliseconds(20)
 
     public init(
         executable: String,
@@ -39,6 +65,20 @@ public final class StreamingProcess: @unchecked Sendable {
         self.cwd = cwd
         self.environment = environment
         self.mergeStderr = mergeStderr
+
+        (linesStream, linesContinuation) = AsyncThrowingStream.makeStream(
+            of: String.self, throwing: Error.self, bufferingPolicy: .unbounded
+        )
+        // stdout is unbounded because every line of it is a transcript event that must not be
+        // dropped. stderr is diagnostics, and the only thing ever read back from it is the tail,
+        // so a bound stops a process that spews warnings from growing a buffer nobody drains.
+        (errorStream, errorContinuation) = AsyncStream.makeStream(
+            of: String.self, bufferingPolicy: .bufferingNewest(4_096)
+        )
+
+        linesContinuation.onTermination = { [weak self] reason in
+            if case .cancelled = reason { self?.terminate() }
+        }
     }
 
     public var isRunning: Bool {
@@ -54,33 +94,16 @@ public final class StreamingProcess: @unchecked Sendable {
 
     /// Lines from stdout, and from stderr too when `mergeStderr` is set. Starts the process on
     /// first use. Only one consumer is supported.
-    public lazy var lines: AsyncThrowingStream<String, Error> = {
-        AsyncThrowingStream<String, Error>(bufferingPolicy: .unbounded) { continuation in
-            lock.lock()
-            stdoutContinuation = continuation
-            lock.unlock()
-
-            continuation.onTermination = { [weak self] reason in
-                if case .cancelled = reason { self?.terminate() }
-            }
-
-            do {
-                try start()
-            } catch {
-                continuation.finish(throwing: error)
-            }
-        }
-    }()
+    public var lines: AsyncThrowingStream<String, Error> {
+        // A launch failure reaches the caller through the stream rather than as a thrown error,
+        // because a property cannot throw and every consumer is already handling stream failure.
+        try? start()
+        return linesStream
+    }
 
     /// Separate stderr stream, used when `mergeStderr` is false. Never throws: a failing process
     /// surfaces through `lines` and `exitStatus`.
-    public lazy var errorLines: AsyncStream<String> = {
-        AsyncStream<String>(bufferingPolicy: .unbounded) { continuation in
-            lock.lock()
-            stderrContinuation = continuation
-            lock.unlock()
-        }
-    }()
+    public var errorLines: AsyncStream<String> { errorStream }
 
     // MARK: - Lifecycle
 
@@ -110,9 +133,11 @@ public final class StreamingProcess: @unchecked Sendable {
             if data.isEmpty {
                 handle.readabilityHandler = nil
                 self.drainStdout(final: true)
+                self.markEOF(stdout: true)
             } else {
                 self.lock.lock()
                 self.stdoutBuffer.append(data)
+                self.lastOutputAt = DispatchTime.now()
                 self.lock.unlock()
                 self.drainStdout(final: false)
             }
@@ -124,22 +149,18 @@ public final class StreamingProcess: @unchecked Sendable {
             if data.isEmpty {
                 handle.readabilityHandler = nil
                 self.drainStderr(final: true)
+                self.markEOF(stdout: false)
             } else {
                 self.lock.lock()
                 self.stderrBuffer.append(data)
+                self.lastOutputAt = DispatchTime.now()
                 self.lock.unlock()
                 self.drainStderr(final: false)
             }
         }
 
         process.terminationHandler = { [weak self] process in
-            guard let self else { return }
-            // Give the readability handlers a moment to flush what is already buffered.
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) {
-                self.drainStdout(final: true)
-                self.drainStderr(final: true)
-                self.finish(status: process.terminationStatus, error: nil)
-            }
+            self?.settle(status: process.terminationStatus, deadline: nil)
         }
 
         do {
@@ -230,29 +251,72 @@ public final class StreamingProcess: @unchecked Sendable {
         }
     }
 
+    // MARK: - Settling
+
+    private func markEOF(stdout: Bool) {
+        lock.lock()
+        if stdout { stdoutAtEOF = true } else { stderrAtEOF = true }
+        lock.unlock()
+    }
+
+    /// Close the streams once the child's output is genuinely complete.
+    ///
+    /// The child exiting says nothing about the pipes: whatever the readability handlers have not
+    /// delivered yet is still in flight, and closing the streams on a fixed delay (it used to be
+    /// 50ms) throws away the tail of a chatty process on a loaded machine. That is the same class
+    /// of bug that made `git diff` come back empty, and here it would silently truncate a setup
+    /// log or drop the agent's final `result` line.
+    ///
+    /// So the wait is for EOF on both pipes, which is the only signal that means "no more bytes".
+    /// EOF can never arrive at all when a grandchild inherited stdout and outlived its parent, so
+    /// two backstops bound it: a quiet period during which nothing new arrived, and a hard limit
+    /// for the grandchild that also keeps writing.
+    private func settle(status: Int32, deadline: DispatchTime?) {
+        let limit = deadline ?? DispatchTime.now() + Self.eofHardLimit
+        let now = DispatchTime.now()
+
+        lock.lock()
+        let sawEOF = stdoutAtEOF && stderrAtEOF
+        let exited = exitedAt ?? now
+        exitedAt = exited
+        // Counted from the exit as well as from the last byte, so a process that fell silent
+        // before exiting still gets the full quiet period for its buffered output to land.
+        let since = max(lastOutputAt, exited)
+        lock.unlock()
+
+        let quiet = now > since + Self.eofQuietPeriod
+        guard sawEOF || quiet || now > limit else {
+            DispatchQueue.global().asyncAfter(deadline: now + Self.eofPollInterval) { [weak self] in
+                self?.settle(status: status, deadline: limit)
+            }
+            return
+        }
+
+        drainStdout(final: true)
+        drainStderr(final: true)
+        finish(status: status, error: nil)
+    }
+
     // MARK: - Draining
 
     private func drainStdout(final: Bool) {
         lock.lock()
         let extracted = Self.extractLines(from: &stdoutBuffer, flushRemainder: final)
-        let continuation = stdoutContinuation
         lock.unlock()
 
-        for line in extracted { continuation?.yield(line) }
+        for line in extracted { linesContinuation.yield(line) }
     }
 
     private func drainStderr(final: Bool) {
         lock.lock()
         let extracted = Self.extractLines(from: &stderrBuffer, flushRemainder: final)
-        let stdout = stdoutContinuation
-        let stderr = stderrContinuation
         lock.unlock()
 
         for line in extracted {
             if mergeStderr {
-                stdout?.yield(line)
+                linesContinuation.yield(line)
             } else {
-                stderr?.yield(line)
+                errorContinuation.yield(line)
             }
         }
     }
@@ -278,14 +342,17 @@ public final class StreamingProcess: @unchecked Sendable {
         guard self.status == nil else { lock.unlock(); return }
         self.status = status
         launchError = error
-        let stdout = stdoutContinuation
-        let stderr = stderrContinuation
         let waiters = exitWaiters
         exitWaiters = []
         lock.unlock()
 
-        stdout?.finish(throwing: error)
-        stderr?.finish()
+        // Nothing will be read from these again, and a live dispatch source on a pipe nobody
+        // drains is a slow leak for the rest of the launch.
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
+
+        linesContinuation.finish(throwing: error)
+        errorContinuation.finish()
         for waiter in waiters { waiter.resume(returning: status) }
     }
 }

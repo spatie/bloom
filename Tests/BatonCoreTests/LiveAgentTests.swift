@@ -14,14 +14,14 @@ import Foundation
 /// captured.
 private let liveEnabled = ProcessInfo.processInfo.environment["BATON_LIVE"] == "1"
 
-@Suite("LiveAgent", .enabled(if: liveEnabled))
+@Suite("LiveAgent", .enabled(if: liveEnabled), .tags(.subprocess), .scratchDirectory)
 struct LiveAgentTests {
     private func makeWorkspace() async throws -> (store: Store, session: Session, path: String, repo: TempRepo) {
         let repo = try await TempRepo()
         try repo.write("notes.txt", "the secret word is pelican\n")
         try await repo.commit("notes")
 
-        let store = try Store(path: NSTemporaryDirectory() + "baton-live-\(UUID().uuidString).sqlite")
+        let store = try makeTestStore("live")
         let manager = WorkspaceManager(store: store)
         let registered = try await manager.addRepository(at: repo.path)
         let workspace = try await manager.createWorkspace(repo: registered, prompt: "Live protocol check")
@@ -79,7 +79,7 @@ struct LiveAgentTests {
         // A tool use row must be findable by its reference id, which is what pairs it with its
         // result in the transcript.
         let toolRows = rows.filter { $0.kind == .toolUse }
-        #expect(!toolRows.isEmpty)
+        #expect(toolRows.isEmpty == false)
         for row in toolRows {
             let refID = try #require(row.refID)
             #expect(try await store.message(sessionID: session.id, refID: refID) != nil)
@@ -146,7 +146,7 @@ struct LiveAgentTests {
         }
         pump.cancel()
 
-        #expect(await !runner.isRunning, "the process was still alive 20 seconds after cancelling")
+        #expect(await runner.isRunning == false, "the process was still alive 20 seconds after cancelling")
 
         // Cancellation bookkeeping is persisted from a detached task, so the state settles a
         // moment after the process dies. Poll rather than reading once.

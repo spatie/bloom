@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 public struct RunScript: Identifiable, Sendable, Hashable {
     public var id: String
@@ -160,18 +161,23 @@ public enum SettingsLoader {
 }
 
 /// The GitHub login, used for branch prefixes. Resolved once per launch because `gh` is slow.
+///
+/// A `Mutex` rather than a lock beside two `nonisolated(unsafe)` variables: the state can then
+/// only be reached through the lock, so "forgot to take it here" stops being possible to write.
 public enum GitHubIdentity {
-    private static let lock = NSLock()
-    nonisolated(unsafe) private static var cached: String?
-    nonisolated(unsafe) private static var resolved = false
+    private struct Identity {
+        var username: String?
+        var resolved = false
+    }
+
+    private static let state = Mutex(Identity())
 
     public static var cachedUsername: String? {
-        lock.lock(); defer { lock.unlock() }
-        return cached
+        state.withLock(\.username)
     }
 
     public static func resolve() async {
-        guard !isResolved() else { return }
+        guard !state.withLock(\.resolved) else { return }
 
         var username: String?
         if let result = try? await Shell.run("gh", ["api", "user", "--jq", ".login"], timeout: .seconds(10)),
@@ -184,18 +190,10 @@ public enum GitHubIdentity {
             username = result.trimmed
         }
 
-        store(username)
-    }
-
-    private static func isResolved() -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        return resolved
-    }
-
-    private static func store(_ username: String?) {
-        lock.lock(); defer { lock.unlock() }
-        cached = username
-        resolved = true
+        state.withLock {
+            $0.username = username
+            $0.resolved = true
+        }
     }
 }
 

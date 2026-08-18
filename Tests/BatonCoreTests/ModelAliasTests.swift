@@ -9,70 +9,67 @@ import Foundation
 ///
 /// The expectations below were checked against the real binary: `opus-5-1m` is rejected,
 /// `claude-opus-5[1m]` and `opus` are accepted.
-@Suite("Model aliases")
+@Suite("Model aliases", .tags(.agentProtocol))
 struct ModelAliasTests {
     @Test("translates the Conductor id that was breaking every run")
     func translatesTheBrokenOne() {
         #expect(ModelAlias.cliValue(for: "opus-5-1m") == "claude-opus-5[1m]")
     }
 
-    @Test("translates the rest of the Conductor family names")
-    func translatesTheFamily() {
-        #expect(ModelAlias.cliValue(for: "opus-5") == "claude-opus-5")
-        #expect(ModelAlias.cliValue(for: "sonnet-5") == "claude-sonnet-5")
-        #expect(ModelAlias.cliValue(for: "haiku-4-5") == "claude-haiku-4-5")
-        #expect(ModelAlias.cliValue(for: "sonnet-5-1m") == "claude-sonnet-5[1m]")
+    @Test("translates a Conductor family name into the id the CLI accepts", arguments: [
+        ("opus-5", "claude-opus-5"),
+        ("sonnet-5", "claude-sonnet-5"),
+        ("haiku-4-5", "claude-haiku-4-5"),
+        ("sonnet-5-1m", "claude-sonnet-5[1m]"),
+    ])
+    func translatesTheFamily(conductorID: String, cliID: String) {
+        #expect(ModelAlias.cliValue(for: conductorID) == cliID)
     }
 
-    @Test("leaves the CLI's own shorthand alone")
-    func leavesShorthandAlone() {
-        #expect(ModelAlias.cliValue(for: "opus") == "opus")
-        #expect(ModelAlias.cliValue(for: "sonnet") == "sonnet")
-        #expect(ModelAlias.cliValue(for: "haiku") == "haiku")
-    }
-
-    @Test("leaves a fully qualified id alone")
-    func leavesQualifiedAlone() {
+    @Test("leaves alone anything the CLI already understands", arguments: [
+        // The CLI's own shorthand.
+        "opus", "sonnet", "haiku",
         // Someone who typed an exact build knows what they want, and rewriting it would be worse
         // than passing it through.
-        #expect(ModelAlias.cliValue(for: "claude-opus-5") == "claude-opus-5")
-        #expect(ModelAlias.cliValue(for: "claude-opus-5[1m]") == "claude-opus-5[1m]")
-        #expect(ModelAlias.cliValue(for: "claude-haiku-4-5-20251001") == "claude-haiku-4-5-20251001")
+        "claude-opus-5", "claude-opus-5[1m]", "claude-haiku-4-5-20251001",
+    ])
+    func leavesKnownIDsAlone(modelID: String) {
+        #expect(ModelAlias.cliValue(for: modelID) == modelID)
     }
 
-    @Test("falls back rather than guessing")
-    func fallsBack() {
-        // Empty means "nothing was chosen", which is the one case where a default is right.
-        #expect(ModelAlias.cliValue(for: "") == "opus")
-        #expect(ModelAlias.cliValue(for: "   ") == "opus")
-        // An id in no shape we recognise is passed through: turning it into something else would
-        // break a model the CLI might well accept.
-        #expect(ModelAlias.cliValue(for: "gpt-5") == "gpt-5")
-        #expect(ModelAlias.cliValue(for: "opus-next") == "opus-next")
+    @Test("falls back to opus only when nothing was chosen", arguments: ["", "   ", "\t\n"])
+    func fallsBackForBlankInput(blank: String) {
+        #expect(ModelAlias.cliValue(for: blank) == "opus")
     }
 
-    @Test("normalises whitespace and case")
-    func normalises() {
-        #expect(ModelAlias.cliValue(for: "  Opus-5-1M  ") == "claude-opus-5[1m]")
-        #expect(ModelAlias.cliValue(for: "OPUS") == "opus")
+    @Test("passes an unrecognised id through rather than guessing", arguments: ["gpt-5", "opus-next"])
+    func passesUnknownIDsThrough(modelID: String) {
+        // Turning it into something else would break a model the CLI might well accept.
+        #expect(ModelAlias.cliValue(for: modelID) == modelID)
+    }
+
+    @Test("normalises whitespace and case", arguments: [
+        ("  Opus-5-1M  ", "claude-opus-5[1m]"),
+        ("OPUS", "opus"),
+        ("\tsonnet-5\n", "claude-sonnet-5"),
+    ])
+    func normalises(input: String, expected: String) {
+        #expect(ModelAlias.cliValue(for: input) == expected)
     }
 
     @Test("the runner sends the translated value, not the stored one")
-    func runnerTranslates() {
+    func runnerTranslates() throws {
         let session = Session(workspaceID: "w", model: "opus-5-1m")
         let argv = AgentRunner.argv(session: session, resume: nil)
-        guard let index = argv.firstIndex(of: "--model") else {
-            Issue.record("argv carries no --model")
-            return
-        }
+        let index = try #require(argv.firstIndex(of: "--model"), "argv carries no --model")
         #expect(argv[index + 1] == "claude-opus-5[1m]")
-        #expect(!argv.contains("opus-5-1m"))
+        #expect(argv.contains("opus-5-1m") == false)
     }
 
-    @Test("never produces an empty model argument")
-    func neverEmpty() {
-        for raw in ["", " ", "opus", "opus-5-1m", "claude-opus-5", "nonsense"] {
-            #expect(!ModelAlias.cliValue(for: raw).isEmpty)
-        }
+    @Test("never produces an empty model argument", arguments: [
+        "", " ", "opus", "opus-5-1m", "claude-opus-5", "nonsense",
+    ])
+    func neverEmpty(raw: String) {
+        #expect(ModelAlias.cliValue(for: raw).isEmpty == false)
     }
 }

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import BatonCore
 
-@Suite("GitHub")
+@Suite("GitHub", .tags(.agentProtocol))
 struct GitHubTests {
     @Test("decodes all passing check shapes")
     func allPassing() throws {
@@ -43,39 +43,41 @@ struct GitHubTests {
         #expect(pullRequest.reviewDecision == "APPROVED")
     }
 
-    @Test("a failing required check fails the rollup")
-    func requiredFailure() throws {
-        let pullRequest = try decode(jsonWithChecks("""
-        {"__typename":"CheckRun","name":"Tests","status":"COMPLETED","conclusion":"FAILURE","isRequired":true}
-        """))
-        #expect(pullRequest.checks == .failing)
-        #expect(pullRequest.checksSummary == "1 required check failed")
-    }
-
-    @Test("an optional failure does not fail the rollup")
-    func optionalFailure() throws {
-        let pullRequest = try decode(jsonWithChecks("""
-        {"__typename":"StatusContext","context":"preview","state":"FAILURE","isRequired":false}
-        """))
-        #expect(pullRequest.checks == .passing)
-        #expect(pullRequest.checksSummary == "1 optional check failed")
-    }
-
-    @Test("queued and running checks are pending")
-    func pending() throws {
-        let pullRequest = try decode(jsonWithChecks("""
-        {"__typename":"CheckRun","name":"Tests","status":"IN_PROGRESS","conclusion":null},
-        {"__typename":"StatusContext","context":"deploy","state":"PENDING"}
-        """))
-        #expect(pullRequest.checks == .pending)
-        #expect(pullRequest.checksSummary == "2 checks pending")
-    }
-
-    @Test("an empty rollup has no checks")
-    func noChecks() throws {
-        let pullRequest = try decode(jsonWithChecks(""))
-        #expect(pullRequest.checks == .none)
-        #expect(pullRequest.checksSummary == "No checks")
+    /// The rollup mixes two GraphQL node shapes, `CheckRun` (a GitHub Actions job) and
+    /// `StatusContext` (a third-party commit status), and each spells its outcome differently.
+    @Test("rolls a mixed set of check nodes up into one verdict", arguments: [
+        (
+            name: "a required failure fails the rollup",
+            nodes: #"{"__typename":"CheckRun","name":"Tests","status":"COMPLETED","conclusion":"FAILURE","isRequired":true}"#,
+            checks: PullRequest.Checks.failing,
+            summary: "1 required check failed"
+        ),
+        (
+            name: "an optional failure does not fail the rollup",
+            nodes: #"{"__typename":"StatusContext","context":"preview","state":"FAILURE","isRequired":false}"#,
+            checks: .passing,
+            summary: "1 optional check failed"
+        ),
+        (
+            name: "queued and running checks are pending",
+            nodes: #"{"__typename":"CheckRun","name":"Tests","status":"IN_PROGRESS","conclusion":null},"#
+                + #"{"__typename":"StatusContext","context":"deploy","state":"PENDING"}"#,
+            checks: .pending,
+            summary: "2 checks pending"
+        ),
+        (
+            name: "an empty rollup has no checks",
+            nodes: "",
+            checks: .none,
+            summary: "No checks"
+        ),
+    ])
+    func rollsChecksUp(
+        name: String, nodes: String, checks: PullRequest.Checks, summary: String
+    ) throws {
+        let pullRequest = try decode(jsonWithChecks(nodes))
+        #expect(pullRequest.checks == checks, "\(name)")
+        #expect(pullRequest.checksSummary == summary, "\(name)")
     }
 
     @Test("decodes a draft and a null review decision")
@@ -92,7 +94,7 @@ struct GitHubTests {
         let pullRequest = try decode("""
         {"number":8,"title":"Small PR","url":"https://example/8","state":"OPEN","statusCheckRollup":[{"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"SUCCESS"}]}
         """)
-        #expect(!pullRequest.isDraft)
+        #expect(pullRequest.isDraft == false)
         #expect(pullRequest.mergeable == nil)
         #expect(pullRequest.checks == .passing)
     }
@@ -107,7 +109,7 @@ struct GitHubTests {
     @Test("recognizes gh's missing pull request error")
     func noPullRequestError() {
         #expect(GitHub.indicatesNoPullRequest(stderr: "no pull requests found for branch feature"))
-        #expect(!GitHub.indicatesNoPullRequest(stderr: "HTTP 503 service unavailable"))
+        #expect(GitHub.indicatesNoPullRequest(stderr: "HTTP 503 service unavailable") == false)
     }
 
     private func decode(_ json: String) throws -> PullRequest {

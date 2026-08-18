@@ -4,10 +4,6 @@ import Foundation
 
 // MARK: - Fixtures
 
-private func makeStore() throws -> Store {
-    try Store(path: NSTemporaryDirectory() + "baton-agent-\(UUID().uuidString).sqlite")
-}
-
 /// A workspace and a session in a throwaway database, because messages are foreign keyed all the
 /// way up to a repo.
 private func makeSession(_ store: Store, permissionMode: PermissionMode = .acceptEdits) async throws -> Session {
@@ -132,16 +128,9 @@ private final class ProcessRecorder: @unchecked Sendable {
     var last: FakeProcess? { all.last }
 }
 
-private func waitFor(_ condition: @Sendable () async -> Bool) async {
-    for _ in 0..<400 {
-        if await condition() { return }
-        try? await Task.sleep(for: .milliseconds(10))
-    }
-}
-
 // MARK: - Tests
 
-@Suite("AgentRunner argv")
+@Suite("AgentRunner argv", .tags(.agentProtocol), .scratchDirectory)
 struct AgentRunnerArgvTests {
     @Test("builds the invocation PROTOCOL.md specifies")
     func buildsArgv() {
@@ -158,12 +147,12 @@ struct AgentRunnerArgvTests {
     }
 
     @Test("appends resume when there is an agent session to resume")
-    func appendsResume() {
+    func appendsResume() throws {
         let session = Session(workspaceID: "w", model: "sonnet")
         let argv = AgentRunner.argv(session: session, resume: "f93932c9-cf0b-40d8-881c-ac75db3f8740")
         #expect(argv.suffix(2) == ["--resume", "f93932c9-cf0b-40d8-881c-ac75db3f8740"])
-        #expect(argv.contains("--model"))
-        #expect(argv[argv.firstIndex(of: "--model")! + 1] == "sonnet")
+        let model = try #require(argv.firstIndex(of: "--model"))
+        #expect(argv[model + 1] == "sonnet")
     }
 
     @Test("leaves resume off for an empty or missing id")
@@ -173,26 +162,30 @@ struct AgentRunnerArgvTests {
         #expect(AgentRunner.argv(session: session, resume: nil).contains("--resume") == false)
     }
 
-    @Test("maps every permission mode to a value the CLI accepts")
-    func mapsPermissionModes() {
-        let expected: [PermissionMode: String] = [
-            .auto: "auto",
-            .acceptEdits: "acceptEdits",
-            .bypassPermissions: "bypassPermissions",
-            .plan: "plan",
-        ]
-        for mode in PermissionMode.allCases {
-            let session = Session(workspaceID: "w", permissionMode: mode)
-            let argv = AgentRunner.argv(session: session, resume: nil)
-            let index = argv.firstIndex(of: "--permission-mode")!
-            #expect(argv[index + 1] == expected[mode])
-            #expect(mode.cliValue == expected[mode])
-        }
+    @Test("maps every permission mode to a value the CLI accepts", arguments: [
+        (PermissionMode.auto, "auto"),
+        (.acceptEdits, "acceptEdits"),
+        (.bypassPermissions, "bypassPermissions"),
+        (.plan, "plan"),
+    ])
+    func mapsPermissionModes(mode: PermissionMode, cliValue: String) throws {
+        let session = Session(workspaceID: "w", permissionMode: mode)
+        let argv = AgentRunner.argv(session: session, resume: nil)
+        let index = try #require(argv.firstIndex(of: "--permission-mode"))
+        #expect(argv[index + 1] == cliValue)
+        #expect(mode.cliValue == cliValue)
+    }
+
+    @Test("covers every permission mode the app can be in")
+    func coversEveryPermissionMode() {
+        // A new case added to the enum has to be added to the table above too, or the CLI is
+        // handed a value nothing checked.
+        #expect(PermissionMode.allCases.count == 4)
     }
 
     @Test("launches in the worktree, resuming once the agent session is known")
     func buildsLaunch() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("agent")
         var session = try await makeSession(store)
         session.agentSessionID = "resume-me"
         let runner = AgentRunner(workspacePath: "/tmp/worktree", session: session, store: store)
@@ -217,11 +210,11 @@ struct AgentRunnerArgvTests {
     }
 }
 
-@Suite("AgentRunner persistence")
+@Suite("AgentRunner persistence", .tags(.agentProtocol, .persistence), .scratchDirectory)
 struct AgentRunnerPersistenceTests {
     @Test("stores every transcript row in order with the raw JSON")
     func storesTranscript() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("agent")
         let session = try await makeSession(store)
         let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
 
@@ -245,7 +238,7 @@ struct AgentRunnerPersistenceTests {
 
     @Test("files tool use rows under their tool_use id so results can pair up")
     func filesRefIDs() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("agent")
         let session = try await makeSession(store)
         let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
 
@@ -265,7 +258,7 @@ struct AgentRunnerPersistenceTests {
 
     @Test("drops stream deltas from the transcript unless asked to keep them")
     func dropsStreamDeltas() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("agent")
         let session = try await makeSession(store)
         let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
 
@@ -280,7 +273,7 @@ struct AgentRunnerPersistenceTests {
 
     @Test("persists the agent session id the moment init arrives")
     func persistsAgentSessionID() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("agent")
         let session = try await makeSession(store)
         let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
 
@@ -294,7 +287,7 @@ struct AgentRunnerPersistenceTests {
 
     @Test("rolls the result usage into the session")
     func updatesSessionOnResult() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("agent")
         let session = try await makeSession(store)
         let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
 
@@ -318,7 +311,7 @@ struct AgentRunnerPersistenceTests {
 
     @Test("marks the session failed when the result says so")
     func failsOnErrorResult() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("agent")
         let session = try await makeSession(store)
         let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
 
@@ -333,7 +326,7 @@ struct AgentRunnerPersistenceTests {
 
     @Test("continues the sequence of an already stored transcript")
     func continuesSeq() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("agent")
         let session = try await makeSession(store)
         try await store.append(Message(
             sessionID: session.id, seq: 0, kind: .user, payload: Data("{}".utf8)
@@ -352,18 +345,17 @@ struct AgentRunnerPersistenceTests {
     }
 }
 
-@Suite("AgentRunner process")
+@Suite("AgentRunner process", .tags(.agentProtocol, .subprocess), .scratchDirectory, .timeLimit(.minutes(1)))
 struct AgentRunnerProcessTests {
     @Test("sends a turn, replays the stream, and lands idle")
     func runsATurn() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("agent")
         let session = try await makeSession(store)
         let recorder = ProcessRecorder()
         let runner = AgentRunner(
             workspacePath: "/tmp/w", session: session, store: store, makeProcess: recorder.factory
         )
 
-        var received: [AgentEvent] = []
         let collector = Task {
             var events: [AgentEvent] = []
             for await event in runner.events {
@@ -383,11 +375,11 @@ struct AgentRunnerProcessTests {
             == "do the thing")
 
         for line in try fixtureSessionLines() { process.emit(line) }
-        received = await collector.value
+        let received = await collector.value
         process.endOutput()
 
         #expect(received.count == 55)
-        await waitFor { await runner.isRunning == false }
+        await waitUntil("the runner stopped") { await runner.isRunning == false }
 
         let reloaded = try #require(try await store.session(id: session.id))
         #expect(reloaded.agentSessionID == "f93932c9-cf0b-40d8-881c-ac75db3f8740")
@@ -402,7 +394,7 @@ struct AgentRunnerProcessTests {
 
     @Test("records an error row and fails the session on a non-zero exit with no result")
     func failsWithoutResult() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("agent")
         let session = try await makeSession(store)
         let recorder = ProcessRecorder(status: 2)
         let runner = AgentRunner(
@@ -415,7 +407,7 @@ struct AgentRunnerProcessTests {
         process.emit(#"{"type":"system","subtype":"status","status":"requesting","session_id":"s"}"#)
         process.endOutput()
 
-        await waitFor { (try? await store.session(id: session.id)?.state) == .failed }
+        await waitUntil("the session was marked failed") { (try? await store.session(id: session.id)?.state) == .failed }
 
         let reloaded = try #require(try await store.session(id: session.id))
         #expect(reloaded.state == .failed)
@@ -429,7 +421,7 @@ struct AgentRunnerProcessTests {
 
     @Test("cancelling terminates the process and marks the session cancelled")
     func cancels() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("agent")
         let session = try await makeSession(store)
         let recorder = ProcessRecorder()
         let runner = AgentRunner(
@@ -441,14 +433,14 @@ struct AgentRunnerProcessTests {
 
         await runner.cancel()
         #expect(process.wasTerminated)
-        await waitFor { (try? await store.session(id: session.id)?.state) == .cancelled }
+        await waitUntil("the session was marked cancelled") { (try? await store.session(id: session.id)?.state) == .cancelled }
         #expect(try await store.session(id: session.id)?.state == .cancelled)
         #expect(await runner.isRunning == false)
     }
 
     @Test("cancelNow signals without awaiting the actor")
     func cancelsFromSyncCode() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("agent")
         let session = try await makeSession(store)
         let recorder = ProcessRecorder()
         let runner = AgentRunner(
@@ -460,13 +452,13 @@ struct AgentRunnerProcessTests {
 
         runner.cancelNow()
         #expect(process.wasTerminated)
-        await waitFor { (try? await store.session(id: session.id)?.state) == .cancelled }
+        await waitUntil("the session was marked cancelled") { (try? await store.session(id: session.id)?.state) == .cancelled }
         #expect(try await store.session(id: session.id)?.state == .cancelled)
     }
 
     @Test("a second turn reuses the running process")
     func reusesProcess() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("agent")
         let session = try await makeSession(store)
         let recorder = ProcessRecorder()
         let runner = AgentRunner(

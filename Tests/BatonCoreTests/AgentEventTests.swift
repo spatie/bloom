@@ -2,31 +2,6 @@ import Testing
 import Foundation
 @testable import BatonCore
 
-/// The captured session lives in the repo, not in a resource bundle, so it is found by walking up
-/// from this file. Symlinks are resolved too, because the core suite is run from a mirrored
-/// package that has no app target (see test-core.sh).
-func batonFixtureLines(_ name: String) throws -> [String] {
-    let starts = [
-        URL(fileURLWithPath: #filePath),
-        URL(fileURLWithPath: #filePath).resolvingSymlinksInPath(),
-    ]
-
-    for start in starts {
-        var directory = start.deletingLastPathComponent()
-        for _ in 0..<8 {
-            let candidate = directory.appendingPathComponent("fixtures").appendingPathComponent(name)
-            if FileManager.default.fileExists(atPath: candidate.path) {
-                return try String(contentsOf: candidate, encoding: .utf8)
-                    .components(separatedBy: "\n")
-                    .filter { !$0.isEmpty }
-            }
-            directory = directory.deletingLastPathComponent()
-        }
-    }
-
-    throw CocoaError(.fileNoSuchFile)
-}
-
 private func fixtureLines(_ name: String) throws -> [String] {
     try batonFixtureLines(name)
 }
@@ -70,13 +45,15 @@ private struct Tally {
     }
 }
 
-private func decodedFixture() throws -> [AgentEvent] {
+private func decodedFixture(sourceLocation: SourceLocation = #_sourceLocation) throws -> [AgentEvent] {
     let lines = try fixtureLines("session-basic.jsonl")
-    #expect(lines.count == 55)
+    // Reported against the calling test, so a truncated fixture does not look like a decoder bug
+    // in whichever test happened to run first.
+    try #require(lines.count == 55, "the captured session changed size", sourceLocation: sourceLocation)
     return lines.compactMap { AgentEvent.decode(line: $0) }
 }
 
-@Suite("AgentEvent")
+@Suite("AgentEvent", .tags(.agentProtocol))
 struct AgentEventTests {
     @Test("decodes every line of the captured session")
     func decodesEveryLine() throws {
@@ -108,7 +85,7 @@ struct AgentEventTests {
     @Test("keeps the raw line on every stored event")
     func keepsRawLines() throws {
         for event in try decodedFixture() where event.isTranscriptRow {
-            #expect(!event.raw.isEmpty)
+            #expect(event.raw.isEmpty == false)
             #expect(JSONValue.parse(event.raw) != nil)
         }
     }
@@ -456,7 +433,7 @@ struct AgentEventTests {
     }
 }
 
-@Suite("JSONValue")
+@Suite("JSONValue", .tags(.agentProtocol))
 struct JSONValueTests {
     @Test("reads through objects and arrays")
     func readsNestedValues() throws {

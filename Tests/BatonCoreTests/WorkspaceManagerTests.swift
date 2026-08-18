@@ -2,17 +2,13 @@ import Testing
 import Foundation
 @testable import BatonCore
 
-@Suite("WorkspaceManager")
+@Suite("WorkspaceManager", .tags(.git), .scratchDirectory)
 struct WorkspaceManagerTests {
-    private func makeStore() throws -> Store {
-        try Store(path: NSTemporaryDirectory() + "baton-wm-\(UUID().uuidString).sqlite")
-    }
-
     @Test("registers a repository once, and finds its default branch")
     func registersRepository() async throws {
         let repo = try await TempRepo(defaultBranch: "main")
         defer { repo.cleanUp() }
-        let manager = WorkspaceManager(store: try makeStore())
+        let manager = WorkspaceManager(store: try makeTestStore("wm"))
 
         let added = try await manager.addRepository(at: repo.path)
         #expect(added.defaultBranch == "main")
@@ -26,13 +22,16 @@ struct WorkspaceManagerTests {
 
     @Test("refuses a folder that is not a repository")
     func refusesNonRepository() async throws {
-        let manager = WorkspaceManager(store: try makeStore())
-        let plain = NSTemporaryDirectory() + "baton-plain-\(UUID().uuidString)"
+        let manager = WorkspaceManager(store: try makeTestStore("wm"))
+        let plain = TestScratch.unique("baton-plain")
         try FileManager.default.createDirectory(atPath: plain, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(atPath: plain) }
 
-        await #expect(throws: WorkspaceError.self) {
+        let error = await #expect(throws: WorkspaceError.self) {
             try await manager.addRepository(at: plain)
+        }
+        guard case .notARepository? = error else {
+            Issue.record("expected notARepository, got \(String(describing: error))")
+            return
         }
     }
 
@@ -40,7 +39,7 @@ struct WorkspaceManagerTests {
     func createsWorkspace() async throws {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
-        let store = try makeStore()
+        let store = try makeTestStore("wm")
         let manager = WorkspaceManager(store: store)
         let registered = try await manager.addRepository(at: repo.path)
 
@@ -48,7 +47,6 @@ struct WorkspaceManagerTests {
             repo: registered,
             prompt: "Stop the silent field clear when a value is missing"
         )
-        defer { Task { try? await Git.removeWorktree(repo: repo.path, path: workspace.path) } }
 
         #expect(workspace.branch == "stop-silent-field-clear-when")
         #expect(workspace.name == "Stop the silent field clear when a value is missing")
@@ -65,17 +63,11 @@ struct WorkspaceManagerTests {
     func avoidsBranchCollisions() async throws {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
-        let manager = WorkspaceManager(store: try makeStore())
+        let manager = WorkspaceManager(store: try makeTestStore("wm"))
         let registered = try await manager.addRepository(at: repo.path)
 
         let first = try await manager.createWorkspace(repo: registered, prompt: "Fix the flaky test")
         let second = try await manager.createWorkspace(repo: registered, prompt: "Fix the flaky test")
-        defer {
-            Task {
-                try? await Git.removeWorktree(repo: repo.path, path: first.path)
-                try? await Git.removeWorktree(repo: repo.path, path: second.path)
-            }
-        }
 
         #expect(first.branch == "fix-flaky-test")
         #expect(second.branch == "fix-flaky-test-2")
@@ -92,16 +84,15 @@ struct WorkspaceManagerTests {
         try repo.write("secret.key", "shh\n")
         // .env files are deliberately not committed, which is exactly why they must be copied.
 
-        let manager = WorkspaceManager(store: try makeStore())
+        let manager = WorkspaceManager(store: try makeTestStore("wm"))
         let registered = try await manager.addRepository(at: repo.path)
         let workspace = try await manager.createWorkspace(repo: registered, prompt: "Copy env files")
-        defer { Task { try? await Git.removeWorktree(repo: repo.path, path: workspace.path) } }
 
         let worktree = TempRepo(existing: workspace.path)
         #expect(worktree.read(".env") == "APP_ENV=local\n")
         #expect(worktree.read(".env.testing") == "APP_ENV=testing\n")
         // The default pattern is .env* only, so nothing else should have travelled.
-        #expect(!worktree.exists("secret.key"))
+        #expect(worktree.exists("secret.key") == false)
     }
 
     @Test("honours a repo's settings file for the branch prefix and copied files")
@@ -119,21 +110,21 @@ struct WorkspaceManagerTests {
         try repo.write("secret.key", "shh\n")
         try repo.write(".env", "x\n")
 
-        let manager = WorkspaceManager(store: try makeStore())
+        let manager = WorkspaceManager(store: try makeTestStore("wm"))
         let registered = try await manager.addRepository(at: repo.path)
         let workspace = try await manager.createWorkspace(repo: registered, prompt: "Use the settings file")
-        defer { Task { try? await Git.removeWorktree(repo: repo.path, path: workspace.path) } }
 
         #expect(workspace.branch == "freek/use-settings-file")
         // A slash in the branch must not create a nested directory.
-        #expect(!workspace.path.contains("freek/use"))
+        #expect(workspace.path.contains("freek/use") == false)
+        #expect(workspace.path.hasSuffix("freek-use-settings-file"))
 
         let worktree = TempRepo(existing: workspace.path)
         #expect(worktree.exists("secret.key"))
         #expect(worktree.exists(".env"))
     }
 
-    @Test("runs the setup script with the workspace environment exported")
+    @Test("runs the setup script with the workspace environment exported", .tags(.subprocess))
     func runsSetupScript() async throws {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
@@ -149,11 +140,10 @@ struct WorkspaceManagerTests {
         '''
         """)
 
-        let store = try makeStore()
+        let store = try makeTestStore("wm")
         let manager = WorkspaceManager(store: store)
         let registered = try await manager.addRepository(at: repo.path)
         let workspace = try await manager.createWorkspace(repo: registered, prompt: "Run setup")
-        defer { Task { try? await Git.removeWorktree(repo: repo.path, path: workspace.path) } }
 
         #expect(workspace.setupState == .pending)
 
@@ -166,7 +156,8 @@ struct WorkspaceManagerTests {
         let output = collector.joined
         #expect(output.contains("name=run-setup"))
         // The temp directory reaches the child through /private/var, so compare the last component.
-        #expect(output.contains("root=") && output.contains(URL(fileURLWithPath: repo.path).lastPathComponent))
+        #expect(output.contains("root="))
+        #expect(output.contains(URL(fileURLWithPath: repo.path).lastPathComponent))
         #expect(output.contains("port=3100"))
         #expect(output.contains("local=1"))
 
@@ -175,7 +166,7 @@ struct WorkspaceManagerTests {
         #expect(try await store.workspace(id: workspace.id)?.setupState == .succeeded)
     }
 
-    @Test("records a failing setup script rather than pretending it worked")
+    @Test("records a failing setup script rather than pretending it worked", .tags(.subprocess))
     func recordsFailingSetup() async throws {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
@@ -187,21 +178,20 @@ struct WorkspaceManagerTests {
         '''
         """)
 
-        let store = try makeStore()
+        let store = try makeTestStore("wm")
         let manager = WorkspaceManager(store: store)
         let registered = try await manager.addRepository(at: repo.path)
         let workspace = try await manager.createWorkspace(repo: registered, prompt: "Fail setup")
-        defer { Task { try? await Git.removeWorktree(repo: repo.path, path: workspace.path) } }
 
         let succeeded = await manager.runSetup(workspace: workspace, repo: registered, port: 0) { _ in }
-        #expect(!succeeded)
+        #expect(succeeded == false)
 
         let stored = try await store.workspace(id: workspace.id)
         #expect(stored?.setupState == .failed)
         #expect(stored?.setupLog.contains("about to fail") == true)
     }
 
-    @Test("archiving removes the worktree and runs the archive script")
+    @Test("archiving removes the worktree and runs the archive script", .tags(.destructive))
     func archivesWorkspace() async throws {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
@@ -210,14 +200,14 @@ struct WorkspaceManagerTests {
         archive = 'echo archived > "$BATON_ROOT_PATH/archive-marker.txt"'
         """)
 
-        let store = try makeStore()
+        let store = try makeTestStore("wm")
         let manager = WorkspaceManager(store: store)
         let registered = try await manager.addRepository(at: repo.path)
         let workspace = try await manager.createWorkspace(repo: registered, prompt: "Archive me")
 
         try await manager.archive(workspace: workspace, repo: registered)
 
-        #expect(!FileManager.default.fileExists(atPath: workspace.path))
+        #expect(FileManager.default.fileExists(atPath: workspace.path) == false)
         #expect(repo.exists("archive-marker.txt"))
         #expect(try await store.workspace(id: workspace.id)?.state == .archived)
         #expect(try await store.workspaces().isEmpty)
@@ -225,52 +215,29 @@ struct WorkspaceManagerTests {
         #expect(await Git.branchExists(workspace.branch, in: repo.path))
     }
 
-    @Test("archiving can delete the branch when asked")
+    @Test("archiving can delete the branch when asked", .tags(.destructive))
     func archivesAndDeletesBranch() async throws {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
-        let manager = WorkspaceManager(store: try makeStore())
+        let manager = WorkspaceManager(store: try makeTestStore("wm"))
         let registered = try await manager.addRepository(at: repo.path)
         let workspace = try await manager.createWorkspace(repo: registered, prompt: "Delete my branch")
 
         try await manager.archive(workspace: workspace, repo: registered, deleteBranch: true)
-        #expect(await !Git.branchExists(workspace.branch, in: repo.path))
+        #expect(await Git.branchExists(workspace.branch, in: repo.path) == false)
     }
 
-    @Test("matches copy patterns the way a shell glob would")
-    func matchesGlobs() throws {
-        let manager = WorkspaceManager(store: try makeStore())
-        #expect(manager.matches(".env", pattern: ".env*"))
-        #expect(manager.matches(".env.local", pattern: ".env*"))
-        #expect(!manager.matches("env", pattern: ".env*"))
-        #expect(manager.matches("secret.key", pattern: "secret.key"))
-        #expect(!manager.matches("secret.key2", pattern: "secret.key"))
-        #expect(manager.matches("a.txt", pattern: "?.txt"))
-    }
-
-    @Test("allocates a free port and does not hand out the same one twice")
-    func allocatesPorts() throws {
-        // Its own range, away from the other port test. See the note in GitSafetyTests.
-        let base = 42_000
-        let first = try PortAllocator.allocate(taken: [], start: base)
-        let second = try PortAllocator.allocate(taken: [first], start: base)
-        #expect(first >= base)
-        #expect(second != first)
-        #expect((second - first) % 10 == 0)
-    }
-}
-
-/// Collects streamed script output from a `@Sendable` callback.
-final class LineCollector: @unchecked Sendable {
-    private let lock = NSLock()
-    private var lines: [String] = []
-
-    func append(_ line: String) {
-        lock.lock(); lines.append(line); lock.unlock()
-    }
-
-    var joined: String {
-        lock.lock(); defer { lock.unlock() }
-        return lines.joined(separator: "\n")
+    @Test("matches copy patterns the way a shell glob would", arguments: [
+        (".env", ".env*", true),
+        (".env.local", ".env*", true),
+        ("env", ".env*", false),
+        ("secret.key", "secret.key", true),
+        ("secret.key2", "secret.key", false),
+        ("a.txt", "?.txt", true),
+        ("ab.txt", "?.txt", false),
+    ])
+    func matchesGlobs(name: String, pattern: String, expected: Bool) throws {
+        let manager = WorkspaceManager(store: try makeTestStore("wm"))
+        #expect(manager.matches(name, pattern: pattern) == expected)
     }
 }

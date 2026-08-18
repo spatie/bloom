@@ -11,14 +11,12 @@ struct HomeView: View {
 
     @State private var hovered: String?
 
-    /// Cards refresh together, so sharing one formatter avoids repeated ICU setup per card.
-    @MainActor private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter
-    }()
+    /// The recent workspaces per project, sorted once when the data changes rather than on every
+    /// redraw. Home is on screen while agents are running, so `body` runs constantly.
+    @State private var sections: [SidebarRepoGroup] = []
 
-    private let columns = [GridItem(.adaptive(minimum: 240, maximum: 360), spacing: 10)]
+    /// Enough to fill the grid without turning Home into a second sidebar.
+    private static let perProject = 9
 
     var body: some View {
         Group {
@@ -30,11 +28,8 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.windowBackground)
-    }
-
-    /// Handed to `RootView`, which owns the only create sheet in the app.
-    private func requestWorkspace(in repo: Repo?) {
-        NotificationCenter.default.post(name: .batonNewWorkspace, object: repo)
+        .onChange(of: app.repos, initial: true) { _, _ in rebuild() }
+        .onChange(of: app.workspaces) { _, _ in rebuild() }
     }
 
     // MARK: - Populated
@@ -42,43 +37,25 @@ struct HomeView: View {
     private var content: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                welcome
+                HomeWelcomeHeader(
+                    greeting: greeting,
+                    summary: summary,
+                    onCreateWorkspace: { requestWorkspace(in: nil) }
+                )
 
-                ForEach(app.repos) { repo in
-                    let workspaces = recent(in: repo)
-                    if !workspaces.isEmpty {
-                        section(repo, workspaces)
-                    }
+                ForEach(sections) { section in
+                    HomeRepoSection(
+                        repo: section.repo,
+                        workspaces: section.workspaces,
+                        hovered: $hovered,
+                        onCreateWorkspace: { requestWorkspace(in: $0) },
+                        onSelect: select
+                    )
                 }
             }
             .padding(28)
             .frame(maxWidth: 1_100, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
-        }
-    }
-
-    private var welcome: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(greeting)
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(Palette.textPrimary)
-                Text(summary)
-                    .font(Typo.body)
-                    .foregroundStyle(Palette.textSecondary)
-            }
-
-            Spacer(minLength: 12)
-
-            Button {
-                requestWorkspace(in: nil)
-            } label: {
-                Label("New workspace", systemImage: "plus")
-                    .font(Typo.bodyEmphasis)
-                    .padding(.horizontal, 4)
-            }
-            .controlSize(.large)
-            .buttonStyle(.borderedProminent)
         }
     }
 
@@ -96,118 +73,47 @@ struct HomeView: View {
         return "\(workspaces), \(unread) waiting to be read."
     }
 
-    private func recent(in repo: Repo) -> [Workspace] {
-        app.workspaces(in: repo)
-            .sorted { $0.lastActivityAt > $1.lastActivityAt }
-            .prefix(9)
-            .map { $0 }
-    }
-
-    private func section(_ repo: Repo, _ workspaces: [Workspace]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 7) {
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(Color(hexString: repo.accent))
-                    .frame(width: 10, height: 10)
-                Text(repo.name)
-                    .font(Typo.title)
-                    .foregroundStyle(Palette.textPrimary)
-                Text(repo.defaultBranch)
-                    .font(Typo.codeTiny)
-                    .foregroundStyle(Palette.textTertiary)
-
-                Spacer(minLength: 8)
-
-                Button {
-                    requestWorkspace(in: repo)
-                } label: {
-                    Label("New", systemImage: "plus")
-                        .font(Typo.label)
-                }
-                .buttonStyle(.borderless)
-            }
-
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
-                ForEach(workspaces) { workspace in
-                    card(workspace)
-                }
-            }
-        }
-    }
-
-    private func card(_ workspace: Workspace) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Text(workspace.name)
-                    .font(Typo.bodyEmphasis)
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                Spacer(minLength: 4)
-                if workspace.unread {
-                    Circle().fill(Palette.accent).frame(width: 6, height: 6)
-                }
-            }
-
-            HStack(spacing: 6) {
-                Chip(text: workspace.branch, systemImage: "arrow.triangle.branch", monospaced: true)
-                Spacer(minLength: 4)
-                if workspace.hasDiff {
-                    DiffStatLabel(additions: workspace.additions, deletions: workspace.deletions)
-                }
-            }
-
-            Text(relative(workspace.lastActivityAt))
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metrics.corner))
-        .overlay {
-            RoundedRectangle(cornerRadius: Metrics.corner)
-                .stroke(hovered == workspace.id ? Palette.borderStrong : Palette.border, lineWidth: Metrics.hairline)
-        }
-        .contentShape(Rectangle())
-        .onHoverChange { inside in
-            hovered = inside ? workspace.id : (hovered == workspace.id ? nil : hovered)
-        }
-        .onTapGesture { app.selection = .workspace(workspace.id) }
-    }
-
-    private func relative(_ date: Date) -> String {
-        Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
-    }
-
     // MARK: - Empty
 
     private var emptyState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "folder.badge.plus")
-                .font(.largeTitle.weight(.light))
-                .foregroundStyle(Palette.textTertiary)
-
-            VStack(spacing: 5) {
-                Text("Add your first project")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(Palette.textPrimary)
-                Text("Point Baton at a git repository. Every workspace you start gets its own worktree and its own agent, so they never step on each other.")
-                    .font(Typo.body)
-                    .foregroundStyle(Palette.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 420)
-            }
-
-            Button {
-                guard let path = ProjectFolderPicker.choose() else { return }
-                Task { await app.addRepository(at: path) }
-            } label: {
-                Label("Choose a folder", systemImage: "folder")
-                    .padding(.horizontal, 4)
-            }
-            .controlSize(.large)
-            .buttonStyle(.borderedProminent)
+        ContentUnavailableView {
+            Label("Add your first project", systemImage: "folder.badge.plus")
+        } description: {
+            Text("Point Baton at a git repository. Every workspace you start gets its own worktree and its own agent, so they never step on each other.")
+        } actions: {
+            Button("Choose a folder", systemImage: "folder", action: addProject)
+                .controlSize(.large)
+                .buttonStyle(.borderedProminent)
         }
-        .padding(40)
+    }
+
+    // MARK: - Derived
+
+    /// Most recently active first, capped, and only for projects that have anything to show.
+    private func rebuild() {
+        sections = app.repos.compactMap { repo in
+            let recent = app.workspaces
+                .filter { $0.repoID == repo.id }
+                .sorted { $0.lastActivityAt > $1.lastActivityAt }
+                .prefix(Self.perProject)
+            guard !recent.isEmpty else { return nil }
+            return SidebarRepoGroup(repo: repo, workspaces: Array(recent))
+        }
+    }
+
+    // MARK: - Actions
+
+    private func select(_ workspace: Workspace) {
+        app.selection = .workspace(workspace.id)
+    }
+
+    /// Handed to `RootView`, which owns the only create sheet in the app.
+    private func requestWorkspace(in repo: Repo?) {
+        NotificationCenter.default.post(name: .batonNewWorkspace, object: repo)
+    }
+
+    private func addProject() {
+        guard let path = ProjectFolderPicker.choose() else { return }
+        Task { await app.addRepository(at: path) }
     }
 }

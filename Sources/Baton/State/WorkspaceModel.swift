@@ -1,5 +1,6 @@
 import SwiftUI
 import Observation
+import Synchronization
 import BatonCore
 
 /// Which tab the bottom panel of the inspector is showing.
@@ -36,7 +37,19 @@ final class WorkspaceModel {
     private unowned let app: AppModel
 
     var sessions: [Session] = []
-    var activeSessionID: String?
+
+    /// Switching tab is the moment a transcript should come into existence, rather than the
+    /// moment a view body happens to ask for one. Preparing it here keeps model creation, which
+    /// is an observable write, out of the render pass.
+    var activeSessionID: String? {
+        get { storedActiveSessionID }
+        set {
+            storedActiveSessionID = newValue
+            prepareActiveTranscript()
+        }
+    }
+
+    private var storedActiveSessionID: String?
 
     /// One transcript per session, built on demand.
     private var transcripts: [String: TranscriptModel] = [:]
@@ -95,6 +108,7 @@ final class WorkspaceModel {
         if activeSessionID == nil || !sessions.contains(where: { $0.id == activeSessionID }) {
             activeSessionID = sessions.first?.id
         }
+        prepareActiveTranscript()
     }
 
     @discardableResult
@@ -122,9 +136,16 @@ final class WorkspaceModel {
     }
 
     /// The transcript for a session, wired to its own agent runner.
+    ///
+    /// Both branches are mutations, so this MUST NOT be called from a view body: creating the
+    /// model writes an observed dictionary and pushing the session down writes an observed
+    /// property, each of which invalidates, from inside its own body, every view that just read
+    /// them. Views read `activeTranscript`, which only looks.
+    @discardableResult
     func transcript(for session: Session) -> TranscriptModel {
         if let existing = transcripts[session.id] {
-            existing.session = session
+            // Assigning an equal value still counts as a mutation to the Observation runtime.
+            if existing.session != session { existing.session = session }
             return existing
         }
         let model = TranscriptModel(session: session, workspace: workspace, app: app)
@@ -133,8 +154,15 @@ final class WorkspaceModel {
         return model
     }
 
+    /// A pure lookup, safe from a view body. Nil until the active session has been prepared,
+    /// which happens on every path that can change which session is active.
     var activeTranscript: TranscriptModel? {
-        activeSession.map { transcript(for: $0) }
+        activeSession.flatMap { transcripts[$0.id] }
+    }
+
+    private func prepareActiveTranscript() {
+        guard let session = activeSession else { return }
+        transcript(for: session)
     }
 
     var isRunning: Bool {
@@ -147,6 +175,11 @@ final class WorkspaceModel {
         setupTask = nil
         changesTask?.cancel()
         pullRequestTask?.cancel()
+        // A cancelled refresh returns before it clears its own flag, so the spinner would spin
+        // for the rest of the launch.
+        isLoadingChanges = false
+        isLoadingPullRequest = false
+        isRunningSetup = false
     }
 
     /// The workspace itself is going away, so the runners go too. `stopEverything` only ends the
@@ -175,11 +208,20 @@ final class WorkspaceModel {
     /// halfway through. Cancellation reaches the script itself through `StreamingProcess.lines`.
     func startSetupThenSend(prompt: String, repo: Repo) {
         setupTask?.cancel()
+        setupGeneration += 1
+        let generation = setupGeneration
         setupTask = Task { [weak self] in
             await self?.runSetupThenSend(prompt: prompt, repo: repo)
-            self?.setupTask = nil
+            // Only clear the handle if it is still this run's. A cancelled setup finishes after
+            // the one that replaced it has already been stored, and clearing unconditionally
+            // dropped the live handle, which left the new run with nothing able to cancel it.
+            guard let self, self.setupGeneration == generation else { return }
+            self.setupTask = nil
         }
     }
+
+    /// Which setup run the stored `setupTask` belongs to.
+    private var setupGeneration = 0
 
     /// Runs the setup script, streaming into the Setup tab, then sends the opening prompt.
     func runSetupThenSend(prompt: String, repo: Repo) async {
@@ -359,17 +401,21 @@ final class WorkspaceModel {
 ///
 /// The producer is a subprocess reader on some background thread and the consumer is the main
 /// actor. Batching between them is what keeps a chatty script from swamping the UI.
-final class LineBuffer: @unchecked Sendable {
-    private let lock = NSLock()
-    private var pending: [String] = []
+///
+/// A `Mutex` rather than a lock next to an unprotected array: the buffer is then unreachable
+/// except through the lock, so the type is `Sendable` on the compiler's terms rather than on a
+/// promise, and `drain` cannot accidentally read outside it.
+final class LineBuffer: Sendable {
+    private let pending = Mutex<[String]>([])
 
     func append(_ line: String) {
-        lock.lock(); pending.append(line); lock.unlock()
+        pending.withLock { $0.append(line) }
     }
 
     func drain() -> [String] {
-        lock.lock()
-        defer { pending.removeAll(keepingCapacity: true); lock.unlock() }
-        return pending
+        pending.withLock { lines in
+            defer { lines.removeAll(keepingCapacity: true) }
+            return lines
+        }
     }
 }

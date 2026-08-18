@@ -9,6 +9,10 @@ import BatonCore
 /// translucent sidebar material, the sidebar toggle, traffic light placement, unified toolbar
 /// integration and remembered column widths. The inspector is the platform `.inspector`, so it
 /// resizes and collapses the way every other Mac inspector does.
+///
+/// The columns themselves are `SidebarView` and `DetailColumn`, and the toolbar is
+/// `BatonWindowToolbar`. What is left here is only what belongs to the window as a whole: the
+/// split view, the inspector, the create sheet, the archive confirmation and the alert.
 struct RootView: View {
     @Environment(AppModel.self) private var app
 
@@ -20,13 +24,38 @@ struct RootView: View {
         @Bindable var app = app
 
         return NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView()
-                .navigationSplitViewColumnWidth(
-                    min: 200, ideal: Metrics.sidebarWidth, max: 420
-                )
+            // `StableColumn`, not a bare `SidebarView`: hiding and showing the sidebar twice
+            // otherwise walked the window into the same Update Constraints loop described below.
+            StableColumn(idealWidth: Metrics.sidebarWidth) {
+                SidebarView()
+            }
+            .navigationSplitViewColumnWidth(
+                min: 200, ideal: Metrics.sidebarWidth, max: 420
+            )
         } detail: {
-            center
-                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+            // An `HSplitView` rather than `.inspector()`.
+            //
+            // `.inspector` cannot be used in this window. With it presented, the window is marked
+            // as needing another Update Constraints pass on every pass, and AppKit throws "more
+            // Update Constraints in Window passes than there are views in the window" within a
+            // second of launch. Reproduced with the real inspector, with a bare `Text` inside it,
+            // attached to the split view and attached to the detail column, and clean every time
+            // the inspector is simply not presented. `HSplitView` is the AppKit split view, so the
+            // divider stays native and draggable, and it does not go near the toolbar.
+            HSplitView {
+                DetailColumn()
+                    .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+
+                if app.isInspectorVisible {
+                    InspectorPane(model: app.selectedModel)
+                        .frame(
+                            minWidth: 280,
+                            idealWidth: Metrics.inspectorWidth,
+                            maxWidth: 760,
+                            maxHeight: .infinity
+                        )
+                }
+            }
                 // Attached to the DETAIL column, not to the `NavigationSplitView`.
                 //
                 // On the split view it crashes the window. The toolbar also belongs to the detail
@@ -35,50 +64,49 @@ struct RootView: View {
                 // needing another Update Constraints pass every pass, and AppKit eventually throws
                 // "more Update Constraints in Window passes than there are views in the window".
                 // Reproduced on every launch, gone the moment both live on the same column.
-                .inspector(isPresented: $app.isInspectorVisible) {
-                    InspectorPane(model: app.selectedModel)
-                        .inspectorColumnWidth(min: 280, ideal: Metrics.inspectorWidth, max: 760)
-                }
+
                 // The toolbar belongs to the detail column, not to the split view. Attached to
                 // the split view, AppKit lays every item out in the sidebar's slice of the
                 // toolbar, which is narrow, so everything past the first item falls into the
                 // overflow menu. On the detail it gets the whole width right of the sidebar.
-                .toolbar { toolbar }
+                .toolbar { BatonWindowToolbar(app: app) }
         }
         // The window title is hidden in the toolbar (see BatonApp), but it still names the window
         // in the Window menu and in Mission Control, so it is worth setting.
-        .navigationTitle(windowTitle)
+        .navigationTitle(app.selectedWorkspace?.name ?? "Baton")
 
         .task { await app.bootstrap() }
         .sheet(isPresented: $isCreateSheetPresented) {
             CreateWorkspaceSheet(initialRepo: createTargetRepo)
         }
+        // This one stays on the window rather than moving to the row that asked for it. It is not
+        // presented by a click: `AppModel.archive` runs a git safety check first and only refuses
+        // afterwards, and it refuses identically whether the request came from a sidebar context
+        // menu, the Workspace menu or a keyboard shortcut. There is no single control it could
+        // animate out of, and anchoring it to the sidebar row would lose the refusals that arrive
+        // for the selected workspace from the menu bar.
         .confirmationDialog(
             "Archive \(app.pendingArchive?.workspace.name ?? "")?",
-            isPresented: archiveBinding,
+            isPresented: $app.pendingArchive.isPresent(),
             titleVisibility: .visible,
             presenting: app.pendingArchive
-        ) { request in
-            Button("Archive and lose that work", role: .destructive) {
-                Task { await app.confirmPendingArchive() }
-            }
-            Button("Keep the workspace", role: .cancel) {
-                app.cancelPendingArchive()
-            }
+        ) { _ in
+            Button("Archive and lose that work", role: .destructive, action: confirmArchive)
+            Button("Keep the workspace", role: .cancel, action: app.cancelPendingArchive)
         } message: { request in
             // Naming what disappears, rather than asking "are you sure?". The confirmation only
             // exists because there is something specific to lose, so it should say what.
-            Text(
-                "Archiving deletes the worktree at \(request.workspace.path).\n\nThis would lose:\n"
-                + request.report.losses.map { "\u{2022} \($0)" }.joined(separator: "\n")
-            )
+            Text(Self.losses(in: request))
         }
-        .alert(item: alertBinding) { alert in
-            Alert(
-                title: Text(alert.title),
-                message: Text(alert.message),
-                dismissButton: .default(Text("OK"))
-            )
+        // A single OK that does nothing but dismiss is the system default, so the actions builder
+        // is deliberately empty rather than spelling one out.
+        .alert(
+            app.alert?.title ?? "",
+            isPresented: $app.alert.isPresent(),
+            presenting: app.alert
+        ) { _ in
+        } message: { alert in
+            Text(alert.message)
         }
         .onReceive(NotificationCenter.default.publisher(for: .batonOpenWorkspace)) { note in
             if let id = note.object as? String { app.selection = .workspace(id) }
@@ -92,167 +120,23 @@ struct RootView: View {
         }
     }
 
-    // MARK: - Columns
-
-    @ViewBuilder
-    private var center: some View {
-        if !app.isLoaded {
-            LoadingView()
-        } else {
-            switch app.selection {
-            case .home:
-                HomeView()
-            case .search:
-                SearchView()
-            case .workspace:
-                if let workspace = app.selectedWorkspace {
-                    // `existingModel` rather than `model(for:)`: creating one here would mutate
-                    // observable state during the render pass. The selection setter has already
-                    // made it.
-                    if let model = app.existingModel(for: workspace.id) {
-                        WorkspaceDetailView(model: model)
-                    } else {
-                        LoadingView()
-                    }
-                } else {
-                    HomeView()
-                }
-            }
-        }
-    }
-
-
-    // MARK: - Toolbar
-
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        @Bindable var app = app
-
-        ToolbarItem(placement: .navigation) {
-            // A split button: the common case is one click, and the folder picker that used to
-            // hide in the account row lives behind the arrow.
-            Menu {
-                Button("New Workspace") { presentCreate(in: nil) }
-                    .disabled(app.repos.isEmpty)
-                Button("Add Project Folder\u{2026}") { addProject() }
-                Divider()
-                Button("Refresh Changes") { Task { await app.refreshDiffStats() } }
-            } label: {
-                Label("New workspace", systemImage: "plus")
-            } primaryAction: {
-                if app.repos.isEmpty { addProject() } else { presentCreate(in: nil) }
-            }
-            .help("Start a workspace")
-        }
-
-        // Always present, even on Home, because an empty principal item collapses the flexible
-        // space that pins the trailing toggles to the right of the toolbar, and controls that
-        // move as you navigate are worse than a redundant word.
-        ToolbarItem(placement: .principal) {
-            title
-        }
-
-        ToolbarItemGroup(placement: .primaryAction) {
-            Toggle(isOn: $app.isBottomPanelVisible) {
-                Label("Terminal panel", systemImage: "rectangle.bottomthird.inset.filled")
-            }
-            .toggleStyle(.button)
-            .disabled(app.selectedModel == nil)
-            .help("Show the terminal panel")
-
-            Toggle(isOn: $app.isInspectorVisible) {
-                Label("Inspector", systemImage: "sidebar.right")
-            }
-            .toggleStyle(.button)
-            .disabled(app.selectedModel == nil)
-            .help("Show the changed files")
-        }
-    }
-
-    /// What the toolbar says you are looking at: the project, the workspace and the branch you
-    /// are about to push. Those are the three facts people keep needing, and the toolbar is where
-    /// a Mac app puts them.
-    @ViewBuilder
-    private var title: some View {
-        if let workspace = app.selectedWorkspace {
-            HStack(spacing: 6) {
-                if let repo = app.repo(for: workspace) {
-                    Circle()
-                        .fill(Color(hexString: repo.accent))
-                        .frame(width: Self.accentDot, height: Self.accentDot)
-                    Text(repo.name)
-                        .font(Typo.label)
-                        .foregroundStyle(Palette.textSecondary)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.right")
-                        .font(Typo.micro)
-                        .foregroundStyle(Palette.textTertiary)
-                }
-
-                Text(workspace.name)
-                    .font(Typo.labelEmphasis)
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-
-                Chip(
-                    text: workspace.branch,
-                    systemImage: "arrow.triangle.branch",
-                    monospaced: true
-                )
-                .help(workspace.branch)
-            }
-            .fixedSize()
-        } else {
-            Text(app.selection == .search ? "Search" : "Home")
-                .font(Typo.labelEmphasis)
-                .foregroundStyle(Palette.textSecondary)
-        }
-    }
-
-    /// The one measurement here that no semantic constant covers: a colour swatch small enough to
-    /// read as a marker rather than a control.
-    private static let accentDot: CGFloat = 8
-
-    private var windowTitle: String {
-        app.selectedWorkspace?.name ?? "Baton"
-    }
-
-    // MARK: - Bindings
-
-    /// The inspector belongs to the selected workspace, so its visibility is stored there rather
-    /// than in the window. Home and Search have nothing to inspect and read as false.
-
-
-    /// Dismissing the dialog by any route must clear the request, or a refused archive would sit
-    /// there and re-present itself on the next redraw.
-    private var archiveBinding: Binding<Bool> {
-        Binding(
-            get: { app.pendingArchive != nil },
-            set: { presented in if !presented { app.cancelPendingArchive() } }
-        )
-    }
-
-    private var alertBinding: Binding<BatonAlert?> {
-        Binding(
-            get: { app.alert },
-            set: { newValue in
-                let model = app
-                model.alert = newValue
-            }
-        )
-    }
-
     // MARK: - Actions
 
-    /// Every entry point goes through the same notification so the sheet behaves identically
-    /// whether it came from the toolbar, the sidebar, Home or the menu bar.
-    private func presentCreate(in repo: Repo?) {
-        NotificationCenter.default.post(name: .batonNewWorkspace, object: repo)
+    private func confirmArchive() {
+        Task { await app.confirmPendingArchive() }
     }
 
-    private func addProject() {
-        guard let path = ProjectFolderPicker.choose() else { return }
-        Task { await app.addRepository(at: path) }
+    /// What the user is about to lose, said as a list rather than as a question.
+    ///
+    /// Built here rather than in the message builder so the string work is a plain function that
+    /// can be read, and changed, without going through a view body.
+    private static func losses(in request: ArchiveRequest) -> String {
+        var text = "Archiving deletes the worktree at \(request.workspace.path).\n\nThis would lose:\n"
+        text += request.report.losses.map { "\u{2022} \($0)" }.joined(separator: "\n")
+        if let problem = request.problem {
+            text += "\n\n\(problem)"
+        }
+        return text
     }
 }
 

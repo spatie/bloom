@@ -15,33 +15,39 @@ private enum AppearancePreference {
 
 /// Collects global and repository preferences in one window so configuration stays discoverable.
 struct SettingsView: View {
-    @Environment(AppModel.self) private var app
+    /// Which tab is showing. An enum rather than an index, so the value says what it selects.
+    @State private var tab: SettingsTab = .general
 
     init() {
         AppearancePreference.apply(UserDefaults.standard.string(forKey: "appearance") ?? "system")
     }
 
     var body: some View {
-        TabView {
-            GeneralSettingsView()
-                .tabItem { Label("General", systemImage: "gear") }
+        TabView(selection: $tab) {
+            Tab("General", systemImage: "gear", value: SettingsTab.general) {
+                GeneralSettingsView()
+            }
 
-            ProjectSettingsView()
-                .tabItem { Label("Projects", systemImage: "folder") }
+            Tab("Projects", systemImage: "folder", value: SettingsTab.projects) {
+                ProjectSettingsView()
+            }
 
-            ModelSettingsView()
-                .tabItem { Label("Models", systemImage: "sparkle") }
+            Tab("Models", systemImage: "sparkle", value: SettingsTab.models) {
+                ModelSettingsView()
+            }
 
-            AgentsSettingsView()
-                .tabItem { Label("Agents", systemImage: "person.2") }
+            Tab("Agents", systemImage: "person.2", value: SettingsTab.agents) {
+                AgentsSettingsView()
+            }
 
-            ToolSettingsView()
-                .tabItem { Label("Tools", systemImage: "wrench.and.screwdriver") }
+            Tab("Tools", systemImage: "wrench.and.screwdriver", value: SettingsTab.tools) {
+                ToolSettingsView()
+            }
 
-            AboutSettingsView()
-                .tabItem { Label("About", systemImage: "info.circle") }
+            Tab("About", systemImage: "info.circle", value: SettingsTab.about) {
+                AboutSettingsView()
+            }
         }
-        .tabViewStyle(.automatic)
         .frame(
             minWidth: Metrics.sidebarWidth + Metrics.inspectorWidth,
             minHeight: Metrics.inspectorWidth
@@ -117,11 +123,7 @@ private struct ProjectSettingsView: View {
                 .frame(minHeight: Metrics.sidebarWidth)
 
                 HStack {
-                    Button {
-                        addProjectFolder()
-                    } label: {
-                        Label("Add Project", systemImage: "plus")
-                    }
+                    Button("Add Project", systemImage: "plus", action: addProjectFolder)
 
                     Button("Remove Project", systemImage: "minus", role: .destructive) {
                         repoPendingRemoval = selectedRepo
@@ -157,32 +159,24 @@ private struct ProjectSettingsView: View {
         }
         .confirmationDialog(
             "Remove \(repoPendingRemoval?.name ?? "this project")?",
-            isPresented: Binding(
-                get: { repoPendingRemoval != nil },
-                set: { if !$0 { repoPendingRemoval = nil } }
-            )
-        ) {
-            Button("Remove Project", role: .destructive) {
-                guard let repo = repoPendingRemoval else { return }
-                repoPendingRemoval = nil
-                Task { await app.removeRepository(repo) }
-            }
-            Button("Cancel", role: .cancel) {
-                repoPendingRemoval = nil
-            }
-        } message: {
+            isPresented: $repoPendingRemoval.isPresent(),
+            presenting: repoPendingRemoval
+        ) { repo in
+            Button("Remove Project", role: .destructive) { remove(repo) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
             Text("Existing workspace records for this project will also be removed.")
         }
     }
 
+    private func remove(_ repo: Repo) {
+        repoPendingRemoval = nil
+        Task { await app.removeRepository(repo) }
+    }
+
     private func addProjectFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Add Project"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await app.addRepository(at: url.path) }
+        guard let path = ProjectFolderPicker.choose() else { return }
+        Task { await app.addRepository(at: path) }
     }
 }
 
@@ -228,12 +222,10 @@ private struct ProjectRow: View {
 
             Chip(text: repo.defaultBranch, systemImage: "arrow.triangle.branch", monospaced: true)
 
-            Button(action: onRemove) {
-                Image(systemName: "minus.circle")
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(Palette.textSecondary)
-            .accessibilityLabel("Remove \(repo.name)")
+            Button("Remove \(repo.name)", systemImage: "minus.circle", action: onRemove)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .foregroundStyle(Palette.textSecondary)
         }
         .onChange(of: repo.name) { _, updated in
             if !isEditingName { name = updated }
@@ -417,11 +409,11 @@ private extension Color {
     /// Converts an editable SwiftUI colour back to the repository's portable storage format.
     var hexString: String? {
         guard let color = NSColor(self).usingColorSpace(.sRGB) else { return nil }
-        return String(
-            format: "%02X%02X%02X",
-            Int((color.redComponent * 255).rounded()),
-            Int((color.greenComponent * 255).rounded()),
-            Int((color.blueComponent * 255).rounded())
-        )
+        return [color.redComponent, color.greenComponent, color.blueComponent]
+            .map { component in
+                let byte = String(Int((component * 255).rounded()), radix: 16, uppercase: true)
+                return byte.count == 1 ? "0" + byte : byte
+            }
+            .joined()
     }
 }

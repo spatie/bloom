@@ -69,7 +69,7 @@ private func codexAuthFile(
 
 // MARK: - Suite
 
-@Suite("AgentCatalog")
+@Suite("AgentCatalog", .tags(.agentProtocol), .scratchDirectory)
 struct AgentCatalogTests {
 
     // MARK: Agent kinds
@@ -241,7 +241,7 @@ struct AgentCatalogTests {
             accountJSON: json(claudeFile), version: "2.1.234", apiKeyIsSet: true
         ) + AgentCatalog.codexDetails(authJSON: codexFile)
 
-        #expect(!details.isEmpty)
+        #expect(details.isEmpty == false)
 
         // Any run of twelve characters from a credential appearing in a rendered value would mean
         // part of that credential reached the UI.
@@ -251,8 +251,8 @@ struct AgentCatalogTests {
             for start in 0...(characters.count - 12) {
                 let window = String(characters[start..<(start + 12)])
                 for detail in details {
-                    #expect(!detail.value.contains(window), "leaked \(window) in \(detail.label)")
-                    #expect(!detail.label.contains(window))
+                    #expect(detail.value.contains(window) == false, "leaked \(window) in \(detail.label)")
+                    #expect(detail.label.contains(window) == false)
                 }
             }
         }
@@ -262,7 +262,7 @@ struct AgentCatalogTests {
 
     @Test("reports a missing override without falling back to PATH")
     func rejectsBrokenOverride() async {
-        let missing = NSTemporaryDirectory() + "baton-no-such-agent-\(UUID().uuidString)"
+        let missing = TestScratch.unique("baton-no-such-agent")
         let catalog = AgentCatalog(overrides: [.claudeCode: missing])
 
         let status = await catalog.status(for: .claudeCode)
@@ -276,7 +276,7 @@ struct AgentCatalogTests {
 
     @Test("returns one status per kind, in order, and caches until invalidated")
     func cachesStatuses() async {
-        let missing = NSTemporaryDirectory() + "baton-no-such-agent-\(UUID().uuidString)"
+        let missing = TestScratch.unique("baton-no-such-agent")
         let catalog = AgentCatalog(overrides: Dictionary(
             uniqueKeysWithValues: AgentKind.allCases.map { ($0, missing) }
         ))
@@ -296,7 +296,7 @@ struct AgentCatalogTests {
 
     @Test("resolves a config path through its symlinks and reports absence as nil")
     func resolvesConfigPaths() throws {
-        let base = NSTemporaryDirectory() + "baton-agentcat-\(UUID().uuidString)"
+        let base = TestScratch.unique("baton-agentcat")
         let real = base + "/real.json"
         let link = base + "/link.json"
         try FileManager.default.createDirectory(atPath: base, withIntermediateDirectories: true)
@@ -318,7 +318,7 @@ struct AgentCatalogTests {
 ///     BATON_LOCAL_AGENTS=1 ./test-core.sh AgentCatalogLocal
 private let localAgentsEnabled = ProcessInfo.processInfo.environment["BATON_LOCAL_AGENTS"] == "1"
 
-@Suite("AgentCatalogLocal", .enabled(if: localAgentsEnabled))
+@Suite("AgentCatalogLocal", .enabled(if: localAgentsEnabled), .tags(.subprocess))
 struct AgentCatalogLocalTests {
     @Test("finds the CLIs this machine has and none that it does not")
     func detectsLocalAgents() async {

@@ -62,23 +62,42 @@ public struct WorkspaceSafetyReport: Sendable, Hashable {
     public var unpushedCommits: Int
     /// Whether the base branch already contains this branch's history.
     public var isBranchMerged: Bool
+    /// Ignored files that differ from the main checkout, or exist only here.
+    ///
+    /// `git status --porcelain` does not list ignored files and `git worktree remove` deletes them
+    /// without a word, so these were invisible. Baton copies `.env*` into every worktree, which
+    /// makes an edited `.env` both the likeliest file to be destroyed and the one nobody would
+    /// think to check.
+    public var modifiedIgnoredFiles: [String]
+    /// Commits held only by this worktree's own HEAD, on no branch at all.
+    ///
+    /// An agent that runs `git checkout` leaves HEAD detached. Commits made after that belong to
+    /// no ref, so counting commits on the branch misses them entirely, and removing the worktree
+    /// throws away the per-worktree reflog that was the last thing holding them.
+    public var detachedCommits: Int
 
     public init(
         hasUncommittedChanges: Bool = false,
         untrackedFiles: [String] = [],
         unpushedCommits: Int = 0,
-        isBranchMerged: Bool = false
+        isBranchMerged: Bool = false,
+        modifiedIgnoredFiles: [String] = [],
+        detachedCommits: Int = 0
     ) {
         self.hasUncommittedChanges = hasUncommittedChanges
         self.untrackedFiles = untrackedFiles
         self.unpushedCommits = unpushedCommits
         self.isBranchMerged = isBranchMerged
+        self.modifiedIgnoredFiles = modifiedIgnoredFiles
+        self.detachedCommits = detachedCommits
     }
 
     /// A merged branch's commits live on in the base branch, so they are not counted as a loss.
     public var isSafeToDiscard: Bool {
         !hasUncommittedChanges
             && untrackedFiles.isEmpty
+            && modifiedIgnoredFiles.isEmpty
+            && detachedCommits == 0
             && (unpushedCommits == 0 || isBranchMerged)
     }
 
@@ -93,8 +112,21 @@ public struct WorkspaceSafetyReport: Sendable, Hashable {
             let rest = untrackedFiles.count > 5 ? ", and \(untrackedFiles.count - 5) more" : ""
             losses.append("\(untrackedFiles.count) untracked file(s): \(sample)\(rest)")
         }
+        if !modifiedIgnoredFiles.isEmpty {
+            let sample = modifiedIgnoredFiles.prefix(5).joined(separator: ", ")
+            let rest = modifiedIgnoredFiles.count > 5
+                ? ", and \(modifiedIgnoredFiles.count - 5) more"
+                : ""
+            losses.append(
+                "\(modifiedIgnoredFiles.count) ignored file(s) that differ from the main checkout: "
+                + "\(sample)\(rest)"
+            )
+        }
         if unpushedCommits > 0, !isBranchMerged {
             losses.append("\(unpushedCommits) commit(s) that exist on no other branch, tag or remote")
+        }
+        if detachedCommits > 0 {
+            losses.append("\(detachedCommits) commit(s) made on a detached HEAD, held by no branch")
         }
         return losses
     }
@@ -467,8 +499,11 @@ public enum Git {
             let path = String(decoding: record, as: UTF8.self)
             guard !path.isEmpty, byPath[path] == nil else { continue }
             let full = (worktree as NSString).appendingPathComponent(path)
+            // Counted the way git counts. `components(separatedBy:)` returns an empty trailing
+            // piece after the final newline, and since practically every text file ends in one,
+            // every untracked file used to read one addition too many.
             let lineCount = (try? String(contentsOfFile: full, encoding: .utf8))
-                .map { $0.isEmpty ? 0 : $0.components(separatedBy: "\n").count } ?? 0
+                .map(countLines) ?? 0
             byPath[path] = ChangedFile(
                 path: path, change: .untracked, additions: lineCount, deletions: 0,
                 isBinary: lineCount == 0 && FileManager.default.fileExists(atPath: full)
@@ -631,6 +666,8 @@ public enum Git {
         if FileManager.default.fileExists(atPath: worktree), await isRepository(worktree) {
             let status = try await checkRaw(["status", "--porcelain", "-z"], in: worktree)
             (report.hasUncommittedChanges, report.untrackedFiles) = parseStatus(status.stdout)
+            report.modifiedIgnoredFiles = try await divergentIgnoredFiles(worktree: worktree, repo: repo)
+            report.detachedCommits = try await detachedCommitCount(worktree: worktree, repo: repo)
         }
 
         guard await branchExists(branch, in: repo) else { return report }
@@ -681,6 +718,70 @@ public enum Git {
             }
         }
         return (dirty, untracked)
+    }
+
+    /// Ignored files in the worktree that the main checkout does not have, or has differently.
+    ///
+    /// Only ignored files are considered, because tracked and untracked ones are already covered.
+    /// An ignored file that matches the main checkout byte for byte is not a loss: Baton copied it
+    /// there and the original is still where it came from.
+    static func divergentIgnoredFiles(worktree: String, repo: String) async throws -> [String] {
+        let ignored = try await checkRaw(
+            ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"], in: worktree
+        )
+
+        var divergent: [String] = []
+        for record in nulRecords(ignored.stdout) {
+            let path = String(decoding: record, as: UTF8.self)
+            guard !path.isEmpty else { continue }
+
+            let here = (worktree as NSString).appendingPathComponent(path)
+            let there = (repo as NSString).appendingPathComponent(path)
+
+            guard let mine = FileManager.default.contents(atPath: here) else { continue }
+            guard let theirs = FileManager.default.contents(atPath: there) else {
+                // Exists only in the worktree, so removing the worktree is the end of it.
+                divergent.append(path)
+                continue
+            }
+            if mine != theirs { divergent.append(path) }
+        }
+        return divergent.sorted()
+    }
+
+    /// Commits reachable from the worktree's own HEAD and from no ref anywhere.
+    ///
+    /// Zero unless HEAD is detached, which is what happens when an agent runs `git checkout` in
+    /// its worktree. Those commits are held only by the per-worktree reflog, which
+    /// `git worktree remove` deletes.
+    static func detachedCommitCount(worktree: String, repo: String) async throws -> Int {
+        let head = try await run(["symbolic-ref", "--quiet", "HEAD"], in: worktree)
+        guard !head.ok else { return 0 }
+
+        let refs = try await check(
+            ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes", "refs/tags"],
+            in: repo
+        ).lines
+        let negated = refs.map { "^\($0)" }.joined(separator: "\n")
+        let unique = try await run(
+            ["rev-list", "--count", "--stdin", "HEAD"],
+            in: worktree,
+            stdin: negated.isEmpty ? "\n" : negated + "\n"
+        )
+        guard unique.ok else { return 0 }
+        return Int(unique.trimmed) ?? 0
+    }
+
+    /// Lines the way `git diff --numstat` counts them: a trailing newline terminates the last
+    /// line rather than starting an empty one.
+    static func countLines(_ contents: String) -> Int {
+        guard !contents.isEmpty else { return 0 }
+        var count = contents.reduce(into: 0) { total, character in
+            if character == "\n" { total += 1 }
+        }
+        // A file whose last line has no newline still has that line.
+        if contents.hasSuffix("\n") == false { count += 1 }
+        return count
     }
 
     // MARK: - Naming

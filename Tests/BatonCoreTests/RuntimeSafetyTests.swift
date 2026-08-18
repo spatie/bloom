@@ -4,10 +4,6 @@ import Foundation
 
 // MARK: - Fixtures
 
-private func makeStore() throws -> Store {
-    try Store(path: NSTemporaryDirectory() + "baton-safety-\(UUID().uuidString).sqlite")
-}
-
 /// A workspace and a session in a throwaway database, because messages are foreign keyed all the
 /// way up to a repo.
 private func makeSession(_ store: Store) async throws -> Session {
@@ -142,13 +138,6 @@ private actor Counter {
     func bump() { count += 1 }
 }
 
-private func waitFor(_ condition: @Sendable () async -> Bool) async {
-    for _ in 0..<600 {
-        if await condition() { return }
-        try? await Task.sleep(for: .milliseconds(10))
-    }
-}
-
 /// Read a fixed number of events off a stream, so a test never hangs on one that stalled.
 private func take(_ count: Int, from stream: AsyncStream<AgentEvent>) async -> [AgentEvent] {
     var events: [AgentEvent] = []
@@ -167,35 +156,45 @@ private let assistantLine = #"""
 
 // MARK: - Event fan out
 
-@Suite("AgentRunner event fan out")
+@Suite("AgentRunner event fan out", .tags(.agentProtocol), .scratchDirectory, .timeLimit(.minutes(1)))
 struct AgentRunnerEventFanOutTests {
-    @Test("every subscriber receives every event")
+    @Test("every subscriber receives every event, in order")
     func broadcastsToEverySubscriber() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("runtime")
         let session = try await makeSession(store)
         let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
 
         // Both streams are taken before anything is yielded, which is what registers them.
         let first = runner.events
         let second = runner.events
-        let a = Task { await take(3, from: first) }
-        let b = Task { await take(3, from: second) }
 
-        await runner.ingest(.status("one"))
-        await runner.ingest(.status("two"))
-        await runner.ingest(.status("three"))
+        // Six deliveries and not one more: three events reaching two subscribers each. A
+        // confirmation says that out loud, where counting array lengths afterwards cannot rule
+        // out a fourth event arriving late.
+        await confirmation("an event reached a subscriber", expectedCount: 6) { delivered in
+            let a = Task { () -> [AgentEvent] in
+                let events = await take(3, from: first)
+                for _ in events { delivered() }
+                return events
+            }
+            let b = Task { () -> [AgentEvent] in
+                let events = await take(3, from: second)
+                for _ in events { delivered() }
+                return events
+            }
 
-        let fromA = await a.value
-        let fromB = await b.value
-        #expect(fromA.count == 3)
-        #expect(fromB.count == 3)
-        #expect(fromA.map(statusLabel) == ["one", "two", "three"])
-        #expect(fromB.map(statusLabel) == ["one", "two", "three"])
+            await runner.ingest(.status("one"))
+            await runner.ingest(.status("two"))
+            await runner.ingest(.status("three"))
+
+            #expect(await a.value.map(statusLabel) == ["one", "two", "three"])
+            #expect(await b.value.map(statusLabel) == ["one", "two", "three"])
+        }
     }
 
     @Test("cancelling one subscriber leaves the others working")
     func oneCancellationDoesNotKillTheRest() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("runtime")
         let session = try await makeSession(store)
         let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
 
@@ -208,7 +207,7 @@ struct AgentRunnerEventFanOutTests {
         }
 
         await runner.ingest(.status("one"))
-        await waitFor { await seen.count == 1 }
+        await waitUntil("the doomed subscriber saw the first event") { await seen.count == 1 }
         doomedTask.cancel()
         _ = await doomedTask.value
 
@@ -222,7 +221,7 @@ struct AgentRunnerEventFanOutTests {
 
     @Test("a second turn after Stop still delivers events")
     func secondTurnAfterStopStillDelivers() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("runtime")
         let session = try await makeSession(store)
         let recorder = ProcessRecorder()
         let runner = AgentRunner(
@@ -238,14 +237,14 @@ struct AgentRunnerEventFanOutTests {
 
         try await runner.send("one")
         recorder.all[0].emit(assistantLine)
-        await waitFor { await firstTurn.count == 1 }
+        await waitUntil("the first turn delivered an event") { await firstTurn.count == 1 }
 
         // Stop: the view cancels the task iterating the stream, which used to finish the only
         // stream the runner had.
         runner.cancelNow()
         pump.cancel()
         _ = await pump.value
-        await waitFor { await runner.isRunning == false }
+        await waitUntil("the runner stopped") { await runner.isRunning == false }
 
         // Turn two, with a fresh subscriber, exactly as the UI would do it.
         let secondStream = runner.events
@@ -256,9 +255,16 @@ struct AgentRunnerEventFanOutTests {
         let received = await take(1, from: secondStream)
         #expect(received.count == 1)
 
+        // Two user turns Baton wrote itself plus the two assistant lines. Persisting happens
+        // just off the delivery path, so wait for the count rather than reading it once and
+        // settling for "more than nothing".
+        await waitUntil("both turns were persisted") {
+            (try? await store.messageCount(sessionID: session.id)) == 4
+        }
         let stored = try await store.messages(sessionID: session.id)
-        #expect(stored.count > 0)
-        #expect(stored.map(\.seq) == Array(0..<stored.count))
+        #expect(stored.count == 4)
+        #expect(stored.map(\.kind) == [.user, .assistantText, .user, .assistantText])
+        #expect(stored.map(\.seq) == [0, 1, 2, 3])
     }
 }
 
@@ -275,7 +281,7 @@ private func statusLabel(_ event: AgentEvent) -> String {
 
 // MARK: - Hostile JSON
 
-@Suite("JSONValue hostile input")
+@Suite("JSONValue hostile input", .tags(.agentProtocol, .security))
 struct JSONValueHostileInputTests {
     @Test("a number Int cannot hold reads as nil instead of trapping")
     func hugeNumbersDoNotTrap() throws {
@@ -403,11 +409,11 @@ private struct SeededGenerator: RandomNumberGenerator {
 
 // MARK: - Persistence failures
 
-@Suite("AgentRunner persistence failures")
+@Suite("AgentRunner persistence failures", .tags(.persistence), .scratchDirectory, .timeLimit(.minutes(1)))
 struct AgentRunnerPersistenceFailureTests {
     @Test("surfaces a failed write instead of pretending the row landed")
     func surfacesFailedAppend() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("runtime")
         // A session that was never inserted: the foreign key on messages refuses every row.
         let session = Session(workspaceID: "no-such-workspace")
         let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
@@ -434,7 +440,7 @@ struct AgentRunnerPersistenceFailureTests {
 
     @Test("a failed write leaves the sequence where it was")
     func failedWriteDoesNotBurnASequenceNumber() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("runtime")
         let session = try await makeSession(store)
         let broken = Session(id: session.id, workspaceID: session.workspaceID)
         let runner = AgentRunner(workspacePath: "/tmp/w", session: broken, store: store)
@@ -456,11 +462,11 @@ struct AgentRunnerPersistenceFailureTests {
 
 // MARK: - Sequence allocation
 
-@Suite("Store sequence allocation")
+@Suite("Store sequence allocation", .tags(.persistence), .scratchDirectory)
 struct StoreSequenceAllocationTests {
     @Test("allocates every sequence number exactly once under concurrency")
     func allocatesConcurrently() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("runtime")
         let session = try await makeSession(store)
 
         let reserved = await withTaskGroup(of: Int?.self, returning: [Int].self) { group in
@@ -483,11 +489,11 @@ struct StoreSequenceAllocationTests {
 
     @Test("refuses a second row claiming a position that is taken")
     func refusesDuplicateSeq() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("runtime")
         let session = try await makeSession(store)
         try await store.append(Message(sessionID: session.id, seq: 0, kind: .system, payload: Data()))
 
-        await #expect(throws: (any Error).self) {
+        await #expect(throws: SQLiteError.self) {
             try await store.append(Message(
                 sessionID: session.id, seq: 0, kind: .system, payload: Data()
             ))
@@ -497,7 +503,7 @@ struct StoreSequenceAllocationTests {
 
     @Test("constrains a database that already holds duplicate positions")
     func migratesADatabaseWithDuplicates() async throws {
-        let path = NSTemporaryDirectory() + "baton-migrate-\(UUID().uuidString).sqlite"
+        let path = TestScratch.unique("baton-migrate") + ".sqlite"
         let session: Session
         do {
             let store = try Store(path: path)
@@ -528,7 +534,7 @@ struct StoreSequenceAllocationTests {
         #expect(Set(messages.map { String(decoding: $0.payload, as: UTF8.self) }) == ["a", "b", "c", "d"])
 
         // And the constraint is live from here on.
-        await #expect(throws: (any Error).self) {
+        await #expect(throws: SQLiteError.self) {
             try await reopened.append(Message(
                 sessionID: session.id, seq: 0, kind: .system, payload: Data()
             ))
@@ -538,11 +544,11 @@ struct StoreSequenceAllocationTests {
 
 // MARK: - Cancellation races
 
-@Suite("AgentRunner cancellation races")
+@Suite("AgentRunner cancellation races", .tags(.subprocess), .scratchDirectory, .timeLimit(.minutes(1)))
 struct AgentRunnerCancellationRaceTests {
     @Test("a cancel meant for the previous run leaves the new one alone")
     func staleCancelIsDropped() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("runtime")
         let session = try await makeSession(store)
         let recorder = ProcessRecorder()
         let runner = AgentRunner(
@@ -551,7 +557,7 @@ struct AgentRunnerCancellationRaceTests {
 
         try await runner.send("one")
         await runner.cancel()
-        await waitFor { await runner.isRunning == false }
+        await waitUntil("the runner stopped") { await runner.isRunning == false }
 
         try await runner.send("two")
         #expect(recorder.all.count == 2)
@@ -567,7 +573,7 @@ struct AgentRunnerCancellationRaceTests {
 
     @Test("a turn sent while the previous process is still dying waits for it")
     func sendWaitsForTheDyingProcess() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("runtime")
         let session = try await makeSession(store)
         let recorder = ProcessRecorder(shutdown: .milliseconds(300))
         let runner = AgentRunner(
@@ -589,7 +595,7 @@ struct AgentRunnerCancellationRaceTests {
 
     @Test("a turn gives up with a clear error when the previous process will not die")
     func sendFailsOnAProcessThatNeverExits() async throws {
-        let store = try makeStore()
+        let store = try makeTestStore("runtime")
         let session = try await makeSession(store)
         let recorder = ProcessRecorder(shutdown: nil)
         let runner = AgentRunner(
@@ -610,7 +616,7 @@ struct AgentRunnerCancellationRaceTests {
 
 // MARK: - Process trees
 
-@Suite("StreamingProcess signals")
+@Suite("StreamingProcess signals", .tags(.subprocess), .timeLimit(.minutes(1)))
 struct StreamingProcessSignalTests {
     @Test("terminate kills the grandchildren too")
     func killsTheWholeGroup() async throws {

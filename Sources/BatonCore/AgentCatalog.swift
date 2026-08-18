@@ -97,6 +97,13 @@ public actor AgentCatalog {
     /// Per-agent executable path chosen by the user, overriding PATH lookup.
     private let overrides: [AgentKind: String]
     private var cache: [AgentKind: AgentStatus] = [:]
+    /// Detections that have been started and not yet finished, so a second caller joins the one
+    /// already running instead of starting its own.
+    private var inFlight: [AgentKind: Task<AgentStatus, Never>] = [:]
+
+    /// How many detections have actually been run, as opposed to served from the cache or joined
+    /// while already in flight. Exists so the sharing can be asserted on rather than assumed.
+    public private(set) var detectionCount = 0
 
     public init(overrides: [AgentKind: String] = [:]) {
         self.overrides = overrides
@@ -104,34 +111,59 @@ public actor AgentCatalog {
 
     /// Detects everything, concurrently. Cheap enough to call on view appearance.
     public func statuses() async -> [AgentStatus] {
-        let missing = AgentKind.allCases.filter { cache[$0] == nil }
-
-        if !missing.isEmpty {
-            let overrides = overrides
-            let fresh = await withTaskGroup(of: AgentStatus.self) { group in
-                for kind in missing {
-                    group.addTask { await Self.detect(kind, override: overrides[kind]) }
-                }
-                var collected: [AgentStatus] = []
-                for await status in group { collected.append(status) }
-                return collected
+        let resolved = await withTaskGroup(of: (AgentKind, AgentStatus).self) { group in
+            for kind in AgentKind.allCases {
+                group.addTask { [self] in (kind, await resolvedStatus(for: kind)) }
             }
-            for status in fresh { cache[status.kind] = status }
+            var byKind: [AgentKind: AgentStatus] = [:]
+            for await (kind, status) in group { byKind[kind] = status }
+            return byKind
         }
-
-        return AgentKind.allCases.compactMap { cache[$0] }
+        return AgentKind.allCases.compactMap { resolved[$0] }
     }
 
     public func status(for kind: AgentKind) async -> AgentStatus {
-        if let cached = cache[kind] { return cached }
-        let status = await Self.detect(kind, override: overrides[kind])
-        cache[kind] = status
-        return status
+        await resolvedStatus(for: kind)
     }
 
     /// Clears the cache so a Refresh button does real work.
     public func invalidate() {
         cache.removeAll()
+        // A detection started before this call describes the world the user just asked to have
+        // looked at again, so its answer must not be filed as fresh when it lands.
+        inFlight.removeAll()
+    }
+
+    /// The cached status, or the detection that will produce it.
+    ///
+    /// Reading the cache and writing it back used to be separated by an `await`, and that
+    /// suspension is where a second caller lands. The settings screen detects on every
+    /// appearance and the Refresh button detects again, so both callers ran the whole thing:
+    /// three CLI version subprocesses and a handful of config file reads, twice. Sharing the
+    /// in-flight task means one detection per agent no matter how many callers arrive.
+    private func resolvedStatus(for kind: AgentKind) async -> AgentStatus {
+        if let cached = cache[kind] { return cached }
+
+        let task: Task<AgentStatus, Never>
+        if let running = inFlight[kind] {
+            task = running
+        } else {
+            let override = overrides[kind]
+            task = Task { await Self.detect(kind, override: override) }
+            inFlight[kind] = task
+            detectionCount += 1
+        }
+
+        let status = await task.value
+
+        // Only file the result if this is still the detection the catalog is waiting for. An
+        // `invalidate()` during the await means the user asked for a fresh look, and caching an
+        // answer gathered before they asked would defeat exactly that.
+        if inFlight[kind] == task {
+            inFlight[kind] = nil
+            cache[kind] = status
+        }
+        return status
     }
 
     // MARK: - Detection

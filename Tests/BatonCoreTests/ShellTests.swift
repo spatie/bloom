@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import BatonCore
 
-@Suite("Shell")
+@Suite("Shell", .tags(.subprocess))
 struct ShellTests {
     @Test("runs a command and captures stdout")
     func capturesStdout() async throws {
