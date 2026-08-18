@@ -1,6 +1,42 @@
 import AppKit
 import SwiftUI
 
+/// A pane: an `NSHostingView` wrapped in a view controller so a split item can hold it.
+///
+/// Deliberately not an `NSHostingController`. That type exists to carry SwiftUI's measured size out
+/// into AppKit through `sizingOptions` and `preferredContentSize`, and a split child controller
+/// reading a measured size back into its item's thickness is the loop that kills this window. A
+/// plain controller around an `NSHostingView` has no such channel at all: the pane fills whatever
+/// the split view gives it, and nothing SwiftUI measures ever travels back the other way.
+final class PaneViewController: NSViewController {
+    private let host: NSHostingView<AnyView>
+
+    var rootView: AnyView {
+        get { host.rootView }
+        set { host.rootView = newValue }
+    }
+
+    init(rootView: AnyView) {
+        host = NSHostingView(rootView: rootView)
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not decoded from a nib") }
+
+    override func loadView() {
+        view = NSView()
+        host.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(host)
+        NSLayoutConstraint.activate([
+            host.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            host.topAnchor.constraint(equalTo: view.topAnchor),
+            host.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+    }
+}
+
 /// The boundary between the centre column and the inspector, owned by AppKit.
 ///
 /// The hand-built version of this was an `HStack` holding a `PaneDivider`, arithmetic that clamped
@@ -11,13 +47,12 @@ import SwiftUI
 ///
 /// The crash `.inspector()` throws is a feedback loop, and the loop runs through SwiftUI's own
 /// `SplitViewChildController`: it observes its hosting view's minimum and maximum size and answers
-/// a change by invalidating layout, which produces another minimum and maximum size. Nothing here
-/// reads a hosted view's ideal size. The thicknesses below are constants, and `sizingOptions` is
-/// emptied so a hosting controller never pushes a `preferredContentSize` up into the split item
-/// holding it. That is the whole reason this is safe where the platform inspector is not.
+/// a change by invalidating layout, which produces another minimum and maximum size. Every
+/// thickness here is a constant, and `PaneViewController` gives SwiftUI no way to report a size
+/// back at all, so there is nothing for such a loop to run through.
 final class DetailSplitViewController: NSSplitViewController {
-    private let detailHost: NSHostingController<AnyView>
-    private let inspectorHost: NSHostingController<AnyView>
+    private let detailHost: PaneViewController
+    private let inspectorHost: PaneViewController
     private var inspectorItem: NSSplitViewItem!
 
     /// What the centre column refuses to go below. The inspector's ceiling is the other side of the
@@ -28,9 +63,11 @@ final class DetailSplitViewController: NSSplitViewController {
     private static let inspectorMinimum: CGFloat = 280
     private static let inspectorMaximum: CGFloat = 760
 
+    private static let autosaveName = "bloom.detail.split"
+
     init(detail: AnyView, inspector: AnyView) {
-        detailHost = NSHostingController(rootView: detail)
-        inspectorHost = NSHostingController(rootView: inspector)
+        detailHost = PaneViewController(rootView: detail)
+        inspectorHost = PaneViewController(rootView: inspector)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -40,11 +77,6 @@ final class DetailSplitViewController: NSSplitViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        // Emptied on both. See the note on the type: a size travelling from the hosted SwiftUI
-        // view up into the split item is the first half of the loop that kills this window.
-        detailHost.sizingOptions = []
-        inspectorHost.sizingOptions = []
-
         let detailItem = NSSplitViewItem(viewController: detailHost)
         detailItem.minimumThickness = Self.detailMinimum
         // The centre column is the one that absorbs a window resize, which is what a low holding
@@ -52,10 +84,29 @@ final class DetailSplitViewController: NSSplitViewController {
         detailItem.holdingPriority = .init(NSLayoutConstraint.Priority.defaultLow.rawValue)
         detailItem.canCollapse = false
 
-        inspectorItem = NSSplitViewItem(inspectorWithViewController: inspectorHost)
+        // A plain item rather than `NSSplitViewItem(inspectorWithViewController:)`. The inspector
+        // flavour wraps its pane in a vibrancy context: the hosted view comes out reporting
+        // `NSAppearanceNameVibrantLight` where the window and the centre pane report `Aqua`, and
+        // every semantic colour inside the pane then resolves to its vibrant variant. Bloom's
+        // inspector paints its own opaque backgrounds, so the material underneath is never seen and
+        // all the vibrancy does is shift the ink drawn on top of it. What the flavour otherwise
+        // gives is a trailing edge, a width that survives a window resize, and a collapse, and
+        // those are the lines below.
+        //
+        // The starting width comes from the view's own frame, set before the item wraps it. An item
+        // with nothing stating a width settles on its minimum, because the centre column's low
+        // holding priority means the centre column is handed every point of slack, and the
+        // inspector then opened at 280 where it has always opened at 380. Neither
+        // `preferredContentSize` nor `setPosition(_:ofDividerAt:)` moves an item inside an
+        // `NSSplitViewController`; both were measured, and both left it at 280.
+        inspectorHost.view.setFrameSize(NSSize(width: Metrics.inspectorWidth, height: 0))
+        inspectorItem = NSSplitViewItem(viewController: inspectorHost)
         inspectorItem.minimumThickness = Self.inspectorMinimum
         inspectorItem.maximumThickness = Self.inspectorMaximum
         inspectorItem.canCollapse = true
+        // Higher than the centre column's, so a window resize moves the centre boundary and leaves
+        // the inspector at the width it was dragged to.
+        inspectorItem.holdingPriority = .init(NSLayoutConstraint.Priority.defaultHigh.rawValue)
 
         addSplitViewItem(detailItem)
         addSplitViewItem(inspectorItem)
@@ -72,7 +123,7 @@ final class DetailSplitViewController: NSSplitViewController {
         splitView.dividerStyle = .thin
 
         // Replaces the `@AppStorage("inspector.width")` the SwiftUI version kept by hand.
-        splitView.autosaveName = "bloom.detail.split"
+        splitView.autosaveName = Self.autosaveName
     }
 
     func update(detail: AnyView, inspector: AnyView, isInspectorPresented: Bool, animated: Bool) {
