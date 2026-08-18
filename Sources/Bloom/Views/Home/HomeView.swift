@@ -22,11 +22,9 @@ import BloomCore
 struct HomeView: View {
     @Environment(AppModel.self) private var app
 
-    /// Survives leaving Home and coming back. See `HomeFilterStore`.
-    private let store = HomeFilterStore.shared
     /// Archived workspaces, which `AppModel` deliberately does not hold: it lists active ones so
     /// the sidebar cannot show a worktree that no longer exists. Home is the one screen that has
-    /// to be able to look at them, so it reads them itself, once, rather than per row.
+    /// to be able to look at them, so it asks `AppModel` for them, once, rather than per row.
     @State private var archived: [Workspace] = []
     @State private var listing = HomeListing.empty
     /// The list's own selection, not the app's. Writing to `app.selection` would navigate away
@@ -44,10 +42,13 @@ struct HomeView: View {
     /// A list you cannot arrow down is not a list.
     @FocusState private var isListFocused: Bool
 
-    private var filter: HomeFilter { store.filter }
+    /// Held by `AppModel` rather than by this view, which is thrown away and rebuilt every time
+    /// the selection leaves Home and comes back. A filter in `@State` would be cleared by opening
+    /// any workspace at all.
+    private var filter: HomeFilter { app.homeFilter }
 
     var body: some View {
-        @Bindable var store = store
+        @Bindable var app = app
 
         return VStack(spacing: 0) {
             HomeHeader(
@@ -55,7 +56,7 @@ struct HomeView: View {
                 repos: app.repos,
                 archivedCount: archived.count,
                 showsControls: hasAnyWorkspace,
-                filter: $store.filter,
+                filter: $app.homeFilter,
                 onCreateWorkspace: { requestWorkspace(in: nil) }
             )
 
@@ -65,15 +66,16 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.windowBackground)
-        // Keyed on the count rather than on the list itself, because the list is reassigned every
-        // few seconds by the diff stat refresh and this is a database read. Archiving and
-        // restoring are the only things that change what is archived, and both change the count.
-        .task(id: app.workspaces.count) { await loadArchived() }
+        // Keyed on the revision rather than on the workspace list, which is reassigned every few
+        // seconds by the diff stat refresh while this is a database read. `AppModel` bumps the
+        // revision from the archive and the restore themselves, so this reloads when the answer
+        // changed and at no other time.
+        .task(id: app.archivedRevision) { archived = await app.archivedWorkspaces() }
         .task { await keepAgesCurrent() }
         .onChange(of: app.workspaces, initial: true) { _, _ in rebuild() }
         .onChange(of: app.repos) { _, _ in rebuild() }
         .onChange(of: archived) { _, _ in rebuild() }
-        .onChange(of: store.filter) { _, _ in rebuild() }
+        .onChange(of: app.homeFilter) { _, _ in rebuild() }
     }
 
     // MARK: - Body
@@ -220,7 +222,7 @@ struct HomeView: View {
                 } description: {
                     Text("Nothing here is called, branched or filed under \"\(filter.query)\".")
                 } actions: {
-                    Button("Clear the search") { store.filter.query = "" }
+                    Button("Clear the search") { app.homeFilter.query = "" }
                 }
             } else if !filter.projects.isEmpty {
                 ContentUnavailableView {
@@ -228,7 +230,7 @@ struct HomeView: View {
                 } description: {
                     Text("The other projects still have work in them. Widen the project filter to see it.")
                 } actions: {
-                    Button("Show all projects") { store.filter.projects = [] }
+                    Button("Show all projects") { app.homeFilter.projects = [] }
                 }
             } else {
                 ContentUnavailableView {
@@ -236,7 +238,7 @@ struct HomeView: View {
                 } description: {
                     Text("All \(count(archived.count, "workspace")) on this Mac have been archived. Turn archived on to look back at them, or start something new.")
                 } actions: {
-                    Button("Show archived") { store.filter.showsArchived = true }
+                    Button("Show archived") { app.homeFilter.showsArchived = true }
                 }
             }
         }
@@ -263,18 +265,6 @@ struct HomeView: View {
             filter: filter,
             now: stamp
         )
-    }
-
-    /// Reads the archived workspaces straight from the store, because `AppModel` holds only the
-    /// active ones and this view cannot add a query to it.
-    ///
-    /// They are read whether or not the toggle is on: the count is what tells the toggle whether
-    /// it has anything to offer, and it is the difference between "no workspaces yet" and
-    /// "everything here is archived", which are two different screens with two different fixes.
-    private func loadArchived() async {
-        guard let store = app.store else { return }
-        let all = try? await store.workspaces(includeArchived: true)
-        archived = (all ?? []).filter { $0.state != .active }
     }
 
     /// Keeps "3h" from sitting at "3h" all afternoon.

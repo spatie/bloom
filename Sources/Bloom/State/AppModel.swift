@@ -143,6 +143,18 @@ final class AppModel {
     /// really is expendable. RootView presents the confirmation from this.
     var pendingArchive: ArchiveRequest?
     var searchQuery = ""
+    /// What Home's list is narrowed to.
+    ///
+    /// Here rather than in `HomeView`'s `@State` for the same reason `searchQuery` is: `HomeView`
+    /// is destroyed and rebuilt every time the selection leaves Home and comes back, so a filter
+    /// held in the view is silently cleared by opening any workspace at all. A user who narrows
+    /// the list to one project, opens something from it and comes back to a list of everything
+    /// has been overruled by the app without being told.
+    ///
+    /// Deliberately not persisted to disk. "Showing archived" is something you turn on to go and
+    /// look at a thing, not a preference, and an app that starts up showing archived workspaces
+    /// because of something you did last Tuesday has to be worked out rather than read.
+    var homeFilter = HomeFilter()
     var isCreatingWorkspace = false
 
     /// The window's undo manager, handed over by the sidebar because only a view can see it.
@@ -340,6 +352,51 @@ final class AppModel {
 
     func repo(for workspace: Workspace) -> Repo? {
         repos.first { $0.id == workspace.repoID }
+    }
+
+    // MARK: - Archived workspaces
+
+    /// Bumped whenever an archive or a restore changes what is archived.
+    ///
+    /// The number itself means nothing. It exists so a view can key a load on it and be reloaded
+    /// exactly when the answer changed. Home used to key on `workspaces.count`, which is not the
+    /// same thing: archive one workspace and restore another and the count is where it started,
+    /// while both lists are different.
+    private(set) var archivedRevision = 0
+
+    /// The archived list, read once and kept until `invalidateArchived` says otherwise.
+    ///
+    /// Outside observation on purpose. Nothing reads it directly; `archivedWorkspaces()` is the
+    /// only way in, and a tracked write from inside an `await` a view is suspended on is the kind
+    /// of mid-update mutation this file avoids everywhere else.
+    @ObservationIgnored private var cachedArchived: [Workspace]?
+
+    /// Every workspace that has been archived, newest first is not promised: this is the store's
+    /// own order, and the one screen that shows them sorts by recency itself.
+    ///
+    /// `workspaces` holds active ones only, so that the sidebar can never offer a worktree that is
+    /// no longer on disk. Home is the one screen that has to be able to look past that, and it
+    /// asks here rather than reaching around this model into the store, because only this model
+    /// knows when the answer changed.
+    ///
+    /// A failed read is not remembered, so the next caller tries again rather than being told
+    /// forever that nothing was ever archived.
+    func archivedWorkspaces() async -> [Workspace] {
+        if let cachedArchived { return cachedArchived }
+        guard let store, let all = try? await store.workspaces(includeArchived: true) else {
+            return []
+        }
+        let archived = all.filter { $0.state != .active }
+        cachedArchived = archived
+        return archived
+    }
+
+    /// Called from the two places that can change what is archived: a completed archive, and a
+    /// completed restore. Not from `reload`, which runs for a diff stat refresh several times a
+    /// minute and would turn the cache into a per-refresh database read.
+    private func invalidateArchived() {
+        cachedArchived = nil
+        archivedRevision &+= 1
     }
 
     func workspaces(in repo: Repo) -> [Workspace] {
@@ -630,6 +687,8 @@ final class AppModel {
             // the app will ever come back for them.
             await TerminalSessionStore.shared.discard(workspaceID: workspace.id)
             workspaceModels[workspace.id] = nil
+            // One more workspace is archived now, so anything holding the old answer is wrong.
+            invalidateArchived()
             if selection.workspaceID == workspace.id { selection = .home }
             await reload()
             await offerUndo(of: workspace, repo: repo, report: report)
@@ -713,6 +772,8 @@ final class AppModel {
         guard let manager else { return }
         do {
             let restored = try await manager.restore(workspace: workspace, repo: repo)
+            // The other half of the pair: this workspace has left the archived list.
+            invalidateArchived()
             await reload()
             selection = .workspace(restored.id)
         } catch {
