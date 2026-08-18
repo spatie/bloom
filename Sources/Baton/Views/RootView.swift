@@ -20,6 +20,9 @@ struct RootView: View {
     /// Survives relaunch, because an inspector that forgets how wide you made it is worse than
     /// one that cannot be resized at all.
     @AppStorage("inspector.width") private var inspectorWidth: Double = Metrics.inspectorWidth
+    /// The detail column's own width, which is the window minus the sidebar. The inspector's
+    /// ceiling comes from this, so it has to be measured rather than assumed.
+    @State private var detailWidth: Double = 0
     @State private var isCreateSheetPresented = false
     @State private var createTargetRepo: Repo?
 
@@ -48,15 +51,25 @@ struct RootView: View {
             // panes, so it starts below the toolbar where a pane boundary belongs.
             HStack(spacing: 0) {
                 DetailColumn()
-                    .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(
+                        minWidth: DetailColumnLayout.minimum,
+                        maxWidth: .infinity,
+                        maxHeight: .infinity
+                    )
 
                 if app.isInspectorVisible {
-                    InspectorDivider(width: $inspectorWidth)
+                    InspectorDivider(width: $inspectorWidth, available: detailWidth)
                     InspectorPane(model: app.selectedModel)
-                        .frame(width: inspectorWidth)
+                        .frame(width: fittedInspectorWidth)
                         .frame(maxHeight: .infinity)
                 }
             }
+            // The stored width is what the user asked for, `fittedInspectorWidth` is what fits.
+            // Measured on every layout rather than only while dragging, so narrowing the window
+            // narrows the inspector instead of squeezing the sidebar out of view.
+            .onGeometryChange(for: Double.self) { proxy in
+                proxy.size.width
+            } action: { detailWidth = $0 }
                 // The toolbar belongs to the detail column, not to the split view. Attached to
                 // the split view, AppKit lays every item out in the sidebar's slice of the
                 // toolbar, which is narrow, so everything past the first item falls into the
@@ -117,6 +130,15 @@ struct RootView: View {
             createTargetRepo = note.object as? Repo ?? app.selectedWorkspace.flatMap(app.repo(for:))
             isCreateSheetPresented = true
         }
+    }
+
+    /// The stored width, capped at what is left once the detail column keeps its minimum. The
+    /// stored value is deliberately not rewritten, so widening the window restores the width the
+    /// user chose rather than leaving it where a narrow window clamped it.
+    private var fittedInspectorWidth: Double {
+        guard detailWidth > 0 else { return inspectorWidth }
+        let ceiling = detailWidth - DetailColumnLayout.minimum - Metrics.spacingWide
+        return min(inspectorWidth, max(InspectorDivider.minimum, ceiling))
     }
 
     // MARK: - Actions
