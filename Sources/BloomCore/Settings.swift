@@ -13,6 +13,25 @@ public struct RunScript: Identifiable, Sendable, Hashable {
     }
 }
 
+/// One editable setting, named so that "where did this value come from" and "where should an
+/// edit to it go" can both be answered by looking it up rather than by matching strings.
+///
+/// The raw value is the TOML key path the writer uses. `runScripts` is the exception: the run
+/// scripts are a table of tables, so the writer addresses each script under `scripts.run` by id
+/// rather than writing this path directly.
+public enum SettingsKey: String, Sendable, Hashable, CaseIterable {
+    case setupScript = "scripts.setup"
+    case archiveScript = "scripts.archive"
+    case runScripts = "scripts.run"
+    case runMode = "scripts.run_mode"
+    case filesToCopy = "file_include_globs"
+    case branchPrefix = "git.branch_prefix"
+    case deleteBranchOnArchive = "git.delete_branch_on_archive"
+
+    /// The key path as components, for the document editor.
+    public var path: [String] { rawValue.components(separatedBy: ".") }
+}
+
 /// The effective configuration for one repository, after layering every settings file that
 /// applies. Conductor's own files are read as-is so an existing repo needs no new config.
 public struct RepoSettings: Sendable, Hashable {
@@ -37,6 +56,15 @@ public struct RepoSettings: Sendable, Hashable {
     public var homeDefaultEffort: String?
     /// Paths of the settings files that contributed, newest last. Shown in the settings UI.
     public var sources: [String] = []
+
+    /// For each setting that some file actually stated, the path of the file that stated it last
+    /// and therefore won. Absent means "nothing on this machine sets it, the default is showing".
+    ///
+    /// This is what makes the settings screen editable rather than merely informative: an edit is
+    /// written back to the file the value came from, so the user changes the same line they would
+    /// have changed by hand, and a teammate's committed `.conductor/settings.toml` is never
+    /// shadowed by an invisible copy somewhere else. See `SettingsWriter.destination`.
+    public var origins: [SettingsKey: String] = [:]
 
     public init() {}
 
@@ -77,7 +105,7 @@ public enum SettingsLoader {
         for path in homePaths() {
             guard let toml = try? TOML.parse(contentsOf: path) else { continue }
             settings.sources.append(path)
-            apply(toml, to: &settings)
+            apply(toml, from: path, to: &settings)
         }
 
         // Everything a home file said about the model belongs to the home layer. Moving it aside
@@ -90,30 +118,38 @@ public enum SettingsLoader {
         for path in repoPaths(repo: repo) {
             guard let toml = try? TOML.parse(contentsOf: path) else { continue }
             settings.sources.append(path)
-            apply(toml, to: &settings)
+            apply(toml, from: path, to: &settings)
         }
 
         return settings
     }
 
-    static func apply(_ toml: TOMLValue, to settings: inout RepoSettings) {
+    static func apply(_ toml: TOMLValue, from source: String, to settings: inout RepoSettings) {
+        /// Records which file had the last word about a key, so an edit can be written back to it.
+        func note(_ key: SettingsKey) { settings.origins[key] = source }
+
         if let setup = toml["scripts.setup"]?.stringValue, !setup.isEmpty {
             settings.setupScript = setup
+            note(.setupScript)
         }
         if let archive = toml["scripts.archive"]?.stringValue, !archive.isEmpty {
             settings.archiveScript = archive
+            note(.archiveScript)
         }
         if let mode = toml["scripts.run_mode"]?.stringValue {
             settings.runMode = mode
+            note(.runMode)
         }
         if let mode = toml["runScriptMode"]?.stringValue {
             settings.runMode = mode
+            note(.runMode)
         }
 
         if let run = toml["scripts.run"] {
             switch run {
             case .string(let command) where !command.isEmpty:
                 settings.runScripts = [RunScript(id: "run", name: "Run", command: command)]
+                note(.runScripts)
             case .table(let named):
                 let scripts = named
                     .sorted { $0.key < $1.key }
@@ -126,33 +162,50 @@ public enum SettingsLoader {
                             command: command
                         )
                     }
-                if !scripts.isEmpty { settings.runScripts = scripts }
+                if !scripts.isEmpty {
+                    settings.runScripts = scripts
+                    note(.runScripts)
+                }
             default:
                 break
             }
         }
 
-        for key in ["files_to_copy", "filesToCopy", "files.copy"] {
-            if let files = toml[key]?.stringArray, !files.isEmpty {
+        // `file_include_globs` is what Conductor's own repository schema calls this, and it was
+        // missing here: a repository configured in Conductor copied nothing in Bloom, silently,
+        // because the three spellings read were all ones nothing writes. It goes first so the
+        // others still win when a file happens to carry both.
+        //
+        // An empty list is honoured rather than ignored. It used to be treated as "said nothing",
+        // which left "copy nothing into a new workspace" impossible to express: clearing the field
+        // put `.env*` back. A key that is present means the file has an opinion, including the
+        // opinion that the answer is none.
+        for key in ["file_include_globs", "files_to_copy", "filesToCopy", "files.copy"] {
+            if let files = toml[key]?.stringArray {
                 settings.filesToCopy = files
+                settings.origins[.filesToCopy] = source
             }
         }
 
         if let prefix = toml["git.branch_prefix"]?.stringValue {
             settings.branchPrefix = prefix
+            note(.branchPrefix)
         }
         if let type = toml["git.branch_prefix_type"]?.stringValue {
             switch type {
             case "github_username":
                 settings.branchPrefix = GitHubIdentity.cachedUsername
+                note(.branchPrefix)
             case "none":
                 settings.branchPrefix = nil
+                note(.branchPrefix)
             default:
                 break
             }
         }
         if let delete = toml["git.delete_branch_on_archive"]?.boolValue {
             settings.deleteBranchOnArchive = delete
+            note(.deleteBranchOnArchive)
         }
         if let model = toml["models.default"]?.stringValue {
             settings.defaultModel = model
