@@ -7,8 +7,8 @@ import BatonCore
 /// window had no title bar, no toolbar, an opaque sidebar and a hard divider running straight
 /// through the traffic lights. `NavigationSplitView` hands all of that back to AppKit: the
 /// translucent sidebar material, the sidebar toggle, traffic light placement, unified toolbar
-/// integration and remembered column widths. The inspector is the platform `.inspector`, so it
-/// resizes and collapses the way every other Mac inspector does.
+/// integration and remembered column widths. The inspector is an `HSplitView` rather than the
+/// platform `.inspector`, for the reason spelled out on the detail column below.
 ///
 /// The columns themselves are `SidebarView` and `DetailColumn`, and the toolbar is
 /// `BatonWindowToolbar`. What is left here is only what belongs to the window as a whole: the
@@ -24,11 +24,7 @@ struct RootView: View {
         @Bindable var app = app
 
         return NavigationSplitView(columnVisibility: $columnVisibility) {
-            // `StableColumn`, not a bare `SidebarView`: hiding and showing the sidebar twice
-            // otherwise walked the window into the same Update Constraints loop described below.
-            StableColumn(idealWidth: Metrics.sidebarWidth) {
-                SidebarView()
-            }
+            SidebarView()
             .navigationSplitViewColumnWidth(
                 min: 200, ideal: Metrics.sidebarWidth, max: 420
             )
@@ -56,15 +52,6 @@ struct RootView: View {
                         )
                 }
             }
-                // Attached to the DETAIL column, not to the `NavigationSplitView`.
-                //
-                // On the split view it crashes the window. The toolbar also belongs to the detail
-                // column, and an inspector on the split view makes a second owner of the same
-                // toolbar: the two keep re-vending items at each other, the window is marked as
-                // needing another Update Constraints pass every pass, and AppKit eventually throws
-                // "more Update Constraints in Window passes than there are views in the window".
-                // Reproduced on every launch, gone the moment both live on the same column.
-
                 // The toolbar belongs to the detail column, not to the split view. Attached to
                 // the split view, AppKit lays every item out in the sidebar's slice of the
                 // toolbar, which is narrow, so everything past the first item falls into the
