@@ -20,6 +20,7 @@ struct SessionTabView: View {
     var onClose: @MainActor () -> Void
     var onSplitRight: @MainActor () -> Void
     var onSplitDown: @MainActor () -> Void
+    var namespace: Namespace.ID
 
     var body: some View {
         CenterTabView(
@@ -37,7 +38,8 @@ struct SessionTabView: View {
             onCancelRename: onCancelRename,
             onClose: onClose,
             onSplitRight: onSplitRight,
-            onSplitDown: onSplitDown
+            onSplitDown: onSplitDown,
+            namespace: namespace
         )
     }
 }

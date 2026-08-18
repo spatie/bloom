@@ -15,8 +15,14 @@ struct SessionTabsView: View {
     @Bindable var model: WorkspaceModel
 
     @Environment(AppModel.self) private var app
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var renamingID: String?
+    /// Which workspace's strip has finished arriving, so the first draw of a workspace is not
+    /// animated. Switching workspace replaces every id in the strip at once, and without this the
+    /// selection would fly in from wherever the previous workspace happened to have it.
+    @State private var settledWorkspaceID: String?
+    @Namespace private var selection
 
     private var tabs: CenterTabStore { .shared }
 
@@ -55,6 +61,20 @@ struct SessionTabsView: View {
                         toolTab(tab)
                     }
                 }
+                // Two values, not one, because they are two different pieces of news and each of
+                // them has to be able to arrive on its own. `order` covers opening, closing and
+                // dragging a tab; `focused` covers the selection moving. Keying the animation to a
+                // value rather than wrapping every mutation in `withAnimation` is what lets the
+                // asynchronous ones animate at all: a session is closed and reordered through an
+                // actor, so by the time the array changes the call that asked for it is long gone.
+                //
+                // It also decides, correctly and for free, what must NOT animate. Typing in the
+                // rename field changes neither value, so the field cannot creep as the title
+                // grows. A busy session's close is refused by a modal until the user answers, and
+                // the id only leaves the array once they have said yes, so nothing slides out from
+                // under the question.
+                .animation(motion, value: order)
+                .animation(motion, value: focused)
             }
             .scrollIndicators(.never)
 
@@ -67,17 +87,68 @@ struct SessionTabsView: View {
             inspectorToggle
         }
         .frame(height: Metrics.barHeight)
+        // A recess under the tabs, painted over the material and under them.
+        //
+        // Safari's strip is about five per cent darker than the tab sitting on it, which is the
+        // whole of how a selected tab is told from an unselected one there. Bloom's strip had no
+        // such step: the header material over a light window resolves to the same white as
+        // `Palette.surface`, so a selected tab was an invisible white rectangle on white and only
+        // its bold text said anything. An opacity on the primary label colour rather than a colour
+        // of its own, so it darkens the strip in a light appearance and lightens it in a dark one,
+        // which is the direction each of them needs.
+        .background { Color.primary.opacity(Self.recess) }
         .tabStripMaterial()
         .background { shortcuts }
-        .task(id: model.workspace.id) { tabs.load(workspaceID: model.workspace.id) }
+        .task(id: model.workspace.id) {
+            settledWorkspaceID = nil
+            tabs.load(workspaceID: model.workspace.id)
+            // One frame is not enough: the sessions arrive from the store after this view first
+            // draws, and animating that first fill would slide a whole strip in from the left.
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            settledWorkspaceID = model.workspace.id
+        }
     }
 
-    /// The rule between two tabs, inset so the strip reads as a row of tabs rather than as a grid.
+    // MARK: - Motion
+
+    /// How far the strip is tinted away from the tab that is selected on it: darker under a light
+    /// appearance, lighter under a dark one, because the tint is an opacity on the primary label
+    /// colour rather than a colour of its own.
+    private static let recess: Double = 0.045
+
+    /// `Motion.pane`, not a curve of this strip's own. It is the one movement the window has, it
+    /// is short and it does not overshoot, and a tab highlight that travelled at a different speed
+    /// from the inspector it sits beside would read as a second app's idea of how fast things go.
+    ///
+    /// Nothing moves under Reduce Motion, and nothing moves while a workspace is still arriving.
+    /// The setting is dropped rather than slowed, matching every other call site: it is about
+    /// movement, not about speed, and the strip says everything it says without any.
+    private var motion: Animation? {
+        guard !reduceMotion, settledWorkspaceID == model.workspace.id else { return nil }
+        return Motion.pane
+    }
+
+    /// Every tab in the strip, in the order it is drawn. Identity and order only: a title that
+    /// changes must not make the strip move.
+    private var order: [String] {
+        model.sessions.map(\.id) + toolTabs.map(\.id)
+    }
+
+    /// The rule between two tabs. Half the height of the strip and one point wide, measured off
+    /// Safari, where the rule between two unselected tabs is exactly half the bar and two device
+    /// pixels across. It used to be a hairline over a taller run, which read as a grid line.
+    ///
+    /// Softened, because the same measurement covers the contrast: Safari's rule is about six per
+    /// cent darker than the strip it is on, and the separator colour at full strength was nearly
+    /// twice that. A rule between two tabs is there to be found, not to be seen.
+    ///
     /// It is kept in the layout when it is not wanted rather than removed, because a rule that came
     /// and went as the selection moved would shift every tab beside it by half a point.
     private func separator(isHidden: Bool) -> some View {
-        Hairline(axis: .vertical)
-            .padding(.vertical, Metrics.spacing)
+        Rectangle()
+            .fill(Palette.border.opacity(0.7))
+            .frame(width: 1, height: Metrics.barHeight / 2)
             .opacity(isHidden ? 0 : 1)
     }
 
@@ -113,7 +184,8 @@ struct SessionTabsView: View {
             onCancelRename: { renamingID = nil },
             onClose: { close(session) },
             onSplitRight: { split(.chat(session.id), axis: .horizontal) },
-            onSplitDown: { split(.chat(session.id), axis: .vertical) }
+            onSplitDown: { split(.chat(session.id), axis: .vertical) },
+            namespace: selection
         )
         .draggable(session.id)
         .dropDestination(for: String.self) { items, _ in move(items.first, before: session) }
@@ -137,7 +209,8 @@ struct SessionTabsView: View {
             onCancelRename: { renamingID = nil },
             onClose: { Task { await tabs.close(tab) } },
             onSplitRight: { split(.tool(tab.id), axis: .horizontal) },
-            onSplitDown: { split(.tool(tab.id), axis: .vertical) }
+            onSplitDown: { split(.tool(tab.id), axis: .vertical) },
+            namespace: selection
         )
         .draggable(tab.id)
         .dropDestination(for: String.self) { items, _ in move(items.first, before: tab) }
