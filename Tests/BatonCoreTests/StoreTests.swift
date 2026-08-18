@@ -125,6 +125,72 @@ struct StoreTests {
         #expect(try await store.session(id: session.id)?.state == .idle)
     }
 
+    @Test("reconciles a setup that was still running when the app died")
+    func recoversInterruptedSetup() async throws {
+        let store = try makeTestStore("store")
+        let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r"))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id, name: "w", branch: "b", path: "/p", baseBranch: "main",
+            setupState: .running, setupLog: "installing dependencies"
+        ))
+
+        try await store.recoverInterruptedSetups()
+
+        let stored = try #require(try await store.workspace(id: workspace.id))
+        #expect(stored.setupState == .pending)
+        // What the script did manage to print is evidence, so it stays, and the note goes after it
+        // so an interrupted run cannot be mistaken for a script that failed on its own.
+        #expect(stored.setupLog.hasPrefix("installing dependencies"))
+        #expect(stored.setupLog.contains("interrupted"))
+    }
+
+    @Test(
+        "leaves a setup state that is not running alone",
+        arguments: [SetupState.pending, .succeeded, .failed, .skipped]
+    )
+    func leavesSettledSetupStatesAlone(state: SetupState) async throws {
+        let store = try makeTestStore("store")
+        let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r"))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id, name: "w", branch: "b", path: "/p", baseBranch: "main",
+            setupState: state, setupLog: "the original log"
+        ))
+
+        try await store.recoverInterruptedSetups()
+
+        let stored = try #require(try await store.workspace(id: workspace.id))
+        #expect(stored.setupState == state)
+        #expect(stored.setupLog == "the original log")
+    }
+
+    @Test("writes the setup columns without clobbering the rest of the row")
+    func setupUpdateKeepsTheRestOfTheRow() async throws {
+        let store = try makeTestStore("store")
+        let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r"))
+        let stale = try await store.upsert(Workspace(
+            repoID: repo.id, name: "original", branch: "b", path: "/p", baseBranch: "main",
+            setupState: .running
+        ))
+
+        // Stands in for everything that can write the row while a setup script runs for minutes:
+        // a rename from the UI, a diff stat from the background refresh, a pin.
+        try await store.upsert(stale.with {
+            $0.name = "renamed while setup ran"
+            $0.pinned = true
+        })
+        try await store.updateDiffStat(workspaceID: stale.id, additions: 12, deletions: 3, files: 2)
+
+        try await store.updateSetup(workspaceID: stale.id, state: .succeeded, log: "done")
+
+        let stored = try #require(try await store.workspace(id: stale.id))
+        #expect(stored.setupState == .succeeded)
+        #expect(stored.setupLog == "done")
+        #expect(stored.name == "renamed while setup ran")
+        #expect(stored.pinned)
+        #expect(stored.additions == 12)
+        #expect(stored.changedFiles == 2)
+    }
+
     @Test("survives a reopen")
     func survivesReopen() async throws {
         let path = TestScratch.unique("baton-persist") + ".sqlite"

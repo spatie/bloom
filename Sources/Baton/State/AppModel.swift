@@ -108,6 +108,10 @@ final class AppModel {
             self.store = store
             self.manager = WorkspaceManager(store: store)
             try await store.resetRunningSessions()
+            // Same reasoning as the sessions above, one table over: a setup script is a child of
+            // this process, so anything still `running` here died with the last launch and would
+            // otherwise spin in the sidebar forever.
+            try await store.recoverInterruptedSetups()
             await reload()
             isLoaded = true
         } catch {

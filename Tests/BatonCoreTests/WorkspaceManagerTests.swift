@@ -191,6 +191,54 @@ struct WorkspaceManagerTests {
         #expect(stored?.setupLog.contains("about to fail") == true)
     }
 
+    @Test(
+        "a finishing setup run does not undo edits made while it ran",
+        .tags(.subprocess), .timeLimit(.minutes(1))
+    )
+    func setupDoesNotClobberConcurrentEdits() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        // The script blocks until the test says go, so the window in which the row is `running`
+        // is controlled rather than raced against a sleep.
+        try repo.write(".conductor/settings.toml", """
+        [scripts]
+        setup = '''
+        for _ in $(seq 1 600); do
+          [ -f "$BATON_WORKSPACE_PATH/go" ] && exit 0
+          sleep 0.05
+        done
+        exit 1
+        '''
+        """)
+
+        let store = try makeTestStore("wm")
+        let manager = WorkspaceManager(store: store)
+        let registered = try await manager.addRepository(at: repo.path)
+        let workspace = try await manager.createWorkspace(repo: registered, prompt: "Slow setup")
+
+        let run = Task {
+            await manager.runSetup(workspace: workspace, repo: registered, port: 0) { _ in }
+        }
+        await waitUntil("the setup run has marked the workspace running") {
+            (try? await store.workspace(id: workspace.id))??.setupState == .running
+        }
+
+        try await store.upsert(workspace.with {
+            $0.name = "renamed while setup ran"
+            $0.pinned = true
+        })
+
+        let worktree = TempRepo(existing: workspace.path)
+        try worktree.write("go", "")
+
+        #expect(await run.value)
+
+        let stored = try #require(try await store.workspace(id: workspace.id))
+        #expect(stored.setupState == .succeeded)
+        #expect(stored.name == "renamed while setup ran")
+        #expect(stored.pinned)
+    }
+
     @Test("archiving removes the worktree and runs the archive script", .tags(.destructive))
     func archivesWorkspace() async throws {
         let repo = try await TempRepo()

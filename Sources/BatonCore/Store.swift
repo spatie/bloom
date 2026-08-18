@@ -308,6 +308,44 @@ public actor Store {
         }
     }
 
+    /// A setup script can run for minutes, and everything else that touches the workspace keeps
+    /// writing during those minutes: renames, pinning, diff stats, activity. Writing the whole
+    /// `Workspace` value the run started with would roll all of that back, which is the bug
+    /// `updateSessionPreferences` exists to avoid on the sessions table. So the setup run owns
+    /// exactly these two columns and touches nothing else.
+    public func updateSetup(workspaceID: String, state: SetupState, log: String? = nil) throws {
+        try db.run(
+            "UPDATE workspaces SET setup_state = ?, setup_log = COALESCE(?, setup_log) WHERE id = ?",
+            [.text(state.rawValue), log.map { .text($0) } ?? .null, .text(workspaceID)]
+        )
+    }
+
+    /// The setup script is a child of this process, so it cannot outlive the app: a row still
+    /// `running` at launch is a run that was killed, never a run still going.
+    ///
+    /// `.pending` and not `.failed`, because the script never got to report anything. Calling it
+    /// failed accuses it of something nobody witnessed and hangs a warning triangle on a workspace
+    /// that is very likely fine; calling it succeeded is simply a lie. `.pending` stops the
+    /// spinner, reads as "setup has not run yet" and leaves the re-run button inviting, which is
+    /// the honest description. The appended log line is what separates this from a workspace whose
+    /// setup genuinely never started.
+    public func recoverInterruptedSetups() throws {
+        let note = "[baton] The app stopped while the setup script was running, "
+            + "so this run was interrupted before it could report a result. Run setup again to finish it."
+        try db.run(
+            """
+            UPDATE workspaces
+            SET setup_state = ?,
+                setup_log = CASE WHEN setup_log = '' THEN ? ELSE setup_log || char(10) || ? END
+            WHERE setup_state = ?
+            """,
+            [
+                .text(SetupState.pending.rawValue), .text(note), .text(note),
+                .text(SetupState.running.rawValue),
+            ]
+        )
+    }
+
     public func nextWorkspaceSortOrder(repoID: String) throws -> Int {
         let rows = try db.query(
             "SELECT COALESCE(MAX(sort_order), -1) AS m FROM workspaces WHERE repo_id = ?",

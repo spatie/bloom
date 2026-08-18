@@ -180,11 +180,11 @@ public struct WorkspaceManager: Sendable {
     ) async -> Bool {
         let settings = SettingsLoader.load(repo: repo.path)
         guard let script = settings.setupScript, !script.isEmpty else {
-            _ = try? await store.upsert(workspace.with { $0.setupState = .skipped })
+            try? await store.updateSetup(workspaceID: workspace.id, state: .skipped)
             return true
         }
 
-        _ = try? await store.upsert(workspace.with { $0.setupState = .running })
+        try? await store.updateSetup(workspaceID: workspace.id, state: .running)
 
         let env = environment(for: workspace, repo: repo, port: port)
         let runner = StreamingProcess(
@@ -208,10 +208,13 @@ public struct WorkspaceManager: Sendable {
         let status = await runner.exitStatus
         let succeeded = status == 0
         let capped = String(log.suffix(200_000))
-        _ = try? await store.upsert(workspace.with {
-            $0.setupState = succeeded ? .succeeded : .failed
-            $0.setupLog = capped
-        })
+        // The whole `workspace` value here is as old as the run, and a run can take minutes, so
+        // upserting it would clobber every other write to the row made in the meantime.
+        try? await store.updateSetup(
+            workspaceID: workspace.id,
+            state: succeeded ? .succeeded : .failed,
+            log: capped
+        )
         return succeeded
     }
 
