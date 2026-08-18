@@ -94,7 +94,11 @@ enum Palette {
     /// as a smudge. These are the same two steps, taken along Bloom's ramp instead.
     static let selected = dynamic(light: 0xDCE7EA, dark: 0x1D4054)
     /// Selection in a focused list inside the key window, where macOS uses the accent colour.
-    static let selectedEmphasized = Color(nsColor: .selectedContentBackgroundColor)
+    ///
+    /// Bloom's accent rather than the system's, for the reason spelled out on `accent`. This is the
+    /// most visible of the surfaces that now ignore System Settings: the selected sidebar row and
+    /// the selected changed file are brand blue on a Mac set to Graphite.
+    static let selectedEmphasized = accentFill
     static let selectedEmphasizedText = Color(nsColor: .alternateSelectedControlTextColor)
 
     // MARK: Lines
@@ -147,8 +151,31 @@ enum Palette {
 
     // MARK: Meaning
 
-    /// The user's chosen accent colour, not a blue we picked for them.
-    static let accent = Color(nsColor: .controlAccentColor)
+    /// Bloom's accent, and deliberately not the user's.
+    ///
+    /// This is the one place the app overrides a system preference on purpose. `controlAccentColor`
+    /// follows System Settings, so on a machine set to Graphite every tinted glyph, chip and
+    /// selected segment in Bloom came out grey, and on one set to Pink they came out pink. Bloom
+    /// has a mark and a site built on one ramp, and an app whose accent is whatever the user last
+    /// picked cannot be part of it. See `PALETTE.md` in the brand folder.
+    ///
+    /// A pair, not a colour, because the ramp is explicit that its bottom half is for dark grounds
+    /// and its top half for light. Bloom `#4FD8C4` measures 10.6 to 1 on the dark surface and 1.7
+    /// to 1 on the light one, so it can never be text on light; the ramp's answer for that is Bloom
+    /// Ink `#0C7A6E`, which measures 5.1. Both are the same hue, so a glyph that is teal in dark is
+    /// recognisably the same glyph in light.
+    ///
+    /// This is for ink and for strokes. A filled control that has to carry white text uses
+    /// `accentFill`, which is a different member of the ramp for exactly that reason.
+    static let accent = dynamic(light: 0x0C7A6E, dark: 0x4FD8C4)
+
+    /// The accent as a fill with light text on it: a selected row, a prominent button.
+    ///
+    /// Spatie Blue, the ramp's anchor and the only colour in it that works on both grounds. White
+    /// on it measures 5.2 to 1, which is where macOS's own selection fill sits (4.9 to 1), so a
+    /// selected row reads exactly as firmly as it did. Bloom itself cannot do this job: white on
+    /// `#4FD8C4` is 1.6 to 1, an unreadable row.
+    static let accentFill = dynamic(light: 0x197593, dark: 0x197593)
     static let positive = Color(nsColor: .systemGreen)
     static let negative = Color(nsColor: .systemRed)
 
@@ -159,17 +186,26 @@ enum Palette {
     /// about work that is going perfectly well. This keeps the meaning and drops the volume.
     static let stop = Color(nsColor: .systemRed.blended(withFraction: 0.28, of: .secondaryLabelColor) ?? .systemRed)
     static let warning = Color(nsColor: .systemOrange)
-    static let running = Color(nsColor: .controlAccentColor)
+    /// An agent mid turn. The ramp is explicit that this is the accent rather than a green of its
+    /// own: "Running, healthy, done. Reuse the accent, do not invent a green."
+    static let running = accent
 
     // MARK: Diffs
     //
-    // Tinted backgrounds, kept low in saturation so a wall of them is still readable, and
-    // defined per appearance because a light green that works on white is invisible on charcoal.
+    // Stated as an alpha over whatever the line is drawn on, rather than as an opaque hex per
+    // appearance. That is the difference between a wash and a slab: a wash follows the surface,
+    // so moving the dark ground from charcoal to deep blue leaves these correct, where the eight
+    // opaque values they replaced each had to be retuned by hand or they drifted off the ground
+    // and read as coloured tape stuck over the code.
+    //
+    // Thirteen and fourteen percent, because a deletion has to look as strong as an addition and
+    // red carries further than green at the same alpha. The emphasis pair is roughly double, for
+    // the run of characters inside a changed line.
 
-    static let diffAddBackground = dynamic(light: 0xE4F3EA, dark: 0x0F322C)
-    static let diffAddEmphasis = dynamic(light: 0xB7E3C4, dark: 0x17503B)
-    static let diffDeleteBackground = dynamic(light: 0xFBE9E7, dark: 0x2C2029)
-    static let diffDeleteEmphasis = dynamic(light: 0xF5C6C6, dark: 0x4F252D)
+    static let diffAddBackground = positive.opacity(0.13)
+    static let diffAddEmphasis = positive.opacity(0.28)
+    static let diffDeleteBackground = negative.opacity(0.14)
+    static let diffDeleteEmphasis = negative.opacity(0.30)
     /// The line number column, which is the sunken step and nothing else.
     static let diffGutter = surfaceSunken
 
@@ -518,6 +554,17 @@ extension EnvironmentValues {
 struct RowBackground: ViewModifier {
     var isSelected: Bool
     var isHovered: Bool
+    /// Whether the list this row belongs to has keyboard focus.
+    ///
+    /// Default false, because most of the lists that draw a selection in this window never take
+    /// focus. The inspector's changed files are picked with the pointer while the composer holds
+    /// the keyboard, and AppKit's rule for that is the quiet grey, not the accent: the emphasized
+    /// fill means "the arrow keys move this", and painting it on a list the arrow keys do not move
+    /// is a promise the window does not keep. It was keyed on the window being main instead, which
+    /// is why every one of those rows sat in a saturated accent fill all the time.
+    ///
+    /// The menus over the composer pass true, since they really are driven by the arrow keys.
+    var isFocused: Bool = false
 
     @Environment(\.controlActiveState) private var activeState
 
@@ -532,20 +579,24 @@ struct RowBackground: ViewModifier {
     }
 
     private var isEmphasized: Bool {
-        isSelected && activeState != .inactive
+        isSelected && isFocused && activeState != .inactive
     }
 
     private var fill: Color {
         if isSelected {
-            return activeState == .inactive ? Palette.selected : Palette.selectedEmphasized
+            return isEmphasized ? Palette.selectedEmphasized : Palette.selected
         }
         return isHovered ? Palette.hover : .clear
     }
 }
 
 extension View {
-    func rowBackground(isSelected: Bool, isHovered: Bool) -> some View {
-        modifier(RowBackground(isSelected: isSelected, isHovered: isHovered))
+    func rowBackground(
+        isSelected: Bool, isHovered: Bool, isFocused: Bool = false
+    ) -> some View {
+        modifier(
+            RowBackground(isSelected: isSelected, isHovered: isHovered, isFocused: isFocused)
+        )
     }
 
     /// Tracks hover without each call site needing its own @State.

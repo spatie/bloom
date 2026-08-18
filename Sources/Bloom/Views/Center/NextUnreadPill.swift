@@ -21,7 +21,9 @@ struct NextUnreadPill: View {
         .buttonStyle(.borderedProminent)
         .buttonBorderShape(.capsule)
         .controlSize(.small)
-        .tint(Palette.accent)
+        // `accentFill` for the reason spelled out on `ComposerSendButton`: this is a filled
+        // control with a white label on it.
+        .tint(Palette.accentFill)
         // Black rather than the label colour, which would be a white glow in dark mode.
         .shadow(color: .black.opacity(0.2), radius: Metrics.spacingSmall, y: Metrics.spacingTight)
         .help("Jump to the next unread reply")

@@ -31,7 +31,9 @@ struct ComposerSendButton: View {
         // shouting it.
         .buttonStyle(.borderedProminent)
         .buttonBorderShape(.circle)
-        .tint(isRunning ? Palette.stop : Palette.accent)
+        // `accentFill`, not `accent`. A prominent button paints a white label on its tint, and
+        // white on Bloom teal is 1.6 to 1. Spatie Blue is the ramp member that carries a label.
+        .tint(isRunning ? Palette.stop : Palette.accentFill)
         .disabled(!isRunning && !canSend)
         .help(isRunning ? "Stop the agent" : "Send (Return)")
     }

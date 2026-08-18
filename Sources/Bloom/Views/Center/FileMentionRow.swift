@@ -38,7 +38,8 @@ struct FileMentionRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(match.path)
-        .rowBackground(isSelected: isSelected, isHovered: isHovered)
+        // Focused, for the reason spelled out on `SlashCommandRow`.
+        .rowBackground(isSelected: isSelected, isHovered: isHovered, isFocused: true)
         .onHover { hovering in
             isHovered = hovering
             if hovering { onHover() }

@@ -42,7 +42,9 @@ struct SlashCommandRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .rowBackground(isSelected: isSelected, isHovered: isHovered)
+        // Focused, because this menu really is driven by the arrow keys while the composer
+        // holds the keyboard, which is the one case AppKit paints in the accent.
+        .rowBackground(isSelected: isSelected, isHovered: isHovered, isFocused: true)
         .onHover { hovering in
             isHovered = hovering
             if hovering { onHover() }
