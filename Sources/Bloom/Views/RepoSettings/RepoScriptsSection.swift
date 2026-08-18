@@ -133,15 +133,26 @@ struct RepoScriptField<Destination: View>: View {
 }
 
 /// One run script. The name is what the tab is called; the command is what runs.
+///
+/// The fields carry no title of their own. A `TextField` with one, inside a `Form`, is split into
+/// a label column and a value column by the form itself, which put the name and the command on two
+/// separate rows of a table and right-aligned a shell command against the far edge of the window.
 struct RepoRunScriptRow: View {
     @Binding var script: DraftRunScript
     let onRemove: () -> Void
 
+    /// Wide enough for "Watch tests" without the command below it starting at a different edge.
+    private static let nameWidth: CGFloat = 180
+
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.spacing) {
             HStack(spacing: Metrics.gutter) {
-                TextField("Name", text: $script.name)
-                    .frame(maxWidth: 180)
+                TextField("", text: $script.name, prompt: Text("Name"))
+                    .textFieldStyle(.roundedBorder)
+                    // Without this the grouped form claims the field for its value column and
+                    // indents it half way across the window, away from the command under it.
+                    .labelsHidden()
+                    .frame(width: Self.nameWidth)
 
                 // The table this script is stored under. Shown because renaming it does not move
                 // it: the table name is fixed when the script is first saved, and it is what a
@@ -155,17 +166,20 @@ struct RepoRunScriptRow: View {
 
                 Spacer(minLength: Metrics.spacingSmall)
 
-                Button("Remove \(script.name)", systemImage: "minus.circle", action: onRemove)
+                Button("Remove this run script", systemImage: "minus.circle", action: onRemove)
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
                     .foregroundStyle(Palette.textSecondary)
                     .help("Remove this run script")
             }
 
-            TextField("Command", text: $script.command, axis: .vertical)
+            TextField("", text: $script.command, prompt: Text("Command"), axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .labelsHidden()
                 .font(Typo.codeSmall)
                 .lineLimit(1...4)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, Metrics.spacingTight)
     }
 }
