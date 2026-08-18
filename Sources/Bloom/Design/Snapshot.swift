@@ -142,26 +142,31 @@ enum Snapshot {
             // swallows the flag after it and the app starts with a preference nobody set. With
             // `--settings --window-size 900x1150` no window is ever created at all.
             let wantsSettings = arguments.contains("--settings")
-            // What `BloomApp` names its one `Window` scene.
-            let mainWindowTitle = "Bloom"
 
             // Polled rather than slept through, and the settings action is re-sent each time round.
             // How long the first window takes depends on how much the store has to read, and a
             // fixed wait that is long enough on a small database is a coin toss on a real one.
             var candidate: NSWindow?
             for _ in 0..<40 {
-                let visible = NSApp.windows.filter { $0.isVisible && $0.contentView != nil }
-                if wantsSettings {
-                    // "Anything but the main window", because SwiftUI titles the settings window
-                    // after whichever pane is showing rather than "Settings", and it does not
-                    // reliably take key focus in a headless capture run either.
-                    candidate = visible.first { $0.title != mainWindowTitle }
-                    if candidate == nil, !visible.isEmpty { openSettingsWindow() }
-                } else {
-                    candidate = visible.first
-                }
+                candidate = capturableWindows().first
                 if candidate != nil { break }
                 try? await Task.sleep(for: .milliseconds(250))
+            }
+
+            // "Whichever window is not the main one", identified by holding on to the main window
+            // rather than by title. SwiftUI titles the settings window after whichever pane is
+            // showing, and it titles the MAIN window after the selected workspace, so a title
+            // comparison against "Bloom" matched neither and every settings capture silently
+            // returned a picture of the main window instead.
+            if wantsSettings {
+                let main = candidate
+                candidate = nil
+                for _ in 0..<40 {
+                    candidate = capturableWindows().first { $0 !== main }
+                    if candidate != nil { break }
+                    openSettingsWindow()
+                    try? await Task.sleep(for: .milliseconds(250))
+                }
             }
 
             guard let window = candidate, let contentView = window.contentView else {
@@ -266,6 +271,20 @@ enum Snapshot {
         // screencapture reports success and writes nothing when the window number is stale.
         let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int ?? 0
         return size > 0
+    }
+
+    /// The windows a capture may be pointed at: this app's own titled windows.
+    ///
+    /// Filtered rather than taken as they come. A process holds more windows than it opened: the
+    /// system attaches a borderless child window to a focused text view, and `screencapture -l`
+    /// on a child returns its PARENT's image, so a settings run that picked one silently produced
+    /// another picture of the main window.
+    @MainActor
+    private static func capturableWindows() -> [NSWindow] {
+        NSApp.windows.filter {
+            $0.isVisible && $0.contentView != nil && $0.parent == nil
+                && $0.styleMask.contains(.titled)
+        }
     }
 
     /// Opens the `Settings` scene from outside a view.

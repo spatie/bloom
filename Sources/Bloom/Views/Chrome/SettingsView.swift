@@ -82,13 +82,12 @@ private struct GeneralSettingsView: View {
         Form {
             Toggle("Confirm before archiving", isOn: $confirmBeforeArchiving)
 
-            LabeledContent("Menu bar") {
-                VStack(alignment: .leading, spacing: Metrics.spacingTight) {
-                    Toggle("Show agent status in the menu bar", isOn: $showsMenuBarStatus)
-                    Text("Which agents are running and which are waiting for you, without raising the window.")
-                        .font(Typo.caption)
-                        .foregroundStyle(Palette.textSecondary)
-                }
+            // A switch with its explanation underneath, not a checkbox inside a labelled row.
+            // Two booleans of the same rank sat next to each other wearing two different controls,
+            // and every other boolean in this window is a switch.
+            Toggle(isOn: $showsMenuBarStatus) {
+                Text("Show agent status in the menu bar")
+                Text("Which agents are running and which are waiting for you, without raising the window.")
             }
 
             LabeledContent("New workspaces") {
@@ -248,6 +247,7 @@ private struct ProjectRow: View {
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
                 .foregroundStyle(Palette.textSecondary)
+                .help("Remove \(repo.name)")
         }
         .onChange(of: repo.name) { _, updated in
             if !isEditingName { name = updated }
@@ -399,6 +399,9 @@ private struct ToolPathRow: View {
 
 /// Gives the settings window a stable identity without hard-coding release metadata.
 private struct AboutSettingsView: View {
+    /// Two lines of the row's own type, which is where an icon beside a name belongs.
+    private static let iconSize: CGFloat = 32
+
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development"
     }
@@ -407,9 +410,18 @@ private struct AboutSettingsView: View {
         Form {
             Section {
                 LabeledContent("Application") {
-                    Label("Bloom", systemImage: "point.3.connected.trianglepath.dotted")
-                        .font(Typo.title)
-                        .foregroundStyle(Palette.textPrimary)
+                    HStack(spacing: Metrics.spacing) {
+                        // The app's own icon, read out of the running bundle. It used to be an SF
+                        // Symbol of three connected dots, which was a stand-in from before Bloom
+                        // had a mark of its own and stopped being true the moment it did.
+                        Image(nsImage: NSApp.applicationIconImage)
+                            .resizable()
+                            .frame(width: Self.iconSize, height: Self.iconSize)
+                            .accessibilityHidden(true)
+                        Text(verbatim: "Bloom")
+                            .font(Typo.title)
+                            .foregroundStyle(Palette.textPrimary)
+                    }
                 }
                 LabeledContent("Version", value: version)
                 LabeledContent("Purpose", value: "Parallel coding agents in isolated git worktrees")

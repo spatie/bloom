@@ -49,12 +49,16 @@ struct TurnFooterView: View {
                         .fixedSize()
                 }
 
-                ForEach(files.prefix(Self.visibleFileLimit)) { file in
-                    TurnFileChip(file: file)
-                }
-
-                if files.count > Self.visibleFileLimit {
-                    Chip(text: "+\(files.count - Self.visibleFileLimit) more")
+                // How many chips there is room for, rather than a fixed count. The chips are the
+                // only thing in this row that can be dropped, and the alternative was every one of
+                // them being squeezed to an empty rounded rectangle while the duration, the cost
+                // and the two buttons kept their width.
+                ViewThatFits(in: .horizontal) {
+                    fileChips(limit: Self.visibleFileLimit)
+                    fileChips(limit: 3)
+                    fileChips(limit: 1)
+                    countChip
+                    Color.clear.frame(width: 0, height: 0)
                 }
 
                 Spacer(minLength: TranscriptLayout.tight)
@@ -116,6 +120,29 @@ struct TurnFooterView: View {
             TurnScan.files(rows: rows, endingAt: seq)
         }.value
         files = scanned
+    }
+
+    /// The first `limit` files as chips, with what is left named rather than dropped.
+    @ViewBuilder
+    private func fileChips(limit: Int) -> some View {
+        HStack(spacing: TranscriptLayout.block) {
+            ForEach(files.prefix(limit)) { file in
+                TurnFileChip(file: file)
+            }
+            if files.count > limit {
+                Chip(text: "+\(files.count - limit) more")
+            }
+        }
+        .fixedSize()
+    }
+
+    /// The last thing before nothing: how many files the turn touched, without naming any of them.
+    @ViewBuilder
+    private var countChip: some View {
+        if !files.isEmpty {
+            Chip(text: files.count == 1 ? "1 file" : "\(files.count) files")
+                .fixedSize()
+        }
     }
 
     private func copyAnswer() {
