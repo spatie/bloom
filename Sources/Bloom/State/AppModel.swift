@@ -735,6 +735,30 @@ final class AppModel {
         await reload()
     }
 
+    /// Clears the mark that says a turn finished while you were not looking.
+    ///
+    /// The rule, in full, because three things now depend on it: the Dock badge, the menu bar
+    /// item and the weight of a project's name in the sidebar.
+    ///
+    /// `TranscriptModel.notifyFinished` SETS the flag when a turn ends and the workspace is not
+    /// the selected one. This clears it when the workspace's transcript comes on screen, from
+    /// `WorkspaceModel.onAppear`. The two are exact duals: the flag means "this finished while it
+    /// was not in front of you", and it goes the moment it is.
+    ///
+    /// Two consequences that have each been mistaken for a bug.
+    ///
+    /// The first is that launching clears it for the restored workspace. `restoreLastSelection`
+    /// reopens the window on the workspace it was last on, that workspace's transcript is what
+    /// the window paints, and the finished turn is the last thing in it. Confirmed by capture: a
+    /// workspace with the flag set that is not the restored one keeps it, the restored one does
+    /// not. That is the same rule as any other selection, and the alternative is worse: the badge
+    /// would count the workspace whose transcript is filling the window, and the only way to
+    /// clear it would be to navigate away and back.
+    ///
+    /// The second is that the flag includes turns that failed or were cancelled. That is
+    /// deliberate. An agent that fell over is still something waiting for a person, and it is the
+    /// one most worth being told about; a mark that counted only successes would go quiet exactly
+    /// when something went wrong.
     func markRead(_ workspace: Workspace) async {
         guard let store, workspace.unread else { return }
         _ = try? await store.upsert(workspace.with { $0.unread = false })

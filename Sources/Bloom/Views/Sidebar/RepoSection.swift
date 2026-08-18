@@ -21,6 +21,11 @@ struct RepoSection: View {
     /// Only used to say why the section is empty, which is a different sentence when a filter is
     /// hiding rows than when the project has none.
     var isFiltered: Bool
+    /// Whether any of this project's workspaces has a finished turn nobody has read.
+    ///
+    /// Passed in rather than derived from `rows`, because `rows` is what the filter is letting
+    /// through. See `SidebarRepoGroup.hasUnreadWork`.
+    var hasUnreadWork: Bool
     @Binding var renaming: String?
     /// Raised to the sidebar, which owns the create sheet.
     var onCreateWorkspace: (Repo) -> Void
@@ -84,22 +89,7 @@ struct RepoSection: View {
                     .onSubmit(commitRepoRename)
                     .onExitCommand { isRenamingRepo = false }
             } else {
-                // A source list section header is usually set below its rows, which is right when
-                // the header names a category ("Favorites", "Locations") and the rows are the
-                // things. Here the header names a thing: a project, with its own icon, its own
-                // menu and its own colour, and the rows are what is inside it. Mail's account
-                // headers and Xcode's project group are the closer precedent, and both sit at
-                // reading size in the heading weight. `Typo.title` is that, and it is what the
-                // same project name is already set in on Home, so the two agree.
-                //
-                // The rows below are `Typo.body`, one weight lighter and one shade quieter, so
-                // the pair reads as a heading and its contents rather than as two ranks of
-                // similar grey text.
-                Text(repo.name)
-                    .font(Typo.title)
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-                    .accessibilityAddTraits(.isHeader)
+                name
             }
 
             Spacer(minLength: Metrics.spacingSmall)
@@ -161,6 +151,53 @@ struct RepoSection: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Bloom forgets this project and its workspaces. Nothing on disk is deleted.")
+        }
+    }
+
+    /// The project's name, one weight heavier while something inside it is waiting to be read.
+    ///
+    /// Weight, because that is what a workspace row already does for the same fact: an unread row
+    /// steps from regular to medium and takes the accent dot. The header steps from the heading's
+    /// own semibold to bold and takes nothing else, so the two read as one signal at two ranks
+    /// rather than as two different marks. There is not much room above semibold at 13 points, and
+    /// that is the point: the projects with work waiting should stand out from the ones without,
+    /// not shout at the rows underneath them.
+    ///
+    /// It earns its keep on a COLLAPSED project, where the rows that carry the dots are not on
+    /// screen at all and the header is the only thing left to say so.
+    ///
+    /// The weight is invisible to VoiceOver, so the same fact is said in words as the heading's
+    /// value. The dot on the row does the same through `WorkspaceRow`'s status description.
+    /// `Typo.title` with one more step of weight on it, and nothing else changed. Not a rung of
+    /// the scale, because it is not a size: it is the same rung saying one more thing.
+    private static let unreadTitle = ScaledFont(.headline, weight: .heavy)
+
+    @ViewBuilder
+    private var name: some View {
+        // A source list section header is usually set below its rows, which is right when the
+        // header names a category ("Favorites", "Locations") and the rows are the things. Here the
+        // header names a thing: a project, with its own icon, its own menu and its own colour, and
+        // the rows are what is inside it. Mail's account headers and Xcode's project group are the
+        // closer precedent, and both sit at reading size in the heading weight. `Typo.title` is
+        // that, and it is what the same project name is already set in on Home, so the two agree.
+        //
+        // The rows below are `Typo.body`, one weight lighter and one shade quieter, so the pair
+        // reads as a heading and its contents rather than as two ranks of similar grey text.
+        // The weight is part of the rung rather than a `fontWeight` laid over it. `Typo.title` is
+        // `.headline`, which carries its own weight inside the `Font` it resolves to, and a
+        // `fontWeight` outside that resolves to nothing at all: captured both ways, the two names
+        // were identical to the pixel.
+        let label = Text(repo.name)
+            .font(hasUnreadWork ? Self.unreadTitle : Typo.title)
+            .foregroundStyle(Palette.textPrimary)
+            .lineLimit(1)
+
+        if hasUnreadWork {
+            label
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityValue("Has unread work")
+        } else {
+            label.accessibilityAddTraits(.isHeader)
         }
     }
 

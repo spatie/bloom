@@ -52,6 +52,7 @@ struct SidebarView: View {
                     repo: group.repo,
                     rows: group.workspaces,
                     isFiltered: filter != .all,
+                    hasUnreadWork: group.hasUnreadWork,
                     renaming: $renaming,
                     onCreateWorkspace: presentCreate
                 )
