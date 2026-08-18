@@ -61,7 +61,10 @@ struct ComposerResizeHandle: View {
     /// A minimum distance, so a double click reaches the tap gesture instead of being eaten as a
     /// zero length drag.
     private var drag: some Gesture {
-        DragGesture(minimumDistance: 1)
+        // `.global`: the default coordinate space is local to this handle, which moves as soon
+        // as the height it is dragging changes, so the translation would be measured against an
+        // origin it had just moved itself.
+        DragGesture(minimumDistance: 1, coordinateSpace: .global)
             .onChanged { value in
                 isDragging = true
                 updateCursor()

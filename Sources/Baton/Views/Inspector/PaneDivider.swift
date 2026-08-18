@@ -64,7 +64,12 @@ struct PaneDivider: View {
                 }
             }
             .gesture(
-                DragGesture(minimumDistance: 1)
+                // `.global`, and that is the whole of why this drag is smooth. The default is
+                // `.local`, which is local to THIS view, and this view moves the moment `length`
+                // changes. Measuring a translation from an origin that the translation itself
+                // just moved is a feedback loop: the divider oscillated between the two ends of
+                // its bounds instead of following the pointer.
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { drag in
                         let origin = dragOrigin ?? length
                         if dragOrigin == nil { dragOrigin = origin }
