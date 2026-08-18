@@ -24,6 +24,11 @@ struct ChangedFileList: View {
     /// Folders the user closed. Empty means everything is open, which is what a change of twenty
     /// files wants on first sight.
     @State private var collapsed: Set<String> = []
+    /// Resolved when the selection moves rather than in `body`, which runs again on every hover.
+    @State private var previewURL: URL?
+    /// Bumped on every row activation, which is what puts the keyboard back on the list after the
+    /// reader has been in the composer or a terminal. See `QuickLookHost`.
+    @State private var quickLookArm = 0
 
     @AppStorage(ChangedFilePresentation.storageKey)
     private var isTree = ChangedFilePresentation.defaultsToTree
@@ -38,7 +43,15 @@ struct ChangedFileList: View {
                 list
             }
         }
-        .onChange(of: model.changedFiles, initial: true) { _, _ in rebuild() }
+        // Space bar Quick Look, the way Finder does it. Behind the rows, so it takes no clicks.
+        .background(QuickLookHost(url: previewURL, armToken: quickLookArm))
+        .onChange(of: model.changedFiles, initial: true) { _, _ in
+            rebuild()
+            // A file the agent has just deleted stops being previewable without the selection
+            // ever moving.
+            refreshPreview()
+        }
+        .onChange(of: model.selectedFilePath, initial: true) { _, _ in refreshPreview() }
         .onChange(of: isTree) { _, _ in rebuild() }
         // Attached to the list the rows live in, so the dialog animates out of the file it is
         // about rather than out of the window.
@@ -160,7 +173,10 @@ struct ChangedFileList: View {
             isSelected: isSelected,
             fullPath: fullPath(file.path),
             indent: indent,
-            onSelect: { model.selectedFilePath = isSelected ? nil : file.path },
+            onSelect: {
+                model.selectedFilePath = isSelected ? nil : file.path
+                quickLookArm += 1
+            },
             onRevert: { pendingRevert = file }
         )
         // The fill is applied here rather than inside the row so that the row's own body can read
@@ -202,6 +218,10 @@ struct ChangedFileList: View {
 
     private func fullPath(_ relative: String) -> String {
         (model.workspace.path as NSString).appendingPathComponent(relative)
+    }
+
+    private func refreshPreview() {
+        previewURL = model.selectedFilePath.flatMap { QuickLookTarget.url(for: fullPath($0)) }
     }
 
     private func refresh() {

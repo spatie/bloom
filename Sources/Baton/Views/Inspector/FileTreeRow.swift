@@ -52,6 +52,9 @@ struct FileTreeRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Folders included: dragging a directory out of a worktree is the same gesture in Finder,
+        // and the provider carries whichever of the two this row is.
+        .fileDrag(path: fullPath)
         .contextMenu {
             Button("Open in Editor") { Reveal.inEditor(fullPath) }
             Button("Reveal in Finder") { Reveal.inFinder(fullPath) }

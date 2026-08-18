@@ -21,6 +21,11 @@ struct FileTreeView: View {
     /// Likewise: this used to be a computed `Set` read once per row, so it was rebuilt from the
     /// whole changed file list for every visible row on every pass.
     @State private var changedPaths: Set<String> = []
+    /// Resolved when the selection moves rather than in `body`, which runs again on every hover.
+    @State private var previewURL: URL?
+    /// Bumped on every row activation, which is what puts the keyboard back on the tree after the
+    /// reader has been in the composer or a terminal. See `QuickLookHost`.
+    @State private var quickLookArm = 0
 
     private struct LoadID: Hashable {
         var workspaceID: String
@@ -33,8 +38,13 @@ struct FileTreeView: View {
             bottom: { detail },
             hasBottom: selection != nil
         )
+        // Space bar Quick Look, the way Finder does it. Behind the rows, so it takes no clicks.
+        .background(QuickLookHost(url: previewURL, armToken: quickLookArm))
         .task(id: LoadID(workspaceID: model.workspace.id, workspacePath: model.workspace.path)) {
             await load()
+        }
+        .onChange(of: selection) { _, path in
+            previewURL = path.flatMap { QuickLookTarget.url(for: fullPath($0)) }
         }
         .onChange(of: model.changedFiles, initial: true) { _, files in
             changedPaths = Set(files.map(\.path))
@@ -105,6 +115,8 @@ struct FileTreeView: View {
     /// A directory opens or closes, a file is selected, and a file the agent touched also becomes
     /// the inspector's selected diff.
     private func activate(_ node: FileTreeNode) {
+        quickLookArm += 1
+
         guard node.isDirectory else {
             selection = selection == node.path ? nil : node.path
             if changedPaths.contains(node.path) { model.selectedFilePath = node.path }

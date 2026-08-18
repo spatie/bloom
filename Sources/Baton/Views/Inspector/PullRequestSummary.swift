@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import BatonCore
 
 /// The strip when a pull request already exists: its number, how CI feels about it, and the one
@@ -18,6 +19,9 @@ struct PullRequestSummary: View {
     /// Which method the user picked, held only for as long as the confirmation is up. Non-nil is
     /// what presents the dialog, so there is no way to reach `onMerge` without passing through it.
     @State private var pendingMerge: GitHub.MergeMethod?
+
+    /// Non-nil for as long as it takes the sharing menu to open. See `SharePicker`.
+    @State private var sharing: SharePayload?
 
     /// gh deletes the branch on the remote as part of merging. It is named in the confirmation
     /// rather than left as a surprise.
@@ -56,6 +60,18 @@ struct PullRequestSummary: View {
                 Chip(text: status.text)
             }
         }
+        // Sharing lives here rather than as another control in the strip. The strip has one length
+        // that can give way and it is already the sentence, so a button added to it comes out of
+        // the part the reader is trying to read. A right click costs no width at all, and it is
+        // where a link is asked for everywhere else on this system.
+        .contextMenu {
+            Button("Open on GitHub") { GitHubBridge.open(pullRequest.url) }
+            Button("Copy link", action: copyLink)
+            if let url = URL(string: pullRequest.url) {
+                Button("Share") { sharing = .link(url) }
+            }
+        }
+        .sharePicker(payload: $sharing)
         // Attached to the merge button's own row, so the dialog animates out of the control that
         // asked for it.
         .confirmationDialog(
@@ -149,6 +165,11 @@ struct PullRequestSummary: View {
         // Disabled controls do not explain themselves, and "why is this greyed out" is the whole
         // question a blocked pull request raises.
         .help(status.blockedReason ?? "Squash and merge, or choose another method")
+    }
+
+    private func copyLink() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(pullRequest.url, forType: .string)
     }
 
     // MARK: - Tint

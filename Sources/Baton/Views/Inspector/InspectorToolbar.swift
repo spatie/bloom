@@ -26,6 +26,9 @@ struct InspectorToolbar: View {
     @AppStorage(ChangedFilePresentation.storageKey)
     private var isTree = ChangedFilePresentation.defaultsToTree
 
+    /// Non-nil for as long as it takes the sharing menu to open. See `SharePicker`.
+    @State private var sharing: SharePayload?
+
     var body: some View {
         // No spacing of its own: there are exactly two things in the row and the gap between them
         // is the spacer's own minimum. Spelled as a gap on both sides of a spacer it was paid
@@ -91,6 +94,12 @@ struct InspectorToolbar: View {
                 if let pullRequest = model.pullRequest {
                     Divider()
                     Button("Open pull request") { GitHubBridge.open(pullRequest.url) }
+                    if let url = URL(string: pullRequest.url) {
+                        // Here rather than in the pull request strip above. That strip already
+                        // clips at the pane's narrow widths, and one more control in it buys
+                        // discoverability with the merge button's room.
+                        Button("Share pull request") { sharing = .link(url) }
+                    }
                 }
             } label: {
                 Label("More for this worktree", systemImage: "ellipsis.circle")
@@ -101,6 +110,9 @@ struct InspectorToolbar: View {
             .controlSize(.small)
             .fixedSize()
             .help("More for this worktree")
+            // The anchor sits on the menu itself, so the sharing menu drops out of the button the
+            // reader just used rather than out of the corner of the window.
+            .sharePicker(payload: $sharing)
         }
     }
 

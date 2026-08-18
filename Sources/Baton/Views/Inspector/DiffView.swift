@@ -61,6 +61,7 @@ struct DiffView: View {
                 model: model,
                 file: file,
                 session: session,
+                diff: source,
                 mode: $mode,
                 isEditable: isEditable,
                 onRevert: revert

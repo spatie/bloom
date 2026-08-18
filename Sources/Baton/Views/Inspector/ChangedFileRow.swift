@@ -51,6 +51,9 @@ struct ChangedFileRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // The real file, so a drop into Finder or an editor gets the document rather than a
+        // sentence about where it lives. One file per drag: the list carries a single selection.
+        .fileDrag(path: fullPath)
         .contextMenu {
             Button("Open in Editor") { Reveal.inEditor(fullPath) }
             Button("Reveal in Finder") { Reveal.inFinder(fullPath) }

@@ -22,6 +22,10 @@ final class TerminalSessionStore {
     private var runSessions: [String: RunScriptSession] = [:]
     private var loading: Set<String> = []
 
+    /// Which workspace each pane belongs to, so closing one can name its tmux session without
+    /// walking back through tabs that may already be gone.
+    private var paneOwner: [String: String] = [:]
+
     private init() {}
 
     // MARK: - Tabs
@@ -67,7 +71,7 @@ final class TerminalSessionStore {
     /// in it is a dead end.
     @discardableResult
     func closeTab(_ tab: TerminalTab, store: Store?) async -> [TerminalTab] {
-        closePanes(of: tab.id)
+        closePanes(of: tab.id, workspaceID: tab.workspaceID)
 
         var tabs = tabs(for: tab.workspaceID).filter { $0.id != tab.id }
         tabsByWorkspace[tab.workspaceID] = tabs
@@ -102,7 +106,14 @@ final class TerminalSessionStore {
     /// Stops one split pane. The shell's whole process group goes, not just the shell: a pty child
     /// is a session leader, so the group is where the `npm run dev` the user started in that pane
     /// actually lives, and it would otherwise be reparented to launchd still holding its port.
+    ///
+    /// A tmux-backed pane needs the session killed as well. Signalling the pane only reaches the
+    /// tmux *client*, which is a detach, and detaching is the opposite of what closing a pane means.
     func closePane(id: String) {
+        if let workspaceID = paneOwner.removeValue(forKey: id) {
+            let persistence = self.persistence
+            Task { await persistence?.kill(workspaceID: workspaceID, paneIDs: [id]) }
+        }
         guard let view = terminals[id] else { return }
         signal(SIGTERM, toGroupOf: view)
         view.shutdown()
@@ -110,8 +121,14 @@ final class TerminalSessionStore {
     }
 
     /// Every pane of a tab that is going away, and the shape it was split into.
-    func closePanes(of ownerID: String) {
-        for pane in TerminalSplitStore.shared.panes(of: ownerID) { closePane(id: pane) }
+    ///
+    /// The workspace is passed when the caller knows it, because a tab can be closed from the strip
+    /// without ever having been drawn, and a pane that was never drawn has no owner recorded.
+    func closePanes(of ownerID: String, workspaceID: String? = nil) {
+        for pane in TerminalSplitStore.shared.panes(of: ownerID) {
+            if let workspaceID { paneOwner[pane] = workspaceID }
+            closePane(id: pane)
+        }
         TerminalSplitStore.shared.discard(ownerID: ownerID)
     }
 
@@ -131,7 +148,19 @@ final class TerminalSessionStore {
                 for: workspace, repo: repo, port: port
             )
         }
-        view.start(TerminalLaunch.loginShell(directory: workspace.path, extra: extra))
+
+        // `tab.id` is the pane id here: a split hands each pane a `TerminalTab` carrying its own id,
+        // and an unsplit tab is its own single pane.
+        paneOwner[tab.id] = workspace.id
+        if let persistence, let command = persistence.command,
+           let session = persistence.decision(workspaceID: workspace.id, paneID: tab.id).session {
+            view.start(TerminalLaunch.tmux(
+                command: command, session: session, directory: workspace.path, extra: extra
+            ))
+        } else {
+            view.start(TerminalLaunch.loginShell(directory: workspace.path, extra: extra))
+        }
+
         terminals[tab.id] = view
         return view
     }
@@ -140,8 +169,55 @@ final class TerminalSessionStore {
     /// terminal after that can build its environment without threading a store through the views.
     private var repoStore: Store?
 
+    /// The tmux server, when there is one to talk to. Built from the database path so a throwaway
+    /// instance pointed at `BATON_DB_PATH` gets its own socket and cannot sweep the real one's
+    /// sessions.
+    private(set) var persistence: TerminalPersistence?
+
+    private var didSweepOrphans = false
+
     func useStore(_ store: Store?) {
         if repoStore == nil { repoStore = store }
+        ensurePersistence()
+        sweepOrphanedSessions()
+    }
+
+    /// Built on demand rather than at init, because archiving a workspace has to be able to kill its
+    /// sessions on a launch where no terminal panel was ever opened and no store was handed over.
+    private func ensurePersistence() {
+        guard persistence == nil, let path = repoStore?.path ?? (try? Store.defaultPath()) else {
+            return
+        }
+        persistence = TerminalPersistence(databasePath: path)
+    }
+
+    /// The launch sweep, run once, the first time anything hands over a store.
+    ///
+    /// It is deliberately not on the critical path of drawing a terminal: a pane that starts before
+    /// the sweep finishes is attaching to its own session by name, which the sweep will have found
+    /// reachable and left alone.
+    private func sweepOrphanedSessions() {
+        // The store is part of the guard rather than of the task: without it there is no way to
+        // know which panes are live, and marking the sweep done would mean it never ran at all.
+        guard !didSweepOrphans, repoStore != nil, let persistence, persistence.isAvailable else {
+            return
+        }
+        didSweepOrphans = true
+
+        Task { [weak self] in
+            await persistence.refresh()
+            guard let self, let store = self.repoStore,
+                  let workspaces = try? await store.workspaces() else { return }
+
+            // Every pane Baton can still reach: each tab of each workspace still in the database,
+            // expanded through the split layout that tab was last left in.
+            var live: Set<String> = []
+            for workspace in workspaces {
+                let tabs = (try? await store.terminalTabs(workspaceID: workspace.id)) ?? []
+                for tab in tabs { live.formUnion(TerminalSplitStore.shared.panes(of: tab.id)) }
+            }
+            await persistence.sweepOrphans(livePaneIDs: live)
+        }
     }
 
     // MARK: - Run scripts
@@ -165,13 +241,22 @@ final class TerminalSessionStore {
     /// Awaitable because archiving deletes the worktree straight after. A shell whose cwd has just
     /// been removed, or a dev server still holding its port, is exactly what should not outlive the
     /// workspace it belonged to.
+    ///
+    /// Every tmux session of this workspace goes first and unconditionally, whatever the persistence
+    /// setting says and whether or not this launch ever drew the pane that owns it. A shell sitting
+    /// in a worktree that is being deleted is the hazard, and the setting has nothing to say about
+    /// it. The sessions are matched by name, so this holds even for a tab that was never loaded.
     func discard(workspaceID: String) async {
+        ensurePersistence()
+        await persistence?.killEverything(workspaceID: workspaceID)
+
         var views: [BatonTerminalView] = []
         for tab in tabs(for: workspaceID) {
             // Every pane of the tab, which for a tab nobody split is the tab's own shell.
             for pane in TerminalSplitStore.shared.panes(of: tab.id) {
                 if let view = terminals[pane] { views.append(view) }
                 terminals[pane] = nil
+                paneOwner[pane] = nil
             }
             TerminalSplitStore.shared.discard(ownerID: tab.id)
         }
@@ -189,12 +274,18 @@ final class TerminalSessionStore {
     /// The quit path: every shell and every run script this launch started, whichever workspace
     /// they belong to. macOS does not kill a process's children, so anything still alive here gets
     /// reparented to launchd and keeps its ports for the rest of the day.
+    ///
+    /// No tmux session is killed here, and that is the feature. A tmux-backed pane's pty child is a
+    /// *client*, and the server is daemonised into its own session, so signalling the client's
+    /// process group detaches rather than terminates. The shell and everything the user started in
+    /// it stay alive for the next launch to pick back up.
     func shutdownAll() async {
         let views = Array(terminals.values)
         let scripts = Array(runSessions.values)
         terminals.removeAll()
         runSessions.removeAll()
         tabsByWorkspace.removeAll()
+        paneOwner.removeAll()
         await stop(terminals: views, runScripts: scripts)
     }
 

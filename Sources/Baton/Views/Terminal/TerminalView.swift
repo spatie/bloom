@@ -35,6 +35,42 @@ struct TerminalLaunch: Sendable, Hashable {
             directory: directory
         )
     }
+
+    /// The same shell, but held by a tmux session instead of by this app, so it survives a quit.
+    ///
+    /// The pty child is a tmux *client*. Killing it, which is what quitting does, detaches rather
+    /// than terminates: the server is daemonised into its own session and keeps the shell and
+    /// everything the user started in it.
+    ///
+    /// The workspace variables are handed to tmux with `-e` rather than left in this process's
+    /// environment, because the server is shared by every pane and outlives any one of them. What
+    /// this process passes only reaches the server the first time one is started.
+    static func tmux(
+        command: TmuxCommand,
+        session: String,
+        directory: String,
+        extra: [String: String]
+    ) -> TerminalLaunch {
+        var variables = Shell.environment()
+        variables["TERM"] = "xterm-256color"
+        variables["COLORTERM"] = "truecolor"
+        variables["TERM_PROGRAM"] = "Baton"
+        if variables["LANG"] == nil { variables["LANG"] = "en_US.UTF-8" }
+
+        var sessionVariables = extra
+        sessionVariables["COLORTERM"] = "truecolor"
+        sessionVariables["TERM_PROGRAM"] = "Baton"
+
+        return TerminalLaunch(
+            executable: command.executable,
+            execName: "tmux",
+            arguments: command.attachOrCreate(
+                session: session, directory: directory, environment: sessionVariables
+            ),
+            environment: variables.map { "\($0.key)=\($0.value)" }.sorted(),
+            directory: directory
+        )
+    }
 }
 
 /// A live shell in a pseudo terminal.
@@ -70,21 +106,24 @@ final class BatonTerminalView: LocalProcessTerminalView {
         }
     }
 
-    /// Kept separate from `font` so Cmd+Plus and Cmd+Minus have something to step.
-    private var fontSize: CGFloat = NSFont.preferredFont(forTextStyle: .callout).pointSize {
-        didSet { font = terminalFont(size: fontSize) }
+    /// The size the user asked for, or nil to follow Ghostty. Owned by SwiftUI through
+    /// `@AppStorage`, so the stepper in Settings and a Cmd+Plus pressed in any one shell both reach
+    /// every shell in every window rather than only the one with the keyboard.
+    var fontSizeOverride: CGFloat? {
+        didSet {
+            guard fontSizeOverride != oldValue else { return }
+            applyFont()
+        }
     }
+
+    /// What is on screen, which is what the two shortcuts step from.
+    private var fontSize: CGFloat { fontSizeOverride ?? defaultFontSize }
 
     /// Ghostty's `font-size` when it has one, so a terminal opens at the size the user reads
     /// everywhere else rather than at Baton's own body size.
     private var defaultFontSize: CGFloat {
-        ghostty?.fontSize.map { CGFloat($0) } ?? NSFont.preferredFont(forTextStyle: .callout).pointSize
+        ghostty?.fontSize.map { CGFloat($0) } ?? TerminalTextSize.systemDefault
     }
-
-    /// One point per press, the way every other terminal steps. This used to be `Metrics.hairline`,
-    /// which is half a point on a Retina display and a whole one everywhere else, so the shortcut
-    /// did almost nothing and did a different almost-nothing depending on the screen.
-    private static let fontStep: CGFloat = 1
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -103,10 +142,8 @@ final class BatonTerminalView: LocalProcessTerminalView {
         applyAppearanceColors()
     }
 
-    /// Goes through `fontSize` rather than `font` so Cmd+Plus and Cmd+Minus keep stepping from
-    /// the size that is on screen.
     private func applyFont() {
-        fontSize = defaultFontSize
+        font = terminalFont(size: fontSize)
     }
 
     /// Ghostty's `font-family` when there is one and it is installed, the monospaced system font
@@ -325,18 +362,14 @@ final class BatonTerminalView: LocalProcessTerminalView {
             copy(self)
         case "v":
             paste(self)
+        // Written to the preference rather than to this view, so the size survives the shell it
+        // was set in and every other open terminal follows it.
         case "+", "=":
-            fontSize = min(
-                fontSize + Self.fontStep,
-                NSFont.preferredFont(forTextStyle: .largeTitle).pointSize
-            )
+            TerminalTextSize.adjust(from: fontSize, by: TerminalTextSize.step)
         case "-":
-            fontSize = max(
-                fontSize - Self.fontStep,
-                NSFont.preferredFont(forTextStyle: .caption2).pointSize
-            )
+            TerminalTextSize.adjust(from: fontSize, by: -TerminalTextSize.step)
         case "0":
-            fontSize = defaultFontSize
+            TerminalTextSize.override = nil
         default:
             return super.performKeyEquivalent(with: event)
         }
@@ -448,6 +481,9 @@ struct TerminalView: NSViewRepresentable {
     /// in Settings moves, which is what pushes the change into a shell that is already running.
     @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
 
+    /// Zero is "no override, follow Ghostty". See `TerminalTextSize`.
+    @AppStorage(TerminalTextSize.defaultsKey) private var fontSize = 0.0
+
     func makeNSView(context: Context) -> TerminalHostView {
         let host = TerminalHostView()
         configure(host)
@@ -462,6 +498,7 @@ struct TerminalView: NSViewRepresentable {
         let session = self.session
         host.attach(session)
         session.usesGhosttyTheme = usesGhosttyTheme
+        session.fontSizeOverride = fontSize > 0 ? CGFloat(fontSize) : nil
         session.onFocus = onFocus
         session.onCommand = onCommand
         session.onContextMenu = onContextMenu
