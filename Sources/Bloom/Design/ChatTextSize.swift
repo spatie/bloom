@@ -42,3 +42,29 @@ enum ChatTextSize: String, CaseIterable, Identifiable, Sendable {
         }
     }
 }
+
+extension ChatTextSize {
+    /// Read and written outside SwiftUI, by the View menu. `@AppStorage` keeps a raw-value enum as
+    /// its raw string, so this is the same slot the Settings picker binds to and every open window
+    /// follows a change to it at once.
+    static var current: ChatTextSize {
+        get {
+            UserDefaults.standard.string(forKey: defaultsKey)
+                .flatMap(ChatTextSize.init(rawValue:)) ?? .standard
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey) }
+    }
+
+    /// The step `offset` places away, or nil when there is none that way.
+    ///
+    /// Walks the cases rather than multiplying the scale, because the steps are what the type is
+    /// for: arithmetic on 0.9 lands on the 0.85 the comment above rules out, and it has no end to
+    /// stop at, which is what tells a menu item to grey itself.
+    func stepped(by offset: Int) -> ChatTextSize? {
+        let steps = Self.allCases
+        guard let index = steps.firstIndex(of: self) else { return nil }
+        let moved = index + offset
+        guard steps.indices.contains(moved) else { return nil }
+        return steps[moved]
+    }
+}

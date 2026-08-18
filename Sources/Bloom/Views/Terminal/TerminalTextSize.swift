@@ -52,6 +52,13 @@ enum TerminalTextSize {
         override = current + delta
     }
 
+    /// Whether that step would land anywhere. `adjust` clamps, so at either end of the range the
+    /// menu item would otherwise be enabled and do nothing, which is the one thing a size control
+    /// must never do: the grey is how the user learns there is no more.
+    static func canAdjust(from current: CGFloat, by delta: CGFloat) -> Bool {
+        min(max(current + delta, range.lowerBound), range.upperBound) != current
+    }
+
     /// Ghostty's `font-size` for this appearance, when the user has one and has not turned the
     /// Ghostty theme off.
     static func ghosttyDefault(for appearance: NSAppearance) -> CGFloat? {

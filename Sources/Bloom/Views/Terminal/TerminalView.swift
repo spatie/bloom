@@ -116,8 +116,10 @@ final class BloomTerminalView: LocalProcessTerminalView {
         }
     }
 
-    /// What is on screen, which is what the two shortcuts step from.
-    private var fontSize: CGFloat { fontSizeOverride ?? defaultFontSize }
+    /// What is on screen, which is what the two shortcuts step from. Readable from outside because
+    /// the View menu steps from it too, and stepping from the stored override instead would make
+    /// the menu item and the keystroke disagree on any terminal following Ghostty.
+    var fontSize: CGFloat { fontSizeOverride ?? defaultFontSize }
 
     /// Ghostty's `font-size` when it has one, so a terminal opens at the size the user reads
     /// everywhere else rather than at Bloom's own body size.
@@ -340,6 +342,17 @@ final class BloomTerminalView: LocalProcessTerminalView {
 
     /// The app menu may or may not claim these, so they are handled here too. `performKeyEquivalent`
     /// runs before `keyDown`, which SwiftTerm owns and does not let us override from outside.
+    ///
+    /// This view beats the menu bar, which was measured rather than assumed: with the keyboard in a
+    /// terminal, Cmd+Plus, Cmd+Minus and Cmd+0 all land here and the View menu's Zoom items never
+    /// fire. `NSApplication` offers a key equivalent to the key window's view tree first and only
+    /// then to the main menu, so a shortcut a focused view claims is a shortcut the menu never sees.
+    ///
+    /// The two are made to agree rather than left to that. `TextZoom` resolves the same three keys
+    /// by walking up from first responder, so whichever route runs acts on the same terminal. The
+    /// walk is deliberately the looser test of the two: the guard below wants first responder to be
+    /// this exact view, and a click that leaves it on the terminal's own scroll bar hands the key
+    /// to the menu instead. That case was seen, and it grows the terminal either way.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard event.modifierFlags.contains(.command),
               !event.modifierFlags.contains(.control),

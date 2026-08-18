@@ -7,6 +7,10 @@ import BloomCore
 struct BloomCommands: Commands {
     private let model: AppModel
 
+    /// Read rather than queried, so the size items grey and ungrey as the sizes and the focus move.
+    /// See `TextZoomAvailability`.
+    private let zoom = TextZoomAvailability.shared
+
     init(model: AppModel) {
         self.model = model
     }
@@ -116,11 +120,36 @@ struct BloomCommands: Commands {
             .keyboardShortcut("u", modifiers: [.command, .shift])
             .disabled(!model.workspaces.contains(where: \.unread))
 
+            // Cmd+Shift+H, not Cmd+0. Cmd+0 is Actual Size on this platform and now belongs to the
+            // Zoom group below; two items in one menu cannot share a key equivalent, and the one
+            // AppKit finds first would silently have killed the other. Cmd+Shift+H is what Home is
+            // bound to in Finder and in Safari anyway, so this is where it should always have been.
             Button("Go to Home") {
                 model.selection = .home
             }
-            .keyboardShortcut("0", modifiers: .command)
+            .keyboardShortcut("h", modifiers: [.command, .shift])
             .disabled(model.selection == .home)
+        }
+
+        // Zoom, at the foot of the View menu, where Safari, Preview and Notes all keep it, and
+        // named as they name it. "Actual Size" only reads as a way back next to "Zoom In", which
+        // is why the whole trio is borrowed rather than Mail's pair of Bigger and Smaller.
+        //
+        // Each item resolves its own target when it fires. See `TextZoom`.
+        CommandGroup(after: .sidebar) {
+            Divider()
+
+            Button("Zoom In") { TextZoom.zoomIn() }
+                .keyboardShortcut("+", modifiers: .command)
+                .disabled(!zoom.canZoomIn)
+
+            Button("Zoom Out") { TextZoom.zoomOut() }
+                .keyboardShortcut("-", modifiers: .command)
+                .disabled(!zoom.canZoomOut)
+
+            Button("Actual Size") { TextZoom.actualSize() }
+                .keyboardShortcut("0", modifiers: .command)
+                .disabled(!zoom.canResetSize)
         }
 
         CommandMenu("Workspace") {
