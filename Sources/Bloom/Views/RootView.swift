@@ -140,9 +140,19 @@ struct RootView: View {
     ///
     /// Built here rather than in the message builder so the string work is a plain function that
     /// can be read, and changed, without going through a view body.
+    /// Names the specific reason this sheet appeared.
+    ///
+    /// A confirmation that only asks "are you sure?" is one people learn to click through, and
+    /// this one is now rare enough to be worth reading: the routine archive, with a clean
+    /// worktree and nothing running, no longer raises it at all. `ArchiveRequest.reasons` puts the
+    /// agent mid turn first, because that is the work that is not in git yet.
     private static func losses(in request: ArchiveRequest) -> String {
-        var text = "Archiving deletes the worktree at \(request.workspace.path).\n\nThis would lose:\n"
-        text += request.report.losses.map { "\u{2022} \($0)" }.joined(separator: "\n")
+        var text = "Archiving deletes the worktree at \(request.workspace.path)."
+        let reasons = request.reasons
+        if !reasons.isEmpty {
+            text += "\n\nThis would lose:\n"
+            text += reasons.map { "\u{2022} \($0)" }.joined(separator: "\n")
+        }
         if let problem = request.problem {
             text += "\n\n\(problem)"
         }

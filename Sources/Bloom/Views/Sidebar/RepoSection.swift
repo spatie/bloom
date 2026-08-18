@@ -32,7 +32,6 @@ struct RepoSection: View {
     @State private var repoDraft = ""
     @FocusState private var repoFieldFocused: Bool
 
-    @State private var archiveTarget: Workspace?
     @State private var isConfirmingRemove = false
     /// Lights the `+`. It belongs to this header rather than to a hover id shared across the whole
     /// list, so crossing the pane lights one project at a time.
@@ -154,22 +153,6 @@ struct RepoSection: View {
             Button("Remove project", role: .destructive) { isConfirmingRemove = true }
         }
         .confirmationDialog(
-            archiveTarget.map { "Archive \($0.name)?" } ?? "Archive workspace?",
-            isPresented: $archiveTarget.isPresent(),
-            titleVisibility: .visible,
-            presenting: archiveTarget
-        ) { target in
-            Button("Archive, keep \(target.branch)", role: .destructive) {
-                archive(target, deleteBranch: false)
-            }
-            Button("Archive and delete \(target.branch)", role: .destructive) {
-                archive(target, deleteBranch: true)
-            }
-            Button("Cancel", role: .cancel) { archiveTarget = nil }
-        } message: { target in
-            Text("The worktree at \(target.path) is removed. The branch \(target.branch) is kept unless you delete it here.")
-        }
-        .confirmationDialog(
             "Remove \(repo.name)?",
             isPresented: $isConfirmingRemove,
             titleVisibility: .visible
@@ -247,7 +230,15 @@ struct RepoSection: View {
             }
             Button("Rename") { renaming = workspace.id }
             Divider()
-            Button("Archive", role: .destructive) { archiveTarget = workspace }
+            // Straight through, with no dialog of its own. Whether this needs confirming is not
+            // something this menu can know: it depends on what is uncommitted, what is running and
+            // what GitHub says about the branch, and `AppModel.archive` is where all three come
+            // together. Asking here as well meant a sheet on every archive, including the routine
+            // one, which is exactly how a confirmation stops being read.
+            //
+            // Whether the branch goes too is the repository's setting, rather than a question
+            // asked every time about a workspace that is usually finished with.
+            Button("Archive", role: .destructive) { archive(workspace) }
         }
     }
 
@@ -268,9 +259,8 @@ struct RepoSection: View {
         return true
     }
 
-    private func archive(_ workspace: Workspace, deleteBranch: Bool) {
-        archiveTarget = nil
-        Task { await app.archive(workspace, deleteBranch: deleteBranch) }
+    private func archive(_ workspace: Workspace) {
+        Task { await app.archive(workspace) }
     }
 
     private func removeRepo() {

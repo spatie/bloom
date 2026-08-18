@@ -93,16 +93,51 @@ public struct WorkspaceSafetyReport: Sendable, Hashable {
     }
 
     /// A merged branch's commits live on in the base branch, so they are not counted as a loss.
+    ///
+    /// The cautious form of the question: it assumes the branch is being deleted along with the
+    /// worktree, and it knows only what git knows. Callers with better information should ask
+    /// `isSafeToDiscard(deletingBranch:isPullRequestMerged:)` instead.
     public var isSafeToDiscard: Bool {
-        !hasUncommittedChanges
+        isSafeToDiscard(deletingBranch: true)
+    }
+
+    /// Whether archiving destroys anything, given the two things a git process cannot see.
+    ///
+    /// - Parameter deletingBranch: whether the branch goes with the worktree. Committed work is
+    ///   only ever at risk when it does. A worktree is a checkout: remove it while the branch
+    ///   survives and every commit is still on the branch, which is the same reasoning
+    ///   `isRestorableFromBranch` is built on and the reason that archive can be undone.
+    /// - Parameter isPullRequestMerged: GitHub says the pull request for this branch was merged.
+    ///   Only ever passed `true` when GitHub actually said so, never inferred from its silence,
+    ///   because being wrong here is only dangerous in one direction. It matters because
+    ///   `isBranchMerged` is git's reachability test, and a squash merge rewrites the branch's
+    ///   commits onto the base rather than joining its history to it. Git's answer for a squash
+    ///   merged branch is "not merged" while every line of its work is already on main, and that
+    ///   is the single most common way this check is wrong.
+    public func isSafeToDiscard(deletingBranch: Bool, isPullRequestMerged: Bool = false) -> Bool {
+        // Everything git was keeping no copy of. It lives in the worktree directory and nowhere
+        // else, so it goes whether the branch survives or not.
+        let workingCopyIsClean = !hasUncommittedChanges
             && untrackedFiles.isEmpty
             && modifiedIgnoredFiles.isEmpty
             && detachedCommits == 0
-            && (unpushedCommits == 0 || isBranchMerged)
+
+        guard workingCopyIsClean else { return false }
+        guard deletingBranch else { return true }
+        return unpushedCommits == 0 || isBranchMerged || isPullRequestMerged
     }
 
     /// One line per thing that would be destroyed, for an error message or a confirmation sheet.
     public var losses: [String] {
+        losses(deletingBranch: true)
+    }
+
+    /// The same list, narrowed to what is actually at stake for this particular archive.
+    ///
+    /// A confirmation that lists commits as a loss when the branch is being kept is a
+    /// confirmation nobody will read twice. See `isSafeToDiscard(deletingBranch:)` for both
+    /// arguments.
+    public func losses(deletingBranch: Bool, isPullRequestMerged: Bool = false) -> [String] {
         var losses: [String] = []
         if hasUncommittedChanges {
             losses.append("uncommitted changes to tracked files")
@@ -122,7 +157,7 @@ public struct WorkspaceSafetyReport: Sendable, Hashable {
                 + "\(sample)\(rest)"
             )
         }
-        if unpushedCommits > 0, !isBranchMerged {
+        if deletingBranch, unpushedCommits > 0, !isBranchMerged, !isPullRequestMerged {
             losses.append("\(unpushedCommits) commit(s) that exist on no other branch, tag or remote")
         }
         if detachedCommits > 0 {

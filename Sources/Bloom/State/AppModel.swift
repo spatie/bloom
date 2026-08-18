@@ -32,6 +32,43 @@ struct ArchiveRequest: Identifiable {
     /// Set when git could not be asked at all, so the report is empty for want of an answer rather
     /// than because there is nothing at stake. Shown alongside the losses, never instead of them.
     var problem: String?
+    /// What the app knows about this workspace that git does not. See `ArchiveHazards`.
+    var hazards = ArchiveHazards()
+
+    /// Everything this confirmation exists because of, in the words the sheet will use.
+    ///
+    /// The live reasons come first. An agent mid turn is producing work that is not in git at all
+    /// yet, so it is both the most valuable thing at stake and the one the report cannot see.
+    var reasons: [String] {
+        hazards.liveLosses + report.losses(
+            deletingBranch: hazards.isDeletingBranch,
+            isPullRequestMerged: hazards.isPullRequestMerged
+        )
+    }
+}
+
+/// What the app knows about a workspace that a git process cannot.
+///
+/// Deliberately not fields on `WorkspaceSafetyReport`. That type is computed inside BloomCore by
+/// running git, and every field on it is something git answered; neither of these is. An agent mid
+/// turn is a process this app is holding a handle to, and the pull request's state came from `gh`
+/// minutes ago and is cached above the core. Putting them on the report would mean a report that
+/// is wrong until whoever built it remembers to correct it, which is the kind of half-filled
+/// safety check that decides whether work gets destroyed.
+struct ArchiveHazards {
+    /// An agent is mid turn in this workspace, right now.
+    var isAgentRunning = false
+    /// GitHub says this branch's pull request was merged.
+    var isPullRequestMerged = false
+    /// Whether this archive will delete the branch as well as the worktree.
+    var isDeletingBranch = false
+
+    /// The losses that are not git's to report.
+    var liveLosses: [String] {
+        isAgentRunning
+            ? ["the turn an agent is running in this workspace right now, which is not in git yet"]
+            : []
+    }
 }
 
 /// The root of the app's state. Owns the store, the repo and workspace lists, and one
@@ -486,6 +523,15 @@ final class AppModel {
     func archive(_ workspace: Workspace, deleteBranch: Bool? = nil) async {
         guard let manager, let repo = repo(for: workspace) else { return }
 
+        let hazards = ArchiveHazards(
+            isAgentRunning: isRunning(workspace),
+            isPullRequestMerged: isPullRequestMerged(workspace),
+            // Resolved here rather than left as nil, because the confirmation has to say whether
+            // the commits are at stake, and only the repository's settings know that when the
+            // caller did not say.
+            isDeletingBranch: deleteBranch ?? SettingsLoader.load(repo: repo.path).deleteBranchOnArchive
+        )
+
         let report: WorkspaceSafetyReport
         do {
             report = try await manager.safetyReport(workspace: workspace, repo: repo)
@@ -496,21 +542,44 @@ final class AppModel {
                 workspace: workspace,
                 report: WorkspaceSafetyReport(),
                 deleteBranch: deleteBranch,
-                problem: "Bloom could not check this workspace for unsaved work. \(error.readableMessage)"
+                problem: "Bloom could not check this workspace for unsaved work. \(error.readableMessage)",
+                hazards: hazards
             )
             return
         }
 
-        guard report.isSafeToDiscard else {
+        let isSafe = report.isSafeToDiscard(
+            deletingBranch: hazards.isDeletingBranch,
+            isPullRequestMerged: hazards.isPullRequestMerged
+        )
+
+        guard isSafe, !hazards.isAgentRunning else {
             pendingArchive = ArchiveRequest(
-                workspace: workspace, report: report, deleteBranch: deleteBranch
+                workspace: workspace, report: report, deleteBranch: deleteBranch, hazards: hazards
             )
             return
         }
 
         await performArchive(
-            workspace, repo: repo, deleteBranch: deleteBranch, force: false, report: report
+            workspace,
+            repo: repo,
+            deleteBranch: deleteBranch,
+            force: false,
+            report: report,
+            hazards: hazards
         )
+    }
+
+    /// GitHub's verdict on this workspace's branch, from whichever of the two places has already
+    /// asked: the open workspace's own model, or the store every sidebar row reads.
+    ///
+    /// Never asks itself. A merged pull request only ever makes this check more permissive, so a
+    /// missing answer costs a confirmation rather than a workspace, and an archive that waited on
+    /// the network before it could decide would be worse than the confirmation it saved.
+    private func isPullRequestMerged(_ workspace: Workspace) -> Bool {
+        let pullRequest = workspaceModels[workspace.id]?.pullRequest
+            ?? WorkspacePullRequests.shared.pullRequest(for: workspace.id)
+        return pullRequest?.isMerged ?? false
     }
 
     /// The user has seen exactly what would be destroyed and asked for it anyway.
@@ -524,7 +593,8 @@ final class AppModel {
             repo: repo,
             deleteBranch: request.deleteBranch,
             force: true,
-            report: request.problem == nil ? request.report : nil
+            report: request.problem == nil ? request.report : nil,
+            hazards: request.hazards
         )
     }
 
@@ -537,7 +607,8 @@ final class AppModel {
         repo: Repo,
         deleteBranch: Bool?,
         force: Bool,
-        report: WorkspaceSafetyReport?
+        report: WorkspaceSafetyReport?,
+        hazards: ArchiveHazards
     ) async {
         guard let manager else { return }
 
@@ -548,7 +619,11 @@ final class AppModel {
 
         do {
             try await manager.archive(
-                workspace: workspace, repo: repo, deleteBranch: deleteBranch, force: force
+                workspace: workspace,
+                repo: repo,
+                deleteBranch: deleteBranch,
+                force: force,
+                isPullRequestMerged: hazards.isPullRequestMerged
             )
             // The worktree is gone from disk now. Its shells are sitting in a directory that no
             // longer exists and its dev servers are still holding their ports, and nothing else in
@@ -573,7 +648,7 @@ final class AppModel {
             case .unsafeToArchive(let fresh):
                 // Only reachable when the worktree changed between the check and the archive.
                 pendingArchive = ArchiveRequest(
-                    workspace: workspace, report: fresh, deleteBranch: deleteBranch
+                    workspace: workspace, report: fresh, deleteBranch: deleteBranch, hazards: hazards
                 )
             default:
                 alert = BloomAlert(title: "Could not archive the workspace", message: error.readableMessage)

@@ -254,11 +254,16 @@ public struct WorkspaceManager: Sendable {
     /// once the branch is gone commits nothing else points at are unreachable. So unless the
     /// caller passes `force`, this refuses up front and throws a report of what is at stake,
     /// before it has touched anything.
+    /// - Parameter isPullRequestMerged: GitHub's own answer for this branch, when the caller has
+    ///   one. Nothing here can ask: `gh` lives above this layer and a report that shelled out to
+    ///   the network would make every archive wait on it. Passing it in is what stops a squash
+    ///   merged branch, which git calls unmerged, from being refused as unsafe.
     public func archive(
         workspace: Workspace,
         repo: Repo,
         deleteBranch: Bool? = nil,
-        force: Bool = false
+        force: Bool = false,
+        isPullRequestMerged: Bool = false
     ) async throws {
         let settings = SettingsLoader.load(repo: repo.path)
         let shouldDeleteBranch = deleteBranch ?? settings.deleteBranchOnArchive
@@ -270,7 +275,11 @@ public struct WorkspaceManager: Sendable {
             report = try? await safetyReport(workspace: workspace, repo: repo)
         } else {
             let computed = try await safetyReport(workspace: workspace, repo: repo)
-            guard computed.isSafeToDiscard else { throw WorkspaceError.unsafeToArchive(computed) }
+            guard computed.isSafeToDiscard(
+                deletingBranch: shouldDeleteBranch, isPullRequestMerged: isPullRequestMerged
+            ) else {
+                throw WorkspaceError.unsafeToArchive(computed)
+            }
             report = computed
         }
 
@@ -298,7 +307,10 @@ public struct WorkspaceManager: Sendable {
                 // `git branch -d` only looks at the upstream and at HEAD, so it refuses branches
                 // whose commits are safely on a remote or on another branch. The safety report
                 // checked every ref, so when it cleared the branch, -D destroys nothing.
-                guard force || report?.isSafeToDiscard == true else { throw error }
+                let cleared = report?.isSafeToDiscard(
+                    deletingBranch: true, isPullRequestMerged: isPullRequestMerged
+                ) == true
+                guard force || cleared else { throw error }
                 try await Git.deleteBranch(workspace.branch, in: repo.path, force: true)
             }
         }
