@@ -27,6 +27,7 @@ enum InspectorLayout {
     static let glyphWidth: CGFloat = 16
     /// One level of indent in the file tree.
     static let indentStep: CGFloat = 12
-    /// How much room a list keeps once a detail pane has opened beneath it.
+    /// How much room a list keeps once a detail pane has opened beneath it, until the reader
+    /// drags the boundary somewhere else.
     static let listHeight: CGFloat = 220
 }

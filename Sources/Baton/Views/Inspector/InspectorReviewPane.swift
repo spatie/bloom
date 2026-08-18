@@ -30,13 +30,14 @@ struct InspectorReviewPane: View {
                     .disabled(index >= total - 1)
                     .help("Next file")
 
-                Text(file.filename)
-                    .font(Typo.bodyEmphasis)
-                    .foregroundStyle(Palette.textPrimary)
+                // Deliberately not the filename: `FileHeaderBar` is the next row down and says
+                // it already, in a heavier weight and with its folder beside it. Saying it twice
+                // in two adjacent bars reads as a bug rather than as emphasis.
+                Text("Reviewing")
+                    .font(Typo.label)
+                    .foregroundStyle(Palette.textSecondary)
                     .lineLimit(1)
-                    .truncationMode(.middle)
                     .layoutPriority(-1)
-                    .help(file.path)
 
                 Spacer(minLength: InspectorLayout.tight)
 
@@ -47,7 +48,9 @@ struct InspectorReviewPane: View {
                 DiffStatLabel(additions: file.additions, deletions: file.deletions, compact: true)
             }
             .padding(.horizontal, InspectorLayout.inset)
-            .frame(height: Metrics.rowHeight)
+            // A bar, not a row: it sits directly above `FileHeaderBar`, and four points shorter
+            // than the bar under it read as a rendering mistake rather than as a hierarchy.
+            .frame(height: InspectorLayout.barHeight)
             .background(Palette.surfaceSunken)
 
             Hairline()

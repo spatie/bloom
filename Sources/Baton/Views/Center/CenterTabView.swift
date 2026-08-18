@@ -29,12 +29,20 @@ struct CenterTabView: View {
     var onCommitRename: @MainActor (String) -> Void
     var onCancelRename: @MainActor () -> Void
     var onClose: @MainActor () -> Void
+    /// Opening the tab beside the pane it is already in, for anyone who would rather pick a menu
+    /// item than drag the tab into the half of the pane they want it in.
+    var onSplitRight: @MainActor () -> Void
+    var onSplitDown: @MainActor () -> Void
 
     /// A tab stops growing here so one long title cannot push every other tab out of the strip.
     private static let maximumWidth: CGFloat = 200
     /// Wide enough for the titles tabs actually get, and the same width whichever tab is being
     /// renamed, so the strip does not jump as the editor opens.
     private static let renameWidth: CGFloat = 140
+    /// The row every tab centres in the strip. Fixed rather than intrinsic because a rename field
+    /// is a point or two taller than a label, and a tab that grew as its editor opened put its
+    /// text on a different line from the tabs beside it.
+    private static let labelHeight: CGFloat = 20
 
     @State private var isHovered = false
     @State private var renameText = ""
@@ -56,26 +64,34 @@ struct CenterTabView: View {
             if isRenaming {
                 TextField("Name", text: $renameText)
                     .textFieldStyle(.plain)
-                    .font(Typo.label)
                     .focused($isRenameFocused)
                     .frame(width: Self.renameWidth)
                     .onSubmit { onCommitRename(renameText) }
                     .onExitCommand(perform: onCancelRename)
             } else {
                 Text(title)
-                    .font(isActive ? Typo.labelEmphasis : Typo.label)
+                    .fontWeight(isActive ? .medium : .regular)
                     .foregroundStyle(isActive ? Palette.textPrimary : Palette.textSecondary)
                     .lineLimit(1)
             }
 
             closeButton
         }
+        // One type size for the whole row, set once above the branches, so selection can only
+        // change the weight. Everything a tab can hold is then on the same line as everything a
+        // neighbouring tab holds, whatever each of them is showing.
+        .font(Typo.label)
+        .frame(height: Self.labelHeight)
         .padding(.horizontal, Metrics.inset)
         .frame(maxWidth: Self.maximumWidth)
         .frame(height: Metrics.barHeight)
         // The selected tab takes the content colour and fills the strip's full height, the way an
         // editor tab bar on this platform does. A rounded capsule of selection grey floating in a
         // strip is a browser chrome idiom, and it read as a solid block rather than as a tab.
+        //
+        // The fill is opaque and reaches the bottom of the strip on purpose: the rule that closes
+        // the strip off from the pane is painted BEHIND the tabs, so this covers it and the
+        // selected tab runs into the content underneath rather than sitting in a box above it.
         .background(background)
         .contentShape(Rectangle())
         // A single click selects and a double click renames, which is one gesture with two
@@ -93,6 +109,9 @@ struct CenterTabView: View {
         .accessibilityAction(named: "Select", onSelect)
         .accessibilityAction(named: "Rename", onStartRename)
         .contextMenu {
+            Button("Open in Split Right", action: onSplitRight)
+            Button("Open in Split Down", action: onSplitDown)
+            Divider()
             Button("Rename", action: onStartRename)
             Button("Close", action: onClose)
                 .disabled(!canClose)

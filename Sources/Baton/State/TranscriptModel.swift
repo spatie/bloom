@@ -170,7 +170,7 @@ final class TranscriptModel {
         } catch {
             isRunning = false
             statusLabel = nil
-            app.alert = BatonAlert(title: "Could not start the agent", message: "\(error)")
+            app.alert = BatonAlert(title: "Could not start the agent", message: error.readableMessage)
         }
     }
 
@@ -278,6 +278,7 @@ final class TranscriptModel {
                 title: "The agent stopped in \(workspace.name)",
                 message: failure.message.isEmpty ? "It exited without finishing the turn." : failure.message
             )
+            NotificationService.shared.agentFailed(workspace: workspace, message: failure.message)
 
         case .result(let result):
             clearStreaming()
@@ -320,13 +321,9 @@ final class TranscriptModel {
         let model = app.model(for: workspace)
         await model.onTurnFinished()
 
-        if app.selection.workspaceID != workspace.id {
-            Notifications.post(
-                title: workspace.name,
-                body: result.summary.isEmpty ? "The agent finished." : result.summary,
-                workspaceID: workspace.id
-            )
-        }
+        NotificationService.shared.turnFinished(
+            workspace: workspace, result: result, wasCancelled: session.state == .cancelled
+        )
     }
 }
 

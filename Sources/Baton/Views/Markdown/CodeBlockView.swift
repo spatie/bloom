@@ -14,8 +14,9 @@ public struct CodeBlockView: View {
     @State private var showsAllLines = false
 
     /// The gutter follows the user's text size, otherwise a raised size runs the numbers into the
-    /// code beside them.
-    @ScaledMetric(relativeTo: .caption) private var lineNumberWidth = MarkdownMetrics.lineNumberWidth
+    /// code beside them. Relative to the style the numbers are actually set in, which is what makes
+    /// the two grow together.
+    @ScaledMetric(relativeTo: .subheadline) private var lineNumberWidth = MarkdownMetrics.lineNumberWidth
 
     public init(code: String, language: Language, showsLineNumbers: Bool = false) {
         self.code = code
@@ -29,14 +30,16 @@ public struct CodeBlockView: View {
 
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Metrics.spacing) {
+                // The fence's only label, and the one thing that says what the block is. It was
+                // at the floor of the scale, a rung under the smallest thing it names.
                 Text(Self.displayName(for: language))
-                    .font(Typo.micro)
+                    .font(Typo.caption)
                     .foregroundStyle(Palette.textTertiary)
                 Spacer(minLength: MarkdownMetrics.blockGap)
                 Button(action: copy) {
                     Label(copied ? "Copied" : "Copy code", systemImage: copied ? "checkmark" : "doc.on.doc")
                         .labelStyle(.iconOnly)
-                        .font(Typo.micro)
+                        .font(Typo.caption)
                         .imageScale(.medium)
                         .foregroundStyle(copied ? Palette.positive : Palette.textTertiary)
                         .frame(width: MarkdownMetrics.iconButton, height: MarkdownMetrics.iconButton)

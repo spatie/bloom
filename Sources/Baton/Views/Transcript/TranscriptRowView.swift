@@ -12,7 +12,17 @@ import BatonCore
 /// This view decides which kind of row it is and hands the decoded payload to the view that draws
 /// it. Every kind except assistant prose, a user turn and an expanded row is exactly one line tall.
 /// That is the whole design: an agent run reads as a list of actions, not a chat log.
-struct TranscriptRowView: View {
+struct TranscriptRowView: View, Equatable {
+    /// A row redraws when what it holds changes, and not because the closure beside it is a new
+    /// closure. Functions are never equal to one another, so without this SwiftUI has to assume
+    /// every row differs from the one it drew a moment ago.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.row == rhs.row
+            && lhs.isExpanded == rhs.isExpanded
+            && lhs.isNested == rhs.isNested
+            && lhs.maxBubbleWidth == rhs.maxBubbleWidth
+    }
+
     var row: TranscriptRow
     var isExpanded = false
     var isNested = false

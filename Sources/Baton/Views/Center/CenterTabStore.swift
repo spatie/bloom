@@ -8,6 +8,10 @@ import BatonCore
 /// the view that draws it. Switching to another workspace and back must not reload a page or fork
 /// a second shell, and a view cannot promise that about anything it owns itself.
 ///
+/// It holds the list and the lifecycle, never which of them is on screen. Where a tab is showing is
+/// `CenterPaneStore`'s business, because with the column split the answer is a pane rather than a
+/// workspace, and two tabs can be showing at once.
+///
 /// It deliberately does not live on `AppModel`. Nothing outside the centre column has any business
 /// knowing that a browser tab is open, and the tab list is the sort of state that is better lost
 /// than migrated, which is why it is written to user defaults rather than to SQLite.
@@ -17,10 +21,6 @@ final class CenterTabStore {
     static let shared = CenterTabStore()
 
     private(set) var tabsByWorkspace: [String: [CenterTab]] = [:]
-
-    /// Which non-chat tab fills the column, per workspace. No entry means the conversation does,
-    /// which is why selecting a chat tab only has to clear this rather than remember anything.
-    private(set) var selectionByWorkspace: [String: String] = [:]
 
     /// Live web views, keyed by tab. Ignored by observation on purpose: no view reads this map, it
     /// is only ever asked for one session at a time, and having it invalidate the column every
@@ -33,16 +33,6 @@ final class CenterTabStore {
 
     func tabs(for workspaceID: String) -> [CenterTab] {
         tabsByWorkspace[workspaceID] ?? []
-    }
-
-    /// The tab filling the column, or nil when the conversation is.
-    func selection(for workspaceID: String) -> CenterTab? {
-        guard let id = selectionByWorkspace[workspaceID] else { return nil }
-        return tabs(for: workspaceID).first { $0.id == id }
-    }
-
-    func isSelected(_ tab: CenterTab) -> Bool {
-        selectionByWorkspace[tab.workspaceID] == tab.id
     }
 
     // MARK: - Writing
@@ -66,12 +56,17 @@ final class CenterTabStore {
         )
         tabs.append(tab)
         apply(tabs, to: workspaceID)
-        selectionByWorkspace[workspaceID] = tab.id
         return tab
     }
 
-    func select(_ tab: CenterTab?, in workspaceID: String) {
-        selectionByWorkspace[workspaceID] = tab?.id
+    /// Moves a tool tab to another place in the strip. Tool tabs keep their own run of the strip
+    /// after the conversations, so an index here is an index among tool tabs only.
+    func move(_ tab: CenterTab, to index: Int) {
+        var ordered = tabs(for: tab.workspaceID)
+        guard let from = ordered.firstIndex(where: { $0.id == tab.id }) else { return }
+        let moved = ordered.remove(at: from)
+        ordered.insert(moved, at: min(max(index, 0), ordered.count))
+        apply(ordered, to: tab.workspaceID)
     }
 
     func rename(_ tab: CenterTab, to title: String) {
@@ -86,13 +81,11 @@ final class CenterTabStore {
         update(tab) { $0.url = url }
     }
 
-    /// Closes a tab and stops whatever it was running. The column falls back to the conversation,
-    /// which is the one thing in this workspace that cannot be closed away.
+    /// Closes a tab and stops whatever it was running. Any pane showing it falls back to the
+    /// conversation, which is the one thing in this workspace that cannot be closed away.
     func close(_ tab: CenterTab) async {
         apply(tabs(for: tab.workspaceID).filter { $0.id != tab.id }, to: tab.workspaceID)
-        if selectionByWorkspace[tab.workspaceID] == tab.id {
-            selectionByWorkspace[tab.workspaceID] = nil
-        }
+        CenterPaneStore.shared.forget(.tool(tab.id), in: tab.workspaceID)
 
         switch tab.kind {
         case .browser:

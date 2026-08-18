@@ -138,19 +138,40 @@ extension Color {
 
 /// Type scale, built on the system text styles so it follows the user's text size rather than
 /// pinning everything to a point size we happened to like.
+///
+/// Five rungs, and every name lands on one of them: 15 / 13 / 12 / 11 / 10, where 15 only ever
+/// appears inside prose. There used to be three, because on macOS `.caption`, `.caption2` and
+/// `.footnote` all resolve to 10 points: `caption` and `micro` were one size wearing two names,
+/// `codeSmall` and `codeTiny` likewise, `title` was a hand-rolled `.headline`, and 11, the one
+/// step the app actually wanted, was never used at all. `.subheadline` is that step, and it is
+/// where everything that sat at 10 for want of anywhere else has moved to.
 enum Typo {
-    static let title = Font.system(.body, design: .default).weight(.semibold)
+    /// 15. The only rung above reading size, and only for a heading inside agent prose, where a
+    /// heading set at body size with a weight on it is not a heading, it is a bold sentence.
+    static let heading = Font.system(.title3).weight(.bold)
+    /// 13 bold. `.headline` is the system's own heading style at reading size, so saying so lets
+    /// macOS treat it as a heading rather than as body with a weight bolted on.
+    static let title = Font.headline
+    /// 13. Reading size: prose, and anything the user is meant to read rather than scan.
     static let body = Font.system(.body)
     static let bodyEmphasis = Font.system(.body).weight(.medium)
+    /// 12. The workhorse: row labels, controls, anything scanned rather than read.
     static let label = Font.system(.callout)
     static let labelEmphasis = Font.system(.callout).weight(.medium)
-    static let caption = Font.system(.caption)
-    static let captionEmphasis = Font.system(.caption).weight(.medium)
-    static let micro = Font.system(.caption2).weight(.medium)
+    /// 11. Supporting text that still has to be legible: a hint under a field, a link out of a
+    /// block, the name on a chip.
+    static let caption = Font.system(.subheadline)
+    static let captionEmphasis = Font.system(.subheadline).weight(.medium)
+    /// 10, the floor, and the reason it is medium rather than regular. Only for something that is
+    /// read off the thing beside it: a count, a duration, a unit.
+    static let micro = Font.system(.footnote).weight(.medium)
 
+    /// The same rungs in monospace, for anything whose columns have to line up: code, a path, a
+    /// diff stat. They step with their proportional twins so a filename set beside a label does
+    /// not read as a size apart from it.
     static let code = Font.system(.callout, design: .monospaced)
-    static let codeSmall = Font.system(.caption, design: .monospaced)
-    static let codeTiny = Font.system(.caption2, design: .monospaced)
+    static let codeSmall = Font.system(.subheadline, design: .monospaced)
+    static let codeTiny = Font.system(.footnote, design: .monospaced)
 }
 
 enum Metrics {
@@ -202,6 +223,10 @@ enum Metrics {
     static let glyph: CGFloat = 13
     /// A status dot, sized to sit on a text baseline rather than to be noticed on its own.
     static let dot: CGFloat = 6
+    /// What a `Chip` keeps inside its fill. Named because the transcript footer draws a two colour
+    /// chip by hand next to a real one, and the two have to be the same shape.
+    static let chipInsetH: CGFloat = 5
+    static let chipInsetV: CGFloat = 2
     /// A strip of small controls along the edge of a pane: the sidebar's status bar, the
     /// inspector's pull request strip and its tab row.
     static let barHeight: CGFloat = 32
@@ -247,6 +272,21 @@ extension View {
     func headerMaterial() -> some View {
         background(VisualEffectBackground(material: .headerView, blending: .withinWindow))
     }
+
+    /// The strip a tab bar sits in: the header material with the pane's top edge already on it.
+    ///
+    /// The rule belongs here, behind the tabs, rather than in an overlay over them. Drawn over the
+    /// top it crosses the selected tab as well, which boxes that tab in and leaves the strip
+    /// reading as a row of buttons; drawn behind, the selected tab's own opaque fill breaks it, and
+    /// that break is what joins the tab to the content below.
+    func tabStripMaterial() -> some View {
+        background {
+            ZStack(alignment: .bottom) {
+                VisualEffectBackground(material: .headerView, blending: .withinWindow)
+                Hairline()
+            }
+        }
+    }
 }
 
 // MARK: - Reusable chrome
@@ -276,19 +316,22 @@ struct Chip: View {
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
 
     var body: some View {
-        HStack(spacing: 3) {
+        // A chip carries content, not metadata: the file a tool read, the model a session started
+        // on. At 10 it was the smallest thing in the window while saying the most, and it was the
+        // one place drawing a raw `.caption2` rather than a rung of the scale.
+        HStack(spacing: Metrics.spacingSmall) {
             if let systemImage {
                 Image(systemName: systemImage)
-                    .font(.caption2)
+                    .font(Typo.micro)
                     .imageScale(.small)
             }
             Text(text)
-                .font(monospaced ? Typo.codeTiny : Typo.micro)
+                .font(monospaced ? Typo.codeSmall : Typo.caption)
                 .lineLimit(1)
         }
         .foregroundStyle(isOnSelection ? Palette.selectedEmphasizedText : tint)
-        .padding(.horizontal, 5)
-        .padding(.vertical, 2)
+        .padding(.horizontal, Metrics.chipInsetH)
+        .padding(.vertical, Metrics.chipInsetV)
         .background(
             isOnSelection ? Palette.selectedEmphasizedText.opacity(0.2) : background,
             in: RoundedRectangle(cornerRadius: Metrics.cornerSmall)
@@ -319,7 +362,10 @@ struct DiffStatLabel: View {
                     )
             }
         }
-        .font(compact ? Typo.codeTiny : Typo.micro)
+        // One rung, two designs: `compact` is the monospaced form used inside a chip, where the
+        // digits have to line up with a filename set in the same face, not a smaller form. It was
+        // written as a size step and never was one, because both styles resolved to 10.
+        .font(compact ? Typo.codeSmall : Typo.caption)
         .monospacedDigit()
     }
 
@@ -400,16 +446,24 @@ struct ActivityDot: View {
     var isActive: Bool
     var tint: Color = Palette.running
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
+
+    /// Reduce Motion drops the pulse rather than slowing it, the same way the pane animations do.
+    /// The dot still says what it said: it is tinted while something is running and grey when it
+    /// is not, so nothing is lost by holding it still.
+    private var isPulsing: Bool { isActive && pulse && !reduceMotion }
 
     var body: some View {
         Circle()
             .fill(isActive ? tint : Palette.textTertiary)
             .frame(width: Metrics.dot, height: Metrics.dot)
-            .scaleEffect(isActive && pulse ? 1.35 : 1)
-            .opacity(isActive && pulse ? 0.5 : 1)
+            .scaleEffect(isPulsing ? 1.35 : 1)
+            .opacity(isPulsing ? 0.5 : 1)
             .animation(
-                isActive ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true) : .default,
+                isActive && !reduceMotion
+                    ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true)
+                    : .default,
                 value: pulse
             )
             .onChange(of: isActive, initial: true) { _, active in

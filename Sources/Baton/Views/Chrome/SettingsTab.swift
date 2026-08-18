@@ -4,6 +4,7 @@
 /// change which pane the window opens on.
 enum SettingsTab: Hashable {
     case general
+    case notifications
     case projects
     case models
     case agents

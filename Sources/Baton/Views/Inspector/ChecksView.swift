@@ -19,8 +19,12 @@ struct ChecksView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            summary
-            Hairline()
+            // With nothing to roll up the strip only repeats the empty state's own title back at
+            // it, so the pane says "No checks" twice under two different type sizes.
+            if !runs.isEmpty {
+                summary
+                Hairline()
+            }
             if runs.isEmpty {
                 empty
             } else {
@@ -51,7 +55,8 @@ struct ChecksView: View {
     private func row(_ run: CheckRun) -> some View {
         CheckRunRow(run: run)
             // Nothing here is selectable, but a row that opens a browser has to say so on hover,
-            // which is what the rest of the inspector's lists do.
+            // which is what the rest of the inspector's lists do. The fill is inset from the pane
+            // edge the way a source list's is, and the row pays the rest of the shared inset.
             .rowBackground(isSelected: false, isHovered: hovered == run.id)
             .padding(.horizontal, Metrics.spacingSmall)
             .onHoverChange { hovering in
@@ -81,11 +86,20 @@ struct ChecksView: View {
                 .accessibilityLabel("\(runs.count) checks")
         }
         .padding(.horizontal, InspectorLayout.inset)
-        .frame(height: Metrics.rowHeight)
+        // The height every other strip in this column is, rather than a list row's.
+        .frame(height: InspectorLayout.barHeight)
+    }
+
+    /// Filled rather than left at its natural height, so it centres in the pane the way the
+    /// changed file list's empty state does. Top aligned it read as a paragraph that had lost
+    /// its heading.
+    private var empty: some View {
+        emptyContent
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
-    private var empty: some View {
+    private var emptyContent: some View {
         if github == .unavailable {
             // Honest rather than alarming: an empty list here means Baton could not ask, not that
             // GitHub reported nothing.
@@ -102,15 +116,15 @@ struct ChecksView: View {
             )
         } else {
             LoadingView("Asking GitHub")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
     private func header(_ group: CheckRunGroup) -> some View {
         HStack(spacing: Metrics.spacingSmall) {
             Text(group.workflow)
-                .font(Typo.micro)
+                .font(Typo.caption)
                 .lineLimit(1)
+                .truncationMode(.middle)
             Spacer(minLength: 0)
             Text("\(group.runs.count)")
                 .font(Typo.micro)

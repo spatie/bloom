@@ -10,11 +10,19 @@ import Foundation
 enum MarkdownMetrics {
     /// Between two top level blocks: paragraph to paragraph, paragraph to code fence.
     static let blockGap: CGFloat = 12
+    /// The extra a heading takes above itself, on top of `blockGap`.
+    ///
+    /// A heading set the same distance from the paragraph above it as from the one below reads as
+    /// belonging to neither. Space above is the whole of what makes it look attached to what it
+    /// introduces, and it costs nothing at the top of a block where there is nothing above.
+    static let headingLead: CGFloat = 10
     /// The column a bullet, an ordinal or a task box sits in. Scaled at the call site.
     static let markerWidth: CGFloat = 24
     /// Room for a four digit line number. Scaled at the call site.
     static let lineNumberWidth: CGFloat = 28
     /// A square hit area for the small icon buttons in a code fence, so the glyph swapping from
-    /// "copy" to "checkmark" does not resize the bar under the pointer.
-    static let iconButton: CGFloat = 16
+    /// "copy" to "checkmark" does not resize the bar under the pointer. Larger than the glyph it
+    /// holds, because a 16 point target for a control that only appears once per block is a
+    /// pointer exercise.
+    static let iconButton: CGFloat = 20
 }

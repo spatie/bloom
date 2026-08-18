@@ -268,7 +268,7 @@ struct DiffView: View {
     private func gate(_ fileDiff: FileDiff, changed: Int) -> some View {
         EmptyStateView(
             glyph: "doc.text.magnifyingglass",
-            title: "\(changed) changed lines",
+            title: "\(changed.formatted()) changed lines",
             message: "Highlighting a diff this size takes a moment.",
             actionTitle: "Show anyway",
             action: { Task { await present(fileDiff) } }
@@ -288,6 +288,10 @@ struct DiffView: View {
                 }
                 .frame(width: width, alignment: .leading)
             }
+            // A scroll view with two axes CENTRES content that does not fill it, so a short diff
+            // floated in the middle of the pane with a band of empty above it. The anchor is also
+            // where the scroller starts, which is the top left either way.
+            .defaultScrollAnchor(.topLeading)
             .scrollBounceBehavior(.basedOnSize)
         }
     }

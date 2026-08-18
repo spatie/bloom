@@ -44,7 +44,7 @@ struct ThinkingRowView: View {
                 .foregroundStyle(Palette.textSecondary)
                 .italic()
                 .lineLimit(1)
-                .frame(width: TranscriptLayout.labelWidth, alignment: .leading)
+                .transcriptLabelColumn()
 
             if !isExpanded {
                 Text(ToolPresenter.oneLine(text))
@@ -62,6 +62,7 @@ struct ThinkingRowView: View {
                     .font(Typo.micro)
                     .foregroundStyle(Palette.textTertiary)
                     .monospacedDigit()
+                    .fixedSize()
             }
 
             TranscriptDisclosure(isExpanded: isExpanded, isVisible: isHovered)

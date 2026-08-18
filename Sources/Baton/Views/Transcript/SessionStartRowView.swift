@@ -24,7 +24,7 @@ struct SessionStartRowView: View {
             Text("Session started")
                 .font(Typo.labelEmphasis)
                 .foregroundStyle(Palette.textSecondary)
-                .frame(width: TranscriptLayout.labelWidth, alignment: .leading)
+                .transcriptLabelColumn()
 
             if !info.model.isEmpty {
                 Chip(text: modelLabel)

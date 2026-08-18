@@ -1,5 +1,4 @@
 import Foundation
-import UserNotifications
 import AppKit
 import BatonCore
 
@@ -24,33 +23,6 @@ enum GitHubBridge {
     static func open(_ url: String) {
         guard let target = URL(string: url) else { return }
         NSWorkspace.shared.open(target)
-    }
-}
-
-/// Turn-finished notifications. A workspace the user is not looking at is the only thing worth
-/// interrupting them for, so posting is always guarded at the call site.
-enum Notifications {
-    private static let workspaceKey = "batonWorkspaceID"
-
-    static func requestAuthorization() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
-    }
-
-    static func post(title: String, body: String, workspaceID: String) {
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = String(body.prefix(300))
-        content.sound = .default
-        content.userInfo = [workspaceKey: workspaceID]
-
-        let request = UNNotificationRequest(
-            identifier: UUID().uuidString, content: content, trigger: nil
-        )
-        UNUserNotificationCenter.current().add(request)
-    }
-
-    static func workspaceID(from response: UNNotificationResponse) -> String? {
-        response.notification.request.content.userInfo[workspaceKey] as? String
     }
 }
 

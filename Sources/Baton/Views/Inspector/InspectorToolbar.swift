@@ -13,20 +13,25 @@ import BatonCore
 /// width there is no room for them, and a segmented control does not truncate: it overflows and is
 /// clipped by the split view, which is how the tab row ended up cut off at both ends. `ViewThatFits`
 /// falls back to a pop-up button, which is what AppKit uses for the same choice in a narrow place.
+///
+/// Only the controls that mean something for the pane below are drawn. A row of four trailing
+/// buttons pushed the picker into its narrow form at the DEFAULT inspector width, and two of them
+/// did nothing at all on the checks tab.
 struct InspectorToolbar: View {
     @Bindable var model: WorkspaceModel
     @Binding var isReviewing: Bool
 
-    /// Shared with `DiffView` through the same defaults key, so the toggle and the diff can never
-    /// disagree about which layout is showing.
-    @AppStorage(DiffLayoutSetting.storageKey) private var isSideBySide = false
-    /// Shared with `ChangedFileList` the same way, and outliving the launch because a user who
-    /// thinks in folders thinks in folders tomorrow too.
+    /// Shared with `ChangedFileList` through the same defaults key, and outliving the launch
+    /// because a user who thinks in folders thinks in folders tomorrow too.
     @AppStorage(ChangedFilePresentation.storageKey)
     private var isTree = ChangedFilePresentation.defaultsToTree
 
     var body: some View {
-        HStack(spacing: InspectorLayout.gap) {
+        // No spacing of its own: there are exactly two things in the row and the gap between them
+        // is the spacer's own minimum. Spelled as a gap on both sides of a spacer it was paid
+        // three times, and those points are the difference between a segmented control and a
+        // pop-up button at the pane's default width.
+        HStack(spacing: 0) {
             ViewThatFits(in: .horizontal) {
                 tabPicker.pickerStyle(.segmented)
                 tabPicker.pickerStyle(.menu).fixedSize()
@@ -34,37 +39,48 @@ struct InspectorToolbar: View {
             .labelsHidden()
             .controlSize(.small)
 
-            Spacer(minLength: InspectorLayout.tight)
+            Spacer(minLength: InspectorLayout.gap)
 
-            Toggle(isOn: $isReviewing) {
-                Label("Review changes", systemImage: "eye")
-            }
-            .labelStyle(.iconOnly)
-            .toggleStyle(.button)
-            .controlSize(.small)
-            .disabled(model.changedFiles.isEmpty)
-            .help("Review the changes one file at a time")
-            .onChange(of: isReviewing) { _, reviewing in
-                guard reviewing, model.selectedFilePath == nil else { return }
-                model.selectedFilePath = model.changedFiles.first?.path
-            }
+            trailing
+        }
+        // The same inset as the pull request strip above and the file header bar below, so the
+        // three stacked bars start their contents on one line rather than a few points apart.
+        .padding(.horizontal, InspectorLayout.inset)
+        .frame(height: InspectorLayout.barHeight)
+    }
 
-            Toggle(isOn: $isTree) {
-                Label("Group changes by folder", systemImage: "folder")
-            }
-            .labelStyle(.iconOnly)
-            .toggleStyle(.button)
-            .controlSize(.small)
-            .disabled(model.changedFiles.isEmpty)
-            .help(isTree ? "Show the changed files as a flat list" : "Group the changed files by folder")
+    /// One cluster, spaced the way a toolbar spaces related buttons rather than the way a row
+    /// spaces unrelated ones. The points that saves are what let the segmented control survive at
+    /// the pane's default width instead of dropping to its pop-up form.
+    private var trailing: some View {
+        HStack(spacing: Metrics.spacingTight) {
+            if model.inspectorTab == .changes {
+                Toggle(isOn: $isReviewing) {
+                    Label("Review changes", systemImage: "eye")
+                }
+                .labelStyle(.iconOnly)
+                .toggleStyle(.button)
+                .controlSize(.small)
+                .disabled(model.changedFiles.isEmpty)
+                .help("Review the changes one file at a time")
+                .onChange(of: isReviewing) { _, reviewing in
+                    guard reviewing, model.selectedFilePath == nil else { return }
+                    model.selectedFilePath = model.changedFiles.first?.path
+                }
 
-            Toggle(isOn: $isSideBySide) {
-                Label("Side by side diff", systemImage: "rectangle.split.2x1")
+                Toggle(isOn: $isTree) {
+                    Label("Group changes by folder", systemImage: "folder")
+                }
+                .labelStyle(.iconOnly)
+                .toggleStyle(.button)
+                .controlSize(.small)
+                .disabled(model.changedFiles.isEmpty)
+                .help(
+                    isTree
+                        ? "Show the changed files as a flat list"
+                        : "Group the changed files by folder"
+                )
             }
-            .labelStyle(.iconOnly)
-            .toggleStyle(.button)
-            .controlSize(.small)
-            .help(isSideBySide ? "Show a unified diff" : "Show the diff side by side")
 
             Menu {
                 Button("Refresh", action: refresh)
@@ -86,8 +102,6 @@ struct InspectorToolbar: View {
             .fixedSize()
             .help("More for this worktree")
         }
-        .padding(.horizontal, InspectorLayout.gap)
-        .frame(height: InspectorLayout.barHeight)
     }
 
     private var tabPicker: some View {

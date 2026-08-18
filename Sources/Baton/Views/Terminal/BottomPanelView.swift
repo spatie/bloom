@@ -14,6 +14,9 @@ struct BottomPanelView: View {
     @State private var settings = RepoSettings()
     @State private var renamingTabID: String?
     @State private var draftName = ""
+    /// Which terminal tab the pointer is over, so only that one shows its close button. A row of
+    /// permanent crosses is noise, and no tab strip on this platform draws one.
+    @State private var hoveredTabID: String?
 
     private var sessions: TerminalSessionStore { .shared }
 
@@ -135,21 +138,26 @@ struct BottomPanelView: View {
                 Text(tab.title).lineLimit(1)
             }
 
-            Button {
+            // Kept in the layout at all times, so a tab does not change width under the pointer as
+            // it arrives, which would walk the whole strip sideways.
+            Button("Close this terminal", systemImage: "xmark") {
                 Task { await close(tab) }
-            } label: {
-                Image(systemName: "xmark")
-                    .imageScale(.small)
-                    .foregroundStyle(Palette.textTertiary)
-                    .frame(width: Metrics.glyph, height: Metrics.glyph)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.borderless)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.accessoryBar)
+            .controlSize(.small)
+            // The size the tab's own glyph is drawn at. Without it the cross came out larger than
+            // the terminal mark it sits beside.
+            .imageScale(.small)
+            .opacity(hoveredTabID == tab.id || isSelected ? 1 : 0)
             .help("Close this terminal")
         }
         .font(Typo.label)
         .foregroundStyle(isSelected ? Palette.textPrimary : Palette.textSecondary)
         .tabChrome(isSelected: isSelected)
+        .onHoverChange { inside in
+            hoveredTabID = inside ? tab.id : (hoveredTabID == tab.id ? nil : hoveredTabID)
+        }
         .onTapGesture { select(.terminal(tab.id)) }
         .help(tab.title)
         .accessibilityElement(children: .contain)
@@ -164,17 +172,16 @@ struct BottomPanelView: View {
         }
     }
 
+    /// The glyph carries neither a font nor a colour of its own: `.accessoryBar` is the system's
+    /// style for a control in a strip like this, and it sizes and tints the glyph, and draws the
+    /// hover and pressed states, the way every other bar on the Mac does. Setting a font and then
+    /// an `.imageScale(.small)` on top of it shrank the mark twice over.
     private func iconButton(_ symbol: String, help: String, run: @escaping () -> Void) -> some View {
-        Button(action: run) {
-            Image(systemName: symbol)
-                .font(Typo.labelEmphasis)
-                .imageScale(.small)
-                .foregroundStyle(Palette.textSecondary)
-                .frame(width: Metrics.barHeight, height: Metrics.barHeight)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.borderless)
-        .help(help)
+        Button(help, systemImage: symbol, action: run)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.accessoryBar)
+            .frame(width: Metrics.barHeight, height: Metrics.barHeight)
+            .help(help)
     }
 
     // MARK: - Content

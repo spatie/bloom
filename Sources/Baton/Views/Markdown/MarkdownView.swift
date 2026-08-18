@@ -50,8 +50,8 @@ private struct MarkdownBlocksView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MarkdownMetrics.blockGap) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                MarkdownBlockView(block: block, foreground: foreground)
+            ForEach(Array(blocks.enumerated()), id: \.offset) { offset, block in
+                MarkdownBlockView(block: block, foreground: foreground, isFirst: offset == 0)
             }
         }
     }
@@ -60,6 +60,8 @@ private struct MarkdownBlocksView: View {
 private struct MarkdownBlockView: View {
     let block: MarkdownBlock
     let foreground: Color
+    /// A heading only claims space above it when there is something above it to be separated from.
+    var isFirst = false
 
     /// The marker column follows the user's text size, otherwise a raised body size pushes "10."
     /// straight out of a column sized for the default one.
@@ -71,7 +73,11 @@ private struct MarkdownBlockView: View {
         case let .paragraph(inline):
             inlineText(inline, font: Typo.body, color: foreground)
         case let .heading(level, inline):
-            inlineText(inline, font: level <= 2 ? Typo.title : Typo.bodyEmphasis, color: foreground)
+            // Three real steps rather than one. Every level used to land on reading size and
+            // differ only in weight, so an agent that structured its answer with headings got a
+            // wall of bold sentences and no structure at all.
+            inlineText(inline, font: Self.headingFont(level), color: foreground)
+                .padding(.top, isFirst ? 0 : MarkdownMetrics.headingLead)
         case let .codeBlock(code, language, _):
             CodeBlockView(code: code, language: language)
         case let .bulletList(items, tight):
@@ -94,6 +100,14 @@ private struct MarkdownBlockView: View {
         }
     }
 
+    private static func headingFont(_ level: Int) -> Font {
+        switch level {
+        case 1: Typo.heading
+        case 2: Typo.title
+        default: Typo.bodyEmphasis
+        }
+    }
+
     private func inlineText(_ inline: [MarkdownInline], font: Font, color: Color) -> some View {
         Text(InlineAttributes.make(inline, font: font, color: color))
             .font(font)
@@ -105,15 +119,21 @@ private struct MarkdownBlockView: View {
     private func marker(_ text: String) -> some View {
         Text(text)
             .font(Typo.body)
-            .foregroundStyle(Palette.textTertiary)
+            // Tertiary is the shade a disabled control gets. A bullet is quiet, not switched off,
+            // and at a quarter ink it all but vanished against the line it belongs to.
+            .foregroundStyle(Palette.textSecondary)
             .monospacedDigit()
             .frame(width: markerWidth, alignment: .trailing)
     }
 
     private func list(items: [[MarkdownBlock]], start: Int?, tight: Bool) -> some View {
-        VStack(alignment: .leading, spacing: tight ? 0 : Metrics.spacingSmall) {
+        // A tight list at zero read as one paragraph with dots in it, and a loose one at four was
+        // tighter than the gap between the marker and its own text.
+        VStack(alignment: .leading, spacing: tight ? Metrics.spacingTight : Metrics.spacing) {
             ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
-                HStack(alignment: .top, spacing: Metrics.spacingSmall) {
+                // Baseline, not top: this is the alignment the task list beside it already used,
+                // and top alignment sat the marker a fraction above the line it marks.
+                HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
                     marker(start.map { "\($0 + offset)." } ?? "\u{2022}")
                     MarkdownBlocksView(blocks: item, foreground: foreground)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -123,7 +143,7 @@ private struct MarkdownBlockView: View {
     }
 
     private func taskList(_ items: [(checked: Bool, inline: [MarkdownInline])]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: Metrics.spacingTight) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
                     Image(systemName: item.checked ? "checkmark.square.fill" : "square")
@@ -142,33 +162,58 @@ private struct MarkdownBlockView: View {
             Grid(horizontalSpacing: 0, verticalSpacing: 0) {
                 GridRow {
                     ForEach(Array(headers.enumerated()), id: \.offset) { column, header in
-                        tableCell(header, font: Typo.labelEmphasis, alignment: alignment(at: column, in: alignments))
+                        // A header set a rung below the cells under it was the wrong way round.
+                        // Same size, heavier, on a fill: that is what makes it read as a header.
+                        tableCell(
+                            header,
+                            font: Typo.bodyEmphasis,
+                            alignment: alignment(at: column, in: alignments),
+                            isLastColumn: column == headers.count - 1,
+                            isLastRow: false
+                        )
+                        .background(Palette.surfaceSunken)
                     }
                 }
-                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                     GridRow {
                         ForEach(Array(row.enumerated()), id: \.offset) { column, cell in
-                            tableCell(cell, font: Typo.body, alignment: alignment(at: column, in: alignments))
+                            tableCell(
+                                cell,
+                                font: Typo.body,
+                                alignment: alignment(at: column, in: alignments),
+                                isLastColumn: column == row.count - 1,
+                                isLastRow: index == rows.count - 1
+                            )
                         }
                     }
                 }
             }
+            // Clipped before it is stroked, so the header fill stops at the corner and the last
+            // column and row do not draw a second line under the border they already have.
+            .clipShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
             .overlay {
-                Rectangle().strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+                    .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
             }
         }
     }
 
-    private func tableCell(_ inline: [MarkdownInline], font: Font, alignment: Alignment) -> some View {
+    private func tableCell(
+        _ inline: [MarkdownInline],
+        font: Font,
+        alignment: Alignment,
+        isLastColumn: Bool,
+        isLastRow: Bool
+    ) -> some View {
         inlineText(inline, font: font, color: foreground)
             .padding(.horizontal, MarkdownMetrics.blockGap)
             .padding(.vertical, Metrics.spacing)
             .frame(maxWidth: .infinity, alignment: alignment)
             .overlay(alignment: .trailing) {
-                Hairline(axis: .vertical)
+                if !isLastColumn { Hairline(axis: .vertical) }
             }
             .overlay(alignment: .bottom) {
-                Hairline()
+                if !isLastRow { Hairline() }
             }
     }
 
@@ -258,9 +303,14 @@ private enum InlineAttributes {
                 output += child
             case let .code(code):
                 var child = AttributedString(code)
-                child.font = Typo.code
-                child.foregroundColor = Palette.textPrimary
+                // Derived from the run it sits in rather than pinned to `Typo.code`, and carrying
+                // whatever emphasis is around it. Pinned, a span of code dropped a rung inside a
+                // paragraph and two inside a heading, took the primary colour inside a quote that
+                // was set secondary, and stayed upright inside bold and italic.
+                child.font = font.monospaced()
+                child.foregroundColor = color
                 child.backgroundColor = Palette.hover
+                if !intents.isEmpty { child.inlinePresentationIntent = intents }
                 output += child
             case let .link(text, url):
                 var child = render(text, font: font, color: Palette.accent, intents: intents)

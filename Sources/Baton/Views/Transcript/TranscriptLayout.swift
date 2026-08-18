@@ -25,16 +25,48 @@ enum TranscriptLayout {
 
     static let glyphWidth: CGFloat = 16
     static let glyphGap: CGFloat = 8
+    /// The label column, at the default text size. Read through `transcriptLabelColumn()` rather
+    /// than directly, because it is the one column here that holds text of unknown length.
     static let labelWidth: CGFloat = 176
     /// Where an expanded body starts, lined up under the label column.
     static let detailIndent: CGFloat = glyphWidth + glyphGap + inset
     static let nestIndent: CGFloat = 16
     /// The coloured rule down the left of an error, a quote or a tool result.
     static let rule: CGFloat = 2
-    static let disclosureWidth: CGFloat = 10
+    /// Wide enough for `chevron.down`, which is half again as wide as `chevron.right`. At 10 the
+    /// open chevron overflowed its own box and the row's trailing edge shifted on every toggle.
+    static let disclosureWidth: CGFloat = 14
     /// The horizontal inset a `Chip` keeps, so a chip drawn by hand is the same shape as one that
     /// is not, which matters in the footer where the two sit next to each other.
-    static let chipInset: CGFloat = 5
+    static let chipInset = Metrics.chipInsetH
     /// Extra leading for the two places that render real prose rather than one line.
     static let proseLeading: CGFloat = 3
+    /// How wide a paragraph is allowed to get.
+    ///
+    /// Nothing else in the window is read a line at a time, so nothing else needs a measure. With
+    /// the inspector closed on a large display the transcript pane is well over a thousand points
+    /// and a paragraph ran to nearly two hundred characters, which is the width at which the eye
+    /// loses the start of the next line. Generous on purpose: at the sizes the window is usually
+    /// dragged to this never bites, and it only ever stops prose running away.
+    static let proseMeasure: CGFloat = 680
+}
+
+/// The label column of a row header.
+///
+/// Fixed columns are what make the transcript scan, but this one holds text nobody chose the
+/// length of ("Run Pint and the new test"), so it is the one that has to grow with the user's text
+/// size. The glyph and detail columns stay pinned, so an expanded body still lands under the label
+/// it belongs to whatever size the text is set at.
+struct TranscriptLabelColumn: ViewModifier {
+    @ScaledMetric(relativeTo: .callout) private var width = TranscriptLayout.labelWidth
+
+    func body(content: Content) -> some View {
+        content.frame(width: width, alignment: .leading)
+    }
+}
+
+extension View {
+    func transcriptLabelColumn() -> some View {
+        modifier(TranscriptLabelColumn())
+    }
 }

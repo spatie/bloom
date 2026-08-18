@@ -45,7 +45,7 @@ struct AgentErrorRowView: View {
                 .foregroundStyle(Palette.negative)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(width: TranscriptLayout.labelWidth, alignment: .leading)
+                .transcriptLabelColumn()
 
             Text(ToolPresenter.oneLine(stderr))
                 .font(Typo.label)

@@ -27,6 +27,15 @@ struct FileHeaderBar: View {
     @State private var isConfirmingRevert = false
     @State private var didCopy = false
     @State private var copyReset: Task<Void, Never>?
+    /// The bar's own width, which is the only thing that can decide whether the folder chip has
+    /// room. `ViewThatFits` cannot: it is handed the share of the row the layout has already
+    /// apportioned, so it dropped the folder while there was still most of a pane to spare.
+    @State private var width: CGFloat = 0
+
+    /// Below this the bar keeps the filename and the controls and drops the folder beside it.
+    /// A readable filename, the collapsed control cluster and the pane's own insets, with just
+    /// enough left for a folder worth reading.
+    private static let folderThreshold: CGFloat = 340
 
     private var isDirty: Bool { session.isDirty(absolutePath) }
 
@@ -36,7 +45,11 @@ struct FileHeaderBar: View {
 
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {
-            FilePathChip(file: file, hasUnsavedEdits: isDirty)
+            FilePathChip(
+                file: file,
+                hasUnsavedEdits: isDirty,
+                showsDirectory: width >= Self.folderThreshold
+            )
 
             // Lower priority than the name beside it, so a wide bar spends its slack on
             // the gap rather than on squeezing the path chip that has room to spare.
@@ -52,6 +65,7 @@ struct FileHeaderBar: View {
         .padding(.horizontal, InspectorLayout.inset)
         .frame(height: InspectorLayout.barHeight)
         .background(Palette.surfaceSunken)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .confirmationDialog(
             "Revert \(file.filename)?",
             isPresented: $isConfirmingRevert,

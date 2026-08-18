@@ -21,7 +21,10 @@ struct DiffExpanderView: View {
             .foregroundStyle(isHovered ? Palette.accent : Palette.textTertiary)
             .padding(.horizontal, CodeMetrics.textInset)
             .frame(width: width, height: CodeMetrics.rowHeight, alignment: .leading)
-            .background(isHovered ? Palette.hover : Palette.surfaceSunken)
+            // The hover tint is a translucent wash, so it goes OVER the band's own fill. Swapped
+            // for it, hovering made the strip lighter than its resting state instead of darker.
+            .background(isHovered ? Palette.hover : .clear)
+            .background(Palette.surfaceSunken)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

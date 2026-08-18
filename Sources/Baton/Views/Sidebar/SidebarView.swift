@@ -18,6 +18,10 @@ struct SidebarView: View {
     @State private var renaming: String?
     @State private var filter: SidebarFilter = .all
 
+    /// What the list itself thinks is selected. See the `onChange` pair below for why this is not
+    /// bound straight to the model.
+    @State private var listSelection: SidebarSelection?
+
     /// The grouped, filtered, sorted list the rows are drawn from.
     ///
     /// Derived state held in `@State` rather than recomputed in `body`, with the three inputs it
@@ -25,7 +29,7 @@ struct SidebarView: View {
     @State private var groups: [SidebarRepoGroup] = []
 
     var body: some View {
-        List(selection: selection) {
+        List(selection: $listSelection) {
             Section {
                 navRow(.home, title: "Home", icon: "house")
                 navRow(.search, title: "Search", icon: "magnifyingglass")
@@ -53,9 +57,13 @@ struct SidebarView: View {
         .onChange(of: app.repos, initial: true) { _, _ in regroup() }
         .onChange(of: app.workspaces) { _, _ in regroup() }
         .onChange(of: filter) { _, _ in regroup() }
+        .onChange(of: listSelection) { _, _ in commitSelection() }
         // Moving off a row has to close whatever field was open on it, or the rename would carry
         // on editing a workspace that is no longer on screen.
-        .onChange(of: app.selection) { _, _ in renaming = nil }
+        .onChange(of: app.selection, initial: true) { _, target in
+            renaming = nil
+            listSelection = target
+        }
     }
 
     private func regroup() {
@@ -66,24 +74,23 @@ struct SidebarView: View {
 
     // MARK: - Selection
 
-    /// The list works in optionals because clicking empty space deselects. Baton always has
-    /// somewhere to be, so an empty selection is ignored rather than written back.
+    /// The list works in optionals because clicking empty space deselects, and Baton always has
+    /// somewhere to be, so an empty selection is put back rather than passed on.
     ///
-    /// One of the few hand-made bindings left in the app. It cannot be a plain `@State` mirrored
-    /// back with `onChange`, because the whole point is that a write of `nil` never reaches the
-    /// model at all.
-    private var selection: Binding<SidebarSelection?> {
-        Binding(
-            get: { app.selection },
-            // Nothing else is written here on purpose. This setter runs inside the table's own
-            // selection callback, and touching view state from there is what AppKit means by a
-            // reentrant delegate operation. Closing an open rename field is left to the
-            // `onChange` above, which SwiftUI runs after the update has finished.
-            set: { newValue in
-                guard let newValue else { return }
-                app.selection = newValue
-            }
-        )
+    /// Putting it back is the whole reason the list is not bound straight to the model through a
+    /// hand-made binding. A binding whose setter drops `nil` looks like it refuses the
+    /// deselection, but the table has already cleared its own highlight by then and nothing
+    /// invalidates it again, so the row went blank while the detail pane carried on showing the
+    /// workspace. Writing the old value back into the list's own state is what redraws it.
+    ///
+    /// Running here rather than in a binding setter also keeps the model write out of the table's
+    /// selection callback, which is what AppKit means by a reentrant delegate operation.
+    private func commitSelection() {
+        guard let listSelection else {
+            listSelection = app.selection
+            return
+        }
+        app.selection = listSelection
     }
 
     private func navRow(_ target: SidebarSelection, title: String, icon: String) -> some View {

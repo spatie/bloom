@@ -65,7 +65,7 @@ struct ChangedFileList: View {
                             row(file)
                         }
                     } header: {
-                        header(group.directory)
+                        header(group)
                     }
                 }
             }
@@ -108,17 +108,21 @@ struct ChangedFileList: View {
         }
     }
 
-    private func header(_ directory: String) -> some View {
+    /// The same shape as the checks list's section header, which is the only other pinned header
+    /// in this column: a name at the pane's own inset, then how many rows are under it.
+    ///
+    /// No glyph. A folder icon here started the label six points inside the pane inset and six
+    /// points outside the filenames below it, which is a stagger that belongs to neither.
+    private func header(_ group: ChangedFileGroup) -> some View {
         HStack(spacing: Metrics.spacingSmall) {
-            Image(systemName: "folder")
-                .font(Typo.micro)
-                .imageScale(.small)
-                .accessibilityHidden(true)
-            Text(directory.isEmpty ? "Repository root" : directory)
-                .font(Typo.micro)
+            Text(group.directory.isEmpty ? "Repository root" : group.directory)
+                .font(Typo.caption)
                 .lineLimit(1)
                 .truncationMode(.head)
             Spacer(minLength: 0)
+            Text("\(group.files.count)")
+                .font(Typo.micro)
+                .monospacedDigit()
         }
         .foregroundStyle(Palette.textTertiary)
         .padding(.horizontal, InspectorLayout.inset)

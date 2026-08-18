@@ -11,7 +11,6 @@ struct DiffLineView: View {
         case both
         case old
         case new
-        case none
     }
 
     var line: DiffLine?
@@ -44,8 +43,6 @@ struct DiffLineView: View {
                 number(line?.oldNumber)
             case .new:
                 number(line?.newNumber)
-            case .none:
-                EmptyView()
             }
         }
         .background(Palette.diffGutter)

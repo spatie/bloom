@@ -21,7 +21,7 @@ struct CheckRunRow: View {
                         .truncationMode(.middle)
                     if let workflow = run.workflowName, workflow != run.name {
                         Text(workflow)
-                            .font(Typo.micro)
+                            .font(Typo.caption)
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                     }
@@ -41,12 +41,16 @@ struct CheckRunRow: View {
                         .accessibilityHidden(true)
                 }
             }
-            .padding(.horizontal, InspectorLayout.inset)
+            // `ChecksView` insets the fill by the rest of the shared row inset, the way the
+            // changed file list and the worktree tree do, so all three lists start on one line.
+            .padding(.horizontal, InspectorLayout.gap)
             .frame(height: Metrics.rowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(run.detailsURL == nil)
+        // Not `.disabled`: a plain button dims everything inside it, so a run GitHub gave no URL
+        // for came out unreadable rather than merely unclickable. Nothing to open simply opens
+        // nothing.
         .help(run.detailsURL ?? run.name)
         .accessibilityInputLabels([run.name])
     }

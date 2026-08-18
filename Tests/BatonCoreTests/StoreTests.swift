@@ -110,6 +110,27 @@ struct StoreTests {
         #expect(try await store.draft(sessionID: "s1") == "")
     }
 
+    @Test("reorders a workspace's sessions without touching what the runner owns")
+    func reordersSessions() async throws {
+        let store = try makeTestStore("store")
+        let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r"))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id, name: "w", branch: "b", path: "/p", baseBranch: "main"
+        ))
+        var first = Session(workspaceID: workspace.id, title: "first", sortOrder: 0)
+        first.agentSessionID = "agent-1"
+        let second = Session(workspaceID: workspace.id, title: "second", sortOrder: 1)
+        let third = Session(workspaceID: workspace.id, title: "third", sortOrder: 2)
+        for session in [first, second, third] { try await store.upsert(session) }
+
+        try await store.reorderSessions(ids: [third.id, first.id, second.id])
+
+        let ordered = try await store.sessions(workspaceID: workspace.id)
+        #expect(ordered.map(\.title) == ["third", "first", "second"])
+        // Resume depends on this column, and a reorder written as a whole row would drop it.
+        #expect(try await store.session(id: first.id)?.agentSessionID == "agent-1")
+    }
+
     @Test("resets sessions that were running when the app died")
     func resetsRunningSessions() async throws {
         let store = try makeTestStore("store")

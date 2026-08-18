@@ -36,9 +36,11 @@ struct ViewedToggle: View {
         .help(isViewed ? "Mark this file as not yet reviewed" : "Mark this file as reviewed")
     }
 
+    /// A shape that still carries the meaning with its title hidden. An empty `square` icon-only
+    /// is a bordered button containing a smaller square, which reads as nothing at all.
     private var toggle: some View {
         Toggle(isOn: $isViewed) {
-            Label("Viewed", systemImage: isViewed ? "checkmark.square" : "square")
+            Label("Viewed", systemImage: isViewed ? "checkmark.circle.fill" : "checkmark.circle")
         }
     }
 }

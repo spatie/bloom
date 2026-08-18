@@ -18,6 +18,8 @@ struct SessionTabView: View {
     var onCommitRename: @MainActor (String) -> Void
     var onCancelRename: @MainActor () -> Void
     var onClose: @MainActor () -> Void
+    var onSplitRight: @MainActor () -> Void
+    var onSplitDown: @MainActor () -> Void
 
     var body: some View {
         CenterTabView(
@@ -33,7 +35,9 @@ struct SessionTabView: View {
             onStartRename: onStartRename,
             onCommitRename: onCommitRename,
             onCancelRename: onCancelRename,
-            onClose: onClose
+            onClose: onClose,
+            onSplitRight: onSplitRight,
+            onSplitDown: onSplitDown
         )
     }
 }

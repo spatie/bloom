@@ -125,6 +125,29 @@ final class WorkspaceModel {
         return stored
     }
 
+    /// Moves a session to another place in the strip, and writes the whole workspace's order back.
+    ///
+    /// The list is updated here first so the tab lands under the pointer on the frame the drop
+    /// happens, rather than a round trip through SQLite later.
+    func reorderSession(_ session: Session, to index: Int) async {
+        guard let store, let from = sessions.firstIndex(where: { $0.id == session.id }) else { return }
+        var ordered = sessions
+        let moved = ordered.remove(at: from)
+        ordered.insert(moved, at: min(max(index, 0), ordered.count))
+        for (order, item) in ordered.enumerated() { ordered[order] = item.with { $0.sortOrder = order } }
+        sessions = ordered
+        try? await store.reorderSessions(ids: ordered.map(\.id))
+    }
+
+    /// Whether this session's agent is in the middle of a turn.
+    ///
+    /// The live transcript is the truth wherever one exists, and only existing ones are consulted:
+    /// asking for a transcript would build a model for every session the strip drew.
+    func isRunning(_ session: Session) -> Bool {
+        if let transcript = transcripts[session.id] { return transcript.isRunning }
+        return session.state == .running
+    }
+
     func closeSession(_ session: Session) async {
         guard let store else { return }
         transcripts[session.id]?.teardown()
@@ -158,6 +181,19 @@ final class WorkspaceModel {
     /// which happens on every path that can change which session is active.
     var activeTranscript: TranscriptModel? {
         activeSession.flatMap { transcripts[$0.id] }
+    }
+
+    /// The same pure lookup for any session, which is what a pane needs: with the column split,
+    /// the conversation on screen is not always the active one.
+    func existingTranscript(for sessionID: String) -> TranscriptModel? {
+        transcripts[sessionID]
+    }
+
+    /// Builds a session's transcript if this launch has not seen it yet. Called from a task, never
+    /// from a body, for the reason `transcript(for:)` spells out.
+    func prepareTranscript(for sessionID: String) {
+        guard let session = sessions.first(where: { $0.id == sessionID }) else { return }
+        transcript(for: session)
     }
 
     private func prepareActiveTranscript() {
@@ -276,6 +312,7 @@ final class WorkspaceModel {
                     title: "Setup failed for \(workspace.name)",
                     message: "The agent was not started. Check the Setup tab for the output."
                 )
+                NotificationService.shared.setupFailed(workspace: workspace)
                 bottomTab = .setup
                 return
             }
@@ -307,7 +344,7 @@ final class WorkspaceModel {
             do {
                 return .success(try await Git.changedFiles(worktree: path, base: base))
             } catch {
-                return .failure(GitFailure(message: "\(error)"))
+                return .failure(GitFailure(message: error.readableMessage))
             }
         }
         changesTask = task

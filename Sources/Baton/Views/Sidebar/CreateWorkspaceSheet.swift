@@ -155,22 +155,22 @@ struct CreateWorkspaceSheet: View {
             // so the field shows focus the way every other text field on the Mac does and
             // follows increased contrast and the accent colour without being told.
             if mode == .chat {
-            LabeledContent("Task") {
-                // The example goes in `prompt:`, not in the title. On macOS a text field's title
-                // is a visible label, so passing the example there draws it beside the field
-                // instead of inside it.
-                TextField(
-                    "Task",
-                    text: $prompt,
-                    prompt: Text("Fix the flaky upload test, and say why it was flaky"),
-                    axis: .vertical
-                )
-                .labelsHidden()
-                .textFieldStyle(.roundedBorder)
-                .font(Typo.body)
-                .lineLimit(6...12)
-                .focused($promptFocused)
-            }
+                LabeledContent("Task") {
+                    // The example goes in `prompt:`, not in the title. On macOS a text field's
+                    // title is a visible label, so passing the example there draws it beside the
+                    // field instead of inside it.
+                    TextField(
+                        "Task",
+                        text: $prompt,
+                        prompt: Text("Fix the flaky upload test, and say why it was flaky"),
+                        axis: .vertical
+                    )
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                    .font(Typo.body)
+                    .lineLimit(6...12)
+                    .focused($promptFocused)
+                }
             }
 
             LabeledContent(mode == .chat ? "Branch" : "Worktree") {
@@ -180,11 +180,13 @@ struct CreateWorkspaceSheet: View {
                         systemImage: "arrow.triangle.branch",
                         monospaced: true
                     )
-                    Spacer(minLength: Metrics.spacingWide)
+                    // Beside the branch it qualifies rather than pushed to the far edge of the
+                    // form, where it read as a second, unrelated field.
                     Text("worktree in ~/baton/workspaces")
                         .font(Typo.caption)
                         .foregroundStyle(Palette.textTertiary)
                         .lineLimit(1)
+                    Spacer(minLength: 0)
                 }
             }
         }

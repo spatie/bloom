@@ -145,7 +145,7 @@ final class AppModel {
             restoreLastSelection()
             isLoaded = true
         } catch {
-            alert = BatonAlert(title: "Could not open the Baton database", message: "\(error)")
+            alert = BatonAlert(title: "Could not open the Baton database", message: error.readableMessage)
             isLoaded = true
         }
 
@@ -191,7 +191,7 @@ final class AppModel {
                 }
             }
         } catch {
-            alert = BatonAlert(title: "Could not read workspaces", message: "\(error)")
+            alert = BatonAlert(title: "Could not read workspaces", message: error.readableMessage)
         }
     }
 
@@ -345,7 +345,7 @@ final class AppModel {
             _ = try await manager.addRepository(at: path)
             await reload()
         } catch {
-            alert = BatonAlert(title: "Could not add that folder", message: "\(error)")
+            alert = BatonAlert(title: "Could not add that folder", message: error.readableMessage)
         }
     }
 
@@ -355,7 +355,7 @@ final class AppModel {
             try await store.deleteRepo(id: repo.id)
             await reload()
         } catch {
-            alert = BatonAlert(title: "Could not remove the project", message: "\(error)")
+            alert = BatonAlert(title: "Could not remove the project", message: error.readableMessage)
         }
     }
 
@@ -420,7 +420,7 @@ final class AppModel {
             model.startSetupThenSend(prompt: prompt, repo: repo)
             return workspace
         } catch {
-            alert = BatonAlert(title: "Could not create the workspace", message: "\(error)")
+            alert = BatonAlert(title: "Could not create the workspace", message: error.readableMessage)
             return nil
         }
     }
@@ -443,7 +443,7 @@ final class AppModel {
                 workspace: workspace,
                 report: WorkspaceSafetyReport(),
                 deleteBranch: deleteBranch,
-                problem: "Baton could not check this workspace for unsaved work: \(error)"
+                problem: "Baton could not check this workspace for unsaved work. \(error.readableMessage)"
             )
             return
         }
@@ -513,10 +513,10 @@ final class AppModel {
                     workspace: workspace, report: report, deleteBranch: deleteBranch
                 )
             default:
-                alert = BatonAlert(title: "Could not archive the workspace", message: "\(error)")
+                alert = BatonAlert(title: "Could not archive the workspace", message: error.readableMessage)
             }
         } catch {
-            alert = BatonAlert(title: "Could not archive the workspace", message: "\(error)")
+            alert = BatonAlert(title: "Could not archive the workspace", message: error.readableMessage)
         }
     }
 

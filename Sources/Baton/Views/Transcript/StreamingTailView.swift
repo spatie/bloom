@@ -7,7 +7,6 @@ import SwiftUI
 /// rebuilding every visible stored row.
 struct StreamingTailView: View {
     let transcript: TranscriptModel
-    let onContentChange: @MainActor () -> Void
 
     var body: some View {
         Group {
@@ -15,7 +14,5 @@ struct StreamingTailView: View {
                 StreamingRowView(transcript: transcript)
             }
         }
-        .onChange(of: transcript.streamingText) { _, _ in onContentChange() }
-        .onChange(of: transcript.streamingThinking) { _, _ in onContentChange() }
     }
 }

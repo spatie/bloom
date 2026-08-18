@@ -24,9 +24,13 @@ struct SessionTabsView: View {
         tabs.tabs(for: model.workspace.id)
     }
 
-    /// The tool tab filling the column, if one is. Nil means the conversation is.
-    private var activeTool: CenterTab? {
-        tabs.selection(for: model.workspace.id)
+    private var panes: CenterPaneStore { .shared }
+
+    /// What the pane the user is in is showing. That is what the strip marks, because with the
+    /// column split there is no single selection: a tab is either in the pane you are working in
+    /// or it is not.
+    private var focused: CenterPaneContent? {
+        panes.content(of: panes.focusedPane(in: model.workspace.id), in: model)
     }
 
     var body: some View {
@@ -34,33 +38,64 @@ struct SessionTabsView: View {
             ScrollView(.horizontal) {
                 HStack(spacing: 0) {
                     ForEach(Array(model.sessions.enumerated()), id: \.element.id) { index, session in
-                        // A rule between neighbours, which is what makes a row of labels read
-                        // as tabs at all once the selected one is no longer a coloured pill.
-                        if index > 0 { Hairline(axis: .vertical) }
+                        if index > 0 {
+                            separator(
+                                isHidden: isSelected(model.sessions[index - 1]) || isSelected(session)
+                            )
+                        }
                         sessionTab(session)
                     }
 
                     ForEach(Array(toolTabs.enumerated()), id: \.element.id) { index, tab in
-                        if index > 0 || !model.sessions.isEmpty { Hairline(axis: .vertical) }
+                        if index > 0 || !model.sessions.isEmpty {
+                            separator(
+                                isHidden: isSelected(before: tab, at: index) || isSelected(tab)
+                            )
+                        }
                         toolTab(tab)
                     }
                 }
             }
             .scrollIndicators(.never)
 
-            Hairline(axis: .vertical)
+            separator(isHidden: false)
 
             newTabMenu
 
-            Hairline(axis: .vertical)
+            separator(isHidden: false)
 
             inspectorToggle
         }
         .frame(height: Metrics.barHeight)
-        .headerMaterial()
-        .overlay(alignment: .bottom) { Hairline() }
+        .tabStripMaterial()
         .background { shortcuts }
         .task(id: model.workspace.id) { tabs.load(workspaceID: model.workspace.id) }
+    }
+
+    /// The rule between two tabs, inset so the strip reads as a row of tabs rather than as a grid.
+    /// It is kept in the layout when it is not wanted rather than removed, because a rule that came
+    /// and went as the selection moved would shift every tab beside it by half a point.
+    private func separator(isHidden: Bool) -> some View {
+        Hairline(axis: .vertical)
+            .padding(.vertical, Metrics.spacing)
+            .opacity(isHidden ? 0 : 1)
+    }
+
+    private func isSelected(_ session: Session) -> Bool {
+        focused == .chat(session.id)
+    }
+
+    private func isSelected(_ tab: CenterTab) -> Bool {
+        focused == .tool(tab.id)
+    }
+
+    /// Whether whatever sits immediately before this tool tab is the selected one, which is the
+    /// last chat when the tool tabs start and the previous tool tab otherwise.
+    private func isSelected(before tab: CenterTab, at index: Int) -> Bool {
+        if index == 0 {
+            return model.sessions.last.map(isSelected) ?? false
+        }
+        return isSelected(toolTabs[index - 1])
     }
 
     // MARK: - Tabs
@@ -68,36 +103,44 @@ struct SessionTabsView: View {
     private func sessionTab(_ session: Session) -> some View {
         SessionTabView(
             session: session,
-            isActive: activeTool == nil && session.id == model.activeSession?.id,
-            isRunning: isRunning(session),
+            isActive: isSelected(session),
+            isRunning: model.isRunning(session),
             isRenaming: renamingID == session.id,
             canClose: model.sessions.count > 1,
             onSelect: { select(session) },
             onStartRename: { renamingID = session.id },
             onCommitRename: { commitRename(session, to: $0) },
             onCancelRename: { renamingID = nil },
-            onClose: { close(session) }
+            onClose: { close(session) },
+            onSplitRight: { split(.chat(session.id), axis: .horizontal) },
+            onSplitDown: { split(.chat(session.id), axis: .vertical) }
         )
+        .draggable(session.id)
+        .dropDestination(for: String.self) { items, _ in move(items.first, before: session) }
     }
 
     private func toolTab(_ tab: CenterTab) -> some View {
         CenterTabView(
             title: tab.title,
             icon: tab.icon,
-            isActive: activeTool?.id == tab.id,
+            isActive: isSelected(tab),
             isRenaming: renamingID == tab.id,
             editableTitle: tab.title,
             canClose: true,
             closeTitle: tab.kind == .terminal ? "Close terminal" : "Close browser",
-            onSelect: { tabs.select(tab, in: model.workspace.id) },
+            onSelect: { panes.show(.tool(tab.id), in: model) },
             onStartRename: { renamingID = tab.id },
             onCommitRename: {
                 renamingID = nil
                 tabs.rename(tab, to: $0)
             },
             onCancelRename: { renamingID = nil },
-            onClose: { Task { await tabs.close(tab) } }
+            onClose: { Task { await tabs.close(tab) } },
+            onSplitRight: { split(.tool(tab.id), axis: .horizontal) },
+            onSplitDown: { split(.tool(tab.id), axis: .vertical) }
         )
+        .draggable(tab.id)
+        .dropDestination(for: String.self) { items, _ in move(items.first, before: tab) }
     }
 
     /// One control for all three kinds, because they differ in what they open and in nothing else.
@@ -167,39 +210,34 @@ struct SessionTabsView: View {
         .accessibilityHidden(true)
     }
 
-    // MARK: - Rules
-
-    /// The active session's live state comes from its transcript. The others fall back to what the
-    /// store last recorded, because asking for their transcript here would build a model for every
-    /// session the moment the strip drew.
-    private func isRunning(_ session: Session) -> Bool {
-        if session.id == model.activeSession?.id {
-            return model.activeTranscript?.isRunning ?? false
-        }
-        return session.state == .running
+    /// Opens a tab beside the one the user asked from, rather than in place of it. The menu item
+    /// beside the drag is there for anyone who would rather not drag, and for the keyboard.
+    private func split(_ content: CenterPaneContent, axis: SplitAxis) {
+        panes.split(model.workspace.id, axis: axis, showing: content)
     }
-
-    // MARK: - Actions
 
     private func newChat() {
-        tabs.select(nil, in: model.workspace.id)
-        Task { await model.createSession() }
+        Task {
+            guard let session = await model.createSession() else { return }
+            panes.show(.chat(session.id), in: model)
+        }
     }
 
-    /// The shell itself is not started here. `CenterToolColumn` settles the environment and the
+    /// The shell itself is not started here. `ToolPaneView` settles the environment and the
     /// port first, because both are baked into the process the moment it is forked.
     private func newTerminal() {
-        tabs.add(kind: .terminal, workspaceID: model.workspace.id)
+        panes.show(.tool(tabs.add(kind: .terminal, workspaceID: model.workspace.id).id), in: model)
     }
 
     private func newBrowser() {
         Task {
             await preparePort()
-            tabs.add(
+            let tab = tabs.add(
                 kind: .browser,
                 workspaceID: model.workspace.id,
                 url: model.port > 0 ? "http://localhost:\(model.port)" : ""
             )
+            panes.show(.tool(tab.id), in: model)
         }
     }
 
@@ -212,13 +250,58 @@ struct SessionTabsView: View {
         model.port = port ?? 0
     }
 
+    // MARK: - Reordering
+    //
+    // Conversations and tools are two runs of the strip, and a drag stays inside its own run.
+    //
+    // They are not one list because they are not one kind of thing, and because they are not one
+    // store either: a session is a row in SQLite that outlives the launch, a terminal or a browser
+    // tab is a line in user defaults that is better lost than migrated. Interleaving them would
+    // mean one order spanning both, and a session restored from the database would have no way of
+    // knowing where a terminal that no longer exists used to sit. Keeping tools after the
+    // conversations also means opening or closing one never shifts a conversation the user was
+    // aiming at.
+    //
+    // The payload is the id rather than a `Transferable` of our own, matching the workspace rows
+    // in the sidebar. Anything else dropped on a tab, including text from another app, fails the
+    // membership check below and the drop is refused.
+
+    private func move(_ draggedID: String?, before session: Session) -> Bool {
+        guard let draggedID, draggedID != session.id,
+              let moved = model.sessions.first(where: { $0.id == draggedID }),
+              let index = model.sessions.firstIndex(where: { $0.id == session.id })
+        else { return false }
+
+        Task { await model.reorderSession(moved, to: index) }
+        return true
+    }
+
+    private func move(_ draggedID: String?, before tab: CenterTab) -> Bool {
+        guard let draggedID, draggedID != tab.id,
+              let moved = toolTabs.first(where: { $0.id == draggedID }),
+              let index = toolTabs.firstIndex(where: { $0.id == tab.id })
+        else { return false }
+
+        tabs.move(moved, to: index)
+        return true
+    }
+
+    // MARK: - Actions
+
+    /// The workspace still has one active session, because the toolbar, the inspector and the
+    /// pull request button all speak about one conversation. Showing a chat in a pane is what
+    /// decides which one that is.
     private func select(_ session: Session) {
-        tabs.select(nil, in: model.workspace.id)
+        panes.show(.chat(session.id), in: model)
         model.activeSessionID = session.id
     }
 
     private func close(_ session: Session) {
-        Task { await model.closeSession(session) }
+        guard CloseSessionAlert.allowsClosing(session, in: model) else { return }
+        Task {
+            await model.closeSession(session)
+            panes.forget(.chat(session.id), in: model.workspace.id)
+        }
     }
 
     private func commitRename(_ session: Session, to newTitle: String) {

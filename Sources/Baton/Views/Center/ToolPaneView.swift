@@ -1,13 +1,12 @@
 import SwiftUI
 import BatonCore
 
-/// The centre column while a terminal or a browser tab is showing.
+/// A terminal or a page, filling one pane of the centre column.
 ///
-/// It replaces the conversation rather than sitting under it, because a shell that has been given
-/// a third of the height is a shell nobody can read. The tab strip is the same view the
-/// conversation draws, in the same place, so switching kinds moves nothing on screen but the
-/// content underneath.
-struct CenterToolColumn: View {
+/// It used to replace the conversation for the whole column, on the grounds that a shell given a
+/// third of the height is a shell nobody can read. Panes make that a choice rather than a rule: put
+/// a terminal beside a chat and it keeps the full height of its own half.
+struct ToolPaneView: View {
     @Bindable var model: WorkspaceModel
     var tab: CenterTab
 
@@ -17,18 +16,6 @@ struct CenterToolColumn: View {
     @State private var isTerminalReady = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            SessionTabsView(model: model)
-            content
-        }
-        .background(Palette.windowBackground)
-        // The same work the conversation does on arrival. A workspace whose column opened straight
-        // onto a terminal would otherwise never refresh its changed files or clear its unread mark.
-        .task(id: model.workspace.id) { await model.onAppear() }
-    }
-
-    @ViewBuilder
-    private var content: some View {
         switch tab.kind {
         case .terminal:
             Group {

@@ -12,6 +12,8 @@ struct FilePreview: View {
     private static let lineLimit = 5_000
     /// A horizontal scroll wider than this helps nobody and makes the scroller useless.
     private static let columnLimit = 800
+    /// The same cap `FilePathChip` puts on the folder above a diff.
+    private static let chipWidth: CGFloat = 170
 
     @State private var lines: [String] = []
     @State private var carries: [LexState] = []
@@ -26,23 +28,66 @@ struct FilePreview: View {
     }
 
     var body: some View {
-        Group {
-            if isLoading {
-                LoadingView("Reading the file")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if lines.isEmpty {
-                EmptyStateView(
-                    glyph: "doc",
-                    title: "Nothing to show",
-                    message: "\((path as NSString).lastPathComponent) is empty, or is not text."
-                )
-            } else {
-                content
+        VStack(spacing: 0) {
+            header
+            Hairline()
+
+            Group {
+                if isLoading {
+                    LoadingView("Reading the file")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if lines.isEmpty {
+                    EmptyStateView(
+                        glyph: "doc",
+                        title: "Nothing to show",
+                        message: "\(filename) is empty, or is not text."
+                    )
+                } else {
+                    content
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Palette.surface)
         .task(id: LoadID(workspaceID: model.workspace.id, path: path)) { await load() }
     }
+
+    /// The same bar `DiffView` puts over a changed file, so clicking through the worktree tree
+    /// does not land the reader in an unlabelled wall of code. It says less because there is less
+    /// to say: nothing here can be edited, reverted or laid out two ways.
+    private var header: some View {
+        HStack(spacing: InspectorLayout.gap) {
+            if !directory.isEmpty {
+                Chip(text: directory)
+                    .frame(maxWidth: Self.chipWidth, alignment: .leading)
+                    .layoutPriority(-1)
+            }
+
+            Text(filename)
+                .font(Typo.bodyEmphasis)
+                .foregroundStyle(Palette.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer(minLength: InspectorLayout.tight)
+
+            Button("Open in Editor", systemImage: "square.and.pencil") {
+                Reveal.inEditor((model.workspace.path as NSString).appendingPathComponent(path))
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .help("Open \(filename) in your editor")
+        }
+        .padding(.horizontal, InspectorLayout.inset)
+        .frame(height: InspectorLayout.barHeight)
+        .background(Palette.surfaceSunken)
+        .help(path)
+    }
+
+    private var filename: String { (path as NSString).lastPathComponent }
+
+    private var directory: String { (path as NSString).deletingLastPathComponent }
 
     /// `GeometryReader` because the sheet has to be at least as wide as the container AND at least
     /// as wide as the longest line, and there is no container-relative modifier that expresses a
@@ -62,7 +107,7 @@ struct FilePreview: View {
                         row(at: index, width: width)
                     }
                     if isTruncated {
-                        Text("Showing the first \(Self.lineLimit) lines")
+                        Text("Showing the first \(Self.lineLimit.formatted()) lines")
                             .font(Typo.micro)
                             .foregroundStyle(Palette.textTertiary)
                             .padding(InspectorLayout.inset)
@@ -70,6 +115,8 @@ struct FilePreview: View {
                 }
                 .frame(width: width, alignment: .leading)
             }
+            // As in `DiffView`: two axes centre content that does not fill the pane.
+            .defaultScrollAnchor(.topLeading)
             .scrollBounceBehavior(.basedOnSize)
         }
     }
@@ -88,6 +135,10 @@ struct FilePreview: View {
                 language: language,
                 carry: index < carries.count ? carries[index] : LexState()
             )
+            // The diff pays for this with its marker column. Without it here the first character
+            // of every line sits against the gutter's edge, and the width computed above already
+            // reserves the room.
+            .padding(.leading, CodeMetrics.textInset)
             Spacer(minLength: 0)
         }
         .frame(width: width, height: CodeMetrics.rowHeight, alignment: .leading)

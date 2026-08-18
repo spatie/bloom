@@ -8,8 +8,10 @@ struct DetailPathLabel: View {
     var body: some View {
         Text(path)
             .font(Typo.codeSmall)
-            .foregroundStyle(Palette.textTertiary)
+            .foregroundStyle(Palette.textSecondary)
             .lineLimit(1)
             .truncationMode(.middle)
+            // The middle is what was dropped, so the tooltip is the only way back to it.
+            .help(path)
     }
 }

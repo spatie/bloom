@@ -2,13 +2,17 @@ import SwiftUI
 
 /// The `@@` line, showing the enclosing function git found. Quiet, because it is orientation
 /// rather than content.
+///
+/// The glyph is the enclosing scope, which is what the line says whenever git can name one. It
+/// used to be a left-and-right arrow, which on a band directly above a diff that really does
+/// scroll sideways read as a scrolling hint.
 struct DiffHunkHeaderView: View {
     var text: String
     var width: CGFloat
 
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {
-            Image(systemName: "arrow.left.and.right")
+            Image(systemName: "curlybraces")
                 .font(Typo.micro)
                 .imageScale(.small)
             Text(text)

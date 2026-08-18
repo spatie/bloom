@@ -467,6 +467,24 @@ public actor Store {
         )
     }
 
+    /// Writes a whole workspace's session order in one transaction.
+    ///
+    /// Targeted, for the same reason `updateSessionPreferences` is: `AgentRunner` owns the agent
+    /// session id, the state and the counters on these rows, and writing a `Session` struct the
+    /// strip was holding would put back whatever those columns looked like when it read them.
+    /// `sort_order` has been on the table since the first migration and `sessions(workspaceID:)`
+    /// already reads by it, so nothing here needs a schema change.
+    public func reorderSessions(ids: [String]) throws {
+        try db.transaction {
+            for (order, id) in ids.enumerated() {
+                try db.run(
+                    "UPDATE sessions SET sort_order = ? WHERE id = ?",
+                    [.int(Int64(order)), .text(id)]
+                )
+            }
+        }
+    }
+
     public func updateLastReadSeq(sessionID: String, seq: Int) throws {
         try db.run(
             "UPDATE sessions SET last_read_seq = ? WHERE id = ?",

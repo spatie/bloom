@@ -30,10 +30,12 @@ struct HomeRepoSection: View {
 
                 // "New" is enough beside the project's own name; VoiceOver and Voice Control get
                 // the unambiguous version, because out of context "New" names nothing.
+                // No `font` of its own, for the reason `HomeWelcomeHeader` gives: a button style
+                // already picks the weight and size AppKit uses at its control size, and setting
+                // one desynchronises the label from the control drawn around it.
                 Button("New", systemImage: "plus") {
                     onCreateWorkspace(repo)
                 }
-                .font(Typo.label)
                 .buttonStyle(.borderless)
                 .help("New workspace in \(repo.name)")
                 .accessibilityLabel("New workspace in \(repo.name)")

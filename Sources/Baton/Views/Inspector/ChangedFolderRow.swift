@@ -7,6 +7,10 @@ import AppKit
 /// A folder is never selected, only opened, so this row carries no selection fill of its own. It
 /// still reads `isOnEmphasizedSelection` because the hover fill and the tree's own row background
 /// modifier put a foreground into the environment that the chevron and the name inherit.
+///
+/// Deliberately laid out exactly like `FileTreeRow`, the other tree in the same pane: one glyph
+/// box, then the name. The two used to disagree about the glyph, the gap and the type size, which
+/// made switching tabs look like switching apps.
 struct ChangedFolderRow: View {
     var name: String
     var path: String
@@ -18,22 +22,19 @@ struct ChangedFolderRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: Metrics.spacingSmall) {
+            HStack(spacing: InspectorLayout.gap) {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                     .font(Typo.micro)
                     .imageScale(.small)
                     .foregroundStyle(.tertiary)
                     .frame(width: InspectorLayout.glyphWidth)
                     .accessibilityHidden(true)
-                Image(systemName: "folder")
-                    .font(Typo.micro)
-                    .imageScale(.small)
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-                // A folder is one step quieter than the files under it, said hierarchically so it
-                // still inverts if the row is ever drawn on a fill.
+                // The same size as the files under it, one step quieter, and said hierarchically
+                // so it still inverts if the row is ever drawn on a fill. It used to be two rungs
+                // down the scale, which read as a section header rather than as a row of the
+                // same rank as the ones it sits between.
                 Text(name)
-                    .font(Typo.micro)
+                    .font(Typo.body)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.head)

@@ -19,8 +19,11 @@ struct TranscriptListView: View {
     @State private var geometry = TranscriptGeometry()
     @State private var didPosition = false
 
-    /// Sentinel ids, negative so they can never collide with a row sequence number.
-    private static let bottomID = -1
+    /// Only used to open a session on its end. An edge needs no identity, so this does not need
+    /// the sentinel row the `ScrollViewReader` used to be pointed at.
+    @State private var scrollPosition = ScrollPosition(edge: .bottom)
+
+    /// Sentinel id, negative so it can never collide with a row sequence number.
     private static let streamingID = -2
     /// How far off the bottom the user may be and still be considered to be following along.
     private static let stickyThreshold: CGFloat = 96
@@ -63,28 +66,37 @@ struct TranscriptListView: View {
                                 maxBubbleWidth: maxBubbleWidth,
                                 onToggle: { toggle(row.seq) }
                             )
+                            // Every pass over this list rebuilds every row the stack has already
+                            // realised, and opening a long session realises all of them. Comparing
+                            // the row's own values first is what keeps a second pass free.
+                            .equatable()
                             .padding(.horizontal, TranscriptLayout.inset)
                             .id(row.seq)
                         }
                     }
 
-                    StreamingTailView(transcript: transcript) {
-                        follow(proxy, animated: false)
-                    }
-                    .padding(.horizontal, TranscriptLayout.inset)
-                    .id(Self.streamingID)
-
-                    Color.clear
-                        .frame(height: 1)
-                        .id(Self.bottomID)
+                    StreamingTailView(transcript: transcript)
+                        .padding(.horizontal, TranscriptLayout.inset)
+                        .id(Self.streamingID)
                 }
                 .padding(.vertical, TranscriptLayout.block)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             // A conversation shorter than the pane hangs from the bottom, just above the composer,
-            // rather than floating at the top with a field of white under it. Only the alignment
-            // role: following new rows stays this view's own decision, made in `follow`.
+            // rather than floating at the top with a field of white under it.
             .defaultScrollAnchor(.bottom, for: .alignment)
+            .scrollPosition($scrollPosition)
+            // What keeps the view at the live end while a turn runs, and it replaces a `scrollTo`
+            // that used to be issued on every row that arrived. Any scroll that names a position
+            // inside a `LazyVStack` has to build and measure every row between the viewport and
+            // that position, so following a turn re-rendered the entire transcript per row. An
+            // anchor asks for none of that.
+            //
+            // Nil while the user has scrolled away, which is the whole of the rule that scroll
+            // used to enforce by hand. Yanking someone back down as they read something further up
+            // is the single most irritating thing a live log can do, and an absent anchor leaves
+            // them exactly where they are.
+            .defaultScrollAnchor(geometry.isNearBottom ? .bottom : nil, for: .sizeChanges)
             .onScrollGeometryChange(for: TranscriptGeometry.self, of: Self.measure) { old, new in
                 geometry = new
                 if old.isNearBottom != new.isNearBottom {
@@ -102,6 +114,9 @@ struct TranscriptListView: View {
             .onChange(of: transcript.session.id) { _, _ in
                 didPosition = false
                 expanded.removeAll()
+                // A session opens at its live end whatever the one being left was scrolled to,
+                // and the anchor is read before the new rows arrive.
+                geometry.isNearBottom = true
             }
             .task(id: transcript.session.id) {
                 await transcript.load()
@@ -128,36 +143,22 @@ struct TranscriptListView: View {
 
     // MARK: Scrolling
 
-    /// First paint lands on the first thing the user has not read, which is the whole point of
-    /// leaving a session and coming back to it. After that the same handler just keeps the view
-    /// pinned to the bottom while rows arrive.
+    /// Where a session opens: on the first thing the user has not read, which is the whole point
+    /// of leaving a session and coming back to it, and otherwise on its live end.
+    ///
+    /// Both of these resolve a position inside a `LazyVStack`, which is the expensive kind of
+    /// scroll: it realises every row it passes. So it happens once per session rather than once
+    /// per row that arrives, and keeping up with a running turn is the size-change anchor's job.
     private func position(_ proxy: ScrollViewProxy) {
-        guard !transcript.rows.isEmpty else { return }
+        guard !transcript.rows.isEmpty, !didPosition else { return }
+        didPosition = true
 
-        guard didPosition else {
-            didPosition = true
-            if let unread = transcript.firstUnreadSeq, unread != transcript.rows.first?.seq {
-                proxy.scrollTo(unread, anchor: .top)
-            } else {
-                proxy.scrollTo(Self.bottomID, anchor: .bottom)
-            }
-            Task { await transcript.markAllRead() }
-            return
-        }
-
-        follow(proxy, animated: true)
-    }
-
-    /// Stick to the bottom, but only for someone who was already there. Yanking a user back down
-    /// while they are reading something further up is the single most irritating thing a live log
-    /// can do.
-    private func follow(_ proxy: ScrollViewProxy, animated: Bool) {
-        guard geometry.isNearBottom else { return }
-        if animated {
-            withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+        if let unread = transcript.firstUnreadSeq, unread != transcript.rows.first?.seq {
+            proxy.scrollTo(unread, anchor: .top)
         } else {
-            proxy.scrollTo(Self.bottomID, anchor: .bottom)
+            scrollPosition.scrollTo(edge: .bottom)
         }
+        Task { await transcript.markAllRead() }
     }
 
     private func toggle(_ seq: Int) {

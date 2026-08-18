@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import BatonCore
 
 /// Keeps keyboard-driven navigation available even when focus is inside a transcript or terminal.
 @MainActor
@@ -32,7 +33,8 @@ struct BatonCommands: Commands {
             // Close, which used to end the process and every agent with it.
             Button("Close Session") {
                 guard let workspace = model.selectedModel,
-                      let session = workspace.activeSession else { return }
+                      let session = workspace.activeSession,
+                      CloseSessionAlert.allowsClosing(session, in: workspace) else { return }
                 Task { await workspace.closeSession(session) }
             }
             .keyboardShortcut("w", modifiers: .command)
@@ -50,6 +52,25 @@ struct BatonCommands: Commands {
             }
             .keyboardShortcut("f", modifiers: .command)
             .disabled(model.workspaces.isEmpty)
+        }
+
+        // Splitting the centre column. Cmd+D is deliberately not used: a terminal pane already
+        // owns it for splitting shells, and one keystroke that splits two different things
+        // depending on where the pointer last was is worse than two that each mean one thing.
+        CommandGroup(after: .sidebar) {
+            Button("Split Right") { splitCentre(.horizontal) }
+                .keyboardShortcut("\\", modifiers: .command)
+                .disabled(model.selectedModel == nil)
+
+            Button("Split Down") { splitCentre(.vertical) }
+                .keyboardShortcut("\\", modifiers: [.command, .shift])
+                .disabled(model.selectedModel == nil)
+
+            Button("Close Pane") { closeCentrePane() }
+                .keyboardShortcut("w", modifiers: [.command, .control])
+                .disabled(model.selectedModel == nil)
+
+            Divider()
         }
 
         CommandGroup(after: .sidebar) {
@@ -149,6 +170,26 @@ struct BatonCommands: Commands {
             }
             .keyboardShortcut("?", modifiers: .command)
         }
+    }
+
+    /// Splits the pane the user is in and shows the same tab in the half that opens, which is what
+    /// splitting means in every editor: the same thing twice, and then you change one of them.
+    private func splitCentre(_ axis: SplitAxis) {
+        guard let workspace = model.selectedModel else { return }
+        let panes = CenterPaneStore.shared
+        let pane = panes.focusedPane(in: workspace.workspace.id)
+        panes.split(
+            workspace.workspace.id,
+            pane: pane,
+            axis: axis,
+            showing: panes.content(of: pane, in: workspace)
+        )
+    }
+
+    private func closeCentrePane() {
+        guard let workspace = model.selectedModel else { return }
+        let panes = CenterPaneStore.shared
+        _ = panes.close(pane: panes.focusedPane(in: workspace.workspace.id), in: workspace.workspace.id)
     }
 
     private func addProjectFolder() {

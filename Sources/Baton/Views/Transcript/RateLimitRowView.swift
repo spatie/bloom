@@ -22,7 +22,7 @@ struct RateLimitRowView: View {
             Text("Rate limit")
                 .font(Typo.labelEmphasis)
                 .foregroundStyle(Palette.textSecondary)
-                .frame(width: TranscriptLayout.labelWidth, alignment: .leading)
+                .transcriptLabelColumn()
 
             Text(window.isEmpty
                 ? "\(used) used"

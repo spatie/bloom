@@ -177,6 +177,8 @@ struct RunScriptView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .help("Open \(url.absoluteString) in your browser")
+                .accessibilityLabel("Open \(url.absoluteString) in your browser")
             }
 
             Spacer(minLength: Metrics.spacing)

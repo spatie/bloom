@@ -34,6 +34,9 @@ struct StreamingRowView: View {
                     .foregroundStyle(Palette.textPrimary)
                     .lineSpacing(TranscriptLayout.proseLeading)
                     .textSelection(.enabled)
+                    // The same measure the stored prose row uses, or the line the user is
+                    // watching rewraps the instant it is replaced by its persisted twin.
+                    .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, TranscriptLayout.inset)
                     .padding(.vertical, TranscriptLayout.inset)

@@ -18,7 +18,9 @@ struct DetailCodeBlock: View {
                     .foregroundStyle(Palette.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(TranscriptLayout.inset)
-                    .background(tint, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+                    // `Metrics.corner`, the radius a code fence in prose uses. The two are the
+                    // same kind of surface and were rounded differently.
+                    .background(tint, in: RoundedRectangle(cornerRadius: Metrics.corner))
 
                 if capped.truncated, !showsAll {
                     Button("Show all") { showsAll = true }

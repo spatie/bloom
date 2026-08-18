@@ -46,13 +46,14 @@ struct StreamingThinkingView: View {
                 .foregroundStyle(Palette.textSecondary)
                 .italic()
                 .lineLimit(1)
-                .frame(width: TranscriptLayout.labelWidth, alignment: .leading)
+                .transcriptLabelColumn()
 
             if tokens > 0 {
                 Text("\(tokens) tokens")
                     .font(Typo.micro)
                     .foregroundStyle(Palette.textTertiary)
                     .monospacedDigit()
+                    .fixedSize()
             }
 
             Spacer(minLength: TranscriptLayout.tight)

@@ -13,6 +13,8 @@ struct OrphanResultRowView: View {
                 .font(Typo.label)
                 .foregroundStyle(result.isError ? Palette.negative : Palette.textTertiary)
                 .lineLimit(1)
+                // The only copy of an output whose call never arrived, so it has to be liftable.
+                .textSelection(.enabled)
 
             Spacer(minLength: 0)
         }

@@ -6,11 +6,11 @@ struct TodoListView: View {
     var todos: [JSONValue]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: TranscriptLayout.proseLeading) {
+        VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
             ForEach(Array(todos.enumerated()), id: \.offset) { _, todo in
                 let status = todo["status"]?.stringValue ?? "pending"
 
-                HStack(alignment: .firstTextBaseline, spacing: TranscriptLayout.inset) {
+                HStack(alignment: .firstTextBaseline, spacing: TranscriptLayout.glyphGap) {
                     Image(systemName: Self.glyph(status))
                         .font(Typo.label)
                         .imageScale(.small)

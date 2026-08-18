@@ -203,10 +203,15 @@ private struct BlockParser {
             index += 1
             var itemLines = [marker.content]
             var separated = false
+            // A blank line only spreads a list out when something follows it: more of the same
+            // item, or another item. Counting the blank line that simply ends the last item made
+            // every list loose, because that is how every list in a document ends, and the tight
+            // case the renderer draws was reachable only at the very end of a message.
+            var blankPending = false
 
             while index < lines.count {
                 if isBlank(lines[index]) {
-                    separated = true
+                    blankPending = true
                     itemLines.append("")
                     index += 1
                     if index >= lines.count { break }
@@ -219,7 +224,16 @@ private struct BlockParser {
                 guard indentation > baseIndent else { break }
                 let remove = min(indentation, marker.contentOffset)
                 itemLines.append(dropLeadingColumns(lines[index], remove))
+                if blankPending {
+                    separated = true
+                    blankPending = false
+                }
                 index += 1
+            }
+
+            if blankPending, index < lines.count, let next = listMarker(lines[index]),
+               next.ordered == ordered, next.indent == baseIndent {
+                separated = true
             }
 
             while itemLines.last.map(isBlank) == true { itemLines.removeLast() }

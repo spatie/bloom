@@ -16,19 +16,26 @@ struct TurnFooterView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // Inset to the column the footer's own contents start on, rather than to the pane.
+            // A rule that stops six points short of the text under it looks like a mistake, and
+            // this one closes a turn, so it has to read as drawn on purpose.
             Hairline()
+                .padding(.horizontal, TranscriptLayout.inset)
 
+            // A turn's cost and duration are the numbers a user goes looking for, so they sit a
+            // rung above the counts and timings that decorate a single row.
             HStack(spacing: TranscriptLayout.block) {
                 Image(systemName: succeeded ? "checkmark.circle" : "exclamationmark.circle")
-                    .font(Typo.micro)
+                    .font(Typo.caption)
                     .imageScale(.medium)
                     .foregroundStyle(succeeded ? Palette.positive : Palette.negative)
                     .accessibilityLabel(succeeded ? "Finished" : "Failed")
 
                 Text(TurnDuration.format(durationMS))
-                    .font(Typo.micro)
+                    .font(Typo.caption)
                     .foregroundStyle(Palette.textSecondary)
                     .monospacedDigit()
+                    .fixedSize()
 
                 if let cost = result?.usage.costUSD, cost > 0 {
                     // Narrow presentation, so a footer in a non-US locale reads "$0.177" rather
@@ -36,9 +43,10 @@ struct TurnFooterView: View {
                     Text(cost, format: .currency(code: "USD")
                         .presentation(.narrow)
                         .precision(.fractionLength(3)))
-                        .font(Typo.micro)
+                        .font(Typo.caption)
                         .foregroundStyle(Palette.textTertiary)
                         .monospacedDigit()
+                        .fixedSize()
                 }
 
                 ForEach(files.prefix(Self.visibleFileLimit)) { file in
@@ -54,11 +62,11 @@ struct TurnFooterView: View {
                 Button(action: copyAnswer) {
                     Label("Copy this answer", systemImage: copied ? "checkmark" : "doc.on.doc")
                         .labelStyle(.iconOnly)
-                        .font(Typo.micro)
+                        .font(Typo.caption)
                         .imageScale(.medium)
                 }
                 .buttonStyle(.borderless)
-                .help("Copy this answer")
+                .help(copied ? "Copied" : "Copy this answer")
 
                 Menu {
                     Button("Copy answer", action: copyAnswer)
@@ -70,7 +78,7 @@ struct TurnFooterView: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .labelStyle(.iconOnly)
-                .font(Typo.micro)
+                .font(Typo.caption)
                 .imageScale(.medium)
                 .fixedSize()
                 .help("More for this turn")

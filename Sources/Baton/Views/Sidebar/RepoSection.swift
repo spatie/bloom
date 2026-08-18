@@ -153,7 +153,6 @@ struct RepoSection: View {
     private func row(_ workspace: Workspace) -> some View {
         WorkspaceRow(
             workspace: workspace,
-            isSelected: app.selection.workspaceID == workspace.id,
             isRunning: app.isRunning(workspace),
             renaming: $renaming
         )

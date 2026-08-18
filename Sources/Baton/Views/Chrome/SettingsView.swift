@@ -33,6 +33,10 @@ struct SettingsView: View {
                 GeneralSettingsView()
             }
 
+            Tab("Notifications", systemImage: "bell", value: SettingsTab.notifications) {
+                NotificationSettingsView()
+            }
+
             Tab("Projects", systemImage: "folder", value: SettingsTab.projects) {
                 ProjectSettingsView()
             }

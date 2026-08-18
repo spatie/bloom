@@ -40,9 +40,10 @@ struct SearchView: View {
                         .help("Clear the search")
                 }
             }
-            .padding(.horizontal, Self.fieldInset)
+            .padding(.horizontal, Metrics.inset)
             .padding(.vertical, Metrics.inset)
             .frame(minHeight: Self.fieldHeight)
+            .column()
 
             Hairline()
 
@@ -59,10 +60,11 @@ struct SearchView: View {
     /// field gets rather than the height of a list row. A minimum, not a fixed height, so it
     /// still fits its text at larger text sizes.
     private static let fieldHeight: CGFloat = 46
-    private static let fieldInset = Metrics.pane
     /// A search result reads as a line, so the column is capped rather than run out to the width
-    /// of the window.
-    private static let resultWidth: CGFloat = 760
+    /// of the window. The field is capped to the same column: it used to run the full width of the
+    /// pane, so the magnifying glass and the mark at the head of every result underneath it only
+    /// shared a left edge at one particular window width.
+    static let resultWidth: CGFloat = 760
 
     @ViewBuilder
     private var results: some View {
@@ -88,9 +90,10 @@ struct SearchView: View {
                         }
                     }
                 }
-                .padding(Metrics.inset)
-                .frame(maxWidth: Self.resultWidth)
-                .frame(maxWidth: .infinity, alignment: .center)
+                // Vertical only. A row carries its own horizontal inset, and adding a second one
+                // here is what pushed every result a row's inset right of the field above them.
+                .padding(.vertical, Metrics.inset)
+                .column()
             }
         }
     }
@@ -108,5 +111,14 @@ struct SearchView: View {
 
     private func select(_ hit: AppModel.SearchHit) {
         app.selection = .workspace(hit.workspace.id)
+    }
+}
+
+private extension View {
+    /// The one column search is set in. The field and every result share it, so they line up at
+    /// any window width rather than at one.
+    func column() -> some View {
+        frame(maxWidth: SearchView.resultWidth)
+            .frame(maxWidth: .infinity, alignment: .center)
     }
 }

@@ -24,6 +24,9 @@ final class BatonAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
 
     func attach(_ model: AppModel) {
         appModel = model
+        // The suppression rule needs to know which workspace the window is showing, and this is
+        // the first moment there is a window to ask.
+        NotificationService.shared.attach(model)
     }
 
     /// Claiming the URL Apple Event has to happen before launching finishes. If SwiftUI's own
@@ -134,12 +137,24 @@ final class BatonAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         return true
     }
 
+    /// Without this, macOS silently swallows every banner while Baton is the frontmost app, and
+    /// "frontmost, but looking at a different workspace" is precisely the case the suppression rule
+    /// deliberately lets through. Whether to interrupt is Baton's decision and it has already been
+    /// made by the time a request gets this far, so everything that arrives here is shown.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping @Sendable (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .list])
+    }
+
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping @Sendable () -> Void
     ) {
-        let workspaceID = Notifications.workspaceID(from: response)
+        let workspaceID = NotificationService.workspaceID(from: response)
         Task { @MainActor in
             NSApp.activate(ignoringOtherApps: true)
             NSApp.windows.first?.makeKeyAndOrderFront(nil)

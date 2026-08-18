@@ -21,7 +21,7 @@ struct FileTreeRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: Metrics.spacingSmall) {
+            HStack(spacing: InspectorLayout.gap) {
                 Image(systemName: symbol)
                     .font(Typo.micro)
                     .imageScale(.small)
@@ -58,7 +58,14 @@ struct FileTreeRow: View {
             Button("Copy path", action: copyPath)
         }
         .help(item.node.path)
+        .accessibilityValue(disclosureState)
         .accessibilityInputLabels([item.node.name])
+    }
+
+    /// A file has no disclosure state to report, and an empty value is one VoiceOver skips.
+    private var disclosureState: String {
+        guard item.node.isDirectory else { return "" }
+        return isExpanded ? "Expanded" : "Collapsed"
     }
 
     private var symbol: String {

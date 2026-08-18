@@ -27,7 +27,7 @@ struct ToolRowHeader: View {
                 .foregroundStyle(Palette.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(width: TranscriptLayout.labelWidth, alignment: .leading)
+                .transcriptLabelColumn()
 
             if showsDetail {
                 Text(presentation.detail)
@@ -38,17 +38,24 @@ struct ToolRowHeader: View {
                     .layoutPriority(1)
             }
 
+            // Deliberately not `fixedSize`: a row is one line tall and clips, so a chip that
+            // refuses to give ground is cut in half at a narrow pane width rather than
+            // truncated. `Chip` already holds itself to one line, and the detail beside it
+            // carries the higher layout priority, so the chip only gives ground last.
             ForEach(Array(presentation.chips.enumerated()), id: \.offset) { _, chip in
                 Chip(text: chip, monospaced: true)
-                    .fixedSize()
             }
 
             Spacer(minLength: TranscriptLayout.tight)
 
+            // Both of these are last in a row whose detail carries `layoutPriority`, so
+            // without `fixedSize` the detail takes the slack and "error" wraps to "e" over "r"
+            // inside a row that is one line tall by construction.
             if isError {
                 Text("error")
-                    .font(Typo.micro)
+                    .font(Typo.caption)
                     .foregroundStyle(Palette.negative)
+                    .fixedSize()
             }
 
             if let durationMS, durationMS > 0 {
@@ -56,6 +63,7 @@ struct ToolRowHeader: View {
                     .font(Typo.micro)
                     .foregroundStyle(Palette.textTertiary)
                     .monospacedDigit()
+                    .fixedSize()
             }
 
             TranscriptDisclosure(isExpanded: isExpanded, isVisible: isHovered)
