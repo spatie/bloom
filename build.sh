@@ -30,6 +30,51 @@ cp "$BIN_DIR/Bloom" "$APP/Contents/MacOS/Bloom"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 [[ -f Resources/AppIcon.icns ]] && cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
+# macOS 26 draws an app icon from a layered Icon Composer document rather than from a flat bitmap:
+# the glass, the shadow and the specular pass belong to the system and are applied live to the
+# layers. Resources/Bloom.icon is that document. actool compiles it into an Assets.car, which the
+# system finds through CFBundleIconName in Info.plist. AppIcon.icns and CFBundleIconFile stay
+# exactly as they are and remain what every release before 26 draws, so nothing about the macOS 15
+# deployment target changes; this needs no Xcode project and no raised floor.
+#
+# Command line tools on their own carry no actool, and a build that failed over the icon would be a
+# worse trade than one that ships the flat icon alone.
+compile_layered_icon() {
+  local iconName=Bloom deployment
+  [[ -d "Resources/$iconName.icon" ]] || return 0
+
+  if ! xcrun --find actool >/dev/null 2>&1; then
+    echo "==> skipping layered icon: actool not found"
+    return 0
+  fi
+
+  deployment="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Resources/Info.plist)"
+
+  # Absolute, because actool hands a relative input path to ibtoold, which resolves it against a
+  # working directory of its own and crashes rather than reporting a missing file.
+  xcrun actool "$PWD/Resources/$iconName.icon" \
+    --compile "$APP/Contents/Resources" \
+    --app-icon "$iconName" \
+    --output-partial-info-plist "$BIN_DIR/$iconName.icon.plist" \
+    --platform macosx \
+    --target-device mac \
+    --minimum-deployment-target "$deployment" \
+    --errors --warnings >/dev/null
+
+  # actool writes a flattened $iconName.icns beside the catalogue as well. AppIcon.icns is the one
+  # built to the measured template, so the spare is dropped rather than shipped next to it.
+  rm -f "$APP/Contents/Resources/$iconName.icns"
+
+  # Nothing above proves the catalogue arrived: actool reports a failure in the plist it prints and
+  # is not reliably non-zero about it. The bundle either has the file or the build is wrong.
+  if [[ ! -f "$APP/Contents/Resources/Assets.car" ]]; then
+    echo "==> layered icon: actool produced no Assets.car" >&2
+    return 1
+  fi
+}
+
+compile_layered_icon
+
 # The About pane reads these out of the bundle by name. PDFs rather than bitmaps, because AppKit
 # redraws a PDF as vector art at whatever scale the display asks for. The .svg beside each one is
 # the source it was generated from and is not needed at runtime.
