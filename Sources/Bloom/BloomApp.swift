@@ -73,11 +73,20 @@ struct BloomApp: App {
         // return, and now shows only the project the workspace belongs to.
         .windowToolbarStyle(.unified(showsTitle: true))
         .defaultSize(width: 1_440, height: 900)
-        .commands { BloomCommands(model: model) }
+        .commands {
+            BloomCommands(model: model)
+            // Attached to the MAIN window rather than to the project settings window group below,
+            // because SwiftUI only realizes a scene's commands while one of that scene's own
+            // windows is key, and an item that opens a window is no use only once it is open.
+            RepoSettingsCommands(model: model)
+        }
 
         Settings {
             SettingsView()
                 .environment(model)
         }
+
+        // One window per project, opened from the gear on its sidebar header. See the scene.
+        RepoSettingsWindow(model: model)
     }
 }

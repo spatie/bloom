@@ -11,7 +11,7 @@ public enum SettingsEdit: Sendable, Hashable {
     case branchPrefix(String?)
     case deleteBranchOnArchive(Bool)
 
-    var key: SettingsKey {
+    public var key: SettingsKey {
         switch self {
         case .setupScript: .setupScript
         case .archiveScript: .archiveScript
