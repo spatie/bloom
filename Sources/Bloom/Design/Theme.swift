@@ -176,16 +176,41 @@ enum Palette {
     /// selected row reads exactly as firmly as it did. Bloom itself cannot do this job: white on
     /// `#4FD8C4` is 1.6 to 1, an unreadable row.
     static let accentFill = dynamic(light: 0x197593, dark: 0x197593)
-    static let positive = Color(nsColor: .systemGreen)
-    static let negative = Color(nsColor: .systemRed)
+    /// Healthy, done, passed, merged. The accent, not a green of its own.
+    ///
+    /// The ramp says so in as many words, and the reference render of this window agrees: its
+    /// "checks passed" tick, its "merged" arrow and its `+214` are all the same value as its
+    /// accent, in both appearances. Sampled from it: `#0C7A6E` light, `#4FD8C4` dark, which is
+    /// exactly `accent`.
+    ///
+    /// This means passing checks and an unread turn now differ in shape rather than in colour.
+    /// That is fine and deliberate: `WorkspaceStatusGlyph` already draws every state as a
+    /// different shape, so the column can be read by someone who cannot tell the red one from the
+    /// green one, and the reference collapses the same two the same way.
+    static let positive = accent
+
+    /// Something went wrong: a failed check, an error row, a deletion count.
+    ///
+    /// Not `systemRed`. The system reds are tuned to be the one saturated thing on their screen,
+    /// and this app puts a dozen small meaning marks in one narrow column: at that volume they
+    /// read as a warning light panel rather than as an index. Measured off the reference render,
+    /// which is a step darker on the light ground and a step paler and less saturated on the dark
+    /// one. `#B23A2E` measures 6.0 to 1 on white, `#E4695E` 5.2 to 1 on the dark sidebar.
+    static let negative = dynamic(light: 0xB23A2E, dark: 0xE4695E)
 
     /// The stop control, which is a quieter red than a failure is.
     ///
-    /// `systemRed` is right for something that went wrong. The stop button is not a failure: it sits
+    /// `negative` is right for something that went wrong. The stop button is not a failure: it sits
     /// in the composer for the whole length of a turn, and at full saturation it reads as an alarm
-    /// about work that is going perfectly well. This keeps the meaning and drops the volume.
-    static let stop = Color(nsColor: .systemRed.blended(withFraction: 0.28, of: .secondaryLabelColor) ?? .systemRed)
-    static let warning = Color(nsColor: .systemOrange)
+    /// about work that is going perfectly well. This keeps the meaning and drops the volume, and it
+    /// is `negative` mixed 28 percent into the secondary ink of its own appearance rather than a
+    /// red chosen separately, so the two cannot drift apart.
+    static let stop = dynamic(light: 0x994842, dark: 0xCC7B76)
+
+    /// Something needs attention but nothing is broken: setup that failed and can be run again,
+    /// checks still going, a rate limit. Measured off the same render as `negative`, and quieter
+    /// than `systemOrange` for the same reason. `#9A6410` measures 5.0 to 1 on white.
+    static let warning = dynamic(light: 0x9A6410, dark: 0xE8A33D)
     /// An agent mid turn. The ramp is explicit that this is the accent rather than a green of its
     /// own: "Running, healthy, done. Reuse the accent, do not invent a green."
     static let running = accent

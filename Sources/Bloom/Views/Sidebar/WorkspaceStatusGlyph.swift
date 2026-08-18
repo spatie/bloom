@@ -30,7 +30,7 @@ struct WorkspaceStatusGlyph: View {
                 .progressViewStyle(.circular)
                 .controlSize(.mini)
         case .running:
-            ActivityDot(isActive: true, tint: isOnSelection ? Palette.textInverted : SidebarTint.running)
+            ActivityDot(isActive: true, tint: isOnSelection ? Palette.textInverted : Palette.running)
         default:
             Image(systemName: Self.symbol(for: status))
                 // The unread mark is a dot rather than a symbol, so it is drawn a size down.
@@ -60,21 +60,23 @@ struct WorkspaceStatusGlyph: View {
         }
     }
 
-    /// Every meaning colour here comes through `SidebarTint` rather than straight off the palette.
-    /// A dozen of these are read at once down a narrow column, and at the system's own volume the
-    /// column reads as a warning light panel rather than as an index. See `SidebarTint` for what
-    /// the quieting is and why it is a clamp.
+    /// The palette's own meaning colours, at the palette's own volume.
+    ///
+    /// This column is why they are as quiet as they are. A dozen of these are read at once down
+    /// 260 points, and at `systemRed` and `systemGreen`'s volume the column reads as a warning
+    /// light panel rather than as an index of what each agent is doing. That was fixed where it
+    /// belongs, in `Palette`, rather than with a second set of colours here.
     static func tint(for status: WorkspaceStatus) -> AnyShapeStyle {
         switch status {
-        case .setupFailed, .checksRunning: AnyShapeStyle(SidebarTint.warning)
-        case .checksFailing: AnyShapeStyle(SidebarTint.negative)
+        case .setupFailed, .checksRunning: AnyShapeStyle(Palette.warning)
+        case .checksFailing: AnyShapeStyle(Palette.negative)
         // Green is the palette's "this went well", and a merge landing is the best outcome a
         // workspace has, so it shares the colour with passing checks and differs in shape.
-        case .checksPassed, .merged: AnyShapeStyle(SidebarTint.positive)
+        case .checksPassed, .merged: AnyShapeStyle(Palette.positive)
         // The accent is what the app uses for "this is waiting for you" rather than for a machine,
         // which is exactly what an unread turn and an open pull request are.
-        case .unread, .pullRequestOpen: AnyShapeStyle(SidebarTint.accent)
-        case .running: AnyShapeStyle(SidebarTint.running)
+        case .unread, .pullRequestOpen: AnyShapeStyle(Palette.accent)
+        case .running: AnyShapeStyle(Palette.running)
         case .changed: AnyShapeStyle(.secondary)
         default: AnyShapeStyle(.tertiary)
         }

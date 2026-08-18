@@ -82,9 +82,10 @@ struct WorkspaceRow: View {
                             .accessibilityLabel("Pinned")
                     }
                     if workspace.hasDiff {
-                        SidebarDiffStat(
+                        DiffStatLabel(
                             additions: workspace.additions,
-                            deletions: workspace.deletions
+                            deletions: workspace.deletions,
+                            compact: true
                         )
                     }
                 }

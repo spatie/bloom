@@ -279,12 +279,19 @@ final class BloomTerminalView: LocalProcessTerminalView {
 
     /// The sixteen ANSI slots.
     ///
-    /// The six hues stay Bloom's, so a red in the terminal is the same red as a failed step
-    /// everywhere else in the window. The four greyscale slots cannot be: they were the label
-    /// colours, which differ from each other in alpha and in nothing else, and SwiftTerm stores a
-    /// colour as three opaque bytes. Dropping the alpha collapsed black, white, bright black and
-    /// bright white to one identical value, so black-on-white, which is most of what a Powerline
-    /// prompt draws, came out as a solid block with nothing legible inside it.
+    /// Red, yellow and blue are Bloom's, so a failing test's red in the terminal is the same red
+    /// as a failed step everywhere else in the window. Green is NOT, and that is the one to
+    /// understand: the app's `positive` is the accent, because the brand ramp says to reuse the
+    /// accent rather than invent a green. That is right for a tick beside a passing check, and
+    /// wrong here, because ANSI green and ANSI blue are two different slots and a program that
+    /// prints both would print them in one colour. So this palette keeps a green of its own,
+    /// which is what every terminal theme does.
+    ///
+    /// The four greyscale slots cannot be the label colours either: those differ from each other
+    /// in alpha and in nothing else, and SwiftTerm stores a colour as three opaque bytes.
+    /// Dropping the alpha collapsed black, white, bright black and bright white to one identical
+    /// value, so black-on-white, which is most of what a Powerline prompt draws, came out as a
+    /// solid block with nothing legible inside it.
     ///
     /// They stay ordered dark to light within each appearance, because every program that colours
     /// its own output assumes slot 8 is a lighter slot 0 and slot 15 a lighter slot 7.
@@ -292,7 +299,7 @@ final class BloomTerminalView: LocalProcessTerminalView {
         [
             Self.black,
             Palette.negative,
-            Palette.positive,
+            Self.green,
             Palette.warning,
             Palette.accent,
             Color(nsColor: .systemPurple),
@@ -300,7 +307,7 @@ final class BloomTerminalView: LocalProcessTerminalView {
             Self.white,
             Self.brightBlack,
             Palette.negative,
-            Palette.positive,
+            Self.green,
             Palette.warning,
             Palette.accent,
             Color(nsColor: .systemPurple),
@@ -308,6 +315,11 @@ final class BloomTerminalView: LocalProcessTerminalView {
             Self.brightWhite,
         ]
     }
+
+    /// ANSI slot 2. Tuned to sit beside `Palette.negative` and `Palette.warning` at the same
+    /// volume they do, rather than to be `systemGreen`, which is a step brighter than everything
+    /// else this terminal prints.
+    private static let green = Palette.dynamic(light: 0x2E7D32, dark: 0x6FCF7B)
 
     // Per appearance, because the terminal's background follows the system: a fixed #FFFFFF for
     // bright white would be invisible on a light panel, and a fixed #000000 black unreadable on a

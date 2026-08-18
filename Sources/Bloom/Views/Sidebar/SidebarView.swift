@@ -58,6 +58,24 @@ struct SidebarView: View {
                 )
             }
         }
+        // The list draws its own selection and its own row height, and both are left to it.
+        //
+        // Selection: this is the one list in the window with the system's source list treatment,
+        // and its highlight follows the user's own accent, dims when the list loses the keyboard
+        // and inverts the row's text for us through `backgroundProminence`, which `WorkspaceRow`
+        // reads. Repainting it in Bloom's teal would buy consistency with the inspector at the
+        // cost of all three, and would make this the only Mac sidebar that ignores the accent the
+        // user chose in System Settings. A source list selection is a system affordance, not
+        // branding. The brand is everywhere else.
+        //
+        // Row height: 32 points, where `Metrics.rowHeight` is 28 and the reference render is 28
+        // as well. It is not ours to set. `listRowInsets`, an explicit `frame(height:)` on the
+        // row, `defaultMinListRowHeight` and `controlSize` were each tried and each captured, and
+        // all four left the pitch at exactly 32; `listRowInsets(leading:)` did not even move the
+        // rows sideways. Reaching 28 means giving up `.listStyle(.sidebar)`, and with it the
+        // selection above, keyboard navigation and the standard insets. Four points is not worth
+        // that. What was in reach was making the rhythm EVEN, which is what `RepoSection` spends
+        // its header padding on.
         .listStyle(.sidebar)
         .overlay {
             if app.repos.isEmpty, app.isLoaded {
