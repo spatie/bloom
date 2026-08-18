@@ -52,7 +52,7 @@ enum Snapshot {
     /// bitmap goes through the real AppKit rendering path, so materials, toolbars and lists all
     /// come out as the user sees them, and it needs no screen recording permission.
     ///
-    ///     Baton --snapshot-window /tmp/shots/window.png
+    ///     Baton --snapshot-window /tmp/shots/window.png [--window-size 900x700]
     /// Opens a `baton://` URL in THIS process, a few seconds after launch.
     ///
     /// `open baton://...` from a shell goes through LaunchServices, which picks whichever copy of
@@ -71,6 +71,19 @@ enum Snapshot {
             try? await Task.sleep(for: .seconds(3))
             NotificationCenter.default.post(name: .batonHandleURL, object: url)
         }
+    }
+
+    /// `WIDTHxHEIGHT` in points, or nil when the flag is absent or malformed.
+    private static var requestedWindowSize: CGSize? {
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: "--window-size"), index + 1 < arguments.count
+        else { return nil }
+
+        let parts = arguments[index + 1].split(separator: "x")
+        guard parts.count == 2, let width = Double(parts[0]), let height = Double(parts[1])
+        else { return nil }
+
+        return CGSize(width: width, height: height)
     }
 
     static var isWindowCaptureRequested: Bool {
@@ -106,6 +119,15 @@ enum Snapshot {
                   let content = window.contentView else {
                 FileHandle.standardError.write(Data("no window to capture\n".utf8))
                 exit(1)
+            }
+
+            // A capture at one comfortable width proves nothing about the width the user actually
+            // drags a pane down to. `--window-size 900x700` reproduces the cramped case on demand,
+            // which is how the inspector's clipped header was found in the first place.
+            if let size = requestedWindowSize {
+                window.setContentSize(size)
+                window.layoutIfNeeded()
+                try? await Task.sleep(for: .seconds(1))
             }
 
             let bounds = content.bounds
