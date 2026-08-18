@@ -78,6 +78,13 @@ enum Palette {
     static let accent = Color(nsColor: .controlAccentColor)
     static let positive = Color(nsColor: .systemGreen)
     static let negative = Color(nsColor: .systemRed)
+
+    /// The stop control, which is a quieter red than a failure is.
+    ///
+    /// `systemRed` is right for something that went wrong. The stop button is not a failure: it sits
+    /// in the composer for the whole length of a turn, and at full saturation it reads as an alarm
+    /// about work that is going perfectly well. This keeps the meaning and drops the volume.
+    static let stop = Color(nsColor: .systemRed.blended(withFraction: 0.28, of: .secondaryLabelColor) ?? .systemRed)
     static let warning = Color(nsColor: .systemOrange)
     static let running = Color(nsColor: .controlAccentColor)
 

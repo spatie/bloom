@@ -24,9 +24,14 @@ struct ComposerSendButton: View {
             .font(Typo.labelEmphasis)
             .frame(width: Self.glyph, height: Self.glyph)
         }
+        // Prominent to send, quiet to stop. Sending is the action on offer, so it earns the filled
+        // accent. Stopping is an escape hatch that sits there for the whole length of a turn, and a
+        // saturated red circle pulling the eye for minutes reads as an alarm about work that is
+        // going fine. Bordered keeps it obviously a button, and the red says what it does without
+        // shouting it.
         .buttonStyle(.borderedProminent)
         .buttonBorderShape(.circle)
-        .tint(isRunning ? Palette.negative : Palette.accent)
+        .tint(isRunning ? Palette.stop : Palette.accent)
         .disabled(!isRunning && !canSend)
         .help(isRunning ? "Stop the agent" : "Send (Return)")
     }
