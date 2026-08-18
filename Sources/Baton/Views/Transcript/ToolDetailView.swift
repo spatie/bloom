@@ -40,7 +40,7 @@ struct ToolDetailView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: TranscriptLayout.block) {
             inputSection
             if let result, !result.isEmpty {
                 resultSection(result)
@@ -48,7 +48,7 @@ struct ToolDetailView: View {
                 caption("The tool returned an image.")
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, TranscriptLayout.inset)
         .textSelection(.enabled)
     }
 
@@ -118,16 +118,17 @@ struct ToolDetailView: View {
     }
 
     private var todoList: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: TranscriptLayout.proseLeading) {
             ForEach(Array((input["todos"]?.arrayValue ?? []).enumerated()), id: \.offset) { _, todo in
                 let status = todo["status"]?.stringValue ?? "pending"
                 let text = status == "in_progress"
                     ? (todo["activeForm"]?.stringValue ?? todo["content"]?.stringValue ?? "")
                     : (todo["content"]?.stringValue ?? "")
 
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: TranscriptLayout.inset) {
                     Image(systemName: Self.todoGlyph(status))
-                        .font(.system(size: 10))
+                        .font(Typo.caption)
+                        .imageScale(.medium)
                         .foregroundStyle(Self.todoTint(status))
                     Text(text)
                         .font(Typo.label)
@@ -139,16 +140,17 @@ struct ToolDetailView: View {
     }
 
     private var questionList: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: TranscriptLayout.inset) {
             ForEach(Array((input["questions"]?.arrayValue ?? []).enumerated()), id: \.offset) { _, question in
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: TranscriptLayout.proseLeading) {
                     Text(question["question"]?.stringValue ?? "")
                         .font(Typo.bodyEmphasis)
                         .foregroundStyle(Palette.textPrimary)
                     ForEach(Array((question["options"]?.arrayValue ?? []).enumerated()), id: \.offset) { _, option in
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        HStack(alignment: .firstTextBaseline, spacing: TranscriptLayout.inset) {
                             Image(systemName: "circle")
-                                .font(.system(size: 8))
+                                .font(Typo.micro)
+                                .imageScale(.small)
                                 .foregroundStyle(Palette.textTertiary)
                             Text(option["label"]?.stringValue ?? "")
                                 .font(Typo.label)
@@ -166,25 +168,24 @@ struct ToolDetailView: View {
     private func resultSection(_ text: String) -> some View {
         let capped = Self.cap(text, lines: showsFullResult ? Int.max : Self.resultLineCap)
 
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: TranscriptLayout.tight * 2) {
             Text(capped.text)
                 .font(Typo.code)
                 .foregroundStyle(isError ? Palette.negative : Palette.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 8)
-                .padding(.vertical, 2)
+                .padding(.leading, TranscriptLayout.block)
+                .padding(.vertical, TranscriptLayout.tight)
                 .overlay(alignment: .leading) {
                     Rectangle()
                         .fill(isError ? Palette.negative : Palette.border)
-                        .frame(width: 2)
+                        .frame(width: TranscriptLayout.rule)
                 }
 
             if capped.truncated, !showsFullResult {
                 Button("Show all output") { showsFullResult = true }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.link)
                     .font(Typo.caption)
-                    .foregroundStyle(Palette.accent)
-                    .padding(.leading, 8)
+                    .padding(.leading, TranscriptLayout.block)
             }
         }
     }
@@ -217,7 +218,7 @@ struct ToolDetailView: View {
             if present.isEmpty {
                 EmptyView()
             } else {
-                HStack(spacing: 4) {
+                HStack(spacing: TranscriptLayout.tight * 2) {
                     ForEach(Array(present.enumerated()), id: \.offset) { _, value in
                         Chip(text: value)
                     }
@@ -235,7 +236,7 @@ struct ToolDetailView: View {
                     .font(Typo.code)
                     .foregroundStyle(Palette.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(6)
+                    .padding(TranscriptLayout.inset)
                     .background(tint, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
             }
         }
@@ -245,7 +246,7 @@ struct ToolDetailView: View {
     /// to a diff without running one.
     @ViewBuilder
     private func replacement(old: String?, new: String?) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
             if let old, !old.isEmpty {
                 code(old, tint: Palette.diffDeleteBackground)
             }

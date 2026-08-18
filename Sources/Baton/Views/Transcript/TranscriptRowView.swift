@@ -6,7 +6,8 @@ import BatonCore
 /// The row decodes its own payload, and it does it in `body` rather than up front. A session can
 /// hold tens of thousands of rows and the enclosing `LazyVStack` only ever builds the handful on
 /// screen, so decoding here is the difference between opening a long transcript instantly and
-/// parsing forty megabytes of JSON before the first frame.
+/// parsing forty megabytes of JSON before the first frame. Every decode goes through
+/// `TranscriptEventCache`, so a row that is rebuilt on every streamed token still only parses once.
 ///
 /// Every kind except assistant prose, a user turn and an expanded row is exactly one line tall.
 /// That is the whole design: an agent run reads as a list of actions, not a chat log.
@@ -19,6 +20,10 @@ struct TranscriptRowView: View {
     var maxBubbleWidth: CGFloat = 560
     var onToggle: () -> Void = {}
 
+    /// How much of the pane a user turn always leaves empty on its left, so it reads as one side
+    /// of a conversation even when it is short.
+    private static let userTurnInset: CGFloat = 32
+
     @State private var isHovered = false
 
     var body: some View {
@@ -29,7 +34,7 @@ struct TranscriptRowView: View {
                     Rectangle()
                         .fill(Palette.border)
                         .frame(width: Metrics.hairline)
-                        .padding(.leading, 5)
+                        .padding(.leading, TranscriptLayout.inset)
                 }
             }
     }
@@ -81,8 +86,8 @@ struct TranscriptRowView: View {
                 if isExpanded {
                     ToolDetailView(use: use, result: toolResult)
                         .padding(.leading, TranscriptLayout.detailIndent)
-                        .padding(.trailing, 6)
-                        .padding(.bottom, 4)
+                        .padding(.trailing, TranscriptLayout.inset)
+                        .padding(.bottom, TranscriptLayout.tight * 2)
                 }
             }
             .modifier(ExpandableRow(isHovered: isHovered, isError: row.isError, onToggle: onToggle))
@@ -96,10 +101,10 @@ struct TranscriptRowView: View {
         let showsDetail = !presentation.detail.isEmpty && !presentation.chips.contains(presentation.detail)
 
         return HStack(spacing: TranscriptLayout.glyphGap) {
-            Image(systemName: presentation.glyph)
-                .font(.system(size: 11))
-                .foregroundStyle(row.isError ? Palette.negative : presentation.tint)
-                .frame(width: TranscriptLayout.glyphWidth, alignment: .center)
+            TranscriptGlyph(
+                symbol: presentation.glyph,
+                tint: row.isError ? Palette.negative : presentation.tint
+            )
 
             Text(presentation.label)
                 .font(Typo.labelEmphasis)
@@ -122,7 +127,7 @@ struct TranscriptRowView: View {
                     .fixedSize()
             }
 
-            Spacer(minLength: 4)
+            Spacer(minLength: TranscriptLayout.tight)
 
             if row.isError {
                 Text("error")
@@ -138,7 +143,7 @@ struct TranscriptRowView: View {
 
             TranscriptDisclosure(isExpanded: isExpanded, isVisible: isHovered)
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, TranscriptLayout.inset)
         .frame(height: Metrics.rowHeight)
     }
 
@@ -147,17 +152,14 @@ struct TranscriptRowView: View {
     private var orphanResult: some View {
         if case .toolResult(let result)? = event {
             HStack(spacing: TranscriptLayout.glyphGap) {
-                Image(systemName: "arrow.turn.down.right")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Palette.textTertiary)
-                    .frame(width: TranscriptLayout.glyphWidth)
+                TranscriptGlyph(symbol: "arrow.turn.down.right")
                 Text(ToolPresenter.oneLine(result.text))
                     .font(Typo.label)
                     .foregroundStyle(result.isError ? Palette.negative : Palette.textTertiary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 6)
+            .padding(.horizontal, TranscriptLayout.inset)
             .frame(height: Metrics.rowHeight)
         }
     }
@@ -169,33 +171,34 @@ struct TranscriptRowView: View {
         if case .assistantText(let block)? = event, !block.text.isEmpty {
             MarkdownView(block.text)
                 .font(Typo.body)
-                .lineSpacing(4)
+                .lineSpacing(TranscriptLayout.proseLeading)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 6)
+                .padding(.horizontal, TranscriptLayout.inset)
+                .padding(.vertical, TranscriptLayout.inset)
         }
     }
 
     private var userTurn: some View {
         HStack(spacing: 0) {
-            Spacer(minLength: 32)
+            Spacer(minLength: Self.userTurnInset)
             Text(userText)
                 .font(Typo.body)
                 .foregroundStyle(Palette.textPrimary)
-                .lineSpacing(3)
+                .lineSpacing(TranscriptLayout.proseLeading)
                 .textSelection(.enabled)
                 .multilineTextAlignment(.leading)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, TranscriptLayout.block)
+                .padding(.vertical, TranscriptLayout.inset)
+                .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 8).stroke(Palette.border, lineWidth: Metrics.hairline)
+                    RoundedRectangle(cornerRadius: Metrics.corner)
+                        .stroke(Palette.border, lineWidth: Metrics.hairline)
                 }
                 .frame(maxWidth: maxBubbleWidth, alignment: .trailing)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 6)
+        .padding(.horizontal, TranscriptLayout.inset)
+        .padding(.vertical, TranscriptLayout.inset)
     }
 
     /// A user turn is the line Baton itself wrote to stdin, so it is read straight out of the
@@ -222,10 +225,7 @@ struct TranscriptRowView: View {
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: TranscriptLayout.glyphGap) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.negative)
-                    .frame(width: TranscriptLayout.glyphWidth)
+                TranscriptGlyph(symbol: "exclamationmark.triangle", tint: Palette.negative)
                 Text(status.map { "Agent exited (\($0))" } ?? "Agent error")
                     .font(Typo.labelEmphasis)
                     .foregroundStyle(Palette.negative)
@@ -234,10 +234,10 @@ struct TranscriptRowView: View {
                     .font(Typo.label)
                     .foregroundStyle(Palette.textTertiary)
                     .lineLimit(1)
-                Spacer(minLength: 4)
+                Spacer(minLength: TranscriptLayout.tight)
                 TranscriptDisclosure(isExpanded: isExpanded, isVisible: isHovered)
             }
-            .padding(.horizontal, 6)
+            .padding(.horizontal, TranscriptLayout.inset)
             .frame(height: Metrics.rowHeight)
 
             if isExpanded, !stderr.isEmpty {
@@ -246,12 +246,12 @@ struct TranscriptRowView: View {
                     .foregroundStyle(Palette.negative)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 8)
+                    .padding(.leading, TranscriptLayout.block)
                     .overlay(alignment: .leading) {
-                        Rectangle().fill(Palette.negative).frame(width: 2)
+                        Rectangle().fill(Palette.negative).frame(width: TranscriptLayout.rule)
                     }
                     .padding(.leading, TranscriptLayout.detailIndent)
-                    .padding(.bottom, 6)
+                    .padding(.bottom, TranscriptLayout.inset)
             }
         }
         .modifier(ExpandableRow(isHovered: isHovered, isError: true, onToggle: onToggle))
@@ -265,10 +265,7 @@ struct TranscriptRowView: View {
         let window = (info?["rateLimitType"]?.stringValue ?? "").replacingOccurrences(of: "_", with: " ")
 
         return HStack(spacing: TranscriptLayout.glyphGap) {
-            Image(systemName: "gauge.with.dots.needle.33percent")
-                .font(.system(size: 10))
-                .foregroundStyle(Palette.warning)
-                .frame(width: TranscriptLayout.glyphWidth)
+            TranscriptGlyph(symbol: "gauge.with.dots.needle.33percent", tint: Palette.warning)
             Text("Rate limit")
                 .font(Typo.labelEmphasis)
                 .foregroundStyle(Palette.textSecondary)
@@ -281,7 +278,7 @@ struct TranscriptRowView: View {
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, TranscriptLayout.inset)
         .frame(height: Metrics.rowHeight)
     }
 
@@ -289,10 +286,7 @@ struct TranscriptRowView: View {
     private var systemRow: some View {
         if case .initialized(let info)? = event {
             HStack(spacing: TranscriptLayout.glyphGap) {
-                Image(systemName: "bolt.horizontal.circle")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Palette.textTertiary)
-                    .frame(width: TranscriptLayout.glyphWidth)
+                TranscriptGlyph(symbol: "bolt.horizontal.circle")
                 Text("Session started")
                     .font(Typo.labelEmphasis)
                     .foregroundStyle(Palette.textTertiary)
@@ -301,7 +295,7 @@ struct TranscriptRowView: View {
                 if !info.permissionMode.isEmpty { Chip(text: info.permissionMode) }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 6)
+            .padding(.horizontal, TranscriptLayout.inset)
             .frame(height: Metrics.rowHeight)
         }
     }
@@ -350,7 +344,7 @@ private final class TranscriptJSONBox {
 /// The payload bytes are part of the key alongside the row ID because an updated store row may
 /// retain its identity. Exact byte equality prevents a cached event from surviving that change.
 @MainActor
-private enum TranscriptEventCache {
+enum TranscriptEventCache {
     private static let limit = 256
     private static let costLimit = 8 * 1_024 * 1_024
 
@@ -388,6 +382,10 @@ private enum TranscriptEventCache {
 }
 
 /// Hover, click to expand and the error rule, shared by every row that opens.
+///
+/// The hover fill comes from `rowBackground` rather than a fill of its own, so a transcript row
+/// highlights exactly the way a sidebar row and a file row do, and follows the window's active
+/// state with them.
 private struct ExpandableRow: ViewModifier {
     var isHovered: Bool
     var isError: Bool
@@ -396,13 +394,15 @@ private struct ExpandableRow: ViewModifier {
     func body(content: Content) -> some View {
         content
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isHovered ? Palette.hover : .clear)
+            .contentShape(Rectangle())
+            .rowBackground(isSelected: false, isHovered: isHovered)
             .overlay(alignment: .leading) {
                 if isError {
-                    Rectangle().fill(Palette.negative).frame(width: 2)
+                    Rectangle()
+                        .fill(Palette.negative)
+                        .frame(width: TranscriptLayout.rule)
                 }
             }
-            .contentShape(Rectangle())
             .onTapGesture(perform: onToggle)
     }
 }

@@ -170,9 +170,9 @@ struct FileMentionMenu: View {
                                     .id(index)
                             }
                         }
-                        .padding(4)
+                        .padding(Metrics.cornerSmall)
                     }
-                    .frame(maxHeight: 240)
+                    .frame(maxHeight: Metrics.sidebarWidth)
                     .onChange(of: selectedIndex) { _, index in
                         proxy.scrollTo(index, anchor: .bottom)
                     }
@@ -182,7 +182,7 @@ struct FileMentionMenu: View {
     }
 
     private func row(_ match: FileMatch, index: Int) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Metrics.corner) {
             Text(match.fileName)
                 .font(Typo.bodyEmphasis)
                 .foregroundStyle(Palette.textPrimary)
@@ -194,7 +194,7 @@ struct FileMentionMenu: View {
                 .truncationMode(.head)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, Metrics.corner)
         .frame(height: Metrics.rowHeight)
         .contentShape(Rectangle())
         .rowBackground(isSelected: index == selectedIndex, isHovered: index == hoveredIndex)
@@ -217,16 +217,21 @@ struct MenuPanel<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             content
         }
-        .frame(width: 420, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         // The panel floats outside the composer, so it must size itself from its rows rather
         // than from the space the composer happens to occupy.
         .fixedSize(horizontal: false, vertical: true)
-        .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Metrics.corner))
+        .headerMaterial()
+        .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.corner)
                 .stroke(Palette.border, lineWidth: Metrics.hairline)
         }
-        .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
+        .shadow(
+            color: Palette.textPrimary.opacity(0.18),
+            radius: Metrics.gutter,
+            y: Metrics.corner
+        )
     }
 }
 
@@ -237,7 +242,7 @@ struct MenuEmptyRow: View {
         Text(text)
             .font(Typo.label)
             .foregroundStyle(Palette.textTertiary)
-            .padding(.horizontal, 12)
-            .frame(height: 34)
+            .padding(.horizontal, Metrics.gutter)
+            .frame(height: Metrics.rowHeight)
     }
 }

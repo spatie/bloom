@@ -14,15 +14,15 @@ struct PullRequestBar: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: InspectorLayout.gap) {
             if let pullRequest = model.pullRequest {
                 existing(pullRequest)
             } else {
                 creator
             }
         }
-        .padding(.horizontal, 10)
-        .frame(height: 36)
+        .padding(.horizontal, InspectorLayout.inset)
+        .frame(height: InspectorLayout.barHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.surface)
         .task(id: model.workspace.id) {
@@ -68,7 +68,7 @@ struct PullRequestBar: View {
                 text: "#\(pullRequest.number)",
                 systemImage: "arrow.triangle.pull",
                 tint: Palette.accent,
-                background: Palette.accent.opacity(0.12)
+                background: Palette.accent.opacity(InspectorLayout.tintOpacity)
             )
         }
         .buttonStyle(.plain)
@@ -84,7 +84,7 @@ struct PullRequestBar: View {
             .lineLimit(1)
             .truncationMode(.tail)
 
-        Spacer(minLength: 4)
+        Spacer(minLength: InspectorLayout.tight * 2)
 
         if isWorking {
             ProgressView().controlSize(.small)
@@ -95,6 +95,9 @@ struct PullRequestBar: View {
         }
     }
 
+    /// The one prominent control in the inspector. It is a real bordered prominent button, so it
+    /// carries the user's accent colour and the pressed and disabled states that come with it,
+    /// rather than a rectangle painted to look like a button.
     private var mergeButton: some View {
         Menu {
             Button("Merge commit") { pendingMerge = .merge }
@@ -102,16 +105,14 @@ struct PullRequestBar: View {
             Button("Rebase and merge") { pendingMerge = .rebase }
         } label: {
             Text("Merge")
-                .font(Typo.captionEmphasis)
         } primaryAction: {
             pendingMerge = .squash
         }
-        .menuStyle(.borderlessButton)
+        .menuStyle(.button)
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
         .fixedSize()
-        .padding(.horizontal, 8)
-        .frame(height: 20)
-        .background(Palette.positive, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
-        .foregroundStyle(Palette.textInverted)
+        .help("Squash and merge, or choose another method")
     }
 
     private func statusText(_ pullRequest: PullRequest) -> String {
@@ -136,7 +137,8 @@ struct PullRequestBar: View {
     @ViewBuilder
     private var creator: some View {
         Image(systemName: "arrow.triangle.pull")
-            .font(.system(size: 10))
+            .font(Typo.caption)
+            .imageScale(.medium)
             .foregroundStyle(Palette.textTertiary)
 
         Text(model.workspace.branch)
@@ -145,18 +147,15 @@ struct PullRequestBar: View {
             .lineLimit(1)
             .truncationMode(.head)
 
-        Spacer(minLength: 4)
+        Spacer(minLength: InspectorLayout.tight * 2)
 
         if isWorking || model.isLoadingPullRequest {
             ProgressView().controlSize(.small)
         } else {
             Button("Create pull request") { createPullRequest() }
-                .font(Typo.captionEmphasis)
-                .buttonStyle(.plain)
-                .padding(.horizontal, 8)
-                .frame(height: 20)
-                .background(Palette.accent, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
-                .foregroundStyle(Palette.textInverted)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Push this branch and open a pull request against \(model.workspace.baseBranch)")
         }
     }
 

@@ -32,17 +32,17 @@ struct SessionTabsView: View {
                     Task { await model.createSession() }
                 } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(Typo.captionEmphasis)
                         .foregroundStyle(Palette.textSecondary)
-                        .frame(width: 26, height: 26)
+                        .frame(width: Metrics.rowHeight, height: Metrics.rowHeight)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
                 .help("New session in this workspace")
-                .padding(.trailing, 6)
+                .padding(.trailing, Metrics.corner)
             }
-            .frame(height: 30)
-            .background(Palette.surface)
+            .frame(height: Metrics.rowHeight)
+            .headerMaterial()
             .overlay(alignment: .bottom) { Hairline() }
         }
     }
@@ -53,7 +53,7 @@ struct SessionTabsView: View {
         let isActive = session.id == model.activeSession?.id
         let isHovered = session.id == hoveredID
 
-        return HStack(spacing: 5) {
+        return HStack(spacing: Metrics.cornerSmall) {
             if isRunning(session) {
                 ActivityDot(isActive: true)
             }
@@ -63,7 +63,7 @@ struct SessionTabsView: View {
                     .textFieldStyle(.plain)
                     .font(Typo.label)
                     .focused($isRenameFocused)
-                    .frame(width: 120)
+                    .frame(width: Metrics.sidebarWidth / 2)
                     .onSubmit { commitRename(session) }
                     .onExitCommand { renamingID = nil }
             } else {
@@ -73,29 +73,29 @@ struct SessionTabsView: View {
                     .lineLimit(1)
             }
 
-            // The close button only appears on hover, so a row of tabs is not a row of crosses.
-            if isHovered, model.sessions.count > 1 {
+            // Keeping the slot avoids every label moving when the pointer enters a tab.
+            if !model.sessions.isEmpty {
                 Button {
                     Task { await model.closeSession(session) }
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(Typo.micro)
                         .foregroundStyle(Palette.textTertiary)
-                        .frame(width: 14, height: 14)
+                        .frame(width: Metrics.rowHeight / 2, height: Metrics.rowHeight / 2)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
+                .opacity(isHovered && model.sessions.count > 1 ? 1 : 0)
+                .allowsHitTesting(isHovered && model.sessions.count > 1)
                 .help("Close session")
             }
         }
-        .padding(.horizontal, 10)
-        .frame(height: 30)
-        .background(isHovered && !isActive ? Palette.hover : .clear)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(isActive ? Palette.accent : .clear)
-                .frame(height: 2)
-        }
+        .padding(.horizontal, Metrics.corner)
+        .frame(height: Metrics.rowHeight)
+        .background(
+            isActive ? Palette.selected : (isHovered ? Palette.hover : .clear),
+            in: Capsule()
+        )
         .contentShape(Rectangle())
         .gesture(
             TapGesture(count: 2)

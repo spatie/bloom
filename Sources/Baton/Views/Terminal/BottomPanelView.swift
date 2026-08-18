@@ -39,7 +39,7 @@ struct BottomPanelView: View {
     private var tabStrip: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal) {
-                HStack(spacing: 2) {
+                HStack(spacing: Metrics.cornerSmall) {
                     if settings.setupScript != nil {
                         tabButton(.setup, title: "Setup", icon: "wrench.and.screwdriver")
                     }
@@ -50,11 +50,11 @@ struct BottomPanelView: View {
                         terminalTabButton(tab)
                     }
                 }
-                .padding(.horizontal, 6)
+                .padding(.horizontal, Metrics.cornerSmall)
             }
             .scrollIndicators(.never)
 
-            Divider().frame(height: 14)
+            Divider()
 
             iconButton("plus", help: "New terminal tab") {
                 Task {
@@ -72,23 +72,25 @@ struct BottomPanelView: View {
             ) {
                 model.isBottomPanelVisible.toggle()
             }
-            .padding(.trailing, 6)
+            .padding(.trailing, Metrics.cornerSmall)
         }
-        .frame(height: 30)
-        .background(Palette.surface)
+        .frame(minHeight: Metrics.rowHeight)
+        .headerMaterial()
     }
 
     private func tabButton(_ tab: BottomTab, title: String, icon: String) -> some View {
         Button {
             select(tab)
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: icon).font(.system(size: 9, weight: .semibold))
+            HStack(spacing: Metrics.cornerSmall) {
+                Image(systemName: icon)
+                    .font(Typo.micro)
+                    .imageScale(.small)
                 Text(title).font(Typo.label).lineLimit(1)
             }
             .foregroundStyle(model.bottomTab == tab ? Palette.textPrimary : Palette.textSecondary)
-            .padding(.horizontal, 8)
-            .frame(height: 22)
+            .padding(.horizontal, Metrics.corner)
+            .padding(.vertical, Metrics.cornerSmall)
             .background(
                 RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                     .fill(model.bottomTab == tab ? Palette.selected : .clear)
@@ -100,14 +102,16 @@ struct BottomPanelView: View {
     private func terminalTabButton(_ tab: TerminalTab) -> some View {
         let isSelected = model.bottomTab == .terminal(tab.id)
 
-        return HStack(spacing: 4) {
-            Image(systemName: "terminal").font(.system(size: 9, weight: .semibold))
+        return HStack(spacing: Metrics.cornerSmall) {
+            Image(systemName: "terminal")
+                .font(Typo.micro)
+                .imageScale(.small)
 
             if renamingTabID == tab.id {
                 TextField("Name", text: $draftName)
                     .textFieldStyle(.plain)
                     .font(Typo.label)
-                    .frame(width: 84)
+                    .frame(width: Metrics.sidebarWidth / 3)
                     .onSubmit { commitRename(tab) }
             } else {
                 Text(tab.title).font(Typo.label).lineLimit(1)
@@ -117,18 +121,18 @@ struct BottomPanelView: View {
                 Task { await close(tab) }
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(Typo.micro)
+                    .imageScale(.small)
                     .foregroundStyle(Palette.textTertiary)
-                    .frame(width: 14, height: 14)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("Close this terminal")
         }
         .foregroundStyle(isSelected ? Palette.textPrimary : Palette.textSecondary)
-        .padding(.leading, 8)
-        .padding(.trailing, 3)
-        .frame(height: 22)
+        .padding(.leading, Metrics.corner)
+        .padding(.trailing, Metrics.cornerSmall)
+        .padding(.vertical, Metrics.cornerSmall)
         .background(
             RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                 .fill(isSelected ? Palette.selected : .clear)
@@ -147,12 +151,13 @@ struct BottomPanelView: View {
     private func iconButton(_ symbol: String, help: String, run: @escaping () -> Void) -> some View {
         Button(action: run) {
             Image(systemName: symbol)
-                .font(.system(size: 10, weight: .semibold))
+                .font(Typo.labelEmphasis)
+                .imageScale(.small)
                 .foregroundStyle(Palette.textSecondary)
-                .frame(width: 24, height: 22)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
+        .controlSize(.small)
         .help(help)
     }
 

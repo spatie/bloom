@@ -61,7 +61,7 @@ struct HomeView: View {
         HStack(alignment: .firstTextBaseline, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(greeting)
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.title2.weight(.semibold))
                     .foregroundStyle(Palette.textPrimary)
                 Text(summary)
                     .font(Typo.body)
@@ -184,12 +184,12 @@ struct HomeView: View {
     private var emptyState: some View {
         VStack(spacing: 14) {
             Image(systemName: "folder.badge.plus")
-                .font(.system(size: 34, weight: .light))
+                .font(.largeTitle.weight(.light))
                 .foregroundStyle(Palette.textTertiary)
 
             VStack(spacing: 5) {
                 Text("Add your first project")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(Palette.textPrimary)
                 Text("Point Baton at a git repository. Every workspace you start gets its own worktree and its own agent, so they never step on each other.")
                     .font(Typo.body)

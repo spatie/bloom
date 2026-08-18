@@ -1,107 +1,112 @@
 import SwiftUI
 import AppKit
 
-/// Baton's colours. Every colour is defined once here, as a dynamic NSColor so light and dark
-/// resolve without an asset catalogue (the app is built by SwiftPM, which has none).
+/// Baton's colours.
+///
+/// Almost everything here resolves to an AppKit semantic colour rather than a hand-picked hex
+/// value. That is deliberate: semantic colours already track light and dark, the user's accent
+/// colour, increased contrast, reduce transparency, and the vibrancy of whatever material they
+/// are drawn on. Hard-coded hexes track none of that, which is what made the first version of
+/// this app look like a web page pretending to be a Mac.
+///
+/// The exceptions are the diff and syntax colours, which have to be specific hues, and even
+/// those are defined once here rather than at their call sites.
 enum Palette {
-    static func dynamic(light: UInt32, dark: UInt32) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            return NSColor(hex: isDark ? dark : light)
-        })
-    }
+    // MARK: Surfaces
 
-    // Surfaces, from the back of the window forward.
-    static let windowBackground = dynamic(light: 0xF2F2F0, dark: 0x1A1A1C)
-    static let sidebar = dynamic(light: 0xF7F7F5, dark: 0x1E1E20)
-    static let surface = dynamic(light: 0xFFFFFF, dark: 0x242427)
-    static let surfaceRaised = dynamic(light: 0xFFFFFF, dark: 0x2B2B2F)
-    static let surfaceSunken = dynamic(light: 0xF4F4F2, dark: 0x1B1B1D)
-    static let hover = dynamic(light: 0x00000009, dark: 0xFFFFFF0D)
-    static let selected = dynamic(light: 0x00000014, dark: 0xFFFFFF18)
+    /// Behind everything. The sidebar draws a real material over this.
+    static let windowBackground = Color(nsColor: .windowBackgroundColor)
 
-    // Lines.
-    static let border = dynamic(light: 0x00000014, dark: 0xFFFFFF14)
-    static let borderStrong = dynamic(light: 0x00000026, dark: 0xFFFFFF26)
+    /// Only used as a fallback where a material cannot be installed. Prefer `SidebarMaterial`.
+    static let sidebar = Color(nsColor: .windowBackgroundColor)
 
-    // Text.
-    static let textPrimary = dynamic(light: 0x1C1C1E, dark: 0xEDEDEF)
-    static let textSecondary = dynamic(light: 0x6B6B70, dark: 0x9C9CA3)
-    static let textTertiary = dynamic(light: 0x9A9AA0, dark: 0x6E6E76)
-    static let textInverted = dynamic(light: 0xFFFFFF, dark: 0x16161A)
+    /// Content areas: the transcript, the inspector, anything holding text.
+    static let surface = Color(nsColor: .textBackgroundColor)
 
-    // Meaning.
-    static let accent = dynamic(light: 0x2F6FED, dark: 0x5B8DEF)
-    static let positive = dynamic(light: 0x1A7F4B, dark: 0x3FBF7F)
-    static let negative = dynamic(light: 0xC03030, dark: 0xF06A6A)
-    static let warning = dynamic(light: 0xB07908, dark: 0xE0A93B)
-    static let running = dynamic(light: 0x2F6FED, dark: 0x5B8DEF)
+    /// A card or control sitting on `surface`, such as the composer box.
+    static let surfaceRaised = Color(nsColor: .controlBackgroundColor)
 
-    // Diffs.
-    static let diffAddBackground = dynamic(light: 0xE4F6E9, dark: 0x14351F)
-    static let diffAddEmphasis = dynamic(light: 0xB6E7C4, dark: 0x1F5B33)
-    static let diffDeleteBackground = dynamic(light: 0xFCE8E8, dark: 0x3A1A1A)
-    static let diffDeleteEmphasis = dynamic(light: 0xF5C2C2, dark: 0x5E2626)
-    static let diffGutter = dynamic(light: 0xFAFAF8, dark: 0x1F1F22)
+    /// A recessed strip: gutters, tool detail blocks, the bottom panel.
+    static let surfaceSunken = Color(nsColor: .underPageBackgroundColor)
 
-    // Syntax, mapped from BatonCore's TokenKind in CodeView.
+    // MARK: Overlays
+    //
+    // These are neutral tints painted over whatever is underneath, so they are expressed as an
+    // opacity on the primary label colour rather than as a colour of their own. Writing them as
+    // 0xRRGGBBAA was the original bug behind the solid black selection bar: 0x00000014 is the
+    // number 20, indistinguishable from an opaque dark blue, so the alpha was never applied.
+
+    static let hover = Color.primary.opacity(0.06)
+    static let selected = Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
+    /// Selection in a focused list inside the key window, where macOS uses the accent colour.
+    static let selectedEmphasized = Color(nsColor: .selectedContentBackgroundColor)
+    static let selectedEmphasizedText = Color(nsColor: .alternateSelectedControlTextColor)
+
+    // MARK: Lines
+
+    static let border = Color(nsColor: .separatorColor)
+    static let borderStrong = Color(nsColor: .gridColor)
+
+    // MARK: Text
+
+    static let textPrimary = Color(nsColor: .labelColor)
+    static let textSecondary = Color(nsColor: .secondaryLabelColor)
+    static let textTertiary = Color(nsColor: .tertiaryLabelColor)
+    static let textInverted = Color(nsColor: .alternateSelectedControlTextColor)
+
+    // MARK: Meaning
+
+    /// The user's chosen accent colour, not a blue we picked for them.
+    static let accent = Color(nsColor: .controlAccentColor)
+    static let positive = Color(nsColor: .systemGreen)
+    static let negative = Color(nsColor: .systemRed)
+    static let warning = Color(nsColor: .systemOrange)
+    static let running = Color(nsColor: .controlAccentColor)
+
+    // MARK: Diffs
+    //
+    // Tinted backgrounds, kept low in saturation so a wall of them is still readable, and
+    // defined per appearance because a light green that works on white is invisible on charcoal.
+
+    static let diffAddBackground = dynamic(light: 0xE6F4EA, dark: 0x14301E)
+    static let diffAddEmphasis = dynamic(light: 0xB7E3C4, dark: 0x1F5233)
+    static let diffDeleteBackground = dynamic(light: 0xFCEAEA, dark: 0x35191A)
+    static let diffDeleteEmphasis = dynamic(light: 0xF5C6C6, dark: 0x5C2527)
+    static let diffGutter = Color(nsColor: .underPageBackgroundColor)
+
+    // MARK: Syntax
+
     static let synKeyword = dynamic(light: 0x9B2393, dark: 0xD08EE0)
     static let synType = dynamic(light: 0x0B7285, dark: 0x5BC8DB)
     static let synString = dynamic(light: 0xC0392B, dark: 0xE8846E)
     static let synNumber = dynamic(light: 0x1C6FBB, dark: 0x7FB3F0)
-    static let synComment = dynamic(light: 0x8A8A8F, dark: 0x76767E)
+    static let synComment = dynamic(light: 0x7F8C8D, dark: 0x76767E)
     static let synFunction = dynamic(light: 0x2F5FD0, dark: 0x89AFF5)
     static let synVariable = dynamic(light: 0x6A3FB5, dark: 0xB49BF0)
     static let synAttribute = dynamic(light: 0x8A6A00, dark: 0xD9B65C)
     static let synOperator = dynamic(light: 0x5A5A60, dark: 0xA8A8B0)
     static let synConstant = dynamic(light: 0x1C6FBB, dark: 0x7FB3F0)
-}
 
-/// Type scale. The app is dense on purpose: a workspace list and a transcript both want to show
-/// a lot at once, so nothing here is larger than the macOS body size.
-enum Typo {
-    static let title = Font.system(size: 13, weight: .semibold)
-    static let body = Font.system(size: 13)
-    static let bodyEmphasis = Font.system(size: 13, weight: .medium)
-    static let label = Font.system(size: 12)
-    static let labelEmphasis = Font.system(size: 12, weight: .medium)
-    static let caption = Font.system(size: 11)
-    static let captionEmphasis = Font.system(size: 11, weight: .medium)
-    static let micro = Font.system(size: 10, weight: .medium)
-
-    static let code = Font.system(size: 12, design: .monospaced)
-    static let codeSmall = Font.system(size: 11, design: .monospaced)
-    static let codeTiny = Font.system(size: 10, design: .monospaced)
-}
-
-enum Metrics {
-    static let sidebarWidth: CGFloat = 260
-    static let inspectorWidth: CGFloat = 380
-    static let rowHeight: CGFloat = 26
-    static let corner: CGFloat = 6
-    static let cornerSmall: CGFloat = 4
-    static let gutter: CGFloat = 12
-    static let hairline: CGFloat = 1
+    /// A colour that differs between appearances, for the few cases where no semantic colour
+    /// means the right thing. Both arguments are plain 0xRRGGBB.
+    static func dynamic(light: UInt32, dark: UInt32) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return NSColor(rgb: isDark ? dark : light)
+        })
+    }
 }
 
 extension NSColor {
-    /// Accepts 0xRRGGBB and 0xRRGGBBAA. The alpha form is how the overlay colours above are
-    /// written, so a hover tint works over any surface.
-    convenience init(hex: UInt32) {
-        let hasAlpha = hex > 0xFFFFFF
-        let red, green, blue, alpha: CGFloat
-        if hasAlpha {
-            red = CGFloat((hex >> 24) & 0xFF) / 255
-            green = CGFloat((hex >> 16) & 0xFF) / 255
-            blue = CGFloat((hex >> 8) & 0xFF) / 255
-            alpha = CGFloat(hex & 0xFF) / 255
-        } else {
-            red = CGFloat((hex >> 16) & 0xFF) / 255
-            green = CGFloat((hex >> 8) & 0xFF) / 255
-            blue = CGFloat(hex & 0xFF) / 255
-            alpha = 1
-        }
-        self.init(srgbRed: red, green: green, blue: blue, alpha: alpha)
+    /// Plain 0xRRGGBB. There is deliberately no packed-alpha form: alpha belongs in
+    /// `Color.opacity`, where it cannot be mistaken for part of the colour.
+    convenience init(rgb: UInt32) {
+        self.init(
+            srgbRed: CGFloat((rgb >> 16) & 0xFF) / 255,
+            green: CGFloat((rgb >> 8) & 0xFF) / 255,
+            blue: CGFloat(rgb & 0xFF) / 255,
+            alpha: 1
+        )
     }
 }
 
@@ -109,13 +114,76 @@ extension Color {
     /// Repo accent colours are stored as plain hex strings in SQLite.
     init(hexString: String) {
         let cleaned = hexString.hasPrefix("#") ? String(hexString.dropFirst()) : hexString
-        self.init(nsColor: NSColor(hex: UInt32(cleaned, radix: 16) ?? 0x4C8DF6))
+        self.init(nsColor: NSColor(rgb: UInt32(cleaned, radix: 16) ?? 0x4C8DF6))
+    }
+}
+
+/// Type scale, built on the system text styles so it follows the user's text size rather than
+/// pinning everything to a point size we happened to like.
+enum Typo {
+    static let title = Font.system(.body, design: .default).weight(.semibold)
+    static let body = Font.system(.body)
+    static let bodyEmphasis = Font.system(.body).weight(.medium)
+    static let label = Font.system(.callout)
+    static let labelEmphasis = Font.system(.callout).weight(.medium)
+    static let caption = Font.system(.caption)
+    static let captionEmphasis = Font.system(.caption).weight(.medium)
+    static let micro = Font.system(.caption2).weight(.medium)
+
+    static let code = Font.system(.callout, design: .monospaced)
+    static let codeSmall = Font.system(.caption, design: .monospaced)
+    static let codeTiny = Font.system(.caption2, design: .monospaced)
+}
+
+enum Metrics {
+    static let sidebarWidth: CGFloat = 260
+    static let inspectorWidth: CGFloat = 380
+    /// Matches the row height AppKit uses for a source list.
+    static let rowHeight: CGFloat = 28
+    static let corner: CGFloat = 6
+    static let cornerSmall: CGFloat = 4
+    static let gutter: CGFloat = 12
+    /// One physical pixel on the display the window is actually on.
+    static var hairline: CGFloat { 1 / (NSScreen.main?.backingScaleFactor ?? 2) }
+    /// Clearance for the traffic lights when the title bar is hidden.
+    static let titleBarHeight: CGFloat = 28
+}
+
+// MARK: - Materials
+
+/// A real AppKit material, so the sidebar is translucent and vibrant the way every other Mac
+/// sidebar is, and so it dims correctly when the window is not key.
+struct VisualEffectBackground: NSViewRepresentable {
+    var material: NSVisualEffectView.Material = .sidebar
+    var blending: NSVisualEffectView.BlendingMode = .behindWindow
+    var emphasized = false
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.material = material
+        view.blendingMode = blending
+        view.isEmphasized = emphasized
+    }
+}
+
+extension View {
+    func sidebarMaterial() -> some View {
+        background(VisualEffectBackground(material: .sidebar))
+    }
+
+    func headerMaterial() -> some View {
+        background(VisualEffectBackground(material: .headerView, blending: .withinWindow))
     }
 }
 
 // MARK: - Reusable chrome
 
-/// A one-pixel separator that stays one physical pixel on Retina.
+/// A separator that stays one physical pixel on Retina.
 struct Hairline: View {
     var axis: Axis = .horizontal
 
@@ -134,23 +202,29 @@ struct Chip: View {
     var text: String
     var systemImage: String?
     var tint: Color = Palette.textSecondary
-    var background: Color = Palette.surfaceSunken
+    var background: Color = Palette.hover
     var monospaced: Bool = false
+
+    @Environment(\.isOnEmphasizedSelection) private var isOnSelection
 
     var body: some View {
         HStack(spacing: 3) {
             if let systemImage {
                 Image(systemName: systemImage)
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.caption2)
+                    .imageScale(.small)
             }
             Text(text)
                 .font(monospaced ? Typo.codeTiny : Typo.micro)
                 .lineLimit(1)
         }
-        .foregroundStyle(tint)
+        .foregroundStyle(isOnSelection ? Palette.selectedEmphasizedText : tint)
         .padding(.horizontal, 5)
         .padding(.vertical, 2)
-        .background(background, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+        .background(
+            isOnSelection ? Palette.selectedEmphasizedText.opacity(0.2) : background,
+            in: RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+        )
     }
 }
 
@@ -160,15 +234,21 @@ struct DiffStatLabel: View {
     var deletions: Int
     var compact: Bool = false
 
+    @Environment(\.isOnEmphasizedSelection) private var isOnSelection
+
     var body: some View {
         HStack(spacing: 4) {
             if additions > 0 {
                 Text("+\(Self.abbreviate(additions))")
-                    .foregroundStyle(Palette.positive)
+                    .foregroundStyle(isOnSelection ? Palette.selectedEmphasizedText : Palette.positive)
             }
             if deletions > 0 {
                 Text("-\(Self.abbreviate(deletions))")
-                    .foregroundStyle(Palette.negative)
+                    .foregroundStyle(
+                        isOnSelection
+                            ? Palette.selectedEmphasizedText.opacity(0.75)
+                            : Palette.negative
+                    )
             }
         }
         .font(compact ? Typo.codeTiny : Typo.micro)
@@ -185,17 +265,53 @@ struct DiffStatLabel: View {
     }
 }
 
+/// Whether the content is sitting on an emphasized (accent coloured) selection.
+///
+/// A selected row inverts its text, but a label that hard-codes a colour, such as a green plus
+/// count, keeps its own and ends up unreadable on the accent fill. Descendants read this to pick
+/// a variant that survives the inversion, which is what AppKit does for secondary text in a
+/// selected table row.
+private struct OnEmphasizedSelectionKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var isOnEmphasizedSelection: Bool {
+        get { self[OnEmphasizedSelectionKey.self] }
+        set { self[OnEmphasizedSelectionKey.self] = newValue }
+    }
+}
+
 /// Rows in the sidebar and the file list share this hover and selection treatment.
+///
+/// Selection follows the AppKit convention rather than a single fixed colour: the accent colour
+/// only when the window is active, a quiet grey otherwise. A row that stays vivid blue in a
+/// background window is one of the clearest tells that an app is not really native.
 struct RowBackground: ViewModifier {
     var isSelected: Bool
     var isHovered: Bool
+
+    @Environment(\.controlActiveState) private var activeState
 
     func body(content: Content) -> some View {
         content
             .background {
                 RoundedRectangle(cornerRadius: Metrics.corner)
-                    .fill(isSelected ? Palette.selected : (isHovered ? Palette.hover : .clear))
+                    .fill(fill)
             }
+            .foregroundStyle(isEmphasized ? Palette.selectedEmphasizedText : Palette.textPrimary)
+            .environment(\.isOnEmphasizedSelection, isEmphasized)
+    }
+
+    private var isEmphasized: Bool {
+        isSelected && activeState != .inactive
+    }
+
+    private var fill: Color {
+        if isSelected {
+            return activeState == .inactive ? Palette.selected : Palette.selectedEmphasized
+        }
+        return isHovered ? Palette.hover : .clear
     }
 }
 
@@ -220,7 +336,7 @@ struct ActivityDot: View {
 
     var body: some View {
         Circle()
-            .fill(isActive ? tint : Palette.textTertiary.opacity(0.4))
+            .fill(isActive ? tint : Palette.textTertiary)
             .frame(width: 6, height: 6)
             .scaleEffect(isActive && pulse ? 1.35 : 1)
             .opacity(isActive && pulse ? 0.5 : 1)

@@ -1,0 +1,75 @@
+# Agent CLIs
+
+Ground truth for the Agents settings screen, read off this machine on 2026-08-18. Verified, not
+guessed. Anything not listed here should be treated as unknown rather than invented.
+
+## Security rule
+
+`~/.claude.json` and `~/.codex/auth.json` contain live credentials: OAuth access tokens, refresh
+tokens and possibly an API key. Baton reads them ONLY to show non-secret, derived facts (email,
+organisation, plan, auth method, expiry). A token must never be rendered in the UI, written to a
+log, put on the pasteboard, or included in an error message. When a field is missing, say
+"unknown", never fall back to printing raw file contents.
+
+## Detection
+
+| Agent | Executable | Version command | Observed output |
+| --- | --- | --- | --- |
+| Claude Code | `claude` | `claude --version` | `2.1.234 (Claude Code)` |
+| Codex | `codex` | `codex --version` | `codex-cli 0.147.0` |
+| Cursor | `cursor-agent` | `cursor-agent --version` | not installed here |
+| OpenCode | `opencode` | `opencode --version` | not installed here |
+
+Resolve the executable through `Shell.which(_:)`, which already augments PATH for a GUI launch.
+Two of the four are not installed on this machine, so "not installed" is a first-class state and
+has to look deliberate, not broken.
+
+## Claude Code
+
+Account facts live in `~/.claude.json` under `oauthAccount`. Relevant keys, all optional:
+
+- `emailAddress`, `displayName`, `organizationName`
+- `organizationType` (observed `claude_max`), `organizationRateLimitTier` (observed
+  `default_claude_max_20x`), `billingType` (observed `stripe_subscription`), `seatTier`,
+  `organizationRole` (observed `admin`)
+
+Derive the login method from `organizationType`: `claude_max` reads as "Claude Max account".
+An `ANTHROPIC_API_KEY` in the environment means API key auth instead, and takes precedence in
+what is displayed. Config file to offer for opening: `~/.claude/settings.json` (a symlink into
+the user's dotfiles here, so resolve symlinks before revealing it).
+
+Login command: `claude /login`. Baton cannot run that inline because it is interactive, so the
+button must open it in a terminal, the way `Reveal.inTerminal(_:)` already does.
+
+## Codex
+
+`~/.codex/auth.json` keys: `auth_mode` (observed `chatgpt`), `OPENAI_API_KEY` (null here),
+`last_refresh`, and `tokens` with `access_token`, `refresh_token`, `id_token`, `account_id`.
+
+The readable facts are claims inside `tokens.id_token`, a JWT. Split on ".", base64url decode the
+SECOND segment, parse as JSON. Do NOT verify the signature and do not pretend to: this is display
+only, and the CLI is the thing that actually authenticates.
+
+Claims: `email`, `name`, `exp` (expiry, seconds since epoch), and a nested object under the key
+`https://api.openai.com/auth` holding `chatgpt_plan_type` (observed `prolite`),
+`chatgpt_account_id`, `chatgpt_subscription_active_until`, `organizations`.
+
+So: Provider `openai`, Plan from `chatgpt_plan_type` (title case it), Auth from `auth_mode`
+(`chatgpt` reads as "ChatGPT login", `apikey` as "API key"), Account from `email`.
+
+Config file: `~/.codex/config.toml`. Login command: `codex login`.
+
+## Cursor and OpenCode
+
+Not installed here, so nothing about their auth files is verified. Detect the binary and show the
+version if present. Do NOT invent an auth file format for them: show "Connected" only when there
+is real evidence, otherwise show that the CLI was found and leave the account block out. Cursor's
+config directory is `~/.cursor` (exists here, holds `hooks.json`). OpenCode's is `~/.opencode`
+(absent here).
+
+## What Baton can actually run
+
+Only Claude Code. The stream-json protocol in `PROTOCOL.md` is the Claude Code one, and
+`AgentRunner` speaks it. Codex, Cursor and OpenCode are detected and configurable, and a
+workspace cannot yet be driven by them. The UI must say so plainly rather than implying a
+connected CLI is a usable backend.

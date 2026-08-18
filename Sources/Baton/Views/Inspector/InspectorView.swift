@@ -21,44 +21,49 @@ struct InspectorView: View {
         VStack(spacing: 0) {
             PullRequestBar(model: model)
             Hairline()
-            tabs
+            toolbar
             Hairline()
             content
         }
         .background(Palette.surface)
     }
 
-    // MARK: - Tabs
+    // MARK: - Toolbar
 
-    private var tabs: some View {
-        HStack(spacing: 2) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 2) {
-                    ForEach(InspectorTab.allCases, id: \.self) { tab in
-                        tabButton(tab)
-                    }
+    /// A real segmented control rather than three hand drawn buttons. It is the AppKit control for
+    /// exactly this choice, so it gets the right metrics, the right selection colour and the right
+    /// behaviour when the window goes inactive, at every width, for free.
+    private var toolbar: some View {
+        HStack(spacing: InspectorLayout.gap) {
+            Picker("Inspector view", selection: tabSelection) {
+                ForEach(InspectorTab.allCases, id: \.self) { tab in
+                    Text(title(for: tab)).tag(tab)
                 }
             }
-            .scrollIndicators(.never)
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
 
-            iconButton(
-                isReviewing ? "eye.fill" : "eye",
-                help: "Review the changes one file at a time",
-                isOn: isReviewing
-            ) {
-                isReviewing.toggle()
-                if isReviewing, model.selectedFilePath == nil {
-                    model.selectedFilePath = model.changedFiles.first?.path
-                }
+            Spacer(minLength: InspectorLayout.tight)
+
+            Toggle(isOn: $isReviewing) {
+                Image(systemName: "eye")
+            }
+            .toggleStyle(.button)
+            .controlSize(.small)
+            .disabled(model.changedFiles.isEmpty)
+            .help("Review the changes one file at a time")
+            .onChange(of: isReviewing) { _, reviewing in
+                guard reviewing, model.selectedFilePath == nil else { return }
+                model.selectedFilePath = model.changedFiles.first?.path
             }
 
-            iconButton(
-                isSideBySide ? "rectangle.split.2x1.fill" : "rectangle.split.2x1",
-                help: isSideBySide ? "Show a unified diff" : "Show the diff side by side",
-                isOn: isSideBySide
-            ) {
-                isSideBySide.toggle()
+            Toggle(isOn: $isSideBySide) {
+                Image(systemName: "rectangle.split.2x1")
             }
+            .toggleStyle(.button)
+            .controlSize(.small)
+            .help(isSideBySide ? "Show a unified diff" : "Show the diff side by side")
 
             Menu {
                 Button("Refresh") {
@@ -80,64 +85,26 @@ struct InspectorView: View {
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 10, weight: .semibold))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
-            .frame(width: 22)
-            .foregroundStyle(Palette.textSecondary)
+            .controlSize(.small)
+            .fixedSize()
+            .help("More for this worktree")
         }
-        .padding(.horizontal, 6)
-        .frame(height: 30)
+        .padding(.horizontal, InspectorLayout.gap)
+        .frame(height: InspectorLayout.barHeight)
     }
 
-    private func tabButton(_ tab: InspectorTab) -> some View {
-        let isSelected = model.inspectorTab == tab
-
-        return Button {
-            model.inspectorTab = tab
-        } label: {
-            HStack(spacing: 4) {
-                Text(tab.rawValue)
-                    .font(isSelected ? Typo.labelEmphasis : Typo.label)
-                    .lineLimit(1)
-                    .fixedSize()
-                if tab == .changes, !model.changedFiles.isEmpty {
-                    Text("\(model.changedFiles.count)")
-                        .font(Typo.micro)
-                        .monospacedDigit()
-                        .foregroundStyle(Palette.textTertiary)
-                        .lineLimit(1)
-                        .fixedSize()
-                }
-            }
-            .foregroundStyle(isSelected ? Palette.textPrimary : Palette.textSecondary)
-            .padding(.horizontal, 7)
-            .frame(height: 20)
-            .background(
-                isSelected ? Palette.selected : .clear,
-                in: RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+    /// The model is observable rather than a source of truth this view owns, so the picker reads
+    /// and writes it directly instead of keeping a second copy that could drift.
+    private var tabSelection: Binding<InspectorTab> {
+        Binding(get: { model.inspectorTab }, set: { model.inspectorTab = $0 })
     }
 
-    private func iconButton(
-        _ symbol: String,
-        help: String,
-        isOn: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(isOn ? Palette.accent : Palette.textSecondary)
-                .frame(width: 22, height: 20)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(help)
+    private func title(for tab: InspectorTab) -> String {
+        guard tab == .changes, !model.changedFiles.isEmpty else { return tab.rawValue }
+        return "\(tab.rawValue) (\(model.changedFiles.count))"
     }
 
     // MARK: - Content
@@ -178,22 +145,24 @@ struct InspectorView: View {
         let total = max(model.changedFiles.count, 1)
 
         return VStack(spacing: 0) {
-            HStack(spacing: 6) {
+            HStack(spacing: InspectorLayout.gap) {
                 Button {
                     step(-1, from: index)
                 } label: {
                     Image(systemName: "chevron.left")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
                 .disabled(index == 0)
+                .help("Previous file")
 
                 Button {
                     step(1, from: index)
                 } label: {
                     Image(systemName: "chevron.right")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
                 .disabled(index >= total - 1)
+                .help("Next file")
 
                 Text(file.filename)
                     .font(Typo.labelEmphasis)
@@ -201,7 +170,7 @@ struct InspectorView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
 
-                Spacer(minLength: 4)
+                Spacer(minLength: InspectorLayout.tight)
 
                 Text("\(index + 1) of \(total)")
                     .font(Typo.micro)
@@ -209,10 +178,8 @@ struct InspectorView: View {
                     .foregroundStyle(Palette.textTertiary)
                 DiffStatLabel(additions: file.additions, deletions: file.deletions, compact: true)
             }
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(Palette.textSecondary)
-            .padding(.horizontal, 10)
-            .frame(height: 26)
+            .padding(.horizontal, InspectorLayout.inset)
+            .frame(height: Metrics.rowHeight)
             .background(Palette.surfaceSunken)
 
             Hairline()
@@ -225,4 +192,28 @@ struct InspectorView: View {
         guard model.changedFiles.indices.contains(target) else { return }
         model.selectedFilePath = model.changedFiles[target].path
     }
+}
+
+/// The inspector's spacing scale.
+///
+/// One set of numbers rather than a literal per call site, because three stacked panes only read
+/// as one column if their rows, insets and gutters agree.
+enum InspectorLayout {
+    /// Between two things that belong to each other.
+    static let tight: CGFloat = 2
+    /// Between controls in a row.
+    static let gap: CGFloat = 6
+    /// The inset a list row keeps from the edge of the pane.
+    static let inset: CGFloat = 10
+    /// The pull request strip and the toolbar under it.
+    static let barHeight: CGFloat = 32
+    /// A meaning colour used as a background rather than as ink. One value, so a green badge and a
+    /// blue chip carry the same weight.
+    static let tintOpacity: Double = 0.12
+    /// Status glyphs share one box, so the names beside them line up whichever symbol lands in it.
+    static let glyphWidth: CGFloat = 16
+    /// One level of indent in the file tree.
+    static let indentStep: CGFloat = 12
+    /// How much room a list keeps once a detail pane has opened beneath it.
+    static let listHeight: CGFloat = 220
 }

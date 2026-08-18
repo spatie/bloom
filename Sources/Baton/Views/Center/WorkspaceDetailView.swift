@@ -37,7 +37,7 @@ struct WorkspaceDetailView: View {
             // stack and only its content takes room. The sidebar and inspector are placed by
             // RootView, which is why neither appears here.
             BottomPanelView(model: model)
-                .frame(height: model.isBottomPanelVisible ? 260 : nil)
+                .frame(height: model.isBottomPanelVisible ? Metrics.sidebarWidth : nil)
         }
         .background(Palette.windowBackground)
         .task(id: model.workspace.id) { await model.onAppear() }

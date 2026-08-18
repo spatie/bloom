@@ -36,7 +36,7 @@ struct ChangedFileList: View {
                             }
                         }
                     }
-                    .padding(.bottom, 4)
+                    .padding(.bottom, InspectorLayout.tight * 2)
                 }
             }
         }
@@ -57,42 +57,35 @@ struct ChangedFileList: View {
         }
     }
 
+    /// "No changes" and "git could not tell us" look identical unless they are said differently,
+    /// and the second one quietly convinces the user their agent did nothing.
+    @ViewBuilder
     private var empty: some View {
-        VStack(spacing: 6) {
-            if model.isLoadingChanges {
-                ProgressView().controlSize(.small)
-            } else if let problem = model.changesError {
-                // "No changes" and "git could not tell us" look identical otherwise, and the
-                // second one quietly convinces the user their agent did nothing.
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 16, weight: .light))
-                    .foregroundStyle(Palette.warning)
-                Text("Could not read the changes")
-                    .font(Typo.captionEmphasis)
-                    .foregroundStyle(Palette.textSecondary)
-                Text(problem)
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(4)
-                    .frame(maxWidth: 260)
-                    .textSelection(.enabled)
-            } else {
-                Image(systemName: "checkmark.circle")
-                    .font(.system(size: 16, weight: .light))
-                    .foregroundStyle(Palette.textTertiary)
-                Text("No changes yet")
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
-            }
+        if model.isLoadingChanges {
+            LoadingView("Reading the worktree")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let problem = model.changesError {
+            EmptyStateView(
+                glyph: "exclamationmark.triangle",
+                title: "Could not read the changes",
+                message: problem,
+                actionTitle: "Try again",
+                action: { Task { await model.refreshChanges() } }
+            )
+        } else {
+            EmptyStateView(
+                glyph: "checkmark.circle",
+                title: "No changes yet",
+                message: "Nothing in this worktree differs from \(model.workspace.baseBranch)."
+            )
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func header(_ directory: String) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: InspectorLayout.tight * 2) {
             Image(systemName: "folder")
-                .font(.system(size: 8))
+                .font(Typo.micro)
+                .imageScale(.small)
             Text(directory.isEmpty ? "Repository root" : directory)
                 .font(Typo.micro)
                 .lineLimit(1)
@@ -100,8 +93,8 @@ struct ChangedFileList: View {
             Spacer(minLength: 0)
         }
         .foregroundStyle(Palette.textTertiary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
+        .padding(.horizontal, InspectorLayout.inset)
+        .padding(.vertical, InspectorLayout.tight * 2)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.surfaceSunken)
     }
@@ -112,30 +105,31 @@ struct ChangedFileList: View {
         return Button {
             model.selectedFilePath = isSelected ? nil : file.path
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: InspectorLayout.gap) {
                 glyph(file.change)
                 Text(file.filename)
                     .font(Typo.label)
                     .foregroundStyle(Palette.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Spacer(minLength: 4)
+                Spacer(minLength: InspectorLayout.tight * 2)
                 if file.isBinary {
                     Chip(text: "bin")
                 } else {
                     DiffStatLabel(additions: file.additions, deletions: file.deletions, compact: true)
                 }
                 Image(systemName: isSelected ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(Typo.micro)
+                    .imageScale(.small)
                     .foregroundStyle(Palette.textTertiary)
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, InspectorLayout.gap)
             .frame(height: Metrics.rowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .rowBackground(isSelected: isSelected, isHovered: hoveredPath == file.path)
-        .padding(.horizontal, 4)
+        .padding(.horizontal, InspectorLayout.tight * 2)
         .onHover { hovering in
             hoveredPath = hovering ? file.path : (hoveredPath == file.path ? nil : hoveredPath)
         }
@@ -160,8 +154,11 @@ struct ChangedFileList: View {
         Text(change.rawValue)
             .font(Typo.codeTiny)
             .foregroundStyle(color(for: change))
-            .frame(width: 14, height: 14)
-            .background(color(for: change).opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
+            .frame(width: InspectorLayout.glyphWidth, height: InspectorLayout.glyphWidth)
+            .background(
+                color(for: change).opacity(InspectorLayout.tintOpacity),
+                in: RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+            )
     }
 
     private func color(for change: ChangedFile.Change) -> Color {

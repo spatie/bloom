@@ -10,6 +10,9 @@ import BatonCore
 struct FileTreeView: View {
     let model: WorkspaceModel
 
+    /// The dot marking a file the agent touched. Punctuation, not a badge.
+    private static let changedDotSize: CGFloat = 5
+
     @State private var children: [String: [TreeNode]] = [:]
     @State private var expanded: Set<String> = []
     @State private var selection: String?
@@ -75,14 +78,14 @@ struct FileTreeView: View {
     @ViewBuilder
     private var tree: some View {
         if isLoading {
-            ProgressView()
-                .controlSize(.small)
+            LoadingView("Listing the worktree")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if children.isEmpty {
-            Text("Nothing tracked in this worktree yet")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            EmptyStateView(
+                glyph: "folder",
+                title: "Nothing tracked",
+                message: "Git knows about no files in this worktree yet."
+            )
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -90,7 +93,7 @@ struct FileTreeView: View {
                         treeRow(row)
                     }
                 }
-                .padding(.vertical, 2)
+                .padding(.vertical, InspectorLayout.tight)
             }
         }
     }
@@ -112,13 +115,14 @@ struct FileTreeView: View {
                 if isChanged { model.selectedFilePath = node.path }
             }
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: InspectorLayout.tight * 2) {
                 Image(systemName: node.isDirectory
                       ? (expanded.contains(node.path) ? "chevron.down" : "chevron.right")
                       : "doc")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(Typo.micro)
+                    .imageScale(.small)
                     .foregroundStyle(Palette.textTertiary)
-                    .frame(width: 10)
+                    .frame(width: InspectorLayout.glyphWidth)
                 Text(node.name)
                     .font(Typo.label)
                     .foregroundStyle(node.isDirectory ? Palette.textSecondary : Palette.textPrimary)
@@ -128,17 +132,17 @@ struct FileTreeView: View {
                 if isChanged {
                     Circle()
                         .fill(Palette.warning)
-                        .frame(width: 5, height: 5)
+                        .frame(width: Self.changedDotSize, height: Self.changedDotSize)
                 }
             }
-            .padding(.leading, CGFloat(row.depth) * 12 + 8)
-            .padding(.trailing, 8)
-            .frame(height: 22)
+            .padding(.leading, CGFloat(row.depth) * InspectorLayout.indentStep + InspectorLayout.gap)
+            .padding(.trailing, InspectorLayout.gap)
+            .frame(height: Metrics.rowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .rowBackground(isSelected: isSelected, isHovered: hovered == node.path)
-        .padding(.horizontal, 4)
+        .padding(.horizontal, InspectorLayout.tight * 2)
         .onHover { hovering in
             hovered = hovering ? node.path : (hovered == node.path ? nil : hovered)
         }
@@ -232,6 +236,8 @@ struct FilePreview: View {
     /// Far more than fits on a screen, and enough that scrolling never reaches the truncation on
     /// any file a person would open on purpose.
     private static let lineLimit = 5_000
+    /// A horizontal scroll wider than this helps nobody and makes the scroller useless.
+    private static let columnLimit = 800
 
     @State private var lines: [String] = []
     @State private var carries: [LexState] = []
@@ -248,14 +254,14 @@ struct FilePreview: View {
     var body: some View {
         Group {
             if isLoading {
-                ProgressView()
-                    .controlSize(.small)
+                LoadingView("Reading the file")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if lines.isEmpty {
-                Text("Nothing to show for \((path as NSString).lastPathComponent)")
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(
+                    glyph: "doc",
+                    title: "Nothing to show",
+                    message: "\((path as NSString).lastPathComponent) is empty, or is not text."
+                )
             } else {
                 content
             }
@@ -268,7 +274,10 @@ struct FilePreview: View {
         GeometryReader { proxy in
             let width = max(
                 proxy.size.width,
-                CGFloat(maxColumns) * CodeMetrics.advance + CodeMetrics.numberWidth + 24
+                CGFloat(maxColumns) * CodeMetrics.advance
+                    + CodeMetrics.numberWidth
+                    + CodeMetrics.textInset
+                    + CodeMetrics.gutterPadding * 2
             )
             ScrollView([.vertical, .horizontal]) {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -279,7 +288,7 @@ struct FilePreview: View {
                                 .monospacedDigit()
                                 .foregroundStyle(Palette.textTertiary)
                                 .frame(width: CodeMetrics.numberWidth, alignment: .trailing)
-                                .padding(.trailing, 6)
+                                .padding(.trailing, CodeMetrics.gutterPadding)
                                 .background(Palette.diffGutter)
                             CodeText(
                                 line: lines[index],
@@ -294,7 +303,7 @@ struct FilePreview: View {
                         Text("Showing the first \(Self.lineLimit) lines")
                             .font(Typo.micro)
                             .foregroundStyle(Palette.textTertiary)
-                            .padding(8)
+                            .padding(InspectorLayout.inset)
                     }
                 }
                 .frame(width: width, alignment: .leading)
@@ -327,7 +336,7 @@ struct FilePreview: View {
         carries = states
         language = detected
         isTruncated = truncated
-        maxColumns = min(kept.reduce(0) { max($0, CodeMetrics.columns(of: $1)) }, 800)
+        maxColumns = min(kept.reduce(0) { max($0, CodeMetrics.columns(of: $1)) }, Self.columnLimit)
         isLoading = false
     }
 }
@@ -342,7 +351,7 @@ struct VSplitLayout<Top: View, Bottom: View>: View {
     var body: some View {
         VStack(spacing: 0) {
             top()
-                .frame(maxHeight: hasBottom ? 220 : .infinity)
+                .frame(maxHeight: hasBottom ? InspectorLayout.listHeight : .infinity)
             if hasBottom {
                 Hairline()
                 bottom()

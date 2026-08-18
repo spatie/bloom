@@ -7,6 +7,10 @@ import BatonCore
 /// actually watching. Text is rendered as plain `Text` rather than markdown on purpose: this view
 /// rebuilds on every delta, and parsing markdown per token is not something a transcript can
 /// afford. The finished block lands a moment later and is rendered properly then.
+///
+/// It uses the same columns as a stored row, so the moment a streamed line is replaced by its
+/// persisted twin nothing moves. A transcript that jumps as rows land is the main way this screen
+/// reads as unfinished.
 struct StreamingRowView: View {
     let transcript: TranscriptModel
 
@@ -15,7 +19,7 @@ struct StreamingRowView: View {
     private static let thinkingTailLimit = 600
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: TranscriptLayout.inset) {
             if !transcript.streamingThinking.isEmpty {
                 thinking
             }
@@ -23,9 +27,9 @@ struct StreamingRowView: View {
                 Text(transcript.streamingText)
                     .font(Typo.body)
                     .foregroundStyle(Palette.textPrimary)
-                    .lineSpacing(4)
+                    .lineSpacing(TranscriptLayout.proseLeading)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 6)
+                    .padding(.horizontal, TranscriptLayout.inset)
             }
             if let tool = transcript.streamingToolName {
                 status(glyph: "gearshape", text: "Running \(tool)")
@@ -33,7 +37,7 @@ struct StreamingRowView: View {
                 status(glyph: nil, text: transcript.statusLabel ?? "Working")
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, TranscriptLayout.tight * 2)
         .transaction { $0.animation = nil }
     }
 
@@ -42,12 +46,9 @@ struct StreamingRowView: View {
     }
 
     private var thinking: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
             HStack(spacing: TranscriptLayout.glyphGap) {
-                Image(systemName: "sparkle")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.textTertiary)
-                    .frame(width: TranscriptLayout.glyphWidth)
+                TranscriptGlyph(symbol: "sparkle")
                 Text("Thinking")
                     .font(Typo.labelEmphasis)
                     .foregroundStyle(Palette.textSecondary)
@@ -65,32 +66,30 @@ struct StreamingRowView: View {
                 .font(Typo.label)
                 .foregroundStyle(Palette.textTertiary)
                 .italic()
-                .lineSpacing(2)
+                .lineSpacing(TranscriptLayout.tight)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, TranscriptLayout.detailIndent)
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, TranscriptLayout.inset)
     }
 
     private func status(glyph: String?, text: String) -> some View {
         HStack(spacing: TranscriptLayout.glyphGap) {
             Group {
                 if let glyph {
-                    Image(systemName: glyph)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.running)
+                    TranscriptGlyph(symbol: glyph, tint: Palette.running)
                 } else {
                     ActivityDot(isActive: true)
+                        .frame(width: TranscriptLayout.glyphWidth)
                 }
             }
-            .frame(width: TranscriptLayout.glyphWidth)
 
             Text(text)
                 .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, TranscriptLayout.inset)
         .frame(height: Metrics.rowHeight)
     }
 

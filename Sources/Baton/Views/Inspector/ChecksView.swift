@@ -8,6 +8,9 @@ import BatonCore
 struct ChecksView: View {
     let model: WorkspaceModel
 
+    /// The rollup dot. Small enough to read as punctuation next to the summary line.
+    private static let dotSize: CGFloat = 6
+
     @State private var runs: [CheckRun] = []
     @State private var hasLoaded = false
 
@@ -37,7 +40,7 @@ struct ChecksView: View {
                             }
                         }
                     }
-                    .padding(.bottom, 4)
+                    .padding(.bottom, InspectorLayout.tight * 2)
                 }
             }
         }
@@ -57,10 +60,10 @@ struct ChecksView: View {
 
     private var summary: some View {
         let rollup = GitHub.rollup(runs)
-        return HStack(spacing: 6) {
+        return HStack(spacing: InspectorLayout.gap) {
             Circle()
                 .fill(color(for: rollup.0))
-                .frame(width: 6, height: 6)
+                .frame(width: Self.dotSize, height: Self.dotSize)
             Text(runs.isEmpty && !hasLoaded ? "Loading checks" : rollup.1)
                 .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
@@ -71,30 +74,26 @@ struct ChecksView: View {
                 .monospacedDigit()
                 .foregroundStyle(Palette.textTertiary)
         }
-        .padding(.horizontal, 10)
-        .frame(height: 28)
+        .padding(.horizontal, InspectorLayout.inset)
+        .frame(height: Metrics.rowHeight)
     }
 
+    @ViewBuilder
     private var empty: some View {
-        VStack(spacing: 6) {
-            if hasLoaded {
-                Image(systemName: "checkmark.seal")
-                    .font(.system(size: 16, weight: .light))
-                    .foregroundStyle(Palette.textTertiary)
-                Text("No checks reported for this branch")
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .multilineTextAlignment(.center)
-            } else {
-                ProgressView().controlSize(.small)
-            }
+        if hasLoaded {
+            EmptyStateView(
+                glyph: "checkmark.seal",
+                title: "No checks",
+                message: "GitHub has not reported a check run for this branch."
+            )
+        } else {
+            LoadingView("Asking GitHub")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func header(_ workflow: String, runs: [CheckRun]) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: InspectorLayout.tight * 2) {
             Text(workflow)
                 .font(Typo.micro)
                 .lineLimit(1)
@@ -104,8 +103,8 @@ struct ChecksView: View {
                 .monospacedDigit()
         }
         .foregroundStyle(Palette.textTertiary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
+        .padding(.horizontal, InspectorLayout.inset)
+        .padding(.vertical, InspectorLayout.tight * 2)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.surfaceSunken)
     }
@@ -116,7 +115,7 @@ struct ChecksView: View {
         Button {
             if let url = run.detailsURL { GitHubBridge.open(url) }
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: InspectorLayout.gap) {
                 glyph(for: Self.state(of: run))
                 VStack(alignment: .leading, spacing: 0) {
                     Text(run.name)
@@ -130,7 +129,7 @@ struct ChecksView: View {
                             .lineLimit(1)
                     }
                 }
-                Spacer(minLength: 4)
+                Spacer(minLength: InspectorLayout.tight * 2)
                 if let duration = Self.duration(of: run) {
                     Text(duration)
                         .font(Typo.micro)
@@ -139,42 +138,45 @@ struct ChecksView: View {
                 }
                 if run.detailsURL != nil {
                     Image(systemName: "arrow.up.right")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(Typo.micro)
+                        .imageScale(.small)
                         .foregroundStyle(Palette.textTertiary)
                 }
             }
-            .padding(.horizontal, 10)
-            .frame(height: 30)
+            .padding(.horizontal, InspectorLayout.inset)
+            .frame(height: Metrics.rowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(run.detailsURL ?? run.name)
     }
 
+    /// Every state occupies the same box, so a list of mixed results does not shuffle its names
+    /// sideways as runs finish.
     @ViewBuilder
     private func glyph(for state: CheckState) -> some View {
-        switch state {
-        case .running:
-            ProgressView()
-                .controlSize(.mini)
-                .frame(width: 14, height: 14)
-        case .passed:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(Palette.positive)
-                .frame(width: 14, height: 14)
-        case .failed:
-            Image(systemName: "xmark.circle.fill")
-                .foregroundStyle(Palette.negative)
-                .frame(width: 14, height: 14)
-        case .skipped:
-            Image(systemName: "minus.circle")
-                .foregroundStyle(Palette.textTertiary)
-                .frame(width: 14, height: 14)
-        case .neutral:
-            Image(systemName: "circle")
-                .foregroundStyle(Palette.textTertiary)
-                .frame(width: 14, height: 14)
+        Group {
+            switch state {
+            case .running:
+                ProgressView()
+                    .controlSize(.mini)
+            case .passed:
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Palette.positive)
+            case .failed:
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(Palette.negative)
+            case .skipped:
+                Image(systemName: "minus.circle")
+                    .foregroundStyle(Palette.textTertiary)
+            case .neutral:
+                Image(systemName: "circle")
+                    .foregroundStyle(Palette.textTertiary)
+            }
         }
+        .font(Typo.label)
+        .imageScale(.medium)
+        .frame(width: InspectorLayout.glyphWidth, height: InspectorLayout.glyphWidth)
     }
 
     // MARK: - Classification

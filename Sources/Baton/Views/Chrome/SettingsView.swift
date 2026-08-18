@@ -2,9 +2,24 @@ import AppKit
 import SwiftUI
 import BatonCore
 
+@MainActor
+private enum AppearancePreference {
+    static func apply(_ value: String) {
+        NSApp.appearance = switch value {
+        case "light": NSAppearance(named: .aqua)
+        case "dark": NSAppearance(named: .darkAqua)
+        default: nil
+        }
+    }
+}
+
 /// Collects global and repository preferences in one window so configuration stays discoverable.
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
+
+    init() {
+        AppearancePreference.apply(UserDefaults.standard.string(forKey: "appearance") ?? "system")
+    }
 
     var body: some View {
         TabView {
@@ -21,7 +36,10 @@ struct SettingsView: View {
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
         .tabViewStyle(.automatic)
-        .frame(width: 620, height: 480)
+        .frame(
+            minWidth: Metrics.sidebarWidth + Metrics.inspectorWidth,
+            minHeight: Metrics.inspectorWidth
+        )
         .background(Palette.windowBackground)
         // RootView is the single presenter for `app.alert`. Binding it here too gave one alert
         // two presenters, and the loser leaves an empty dialog shell on screen.
@@ -31,7 +49,6 @@ struct SettingsView: View {
 /// Keeps operating-system behavior and safety choices separate from agent configuration.
 private struct GeneralSettingsView: View {
     @AppStorage("appearance") private var appearance = "system"
-    @AppStorage("notifyWhenAgentFinishes") private var notifyWhenAgentFinishes = false
     @AppStorage("confirmBeforeArchiving") private var confirmBeforeArchiving = true
 
     var body: some View {
@@ -42,11 +59,6 @@ private struct GeneralSettingsView: View {
                 Text("Dark").tag("dark")
             }
             .pickerStyle(.segmented)
-
-            Toggle("Notify when an agent finishes", isOn: $notifyWhenAgentFinishes)
-                .onChange(of: notifyWhenAgentFinishes) { _, enabled in
-                    if enabled { Notifications.requestAuthorization() }
-                }
 
             Toggle("Confirm before archiving", isOn: $confirmBeforeArchiving)
 
@@ -65,6 +77,8 @@ private struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { AppearancePreference.apply(appearance) }
+        .onChange(of: appearance) { _, value in AppearancePreference.apply(value) }
     }
 }
 
@@ -79,57 +93,54 @@ private struct ProjectSettingsView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            List(selection: $selectedRepoID) {
-                ForEach(app.repos) { repo in
-                    ProjectRow(repo: repo) {
-                        repoPendingRemoval = repo
-                    }
+        Form {
+            Section("Projects") {
+                List(selection: $selectedRepoID) {
+                    ForEach(app.repos) { repo in
+                        ProjectRow(repo: repo) {
+                            repoPendingRemoval = repo
+                        }
                         .tag(repo.id)
                         .contextMenu {
                             Button("Remove Project", role: .destructive) {
                                 repoPendingRemoval = repo
                             }
                         }
+                    }
+                }
+                .frame(minHeight: Metrics.sidebarWidth)
+
+                HStack {
+                    Button {
+                        addProjectFolder()
+                    } label: {
+                        Label("Add Project", systemImage: "plus")
+                    }
+
+                    Button("Remove Project", systemImage: "minus", role: .destructive) {
+                        repoPendingRemoval = selectedRepo
+                    }
+                    .disabled(selectedRepo == nil)
+
+                    Spacer()
                 }
             }
-            .frame(minHeight: 150)
-
-            HStack {
-                Button {
-                    addProjectFolder()
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Add Project Folder")
-
-                Button {
-                    repoPendingRemoval = selectedRepo
-                } label: {
-                    Image(systemName: "minus")
-                }
-                .buttonStyle(.borderless)
-                .disabled(selectedRepo == nil)
-                .accessibilityLabel("Remove Project")
-
-                Spacer()
-            }
-            .padding(.horizontal, Metrics.gutter)
-            .frame(height: Metrics.rowHeight)
-
-            Hairline()
 
             if let selectedRepo {
-                EffectiveSettingsView(repo: selectedRepo)
+                Section("Effective settings") {
+                    EffectiveSettingsView(repo: selectedRepo)
+                }
             } else {
-                EmptyStateView(
-                    glyph: "folder",
-                    title: "Select a project",
-                    message: "Its effective repository settings will appear here."
-                )
+                Section {
+                    ContentUnavailableView(
+                        "Select a project",
+                        systemImage: "folder",
+                        description: Text("Its effective repository settings will appear here.")
+                    )
+                }
             }
         }
+        .formStyle(.grouped)
         .onAppear {
             if selectedRepoID == nil { selectedRepoID = app.repos.first?.id }
         }
@@ -254,36 +265,32 @@ private struct EffectiveSettingsView: View {
     @State private var settings = RepoSettings()
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Metrics.gutter) {
-                HStack {
-                    Text("Effective settings")
-                        .font(Typo.title)
-                    Spacer()
-                    Button("Open Project Settings") {
-                        Reveal.inEditor((repo.path as NSString).appendingPathComponent(".conductor/settings.toml"))
-                    }
+        Group {
+            LabeledContent {
+                Button("Open Project Settings") {
+                    Reveal.inEditor((repo.path as NSString).appendingPathComponent(".conductor/settings.toml"))
                 }
-
-                SettingValue(title: "Contributing files", value: settings.sources.isEmpty ? "None" : settings.sources.joined(separator: "\n"))
-                ScriptValue(title: "Setup script", value: settings.setupScript)
-                ScriptValue(title: "Archive script", value: settings.archiveScript)
-
-                if settings.runScripts.isEmpty {
-                    SettingValue(title: "Run scripts", value: "None")
-                } else {
-                    ForEach(settings.runScripts) { script in
-                        ScriptValue(title: "Run: \(script.name)", value: script.command)
-                    }
-                }
-
-                SettingValue(
-                    title: "Files to copy",
-                    value: settings.filesToCopy.isEmpty ? "None" : settings.filesToCopy.joined(separator: "\n")
-                )
-                SettingValue(title: "Branch prefix", value: settings.branchPrefix ?? "None")
+            } label: {
+                Text("Configuration")
             }
-            .padding(Metrics.gutter)
+
+            SettingValue(title: "Contributing files", value: settings.sources.isEmpty ? "None" : settings.sources.joined(separator: "\n"))
+            ScriptValue(title: "Setup script", value: settings.setupScript)
+            ScriptValue(title: "Archive script", value: settings.archiveScript)
+
+            if settings.runScripts.isEmpty {
+                SettingValue(title: "Run scripts", value: "None")
+            } else {
+                ForEach(settings.runScripts) { script in
+                    ScriptValue(title: "Run: \(script.name)", value: script.command)
+                }
+            }
+
+            SettingValue(
+                title: "Files to copy",
+                value: settings.filesToCopy.isEmpty ? "None" : settings.filesToCopy.joined(separator: "\n")
+            )
+            SettingValue(title: "Branch prefix", value: settings.branchPrefix ?? "None")
         }
         .task(id: repo.path) {
             settings = RepoSettings()
@@ -303,13 +310,12 @@ private struct SettingValue: View {
     let value: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.cornerSmall) {
-            Text(title)
-                .font(Typo.labelEmphasis)
+        LabeledContent(title) {
             Text(value)
                 .font(Typo.codeSmall)
                 .foregroundStyle(Palette.textSecondary)
                 .textSelection(.enabled)
+                .multilineTextAlignment(.trailing)
         }
     }
 }
@@ -320,10 +326,7 @@ private struct ScriptValue: View {
     let value: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.cornerSmall) {
-            Text(title)
-                .font(Typo.labelEmphasis)
-
+        LabeledContent(title) {
             ScrollView([.horizontal, .vertical]) {
                 Text(value ?? "None")
                     .font(Typo.codeSmall)
@@ -331,46 +334,16 @@ private struct ScriptValue: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxHeight: 72)
             .padding(Metrics.cornerSmall)
             .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
         }
     }
 }
 
-/// Stores launch defaults independently of repository overrides and surfaces missing command-line tools early.
+/// Surfaces missing command-line tools before an agent launch fails without a useful explanation.
 private struct AgentSettingsView: View {
-    @Environment(AppModel.self) private var app
-
-    @State private var defaultModel = "opus"
-    @State private var defaultEffort = "high"
-    @State private var defaultPermissionMode = PermissionMode.acceptEdits.rawValue
-    @State private var fastModeByDefault = false
-    @State private var hasLoaded = false
-
     var body: some View {
         Form {
-            Picker("Default model", selection: $defaultModel) {
-                Text("Opus").tag("opus")
-                Text("Sonnet").tag("sonnet")
-                Text("Haiku").tag("haiku")
-            }
-
-            Picker("Default effort", selection: $defaultEffort) {
-                Text("Low").tag("low")
-                Text("Medium").tag("medium")
-                Text("High").tag("high")
-                Text("Max").tag("max")
-            }
-
-            Picker("Default permission mode", selection: $defaultPermissionMode) {
-                ForEach(PermissionMode.allCases, id: \.rawValue) { mode in
-                    Text(mode.label).tag(mode.rawValue)
-                }
-            }
-
-            Toggle("Fast mode by default", isOn: $fastModeByDefault)
-
             Section("Command-line tools") {
                 ToolPathRow(name: "claude", path: Shell.which("claude"))
                 ToolPathRow(name: "gh", path: Shell.which("gh"))
@@ -378,25 +351,6 @@ private struct AgentSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .task { await load() }
-        .onChange(of: defaultModel) { _, value in save("defaultModel", value) }
-        .onChange(of: defaultEffort) { _, value in save("defaultEffort", value) }
-        .onChange(of: defaultPermissionMode) { _, value in save("defaultPermissionMode", value) }
-        .onChange(of: fastModeByDefault) { _, value in save("fastModeByDefault", value ? "true" : "false") }
-    }
-
-    private func load() async {
-        guard let store = app.store else { return }
-        defaultModel = (try? await store.setting("defaultModel")) ?? "opus"
-        defaultEffort = (try? await store.setting("defaultEffort")) ?? "high"
-        defaultPermissionMode = (try? await store.setting("defaultPermissionMode")) ?? PermissionMode.acceptEdits.rawValue
-        fastModeByDefault = (try? await store.setting("fastModeByDefault")) == "true"
-        hasLoaded = true
-    }
-
-    private func save(_ key: String, _ value: String) {
-        guard hasLoaded, let store = app.store else { return }
-        Task { try? await store.setSetting(key, value) }
     }
 }
 
@@ -428,32 +382,26 @@ private struct AboutSettingsView: View {
     }
 
     var body: some View {
-        VStack(spacing: Metrics.gutter) {
-            Image(systemName: "point.3.connected.trianglepath.dotted")
-                .font(.system(size: 32))
-                .foregroundStyle(Palette.accent)
-
-            Text("Baton")
-                .font(Typo.title)
-
-            Text("Version \(version)")
-                .font(Typo.label)
-                .foregroundStyle(Palette.textSecondary)
-
-            Text("Parallel coding agents, each working safely in its own git worktree.")
-                .font(Typo.label)
-                .foregroundStyle(Palette.textSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 320)
-
-            LabeledContent("GitHub user") {
-                Text(GitHubIdentity.cachedUsername ?? "Not resolved")
-                    .font(Typo.codeSmall)
-                    .foregroundStyle(Palette.textSecondary)
+        Form {
+            Section {
+                LabeledContent("Application") {
+                    Label("Baton", systemImage: "point.3.connected.trianglepath.dotted")
+                        .font(Typo.title)
+                        .foregroundStyle(Palette.textPrimary)
+                }
+                LabeledContent("Version", value: version)
+                LabeledContent("Purpose", value: "Parallel coding agents in isolated git worktrees")
             }
-            .frame(maxWidth: 320)
+
+            Section("Account") {
+                LabeledContent("GitHub user") {
+                    Text(GitHubIdentity.cachedUsername ?? "Not resolved")
+                        .font(Typo.codeSmall)
+                        .foregroundStyle(Palette.textSecondary)
+                }
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .formStyle(.grouped)
     }
 }
 

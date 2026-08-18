@@ -51,13 +51,15 @@ struct DiffLineView: View {
         .background(Palette.diffGutter)
     }
 
+    /// Right aligned, dimmed and monospaced, so a column of numbers reads as a ruler rather than
+    /// as content competing with the code beside it.
     private func number(_ value: Int?) -> some View {
         Text(value.map(String.init) ?? "")
             .font(Typo.codeTiny)
             .monospacedDigit()
             .foregroundStyle(Palette.textTertiary)
             .frame(width: CodeMetrics.numberWidth, alignment: .trailing)
-            .padding(.trailing, 4)
+            .padding(.trailing, CodeMetrics.gutterPadding)
     }
 
     // MARK: - Content
@@ -77,6 +79,9 @@ struct DiffLineView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             default:
+                // The word level emphasis is a background on the glyph runs inside `CodeText`, so
+                // it paints over the row tint underneath rather than replacing it. Both are needed:
+                // the tint says the line changed, the emphasis says which part of it did.
                 HStack(spacing: 0) {
                     marker
                     CodeText(line: line.text, language: language, carry: carry)
@@ -135,9 +140,10 @@ struct DiffHunkHeaderView: View {
     var width: CGFloat
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: InspectorLayout.gap) {
             Image(systemName: "arrow.left.and.right")
-                .font(.system(size: 8, weight: .semibold))
+                .font(Typo.micro)
+                .imageScale(.small)
             Text(text)
                 .font(Typo.codeTiny)
                 .lineLimit(1)
@@ -145,7 +151,7 @@ struct DiffHunkHeaderView: View {
             Spacer(minLength: 0)
         }
         .foregroundStyle(Palette.textTertiary)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, CodeMetrics.textInset)
         .frame(width: width, height: CodeMetrics.rowHeight, alignment: .leading)
         .background(Palette.surfaceSunken)
     }
@@ -161,15 +167,16 @@ struct DiffExpanderView: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
+            HStack(spacing: InspectorLayout.gap) {
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(Typo.micro)
+                    .imageScale(.small)
                 Text(title)
                     .font(Typo.codeTiny)
                 Spacer(minLength: 0)
             }
             .foregroundStyle(isHovered ? Palette.accent : Palette.textTertiary)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, CodeMetrics.textInset)
             .frame(width: width, height: CodeMetrics.rowHeight, alignment: .leading)
             .background(isHovered ? Palette.hover : Palette.surfaceSunken)
             .contentShape(Rectangle())

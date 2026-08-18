@@ -49,8 +49,12 @@ final class BatonTerminalView: LocalProcessTerminalView {
     private let processObserver = TerminalProcessObserver()
 
     /// Kept separate from `font` so Cmd+Plus and Cmd+Minus have something to step.
-    private var fontSize: CGFloat = 12 {
+    private var fontSize: CGFloat = BatonTerminalView.defaultFontSize {
         didSet { font = Self.monospacedFont(size: fontSize) }
+    }
+
+    private static var defaultFontSize: CGFloat {
+        NSFont.preferredFont(forTextStyle: .callout).pointSize
     }
 
     override init(frame: CGRect) {
@@ -71,8 +75,7 @@ final class BatonTerminalView: LocalProcessTerminalView {
     }
 
     static func monospacedFont(size: CGFloat) -> NSFont {
-        NSFont(name: "SFMono-Regular", size: size)
-            ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
     }
 
     // MARK: - Process
@@ -130,53 +133,54 @@ final class BatonTerminalView: LocalProcessTerminalView {
     /// SwiftTerm ships a palette that looks nothing like the rest of Baton, so both the sixteen
     /// ANSI slots and the default foreground and background are replaced here.
     func applyAppearanceColors() {
-        let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-
-        installColors(isDark ? Self.darkAnsi : Self.lightAnsi)
-        nativeForegroundColor = NSColor(hex: isDark ? 0xEDEDEF : 0x1C1C1E)
-        nativeBackgroundColor = NSColor(hex: isDark ? 0x1B1B1D : 0xF4F4F2)
-        caretColor = NSColor(hex: isDark ? 0x5B8DEF : 0x2F6FED)
-        selectedTextBackgroundColor = NSColor(hex: isDark ? 0xFFFFFF26 : 0x00000020)
+        installColors(ansiColors.map(swiftTermColor))
+        nativeForegroundColor = resolved(Palette.textPrimary)
+        nativeBackgroundColor = resolved(Palette.surface)
+        caretColor = resolved(Palette.accent)
+        selectedTextBackgroundColor = resolved(Palette.selected)
         needsDisplay = true
     }
 
-    private static let darkAnsi: [SwiftTerm.Color] = [
-        SwiftTerm.Color(red8: 0x2A, green8: 0x2A, blue8: 0x2E),
-        SwiftTerm.Color(red8: 0xF0, green8: 0x6A, blue8: 0x6A),
-        SwiftTerm.Color(red8: 0x3F, green8: 0xBF, blue8: 0x7F),
-        SwiftTerm.Color(red8: 0xE0, green8: 0xA9, blue8: 0x3B),
-        SwiftTerm.Color(red8: 0x5B, green8: 0x8D, blue8: 0xEF),
-        SwiftTerm.Color(red8: 0xC7, green8: 0x92, blue8: 0xEA),
-        SwiftTerm.Color(red8: 0x5B, green8: 0xC8, blue8: 0xDB),
-        SwiftTerm.Color(red8: 0xC8, green8: 0xC8, blue8: 0xCE),
-        SwiftTerm.Color(red8: 0x6E, green8: 0x6E, blue8: 0x76),
-        SwiftTerm.Color(red8: 0xFF, green8: 0x8A, blue8: 0x8A),
-        SwiftTerm.Color(red8: 0x64, green8: 0xD9, blue8: 0x9B),
-        SwiftTerm.Color(red8: 0xF0, green8: 0xC4, blue8: 0x63),
-        SwiftTerm.Color(red8: 0x84, green8: 0xAA, blue8: 0xF5),
-        SwiftTerm.Color(red8: 0xDD, green8: 0xB0, blue8: 0xF5),
-        SwiftTerm.Color(red8: 0x84, green8: 0xDC, blue8: 0xE9),
-        SwiftTerm.Color(red8: 0xED, green8: 0xED, blue8: 0xEF),
-    ]
+    private var ansiColors: [SwiftUI.Color] {
+        [
+            Palette.textTertiary,
+            Palette.negative,
+            Palette.positive,
+            Palette.warning,
+            Palette.accent,
+            Color(nsColor: .systemPurple),
+            Color(nsColor: .systemTeal),
+            Palette.textSecondary,
+            Palette.textSecondary,
+            Palette.negative,
+            Palette.positive,
+            Palette.warning,
+            Palette.accent,
+            Color(nsColor: .systemPurple),
+            Color(nsColor: .systemTeal),
+            Palette.textPrimary,
+        ]
+    }
 
-    private static let lightAnsi: [SwiftTerm.Color] = [
-        SwiftTerm.Color(red8: 0x1C, green8: 0x1C, blue8: 0x1E),
-        SwiftTerm.Color(red8: 0xC0, green8: 0x30, blue8: 0x30),
-        SwiftTerm.Color(red8: 0x1A, green8: 0x7F, blue8: 0x4B),
-        SwiftTerm.Color(red8: 0xB0, green8: 0x79, blue8: 0x08),
-        SwiftTerm.Color(red8: 0x2F, green8: 0x6F, blue8: 0xED),
-        SwiftTerm.Color(red8: 0x9B, green8: 0x23, blue8: 0x93),
-        SwiftTerm.Color(red8: 0x0B, green8: 0x72, blue8: 0x85),
-        SwiftTerm.Color(red8: 0x9A, green8: 0x9A, blue8: 0xA0),
-        SwiftTerm.Color(red8: 0x6B, green8: 0x6B, blue8: 0x70),
-        SwiftTerm.Color(red8: 0xD8, green8: 0x4A, blue8: 0x4A),
-        SwiftTerm.Color(red8: 0x2A, green8: 0x9D, blue8: 0x63),
-        SwiftTerm.Color(red8: 0xC7, green8: 0x92, blue8: 0x12),
-        SwiftTerm.Color(red8: 0x4A, green8: 0x85, blue8: 0xF0),
-        SwiftTerm.Color(red8: 0xB4, green8: 0x3C, blue8: 0xAC),
-        SwiftTerm.Color(red8: 0x1A, green8: 0x8C, blue8: 0xA0),
-        SwiftTerm.Color(red8: 0x33, green8: 0x33, blue8: 0x38),
-    ]
+    private func resolved(_ color: SwiftUI.Color) -> NSColor {
+        var native = NSColor(color)
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            native = NSColor(color)
+        }
+        return native
+    }
+
+    /// SwiftTerm stores terminal colours as byte channels, while Baton keeps dynamic AppKit
+    /// colours so they follow appearance, contrast and accent changes.
+    private func swiftTermColor(_ color: SwiftUI.Color) -> SwiftTerm.Color {
+        let resolved = resolved(color)
+        let native = resolved.usingColorSpace(NSColorSpace.deviceRGB) ?? resolved
+        return SwiftTerm.Color(
+            red8: UInt16(clamping: Int((native.redComponent * 255).rounded())),
+            green8: UInt16(clamping: Int((native.greenComponent * 255).rounded())),
+            blue8: UInt16(clamping: Int((native.blueComponent * 255).rounded()))
+        )
+    }
 
     // MARK: - Keyboard
 
@@ -198,11 +202,17 @@ final class BatonTerminalView: LocalProcessTerminalView {
         case "v":
             paste(self)
         case "+", "=":
-            fontSize = min(fontSize + 1, 32)
+            fontSize = min(
+                fontSize + Metrics.hairline,
+                NSFont.preferredFont(forTextStyle: .largeTitle).pointSize
+            )
         case "-":
-            fontSize = max(fontSize - 1, 8)
+            fontSize = max(
+                fontSize - Metrics.hairline,
+                NSFont.preferredFont(forTextStyle: .caption2).pointSize
+            )
         case "0":
-            fontSize = 12
+            fontSize = Self.defaultFontSize
         default:
             return super.performKeyEquivalent(with: event)
         }

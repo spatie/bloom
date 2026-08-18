@@ -2,12 +2,15 @@ import SwiftUI
 import AppKit
 import BatonCore
 
-/// One project and its workspaces, as a pinned section of the sidebar list.
+/// One project and its workspaces, as a collapsible section of the source list.
 ///
-/// The section owns the interaction that surrounds a row (selection, context menus, drag to
-/// reorder, the archive confirmation) while `WorkspaceRow` stays a pure drawing of a workspace.
-/// Splitting it this way keeps the row cheap to redraw, which matters because a running agent
-/// updates its diff stat every few seconds.
+/// The section owns the interaction that surrounds a row (context menus, drag to reorder, the
+/// archive confirmation) while `WorkspaceRow` stays a pure drawing of a workspace. Splitting it
+/// this way keeps the row cheap to redraw, which matters because a running agent updates its diff
+/// stat every few seconds.
+///
+/// Collapsing is the list's own disclosure triangle bound to the repo's stored `collapsed` flag,
+/// rather than a chevron we draw and a tap gesture we interpret.
 struct RepoSection: View {
     var repo: Repo
     var filter: SidebarFilter
@@ -30,21 +33,78 @@ struct RepoSection: View {
     }
 
     var body: some View {
-        Section {
-            if !repo.collapsed {
-                ForEach(rows) { workspace in
-                    row(workspace)
-                }
-                if rows.isEmpty {
-                    Text(filter == .all ? "No workspaces yet" : "Nothing matches the filter")
-                        .font(Typo.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                        .padding(.horizontal, 14)
-                        .frame(height: 22, alignment: .leading)
-                }
+        Section(isExpanded: isExpanded) {
+            ForEach(rows) { workspace in
+                row(workspace)
+            }
+            if rows.isEmpty {
+                Text(filter == .all ? "No workspaces yet" : "Nothing matches the filter")
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textTertiary)
             }
         } header: {
             header
+        }
+    }
+
+    /// The stored flag is the source of truth, so the binding only writes when the list is asking
+    /// for the state it is not already in. Anything else would toggle back on every redraw.
+    private var isExpanded: Binding<Bool> {
+        Binding(
+            get: { !repo.collapsed },
+            set: { expanded in
+                guard expanded == repo.collapsed else { return }
+                Task { await app.toggleCollapsed(repo) }
+            }
+        )
+    }
+
+    // MARK: - Header
+
+    private var headerID: String { "repo:\(repo.id)" }
+
+    /// The confirmations hang off the header rather than off the `Section`, because a section is
+    /// a layout instruction to the list rather than a view that can present anything.
+    private var header: some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+                .fill(Color(hexString: repo.accent))
+                .frame(width: Self.swatch, height: Self.swatch)
+
+            if isRenamingRepo {
+                TextField("", text: $repoDraft)
+                    .textFieldStyle(.plain)
+                    .focused($repoFieldFocused)
+                    .onSubmit { commitRepoRename() }
+                    .onExitCommand { isRenamingRepo = false }
+            } else {
+                Text(repo.name)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 4)
+
+            Button {
+                onCreateWorkspace(repo)
+            } label: {
+                Image(systemName: "plus")
+                    .imageScale(.small)
+                    .foregroundStyle(hovered == headerID ? Palette.textSecondary : Palette.textTertiary)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("New workspace in \(repo.name)")
+        }
+        .contentShape(Rectangle())
+        .onHoverChange { inside in
+            hovered = inside ? headerID : (hovered == headerID ? nil : hovered)
+        }
+        .contextMenu {
+            Button("New workspace") { onCreateWorkspace(repo) }
+            Button("Rename") { beginRepoRename() }
+            Button("Reveal in Finder") { Reveal.inFinder(repo.path) }
+            Divider()
+            Button("Remove project", role: .destructive) { isConfirmingRemove = true }
         }
         .confirmationDialog(
             archiveTarget.map { "Archive \($0.name)?" } ?? "Archive workspace?",
@@ -82,69 +142,8 @@ struct RepoSection: View {
         }
     }
 
-    // MARK: - Header
-
-    private var headerID: String { "repo:\(repo.id)" }
-
-    private var header: some View {
-        HStack(spacing: 6) {
-            RoundedRectangle(cornerRadius: 3)
-                .fill(Color(hexString: repo.accent))
-                .frame(width: 9, height: 9)
-
-            if isRenamingRepo {
-                TextField("", text: $repoDraft)
-                    .textFieldStyle(.plain)
-                    .font(Typo.labelEmphasis)
-                    .foregroundStyle(Palette.textPrimary)
-                    .focused($repoFieldFocused)
-                    .onSubmit { commitRepoRename() }
-                    .onExitCommand { isRenamingRepo = false }
-            } else {
-                Text(repo.name)
-                    .font(Typo.labelEmphasis)
-                    .foregroundStyle(Palette.textSecondary)
-                    .lineLimit(1)
-
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 7, weight: .bold))
-                    .foregroundStyle(Palette.textTertiary)
-                    .rotationEffect(.degrees(repo.collapsed ? -90 : 0))
-            }
-
-            Spacer(minLength: 4)
-
-            Button {
-                onCreateWorkspace(repo)
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(hovered == headerID ? Palette.textSecondary : Palette.textTertiary)
-                    .frame(width: 16, height: 16)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("New workspace in \(repo.name)")
-        }
-        .padding(.horizontal, 14)
-        .frame(height: 24)
-        .background(Palette.sidebar)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            guard !isRenamingRepo else { return }
-            Task { await app.toggleCollapsed(repo) }
-        }
-        .onHoverChange { inside in
-            hovered = inside ? headerID : (hovered == headerID ? nil : hovered)
-        }
-        .contextMenu {
-            Button("New workspace") { onCreateWorkspace(repo) }
-            Button("Rename") { beginRepoRename() }
-            Button("Reveal in Finder") { Reveal.inFinder(repo.path) }
-            Divider()
-            Button("Remove project", role: .destructive) { isConfirmingRemove = true }
-        }
-    }
+    /// Small enough to read as a project marker rather than as a control.
+    private static let swatch: CGFloat = 9
 
     // MARK: - Rows
 
@@ -152,24 +151,17 @@ struct RepoSection: View {
         WorkspaceRow(
             workspace: workspace,
             isSelected: app.selection.workspaceID == workspace.id,
-            isHovered: hovered == workspace.id,
             isRunning: app.isRunning(workspace),
             renaming: $renaming
         )
-        .padding(.horizontal, 8)
-        .onHoverChange { inside in
-            hovered = inside ? workspace.id : (hovered == workspace.id ? nil : hovered)
-        }
-        .onTapGesture {
-            guard renaming != workspace.id else { return }
-            renaming = nil
-            app.selection = .workspace(workspace.id)
-        }
+        .tag(SidebarSelection.workspace(workspace.id))
         .draggable(workspace.id)
         .dropDestination(for: String.self) { items, _ in
             guard let dragged = items.first, dragged != workspace.id else { return false }
             guard let moved = app.workspaces.first(where: { $0.id == dragged }),
                   moved.repoID == repo.id else { return false }
+            // The visible list can be filtered, so the drop target's position has to be
+            // translated back into the unfiltered order the store actually stores.
             let unfiltered = app.workspaces(in: repo)
             guard let index = unfiltered.firstIndex(where: { $0.id == workspace.id }) else {
                 return false

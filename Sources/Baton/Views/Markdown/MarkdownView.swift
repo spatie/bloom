@@ -49,7 +49,7 @@ private struct MarkdownBlocksView: View {
     var foreground = Palette.textPrimary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Metrics.gutter) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 MarkdownBlockView(block: block, foreground: foreground)
             }
@@ -66,10 +66,8 @@ private struct MarkdownBlockView: View {
         switch block {
         case let .paragraph(inline):
             inlineText(inline, font: Typo.body, color: foreground)
-                .lineSpacing(3)
         case let .heading(level, inline):
             inlineText(inline, font: level <= 2 ? Typo.title : Typo.bodyEmphasis, color: foreground)
-                .padding(.top, level <= 2 ? Metrics.gutter : Metrics.corner)
         case let .codeBlock(code, language, _):
             CodeBlockView(code: code, language: language)
         case let .bulletList(items, tight):
@@ -79,12 +77,9 @@ private struct MarkdownBlockView: View {
         case let .taskList(items):
             taskList(items)
         case let .blockQuote(blocks):
-            HStack(alignment: .top, spacing: 0) {
-                Rectangle()
-                    .fill(Palette.border)
-                    .frame(width: 2)
+            HStack(alignment: .top, spacing: Metrics.gutter) {
+                Hairline(axis: .vertical)
                 MarkdownBlocksView(blocks: blocks, foreground: Palette.textSecondary)
-                    .padding(.leading, 10)
             }
         case let .table(headers, rows, alignments):
             table(headers: headers, rows: rows, alignments: alignments)
@@ -115,13 +110,13 @@ private struct MarkdownBlockView: View {
                     .monospacedDigit()
             }
         }
-        .frame(width: 18, alignment: .trailing)
+        .frame(width: Metrics.rowHeight, alignment: .trailing)
     }
 
     private func list(items: [[MarkdownBlock]], start: Int?, tight: Bool) -> some View {
         VStack(alignment: .leading, spacing: tight ? 0 : Metrics.cornerSmall) {
             ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
-                HStack(alignment: .top, spacing: 0) {
+                HStack(alignment: .top, spacing: Metrics.cornerSmall) {
                     marker(start.map { "\($0 + offset)." }, bullet: start == nil)
                     MarkdownBlocksView(blocks: item, foreground: foreground)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -133,11 +128,11 @@ private struct MarkdownBlockView: View {
     private func taskList(_ items: [(checked: Bool, inline: [MarkdownInline])]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: Metrics.cornerSmall) {
                     Image(systemName: item.checked ? "checkmark.square.fill" : "square")
                         .font(Typo.caption)
                         .foregroundStyle(item.checked ? Palette.accent : Palette.textTertiary)
-                        .frame(width: 18, alignment: .trailing)
+                        .frame(width: Metrics.rowHeight, alignment: .trailing)
                     inlineText(item.inline, font: Typo.body, color: foreground)
                 }
             }
@@ -267,7 +262,7 @@ private enum InlineAttributes {
                 var child = AttributedString(code)
                 child.font = Typo.code
                 child.foregroundColor = Palette.textPrimary
-                child.backgroundColor = Palette.surfaceSunken
+                child.backgroundColor = Palette.hover
                 output += child
             case let .link(text, url):
                 var child = render(text, font: font, color: Palette.accent, intents: intents)

@@ -1,26 +1,40 @@
 import SwiftUI
 import BatonCore
 
-/// The three column layout: workspace list, the session, and the inspector.
+/// The window: a real `NavigationSplitView` with a real toolbar.
 ///
-/// Deliberately not `NavigationSplitView`. That control owns its own sidebar chrome, animation
-/// and collapse behaviour, and fighting it costs more than laying out three panes by hand does.
+/// This used to be a hand-rolled `HStack` with its own drag handles, which is precisely why the
+/// window had no title bar, no toolbar, an opaque sidebar and a hard divider running straight
+/// through the traffic lights. `NavigationSplitView` hands all of that back to AppKit: the
+/// translucent sidebar material, the sidebar toggle, traffic light placement, unified toolbar
+/// integration and remembered column widths. The inspector is the platform `.inspector`, so it
+/// resizes and collapses the way every other Mac inspector does.
 struct RootView: View {
     @Environment(AppModel.self) private var app
 
-    @State private var sidebarWidth: CGFloat = Metrics.sidebarWidth
-    @State private var inspectorWidth: CGFloat = Metrics.inspectorWidth
-    @State private var isSidebarVisible = true
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isCreateSheetPresented = false
     @State private var createTargetRepo: Repo?
 
     var body: some View {
-        GeometryReader { proxy in
-            layout(containerWidth: proxy.size.width)
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            SidebarView()
+                .navigationSplitViewColumnWidth(
+                    min: 200, ideal: Metrics.sidebarWidth, max: 420
+                )
+        } detail: {
+            center
+                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                // The toolbar belongs to the detail column, not to the split view. Attached to
+                // the split view, AppKit lays every item out in the sidebar's slice of the
+                // toolbar, which is narrow, so everything past the first item falls into the
+                // overflow menu. On the detail it gets the whole width right of the sidebar.
+                .toolbar { toolbar }
         }
-        .background(Palette.windowBackground)
-        .animation(.easeOut(duration: 0.16), value: isSidebarVisible)
-        .animation(.easeOut(duration: 0.16), value: app.selectedModel?.isInspectorVisible)
+        // The window title is hidden in the toolbar (see BatonApp), but it still names the window
+        // in the Window menu and in Mission Control, so it is worth setting.
+        .navigationTitle(windowTitle)
+        .inspector(isPresented: isInspectorVisible) { inspector }
         .task { await app.bootstrap() }
         .sheet(isPresented: $isCreateSheetPresented) {
             CreateWorkspaceSheet(initialRepo: createTargetRepo)
@@ -56,7 +70,7 @@ struct RootView: View {
             if let id = note.object as? String { app.selection = .workspace(id) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .batonToggleSidebar)) { _ in
-            isSidebarVisible.toggle()
+            columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
         }
         .onReceive(NotificationCenter.default.publisher(for: .batonNewWorkspace)) { note in
             createTargetRepo = note.object as? Repo ?? app.selectedWorkspace.flatMap(app.repo(for:))
@@ -64,70 +78,7 @@ struct RootView: View {
         }
     }
 
-    private func layout(containerWidth: CGFloat) -> some View {
-        let inspectorVisible = app.selectedModel?.isInspectorVisible == true
-        let sidebarRange = paneRange(
-            minimum: 200,
-            maximum: 420,
-            containerWidth: containerWidth,
-            otherPaneWidth: inspectorVisible ? max(inspectorWidth, 280) : 0,
-            visibleHandleCount: (isSidebarVisible ? 1 : 0) + (inspectorVisible ? 1 : 0)
-        )
-        let visibleSidebarWidth = isSidebarVisible
-            ? min(max(sidebarWidth, sidebarRange.lowerBound), sidebarRange.upperBound)
-            : 0
-        let inspectorRange = paneRange(
-            minimum: 280,
-            maximum: 760,
-            containerWidth: containerWidth,
-            otherPaneWidth: visibleSidebarWidth,
-            visibleHandleCount: (isSidebarVisible ? 1 : 0) + (inspectorVisible ? 1 : 0)
-        )
-        let visibleInspectorWidth = inspectorVisible
-            ? min(max(inspectorWidth, inspectorRange.lowerBound), inspectorRange.upperBound)
-            : 0
-
-        return HStack(spacing: 0) {
-            if isSidebarVisible {
-                SidebarView()
-                    .frame(width: visibleSidebarWidth)
-                    .background(Palette.sidebar)
-                    .transition(.move(edge: .leading))
-
-                ResizeHandle(width: $sidebarWidth, range: sidebarRange, edge: .leading)
-            }
-
-            center
-                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
-                .background(Palette.surface)
-
-            if let model = app.selectedModel, model.isInspectorVisible {
-                ResizeHandle(width: $inspectorWidth, range: inspectorRange, edge: .trailing)
-
-                InspectorView(model: model)
-                    .id(model.workspace.id)
-                    .frame(width: visibleInspectorWidth)
-                    .background(Palette.surface)
-                    .transition(.move(edge: .trailing))
-            }
-        }
-    }
-
-    /// Pane limits depend on the live window size so neither drag handle can consume the space
-    /// reserved for the session.
-    private func paneRange(
-        minimum: CGFloat,
-        maximum: CGFloat,
-        containerWidth: CGFloat,
-        otherPaneWidth: CGFloat,
-        visibleHandleCount: Int
-    ) -> ClosedRange<CGFloat> {
-        let available = containerWidth
-            - 420
-            - otherPaneWidth
-            - CGFloat(visibleHandleCount) * Metrics.hairline
-        return minimum...max(minimum, min(maximum, available))
-    }
+    // MARK: - Columns
 
     @ViewBuilder
     private var center: some View {
@@ -149,6 +100,127 @@ struct RootView: View {
         }
     }
 
+    @ViewBuilder
+    private var inspector: some View {
+        if let model = app.selectedModel {
+            InspectorView(model: model)
+                // Rebuilt per workspace, so a diff selection never leaks across a switch.
+                .id(model.workspace.id)
+                .inspectorColumnWidth(min: 280, ideal: Metrics.inspectorWidth, max: 760)
+        }
+    }
+
+    // MARK: - Toolbar
+
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            // A split button: the common case is one click, and the folder picker that used to
+            // hide in the account row lives behind the arrow.
+            Menu {
+                Button("New Workspace") { presentCreate(in: nil) }
+                    .disabled(app.repos.isEmpty)
+                Button("Add Project Folder\u{2026}") { addProject() }
+                Divider()
+                Button("Refresh Changes") { Task { await app.refreshDiffStats() } }
+            } label: {
+                Label("New workspace", systemImage: "plus")
+            } primaryAction: {
+                if app.repos.isEmpty { addProject() } else { presentCreate(in: nil) }
+            }
+            .help("Start a workspace")
+        }
+
+        // Always present, even on Home, because an empty principal item collapses the flexible
+        // space that pins the trailing toggles to the right of the toolbar, and controls that
+        // move as you navigate are worse than a redundant word.
+        ToolbarItem(placement: .principal) {
+            title
+        }
+
+        ToolbarItemGroup(placement: .primaryAction) {
+            Toggle(isOn: isBottomPanelVisible) {
+                Label("Terminal panel", systemImage: "rectangle.bottomthird.inset.filled")
+            }
+            .toggleStyle(.button)
+            .disabled(app.selectedModel == nil)
+            .help("Show the terminal panel")
+
+            Toggle(isOn: isInspectorVisible) {
+                Label("Inspector", systemImage: "sidebar.right")
+            }
+            .toggleStyle(.button)
+            .disabled(app.selectedModel == nil)
+            .help("Show the changed files")
+        }
+    }
+
+    /// What the toolbar says you are looking at: the project, the workspace and the branch you
+    /// are about to push. Those are the three facts people keep needing, and the toolbar is where
+    /// a Mac app puts them.
+    @ViewBuilder
+    private var title: some View {
+        if let workspace = app.selectedWorkspace {
+            HStack(spacing: 6) {
+                if let repo = app.repo(for: workspace) {
+                    Circle()
+                        .fill(Color(hexString: repo.accent))
+                        .frame(width: Self.accentDot, height: Self.accentDot)
+                    Text(repo.name)
+                        .font(Typo.label)
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.right")
+                        .font(Typo.micro)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+
+                Text(workspace.name)
+                    .font(Typo.labelEmphasis)
+                    .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+
+                Chip(
+                    text: workspace.branch,
+                    systemImage: "arrow.triangle.branch",
+                    monospaced: true
+                )
+                .help(workspace.branch)
+            }
+            .fixedSize()
+        } else {
+            Text(app.selection == .search ? "Search" : "Home")
+                .font(Typo.labelEmphasis)
+                .foregroundStyle(Palette.textSecondary)
+        }
+    }
+
+    /// The one measurement here that no semantic constant covers: a colour swatch small enough to
+    /// read as a marker rather than a control.
+    private static let accentDot: CGFloat = 8
+
+    private var windowTitle: String {
+        app.selectedWorkspace?.name ?? "Baton"
+    }
+
+    // MARK: - Bindings
+
+    /// The inspector belongs to the selected workspace, so its visibility is stored there rather
+    /// than in the window. Home and Search have nothing to inspect and read as false.
+    private var isInspectorVisible: Binding<Bool> {
+        Binding(
+            get: { app.selectedModel?.isInspectorVisible ?? false },
+            set: { visible in app.selectedModel?.isInspectorVisible = visible }
+        )
+    }
+
+    private var isBottomPanelVisible: Binding<Bool> {
+        Binding(
+            get: { app.selectedModel?.isBottomPanelVisible ?? false },
+            set: { visible in app.selectedModel?.isBottomPanelVisible = visible }
+        )
+    }
+
     /// Dismissing the dialog by any route must clear the request, or a refused archive would sit
     /// there and re-present itself on the next redraw.
     private var archiveBinding: Binding<Bool> {
@@ -167,41 +239,18 @@ struct RootView: View {
             }
         )
     }
-}
 
-/// A draggable one-pixel divider. Uses a wider invisible hit area than it draws, because a
-/// one-pixel drag target is unusable.
-struct ResizeHandle: View {
-    @Binding var width: CGFloat
-    var range: ClosedRange<CGFloat>
-    var edge: HorizontalEdge
+    // MARK: - Actions
 
-    @State private var startWidth: CGFloat?
-    @State private var isHovered = false
+    /// Every entry point goes through the same notification so the sheet behaves identically
+    /// whether it came from the toolbar, the sidebar, Home or the menu bar.
+    private func presentCreate(in repo: Repo?) {
+        NotificationCenter.default.post(name: .batonNewWorkspace, object: repo)
+    }
 
-    var body: some View {
-        Rectangle()
-            .fill(isHovered ? Palette.borderStrong : Palette.border)
-            .frame(width: Metrics.hairline)
-            .overlay {
-                Color.clear
-                    .frame(width: 9)
-                    .contentShape(Rectangle())
-                    .onHover { hovering in
-                        isHovered = hovering
-                        if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-                    }
-                    .gesture(
-                        DragGesture(minimumDistance: 1)
-                            .onChanged { value in
-                                let base = startWidth ?? width
-                                if startWidth == nil { startWidth = base }
-                                let delta = edge == .leading ? value.translation.width : -value.translation.width
-                                width = min(max(base + delta, range.lowerBound), range.upperBound)
-                            }
-                            .onEnded { _ in startWidth = nil }
-                    )
-            }
+    private func addProject() {
+        guard let path = ProjectFolderPicker.choose() else { return }
+        Task { await app.addRepository(at: path) }
     }
 }
 

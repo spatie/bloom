@@ -59,7 +59,7 @@ struct CreateWorkspaceSheet: View {
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: "plus.rectangle.on.folder")
-                .font(.system(size: 12, weight: .medium))
+                .font(Typo.bodyEmphasis)
                 .foregroundStyle(Palette.accent)
             Text("New workspace")
                 .font(Typo.title)
@@ -136,10 +136,11 @@ struct CreateWorkspaceSheet: View {
             Text("Add a git repository before starting a workspace.")
                 .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
-            Button("Add a folder") {
+            Button("Add a Folder") {
                 guard let path = ProjectFolderPicker.choose() else { return }
                 Task { await app.addRepository(at: path) }
             }
+            .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity)
         .padding(28)

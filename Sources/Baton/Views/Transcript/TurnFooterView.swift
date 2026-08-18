@@ -20,10 +20,11 @@ struct TurnFooterView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Hairline()
-            HStack(spacing: 8) {
-                Image(systemName: result?.succeeded == false ? "exclamationmark.circle" : "checkmark.circle")
-                    .font(.system(size: 10))
-                    .foregroundStyle(result?.succeeded == false ? Palette.negative : Palette.positive)
+            HStack(spacing: TranscriptLayout.block) {
+                Image(systemName: succeeded ? "checkmark.circle" : "exclamationmark.circle")
+                    .font(Typo.micro)
+                    .imageScale(.medium)
+                    .foregroundStyle(succeeded ? Palette.positive : Palette.negative)
 
                 Text(TurnDuration.format(durationMS))
                     .font(Typo.micro)
@@ -39,16 +40,16 @@ struct TurnFooterView: View {
 
                 fileChips
 
-                Spacer(minLength: 4)
+                Spacer(minLength: TranscriptLayout.tight)
 
                 Button {
                     copy(summaryText)
                 } label: {
                     Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Palette.textSecondary)
+                        .font(Typo.micro)
+                        .imageScale(.medium)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
                 .help("Copy this answer")
 
                 Menu {
@@ -57,15 +58,17 @@ struct TurnFooterView: View {
                     Button("Copy raw event") { copy(String(decoding: row.payload, as: UTF8.self)) }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Palette.textSecondary)
+                        .font(Typo.micro)
+                        .imageScale(.medium)
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .help("More for this turn")
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 7)
+            .foregroundStyle(Palette.textSecondary)
+            .padding(.horizontal, TranscriptLayout.inset)
+            .padding(.vertical, TranscriptLayout.inset)
         }
         .task(id: row.seq) {
             // Off the main actor: a long turn means decoding every tool call in it, and that must
@@ -80,15 +83,15 @@ struct TurnFooterView: View {
     @ViewBuilder
     private var fileChips: some View {
         ForEach(files.prefix(Self.visibleFileLimit)) { file in
-            HStack(spacing: 4) {
+            HStack(spacing: TranscriptLayout.tight * 2) {
                 Text(file.name)
                     .font(Typo.codeTiny)
                     .foregroundStyle(Palette.textSecondary)
                     .lineLimit(1)
                 DiffStatLabel(additions: file.additions, deletions: file.deletions, compact: true)
             }
-            .padding(.horizontal, 5)
-            .padding(.vertical, 2)
+            .padding(.horizontal, TranscriptLayout.inset - 1)
+            .padding(.vertical, TranscriptLayout.tight)
             .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
             .help(file.path)
         }
@@ -98,12 +101,16 @@ struct TurnFooterView: View {
         }
     }
 
+    /// Read through the same cache the rows use. The footer asks for the result three times in one
+    /// pass, and a result payload is one of the larger ones in the file.
     private var result: AgentResult? {
-        guard case .result(let value)? = AgentEvent.decode(line: String(decoding: row.payload, as: UTF8.self)) else {
+        guard case .result(let value)? = TranscriptEventCache.event(rowID: row.id, payload: row.payload) else {
             return nil
         }
         return value
     }
+
+    private var succeeded: Bool { result?.succeeded != false }
 
     private var durationMS: Int { row.durationMS ?? result?.durationMS ?? 0 }
 

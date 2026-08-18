@@ -57,7 +57,7 @@ public struct CodeBlockView: View {
                                     .font(Typo.codeSmall)
                                     .foregroundStyle(Palette.textTertiary)
                                     .monospacedDigit()
-                                    .frame(minWidth: 24, alignment: .trailing)
+                                    .frame(minWidth: Metrics.titleBarHeight, alignment: .trailing)
                             }
                             Text(SyntaxCache.attributed(
                                 line: prepared.lines[offset],
@@ -68,7 +68,6 @@ public struct CodeBlockView: View {
                                 .foregroundStyle(Palette.textPrimary)
                                 .textSelection(.enabled)
                         }
-                        .frame(minHeight: 16)
                     }
                 }
                 .padding(Metrics.gutter)

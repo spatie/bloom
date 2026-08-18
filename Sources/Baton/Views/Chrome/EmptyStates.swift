@@ -25,7 +25,8 @@ struct EmptyStateView: View {
     var body: some View {
         VStack(spacing: Metrics.gutter) {
             Image(systemName: glyph)
-                .font(.system(size: 32))
+                .font(Typo.title)
+                .imageScale(.large)
                 .foregroundStyle(Palette.textTertiary)
 
             Text(title)
@@ -36,11 +37,11 @@ struct EmptyStateView: View {
                 .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 320)
 
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -58,8 +59,7 @@ struct LoadingView: View {
     var body: some View {
         HStack(spacing: Metrics.gutter) {
             ProgressView()
-                .controlSize(.small)
-                .scaleEffect(0.6)
+                .controlSize(.regular)
 
             if let label {
                 Text(label)
@@ -101,7 +101,7 @@ struct ErrorBanner: View {
             }
             .foregroundStyle(Palette.negative)
             .padding(Metrics.gutter)
-            .background(Palette.negative.opacity(0.12), in: RoundedRectangle(cornerRadius: Metrics.corner))
+            .background(Palette.hover, in: RoundedRectangle(cornerRadius: Metrics.corner))
         }
     }
 }

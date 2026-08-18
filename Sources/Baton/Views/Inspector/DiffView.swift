@@ -184,8 +184,7 @@ struct DiffView: View {
     private var content: some View {
         switch phase {
         case .loading:
-            ProgressView()
-                .controlSize(.small)
+            LoadingView("Reading the diff")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case let .notice(symbol, title, detail):
             placeholder(symbol: symbol, title: title, detail: detail)
@@ -301,40 +300,17 @@ struct DiffView: View {
     // MARK: Placeholders
 
     private func placeholder(symbol: String, title: String, detail: String) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: symbol)
-                .font(.system(size: 18, weight: .light))
-                .foregroundStyle(Palette.textTertiary)
-            Text(title)
-                .font(Typo.bodyEmphasis)
-                .foregroundStyle(Palette.textSecondary)
-            Text(detail)
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(glyph: symbol, title: title, message: detail)
     }
 
     private func gate(_ fileDiff: FileDiff, changed: Int) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 18, weight: .light))
-                .foregroundStyle(Palette.textTertiary)
-            Text("This file has \(changed) changed lines")
-                .font(Typo.bodyEmphasis)
-                .foregroundStyle(Palette.textSecondary)
-            Text("Highlighting a diff this size takes a moment.")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-            Button("Show anyway") {
-                Task { await present(fileDiff) }
-            }
-            .controlSize(.small)
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            glyph: "doc.text.magnifyingglass",
+            title: "\(changed) changed lines",
+            message: "Highlighting a diff this size takes a moment.",
+            actionTitle: "Show anyway",
+            action: { Task { await present(fileDiff) } }
+        )
     }
 
     // MARK: Diff
@@ -357,8 +333,11 @@ struct DiffView: View {
     /// One sheet of text, sized from the widest line, so the whole file scrolls sideways together
     /// instead of every row carrying its own scroller.
     private func intrinsicWidth(_ document: DiffDocument) -> CGFloat {
-        let gutter = CodeMetrics.numberWidth + 4
-        let code = CGFloat(document.maxColumns) * CodeMetrics.advance + CodeMetrics.markerWidth + 12
+        let gutter = CodeMetrics.numberWidth + CodeMetrics.gutterPadding
+        let code = CGFloat(document.maxColumns) * CodeMetrics.advance
+            + CodeMetrics.markerWidth
+            + CodeMetrics.textInset
+            + CodeMetrics.gutterPadding
         return isSideBySide ? 2 * (gutter + code) : 2 * gutter + code
     }
 
@@ -391,10 +370,13 @@ struct DiffView: View {
             )
 
         case let .pair(_, pair):
+            // The two panes split whatever the hairline between them leaves, so they stay the
+            // same width as each other on any display.
             HStack(spacing: 0) {
-                side(pair.left, document: document, numbers: .old, width: (width - 1) / 2)
+                let half = (width - Metrics.hairline) / 2
+                side(pair.left, document: document, numbers: .old, width: half)
                 Hairline(axis: .vertical)
-                side(pair.right, document: document, numbers: .new, width: (width - 1) / 2)
+                side(pair.right, document: document, numbers: .new, width: half)
             }
         }
     }

@@ -11,6 +11,13 @@ public actor Store {
     }
 
     public static func defaultPath() throws -> String {
+        // An override exists so a throwaway instance (a snapshot run, a manual experiment) can be
+        // pointed at its own database instead of the one holding the user's real workspaces.
+        if let override = ProcessInfo.processInfo.environment["BATON_DB_PATH"], !override.isEmpty {
+            let directory = (override as NSString).deletingLastPathComponent
+            try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+            return override
+        }
         let directory = defaultDirectory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.appendingPathComponent("baton.sqlite").path

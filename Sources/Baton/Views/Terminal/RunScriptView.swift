@@ -155,7 +155,7 @@ struct RunScriptView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Metrics.corner) {
             ActivityDot(isActive: session.isRunning)
 
             Text(script.name)
@@ -172,14 +172,14 @@ struct RunScriptView: View {
                         text: url.absoluteString,
                         systemImage: "arrow.up.right",
                         tint: Palette.accent,
-                        background: Palette.accent.opacity(0.12),
+                        background: Palette.hover,
                         monospaced: true
                     )
                 }
                 .buttonStyle(.plain)
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: Metrics.corner)
 
             if session.isRunning {
                 action("Stop", icon: "stop.fill", tint: Palette.negative) { session.stop() }
@@ -193,8 +193,8 @@ struct RunScriptView: View {
             }
         }
         .padding(.horizontal, Metrics.gutter)
-        .frame(height: 28)
-        .background(Palette.surface)
+        .padding(.vertical, Metrics.cornerSmall)
+        .headerMaterial()
     }
 
     private func action(
@@ -204,13 +204,16 @@ struct RunScriptView: View {
         run: @escaping () -> Void
     ) -> some View {
         Button(action: run) {
-            HStack(spacing: 3) {
-                Image(systemName: icon).font(.system(size: 9, weight: .semibold))
+            HStack(spacing: Metrics.cornerSmall) {
+                Image(systemName: icon)
+                    .font(Typo.micro)
+                    .imageScale(.small)
                 Text(title).font(Typo.label)
             }
             .foregroundStyle(tint)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
     }
 
     private var serverURL: URL? {

@@ -21,6 +21,10 @@ struct TranscriptView: View {
     private static let streamingID = -2
     /// How far off the bottom the user may be and still be considered to be following along.
     private static let stickyThreshold: CGFloat = 96
+    /// A user bubble takes this share of the pane, and never gets narrower than the floor, so a
+    /// long prompt wraps sensibly and a short one still reads as one side of a conversation.
+    private static let bubbleShare: CGFloat = 0.7
+    private static let bubbleFloor: CGFloat = 240
 
     /// Told whenever the user leaves, or returns to, the live end of the transcript. The composer
     /// uses it to decide whether a "jump to newest" pill is worth offering.
@@ -71,7 +75,7 @@ struct TranscriptView: View {
                         StreamingTailView(transcript: transcript) {
                             follow(proxy, animated: false)
                         }
-                        .padding(.horizontal, 6)
+                        .padding(.horizontal, TranscriptLayout.inset)
                         .id(Self.streamingID)
 
                         Color.clear
@@ -79,7 +83,7 @@ struct TranscriptView: View {
                             .id(Self.bottomID)
                             .background(bottomProbe)
                     }
-                    .padding(.vertical, 8)
+                    .padding(.vertical, TranscriptLayout.block)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .coordinateSpace(name: Self.coordinateSpace)
@@ -118,18 +122,21 @@ struct TranscriptView: View {
             EmptyView()
         } else if row.kind == .result {
             TurnFooterView(rows: transcript.rows, row: row)
-                .padding(.horizontal, 6)
-                .padding(.top, 2)
-                .padding(.bottom, 10)
+                .padding(.horizontal, TranscriptLayout.inset)
+                .padding(.top, TranscriptLayout.tight)
+                .padding(.bottom, TranscriptLayout.block + TranscriptLayout.tight)
         } else {
             TranscriptRowView(
                 row: row,
                 isExpanded: expanded.contains(row.seq),
                 isNested: row.parentToolUseID != nil,
-                maxBubbleWidth: max(240, (width - Metrics.gutter * 2) * 0.7),
+                maxBubbleWidth: max(
+                    Self.bubbleFloor,
+                    (width - Metrics.gutter * 2) * Self.bubbleShare
+                ),
                 onToggle: { toggle(row.seq) }
             )
-            .padding(.horizontal, 6)
+            .padding(.horizontal, TranscriptLayout.inset)
         }
     }
 

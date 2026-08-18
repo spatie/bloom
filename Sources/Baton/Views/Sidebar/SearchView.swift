@@ -17,12 +17,12 @@ struct SearchView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(Typo.bodyEmphasis)
                     .foregroundStyle(Palette.textTertiary)
 
                 TextField("Search workspaces, branches and projects", text: $app.searchQuery)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 15))
+                    .font(.title3)
                     .foregroundStyle(Palette.textPrimary)
                     .focused($fieldFocused)
 
@@ -32,7 +32,7 @@ struct SearchView: View {
                         fieldFocused = true
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 12))
+                            .font(Typo.body)
                             .foregroundStyle(Palette.textTertiary)
                     }
                     .buttonStyle(.plain)
@@ -84,7 +84,7 @@ struct SearchView: View {
                 .lineLimit(1)
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 8, weight: .semibold))
+                .font(Typo.micro)
                 .foregroundStyle(Palette.textTertiary)
 
             Text(hit.workspace.name)

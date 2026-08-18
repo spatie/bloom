@@ -48,8 +48,8 @@ struct ComposerView: View {
     var body: some View {
         box
             .padding(.horizontal, Metrics.gutter)
-            .padding(.bottom, 10)
-            .padding(.top, 4)
+            .padding(.bottom, Metrics.gutter)
+            .padding(.top, Metrics.cornerSmall)
             .background(Palette.surface)
             .task(id: transcript.session.id) { await prepare() }
             .task(id: transcript.workspace.path) {
@@ -74,29 +74,33 @@ struct ComposerView: View {
     }
 
     private var box: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Metrics.corner) {
             editor
             footer
         }
-        .padding(12)
+        .padding(Metrics.gutter)
         // The tap lives on the background rather than the box, so a click inside the text view
         // still lands on the text view and only the padding acts as a focus target.
         .background {
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: Metrics.corner)
                 .fill(Palette.surfaceRaised)
                 .onTapGesture { isFocused = true }
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isFocused ? Palette.borderStrong : Palette.border, lineWidth: 1)
+            RoundedRectangle(cornerRadius: Metrics.corner)
+                .stroke(
+                    isFocused ? Palette.accent : Palette.border,
+                    lineWidth: isFocused ? Metrics.hairline * 2 : Metrics.hairline
+                )
         }
+        .shadow(color: isFocused ? Palette.accent.opacity(0.24) : .clear, radius: Metrics.cornerSmall)
         .overlay(alignment: .topLeading) {
             menuOverlay
-                .alignmentGuide(.top) { $0[.bottom] + 6 }
+                .alignmentGuide(.top) { $0[.bottom] + Metrics.corner }
         }
         .overlay(alignment: .top) {
             unreadOverlay
-                .alignmentGuide(.top) { $0[.bottom] + 8 }
+                .alignmentGuide(.top) { $0[.bottom] + Metrics.corner }
         }
     }
 
@@ -124,7 +128,7 @@ struct ComposerView: View {
     // MARK: - Footer
 
     private var footer: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Metrics.cornerSmall) {
             modelPicker
             fastToggle
             effortPicker
@@ -134,11 +138,11 @@ struct ComposerView: View {
 
             Button(action: attach) {
                 Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(Typo.captionEmphasis)
                     .foregroundStyle(Palette.textSecondary)
-                    .frame(width: 24, height: 24)
+                    .frame(width: Metrics.rowHeight, height: Metrics.rowHeight)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
             .help("Attach a file")
 
             sendButton
@@ -156,14 +160,16 @@ struct ComposerView: View {
                 }
             }
         } label: {
-            ComposerControlLabel(
-                systemImage: "sparkle",
-                text: ComposerOption.label(for: transcript.session.model, in: ComposerOption.models)
+            Label(
+                ComposerOption.label(for: transcript.session.model, in: ComposerOption.models),
+                systemImage: "sparkle"
             )
+            .font(Typo.caption)
+            .foregroundStyle(Palette.textSecondary)
         }
         .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
         .fixedSize()
+        .help("Choose the model")
     }
 
     /// Fast mode has no column on `Session`, so it is kept in the store's key value table. It is
@@ -184,7 +190,7 @@ struct ComposerView: View {
                 isActive: isFastMode
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
         .help("Fast mode trades some reasoning for a quicker reply")
     }
 
@@ -199,14 +205,16 @@ struct ComposerView: View {
                 }
             }
         } label: {
-            ComposerControlLabel(
-                systemImage: "chart.bar.fill",
-                text: ComposerOption.label(for: transcript.session.effort, in: ComposerOption.efforts)
+            Label(
+                ComposerOption.label(for: transcript.session.effort, in: ComposerOption.efforts),
+                systemImage: "chart.bar.fill"
             )
+            .font(Typo.caption)
+            .foregroundStyle(Palette.textSecondary)
         }
         .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
         .fixedSize()
+        .help("Choose reasoning effort")
     }
 
     private var permissionPicker: some View {
@@ -220,40 +228,35 @@ struct ComposerView: View {
                 }
             }
         } label: {
-            ComposerControlLabel(
-                systemImage: Self.permissionGlyph(transcript.session.permissionMode),
-                text: transcript.session.permissionMode.label,
-                tint: transcript.session.permissionMode == .bypassPermissions
+            Label(
+                transcript.session.permissionMode.label,
+                systemImage: Self.permissionGlyph(transcript.session.permissionMode)
+            )
+            .font(Typo.caption)
+            .foregroundStyle(
+                transcript.session.permissionMode == .bypassPermissions
                     ? Palette.warning
                     : Palette.textSecondary
             )
         }
         .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
         .fixedSize()
+        .help("Choose permission mode")
     }
 
     private var sendButton: some View {
         Button {
             if transcript.isRunning { transcript.stop() } else { send() }
         } label: {
-            Circle()
-                .fill(sendTint)
-                .frame(width: 26, height: 26)
-                .overlay {
-                    Image(systemName: transcript.isRunning ? "stop.fill" : "arrow.up")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Palette.textInverted)
-                }
+            Image(systemName: transcript.isRunning ? "stop.fill" : "arrow.up")
+                .font(Typo.captionEmphasis)
+                .frame(width: Metrics.rowHeight, height: Metrics.rowHeight)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.circle)
+        .tint(transcript.isRunning ? Palette.negative : Palette.accent)
         .disabled(!transcript.isRunning && !hasBody)
         .help(transcript.isRunning ? "Stop the agent" : "Send (Return)")
-    }
-
-    private var sendTint: Color {
-        if transcript.isRunning { return Palette.negative }
-        return hasBody ? Palette.accent : Palette.textTertiary.opacity(0.5)
     }
 
     private var hasBody: Bool {
@@ -588,16 +591,16 @@ struct ComposerControlLabel: View {
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Metrics.cornerSmall) {
             Image(systemName: systemImage)
-                .font(.system(size: 10, weight: .medium))
+                .font(Typo.micro)
             Text(text)
                 .font(Typo.caption)
                 .lineLimit(1)
         }
         .foregroundStyle(tint)
-        .padding(.horizontal, 6)
-        .frame(height: 22)
+        .padding(.horizontal, Metrics.corner)
+        .frame(height: Metrics.rowHeight)
         .background {
             RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                 .fill(isActive ? Palette.selected : (isHovered ? Palette.hover : .clear))
@@ -647,17 +650,21 @@ struct NextUnreadPill: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
+            HStack(spacing: Metrics.cornerSmall) {
                 Image(systemName: "arrow.down")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(Typo.micro)
                 Text(count == 1 ? "Next unread" : "Next unread (\(count))")
                     .font(Typo.captionEmphasis)
             }
             .foregroundStyle(Palette.textInverted)
-            .padding(.horizontal, 10)
-            .frame(height: 24)
+            .padding(.horizontal, Metrics.gutter)
+            .frame(height: Metrics.rowHeight)
             .background(Palette.accent.opacity(isHovered ? 1 : 0.9), in: Capsule())
-            .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
+            .shadow(
+                color: Palette.textPrimary.opacity(0.2),
+                radius: Metrics.corner,
+                y: Metrics.hairline * 2
+            )
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
@@ -683,8 +690,8 @@ struct ComposerTextEditor: NSViewRepresentable {
     var onHeightChange: @MainActor (CGFloat) -> Void
     var onKey: @MainActor (ComposerKey) -> Bool
 
-    static let font = NSFont.systemFont(ofSize: 13)
-    static let lineHeight: CGFloat = 17
+    static var font: NSFont { NSFont.preferredFont(forTextStyle: .body) }
+    static var lineHeight: CGFloat { NSLayoutManager().defaultLineHeight(for: font) }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)

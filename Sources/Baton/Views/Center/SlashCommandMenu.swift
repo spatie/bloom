@@ -173,9 +173,9 @@ struct SlashCommandMenu: View {
                                     .id(index)
                             }
                         }
-                        .padding(4)
+                        .padding(Metrics.cornerSmall)
                     }
-                    .frame(maxHeight: 240)
+                    .frame(maxHeight: Metrics.sidebarWidth)
                     .onChange(of: selectedIndex) { _, index in
                         proxy.scrollTo(index, anchor: .bottom)
                     }
@@ -185,7 +185,7 @@ struct SlashCommandMenu: View {
     }
 
     private func row(_ command: SlashCommand, index: Int) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Metrics.corner) {
             Text("/\(command.name)")
                 .font(Typo.code)
                 .foregroundStyle(Palette.textPrimary)
@@ -201,7 +201,7 @@ struct SlashCommandMenu: View {
                 Chip(text: command.origin.label)
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, Metrics.corner)
         .frame(height: Metrics.rowHeight)
         .contentShape(Rectangle())
         .rowBackground(isSelected: index == selectedIndex, isHovered: index == hoveredIndex)

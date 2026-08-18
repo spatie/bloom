@@ -8,13 +8,19 @@ import BatonCore
 /// without a click, which of them is working, which needs reading and which fell over. Everything
 /// else on the row is secondary and is allowed to truncate.
 ///
-/// The row owns no hover state. The parent list holds a single `hovered` id, because one piece of
-/// state for a hundred rows is cheaper than a hundred pieces of state, and it makes "only one row
-/// can be hovered" true by construction.
+/// The row draws no background of its own. It lives in a `List` with `.listStyle(.sidebar)`, and
+/// that list already draws AppKit selection: the accent colour while the window is key, a quiet
+/// grey when it is not. Painting a second highlight underneath was what produced the solid dark
+/// bar the owner saw.
+///
+/// Text uses the hierarchical styles rather than fixed label colours for the same reason: inside
+/// a selected row the list inverts `.primary` and `.secondary` for us, and a pinned
+/// `NSColor.labelColor` would stay dark on the accent fill.
 struct WorkspaceRow: View {
     var workspace: Workspace
+    /// Only used to keep the meaning colours legible against the selection fill. The highlight
+    /// itself belongs to the list.
     var isSelected: Bool
-    var isHovered: Bool
     /// Whether an agent is mid turn in this workspace. Passed in rather than read here, so the row
     /// stays a pure function of its inputs.
     var isRunning: Bool
@@ -32,13 +38,11 @@ struct WorkspaceRow: View {
     var body: some View {
         HStack(spacing: 6) {
             glyph
-                .frame(width: 13, height: 13)
+                .frame(width: Self.glyphSize, height: Self.glyphSize)
 
             if isRenaming {
                 TextField("", text: $draft)
                     .textFieldStyle(.plain)
-                    .font(Typo.body)
-                    .foregroundStyle(Palette.textPrimary)
                     .focused($fieldFocused)
                     .onSubmit { commit() }
                     .onExitCommand { renaming = nil }
@@ -50,8 +54,7 @@ struct WorkspaceRow: View {
                     }
             } else {
                 Text(workspace.name)
-                    .font(workspace.unread ? Typo.bodyEmphasis : Typo.body)
-                    .foregroundStyle(nameTint)
+                    .fontWeight(workspace.unread ? .medium : .regular)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -61,8 +64,8 @@ struct WorkspaceRow: View {
             if !isRenaming {
                 if workspace.pinned {
                     Image(systemName: "pin.fill")
-                        .font(.system(size: 8))
-                        .foregroundStyle(Palette.textTertiary)
+                        .font(Typo.micro)
+                        .foregroundStyle(.tertiary)
                 }
                 if workspace.hasDiff {
                     DiffStatLabel(
@@ -73,11 +76,12 @@ struct WorkspaceRow: View {
                 }
             }
         }
-        .padding(.horizontal, 6)
-        .frame(height: Metrics.rowHeight)
-        .rowBackground(isSelected: isSelected, isHovered: isHovered)
         .contentShape(Rectangle())
     }
+
+    /// Matches the cap height of the surrounding text, so the glyphs line up down the column
+    /// whichever state each row happens to be in.
+    private static let glyphSize: CGFloat = 13
 
     // MARK: - Glyph
 
@@ -104,28 +108,24 @@ struct WorkspaceRow: View {
         case .settingUp:
             ProgressView()
                 .progressViewStyle(.circular)
-                .controlSize(.small)
-                .scaleEffect(0.5)
+                .controlSize(.mini)
         case .running:
-            ActivityDot(isActive: true, tint: Palette.running)
+            ActivityDot(isActive: true, tint: isSelected ? Palette.textInverted : Palette.running)
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 10))
+                .font(Typo.caption)
                 .foregroundStyle(Palette.warning)
         case .unread:
+            // The unread marker is the accent colour, which is also the selection fill, so on a
+            // selected row it has to borrow the row's own foreground to stay visible at all.
             Image(systemName: "circle.fill")
-                .font(.system(size: 7))
-                .foregroundStyle(Palette.accent)
+                .font(Typo.micro)
+                .foregroundStyle(isSelected ? Color.primary : Palette.accent)
         case .idle:
             Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 10))
-                .foregroundStyle(isSelected ? Palette.textSecondary : Palette.textTertiary)
+                .font(Typo.caption)
+                .foregroundStyle(.tertiary)
         }
-    }
-
-    private var nameTint: Color {
-        if isSelected || workspace.unread { return Palette.textPrimary }
-        return Palette.textSecondary
     }
 
     // MARK: - Renaming

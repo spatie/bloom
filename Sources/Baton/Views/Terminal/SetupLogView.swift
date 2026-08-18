@@ -20,25 +20,24 @@ struct SetupLogView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Metrics.corner) {
             statusIcon
             Text(statusText)
                 .font(Typo.labelEmphasis)
                 .foregroundStyle(Palette.textSecondary)
 
-            Spacer(minLength: 8)
+            Spacer(minLength: Metrics.corner)
 
             Button(model.isRunningSetup ? "Running" : "Run setup again") {
                 Task { await runSetup() }
             }
-            .buttonStyle(.plain)
-            .font(Typo.label)
-            .foregroundStyle(model.isRunningSetup ? Palette.textTertiary : Palette.accent)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
             .disabled(model.isRunningSetup || model.repo == nil)
         }
         .padding(.horizontal, Metrics.gutter)
-        .frame(height: 28)
-        .background(Palette.surface)
+        .padding(.vertical, Metrics.cornerSmall)
+        .headerMaterial()
     }
 
     @ViewBuilder
@@ -47,15 +46,15 @@ struct SetupLogView: View {
             LoadingView()
         } else if succeeded {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 11))
+                .font(Typo.label)
                 .foregroundStyle(Palette.positive)
         } else if failed {
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 11))
+                .font(Typo.label)
                 .foregroundStyle(Palette.negative)
         } else {
             Image(systemName: "wrench.and.screwdriver")
-                .font(.system(size: 11))
+                .font(Typo.label)
                 .foregroundStyle(Palette.textTertiary)
         }
     }
@@ -119,10 +118,10 @@ struct LogOutputView: View {
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, Metrics.gutter)
-                        .padding(.vertical, 8)
+                        .padding(.vertical, Metrics.corner)
 
                     Color.clear
-                        .frame(height: 1)
+                        .frame(height: Metrics.hairline)
                         .id(Self.bottomAnchor)
                 }
             }
