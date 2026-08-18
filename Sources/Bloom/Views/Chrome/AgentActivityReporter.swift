@@ -13,7 +13,14 @@ struct AgentActivityReporter: ViewModifier {
     /// without asking permission for anything, so it starts switched on and can be turned off.
     @AppStorage(DockBadge.settingKey) private var isBadgeEnabled = true
 
+    /// Default on. See `SleepPrevention`, which owns both the key and the argument for the
+    /// default, because the menu bar item offers the same switch and the two must not drift.
+    @AppStorage(SleepPrevention.settingKey) private var preventsSleep = SleepPrevention.isOnByDefault
+
     func body(content: Content) -> some View {
+        // Before `preventsSleep` below is read for the first time. See `SystemDefaults`.
+        SystemDefaults.registerOnce()
+
         // Selection is read alongside the count on purpose. `runningAgentCount` walks the model
         // dictionary, which is deliberately outside observation, so a `WorkspaceModel` created
         // after this body last ran would never invalidate it. Selecting a workspace is what
@@ -32,6 +39,9 @@ struct AgentActivityReporter: ViewModifier {
             }
             .onChange(of: unread, initial: true) { _, count in
                 AgentActivity.shared.setUnreadCount(count)
+            }
+            .onChange(of: preventsSleep, initial: true) { _, isOn in
+                AgentActivity.shared.setPreventsSleep(isOn)
             }
             .onChange(of: isBadgeEnabled, initial: true) { _, enabled in
                 AgentActivity.shared.setBadgeEnabled(enabled)
