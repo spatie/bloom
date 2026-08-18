@@ -11,11 +11,12 @@ import SwiftUI
 /// make the tab worth its own pane, and they are also what would have swamped General.
 ///
 /// The two sizes are separate because they are different things. The conversation is prose set in
-/// the system face and scales as a whole scale of rungs; a terminal is a monospaced grid at one
+/// a face of its own and scales as a whole scale of rungs; a terminal is a monospaced grid at one
 /// point size that the user has already chosen once, in Ghostty.
 struct AppearanceSettingsView: View {
     @AppStorage("appearance") private var appearance = "system"
     @AppStorage(ChatTextSize.defaultsKey) private var chatTextSize = ChatTextSize.standard
+    @AppStorage(ChatFont.defaultsKey) private var chatFont = ChatFont.standard
     @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
     /// Zero means "no override, follow Ghostty". Read here as well as in `TerminalTextSize` so the
     /// pane redraws when a Cmd+Plus in a terminal moves it while this window is open.
@@ -34,6 +35,17 @@ struct AppearanceSettingsView: View {
             }
 
             Section {
+                Picker("Font", selection: $chatFont) {
+                    ForEach(ChatFont.allCases) { font in
+                        Text(font.title).tag(font)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(chatFont.summary)
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textSecondary)
+
                 Picker("Text size", selection: $chatTextSize) {
                     ForEach(ChatTextSize.allCases) { size in
                         Text(size.title).tag(size)
@@ -43,10 +55,11 @@ struct AppearanceSettingsView: View {
 
                 ChatTextPreview()
                     .environment(\.fontScale, chatTextSize.scale)
+                    .environment(\.chatFont, chatFont)
             } header: {
                 Text("Conversation")
             } footer: {
-                Text("Applies to what an agent says and to what you type. The sidebar, the inspector and the toolbar follow the text size in System Settings.")
+                Text("Applies to what an agent says and to what you type. Code, paths and diffs stay monospaced whichever face is chosen. The sidebar, the inspector and the toolbar follow System Settings.")
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textSecondary)
             }
@@ -138,15 +151,22 @@ struct AppearanceSettingsView: View {
 
 /// A few rungs of the conversation at once, because one line of body text cannot show what a scale
 /// does: what the setting changes is the distance between a heading, a sentence and a filename.
+///
+/// Drawn by the transcript's own renderer rather than by a hand-built stack of `Text`, because the
+/// two questions a face has to answer here are how a paragraph reads and how a span of inline code
+/// sits inside it, and only the real renderer pairs the two the way the transcript will. Written
+/// as markdown for the same reason: this is the shape an agent actually replies in.
 private struct ChatTextPreview: View {
+    private static let sample = """
+    ## Ran the test suite
+
+    All 443 tests pass. **Cause:** a stale snapshot in `DiffParserTests.swift`, not the parser. \
+    **Fix:** regenerated it with `swift test --update-snapshots` and left `parse(hunk:)` alone.
+    """
+
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.spacing) {
-            Text("Ran the test suite")
-                .font(Typo.title)
-
-            Text("All 443 tests pass. The failure was a stale snapshot, not the parser.")
-                .font(Typo.body)
-                .foregroundStyle(Palette.textPrimary)
+            MarkdownView(Self.sample)
 
             HStack(spacing: Metrics.spacing) {
                 Chip(text: "Sources/BloomCore/Store.swift", systemImage: "doc", monospaced: true)
@@ -160,7 +180,7 @@ private struct ChatTextPreview: View {
             RoundedRectangle(cornerRadius: Metrics.corner)
                 .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
         }
-        .accessibilityLabel("Preview of the conversation at this text size")
+        .accessibilityLabel("Preview of the conversation in this font and text size")
     }
 }
 

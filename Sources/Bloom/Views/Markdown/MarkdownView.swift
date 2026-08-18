@@ -67,6 +67,8 @@ private struct MarkdownBlockView: View {
     /// "10." straight out of a column sized for the default one. This was a `@ScaledMetric`, which
     /// on macOS never moves: there is no Dynamic Type for it to track.
     @Environment(\.fontScale) private var fontScale
+    /// The conversation's face, for the same reason: prose set in it, inline code paired to it.
+    @Environment(\.chatFont) private var chatFont
 
     private var markerWidth: CGFloat { MarkdownMetrics.markerWidth * fontScale }
 
@@ -74,12 +76,12 @@ private struct MarkdownBlockView: View {
     var body: some View {
         switch block {
         case let .paragraph(inline):
-            inlineText(inline, font: resolved(Typo.body), color: foreground)
+            inlineText(inline, rung: Typo.body, color: foreground)
         case let .heading(level, inline):
             // Three real steps rather than one. Every level used to land on reading size and
             // differ only in weight, so an agent that structured its answer with headings got a
             // wall of bold sentences and no structure at all.
-            inlineText(inline, font: resolved(Self.headingFont(level)), color: foreground)
+            inlineText(inline, rung: Self.headingFont(level), color: foreground)
                 .padding(.top, isFirst ? 0 : MarkdownMetrics.headingLead)
         case let .codeBlock(code, language, _):
             CodeBlockView(code: code, language: language)
@@ -112,17 +114,21 @@ private struct MarkdownBlockView: View {
     }
 
     /// An attributed string needs a real `Font`, so the rung is resolved here rather than left to
-    /// the `.font(ScaledFont)` modifier the rest of the app leans on.
-    private func resolved(_ font: ScaledFont) -> Font {
-        font.resolved(scale: fontScale)
-    }
-
-    private func inlineText(_ inline: [MarkdownInline], font: Font, color: Color) -> some View {
-        Text(InlineAttributes.make(inline, font: font, color: color))
-            .font(font)
-            .foregroundStyle(color)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
+    /// the `.font(ScaledFont)` modifier the rest of the app leans on. The rung is carried this far
+    /// rather than a `Font`, because the code face has to be derived from the same rung: a span of
+    /// code takes its size from the run it sits in, not from a rung of its own.
+    private func inlineText(_ inline: [MarkdownInline], rung: ScaledFont, color: Color) -> some View {
+        let font = rung.resolved(scale: fontScale, face: chatFont)
+        return Text(InlineAttributes.make(
+            inline,
+            font: font,
+            code: rung.monospacedCompanion(scale: fontScale, face: chatFont),
+            color: color
+        ))
+        .font(font)
+        .foregroundStyle(color)
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func marker(_ text: String) -> some View {
@@ -160,7 +166,7 @@ private struct MarkdownBlockView: View {
                         .foregroundStyle(item.checked ? Palette.positive : Palette.textTertiary)
                         .frame(width: markerWidth, alignment: .trailing)
                         .accessibilityLabel(item.checked ? "Done" : "Not done")
-                    inlineText(item.inline, font: resolved(Typo.body), color: foreground)
+                    inlineText(item.inline, rung: Typo.body, color: foreground)
                 }
             }
         }
@@ -175,7 +181,7 @@ private struct MarkdownBlockView: View {
                         // Same size, heavier, on a fill: that is what makes it read as a header.
                         tableCell(
                             header,
-                            font: resolved(Typo.bodyEmphasis),
+                            rung: Typo.bodyEmphasis,
                             alignment: alignment(at: column, in: alignments),
                             isLastColumn: column == headers.count - 1,
                             isLastRow: false
@@ -188,7 +194,7 @@ private struct MarkdownBlockView: View {
                         ForEach(Array(row.enumerated()), id: \.offset) { column, cell in
                             tableCell(
                                 cell,
-                                font: resolved(Typo.body),
+                                rung: Typo.body,
                                 alignment: alignment(at: column, in: alignments),
                                 isLastColumn: column == row.count - 1,
                                 isLastRow: index == rows.count - 1
@@ -209,12 +215,12 @@ private struct MarkdownBlockView: View {
 
     private func tableCell(
         _ inline: [MarkdownInline],
-        font: Font,
+        rung: ScaledFont,
         alignment: Alignment,
         isLastColumn: Bool,
         isLastRow: Bool
     ) -> some View {
-        inlineText(inline, font: font, color: foreground)
+        inlineText(inline, rung: rung, color: foreground)
             .padding(.horizontal, MarkdownMetrics.blockGap)
             .padding(.vertical, Metrics.spacing)
             .frame(maxWidth: .infinity, alignment: alignment)
@@ -239,16 +245,19 @@ private struct MarkdownBlockView: View {
 private final class InlineAttributesKey: NSObject {
     let inline: [MarkdownInline]
     let font: Font
+    let code: Font
     let color: Color
     private let cachedHash: Int
 
-    init(inline: [MarkdownInline], font: Font, color: Color) {
+    init(inline: [MarkdownInline], font: Font, code: Font, color: Color) {
         self.inline = inline
         self.font = font
+        self.code = code
         self.color = color
         var hasher = Hasher()
         hasher.combine(inline)
         hasher.combine(font)
+        hasher.combine(code)
         hasher.combine(color)
         cachedHash = hasher.finalize()
     }
@@ -260,6 +269,7 @@ private final class InlineAttributesKey: NSObject {
         return cachedHash == other.cachedHash
             && inline == other.inline
             && font == other.font
+            && code == other.code
             && color == other.color
     }
 }
@@ -272,8 +282,9 @@ private final class InlineAttributesBox {
 
 /// Keeps parsed paragraphs from rebuilding the same styled string on unrelated view updates.
 ///
-/// Inline runs, font and foreground colour all participate in exact equality so a cached value
-/// cannot cross between structurally equal text rendered with different presentation.
+/// Inline runs, both fonts and the foreground colour all participate in exact equality so a
+/// cached value cannot cross between structurally equal text rendered with different presentation,
+/// which now includes the same paragraph seen in two different conversation faces.
 @MainActor
 private enum InlineAttributes {
     private static let values: NSCache<InlineAttributesKey, InlineAttributesBox> = {
@@ -282,11 +293,16 @@ private enum InlineAttributes {
         return cache
     }()
 
-    static func make(_ inline: [MarkdownInline], font: Font, color: Color) -> AttributedString {
-        let key = InlineAttributesKey(inline: inline, font: font, color: color)
+    static func make(
+        _ inline: [MarkdownInline],
+        font: Font,
+        code: Font,
+        color: Color
+    ) -> AttributedString {
+        let key = InlineAttributesKey(inline: inline, font: font, code: code, color: color)
         if let cached = values.object(forKey: key) { return cached.value }
 
-        let value = render(inline, font: font, color: color, intents: [])
+        let value = render(inline, font: font, code: code, color: color, intents: [])
         values.setObject(InlineAttributesBox(value), forKey: key)
         return value
     }
@@ -294,6 +310,7 @@ private enum InlineAttributes {
     private static func render(
         _ values: [MarkdownInline],
         font: Font,
+        code: Font,
         color: Color,
         intents: InlinePresentationIntent
     ) -> AttributedString {
@@ -303,26 +320,26 @@ private enum InlineAttributes {
             case let .text(text):
                 output += run(text, font: font, color: color, intents: intents)
             case let .emphasis(children):
-                output += render(children, font: font, color: color, intents: intents.union(.emphasized))
+                output += render(children, font: font, code: code, color: color, intents: intents.union(.emphasized))
             case let .strong(children):
-                output += render(children, font: font, color: color, intents: intents.union(.stronglyEmphasized))
+                output += render(children, font: font, code: code, color: color, intents: intents.union(.stronglyEmphasized))
             case let .strikethrough(children):
-                var child = render(children, font: font, color: color, intents: intents)
+                var child = render(children, font: font, code: code, color: color, intents: intents)
                 child.strikethroughStyle = .single
                 output += child
-            case let .code(code):
-                var child = AttributedString(code)
+            case let .code(text):
+                var child = AttributedString(text)
                 // Derived from the run it sits in rather than pinned to `Typo.code`, and carrying
                 // whatever emphasis is around it. Pinned, a span of code dropped a rung inside a
                 // paragraph and two inside a heading, took the primary colour inside a quote that
                 // was set secondary, and stayed upright inside bold and italic.
-                child.font = font.monospaced()
+                child.font = code
                 child.foregroundColor = color
                 child.backgroundColor = Palette.hover
                 if !intents.isEmpty { child.inlinePresentationIntent = intents }
                 output += child
             case let .link(text, url):
-                var child = render(text, font: font, color: Palette.accent, intents: intents)
+                var child = render(text, font: font, code: code, color: Palette.accent, intents: intents)
                 child.foregroundColor = Palette.accent
                 child.underlineStyle = .single
                 if let target = URL(string: url) { child.link = target }

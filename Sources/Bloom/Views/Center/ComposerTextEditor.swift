@@ -33,15 +33,18 @@ struct ComposerTextEditor: NSViewRepresentable {
     /// The conversation's text size, so what you type is set at the size you read. Without it the
     /// SwiftUI placeholder behind this view would grow and the typed text would not.
     @Environment(\.fontScale) private var fontScale
+    /// And the face, so what you type is in the face you read rather than in the one the composer
+    /// happens to be built out of.
+    @Environment(\.chatFont) private var chatFont
 
     static var font: NSFont { NSFont.preferredFont(forTextStyle: .body) }
     static var lineHeight: CGFloat { NSLayoutManager().defaultLineHeight(for: font) }
 
     /// Rounded to a whole point for the same reason `ScaledFont` rounds, and built from the body
-    /// style so an unscaled composer is byte for byte the font it was before.
-    static func font(scale: CGFloat) -> NSFont {
-        guard scale != 1 else { return font }
-        return .systemFont(ofSize: (font.pointSize * scale).rounded())
+    /// style so an unscaled composer in the system face is byte for byte the font it was before.
+    static func font(scale: CGFloat, face: ChatFont) -> NSFont {
+        guard scale != 1 || face != .system else { return font }
+        return face.nsFont(size: (font.pointSize * scale).rounded())
     }
 
     func makeCoordinator() -> Coordinator {
@@ -78,7 +81,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         textView.onFocusChange = { [weak coordinator = context.coordinator] focused in
             coordinator?.focusChanged(to: focused)
         }
-        textView.font = Self.font(scale: fontScale)
+        textView.font = Self.font(scale: fontScale, face: chatFont)
         textView.textColor = .labelColor
         // The colour macOS uses for a caret, which is not always the accent colour: it stays
         // fixed when the user picks a graphite or multicolour accent.
@@ -115,7 +118,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         context.coordinator.parent = self
 
         // Ahead of the text, because setting the string re-reads the typing attributes.
-        let font = Self.font(scale: fontScale)
+        let font = Self.font(scale: fontScale, face: chatFont)
         if textView.font != font {
             textView.font = font
         }

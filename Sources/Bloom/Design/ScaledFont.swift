@@ -37,14 +37,34 @@ struct ScaledFont: Hashable, Sendable {
     /// Rounded to a whole point, because a text style is a whole point everywhere else in macOS and
     /// a scale that lands on 14.95 renders a hair off the metrics every neighbouring control uses.
     /// The five rungs stay distinct at every scale the settings window offers.
-    func resolved(scale: CGFloat) -> Font {
-        guard scale != 1 else { return unscaled }
+    ///
+    /// A monospaced rung keeps the system's monospaced face whatever `face` is. Code, paths and
+    /// diff stats line up in a column because they are all one face, and a prose face chosen for
+    /// paragraphs is not a face whose columns line up.
+    func resolved(scale: CGFloat, face: ChatFont = .system) -> Font {
+        let wantsFace = face != .system && design != .monospaced
+        guard scale != 1 || wantsFace else { return unscaled }
         let base = NSFont.preferredFont(forTextStyle: style.appKitStyle)
-        return Font.system(
-            size: (base.pointSize * scale).rounded(),
-            weight: weight ?? base.systemWeight,
-            design: design
-        )
+        let size = (base.pointSize * scale).rounded()
+        let resolvedWeight = weight ?? base.systemWeight
+        guard wantsFace else {
+            return Font.system(size: size, weight: resolvedWeight, design: design)
+        }
+        return face.font(size: size, weight: resolvedWeight)
+    }
+
+    /// The monospaced companion for a span of code sitting inside a run of this rung.
+    ///
+    /// Its own method rather than `resolved(...).monospaced()`, because that expression only means
+    /// anything on a system font: on a `Font.custom` face SwiftUI cannot swap the design, so it
+    /// substitutes whatever monospaced face CoreText offers and the code in a paragraph silently
+    /// changes width. Asking for the system monospaced face by size says what is wanted, and it is
+    /// also the only way to apply `ChatFont.inlineCodeScale`, which is what keeps a mono run from
+    /// reading a size larger than the sentence it is in.
+    func monospacedCompanion(scale: CGFloat, face: ChatFont = .system) -> Font {
+        let base = NSFont.preferredFont(forTextStyle: style.appKitStyle)
+        let size = (base.pointSize * scale * face.inlineCodeScale).rounded()
+        return Font.system(size: size, weight: weight ?? base.systemWeight, design: .monospaced)
     }
 }
 
@@ -60,9 +80,10 @@ private struct ScaledFontModifier: ViewModifier {
     let font: ScaledFont
 
     @Environment(\.fontScale) private var scale
+    @Environment(\.chatFont) private var face
 
     func body(content: Content) -> some View {
-        content.font(font.resolved(scale: scale))
+        content.font(font.resolved(scale: scale, face: face))
     }
 }
 

@@ -24,6 +24,8 @@ struct ChatPaneView: View {
     /// scoped to: what was said and what you are about to say. The sidebar, the inspector and the
     /// toolbar are chrome and keep the size macOS gives them.
     @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.standard
+    /// And the face, scoped to exactly the same subtree for exactly the same reason.
+    @AppStorage(ChatFont.defaultsKey) private var chatFont = ChatFont.standard
 
     var body: some View {
         VStack(spacing: 0) {
@@ -45,5 +47,6 @@ struct ChatPaneView: View {
         }
         .background(Palette.windowBackground)
         .environment(\.fontScale, textSize.scale)
+        .environment(\.chatFont, chatFont)
     }
 }
