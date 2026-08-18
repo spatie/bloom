@@ -65,6 +65,19 @@ public actor AgentRunner {
     private var persistenceFailures = 0
     private var lastFailure: String?
 
+    /// What the model was last handed, from the newest `assistant` event of this turn.
+    ///
+    /// Tracked as the turn runs because the number is not on the line that closes it. The `usage`
+    /// on `result` is the SUM over every API call the turn made, so a turn with ten tool calls
+    /// reports roughly ten times the context it actually had: one real session recorded 619k
+    /// against a window of 1M where the true figure was 60k. What an `assistant` event carries is
+    /// the single call that produced it, which is exactly the context that was in front of the
+    /// model. `ContextWindowUsage` reads the same number out of a loaded transcript.
+    ///
+    /// Rows from inside a subagent are skipped: the Agent tool runs its own conversation with its
+    /// own window, and its usage says nothing about this one.
+    private var lastContextUsed = 0
+
     /// Stream deltas are the same text arriving character by character, already superseded by the
     /// `assistant` event behind them. Storing them would multiply the row count and duplicate the
     /// transcript, so they reach the UI live and are then dropped. Flip this on to keep them.
@@ -280,12 +293,20 @@ public actor AgentRunner {
                 await save(session)
             }
 
+        case .assistantText(let block), .thinking(let block):
+            guard block.parentToolUseID == nil, block.usage.contextUsedTokens > 0 else { break }
+            lastContextUsed = block.usage.contextUsedTokens
+
         case .result(let result):
             session = session.with {
                 $0.inputTokens += result.usage.inputTokens
                 $0.outputTokens += result.usage.outputTokens
                 $0.costUSD += result.usage.costUSD
-                $0.contextTokens = result.usage.contextUsedTokens
+                // Whatever the last assistant event said, and the previous reading when this turn
+                // produced no assistant event at all, which is what an error or a cancellation
+                // looks like. Never `result.usage`, which counts the whole turn rather than the
+                // window; see `lastContextUsed`.
+                if lastContextUsed > 0 { $0.contextTokens = lastContextUsed }
                 // A cancelled turn also comes back as an error result, because SIGTERM makes the
                 // CLI report error_during_execution on its way out. That is the user pressing
                 // stop, not a failure, so cancellation wins over what the result says.

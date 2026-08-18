@@ -298,7 +298,8 @@ struct AgentRunnerPersistenceTests {
         #expect(reloaded.inputTokens == 6)
         #expect(reloaded.outputTokens == 360)
         #expect(abs(reloaded.costUSD - 0.119112) < 0.000001)
-        #expect(reloaded.contextTokens == 6 + 100_420 + 13_928)
+        // The context size is deliberately NOT taken from here; see the test below.
+        #expect(reloaded.contextTokens == 0)
         #expect(reloaded.state == .idle)
 
         // A second turn accumulates rather than replacing.
@@ -307,6 +308,26 @@ struct AgentRunnerPersistenceTests {
 
         let stored = try await store.messages(sessionID: session.id)
         #expect(stored.map(\.durationMS) == [7880, 7880])
+    }
+
+    @Test("records the context the model had, not the turn's total")
+    func recordsContextWindowUsage() async throws {
+        let store = try makeTestStore("agent")
+        let session = try await makeSession(store)
+        let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
+
+        for event in try fixtureSessionLines().compactMap({ AgentEvent.decode(line: $0) }) {
+            await runner.ingest(event)
+        }
+
+        let reloaded = try #require(try await store.session(id: session.id))
+        // The last assistant event's own call: 2 input, 215 created, 38_137 read. That is what the
+        // model was handed.
+        #expect(reloaded.contextTokens == 2 + 215 + 38_137)
+        // And emphatically not the usage on the result line, which sums every API call the turn
+        // made. On a real session that read 619k against a 1M window where 60k was in front of the
+        // model, which is the whole reason this is tracked as the turn runs.
+        #expect(reloaded.contextTokens != 6 + 100_420 + 13_928)
     }
 
     @Test("marks the session failed when the result says so")
