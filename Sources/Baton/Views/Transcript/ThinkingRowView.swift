@@ -37,7 +37,7 @@ struct ThinkingRowView: View {
 
     private var header: some View {
         HStack(spacing: TranscriptLayout.glyphGap) {
-            TranscriptGlyph(symbol: "sparkle", tint: Palette.textTertiary)
+            TranscriptGlyph(symbol: "sparkle")
 
             Text("Thinking")
                 .font(Typo.labelEmphasis)
@@ -66,7 +66,6 @@ struct ThinkingRowView: View {
 
             TranscriptDisclosure(isExpanded: isExpanded, isVisible: isHovered)
         }
-        .padding(.horizontal, TranscriptLayout.inset)
-        .frame(height: Metrics.rowHeight)
+        .transcriptRowFrame()
     }
 }

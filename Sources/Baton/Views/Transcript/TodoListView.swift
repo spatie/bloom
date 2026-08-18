@@ -12,8 +12,8 @@ struct TodoListView: View {
 
                 HStack(alignment: .firstTextBaseline, spacing: TranscriptLayout.inset) {
                     Image(systemName: Self.glyph(status))
-                        .font(Typo.caption)
-                        .imageScale(.medium)
+                        .font(Typo.label)
+                        .imageScale(.small)
                         .foregroundStyle(Self.tint(status))
                         .accessibilityHidden(true)
 

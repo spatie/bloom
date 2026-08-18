@@ -18,7 +18,9 @@ struct StreamingRowView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: TranscriptLayout.inset) {
+        // Spacing 0, like the stored row list: each piece below carries the same padding its
+        // persisted twin does, so replacing one with the other moves nothing.
+        VStack(alignment: .leading, spacing: 0) {
             if !transcript.streamingThinking.isEmpty {
                 StreamingThinkingView(
                     text: transcript.streamingThinking,
@@ -31,8 +33,10 @@ struct StreamingRowView: View {
                     .font(Typo.body)
                     .foregroundStyle(Palette.textPrimary)
                     .lineSpacing(TranscriptLayout.proseLeading)
+                    .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, TranscriptLayout.inset)
+                    .padding(.vertical, TranscriptLayout.inset)
             }
 
             if let tool = transcript.streamingToolName {
@@ -41,7 +45,6 @@ struct StreamingRowView: View {
                 StreamingStatusView(glyph: nil, text: transcript.statusLabel ?? "Working")
             }
         }
-        .padding(.vertical, TranscriptLayout.tight * 2)
         // Streamed text arrives many times a second. Animating it would mean a new implicit
         // animation per token, all of them fighting over the same layout.
         .transaction { $0.animation = nil }

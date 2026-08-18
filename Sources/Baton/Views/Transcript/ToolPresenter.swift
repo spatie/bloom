@@ -370,7 +370,7 @@ enum ToolPresenter {
             glyph: "puzzlepiece.extension",
             label: label,
             detail: firstScalar(input),
-            tint: Palette.synVariable
+            tint: Palette.textSecondary
         )
     }
 

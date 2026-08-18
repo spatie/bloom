@@ -23,7 +23,7 @@ struct SessionStartRowView: View {
 
             Text("Session started")
                 .font(Typo.labelEmphasis)
-                .foregroundStyle(Palette.textTertiary)
+                .foregroundStyle(Palette.textSecondary)
                 .frame(width: TranscriptLayout.labelWidth, alignment: .leading)
 
             if !info.model.isEmpty {
@@ -35,7 +35,6 @@ struct SessionStartRowView: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, TranscriptLayout.inset)
-        .frame(height: Metrics.rowHeight)
+        .transcriptRowFrame()
     }
 }

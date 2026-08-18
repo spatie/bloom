@@ -60,7 +60,6 @@ struct ToolRowHeader: View {
 
             TranscriptDisclosure(isExpanded: isExpanded, isVisible: isHovered)
         }
-        .padding(.horizontal, TranscriptLayout.inset)
-        .frame(height: Metrics.rowHeight)
+        .transcriptRowFrame()
     }
 }

@@ -49,7 +49,7 @@ private struct MarkdownBlocksView: View {
     var foreground = Palette.textPrimary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.gutter) {
+        VStack(alignment: .leading, spacing: MarkdownMetrics.blockGap) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 MarkdownBlockView(block: block, foreground: foreground)
             }
@@ -60,6 +60,10 @@ private struct MarkdownBlocksView: View {
 private struct MarkdownBlockView: View {
     let block: MarkdownBlock
     let foreground: Color
+
+    /// The marker column follows the user's text size, otherwise a raised body size pushes "10."
+    /// straight out of a column sized for the default one.
+    @ScaledMetric(relativeTo: .body) private var markerWidth = MarkdownMetrics.markerWidth
 
     @ViewBuilder
     var body: some View {
@@ -77,8 +81,10 @@ private struct MarkdownBlockView: View {
         case let .taskList(items):
             taskList(items)
         case let .blockQuote(blocks):
-            HStack(alignment: .top, spacing: Metrics.gutter) {
-                Hairline(axis: .vertical)
+            HStack(alignment: .top, spacing: TranscriptLayout.block) {
+                Rectangle()
+                    .fill(Palette.border)
+                    .frame(width: TranscriptLayout.rule)
                 MarkdownBlocksView(blocks: blocks, foreground: Palette.textSecondary)
             }
         case let .table(headers, rows, alignments):
@@ -96,28 +102,19 @@ private struct MarkdownBlockView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func marker(_ text: String?, bullet: Bool) -> some View {
-        Group {
-            if bullet {
-                Circle()
-                    .fill(Palette.textTertiary)
-                    .frame(width: Metrics.cornerSmall, height: Metrics.cornerSmall)
-                    .padding(.top, Metrics.corner)
-            } else if let text {
-                Text(text)
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .monospacedDigit()
-            }
-        }
-        .frame(width: Metrics.rowHeight, alignment: .trailing)
+    private func marker(_ text: String) -> some View {
+        Text(text)
+            .font(Typo.body)
+            .foregroundStyle(Palette.textTertiary)
+            .monospacedDigit()
+            .frame(width: markerWidth, alignment: .trailing)
     }
 
     private func list(items: [[MarkdownBlock]], start: Int?, tight: Bool) -> some View {
-        VStack(alignment: .leading, spacing: tight ? 0 : Metrics.cornerSmall) {
+        VStack(alignment: .leading, spacing: tight ? 0 : Metrics.spacingSmall) {
             ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
-                HStack(alignment: .top, spacing: Metrics.cornerSmall) {
-                    marker(start.map { "\($0 + offset)." }, bullet: start == nil)
+                HStack(alignment: .top, spacing: Metrics.spacingSmall) {
+                    marker(start.map { "\($0 + offset)." } ?? "\u{2022}")
                     MarkdownBlocksView(blocks: item, foreground: foreground)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -128,11 +125,12 @@ private struct MarkdownBlockView: View {
     private func taskList(_ items: [(checked: Bool, inline: [MarkdownInline])]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                HStack(alignment: .firstTextBaseline, spacing: Metrics.cornerSmall) {
+                HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
                     Image(systemName: item.checked ? "checkmark.square.fill" : "square")
-                        .font(Typo.caption)
-                        .foregroundStyle(item.checked ? Palette.accent : Palette.textTertiary)
-                        .frame(width: Metrics.rowHeight, alignment: .trailing)
+                        .font(Typo.body)
+                        .foregroundStyle(item.checked ? Palette.positive : Palette.textTertiary)
+                        .frame(width: markerWidth, alignment: .trailing)
+                        .accessibilityLabel(item.checked ? "Done" : "Not done")
                     inlineText(item.inline, font: Typo.body, color: foreground)
                 }
             }
@@ -156,15 +154,15 @@ private struct MarkdownBlockView: View {
                 }
             }
             .overlay {
-                Rectangle().stroke(Palette.border, lineWidth: Metrics.hairline)
+                Rectangle().strokeBorder(Palette.border, lineWidth: Metrics.hairline)
             }
         }
     }
 
     private func tableCell(_ inline: [MarkdownInline], font: Font, alignment: Alignment) -> some View {
         inlineText(inline, font: font, color: foreground)
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.vertical, Metrics.corner)
+            .padding(.horizontal, MarkdownMetrics.blockGap)
+            .padding(.vertical, Metrics.spacing)
             .frame(maxWidth: .infinity, alignment: alignment)
             .overlay(alignment: .trailing) {
                 Hairline(axis: .vertical)

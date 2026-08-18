@@ -40,7 +40,7 @@ struct ToolDetailView: View {
                 DetailCaption(text: "The tool returned an image.")
             }
         }
-        .padding(.vertical, TranscriptLayout.inset)
+        .padding(.top, TranscriptLayout.inset)
         .textSelection(.enabled)
     }
 }

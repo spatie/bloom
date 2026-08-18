@@ -16,7 +16,6 @@ struct OrphanResultRowView: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, TranscriptLayout.inset)
-        .frame(height: Metrics.rowHeight)
+        .transcriptRowFrame()
     }
 }

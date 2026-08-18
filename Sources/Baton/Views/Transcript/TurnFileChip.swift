@@ -13,9 +13,9 @@ struct TurnFileChip: View {
 
             DiffStatLabel(additions: file.additions, deletions: file.deletions, compact: true)
         }
-        .padding(.horizontal, TranscriptLayout.inset - 1)
+        .padding(.horizontal, TranscriptLayout.chipInset)
         .padding(.vertical, TranscriptLayout.tight)
-        .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+        .background(Palette.hover, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
         .help(file.path)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(file.path)

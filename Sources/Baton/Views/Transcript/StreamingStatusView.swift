@@ -21,8 +21,7 @@ struct StreamingStatusView: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, TranscriptLayout.inset)
-        .frame(height: Metrics.rowHeight)
+        .transcriptRowFrame()
         .accessibilityElement(children: .combine)
         .accessibilityLabel(text)
     }

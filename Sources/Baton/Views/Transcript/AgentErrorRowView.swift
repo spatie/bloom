@@ -28,7 +28,8 @@ struct AgentErrorRowView: View {
                             .frame(width: TranscriptLayout.rule)
                     }
                     .padding(.leading, TranscriptLayout.detailIndent)
-                    .padding(.bottom, TranscriptLayout.inset)
+                    .padding(.trailing, TranscriptLayout.inset)
+                    .padding(.bottom, TranscriptLayout.block)
             }
         }
         .modifier(ExpandableRow(isHovered: isHovered, isError: true))
@@ -42,18 +43,20 @@ struct AgentErrorRowView: View {
             Text(status.map { "Agent exited (\($0))" } ?? "Agent error")
                 .font(Typo.labelEmphasis)
                 .foregroundStyle(Palette.negative)
+                .lineLimit(1)
+                .truncationMode(.tail)
                 .frame(width: TranscriptLayout.labelWidth, alignment: .leading)
 
             Text(ToolPresenter.oneLine(stderr))
                 .font(Typo.label)
                 .foregroundStyle(Palette.textTertiary)
                 .lineLimit(1)
+                .truncationMode(.tail)
 
             Spacer(minLength: TranscriptLayout.tight)
 
             TranscriptDisclosure(isExpanded: isExpanded, isVisible: isHovered)
         }
-        .padding(.horizontal, TranscriptLayout.inset)
-        .frame(height: Metrics.rowHeight)
+        .transcriptRowFrame()
     }
 }

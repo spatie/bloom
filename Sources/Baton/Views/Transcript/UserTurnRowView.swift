@@ -24,7 +24,7 @@ struct UserTurnRowView: View {
                 .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
                 .overlay {
                     RoundedRectangle(cornerRadius: Metrics.corner)
-                        .stroke(Palette.border, lineWidth: Metrics.hairline)
+                        .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
                 }
                 .frame(maxWidth: maxWidth, alignment: .trailing)
         }

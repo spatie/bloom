@@ -28,7 +28,7 @@ struct ToolRowView: View {
                 ToolDetailView(use: use, result: result)
                     .padding(.leading, TranscriptLayout.detailIndent)
                     .padding(.trailing, TranscriptLayout.inset)
-                    .padding(.bottom, TranscriptLayout.tight * 2)
+                    .padding(.bottom, TranscriptLayout.block)
             }
         }
         .modifier(ExpandableRow(isHovered: isHovered, isError: isError))

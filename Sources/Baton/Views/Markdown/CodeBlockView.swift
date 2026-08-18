@@ -4,11 +4,18 @@ import BatonCore
 
 /// Code gets a dedicated surface so syntax state can flow across lines without flattening the transcript.
 public struct CodeBlockView: View {
+    /// Beyond this the fence is folded, because a `Text` per line is not a pager.
+    private static let lineCap = 2_000
+
     private let code: String
     private let language: Language
     private let showsLineNumbers: Bool
     @State private var copied = false
     @State private var showsAllLines = false
+
+    /// The gutter follows the user's text size, otherwise a raised size runs the numbers into the
+    /// code beside them.
+    @ScaledMetric(relativeTo: .caption) private var lineNumberWidth = MarkdownMetrics.lineNumberWidth
 
     public init(code: String, language: Language, showsLineNumbers: Bool = false) {
         self.code = code
@@ -18,46 +25,41 @@ public struct CodeBlockView: View {
 
     public var body: some View {
         let prepared = CodeBlockPreparationCache.prepared(code: code, language: language)
-        let visibleCount = showsAllLines ? prepared.lines.count : min(prepared.lines.count, 2_000)
+        let visibleCount = showsAllLines ? prepared.lines.count : min(prepared.lines.count, Self.lineCap)
 
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: Metrics.corner) {
+            HStack(spacing: Metrics.spacing) {
                 Text(Self.displayName(for: language))
                     .font(Typo.micro)
                     .foregroundStyle(Palette.textTertiary)
-                Spacer(minLength: Metrics.gutter)
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(code, forType: .string)
-                    copied = true
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .seconds(1.2))
-                        copied = false
-                    }
-                } label: {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                Spacer(minLength: MarkdownMetrics.blockGap)
+                Button(action: copy) {
+                    Label(copied ? "Copied" : "Copy code", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .labelStyle(.iconOnly)
                         .font(Typo.micro)
+                        .imageScale(.medium)
                         .foregroundStyle(copied ? Palette.positive : Palette.textTertiary)
-                        .frame(width: Metrics.gutter, height: Metrics.gutter)
+                        .frame(width: MarkdownMetrics.iconButton, height: MarkdownMetrics.iconButton)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(copied ? "Copied" : "Copy code")
             }
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.vertical, Metrics.corner)
+            .padding(.horizontal, MarkdownMetrics.blockGap)
+            .padding(.vertical, Metrics.spacing)
 
             Hairline()
 
             ScrollView(.horizontal) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(0..<visibleCount, id: \.self) { offset in
-                        HStack(alignment: .firstTextBaseline, spacing: Metrics.gutter) {
+                        HStack(alignment: .firstTextBaseline, spacing: MarkdownMetrics.blockGap) {
                             if showsLineNumbers {
                                 Text(String(offset + 1))
                                     .font(Typo.codeSmall)
                                     .foregroundStyle(Palette.textTertiary)
                                     .monospacedDigit()
-                                    .frame(minWidth: Metrics.titleBarHeight, alignment: .trailing)
+                                    .frame(minWidth: lineNumberWidth, alignment: .trailing)
                             }
                             Text(SyntaxCache.attributed(
                                 line: prepared.lines[offset],
@@ -70,26 +72,35 @@ public struct CodeBlockView: View {
                         }
                     }
                 }
-                .padding(Metrics.gutter)
+                .padding(MarkdownMetrics.blockGap)
             }
 
-            if prepared.lines.count > 2_000, !showsAllLines {
+            if prepared.lines.count > Self.lineCap, !showsAllLines {
                 Hairline()
                 Button("Show all \(prepared.lines.count) lines") {
                     showsAllLines = true
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.link)
                 .font(Typo.caption)
-                .foregroundStyle(Palette.accent)
-                .padding(.horizontal, Metrics.gutter)
-                .padding(.vertical, Metrics.corner)
+                .padding(.horizontal, MarkdownMetrics.blockGap)
+                .padding(.vertical, Metrics.spacing)
             }
         }
         .background(Palette.surfaceSunken)
         .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.corner)
-                .stroke(Palette.border, lineWidth: Metrics.hairline)
+                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+        }
+    }
+
+    private func copy() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(code, forType: .string)
+        copied = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            copied = false
         }
     }
 

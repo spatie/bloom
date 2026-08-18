@@ -19,7 +19,7 @@ struct QuestionListView: View {
                     ForEach(Array((question["options"]?.arrayValue ?? []).enumerated()), id: \.offset) { _, option in
                         HStack(alignment: .firstTextBaseline, spacing: TranscriptLayout.inset) {
                             Image(systemName: "circle")
-                                .font(Typo.micro)
+                                .font(Typo.label)
                                 .imageScale(.small)
                                 .foregroundStyle(Palette.textTertiary)
                                 .accessibilityHidden(true)
