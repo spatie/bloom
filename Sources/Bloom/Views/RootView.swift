@@ -7,8 +7,8 @@ import BloomCore
 /// window had no title bar, no toolbar, an opaque sidebar and a hard divider running straight
 /// through the traffic lights. `NavigationSplitView` hands all of that back to AppKit: the
 /// translucent sidebar material, the sidebar toggle, traffic light placement, unified toolbar
-/// integration and remembered column widths. The inspector is an `HSplitView` rather than the
-/// platform `.inspector`, for the reason spelled out on the detail column below.
+/// integration and remembered column widths. The centre column and the inspector are an AppKit
+/// `NSSplitViewController`, for the reason spelled out on `DetailSplitViewController`.
 ///
 /// The columns themselves are `SidebarView` and `DetailColumn`, and the toolbar is
 /// `BloomWindowToolbar`. What is left here is only what belongs to the window as a whole: the
@@ -18,12 +18,6 @@ struct RootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    /// Survives relaunch, because an inspector that forgets how wide you made it is worse than
-    /// one that cannot be resized at all.
-    @AppStorage("inspector.width") private var inspectorWidth: Double = Metrics.inspectorWidth
-    /// The detail column's own width, which is the window minus the sidebar. The inspector's
-    /// ceiling comes from this, so it has to be measured rather than assumed.
-    @State private var detailWidth: Double = 0
     @State private var isCreateSheetPresented = false
     @State private var createTargetRepo: Repo?
 
@@ -36,55 +30,24 @@ struct RootView: View {
                 min: 200, ideal: Metrics.sidebarWidth, max: 420
             )
         } detail: {
-            // An `HStack` and our own divider, rather than `.inspector()` or `HSplitView`.
+            // An `NSSplitViewController`, not `.inspector()` and not `HSplitView`.
             //
-            // `.inspector` cannot be used in this window. With it presented, the window is marked
-            // as needing another Update Constraints pass on every pass, and AppKit throws "more
-            // Update Constraints in Window passes than there are views in the window" within a
-            // second of launch. Reproduced with the real inspector, with a bare `Text` inside it,
-            // attached to the split view and attached to the detail column, and clean every time
-            // the inspector is simply not presented.
+            // `.inspector` cannot be used in this window. Presented, it throws "more Update
+            // Constraints in Window passes than there are views in the window" out of the display
+            // cycle, from a loop that runs through SwiftUI's own `SplitViewChildController`
+            // reacting to its hosting view's min and max size. Verified again on this branch:
+            // swapping the split below for `.inspector()` kills the window during a resize.
             //
-            // `HSplitView` was the next attempt and it did not crash, but it is an AppKit split
-            // view that draws its divider down its whole bounds while the SwiftUI content inside
-            // each pane respects the safe area. Under a unified toolbar that put a hard rule
-            // through the title. A divider we lay out ourselves sits in the same safe area as the
-            // panes, so it starts below the toolbar where a pane boundary belongs.
-            HStack(spacing: 0) {
-                DetailColumn()
-                    .frame(
-                        minWidth: DetailColumnLayout.minimum,
-                        maxWidth: .infinity,
-                        maxHeight: .infinity
-                    )
-
-                if isInspectorPresented {
-                    // The divider and the pane move as one, because the boundary is part of the
-                    // pane rather than a thing the detail column keeps when the pane leaves.
-                    HStack(spacing: 0) {
-                        InspectorDivider(width: $inspectorWidth, available: detailWidth)
-                        InspectorPane(model: app.selectedModel)
-                            .frame(width: fittedInspectorWidth)
-                    }
-                    .frame(maxHeight: .infinity)
-                    .transition(.move(edge: .trailing))
-                }
-            }
-            // Keyed on the visibility alone, so the width the pane is dragged to and the width it
-            // is clamped to as the window narrows both stay instant. A pane that eased its way
-            // after the pointer would feel broken, and animating on every layout is exactly the
-            // churn that used to crash this window.
-            .animation(reduceMotion ? nil : Motion.pane, value: isInspectorPresented)
-            // The stored width is what the user asked for, `fittedInspectorWidth` is what fits.
-            // Measured on every layout rather than only while dragging, so narrowing the window
-            // narrows the inspector instead of squeezing the sidebar out of view.
-            .onGeometryChange(for: Double.self) { proxy in
-                proxy.size.width
-            } action: { detailWidth = $0 }
-                // The toolbar belongs to the detail column, not to the split view. Attached to
-                // the split view, AppKit lays every item out in the sidebar's slice of the
-                // toolbar, which is narrow, so everything past the first item falls into the
-                // overflow menu. On the detail it gets the whole width right of the sidebar.
+            // `HSplitView` was the next attempt and it did not crash, but its divider is drawn
+            // down the whole bounds of the split view while the SwiftUI content inside each pane
+            // respects the safe area, so under a unified toolbar a hard rule crossed the title.
+            // An `NSSplitViewController` is a view controller container rather than a view, so its
+            // panes and its divider share one safe area and the rule starts under the toolbar.
+            DetailSplitView(
+                app: app,
+                isInspectorPresented: isInspectorPresented,
+                animated: !reduceMotion
+            )
                 .toolbar { BloomWindowToolbar(app: app) }
         }
         // The window title is hidden in the toolbar (see BloomApp), but it still names the window
@@ -140,15 +103,6 @@ struct RootView: View {
             createTargetRepo = note.object as? Repo ?? app.selectedWorkspace.flatMap(app.repo(for:))
             isCreateSheetPresented = true
         }
-    }
-
-    /// The stored width, capped at what is left once the detail column keeps its minimum. The
-    /// stored value is deliberately not rewritten, so widening the window restores the width the
-    /// user chose rather than leaving it where a narrow window clamped it.
-    private var fittedInspectorWidth: Double {
-        guard detailWidth > 0 else { return inspectorWidth }
-        let ceiling = detailWidth - DetailColumnLayout.minimum - Metrics.spacingWide
-        return min(inspectorWidth, max(InspectorDivider.minimum, ceiling))
     }
 
     /// The inspector answers one question, what this workspace's agent changed, so on Home it has
