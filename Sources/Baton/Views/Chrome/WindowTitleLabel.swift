@@ -5,9 +5,13 @@ import BatonCore
 /// about to push.
 ///
 /// Those are the three facts people keep needing, and the toolbar is where a Mac app puts them.
-/// It is always present, even on Home, because an empty principal item collapses the flexible
-/// space that pins the trailing toggles to the right of the toolbar, and controls that move as you
-/// navigate are worse than a redundant word.
+/// It is always present, even on Home, where it is one word. That began as a workaround, because
+/// an empty principal item collapsed the flexible space that pins the trailing toggles to the
+/// right, which `ToolbarSpacer(.flexible)` would now express directly on macOS 26. It stays
+/// because controls that move as you navigate are worse than a redundant word.
+///
+/// It draws its own swatch, spacing and chip, so on macOS 26 the toolbar is told not to put a
+/// glass background behind it. See `BatonWindowToolbar`.
 struct WindowTitleLabel: View {
     @Environment(AppModel.self) private var app
 

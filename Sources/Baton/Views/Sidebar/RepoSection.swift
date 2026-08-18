@@ -89,14 +89,26 @@ struct RepoSection: View {
 
             Spacer(minLength: Metrics.spacingSmall)
 
-            Button("New workspace in \(repo.name)", systemImage: "plus") {
+            // The sidebar's glyph box, rather than whatever the list's section header font hands
+            // down: a header is set a size below its rows, and `.imageScale(.small)` took another
+            // bite out of that, which left a speck. A box is also what centres the plus against
+            // the name, since the two are then centred as boxes rather than as a word and a mark.
+            // The padding is the click target, and it is inside the label because a button's hit
+            // area is its label, which is why the `contentShape` outside the button widened
+            // nothing.
+            Button {
                 onCreateWorkspace(repo)
+            } label: {
+                Label("New workspace in \(repo.name)", systemImage: "plus")
+                    .labelStyle(.iconOnly)
+                    .font(Typo.label)
+                    .frame(width: Metrics.glyph, height: Metrics.glyph)
+                    .padding(.horizontal, Metrics.spacingSmall)
+                    .padding(.vertical, Metrics.spacingTight)
+                    .contentShape(Rectangle())
             }
-            .labelStyle(.iconOnly)
-            .imageScale(.small)
-            .foregroundStyle(isHeaderHovered ? Palette.textSecondary : Palette.textTertiary)
             .buttonStyle(.plain)
-            .contentShape(Rectangle())
+            .foregroundStyle(isHeaderHovered ? Palette.textSecondary : Palette.textTertiary)
             .help("New workspace in \(repo.name)")
         }
         .contentShape(Rectangle())

@@ -31,25 +31,59 @@ struct BatonWindowToolbar: ToolbarContent {
             .help("Start a workspace")
         }
 
-        ToolbarItem(placement: .principal) {
-            WindowTitleLabel()
-        }
-
-        ToolbarItemGroup(placement: .primaryAction) {
-            Toggle(isOn: $app.isBottomPanelVisible) {
-                Label("Terminal panel", systemImage: "rectangle.bottomthird.inset.filled")
+        // On macOS 26 every toolbar item is handed its own Liquid Glass background. This one
+        // draws its whole content itself, so the system capsule is a second background on top of
+        // it: a circle around the single word on Home, and a rim with no clearance around the
+        // project swatch and the branch chip on a workspace.
+        if #available(macOS 26.0, *) {
+            ToolbarItem(placement: .principal) {
+                WindowTitleLabel()
             }
-            .toggleStyle(.button)
-            .disabled(app.selectedModel == nil)
-            .help("Show the terminal panel")
+            .sharedBackgroundVisibility(.hidden)
 
-            Toggle(isOn: $app.isInspectorVisible) {
-                Label("Inspector", systemImage: "sidebar.right")
+            // Adjacent items share one glass capsule, and a toggle inside a shared capsule has to
+            // paint its own "on" fill inside it. With two panel symbols, both usually on, that
+            // reads as a filled rectangle inside a rounded fill inside a pill. A spacer gives each
+            // toggle a capsule of its own, where being on tints that capsule instead.
+            ToolbarItem(placement: .primaryAction) {
+                bottomPanelToggle
             }
-            .toggleStyle(.button)
-            .disabled(app.selectedModel == nil)
-            .help("Show the changed files")
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItem(placement: .primaryAction) {
+                inspectorToggle
+            }
+        } else {
+            ToolbarItem(placement: .principal) {
+                WindowTitleLabel()
+            }
+
+            ToolbarItemGroup(placement: .primaryAction) {
+                bottomPanelToggle
+                inspectorToggle
+            }
         }
+    }
+
+    // MARK: - Toggles
+    //
+    // Shared by both branches above, which differ only in how the toolbar groups them.
+
+    private var bottomPanelToggle: some View {
+        Toggle(isOn: $app.isBottomPanelVisible) {
+            Label("Terminal panel", systemImage: "rectangle.bottomthird.inset.filled")
+        }
+        .toggleStyle(.button)
+        .disabled(app.selectedModel == nil)
+        .help("Show the terminal panel")
+    }
+
+    private var inspectorToggle: some View {
+        Toggle(isOn: $app.isInspectorVisible) {
+            Label("Inspector", systemImage: "sidebar.right")
+        }
+        .toggleStyle(.button)
+        .disabled(app.selectedModel == nil)
+        .help("Show the changed files")
     }
 
     // MARK: - Actions

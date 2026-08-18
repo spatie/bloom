@@ -202,8 +202,13 @@ private struct ProjectRow: View {
 
     var body: some View {
         HStack(spacing: Metrics.gutter) {
+            // A stock `ColorPicker`, so the colour panel and its eyedropper come for free. It is
+            // a capsule on macOS 26 because that is what Apple draws, but at the default control
+            // size it is taller than the two lines of text beside it and reads as the subject of
+            // the row rather than as one attribute of it.
             ColorPicker("Accent", selection: accentBinding, supportsOpacity: false)
                 .labelsHidden()
+                .controlSize(.small)
 
             VStack(alignment: .leading, spacing: Metrics.spacingTight) {
                 TextField("Project name", text: $name)
