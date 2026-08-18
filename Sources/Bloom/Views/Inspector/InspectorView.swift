@@ -5,17 +5,19 @@ import BloomCore
 ///
 /// Everything here is a thin arrangement of the pieces below it: the pull request strip, the tab
 /// row, and whichever pane the tab row selected.
+///
+/// It shows no file contents. It used to: the list sat above a drawer that held the diff, and the
+/// two shared the column's height, so a wide diff got a narrow pane and a long list got a short
+/// one. Files open in the centre column now, which is where Conductor puts them and where there
+/// is room for them, and this column went back to being a list of what changed.
 struct InspectorView: View {
     let model: WorkspaceModel
-
-    /// Review mode belongs to the column rather than to a file, so it survives switching files.
-    @State private var isReviewing = false
 
     var body: some View {
         VStack(spacing: 0) {
             PullRequestBar(model: model)
             Hairline()
-            InspectorToolbar(model: model, isReviewing: $isReviewing)
+            InspectorToolbar(model: model)
             Hairline()
             content
         }
@@ -28,26 +30,9 @@ struct InspectorView: View {
         case .allFiles:
             FileTreeView(model: model)
         case .changes:
-            changes
+            ChangedFileList(model: model)
         case .checks:
             ChecksView(model: model)
-        }
-    }
-
-    @ViewBuilder
-    private var changes: some View {
-        if isReviewing, let file = model.selectedFile ?? model.changedFiles.first {
-            InspectorReviewPane(model: model, file: file)
-        } else {
-            VSplitLayout(
-                top: { ChangedFileList(model: model) },
-                bottom: {
-                    if let file = model.selectedFile {
-                        DiffView(model: model, file: file)
-                    }
-                },
-                hasBottom: model.selectedFile != nil
-            )
         }
     }
 }

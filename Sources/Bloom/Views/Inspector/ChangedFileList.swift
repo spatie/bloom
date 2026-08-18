@@ -171,8 +171,12 @@ struct ChangedFileList: View {
             isSelected: isSelected,
             fullPath: fullPath(file.path),
             depth: depth,
+            // Always a selection, never a toggle. Clicking the open row used to close the diff
+            // under the list; there is no diff under the list any more, and a click that
+            // deselected would now close nothing while making the row you just aimed at go quiet.
             onSelect: {
-                model.selectedFilePath = isSelected ? nil : file.path
+                model.selectedFilePath = file.path
+                FileReview.open(path: file.path, in: model)
                 quickLookArm += 1
             },
             onRevert: { pendingRevert = file }

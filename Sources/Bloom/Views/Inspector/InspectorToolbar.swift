@@ -19,7 +19,6 @@ import BloomCore
 /// did nothing at all on the checks tab.
 struct InspectorToolbar: View {
     @Bindable var model: WorkspaceModel
-    @Binding var isReviewing: Bool
 
     /// Shared with `ChangedFileList` through the same defaults key, and outliving the launch
     /// because a user who thinks in folders thinks in folders tomorrow too.
@@ -58,19 +57,10 @@ struct InspectorToolbar: View {
     private var trailing: some View {
         HStack(spacing: Metrics.spacingTight) {
             if model.inspectorTab == .changes {
-                Toggle(isOn: $isReviewing) {
-                    Label("Review changes", systemImage: "eye")
-                }
-                .labelStyle(.iconOnly)
-                .toggleStyle(.button)
-                .inspectorBarControl()
-                .disabled(model.changedFiles.isEmpty)
-                .help("Review the changes one file at a time")
-                .onChange(of: isReviewing) { _, reviewing in
-                    guard reviewing, model.selectedFilePath == nil else { return }
-                    model.selectedFilePath = model.changedFiles.first?.path
-                }
-
+                // No Review toggle. It existed to hide this list so that the diff under it had
+                // room, and the diff is not under it any more: it is a tab in the centre column
+                // at the full height of the window, and the list stays beside it the whole time.
+                // Walking the files one at a time is Cmd+Option+J and K.
                 Toggle(isOn: $isTree) {
                     Label("Group changes by folder", systemImage: "folder")
                 }

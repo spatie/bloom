@@ -30,9 +30,6 @@ enum InspectorLayout {
     /// is less than the glyph it is meant to clear and read as a ragged margin rather than as a
     /// level. Any wider and a path three deep leaves no room for a filename at 280pt.
     static let indentStep: CGFloat = 16
-    /// How much room a list keeps once a detail pane has opened beneath it, until the reader
-    /// drags the boundary somewhere else.
-    static let listHeight: CGFloat = 220
 }
 
 extension View {

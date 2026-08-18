@@ -33,11 +33,8 @@ struct FileTreeView: View {
     }
 
     var body: some View {
-        VSplitLayout(
-            top: { tree },
-            bottom: { detail },
-            hasBottom: selection != nil
-        )
+        tree
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Space bar Quick Look, the way Finder does it. Behind the rows, so it takes no clicks.
         .background(QuickLookHost(url: previewURL, armToken: quickLookArm))
         .task(id: LoadID(workspaceID: model.workspace.id, workspacePath: model.workspace.path)) {
@@ -95,31 +92,19 @@ struct FileTreeView: View {
         }
     }
 
-    // MARK: - Detail
-
-    /// A changed file is more usefully read as a diff, so the tree hands those to `DiffView` and
-    /// only renders raw contents for files nobody has touched.
-    @ViewBuilder
-    private var detail: some View {
-        if let selection {
-            if let changed = model.changedFiles.first(where: { $0.path == selection }) {
-                DiffView(model: model, file: changed)
-            } else {
-                FilePreview(model: model, path: selection)
-            }
-        }
-    }
-
     // MARK: - Actions
 
-    /// A directory opens or closes, a file is selected, and a file the agent touched also becomes
-    /// the inspector's selected diff.
+    /// A directory opens or closes, and a file opens in the centre column: as a diff if the agent
+    /// touched it, as its own contents if it did not. The tree keeps its own selection for the
+    /// highlight and for Quick Look, and a file the agent touched also becomes the changed list's
+    /// selection, so the two tabs of this column agree about what is open.
     private func activate(_ node: FileTreeNode) {
         quickLookArm += 1
 
         guard node.isDirectory else {
-            selection = selection == node.path ? nil : node.path
+            selection = node.path
             if changedPaths.contains(node.path) { model.selectedFilePath = node.path }
+            FileReview.open(path: node.path, in: model)
             return
         }
 

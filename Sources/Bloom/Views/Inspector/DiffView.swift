@@ -78,6 +78,7 @@ struct DiffView: View {
             }
         }
         .background(Palette.surface)
+        .background { shortcut }
         .task(id: LoadID(workspaceID: model.workspace.id, file: file)) { await load() }
         .onChange(of: isSideBySide) { _, _ in rebuild() }
         .onChange(of: ignoresWhitespace) { _, _ in refold() }
@@ -95,6 +96,21 @@ struct DiffView: View {
         } message: { problem in
             Text(problem)
         }
+    }
+
+    /// Cmd+E flips between the diff and the file, which is what Conductor binds the same choice
+    /// to. A hidden button rather than a menu command, for the reason spelled out in
+    /// `SessionTabsView`: the menu bar is built elsewhere, and a key equivalent is only offered to
+    /// the menu bar and to the view hierarchy. Only alive while a file is actually open.
+    private var shortcut: some View {
+        Button("Toggle Diff and Edit") {
+            guard isEditable else { return }
+            mode = mode == .diff ? .edit : .diff
+        }
+        .keyboardShortcut("e", modifiers: .command)
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder
