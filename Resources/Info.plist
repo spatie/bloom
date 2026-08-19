@@ -30,6 +30,42 @@
 	<false/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.developer-tools</string>
+	<!--
+	    Sparkle. The two values below are placeholders on purpose: the bucket the appcast will be
+	    published to does not exist yet, and a real-looking default is the one thing that could
+	    make a build check a host nobody owns.
+
+	    build.sh fills them in from the environment:
+
+	      BLOOM_UPDATE_FEED_URL     the appcast, e.g. https://<bucket-host>/appcast.xml
+	      BLOOM_UPDATE_PUBLIC_KEY   the base64 EdDSA public key printed by Sparkle's generate_keys
+
+	    A build with either one missing keeps the placeholder, and `SoftwareUpdate.availability`
+	    reads that as "not configured" and never starts the updater. The private half of the key
+	    pair belongs in the release runner's secret store and in the macOS keychain of whoever
+	    generated it. It must never be committed here.
+	-->
+	<key>SUFeedURL</key>
+	<string>__BLOOM_UPDATE_FEED_URL__</string>
+	<key>SUPublicEDKey</key>
+	<string>__BLOOM_UPDATE_PUBLIC_KEY__</string>
+	<!--
+	    Present so Sparkle does not ask on second launch whether it may check. The question is
+	    answered here and the answer is offered as a switch in Settings, which is where the rest of
+	    Bloom's system preferences live. Sparkle owns the preference from then on: see
+	    `UpdateSettingsSection` for why there is deliberately no @AppStorage mirror of it.
+	-->
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<!-- A day. See `SoftwareUpdate.checkInterval`, which is the same number. -->
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+	<!-- Nothing is downloaded before the user has said yes. See `SoftwareUpdater.start`. -->
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<!-- No anonymous system profile is sent with the check. -->
+	<key>SUEnableSystemProfiling</key>
+	<false/>
 	<key>NSServices</key>
 	<array>
 		<dict>

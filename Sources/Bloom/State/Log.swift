@@ -25,6 +25,9 @@ enum Log {
     /// The composer, and anything that holds text somebody typed.
     static let composer = Logger(subsystem: subsystem, category: "composer")
 
+    /// The updater, which mostly logs the checks and installs it decided not to do.
+    static let updates = Logger(subsystem: subsystem, category: "updates")
+
     /// The app's own bundle id, so an instance running against `BLOOM_DB_PATH` for a test can be
     /// told apart from the one somebody is using.
     private static let subsystem = Bundle.main.bundleIdentifier ?? "be.spatie.bloom"

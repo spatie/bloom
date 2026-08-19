@@ -30,6 +30,105 @@ cp "$BIN_DIR/Bloom" "$APP/Contents/MacOS/Bloom"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 [[ -f Resources/AppIcon.icns ]] && cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
+plist_set() {
+  local key="$1" type="$2" value="$3"
+  /usr/libexec/PlistBuddy -c "Set :$key $value" "$APP/Contents/Info.plist" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c "Add :$key $type $value" "$APP/Contents/Info.plist" >/dev/null
+}
+
+# What version this build claims to be, and whether it is allowed to update itself.
+#
+# The updater compares the appcast against CFBundleVersion, so that number has to mean something.
+# Resources/Info.plist carries a fixed one, which is fine as a placeholder and useless as a claim:
+# every build made from the source tree would carry it, so a released build would look newer than
+# a working copy that is months ahead of it, and a working copy that had been hand-stamped would
+# look newer than everything and never update again.
+#
+# So a build only claims a version when it is given one, and only a build that claims a version is
+# allowed to update itself. `BloomBuildChannel` is what says which of the two this is;
+# `SoftwareUpdate.availability` reads it and refuses to start the updater on a local build. That is
+# also what keeps the copy master.sh installs out of it, and master.sh's own BloomMasterCommit is
+# checked as a second, independent guard on the same case.
+#
+#   BLOOM_VERSION=0.2.0 BLOOM_BUILD=7 ./build.sh -r
+#
+# BLOOM_BUILD has to increase with every release and never repeat. The release pipeline should
+# derive both from the tag it is building, and the appcast's sparkle:version MUST equal the
+# BLOOM_BUILD of the zip it points at, or an installed app updates to a build that still reports
+# the old number and offers itself the same update forever.
+if [[ -n "${BLOOM_VERSION:-}" && -n "${BLOOM_BUILD:-}" ]]; then
+  plist_set CFBundleShortVersionString string "$BLOOM_VERSION"
+  plist_set CFBundleVersion string "$BLOOM_BUILD"
+  plist_set BloomBuildChannel string release
+  echo "==> version $BLOOM_VERSION ($BLOOM_BUILD)"
+else
+  plist_set BloomBuildChannel string local
+fi
+
+# The appcast and the key its signatures are checked against. Resources/Info.plist ships
+# placeholders for both, and a build that leaves either of them in place never starts the updater,
+# so an unconfigured build cannot reach for a host nobody owns.
+#
+#   BLOOM_UPDATE_FEED_URL     the appcast, e.g. https://<bucket-host>/appcast.xml
+#   BLOOM_UPDATE_PUBLIC_KEY   the base64 EdDSA public key from Sparkle's generate_keys
+#
+# The private half of that pair never appears in this repository. It lives in the release runner's
+# secret store, and in the keychain of the Mac that generated it.
+if [[ -n "${BLOOM_UPDATE_FEED_URL:-}" ]]; then
+  plist_set SUFeedURL string "$BLOOM_UPDATE_FEED_URL"
+fi
+if [[ -n "${BLOOM_UPDATE_PUBLIC_KEY:-}" ]]; then
+  plist_set SUPublicEDKey string "$BLOOM_UPDATE_PUBLIC_KEY"
+fi
+
+# Sparkle, embedded by hand.
+#
+# It ships as a binary XCFramework, and a Swift package build links against it but copies nothing:
+# an Xcode project would have an "Embed Frameworks" phase and there is no Xcode project here. So
+# the framework is copied into Contents/Frameworks, which is where a signed and notarised bundle
+# has to keep one, and the executable is given the rpath that finds it there. Without this the app
+# builds perfectly and then fails to launch, because dyld cannot resolve
+# @rpath/Sparkle.framework/Versions/B/Sparkle.
+#
+# This runs on every build, not only on ones that can update themselves: the binary is linked
+# against the framework either way, so a build without it would not start at all.
+#
+# ditto rather than cp, because the framework is a versioned bundle held together by symlinks and
+# carries a code signature of its own. install_name_tool invalidates the signature the build
+# system just applied, which is why both happen before the codesign pass at the foot of this file.
+embed_sparkle() {
+  local scratch framework
+  # BIN_DIR is <scratch>/<triple>/<config>, and the binary artifacts sit beside the triple.
+  scratch="$(dirname "$(dirname "$BIN_DIR")")"
+  framework="$(/usr/bin/find "$scratch/artifacts" -maxdepth 6 -type d \
+    -name 'Sparkle.framework' -path '*Sparkle.xcframework/macos*' 2>/dev/null | head -1)"
+
+  if [[ -z "$framework" ]]; then
+    echo "==> Sparkle.framework not found under $scratch/artifacts" >&2
+    return 1
+  fi
+
+  # The App Intents typecheck pass below compiles the app's sources a second time and needs the
+  # same framework search path the real build had, or `import Sparkle` fails there and takes the
+  # whole build with it.
+  SPARKLE_SEARCH_PATH="$(dirname "$framework")"
+
+  mkdir -p "$APP/Contents/Frameworks"
+  rm -rf "$APP/Contents/Frameworks/Sparkle.framework"
+  /usr/bin/ditto "$framework" "$APP/Contents/Frameworks/Sparkle.framework"
+  /usr/bin/install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/Bloom" 2>/dev/null
+
+  # Nothing above proves dyld will find it, so the answer is read back out of the binary rather
+  # than assumed. An app that launches on this machine only because the framework happens to still
+  # be in .build is exactly the failure this step exists to prevent.
+  if ! otool -l "$APP/Contents/MacOS/Bloom" | grep -q '@executable_path/../Frameworks'; then
+    echo "==> Sparkle: the executable has no rpath into Contents/Frameworks" >&2
+    return 1
+  fi
+}
+
+embed_sparkle
+
 # macOS 26 draws an app icon from a layered Icon Composer document rather than from a flat bitmap:
 # the glass, the shadow and the specular pass belong to the system and are applied live to the
 # layers. Resources/Bloom.icon is that document. actool compiles it into an Assets.car, which the
@@ -134,6 +233,7 @@ emit_app_intents_metadata() {
     -target "$triple" \
     -sdk "$sdk" \
     -I "$BIN_DIR/Modules" \
+    -F "${SPARKLE_SEARCH_PATH:-$BIN_DIR}" \
     -emit-const-values-path "$constvalues" \
     -Xfrontend -const-gather-protocols-file -Xfrontend "$protocolList" \
     "@$sources"

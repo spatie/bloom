@@ -92,6 +92,8 @@ private struct GeneralSettingsView: View {
 
             SleepSettingsSection()
 
+            UpdateSettingsSection()
+
             LabeledContent("New workspaces") {
                 HStack(spacing: Metrics.gutter) {
                     Text(WorkspaceManager.workspacesRoot.path)

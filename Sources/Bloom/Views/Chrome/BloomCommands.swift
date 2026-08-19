@@ -11,6 +11,10 @@ struct BloomCommands: Commands {
     /// See `TextZoomAvailability`.
     private let zoom = TextZoomAvailability.shared
 
+    /// Read for the same reason `zoom` is: this body is not a view, so the item only greys and
+    /// ungreys because an `@Observable` it reads has moved. See `SoftwareUpdater`.
+    private let updater = SoftwareUpdater.shared
+
     /// Nil in every scene but the main window. See `MainWindowFocusKey`.
     @FocusedValue(\.isMainWindowFocused) private var isMainWindowFocused: Bool?
 
@@ -19,6 +23,21 @@ struct BloomCommands: Commands {
     }
 
     var body: some Commands {
+        // Directly under "About Bloom", which is where every Mac app that updates itself puts it
+        // and therefore the first place anyone looks. Not in the Help menu, and not in Settings
+        // only: the Settings switch decides whether Bloom looks on its own, and this asks now.
+        //
+        // Absent rather than greyed out on a build that cannot update itself, because a permanently
+        // dead menu item invites the same click every time. See `SoftwareUpdate.availability`.
+        CommandGroup(after: .appInfo) {
+            if case .configured = updater.availability {
+                Button("Check for Updates…") {
+                    updater.checkForUpdates()
+                }
+                .disabled(!updater.canCheckForUpdates)
+            }
+        }
+
         CommandGroup(replacing: .newItem) {
             Button("New Workspace") {
                 // The sheet lives in RootView, and the sidebar and Home already open it this way.

@@ -25,12 +25,21 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
     /// Kept alive here because `NSApp.servicesProvider` is an unowned reference.
     private let servicesProvider = BloomServicesProvider()
 
+    /// Set by `SoftwareUpdater` once it has asked its own question about the running agents, so
+    /// the quit confirmation below does not ask the same question a second time and leave
+    /// Sparkle's installer waiting on an answer the user thought they had given.
+    var isInstallingUpdate = false
+
     func attach(_ model: AppModel) {
         appModel = model
         servicesProvider.attach(model)
         // The suppression rule needs to know which workspace the window is showing, and this is
         // the first moment there is a window to ask.
         NotificationService.shared.attach(model)
+        // The updater needs the same state, for one question: how many agents are mid turn. This
+        // is also the first moment there is any, and it is deliberately after launching rather
+        // than during it, so Sparkle's first scheduled check cannot land inside the launch.
+        SoftwareUpdater.shared.start(app: model)
     }
 
     /// Claiming the URL Apple Event has to happen before launching finishes. If SwiftUI's own
@@ -93,7 +102,9 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         // pausing them: a turn interrupted here is work the agent has already paid for and
         // cannot resume. Only asked when there is something to lose, so a quiet quit stays one
         // keystroke.
-        if let running = appModel?.runningAgentCount, running > 0, !confirmQuit(running: running) {
+        if !isInstallingUpdate,
+           let running = appModel?.runningAgentCount, running > 0,
+           !confirmQuit(running: running) {
             return .terminateCancel
         }
 
