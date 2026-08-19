@@ -1,51 +1,42 @@
 {
-  "fill": "automatic",
-  "groups": [
+ "fill": "automatic",
+ "groups": [
+  {
+   "layers": [
     {
-      "layers": [
-        {
-          "image-name": "mark.svg",
-          "name": "Mark"
-        }
-      ],
-      "shadow": {
-        "kind": "neutral",
-        "opacity": 0.5
-      },
-      "specular": true,
-      "translucency": {
-        "enabled": false,
-        "value": 0.5
-      }
-    },
-    {
-      "layers": [
-        {
-          "image-name": "bleed.svg",
-          "name": "Bleed"
-        }
-      ],
-      "translucency": {
-        "enabled": false,
-        "value": 0.5
-      }
-    },
-    {
-      "layers": [
-        {
-          "image-name": "ground.svg",
-          "name": "Ground"
-        }
-      ]
+     "image-name": "mark.svg",
+     "name": "Mark"
     }
-  ],
-  "supported-platforms": {
-    "circles": [
-      "watchOS"
-    ],
-    "squares": [
-      "macOS",
-      "iOS"
-    ]
+   ],
+   "shadow": {
+    "kind": "neutral",
+    "opacity": 0.5
+   },
+   "specular": true,
+   "translucency": {
+    "enabled": false,
+    "value": 0.5
+   }
+  },
+  {
+   "layers": [
+    {
+     "image-name": "bleed.svg",
+     "name": "Bleed"
+    }
+   ],
+   "translucency": {
+    "enabled": false,
+    "value": 0.5
+   }
+  },
+  {
+   "layers": [
+    {
+     "image-name": "ground.svg",
+     "name": "Ground"
+    }
+   ]
   }
+ ]
 }
