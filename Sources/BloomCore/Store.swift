@@ -2,6 +2,24 @@ import Foundation
 import Synchronization
 
 /// All persistence. One actor, one SQLite file.
+///
+/// One rule runs through every table here, and it is worth reading before adding a column or a
+/// write. **`upsert` creates a row. `update` modifies one.** An `upsert` writes every column from
+/// the value it is handed, so it is correct only when that value was built here and now; hand it
+/// something read a few seconds ago and it carries every column back to what it looked like then.
+/// `update(workspaceID:)`, `update(repoID:)` and `update(sessionID:)` each read the row inside
+/// this actor, apply the change, and write, with no suspension in between, so a write changes
+/// what it named and nothing else. Where one writer owns a fixed set of columns, it gets a method
+/// that names them: `updateDiffStat`, `touch`, `updateSetup`, `updateSessionPreferences`,
+/// `reorderSessions`, `updateLastReadSeq`.
+///
+/// This is not tidiness. These rows have several writers running at wildly different speeds: a
+/// diff stat refresh every six seconds, an archive that takes seconds of disk work before it can
+/// say so, an open panel somebody spends a minute in, an agent turn that runs for ten minutes.
+/// Whole-value writes from any of them silently rolled the others back, and the damage ranged
+/// from a stale count through a project losing its icon to a workspace whose row said it was live
+/// after its worktree had been deleted. A column added to a model is picked up by `update`
+/// automatically; reach for `upsert` on an existing row and it is reintroduced.
 public actor Store {
     private let db: SQLiteDatabase
     public nonisolated let path: String
@@ -527,6 +545,14 @@ public actor Store {
         try db.query("SELECT * FROM sessions WHERE id = ?", [.text(id)]).first.map(Self.session(from:))
     }
 
+    /// Writes a whole session row. This is how a session is created, and it is worth reaching for
+    /// only when the value being written was built here and now.
+    ///
+    /// Changing something about a session that already exists is `update(sessionID:_:)`, or one of
+    /// the methods that names its columns: `updateSessionPreferences`, `reorderSessions`,
+    /// `updateLastReadSeq`. This row has two owners running at very different speeds and
+    /// `agent_session_id` is in the conflict clause below, so a whole-value write from a copy read
+    /// before the agent answered takes resume with it.
     @discardableResult
     public func upsert(_ session: Session) throws -> Session {
         try db.run(
@@ -566,6 +592,37 @@ public actor Store {
             ]
         )
         return session
+    }
+
+    /// Changes an existing session without writing the columns it did not mean to change.
+    ///
+    /// `update(workspaceID:_:)` and `update(repoID:_:)` two tables over, for the same reason and
+    /// built the same way: the row is read here, inside the actor, immediately before it is
+    /// written back, and neither SQLite call suspends, so nothing can write between them.
+    ///
+    /// This is the table where getting it wrong costs the most. A session row has two owners.
+    /// `AgentRunner` owns `agent_session_id`, `state`, the token counters and `updated_at`, and it
+    /// holds one `Session` value for as long as the workspace is open, which can be hours. The UI
+    /// owns the title, the pickers, the sort order, the read mark and `archived_at`, and it writes
+    /// them while turns are running. Whichever of them wrote a whole value put the other's columns
+    /// back to what they were when its own copy was read, and one of those columns is the id
+    /// `--resume` is built from: renaming a session tab mid turn wrote `agent_session_id` back to
+    /// null, and the conversation could no longer be continued.
+    ///
+    /// Identity is not the caller's to move: `id` is pinned after the change runs, and
+    /// `workspace_id` and `created_at` are not in `upsert`'s conflict clause at all.
+    ///
+    /// Returns nil when there is no such row rather than inserting one, so a turn still writing
+    /// after its workspace was archived cannot put an orphan back.
+    @discardableResult
+    public func update(
+        sessionID: String,
+        _ change: @Sendable (inout Session) -> Void
+    ) throws -> Session? {
+        guard var row = try session(id: sessionID) else { return nil }
+        change(&row)
+        row.id = sessionID
+        return try upsert(row)
     }
 
     /// Targeted updates for the fields the UI owns.

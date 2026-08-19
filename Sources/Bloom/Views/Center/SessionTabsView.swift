@@ -348,7 +348,10 @@ struct SessionTabsView: View {
             model.sessions[index] = updated
         }
         Task {
-            _ = try? await store.upsert(updated)
+            // The title alone. This value was read when the strip was drawn, and a running agent
+            // has been writing its own columns into that row since, one of which is the id
+            // `--resume` needs.
+            try? await store.updateSessionPreferences(id: session.id, title: title)
             await model.reloadSessions()
         }
     }

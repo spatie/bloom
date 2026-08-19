@@ -341,9 +341,33 @@ public actor AgentRunner {
         }
     }
 
+    /// Writes the columns this runner owns, and nothing else.
+    ///
+    /// The distinction is not cosmetic here. This runner holds one `Session` value for as long as
+    /// the workspace is open, mutating it in place turn after turn, so every column it did not
+    /// write is a copy of how that column looked when the workspace was opened. Saving the whole
+    /// value put all of them back: a session renamed mid turn got its old name again, a model or
+    /// a permission mode picked in the composer was reverted, a tab closed while the agent was
+    /// working reopened, and the read mark came undone.
+    ///
+    /// And `agent_session_id` runs the other way. It is written here, from `system/init`, and it
+    /// is what `--resume` is built from, so a whole-value write from the UI's copy erased it and
+    /// the conversation could not be continued. `TranscriptModel.refreshSession` says the same
+    /// rule from the other side: what this runner owns only ever travels in that direction.
+    ///
+    /// `updatedAt` is included because it is this runner's statement about when the turn moved,
+    /// which is what `refreshSession` reads to decide whether a row still describes the last turn.
     private func save(_ session: Session) async {
         do {
-            try await store.upsert(session)
+            try await store.update(sessionID: session.id) {
+                $0.agentSessionID = session.agentSessionID
+                $0.state = session.state
+                $0.inputTokens = session.inputTokens
+                $0.outputTokens = session.outputTokens
+                $0.costUSD = session.costUSD
+                $0.contextTokens = session.contextTokens
+                $0.updatedAt = session.updatedAt
+            }
         } catch {
             report("Could not save the session", error)
         }

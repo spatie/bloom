@@ -207,9 +207,10 @@ final class WorkspaceModel {
         guard let store else { return }
         transcripts[session.id]?.teardown()
         transcripts[session.id] = nil
-        _ = try? await store.upsert(session.with {
-            $0.archivedAt = Date()
-        })
+        // Closing is one column. The strip's copy of this row can be a whole turn old, and the
+        // runner has been writing the state, the counters and the agent session id into it all
+        // the while.
+        _ = try? await store.update(sessionID: session.id) { $0.archivedAt = Date() }
         await reloadSessions()
     }
 
