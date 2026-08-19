@@ -43,7 +43,13 @@ final class TranscriptModel {
     private unowned let app: AppModel
 
     private(set) var rows: [TranscriptRow] = []
-    private(set) var isRunning = false
+    /// Whether this session's agent is mid turn.
+    ///
+    /// Computed over one stored flag rather than being the stored flag, so that every change to
+    /// it goes through `setRunning` and the app can be told. Reading it still registers a
+    /// dependency on `storedIsRunning`, which is what a view needs.
+    var isRunning: Bool { storedIsRunning }
+    private var storedIsRunning = false
     private(set) var isLoaded = false
 
     /// Text and thinking arriving live, before the completed block is persisted.
@@ -128,7 +134,7 @@ final class TranscriptModel {
         // turn started still describes the previous one, so it says nothing about this turn.
         let isStale = turnStartedAt.map { fresh.updatedAt < $0 } ?? false
         if !isStale, fresh.state == .failed || fresh.state == .cancelled {
-            isRunning = false
+            setRunning(false)
             statusLabel = nil
         }
     }
@@ -162,13 +168,13 @@ final class TranscriptModel {
 
         let runner = ensureRunner()
         turnStartedAt = Date()
-        isRunning = true
+        setRunning(true)
         statusLabel = "Starting"
 
         do {
             try await runner.send(body)
         } catch {
-            isRunning = false
+            setRunning(false)
             statusLabel = nil
             // The composer was emptied on the assumption the turn would start. It did not, so
             // the words go back where they were typed. An unsent prompt is often minutes of
@@ -192,12 +198,28 @@ final class TranscriptModel {
         try? await store.saveDraft(sessionID: session.id, body: draft)
     }
 
+    /// The one place `isRunning` moves.
+    ///
+    /// Seven call sites set it, and every one of them also has to reach `AppModel`, because the
+    /// sidebar's status strip, Home's summary line, the menu bar item, the Dock badge and the
+    /// sleep assertion are all answers to "is anything running" and none of them can see this
+    /// object. `AppModel.runningWorkspaceIDs` explains why they cannot simply read it: the model
+    /// dictionary those readers would have to walk is outside observation on purpose.
+    ///
+    /// Idempotent, so a path that stops an already stopped turn writes nothing and invalidates
+    /// nobody.
+    private func setRunning(_ value: Bool) {
+        guard storedIsRunning != value else { return }
+        storedIsRunning = value
+        app.noteRunningChanged(workspaceID: workspace.id)
+    }
+
     /// The UI stops looking busy right away, but the pump is deliberately left running: a cancelled
     /// turn still emits its own result, and that event is what writes the final state back into the
     /// session row. Tearing the pump down here used to strand the session until the next launch.
     func stop() {
         runner?.cancelNow()
-        isRunning = false
+        setRunning(false)
         statusLabel = nil
         clearStreaming()
     }
@@ -215,7 +237,7 @@ final class TranscriptModel {
     func shutdown() async {
         guard let runner else { return }
         runner.cancelNow()
-        isRunning = false
+        setRunning(false)
         statusLabel = nil
         clearStreaming()
 
@@ -284,7 +306,7 @@ final class TranscriptModel {
             // stays locked for the rest of the launch.
             clearStreaming()
             await appendLatestMessages()
-            isRunning = false
+            setRunning(false)
             statusLabel = nil
             await refreshSession()
             app.alert = BloomAlert(
@@ -296,7 +318,7 @@ final class TranscriptModel {
         case .result(let result):
             clearStreaming()
             await appendLatestMessages()
-            isRunning = false
+            setRunning(false)
             statusLabel = nil
             // Token counts, cost and state are all written by the runner as part of handling the
             // same result. Reading them back keeps one writer and avoids double counting.

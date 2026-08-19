@@ -21,13 +21,12 @@ struct AgentActivityReporter: ViewModifier {
         // Before `preventsSleep` below is read for the first time. See `SystemDefaults`.
         SystemDefaults.registerOnce()
 
-        // Selection is read alongside the count on purpose. `runningAgentCount` walks the model
-        // dictionary, which is deliberately outside observation, so a `WorkspaceModel` created
-        // after this body last ran would never invalidate it. Selecting a workspace is what
-        // creates one, so reading the selection here is what makes the new model's `isRunning`
-        // get tracked on the next pass.
+        // `runningAgentCount` is one observable set on `AppModel`, written by the transcript that
+        // started or finished the turn, so reading it here is a real dependency. It used to walk
+        // the model dictionary, which is outside observation, and this body had to read the
+        // selection as well to be invalidated when a workspace was opened. See
+        // `AppModel.runningWorkspaceIDs`.
         let running = app.runningAgentCount
-        let selection = app.selection
         // Reading the array is what subscribes this body to it. Every path that lowers an unread
         // flag goes through `AppModel.markRead`, which writes to the store and reloads, so the
         // badge follows a workspace being read without a poll and without a restart.
@@ -45,12 +44,6 @@ struct AgentActivityReporter: ViewModifier {
             }
             .onChange(of: isBadgeEnabled, initial: true) { _, enabled in
                 AgentActivity.shared.setBadgeEnabled(enabled)
-                AgentActivity.shared.setUnreadCount(
-                    DockBadge.unreadCount(in: app.workspaces, isRunning: app.isRunning)
-                )
-            }
-            .onChange(of: selection) { _, _ in
-                AgentActivity.shared.setRunningCount(app.runningAgentCount)
                 AgentActivity.shared.setUnreadCount(
                     DockBadge.unreadCount(in: app.workspaces, isRunning: app.isRunning)
                 )

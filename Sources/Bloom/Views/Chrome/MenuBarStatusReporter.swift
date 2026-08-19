@@ -12,11 +12,9 @@ struct MenuBarStatusReporter: ViewModifier {
         // Before `isEnabled` below is read for the first time. See `SystemDefaults`.
         SystemDefaults.registerOnce()
 
-        // Selection is read for the reason `AgentActivityReporter` spells out: the running count
-        // walks a dictionary that is outside observation, and selecting a workspace is what puts
-        // a new model into it.
+        // One observable set on `AppModel`, so this is a real dependency rather than a walk of a
+        // dictionary nothing is watching. See `AppModel.runningWorkspaceIDs`.
         let running = app.runningAgentCount
-        let selection = app.selection
         // The same figure the Dock badge is drawn from, deliberately. "Unread" has one definition
         // in this app and `DockBadge` owns it.
         let unread = DockBadge.unreadCount(in: app.workspaces, isRunning: app.isRunning)
@@ -34,12 +32,6 @@ struct MenuBarStatusReporter: ViewModifier {
             }
             .onChange(of: unread, initial: true) { _, count in
                 MenuBarStatusItem.shared.setUnreadCount(count)
-            }
-            .onChange(of: selection) { _, _ in
-                MenuBarStatusItem.shared.setRunningCount(app.runningAgentCount)
-                MenuBarStatusItem.shared.setUnreadCount(
-                    DockBadge.unreadCount(in: app.workspaces, isRunning: app.isRunning)
-                )
             }
     }
 }

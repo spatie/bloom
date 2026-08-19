@@ -462,13 +462,49 @@ final class AppModel {
         return workspaceModels[id]
     }
 
+    // MARK: - Which agents are running
+
+    /// The workspaces whose agent is mid turn, held here as one observable value.
+    ///
+    /// It is a stored set rather than a walk of `workspaceModels`, and that is the whole point.
+    /// `workspaceModels` is `@ObservationIgnored`, so reading it registers no dependency at all:
+    /// a count derived by walking it saw whatever models happened to exist the last time the
+    /// reader's body ran, and a model created afterwards could never invalidate it. The sidebar's
+    /// status bar is the case that made this visible. Its body runs once, before any workspace
+    /// has been opened, over an empty dictionary; selecting a workspace then creates a model
+    /// through an untracked write, the agent starts, and nothing ever tells the strip to look
+    /// again. It read "Idle" for an entire run while the row two inches above it showed the
+    /// running glyph, because that row is inside a list that reads `workspaces` and is redrawn by
+    /// the diff stat refresh every few seconds. The readers that looked correct were only ever
+    /// being carried by a poll.
+    ///
+    /// Writing it is a tracked mutation, so every reader (the strip, Home's summary line, the
+    /// sidebar rows, the menu bar item, the Dock badge and the sleep assertion) is invalidated by
+    /// the same thing, at the same moment, and none of them needs a private counter.
+    private(set) var runningWorkspaceIDs: Set<String> = []
+
+    /// Told by `TranscriptModel` whenever a turn starts or ends. See `TranscriptModel.setRunning`,
+    /// which is the one place that flag moves.
+    ///
+    /// The answer is recomputed from the workspace's model rather than taken from the caller,
+    /// because a workspace can hold several sessions and one of them finishing does not mean the
+    /// workspace has stopped working.
+    func noteRunningChanged(workspaceID: String) {
+        let isRunning = workspaceModels[workspaceID]?.isRunning ?? false
+        if isRunning {
+            runningWorkspaceIDs.insert(workspaceID)
+        } else {
+            runningWorkspaceIDs.remove(workspaceID)
+        }
+    }
+
     /// Workspaces with an agent currently running, for the sidebar's status bar and Home's
     /// summary line.
     ///
     /// Not the Dock badge, which counts unread finished work instead: see `DockBadge`. Not the
     /// sleep assertion either, which is driven from `runningAgentCount`.
     var runningCount: Int {
-        workspaceModels.values.count { $0.isRunning }
+        runningWorkspaceIDs.count
     }
 
     /// Whether a workspace has a running agent, without forcing a `WorkspaceModel` into
@@ -476,7 +512,7 @@ final class AppModel {
     /// `model(for:)` mutates observable state, so calling that from a view body would schedule
     /// an extra render pass per row.
     func isRunning(_ workspace: Workspace) -> Bool {
-        workspaceModels[workspace.id]?.isRunning ?? false
+        runningWorkspaceIDs.contains(workspace.id)
     }
 
     /// How many agents are mid turn, for the confirmation shown on quit.
@@ -484,15 +520,17 @@ final class AppModel {
     /// Counted over the live models rather than the stored sessions, because a session row says
     /// what was true when it was written and this question is about processes running right now.
     var runningAgentCount: Int {
-        workspaceModels.values.count(where: \.isRunning)
+        runningWorkspaceIDs.count
     }
 
     /// The workspaces those agents are working in, named so the confirmation can say where the
     /// work would be interrupted rather than only how much of it there is.
+    ///
+    /// Named from the models rather than from `workspaces`, because a workspace that has just
+    /// been archived is out of that list while its agent is still being wound down.
     var runningAgentWorkspaceNames: [String] {
-        workspaceModels.values
-            .filter(\.isRunning)
-            .map(\.workspace.name)
+        runningWorkspaceIDs
+            .compactMap { workspaceModels[$0]?.workspace.name }
             .sorted()
     }
 
@@ -980,6 +1018,9 @@ final class AppModel {
             // the app will ever come back for them.
             await TerminalSessionStore.shared.discard(workspaceID: workspace.id)
             workspaceModels[workspace.id] = nil
+            // The model is what `noteRunningChanged` reads, so the last word about this workspace
+            // has to be said before it goes.
+            runningWorkspaceIDs.remove(workspace.id)
             // One more workspace is archived now, so anything holding the old answer is wrong.
             invalidateArchived()
             await reload()
