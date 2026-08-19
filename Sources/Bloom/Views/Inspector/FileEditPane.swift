@@ -90,8 +90,9 @@ struct FileEditPane: View {
             Button("Discard and reload", role: .destructive) {
                 Task { await session.reload(path: path) }
             }
+            // Escape keeps the edits. See the archive confirmation in `RootView` for why no
+            // cancel button in this app carries `.keyboardShortcut(.defaultAction)`.
             Button("Keep editing", role: .cancel) {}
-                .keyboardShortcut(.defaultAction)
         } message: {
             Text("The file on disk replaces what you typed. There is no undo for this.")
         }

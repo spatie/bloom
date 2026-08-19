@@ -128,12 +128,16 @@ struct RootView: View {
             // dismissing the dialog clears it before the action's task ever reaches the main
             // actor. See `AppModel.confirmArchive`.
             Button(Self.confirmLabel(for: request), role: .destructive) { confirmArchive(request) }
-            // Return keeps the workspace, for the reason `CloseSessionAlert` gives for the same
-            // choice: the destructive answer should cost a deliberate click, not the key your hand
-            // is already on. Without this the dialog opens with the destructive button as the
-            // default, so Cmd+Delete and then Return destroys a worktree without a word being read.
+            // No `.keyboardShortcut(.defaultAction)` on the cancel button, and that is not an
+            // oversight. It used to be there, to keep Return off the destructive answer, and it
+            // did that by REPLACING the cancel button's own key binding. A `.cancel` role button
+            // is what Escape is wired to, so moving Return onto it took Escape off it, and no
+            // destructive confirmation in the app could be waved away with the key every Mac user
+            // reaches for. Verified on this build: with the modifier gone Escape dismisses, and
+            // Return does nothing at all, because a confirmation dialog has no default button
+            // unless one is named. Both halves of the rule hold, and the safe answer keeps the
+            // key it is supposed to have.
             Button("Keep the workspace", role: .cancel, action: app.cancelPendingArchive)
-                .keyboardShortcut(.defaultAction)
         } message: { request in
             // Naming what disappears, rather than asking "are you sure?".
             Text(Self.losses(in: request))
@@ -149,11 +153,9 @@ struct RootView: View {
             presenting: closeSession.request
         ) { _ in
             Button("Close anyway", role: .destructive) { closeSession.confirm() }
-            // Return keeps the session, for the same reason the archive confirmation gives: the
-            // destructive answer should cost a deliberate click, not the key your hand is already
-            // on. Cmd+W is a key your hand is already on twice over.
+            // Escape keeps the session. See the archive confirmation above for why no cancel
+            // button in this app carries `.keyboardShortcut(.defaultAction)`.
             Button("Keep working", role: .cancel) { closeSession.cancel() }
-                .keyboardShortcut(.defaultAction)
         } message: { _ in
             Text(CloseSessionAlert.message)
         }

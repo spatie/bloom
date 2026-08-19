@@ -66,8 +66,9 @@ struct ChangedFileList: View {
             presenting: pendingRevert
         ) { file in
             Button("Revert and lose those changes", role: .destructive) { revert(file) }
+            // Escape keeps the changes. See the archive confirmation in `RootView` for why no
+            // cancel button in this app carries `.keyboardShortcut(.defaultAction)`.
             Button("Keep the changes", role: .cancel) {}
-                .keyboardShortcut(.defaultAction)
         } message: { file in
             // The same sentence the header bar's Revert shows, from the same place, because it is
             // the same command on the same file and two wordings would eventually describe two

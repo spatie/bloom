@@ -74,10 +74,10 @@ struct FileHeaderBar: View {
             titleVisibility: .visible
         ) {
             Button("Revert and lose those changes", role: .destructive, action: onRevert)
-            // Return keeps the changes. See the archive confirmation in `RootView`, and
-            // `CloseSessionAlert`, for why the destructive answer is never the default one.
+            // Escape keeps the changes. See the archive confirmation in `RootView` for why the
+            // destructive answer is never the default one and why the cancel button carries no
+            // shortcut of its own.
             Button("Keep the changes", role: .cancel) {}
-                .keyboardShortcut(.defaultAction)
         } message: {
             // Naming what disappears, rather than asking "are you sure?", the way archiving a
             // workspace does.
