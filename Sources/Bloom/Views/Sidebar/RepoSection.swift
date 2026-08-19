@@ -33,6 +33,8 @@ struct RepoSection: View {
 
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Opens the project settings window from the context menu, the same call the gear makes.
+    @Environment(\.openWindow) private var openWindow
 
     @State private var isRenamingRepo = false
     @State private var repoDraft = ""
@@ -102,20 +104,36 @@ struct RepoSection: View {
 
             Spacer(minLength: Metrics.spacingSmall)
 
+            // The gear is drawn only under the pointer. It used to be present at rest and merely
+            // lit on hover, on the argument that Finder's own sidebar headers do that with Show
+            // and Hide; the owner looked at the result and asked for it to be revealed instead.
+            // A project's settings are the rarest thing anyone does to a project, and a gear on
+            // every header is a column of them down a pane whose job is to name the work.
+            //
+            // Faded rather than built and torn down: the button stays in the hierarchy at every
+            // moment and only its opacity moves, so nothing about the header's layout depends on
+            // where the pointer is, the row cannot reflow as the pointer crosses it, and the view
+            // keeps one identity rather than being a different view on each side of the hover.
+            // The fade is what keeps a pointer travelling down a full pane from reading as a
+            // column of gears flickering on and off, and it goes when Reduce Motion is on, which
+            // leaves the reveal instant rather than animated.
+            //
+            // The `+` beside it stays present at rest. It is the one thing anyone does to a
+            // project often enough to look for, and a trailing edge that empties completely on
+            // every header would leave nothing to aim at.
+            //
+            // Nothing is lost with the pointer away: Project settings is on this header's own
+            // context menu, and in File as Project Settings with Command Shift comma.
+            RepoSettingsButton(repo: repo, isHighlighted: isHeaderHovered)
+                .opacity(isHeaderHovered ? 1 : 0)
+                .animation(
+                    reduceMotion ? nil : .easeInOut(duration: 0.12), value: isHeaderHovered
+                )
+
             // Boxed to the tile's size at the other end of the row, so the header is bracketed by
             // two marks of one size rather than by an icon and a speck. The padding is the click
             // target, and it is inside the label because a button's hit area is its label, which
             // is why the `contentShape` outside the button widened nothing.
-            //
-            // Still hover-lit, and deliberately lit rather than revealed. Finder's own sidebar
-            // headers do exactly this with Show and Hide: present at rest, quiet, and brought
-            // forward under the pointer. Revealing it from nothing would make every header twitch
-            // as the pointer crosses the list and would hide the control from anyone who never
-            // gets a pointer near it, which is the whole of Full Keyboard Access and VoiceOver.
-            // At the old size it was a hairline glyph that hover had to rescue; now hover only
-            // has to say which project the click would land in.
-            RepoSettingsButton(repo: repo, isHighlighted: isHeaderHovered)
-
             Button {
                 onCreateWorkspace(repo)
             } label: {
@@ -140,6 +158,12 @@ struct RepoSection: View {
             .foregroundStyle(isHeaderHovered ? Palette.textPrimary : Palette.textSecondary)
             .help("New workspace in \(repo.name)")
         }
+        // A section header is given more room at its trailing edge than a plain row is, so the
+        // `+` was drawn about eight points further right than the diff counts on the rows under
+        // it and than the add button on the Projects heading, which left the pane's trailing edge
+        // ragged. Eight points of padding puts all three in one column. Nothing here changes the
+        // row's height: the header's own drawing band is 19 points and this is horizontal.
+        .padding(.trailing, Metrics.spacingWide)
         .contentShape(Rectangle())
         .onHoverChange { isHeaderHovered = $0 }
         .contextMenu {
@@ -148,6 +172,13 @@ struct RepoSection: View {
                 Task { await app.toggleCollapsed(repo) }
             }
             Button("Rename", action: beginRepoRename)
+            // The route to this project's settings that needs no pointer on the gear, which is
+            // drawn only while the pointer is on the header. File's own Project Settings item
+            // opens the selected workspace's project; this one opens the project it was raised
+            // from, which is not always the same thing.
+            Button("Project settings…") {
+                openWindow(id: RepoSettingsWindow.id, value: repo.id)
+            }
             Button("Reveal in Finder") { Reveal.inFinder(repo.path) }
             Divider()
             Button("Remove project", role: .destructive) { isConfirmingRemove = true }
