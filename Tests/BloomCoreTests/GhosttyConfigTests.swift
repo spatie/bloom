@@ -328,6 +328,55 @@ struct GhosttyConfigTests {
         ) == ["/elsewhere/ghostty/themes", "/bundled"])
     }
 
+    // MARK: - Fixtures on disk
+
+    /// Every file this suite puts on disk goes through here, and a path outside the running test's
+    /// own scratch directory fails the test rather than landing.
+    ///
+    /// This suite is the one place in the project that writes files whose names and locations are
+    /// also real: `config` and `config.ghostty`, under `~/.config/ghostty` and under
+    /// `~/Library/Application Support/com.mitchellh.ghostty`. One `GhosttyConfigLoader.configPaths()`
+    /// left on its default arguments, in a test or in something run beside one, points at those
+    /// four real files. That is not hypothetical. A `config.ghostty` holding a colour scheme nobody
+    /// had chosen appeared in a real Application Support directory and changed that machine's
+    /// terminal, in Ghostty and in Bloom alike, for a day before anyone connected the two.
+    ///
+    /// Reading the user's Ghostty configuration is the whole point of this file. Writing anywhere
+    /// near it is always a bug.
+    struct FixtureOutsideScratch: Error, CustomStringConvertible {
+        var path: String
+        var scratch: String?
+
+        var description: String {
+            guard let scratch else {
+                return "a fixture was written before .scratchDirectory scoped one: \(path)"
+            }
+            return "a fixture may only be written inside \(scratch), not at \(path)"
+        }
+    }
+
+    static func writeFixture(_ text: String, to path: String) throws {
+        guard let scratch = TestScratch.directory, path.hasPrefix(scratch + "/") else {
+            throw FixtureOutsideScratch(path: path, scratch: TestScratch.directory)
+        }
+        try FileManager.default.createDirectory(
+            atPath: (path as NSString).deletingLastPathComponent,
+            withIntermediateDirectories: true
+        )
+        try text.write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
+    @Test("a fixture outside the scratch directory is refused rather than written")
+    func fixturesCannotEscapeTheScratchDirectory() throws {
+        // A sibling of the scratch directory rather than a child of it: the shape a real Ghostty
+        // path has, which is somewhere else on the machine entirely.
+        let outside = NSTemporaryDirectory() + "bloom-ghostty-never-written-\(UUID().uuidString)"
+        #expect(throws: FixtureOutsideScratch.self) {
+            try Self.writeFixture("background = #000000\n", to: outside)
+        }
+        #expect(!FileManager.default.fileExists(atPath: outside))
+    }
+
     // MARK: - No Ghostty at all
 
     @Test("no config file anywhere means no opinion, so Bloom keeps its own colours")
@@ -342,12 +391,8 @@ struct GhosttyConfigTests {
 
     @Test("a config that says nothing about appearance is also no opinion")
     func silentConfigIsNoOpinion() throws {
-        let directory = TestScratch.path("ghostty")
-        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
-        let path = (directory as NSString).appendingPathComponent("config")
-        try "term = xterm-256color\nkeybind = ctrl+z=close_surface\n".write(
-            toFile: path, atomically: true, encoding: .utf8
-        )
+        let path = TestScratch.path("ghostty") + "/config"
+        try Self.writeFixture("term = xterm-256color\nkeybind = ctrl+z=close_surface\n", to: path)
 
         #expect(GhosttyConfigLoader.load(
             appearance: .light,
@@ -359,18 +404,12 @@ struct GhosttyConfigTests {
     @Test("a real pair of files on disk resolves through the loader")
     func loadsFromDisk() throws {
         let directory = TestScratch.path("ghostty-pair")
-        let themes = (directory as NSString).appendingPathComponent("themes")
-        try FileManager.default.createDirectory(atPath: themes, withIntermediateDirectories: true)
-
-        let lower = (directory as NSString).appendingPathComponent("config")
-        let upper = (directory as NSString).appendingPathComponent("config.ghostty")
-        try "theme = Fixture\npalette = 2=#5ccd86\n".write(toFile: lower, atomically: true, encoding: .utf8)
-        try "background = #fdf6e3\n".write(toFile: upper, atomically: true, encoding: .utf8)
-        try Self.solarizedDark.write(
-            toFile: (themes as NSString).appendingPathComponent("Fixture"),
-            atomically: true,
-            encoding: .utf8
-        )
+        let themes = directory + "/themes"
+        let lower = directory + "/config"
+        let upper = directory + "/config.ghostty"
+        try Self.writeFixture("theme = Fixture\npalette = 2=#5ccd86\n", to: lower)
+        try Self.writeFixture("background = #fdf6e3\n", to: upper)
+        try Self.writeFixture(Self.solarizedDark, to: themes + "/Fixture")
 
         let theme = try #require(GhosttyConfigLoader.load(
             appearance: .light,
@@ -383,12 +422,119 @@ struct GhosttyConfigTests {
         #expect(theme.palette[2] == GhosttyColor(red: 0x5C, green: 0xCD, blue: 0x86))
     }
 
+    // MARK: - The four files as they actually sit on one machine
+
+    /// Ghostty's own template, verbatim through the line that warns about `#` inside a value, and
+    /// then the four keys this machine really sets. The commented `background` above the real one
+    /// is the whole point: it is line 41 of the file and the real one is line 53.
+    static let applicationSupportConfig = """
+    # This is the configuration file for Ghostty.
+    #
+    # Config syntax crash course
+    # ==========================
+    # # Any line beginning with a # is a comment. It's not possible to put
+    # # a comment after a config option, since it would be interpreted as a
+    # # part of the value. For example, this will have a value of "#123abc":
+    # background = #123abc
+    #
+    # # Empty values are used to reset config keys to default.
+    # key =
+
+    font-family = MesloLGM Nerd Font Mono
+    font-size = 14
+    background = #fdf6e3
+    foreground = #000000
+    unfocused-split-opacity = 0.4
+    """
+
+    /// The dotfiles half, symlinked to `~/.config/ghostty/config`. It sets no background at all,
+    /// which is why reading it alone would leave the terminal with no colour to draw and send it
+    /// back to Bloom's own surface.
+    static let xdgConfig = """
+    term = xterm-256color
+    working-directory = /Users/someone/dev
+    cursor-style = block
+    shell-integration-features = no-cursor
+    palette = 2=#5ccd86
+    unfocused-split-opacity = 0.55
+    unfocused-split-fill = #7a7a7a
+    split-divider-color = #000000
+    """
+
+    /// A split config, the way a dotfiles repository plus Ghostty's own template leaves one: the
+    /// cream ground comes from Application Support and the green palette slot from `~/.config`.
+    ///
+    /// Both halves have to be read for this to come out right. Reading only the XDG file finds no
+    /// background at all and hands back nothing, and a terminal with nothing to draw falls back to
+    /// the window's own sunken surface, which is a deep blue rather than a cream.
+    @Test("a commented background above a real one, across both config directories")
+    func splitConfigKeepsTheRealBackground() throws {
+        let directory = TestScratch.path("ghostty-split")
+        let xdg = directory + "/xdg/ghostty/config"
+        let support = directory + "/support/com.mitchellh.ghostty/config"
+        try Self.writeFixture(Self.xdgConfig, to: xdg)
+        try Self.writeFixture(Self.applicationSupportConfig, to: support)
+
+        let theme = try #require(GhosttyConfigLoader.load(
+            appearance: .light,
+            paths: [xdg, support],
+            themeDirectories: []
+        ))
+
+        // The template's `# background = #123abc` is a comment and the real value is fifteen lines
+        // below it, so first-match parsing would have produced #123abc and last-match the cream.
+        #expect(theme.background == GhosttyColor(red: 0xFD, green: 0xF6, blue: 0xE3))
+        #expect(theme.foreground == GhosttyColor(red: 0x00, green: 0x00, blue: 0x00))
+        #expect(theme.fontFamily == "MesloLGM Nerd Font Mono")
+        #expect(theme.fontSize == 14)
+        // From the other file, which is the half that would be lost if only one were read.
+        #expect(theme.palette[2] == GhosttyColor(red: 0x5C, green: 0xCD, blue: 0x86))
+    }
+
+    /// `config.ghostty` beside `config` in the same directory is a second file, not an alternative
+    /// name for the first, and it is loaded after it.
+    ///
+    /// This is what turned one machine's cream terminal into a dark blue one: a stray
+    /// `config.ghostty` holding a dumped colour scheme appeared next to a `config` that had said
+    /// `background = #fdf6e3` for months, and nothing in the older file was touched. Ghostty's own
+    /// `+show-config` resolved the same navy from the same pair, so the answer below is Ghostty's
+    /// answer and not a bug being pinned in place.
+    @Test("config.ghostty is loaded after config in the same directory and outranks it")
+    func upperConfigOutranksTheLegacyName() throws {
+        let directory = TestScratch.path("ghostty-stray")
+        let config = directory + "/config"
+        let stray = directory + "/config.ghostty"
+        try Self.writeFixture(Self.applicationSupportConfig, to: config)
+        try Self.writeFixture(
+            "background = #162c35\nforeground = #c0c5ce\nfont-family = JetBrains Mono\n",
+            to: stray
+        )
+
+        let both = try #require(GhosttyConfigLoader.load(
+            appearance: .light,
+            paths: [config, stray],
+            themeDirectories: []
+        ))
+        #expect(both.background == GhosttyColor(red: 0x16, green: 0x2C, blue: 0x35))
+        // A repeated font-family declares a fallback rather than replacing the choice, so the
+        // primary face still comes from the file that named it first.
+        #expect(both.fontFamily == "MesloLGM Nerd Font Mono")
+
+        // Take the stray away and the cream is there again, untouched, in the same file it always
+        // was. Nothing had to be fixed in the older config to get it back.
+        let alone = try #require(GhosttyConfigLoader.load(
+            appearance: .light,
+            paths: [config],
+            themeDirectories: []
+        ))
+        #expect(alone.background == GhosttyColor(red: 0xFD, green: 0xF6, blue: 0xE3))
+    }
+
     @Test("a theme name with a path separator is refused")
     func themeNamesCannotEscapeTheirDirectory() throws {
         let directory = TestScratch.path("ghostty-escape")
-        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
-        let path = (directory as NSString).appendingPathComponent("outside")
-        try "background = #123456\n".write(toFile: path, atomically: true, encoding: .utf8)
+        let path = directory + "/outside"
+        try Self.writeFixture("background = #123456\n", to: path)
 
         #expect(GhosttyConfigLoader.themeText(named: "../outside", in: [directory]) == nil)
         #expect(GhosttyConfigLoader.themeText(named: path, in: []) != nil)
