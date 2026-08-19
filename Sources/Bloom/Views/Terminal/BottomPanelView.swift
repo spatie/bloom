@@ -176,30 +176,17 @@ struct BottomPanelView: View {
             .help(help)
     }
 
-    /// What the pane under the strip is actually painted with, and the ink that sits on it.
+    /// One surface for every tab in the strip, whatever the pane behind it draws.
     ///
-    /// Every pane here draws the sunken surface except a terminal running the user's own Ghostty
-    /// theme, which draws whatever that theme says: a light grey tab above a black shell is the
-    /// seam that gave the panel away as two views stacked by accident.
+    /// A terminal tab used to take its ground and ink from the user's Ghostty theme, so the tab
+    /// matched the shell under it. It read as a coloured tab in a row of grey ones, which is a
+    /// strip that cannot be scanned: the eye sorts the tabs by colour before it reads any of them,
+    /// and the colour means nothing except which pane happens to be open.
     ///
-    /// The pairing is taken whole or not at all, which is `TabSurface.themed`: a theme that names a
-    /// ground but no ink leaves nothing that is guaranteed to read on it, and a tab whose own name
-    /// has disappeared is worse than one that does not match the shell below it.
-    private func surface(of tab: BottomTab) -> TabSurface {
-        guard case .terminal = tab, usesGhosttyTheme else { return Self.pane.surface }
-
-        let appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
-        guard let appearance,
-              let theme = TerminalGhostty.theme(for: appearance),
-              let background = theme.background,
-              let foreground = theme.foreground
-        else { return Self.pane.surface }
-
-        return .themed(
-            fill: Color(nsColor: NSColor(background)),
-            ink: Color(nsColor: NSColor(foreground))
-        )
-    }
+    /// The seam that idea was solving is real (a grey tab directly above a themed shell shows the
+    /// join) but it belongs to the pane rather than to the tab, and a tab strip whose members
+    /// disagree about their own colour is the worse of the two problems.
+    private func surface(of tab: BottomTab) -> TabSurface { Self.pane.surface }
 
     // MARK: - Content
 
