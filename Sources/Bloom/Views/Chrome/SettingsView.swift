@@ -278,7 +278,7 @@ private struct ProjectRow: View {
                 guard let hex = color.hexString, hex != repo.accent else { return }
                 Task {
                     guard let store = app.store else { return }
-                    _ = try? await store.upsert(repo.with { $0.accent = hex })
+                    _ = try? await store.update(repoID: repo.id) { $0.accent = hex }
                     await app.reload()
                 }
             }

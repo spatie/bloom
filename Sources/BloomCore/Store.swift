@@ -260,6 +260,13 @@ public actor Store {
         try db.query("SELECT * FROM repos WHERE path = ?", [.text(path)]).first.map(Self.repo(from:))
     }
 
+    /// Writes a whole project row. This is how a project is added, and it is worth reaching for
+    /// only when the value being written was built here and now.
+    ///
+    /// Changing something about a project that already exists is `update(repoID:_:)` instead.
+    /// Every column in the conflict clause below is written from the value handed in, so a value
+    /// read a few seconds ago carries all of them back to what they were then, `icon_path` and
+    /// `icon_source` included. See `update` for what that costs.
     @discardableResult
     public func upsert(_ repo: Repo) throws -> Repo {
         try db.run(
@@ -288,6 +295,36 @@ public actor Store {
             ]
         )
         return repo
+    }
+
+    /// Changes an existing project without writing the columns it did not mean to change.
+    ///
+    /// `update(workspaceID:_:)` one table over, for the same reason and built the same way: the
+    /// row is read here, inside the actor, immediately before it is written back, and neither
+    /// SQLite call suspends, so nothing can write between them.
+    ///
+    /// The `repos` table has five writers and they hold their copy of the row for very different
+    /// lengths of time. Collapsing a project's section and renaming it are quick. The accent well
+    /// writes on every distinct colour of a drag. The icon is the slow one: "Find icon" holds its
+    /// value across a walk of the project directory, and "Choose icon" holds it across a whole
+    /// `NSOpenPanel` session, which is as long as somebody takes to find a file. Whichever of
+    /// them wrote last used to put every column back to what it had seen, so the project quietly
+    /// lost the icon Bloom had just found for it, or got its old name back, or its old colour.
+    ///
+    /// Identity is not the caller's to move: `id` is pinned after the change runs, and
+    /// `created_at` is not in `upsert`'s conflict clause at all. `path` is, because a project can
+    /// legitimately be pointed somewhere else, so it stays something a caller can name.
+    ///
+    /// Returns nil when there is no such row rather than inserting one.
+    @discardableResult
+    public func update(
+        repoID: String,
+        _ change: @Sendable (inout Repo) -> Void
+    ) throws -> Repo? {
+        guard var row = try repo(id: repoID) else { return nil }
+        change(&row)
+        row.id = repoID
+        return try upsert(row)
     }
 
     public func deleteRepo(id: String) throws {

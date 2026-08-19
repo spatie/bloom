@@ -662,13 +662,15 @@ final class AppModel {
 
     func toggleCollapsed(_ repo: Repo) async {
         guard let store else { return }
-        _ = try? await store.upsert(repo.with { $0.collapsed.toggle() })
+        // Toggled against the stored row rather than against the copy the sidebar was drawn
+        // from, so the disclosure cannot also write back a project's name, colour or icon.
+        _ = try? await store.update(repoID: repo.id) { $0.collapsed.toggle() }
         await reload()
     }
 
     func rename(_ repo: Repo, to name: String) async {
         guard let store, !name.isEmpty else { return }
-        _ = try? await store.upsert(repo.with { $0.name = name })
+        _ = try? await store.update(repoID: repo.id) { $0.name = name }
         await reload()
     }
 

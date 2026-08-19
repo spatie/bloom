@@ -238,10 +238,14 @@ struct RepoSettingsView: View {
         // be a file that has changed since it was last read.
         RepoIconArt.forget(repo.iconPath)
         RepoIconArt.forget(icon)
-        _ = try? await store.upsert(repo.with {
+        // The two icon columns only. This value was captured before the detection walk, or
+        // before an open panel that somebody may have spent a minute in, and writing all of it
+        // would put the project's name, colour and collapsed state back to whatever they were
+        // when the button was pressed.
+        _ = try? await store.update(repoID: repo.id) {
             $0.iconPath = icon
             $0.iconSource = source
-        })
+        }
         await app.reload()
     }
 
@@ -261,7 +265,9 @@ struct RepoSettingsView: View {
                 guard let hex = color.hexString, hex != repo.accent else { return }
                 Task {
                     guard let store = app.store else { return }
-                    _ = try? await store.upsert(repo.with { $0.accent = hex })
+                    // The colour and nothing else: the icon buttons above write from a value
+                    // this one knows nothing about.
+                    _ = try? await store.update(repoID: repo.id) { $0.accent = hex }
                     await app.reload()
                 }
             }
