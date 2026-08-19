@@ -91,6 +91,7 @@ struct FileEditPane: View {
                 Task { await session.reload(path: path) }
             }
             Button("Keep editing", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
         } message: {
             Text("The file on disk replaces what you typed. There is no undo for this.")
         }

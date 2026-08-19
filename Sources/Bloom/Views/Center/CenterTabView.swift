@@ -149,7 +149,10 @@ struct CenterTabView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
         .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
-        .accessibilityAction(named: "Select", onSelect)
+        // Unnamed, so this is the DEFAULT action. Selecting is a tap gesture rather than a button
+        // here, and a named action only appears in VoiceOver's actions rotor: the row said it was
+        // a button and then did nothing when a reader pressed it.
+        .accessibilityAction { onSelect() }
         .accessibilityActions { if canRename { Button("Rename", action: onStartRename) } }
         .contextMenu {
             Button("Open in Split Right", systemImage: PaneSymbol.splitRight, action: onSplitRight)

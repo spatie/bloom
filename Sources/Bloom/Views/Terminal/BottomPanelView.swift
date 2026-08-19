@@ -176,6 +176,9 @@ struct BottomPanelView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(tab.title)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        // The tabs beside this one are real buttons; this one selects through a tap gesture, so
+        // without a default action it announced itself as a button that could not be pressed.
+        .accessibilityAction { select(.terminal(tab.id)) }
         .contextMenu {
             Button("Rename") {
                 draftName = tab.title

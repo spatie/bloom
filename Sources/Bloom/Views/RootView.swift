@@ -90,7 +90,12 @@ struct RootView: View {
             presenting: app.pendingArchive
         ) { _ in
             Button("Archive and lose that work", role: .destructive, action: confirmArchive)
+            // Return keeps the workspace, for the reason `CloseSessionAlert` gives for the same
+            // choice: the destructive answer should cost a deliberate click, not the key your hand
+            // is already on. Without this the dialog opens with "Archive and lose that work" as the
+            // default, so Cmd+Delete and then Return destroys a worktree without a word being read.
             Button("Keep the workspace", role: .cancel, action: app.cancelPendingArchive)
+                .keyboardShortcut(.defaultAction)
         } message: { request in
             // Naming what disappears, rather than asking "are you sure?". The confirmation only
             // exists because there is something specific to lose, so it should say what.

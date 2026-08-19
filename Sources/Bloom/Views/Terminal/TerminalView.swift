@@ -380,12 +380,24 @@ final class BloomTerminalView: LocalProcessTerminalView {
             return true
         }
 
+        // Everything below is a plain Command shortcut, so Option and Shift have to be checked
+        // rather than ignored. This view is offered every key equivalent before the menu bar is,
+        // and matching on the character alone meant a focused terminal quietly ate shortcuts that
+        // belong to the app and that its own menus advertise: Cmd+Option+K, which steps back
+        // through a review's changed files, cleared the scrollback instead, and Shift+Cmd+C, which
+        // the Workspace menu shows as Copy Branch Name, copied the terminal's selection. Cmd+Plus
+        // keeps Shift, because that is how the character is typed at all.
+        let shift = event.modifierFlags.contains(.shift)
+        guard !event.modifierFlags.contains(.option) else {
+            return super.performKeyEquivalent(with: event)
+        }
+
         switch key {
-        case "k":
+        case "k" where !shift:
             clearScreen()
-        case "c":
+        case "c" where !shift:
             copy(self)
-        case "v":
+        case "v" where !shift:
             paste(self)
         // Written to the preference rather than to this view, so the size survives the shell it
         // was set in and every other open terminal follows it.

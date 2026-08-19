@@ -16,6 +16,10 @@ struct ChangedFileList: View {
 
     @State private var hoveredPath: String?
     @State private var pendingRevert: ChangedFile?
+    /// A revert that failed, so the user hears about it. It used to be a `try?` that threw the
+    /// error away and refreshed the list, which left a file that had not been reverted looking
+    /// exactly like one that had.
+    @State private var revertProblem: RevertProblem?
     /// Derived from `model.changedFiles`, rebuilt only when that list changes. See
     /// `ChangedFileGroup`.
     @State private var groups: [ChangedFileGroup] = []
@@ -58,14 +62,29 @@ struct ChangedFileList: View {
         .confirmationDialog(
             "Revert \(pendingRevert?.filename ?? "this file")?",
             isPresented: $pendingRevert.isPresent(),
+            titleVisibility: .visible,
             presenting: pendingRevert
         ) { file in
-            Button("Revert", role: .destructive) { revert(file) }
-            Button("Cancel", role: .cancel) {}
+            Button("Revert and lose those changes", role: .destructive) { revert(file) }
+            Button("Keep the changes", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
         } message: { file in
-            Text(file.change == .untracked
-                 ? "\(file.path) is untracked, so reverting deletes it. This cannot be undone."
-                 : "Discards every change to \(file.path). This cannot be undone.")
+            // The same sentence the header bar's Revert shows, from the same place, because it is
+            // the same command on the same file and two wordings would eventually describe two
+            // different operations.
+            Text(FileRevert.losses(
+                for: file,
+                in: model.workspace,
+                hasDraft: FileEditSession.shared.isDirty(fullPath(file.path))
+            ))
+        }
+        .alert(
+            "Could not revert \(revertProblem?.filename ?? "the file")",
+            isPresented: $revertProblem.isPresent(),
+            presenting: revertProblem
+        ) { _ in
+        } message: { problem in
+            Text(problem.message)
         }
     }
 
@@ -230,17 +249,30 @@ struct ChangedFileList: View {
         Task { await model.refreshChanges() }
     }
 
-    /// Untracked files have no committed version to restore, so the only honest revert is a
-    /// delete. Both paths go through git so the working tree and the index stay in step.
+    /// Through `FileRevert`, which is the one place that knows what reverting a file means.
+    ///
+    /// This used to run its own pair of git commands, and they were not the same operation: an
+    /// untracked file was destroyed with `git clean -f` where `FileRevert` moves it to the Trash,
+    /// and a tracked one was restored from the index rather than from the merge base, so the two
+    /// Revert buttons in this column gave the file two different contents. Renames were handled by
+    /// neither half.
     private func revert(_ file: ChangedFile) {
-        let worktree = model.workspace.path
-        let arguments = file.change == .untracked
-            ? ["clean", "-f", "--", file.path]
-            : ["checkout", "--", file.path]
-
+        let workspace = model.workspace
+        let absolute = fullPath(file.path)
         Task {
-            _ = try? await Shell.run("git", arguments, cwd: worktree, timeout: .seconds(20))
+            // The draft goes with the file, exactly as it does from the header bar. Left behind,
+            // an open Edit pane would keep offering to save the text that was just reverted.
+            FileEditSession.shared.discard(path: absolute)
+            if let message = await FileRevert.revert(file: file, in: workspace) {
+                revertProblem = RevertProblem(filename: file.filename, message: message)
+            }
             await model.refreshChanges()
         }
+    }
+
+    private struct RevertProblem: Identifiable {
+        let id = UUID()
+        var filename: String
+        var message: String
     }
 }

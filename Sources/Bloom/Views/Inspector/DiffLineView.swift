@@ -28,6 +28,30 @@ struct DiffLineView: View {
             content
         }
         .frame(width: width, height: CodeMetrics.rowHeight, alignment: .leading)
+        // One element per line, said as a sentence. Left as it was drawn, VoiceOver read a row as
+        // four unrelated fragments, "128", "129", "+", and then the code, and whether a line was
+        // added or removed reached the reader only as a background wash and a one-character
+        // marker that is a bare space on a context line. A colour is not a label.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHidden(line == nil)
+    }
+
+    /// What this line is, where it is, and what it says, in that order.
+    private var accessibilityLabel: String {
+        guard let line else { return "" }
+        if line.kind == .noNewline { return "No newline at end of file" }
+
+        let number = line.newNumber ?? line.oldNumber
+        let place = number.map { " \($0)" } ?? ""
+        let state = switch line.kind {
+        case .addition: "Added line\(place)"
+        case .deletion: "Removed line\(place)"
+        default: "Line\(place)"
+        }
+
+        let text = line.text.trimmingCharacters(in: .whitespaces)
+        return text.isEmpty ? "\(state), empty" : "\(state), \(text)"
     }
 
     // MARK: - Gutter

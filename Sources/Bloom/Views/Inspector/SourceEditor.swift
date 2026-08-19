@@ -126,6 +126,16 @@ struct SourceEditor: NSViewRepresentable {
         private weak var ruler: LineNumberRuler?
         private var highlightTask: Task<Void, Never>?
 
+        /// The editor's own undo stack, kept off the window's.
+        ///
+        /// An `NSTextView` with no manager of its own asks the responder chain, which ends at the
+        /// window, so this editor was typing into the same stack that holds `Undo Archive
+        /// Workspace`. `removeAllActions()` below then threw that stack away wholesale, and simply
+        /// opening a file in Edit mode took the only way back from an archive with it.
+        private let editorUndo = UndoManager()
+
+        func undoManager(for view: NSTextView) -> UndoManager? { editorUndo }
+
         init(text: Binding<String>) {
             self.text = text
         }
@@ -150,7 +160,8 @@ struct SourceEditor: NSViewRepresentable {
             appearance = scheme
             if textView.string != value {
                 textView.string = value
-                textView.undoManager?.removeAllActions()
+                // Only this editor's stack, which is what `editorUndo` exists to make true.
+                editorUndo.removeAllActions()
             }
             ruler?.refresh()
             highlight(immediately: true)
