@@ -94,6 +94,8 @@ private struct GeneralSettingsView: View {
 
             UpdateSettingsSection()
 
+            InstallPingSettingsSection()
+
             LabeledContent("New workspaces") {
                 HStack(spacing: Metrics.gutter) {
                     Text(WorkspaceManager.workspacesRoot.path)

@@ -93,6 +93,12 @@ struct RootView: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: app.notice)
 
         .task { await app.bootstrap() }
+        // The install ping. Started from here because this is the first moment there is a window
+        // and a model, and it keeps a loop of its own from then on rather than living inside this
+        // task: Bloom goes on running with its window closed, and a view's task does not. It waits
+        // a minute before it does anything at all, so nothing about it is part of a launch. See
+        // `InstallPingService`.
+        .task { InstallPingService.shared.start(app: app) }
         // The terminal panel lives at the bottom of the inspector now, so anything that asks for
         // the panel has to bring the inspector with it. Without this, Toggle Bottom Panel from the
         // menu bar while the inspector is closed does nothing at all.

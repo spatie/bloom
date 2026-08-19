@@ -195,6 +195,35 @@ public actor AgentCatalog {
         return await describe(kind, executablePath: path, configPath: configPath)
     }
 
+    // MARK: - Which agents this machine has
+
+    /// The user default the Agents pane files a per-agent executable path under.
+    ///
+    /// Named here rather than only at the one call site that writes it, because the install ping
+    /// has to resolve the same executable that pane was pointed at, and two spellings of one key
+    /// is how the ping would quietly start reporting an agent as missing.
+    public static func executablePathSettingKey(_ kind: AgentKind) -> String {
+        "agent.\(kind.rawValue).executablePath"
+    }
+
+    /// Which agent CLIs are present on this machine, by executable lookup alone.
+    ///
+    /// Deliberately much less than `detect`. No `--version` subprocess, no config file opened and
+    /// no account looked at: this answers only "does the binary resolve", which is the one
+    /// non-secret fact the install ping is allowed to carry. `~/.claude.json` and
+    /// `~/.codex/auth.json` hold live credentials, and this path never opens either of them.
+    ///
+    /// Synchronous and uncached, because its only caller asks once a day.
+    public static func installedKinds(overrides: [AgentKind: String] = [:]) -> [AgentKind] {
+        AgentKind.allCases.filter { kind in
+            let override = overrides[kind]?.trimmingCharacters(in: .whitespaces)
+            if let override, !override.isEmpty {
+                return Shell.which(expandingTilde(override)) != nil
+            }
+            return Shell.which(kind.executableName) != nil
+        }
+    }
+
     private static func describe(
         _ kind: AgentKind,
         executablePath: String,
