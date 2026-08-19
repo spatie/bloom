@@ -30,19 +30,40 @@ public struct PullRequestStatus: Sendable, Hashable {
     public var canMerge: Bool
     /// Why not, in a sentence a tooltip can show. Nil when merging is allowed.
     public var blockedReason: String?
+    /// What the strip's one prominent button should offer in this state.
+    ///
+    /// Decided here rather than in the view, and not re-derived from whatever the view happens to
+    /// know about the worktree. The first version of this let the button read the local counts
+    /// directly, and a branch with both a conflict and uncommitted work drew "Merge conflicts"
+    /// over a Commit and push button: the headline came from the precedence and the button came
+    /// from somewhere else, so the strip gave two different answers at once. There is one
+    /// decision, so there is one place it is made.
+    public var remedy: Remedy
+
+    /// What to do about this state, as far as one button can express it.
+    public enum Remedy: Sendable, Hashable {
+        /// Land it. What every state GitHub reports on its own offers.
+        case merge
+        /// Get the worktree onto the remote first. Committing is part of it or it is not,
+        /// depending on whether anything is uncommitted, and the label follows.
+        case commitAndPush
+        case push
+    }
 
     public init(
         tone: Tone,
         text: String,
         detail: String? = nil,
         canMerge: Bool,
-        blockedReason: String? = nil
+        blockedReason: String? = nil,
+        remedy: Remedy = .merge
     ) {
         self.tone = tone
         self.text = text
         self.detail = detail
         self.canMerge = canMerge
         self.blockedReason = blockedReason
+        self.remedy = remedy
     }
 }
 
@@ -63,6 +84,73 @@ public extension PullRequest {
     var reviewLabel: String? {
         guard let reviewDecision, !reviewDecision.isEmpty else { return nil }
         return reviewDecision.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    /// The state of this pull request, with what the worktree is holding weighed against it.
+    ///
+    /// GitHub is the authority on everything in `status` and on nothing here. Every state it
+    /// reports describes the commit that was pushed: "12 of 12 checks passed" is a fact about a
+    /// commit, and the moment anything is edited or committed after that push, the fact is about
+    /// something that no longer exists on this machine. "Ready to merge" over a branch whose work
+    /// is still on disk is not a slightly stale answer, it is the wrong one, and acting on it
+    /// merges a pull request without the change the reader is looking at and deletes the branch.
+    ///
+    /// The precedence, worst first, and why:
+    ///
+    /// 1. **Merged** and **closed**. Facts about the pull request itself rather than about a
+    ///    commit, and nothing local changes either. Local work on a merged branch belongs to the
+    ///    NEXT pull request, so pointing at a push here would be pointing at a dead branch.
+    /// 2. **Merge conflicts**. Also outranks local work, and this one is a judgement call rather
+    ///    than an obvious ordering. GitHub computed it against the pushed head, so in principle
+    ///    the conflict could already be resolved on disk. It stays first because it is the only
+    ///    state that a push cannot clear, because it is the one that needs a person, and because
+    ///    it is the one where being wrong costs the most.
+    /// 3. **Local changes**. Above everything derived from the check and review rollup, because
+    ///    every one of those is a claim about a commit the reader does not have. Above draft too:
+    ///    draft is a property you set and already know, and local work is news.
+    /// 4. Draft, then the rollup: checks failing, checks running, changes requested, waiting for
+    ///    review, ready to merge.
+    ///
+    /// Merging is NOT blocked. The button stays live and the confirmation says what is missing,
+    /// because whether uncommitted work belongs to this pull request is a question only the reader
+    /// can answer: an agent leaves scratch files in a worktree constantly, and a strip that
+    /// disabled the app's most important control over an untracked `notes.md` would be wrong far
+    /// more often than it was right. Telling the truth loudly and letting the reader decide is the
+    /// trade this makes.
+    func status(local: LocalWork?) -> PullRequestStatus {
+        let base = status
+        guard let local, local.isAhead, isOpen, !hasConflicts else { return base }
+
+        return PullRequestStatus(
+            tone: .warning,
+            text: "Local changes",
+            detail: Self.localDetail(local),
+            canMerge: base.canMerge,
+            blockedReason: base.blockedReason,
+            remedy: local.hasUncommitted ? .commitAndPush : .push
+        )
+    }
+
+    /// What is local, counted rather than named.
+    ///
+    /// One headline and two possible halves rather than two states, because the two facts have one
+    /// remedy in this app: the button hands the work to the agent, and an agent asked to push
+    /// uncommitted work commits it first. A state that does not change what the button does does
+    /// not need to be its own state. What they do change is the sentence, which is what this is.
+    ///
+    /// Both halves when both are true, in the order they have to be dealt with: nothing can be
+    /// pushed until it is committed.
+    static func localDetail(_ local: LocalWork) -> String {
+        var parts: [String] = []
+        let files = local.modifiedFiles + local.untrackedFiles
+        if files > 0 {
+            parts.append("\(files) file\(files == 1 ? "" : "s") to commit")
+        }
+        if local.hasUnpushed {
+            let count = local.unpushedCommits
+            parts.append("\(count) commit\(count == 1 ? "" : "s") to push")
+        }
+        return parts.joined(separator: ", ")
     }
 
     var status: PullRequestStatus {
@@ -118,8 +206,20 @@ public extension PullRequest {
     /// Merging is not undoable from here: gh has no reverse for it, and the branch is gone from
     /// GitHub afterwards. So the dialog names the pull request, the branch and the base by name,
     /// and repeats a red check rather than letting the button hide it.
-    func mergeConfirmation(method: GitHub.MergeMethod, base: String, deletesBranch: Bool) -> String {
+    func mergeConfirmation(
+        method: GitHub.MergeMethod,
+        base: String,
+        deletesBranch: Bool,
+        local: LocalWork? = nil
+    ) -> String {
         var text = "\(method.label) puts #\(number) \"\(title)\" into \(base) on GitHub."
+        // First, above the rest, because it is the one line here that says the merge will land
+        // something OTHER than what the reader is looking at. The strip lets the button stay live
+        // over local work rather than disabling it, so this is where that trade is paid back.
+        if let local, local.isAhead {
+            text += "\n\nGitHub does not have everything in this worktree: "
+                + Self.localDetail(local) + ". None of that is part of what is merged."
+        }
         // An older gh does not report the head branch, and naming a branch we are guessing at
         // would be worse than not naming one.
         if deletesBranch, !branch.isEmpty {

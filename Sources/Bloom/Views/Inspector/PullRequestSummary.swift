@@ -22,8 +22,13 @@ struct PullRequestSummary: View {
     var baseBranch: String
     /// Where the login runs if it turns out GitHub is not connected. See `propose`.
     var worktree: String
+    /// What this worktree is holding that GitHub has not got. Nil while the first refresh is
+    /// still running, which is not the same as "nothing", and is drawn as nothing extra.
+    var localWork: LocalWork?
     var isWorking: Bool
     var onMerge: (GitHub.MergeMethod) -> Void
+    /// Hands the outstanding work to the workspace's agent to commit and push.
+    var onPush: () -> Void
 
     /// Which method the user picked, held only for as long as the confirmation is up. Non-nil is
     /// what presents the dialog, so there is no way to reach `onMerge` without passing through it.
@@ -37,7 +42,9 @@ struct PullRequestSummary: View {
     /// gh's own clean up is never asked for.
     private static let deletesBranch = true
 
-    private var status: PullRequestStatus { pullRequest.status }
+    private var status: PullRequestStatus { pullRequest.status(local: localWork) }
+
+
 
     /// Whether this strip is asking for something or reporting something.
     ///
@@ -80,7 +87,10 @@ struct PullRequestSummary: View {
             // sure?". Nothing in Bloom can put any of it back afterwards.
             Text(
                 pullRequest.mergeConfirmation(
-                    method: method, base: baseBranch, deletesBranch: Self.deletesBranch
+                    method: method,
+                    base: baseBranch,
+                    deletesBranch: Self.deletesBranch,
+                    local: localWork
                 )
             )
         }
@@ -189,18 +199,90 @@ struct PullRequestSummary: View {
         .accessibilityLabel(accessibilityText)
     }
 
+    /// The one prominent control, whichever it is, and the merge methods beside it.
+    ///
+    /// The primary slot belongs to whatever the state is actually asking for. With local work in
+    /// the worktree that is not Merge: merging now would land the pull request WITHOUT what the
+    /// reader is looking at and delete the branch it was on. So the primary swaps to Commit and
+    /// push, and merging stays exactly one click away in the menu beside it, which already listed
+    /// all three methods and already opens the same confirmation. Nothing is taken away; what
+    /// changes is which of the two the strip is pointing at.
     @ViewBuilder
     private var trailing: some View {
         if isWorking {
             ProgressView()
                 .controlSize(.small)
-                .accessibilityLabel("Merging")
+                .accessibilityLabel("Working")
         } else if pullRequest.isOpen {
-            mergeButton
+            HStack(spacing: Metrics.spacingTight) {
+                if status.remedy == .merge { mergeButton } else { pushButton }
+                mergeMenu
+            }
+            .fixedSize()
         }
         // A merged or closed pull request needs no control here. The headline says which of the
         // two it is and the strip carries its colour, so a capsule repeating the same word was
         // only ever taking the place of the button that used to be there.
+    }
+
+    /// Commit what is outstanding and push it, by asking the agent to.
+    ///
+    /// Bloom never writes the commit message. The agent knows what it changed and how this project
+    /// words a commit; Bloom knows only that a file is dirty, and a message invented from that
+    /// would be in the history forever. Same route as Create pull request: it composes a turn and
+    /// sends it, so the request lands in the transcript where it can be read and corrected.
+    ///
+    /// The label follows the fact rather than being one word for both halves. "Commit and push"
+    /// over a worktree with nothing to commit is a small lie, and the reader is standing right in
+    /// front of the thing it would be lying about.
+    /// Two forms, the way `PullRequestCreator` gives its own button two. "Commit and push" is the
+    /// longest label anything in this strip carries, and beside a 15 point headline, a chip and a
+    /// menu it does not fit the pane at its default width. Dropping the title rather than letting
+    /// the headline truncate keeps the sentence, which is the part that cannot be guessed from a
+    /// glyph.
+    private var pushButton: some View {
+        ViewThatFits(in: .horizontal) {
+            pushControl.labelStyle(.titleAndIcon)
+            pushControl.labelStyle(.iconOnly)
+        }
+        .fixedSize()
+    }
+
+    private var pushControl: some View {
+        Button(pushLabel, systemImage: "arrow.up.circle", action: onPush)
+            .buttonStyle(.borderedProminent)
+            .tint(tint ?? Palette.accentFill)
+            .controlSize(.regular)
+            .help(
+                "Ask this workspace's agent to \(pushLabel.lowercased()) branch "
+                    + "\(pullRequest.branch.isEmpty ? "this branch" : pullRequest.branch), so "
+                    + "#\(pullRequest.number) is what is on this disk."
+            )
+    }
+
+    private var pushLabel: String {
+        status.remedy == .push ? "Push" : "Commit and push"
+    }
+
+    /// The other two merge methods, and while there is local work the way to merge at all.
+    private var mergeMenu: some View {
+        Menu {
+            ForEach(GitHub.MergeMethod.allCases, id: \.self) { method in
+                Button(method.label) { propose(method) }
+            }
+        } label: {
+            Label("Choose a merge method", systemImage: "chevron.down")
+        }
+        .labelStyle(.iconOnly)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        // The state's colour rather than a neutral grey. It stands beside a filled button in
+        // that colour and belongs to it, and a grey chevron a few points off a teal capsule
+        // reads as a stray control that wandered into the strip.
+        .foregroundStyle(tint ?? Palette.accent)
+        .controlSize(.small)
+        .disabled(!status.canMerge)
+        .help(status.blockedReason ?? "Merge #\(pullRequest.number), by whichever method")
     }
 
     /// The one prominent control in the inspector, and the only solid colour in the strip.
@@ -227,33 +309,14 @@ struct PullRequestSummary: View {
     /// Every path through it opens the confirmation. The button proposes a squash merge because
     /// that is what it says; nothing here ever performs one.
     private var mergeButton: some View {
-        HStack(spacing: Metrics.spacingTight) {
-            Button("Merge", systemImage: "arrow.triangle.merge") { propose(.squash) }
-                .buttonStyle(.borderedProminent)
-                .tint(tint ?? Palette.accentFill)
-                .controlSize(.regular)
-
-            Menu {
-                ForEach(GitHub.MergeMethod.allCases, id: \.self) { method in
-                    Button(method.label) { propose(method) }
-                }
-            } label: {
-                Label("Choose a merge method", systemImage: "chevron.down")
-            }
-            .labelStyle(.iconOnly)
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            // The state's colour rather than a neutral grey. It stands beside a filled button in
-            // that colour and belongs to it, and a grey chevron a few points off a teal capsule
-            // reads as a stray control that wandered into the strip.
-            .foregroundStyle(tint ?? Palette.accent)
-            .controlSize(.small)
-        }
-        .fixedSize()
-        .disabled(!status.canMerge)
-        // Disabled controls do not explain themselves, and "why is this greyed out" is the whole
-        // question a blocked pull request raises.
-        .help(status.blockedReason ?? "Squash and merge, or choose another method")
+        Button("Merge", systemImage: "arrow.triangle.merge") { propose(.squash) }
+            .buttonStyle(.borderedProminent)
+            .tint(tint ?? Palette.accentFill)
+            .controlSize(.regular)
+            .disabled(!status.canMerge)
+            // Disabled controls do not explain themselves, and "why is this greyed out" is the
+            // whole question a blocked pull request raises.
+            .help(status.blockedReason ?? "Squash and merge, or choose another method")
     }
 
     // MARK: - Text

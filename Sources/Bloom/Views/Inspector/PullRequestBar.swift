@@ -65,8 +65,11 @@ struct PullRequestBar: View {
     }
 
     /// Nil until there is a pull request, and for the states that have nothing to signal.
+    ///
+    /// The same status the strip's contents draw, local work weighed in, so a branch holding work
+    /// GitHub has not got turns the whole band amber rather than only its headline.
     private var tint: Color? {
-        model.pullRequest?.status.tone.color
+        model.pullRequest?.status(local: model.localWork).tone.color
     }
 
     /// How hard the band carries its colour.
@@ -88,8 +91,10 @@ struct PullRequestBar: View {
                 pullRequest: pullRequest,
                 baseBranch: model.workspace.baseBranch,
                 worktree: model.workspace.path,
+                localWork: model.localWork,
                 isWorking: isWorking,
-                onMerge: merge
+                onMerge: merge,
+                onPush: push
             )
         } else {
             PullRequestCreator(
@@ -131,6 +136,25 @@ struct PullRequestBar: View {
         Task {
             defer { isWorking = false }
             if let refusal = await model.requestPullRequest() {
+                report = MergeReport(
+                    tone: .info, title: "Nothing was sent", message: refusal
+                )
+            }
+        }
+    }
+
+    /// Hands the outstanding work to the agent, the same way Create pull request does.
+    ///
+    /// Nothing here runs git. Bloom does not write commit messages, so the whole of this is
+    /// composing a turn and sending it; what comes back is a normal turn in the transcript, and
+    /// the strip notices the result on its next refresh like any other change to the worktree.
+    private func push() {
+        isWorking = true
+        report = nil
+
+        Task {
+            defer { isWorking = false }
+            if let refusal = await model.requestPush() {
                 report = MergeReport(
                     tone: .info, title: "Nothing was sent", message: refusal
                 )

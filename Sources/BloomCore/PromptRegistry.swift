@@ -6,6 +6,7 @@ import Foundation
 /// override at a different prompt. The raw value is also the storage key suffix.
 public enum PromptID: String, Sendable, Hashable, CaseIterable, Codable {
     case createPullRequest
+    case pushLocalWork
     case review
     case nameWorkspace
 }
@@ -56,7 +57,9 @@ public struct PromptDefinition: Sendable, Hashable, Identifiable {
 /// context, and it can react when a push is rejected. A `gh pr create` fired from the app knows
 /// none of that and can only fail.
 public enum PromptRegistry {
-    public static let all: [PromptDefinition] = [createPullRequest, review, nameWorkspace]
+    public static let all: [PromptDefinition] = [
+        createPullRequest, pushLocalWork, review, nameWorkspace,
+    ]
 
     public static func definition(for id: PromptID) -> PromptDefinition {
         // Total by construction: every case is in `all`, and the test suite pins that.
@@ -70,6 +73,14 @@ public enum PromptRegistry {
         public static let branch = "branch"
         public static let baseBranch = "base_branch"
         public static let task = "task"
+        public static let changes = "changes"
+    }
+
+    /// The names the commit-and-push prompt may use.
+    public enum PushLocalWork {
+        public static let workspace = "workspace"
+        public static let branch = "branch"
+        public static let baseBranch = "base_branch"
         public static let changes = "changes"
     }
 
@@ -114,6 +125,40 @@ public enum PromptRegistry {
         ],
         defaultTemplate: """
         Create a pull request for this workspace against {{base_branch}}.
+        """
+    )
+
+    /// Sent when the pull request strip reports local changes.
+    ///
+    /// The agent commits rather than Bloom, for the same reason it opens the pull request rather
+    /// than Bloom: a commit needs a message, the agent is the only party here that knows what it
+    /// changed and how this project words a commit, and a message Bloom invented would be a lie
+    /// in the repository's history forever. Bloom knows only that something is uncommitted.
+    static let pushLocalWork = PromptDefinition(
+        id: .pushLocalWork,
+        title: "Commit and push",
+        summary: """
+        Sent to the workspace's agent when you press Commit and push in the pull request strip, \
+        which appears when this worktree is holding work GitHub has not got. Bloom never writes a \
+        commit message itself: the agent knows what it changed and how this project words a \
+        commit, and one Bloom invented would be in the history forever.
+        """,
+        variables: [
+            PromptVariable(name: PushLocalWork.workspace, summary: "The workspace's name."),
+            PromptVariable(name: PushLocalWork.branch, summary: "The branch the work is on."),
+            PromptVariable(
+                name: PushLocalWork.baseBranch,
+                summary: "The branch the pull request targets."
+            ),
+            PromptVariable(
+                name: PushLocalWork.changes,
+                summary: "The changed files, with their added and removed line counts."
+            ),
+        ],
+        defaultTemplate: """
+        Commit everything outstanding in this worktree, with a message that describes the change \
+        the way this project words one, then push {{branch}} so its pull request reflects what is \
+        here. If there is nothing to commit, just push.
         """
     )
 

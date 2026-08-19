@@ -64,6 +64,10 @@ final class WorkspaceModel {
     var changesError: String?
     var pullRequest: PullRequest?
     var isLoadingPullRequest = false
+    /// What this worktree is holding that the remote has not got, refreshed alongside the changed
+    /// file list. Nil until the first refresh has answered, which is what stops the strip from
+    /// claiming a clean branch before it has looked.
+    var localWork: LocalWork?
 
     // Bottom panel.
     var bottomTab: BottomTab = .firstTerminal
@@ -116,7 +120,7 @@ final class WorkspaceModel {
     /// The in-flight refreshes, so a newer one can cancel the one it replaces. Two overlapping
     /// refreshes both claim `isLoadingChanges`, and the slower one finishing last would otherwise
     /// write its stale answer over the fresh one.
-    private var changesTask: Task<Result<[ChangedFile], GitFailure>, Never>?
+    private var changesTask: Task<Result<ChangesAnswer, GitFailure>, Never>?
     private var pullRequestTask: Task<PullRequest?, Never>?
     /// A setup script can run for minutes (`composer install`, `npm ci`). Without a handle,
     /// archiving mid-setup cannot stop it and it outlives the app.
@@ -395,9 +399,20 @@ final class WorkspaceModel {
         let path = workspace.path
         let base = workspace.baseBranch
 
-        let task = Task.detached(priority: .userInitiated) { () -> Result<[ChangedFile], GitFailure> in
+        let task = Task.detached(priority: .userInitiated) { () -> Result<ChangesAnswer, GitFailure> in
             do {
-                return .success(try await Git.changedFiles(worktree: path, base: base))
+                let files = try await Git.changedFiles(worktree: path, base: base)
+                // In the same task as the file list rather than on a cadence of its own. The one
+                // extra command is `status --porcelain -z --branch`, which answers uncommitted,
+                // untracked and unpushed at once, so the poll that already runs three git calls
+                // every six seconds runs four. Nothing stats the worktree on a redraw: the strip
+                // reads a value, and the value is only ever written here.
+                //
+                // Failing to answer it is not a failure of the refresh. The file list is what the
+                // reader asked for; a missing local count means the strip says nothing extra,
+                // which is the right answer when we do not know.
+                let local = try? await Git.localWork(worktree: path)
+                return .success(ChangesAnswer(files: files, local: local))
             } catch {
                 return .failure(GitFailure(message: error.readableMessage))
             }
@@ -422,14 +437,24 @@ final class WorkspaceModel {
             // wrong, so the last known list stays and the failure is reported instead.
             changesError = failure.message
 
-        case .success(let files):
+        case .success(let answer):
             // Only when it actually moved. `AppModel`'s poll lands here every six seconds, and a
             // write of an identical list is still a write as far as Observation is concerned,
             // which would rerun the inspector's body and rebuild the tree for nothing.
             if changesError != nil { changesError = nil }
-            if changedFiles != files { changedFiles = files }
-            adoptSelection(among: files, reason: reason)
+            if changedFiles != answer.files { changedFiles = answer.files }
+            // Only when git actually answered. A failed count leaves the last known one standing
+            // rather than replacing it with "nothing local", which is a claim.
+            if let local = answer.local, localWork != local { localWork = local }
+            adoptSelection(among: answer.files, reason: reason)
         }
+    }
+
+    /// What one refresh of the worktree came back with: the diff against the base, and what is
+    /// sitting here that the remote has not got. One value because they come from one task.
+    struct ChangesAnswer: Sendable {
+        var files: [ChangedFile]
+        var local: LocalWork?
     }
 
     /// A refresh can drop the file the reader had open, and the first one arrives with nothing
@@ -526,6 +551,49 @@ final class WorkspaceModel {
         // pressed a button in the inspector should be looking at the answer to it.
         activeSessionID = session.id
         await transcript(for: session).send(pullRequestTurn(text: render.text))
+        return nil
+    }
+
+    /// Asks this workspace's agent to commit what is outstanding and push the branch.
+    ///
+    /// The agent rather than Bloom, and the reasoning is the same one that put pull request
+    /// creation here: a commit needs a message, and Bloom knows only that a file changed. The
+    /// agent knows what it changed, how this project words a commit and what to do when the push
+    /// is rejected. A message this app invented would be in the repository's history forever.
+    ///
+    /// The same guard and the same route as `requestPullRequest`, so both buttons in the strip
+    /// behave identically: one agent, one turn, and the session comes forward so the reader is
+    /// looking at the answer to the button they pressed.
+    ///
+    /// Returns nil on success, or the sentence to put in front of the user.
+    func requestPush(overrides: PromptOverrides = PromptOverrides()) async -> String? {
+        guard !isRunning else {
+            return "\(workspace.name) is still working. Wait for the turn to finish, then ask again."
+        }
+
+        let template = overrides.template(for: .pushLocalWork)
+        let wanted = Set(PromptTemplate.variableNames(in: template))
+
+        if wanted.contains(PromptRegistry.PushLocalWork.changes) {
+            await refreshChanges()
+        }
+
+        guard let session = await sessionForPullRequest() else {
+            return "Could not open a session in \(workspace.name) to send the request to."
+        }
+
+        let render = PromptTemplate.render(template, values: [
+            PromptRegistry.PushLocalWork.workspace: workspace.name,
+            PromptRegistry.PushLocalWork.branch: workspace.branch,
+            PromptRegistry.PushLocalWork.baseBranch: workspace.baseBranch,
+            PromptRegistry.PushLocalWork.changes:
+                PullRequestPromptContext.changeSummary(changedFiles),
+        ])
+
+        activeSessionID = session.id
+        // No attachment. `.bloom/pr-instructions.md` is about opening a pull request, and there is
+        // already one open by the time this button exists.
+        await transcript(for: session).send(render.text)
         return nil
     }
 
