@@ -623,23 +623,12 @@ public actor Store {
         )
     }
 
-    public func updateMessage(id: Int64, payload: Data, durationMS: Int? = nil) throws {
-        try db.run(
-            "UPDATE messages SET payload = ?, duration_ms = COALESCE(?, duration_ms) WHERE id = ?",
-            [.blob(payload), durationMS.map { .int(Int64($0)) } ?? .null, .int(id)]
-        )
-    }
-
     /// Find the stored toolUse row a tool_result belongs to.
     public func message(sessionID: String, refID: String) throws -> Message? {
         try db.query(
             "SELECT * FROM messages WHERE session_id = ? AND ref_id = ? ORDER BY seq DESC LIMIT 1",
             [.text(sessionID), .text(refID)]
         ).first.map(Self.message(from:))
-    }
-
-    public func deleteMessages(sessionID: String) throws {
-        try db.run("DELETE FROM messages WHERE session_id = ?", [.text(sessionID)])
     }
 
     // MARK: - Drafts

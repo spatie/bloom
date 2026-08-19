@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UserNotifications
 import BloomCore
 
 /// The Notifications pane.

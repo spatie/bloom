@@ -87,10 +87,6 @@ private struct CheckPayload: Decodable {
     }
 }
 
-private struct RepositoryPayload: Decodable {
-    let nameWithOwner: String?
-}
-
 private struct PullRequestSnapshot: Sendable {
     let pullRequest: PullRequest
     let runs: [CheckRun]
@@ -255,25 +251,6 @@ public enum GitHub {
             timeout: .seconds(20)
         ) else { return false }
         return result.ok
-    }
-
-    public static func repositoryNameWithOwner(worktree: String) async -> String? {
-        guard let result = try? await Shell.run(
-            "gh", ["repo", "view", "--json", "nameWithOwner"],
-            cwd: worktree,
-            timeout: .seconds(20)
-        ), result.ok else { return nil }
-
-        return try? JSONDecoder().decode(
-            RepositoryPayload.self, from: Data(result.stdout.utf8)
-        ).nameWithOwner
-    }
-
-    /// Only http(s) is opened, so a value from gh JSON cannot become an argument to `open` or a
-    /// file:// path that launches something local.
-    public static func openInBrowser(_ url: String) async {
-        guard url.hasPrefix("https://") || url.hasPrefix("http://") else { return }
-        _ = try? await Shell.run("/usr/bin/open", ["--", url], timeout: .seconds(20))
     }
 
     /// gh has no structured error code for a branch without a pull request.

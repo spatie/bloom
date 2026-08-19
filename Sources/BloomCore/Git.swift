@@ -145,7 +145,7 @@ public struct WorkspaceSafetyReport: Sendable, Hashable {
         if !untrackedFiles.isEmpty {
             let sample = untrackedFiles.prefix(5).joined(separator: ", ")
             let rest = untrackedFiles.count > 5 ? ", and \(untrackedFiles.count - 5) more" : ""
-            losses.append("\(untrackedFiles.count) untracked file(s): \(sample)\(rest)")
+            losses.append("\(Self.count(untrackedFiles.count, "untracked file")): \(sample)\(rest)")
         }
         if !modifiedIgnoredFiles.isEmpty {
             let sample = modifiedIgnoredFiles.prefix(5).joined(separator: ", ")
@@ -153,17 +153,31 @@ public struct WorkspaceSafetyReport: Sendable, Hashable {
                 ? ", and \(modifiedIgnoredFiles.count - 5) more"
                 : ""
             losses.append(
-                "\(modifiedIgnoredFiles.count) ignored file(s) that differ from the main checkout: "
-                + "\(sample)\(rest)"
+                "\(Self.count(modifiedIgnoredFiles.count, "ignored file")) that "
+                + "\(modifiedIgnoredFiles.count == 1 ? "differs" : "differ") "
+                + "from the main checkout: \(sample)\(rest)"
             )
         }
         if deletingBranch, unpushedCommits > 0, !isBranchMerged, !isPullRequestMerged {
-            losses.append("\(unpushedCommits) commit(s) that exist on no other branch, tag or remote")
+            losses.append(
+                "\(Self.count(unpushedCommits, "commit")) that "
+                + "\(unpushedCommits == 1 ? "exists" : "exist") on no other branch, tag or remote"
+            )
         }
         if detachedCommits > 0 {
-            losses.append("\(detachedCommits) commit(s) made on a detached HEAD, held by no branch")
+            losses.append(
+                "\(Self.count(detachedCommits, "commit")) made on a detached HEAD, "
+                + "held by no branch"
+            )
         }
         return losses
+    }
+
+    /// "1 untracked file", "3 untracked files". The list this feeds is read at the moment somebody
+    /// decides whether to destroy their work, which is the worst place in the app for the reader to
+    /// have to translate "file(s)" for themselves.
+    private static func count(_ value: Int, _ noun: String) -> String {
+        "\(value) \(noun)\(value == 1 ? "" : "s")"
     }
 }
 
@@ -378,17 +392,6 @@ public enum Git {
         guard isValidBranchName(branch) else { return false }
         let result = try? await run(["show-ref", "--verify", "--quiet", "--", "refs/heads/\(branch)"], in: repo)
         return result?.ok ?? false
-    }
-
-    static func refExists(_ ref: String, in repo: String) async -> Bool {
-        guard (try? validate(ref: ref)) != nil else { return false }
-        let result = try? await run(["show-ref", "--verify", "--quiet", "--", ref], in: repo)
-        return result?.ok ?? false
-    }
-
-    public static func remoteURL(of repo: String) async throws -> String? {
-        let result = try await run(["remote", "get-url", "origin"], in: repo)
-        return result.ok ? result.trimmed : nil
     }
 
     public static func headSHA(of path: String) async throws -> String {
@@ -658,11 +661,6 @@ public enum Git {
         return try await check(
             ["diff", "--no-color", "-M", mergeBase, "--", file.path], in: worktree
         ).stdout
-    }
-
-    public static func fullPatch(worktree: String, base: String) async throws -> String {
-        let mergeBase = try await mergeBase(base, in: worktree)
-        return try await check(["diff", "--no-color", "-M", mergeBase, "--"], in: worktree).stdout
     }
 
     public static func hasUncommittedChanges(worktree: String) async throws -> Bool {

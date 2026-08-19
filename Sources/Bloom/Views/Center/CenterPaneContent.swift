@@ -13,14 +13,4 @@ import Foundation
 enum CenterPaneContent: Codable, Hashable, Sendable {
     case chat(String)
     case tool(String)
-
-    var chatID: String? {
-        if case .chat(let id) = self { return id }
-        return nil
-    }
-
-    var toolID: String? {
-        if case .tool(let id) = self { return id }
-        return nil
-    }
 }

@@ -447,13 +447,6 @@ final class AppModel {
         return workspaceModels[id]
     }
 
-    /// Brings the selected workspace's model up to date, away from the render pass. Called after
-    /// a reload, because a reload replaces the `Workspace` values the models are holding.
-    func syncSelectedModel() {
-        guard let workspace = selectedWorkspace else { return }
-        model(for: workspace)
-    }
-
     /// Workspaces with an agent currently running, for the sidebar's status bar and Home's
     /// summary line.
     ///

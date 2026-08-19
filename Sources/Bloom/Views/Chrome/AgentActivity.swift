@@ -135,14 +135,4 @@ final class AgentActivity {
     private var wantedOptions: ProcessInfo.ActivityOptions {
         preventsSleep ? .userInitiated : .userInitiatedAllowingIdleSystemSleep
     }
-
-    /// Whether the assertion is currently held. Reachable so the behaviour can be asserted on from
-    /// outside rather than only reasoned about.
-    var isHoldingActivityAssertion: Bool { assertion != nil }
-
-    /// Whether the held assertion is the one that stops the Mac idling to sleep, as opposed to the
-    /// one that only stops App Nap.
-    var isPreventingIdleSleep: Bool {
-        heldOptions?.contains(.idleSystemSleepDisabled) ?? false
-    }
 }

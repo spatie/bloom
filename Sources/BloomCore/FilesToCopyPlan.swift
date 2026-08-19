@@ -44,11 +44,6 @@ public struct FilesToCopyPlan: Sendable, Hashable {
     public var isTruncated: Bool = false
 
     public init() {}
-
-    /// How many bytes the listed matches account for. Not the total when truncated.
-    public var listedBytes: Int64 {
-        matches.filter { !$0.isDirectory }.reduce(0) { $0 + $1.bytes }
-    }
 }
 
 public enum FilesToCopyResolver {

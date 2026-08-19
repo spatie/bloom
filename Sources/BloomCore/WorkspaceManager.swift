@@ -1,14 +1,8 @@
 import Foundation
 
-public struct WorkspaceCreation: Sendable {
-    public var workspace: Workspace
-    public var prompt: String
-}
-
 public enum WorkspaceError: Error, CustomStringConvertible {
     case notARepository(String)
     case pathInUse(String)
-    case repoMissing
     /// Archiving would destroy work that exists nowhere else. Carries the full report so the UI
     /// can list what is at stake instead of asking "are you sure?" about nothing in particular.
     case unsafeToArchive(WorkspaceSafetyReport)
@@ -18,7 +12,6 @@ public enum WorkspaceError: Error, CustomStringConvertible {
         switch self {
         case .notARepository(let path): "\(path) is not a git repository"
         case .pathInUse(let path): "\(path) already exists"
-        case .repoMissing: "the workspace has no repository"
         case .unsafeToArchive(let report):
             "archiving would permanently destroy " + report.losses.joined(separator: ", ")
         case .archiveScriptFailed(let status, let output):

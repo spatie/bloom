@@ -67,8 +67,6 @@ public struct RepoSettings: Sendable, Hashable {
     public var origins: [SettingsKey: String] = [:]
 
     public init() {}
-
-    public var primaryRunScript: RunScript? { runScripts.first }
 }
 
 public enum SettingsLoader {

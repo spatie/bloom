@@ -407,10 +407,6 @@ final class WorkspaceModel {
         }
     }
 
-    var selectedFile: ChangedFile? {
-        changedFiles.first { $0.path == selectedFilePath }
-    }
-
     func patch(for file: ChangedFile) async -> String {
         let path = workspace.path
         let base = workspace.baseBranch

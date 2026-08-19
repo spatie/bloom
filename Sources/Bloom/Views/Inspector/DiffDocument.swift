@@ -15,8 +15,6 @@ struct DiffDocument: Sendable {
     var emphasis: [Int: [Range<String.Index>]]
     var maxColumns: Int
 
-    var changedLines: Int { file.additions + file.deletions }
-
     /// Past this many paired lines the word diff stops. A file with thousands of paired edits is
     /// being skimmed, not read, and the LCS per pair is the one superlinear cost in the pass.
     private static let emphasisLimit = 4_000
