@@ -110,6 +110,18 @@ struct ComposerTextEditor: NSViewRepresentable {
         textView.drawsBackground = false
         textView.isRichText = false
         textView.allowsUndo = true
+        // Writing Tools off, which is the only way to be rid of the orb.
+        //
+        // AppKit parks a 25 point Siri orb beside the first line of any editable text view it is
+        // switched on for. In this layout that lands it outside the box, sitting on the composer's
+        // own left border, and it is there from the moment the sheet opens on an empty draft.
+        // `.limited` was tried first and keeps it: the orb is the affordance in both of the modes
+        // that have one, so there is no setting that keeps the feature and loses the circle.
+        //
+        // Losing the feature costs this box nothing. What is written here is a prompt to an agent,
+        // not prose being drafted, and rewriting or proofreading it is the one editing job nobody
+        // has ever wanted done to an instruction.
+        textView.writingToolsBehavior = .none
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
