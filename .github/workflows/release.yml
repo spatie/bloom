@@ -1,0 +1,348 @@
+name: Release
+
+# Publish a release on GitHub and this builds it, signs it, has Apple notarise
+# it, and puts the zip and the Sparkle feed in the bucket. Nothing here creates
+# the release: the tag and the notes are written by a person, and this reacts.
+#
+# Every value it needs is listed in RELEASING.md. The preflight step below
+# fails on a missing one before anything is built, because finding out that a
+# secret is empty after a twenty minute build and a notarisation round trip is
+# a bad way to spend an evening.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: An existing tag to build, for example v1.4.0
+        required: true
+        type: string
+
+permissions:
+  # Only to attach the zip to the release that triggered this.
+  contents: write
+
+# The appcast is read, changed and written back. Two releases doing that at the
+# same time would leave whichever finished second having quietly dropped the
+# other one's item.
+concurrency:
+  group: bloom-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 90
+
+    steps:
+      # Through env rather than straight into the shell, because a tag name is
+      # text somebody wrote and interpolating it into a script is how that text
+      # becomes a command.
+      - name: Work out what is being released
+        id: release
+        env:
+          EVENT: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "release" ]; then
+            tag="$RELEASE_TAG"
+            flagged="$RELEASE_PRERELEASE"
+          else
+            tag="$INPUT_TAG"
+            flagged=false
+          fi
+          [ -n "$tag" ] || { echo "No tag to build."; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "flagged_prerelease=$flagged" >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag (marked prerelease: $flagged)"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+          # The build number is a commit count, and a shallow clone counts wrong.
+          fetch-depth: 0
+
+      # Names only. None of these are ever printed, and the point is to stop
+      # before the build rather than to show what is set.
+      - name: Check everything needed is configured
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          UPCLOUD_ACCESS_KEY_ID: ${{ secrets.UPCLOUD_ACCESS_KEY_ID }}
+          UPCLOUD_SECRET_ACCESS_KEY: ${{ secrets.UPCLOUD_SECRET_ACCESS_KEY }}
+          UPCLOUD_BUCKET: ${{ vars.UPCLOUD_BUCKET }}
+          UPCLOUD_S3_ENDPOINT: ${{ vars.UPCLOUD_S3_ENDPOINT }}
+          UPCLOUD_S3_REGION: ${{ vars.UPCLOUD_S3_REGION }}
+          BLOOM_PUBLIC_BASE_URL: ${{ vars.BLOOM_PUBLIC_BASE_URL }}
+          SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for name in APPLE_CERTIFICATE_P12 APPLE_CERTIFICATE_PASSWORD \
+                      APPLE_API_KEY_P8 APPLE_API_KEY_ID APPLE_API_ISSUER_ID \
+                      SPARKLE_PRIVATE_KEY \
+                      UPCLOUD_ACCESS_KEY_ID UPCLOUD_SECRET_ACCESS_KEY \
+                      UPCLOUD_BUCKET UPCLOUD_S3_ENDPOINT UPCLOUD_S3_REGION \
+                      BLOOM_PUBLIC_BASE_URL SPARKLE_PUBLIC_KEY; do
+            if [ -z "${!name:-}" ]; then
+              missing="$missing $name"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "Not configured:$missing"
+            echo "RELEASING.md says where each of these comes from."
+            exit 1
+          fi
+          echo "All secrets and variables are present."
+
+      # Swift 6 language mode, actool for the layered icon, and the App Intents
+      # metadata processor all come from Xcode. An older one on the runner would
+      # produce an app that builds and is missing pieces, which is worse than
+      # not building.
+      - name: Check the toolchain
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          swift --version
+          major="$(xcodebuild -version | head -1 | sed -E 's/^Xcode ([0-9]+).*/\1/')"
+          if [ "$major" -lt 26 ]; then
+            echo "Bloom needs Xcode 26 or newer, this runner has $major."
+            exit 1
+          fi
+
+      # The one Sparkle mistake nothing downstream catches. If the key baked into
+      # the app is not the partner of the key the feed is signed with, the build
+      # is green, the feed is valid, and every updater silently rejects it.
+      - name: Check the Sparkle keys are a pair
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          derived="$(printf '%s' "$SPARKLE_PRIVATE_KEY" | Tools/release/sparkle-public-key.sh)"
+          if [ "$derived" != "$SPARKLE_PUBLIC_KEY" ]; then
+            echo "The SPARKLE_PUBLIC_KEY variable does not belong to the SPARKLE_PRIVATE_KEY secret."
+            echo "Set SPARKLE_PUBLIC_KEY to: $derived"
+            exit 1
+          fi
+          echo "The Sparkle key pair matches."
+
+      - name: Derive the version
+        id: version
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          FLAGGED: ${{ steps.release.outputs.flagged_prerelease }}
+        run: |
+          set -euo pipefail
+          Tools/release/version.sh "$TAG" >> "$GITHUB_OUTPUT"
+          eval "$(Tools/release/version.sh "$TAG")"
+          # A release can be a prerelease two ways: the tag says so (v1.4.0-beta.1)
+          # or the person ticked the box on GitHub. Either one is enough, so a
+          # release marked prerelease with a plain tag still lands in the beta
+          # channel rather than in front of everybody.
+          if [ "$FLAGGED" = "true" ]; then
+            channel=beta
+          fi
+          echo "resolved_channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "Bundle will say $version ($build), channel $channel"
+
+      - name: Import the signing certificate
+        id: keychain
+        env:
+          BLOOM_CERT_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          BLOOM_CERT_P12_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: Tools/release/keychain.sh import > /dev/null
+
+      # notarytool wants the key as a file. It is written under RUNNER_TEMP with
+      # a tight umask and deleted by the cleanup step, which runs even when the
+      # job fails.
+      - name: Write the notarisation key
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          test -s "$RUNNER_TEMP/notary.p8"
+
+      # build.sh substitutes these two into the bundle's Info.plist, where Sparkle
+      # reads them. The feed URL is computed from the same variables the appcast
+      # is uploaded with, rather than written out again, so the address the app
+      # polls and the address the feed is written to cannot drift apart.
+      - name: Build
+        env:
+          BLOOM_BUCKET: ${{ vars.UPCLOUD_BUCKET }}
+          BLOOM_S3_ENDPOINT: ${{ vars.UPCLOUD_S3_ENDPOINT }}
+          BLOOM_S3_REGION: ${{ vars.UPCLOUD_S3_REGION }}
+          BLOOM_PUBLIC_BASE_URL: ${{ vars.BLOOM_PUBLIC_BASE_URL }}
+          BLOOM_BUCKET_PREFIX: ${{ vars.BLOOM_BUCKET_PREFIX }}
+          BLOOM_UPDATE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          BLOOM_UPDATE_FEED_URL="$(Tools/release/bucket.sh url appcast.xml)"
+          export BLOOM_UPDATE_FEED_URL
+          echo "Feed the app will poll: $BLOOM_UPDATE_FEED_URL"
+          ./build.sh -r
+
+      - name: Sign, notarise and staple
+        id: package
+        env:
+          BLOOM_CODESIGN_IDENTITY: ${{ steps.keychain.outputs.identity }}
+          BLOOM_NOTARY_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          BLOOM_NOTARY_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.version.outputs.build }}
+        run: |
+          set -euo pipefail
+          export BLOOM_NOTARY_KEY="$RUNNER_TEMP/notary.p8"
+          app="$(swift build -c release --show-bin-path)/Bloom.app"
+          zip="$PWD/dist/Bloom-$VERSION.zip"
+          Tools/release/package-app.sh --app "$app" --zip "$zip" \
+            --version "$VERSION" --build "$BUILD"
+          {
+            echo "zip=$zip"
+            echo "name=Bloom-$VERSION.zip"
+            echo "length=$(stat -f%z "$zip")"
+          } >> "$GITHUB_OUTPUT"
+
+      # Piped in rather than written to a file, so the Sparkle key never touches
+      # the runner's disk and never appears in an argument list.
+      - name: Sign the update for Sparkle
+        id: sparkle
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          ZIP: ${{ steps.package.outputs.zip }}
+        run: |
+          set -euo pipefail
+          bin="$(Tools/release/sparkle-tools.sh)"
+          signature="$(printf '%s' "$SPARKLE_PRIVATE_KEY" | "$bin/sign_update" --ed-key-file - -p "$ZIP")"
+          [ -n "$signature" ] || { echo "sign_update produced nothing."; exit 1; }
+          echo "signature=$signature" >> "$GITHUB_OUTPUT"
+
+      # The release notes on GitHub are markdown, and Sparkle shows the item
+      # description in a web view. GitHub will render its own markdown for us,
+      # which is one fewer dependency than a markdown library on the runner.
+      - name: Render the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          : > "$RUNNER_TEMP/notes.md"
+          gh release view "$TAG" --json body --jq .body > "$RUNNER_TEMP/notes.md" || true
+          if [ -s "$RUNNER_TEMP/notes.md" ]; then
+            gh api --method POST /markdown \
+              -f mode=gfm -f context="$GITHUB_REPOSITORY" \
+              -F text=@"$RUNNER_TEMP/notes.md" > "$RUNNER_TEMP/notes.html"
+          else
+            : > "$RUNNER_TEMP/notes.html"
+          fi
+
+      # The zip first, then the feed. In that order a feed is never pointing at
+      # a file that is not there yet. The other way round, every user who checks
+      # for updates in the gap gets an error.
+      - name: Upload the zip
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.UPCLOUD_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.UPCLOUD_SECRET_ACCESS_KEY }}
+          BLOOM_BUCKET: ${{ vars.UPCLOUD_BUCKET }}
+          BLOOM_S3_ENDPOINT: ${{ vars.UPCLOUD_S3_ENDPOINT }}
+          BLOOM_S3_REGION: ${{ vars.UPCLOUD_S3_REGION }}
+          BLOOM_PUBLIC_BASE_URL: ${{ vars.BLOOM_PUBLIC_BASE_URL }}
+          BLOOM_BUCKET_PREFIX: ${{ vars.BLOOM_BUCKET_PREFIX }}
+          BLOOM_S3_ACL: ${{ vars.BLOOM_S3_ACL }}
+          ZIP: ${{ steps.package.outputs.zip }}
+          NAME: ${{ steps.package.outputs.name }}
+        run: |
+          set -euo pipefail
+          # A zip for a given version never changes, so it can be cached forever.
+          Tools/release/bucket.sh put "$ZIP" "$NAME" "public, max-age=31536000, immutable"
+
+      - name: Update the appcast
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.UPCLOUD_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.UPCLOUD_SECRET_ACCESS_KEY }}
+          BLOOM_BUCKET: ${{ vars.UPCLOUD_BUCKET }}
+          BLOOM_S3_ENDPOINT: ${{ vars.UPCLOUD_S3_ENDPOINT }}
+          BLOOM_S3_REGION: ${{ vars.UPCLOUD_S3_REGION }}
+          BLOOM_PUBLIC_BASE_URL: ${{ vars.BLOOM_PUBLIC_BASE_URL }}
+          BLOOM_BUCKET_PREFIX: ${{ vars.BLOOM_BUCKET_PREFIX }}
+          BLOOM_S3_ACL: ${{ vars.BLOOM_S3_ACL }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.version.outputs.build }}
+          CHANNEL: ${{ steps.version.outputs.resolved_channel }}
+          SIGNATURE: ${{ steps.sparkle.outputs.signature }}
+          LENGTH: ${{ steps.package.outputs.length }}
+          NAME: ${{ steps.package.outputs.name }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          Tools/release/bucket.sh get appcast.xml "$RUNNER_TEMP/appcast.xml"
+
+          # An empty channel means the default one, which is everybody. Only a
+          # prerelease gets a channel written onto its item.
+          channel=""
+          [ "$CHANNEL" = "beta" ] && channel=beta
+
+          Tools/release/appcast.py \
+            --existing "$RUNNER_TEMP/appcast.xml" \
+            --output "$RUNNER_TEMP/appcast.xml" \
+            --version "$VERSION" \
+            --build "$BUILD" \
+            --url "$(Tools/release/bucket.sh url "$NAME")" \
+            --length "$LENGTH" \
+            --signature "$SIGNATURE" \
+            --min-system "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Resources/Info.plist)" \
+            --channel "$channel" \
+            --notes-file "$RUNNER_TEMP/notes.html" \
+            --link "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" \
+            --feed-link "$(Tools/release/bucket.sh url appcast.xml)"
+
+          # Short cache: this is the file every copy of Bloom polls, and a stale
+          # one means an update nobody is offered.
+          Tools/release/bucket.sh put "$RUNNER_TEMP/appcast.xml" appcast.xml "public, max-age=300"
+
+      - name: Attach the zip to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          ZIP: ${{ steps.package.outputs.zip }}
+        run: gh release upload "$TAG" "$ZIP" --clobber
+
+      - name: Say where it went
+        env:
+          NAME: ${{ steps.package.outputs.name }}
+          BLOOM_BUCKET: ${{ vars.UPCLOUD_BUCKET }}
+          BLOOM_S3_ENDPOINT: ${{ vars.UPCLOUD_S3_ENDPOINT }}
+          BLOOM_S3_REGION: ${{ vars.UPCLOUD_S3_REGION }}
+          BLOOM_PUBLIC_BASE_URL: ${{ vars.BLOOM_PUBLIC_BASE_URL }}
+          BLOOM_BUCKET_PREFIX: ${{ vars.BLOOM_BUCKET_PREFIX }}
+          CHANNEL: ${{ steps.version.outputs.resolved_channel }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.version.outputs.build }}
+        run: |
+          {
+            echo "### Bloom $VERSION ($BUILD)"
+            echo
+            echo "- channel: $CHANNEL"
+            echo "- download: $(Tools/release/bucket.sh url "$NAME")"
+            echo "- appcast: $(Tools/release/bucket.sh url appcast.xml)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Always, including after a failure, and including after a cancellation.
+      # A certificate left behind in a keychain outliving the job is the one
+      # thing here that would still be wrong tomorrow.
+      - name: Remove the certificate and the key
+        if: always()
+        run: |
+          Tools/release/keychain.sh cleanup || true
+          rm -f "$RUNNER_TEMP/notary.p8"

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A feed shaped the way an older one would be: items out of order, a CDATA
+    description, an element the generator does not write itself, and a channel
+    on the prerelease. Round tripping this is the test.
+-->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+    <channel>
+        <title>Bloom</title>
+        <description>Updates for Bloom</description>
+        <language>en</language>
+        <item>
+            <title>1.1.0</title>
+            <pubDate>Mon, 05 Jan 2026 09:00:00 +0000</pubDate>
+            <sparkle:version>200</sparkle:version>
+            <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<p>The first one anybody outside kept.</p>]]></description>
+            <enclosure url="https://example.invalid/Bloom-1.1.0.zip" length="1111" type="application/octet-stream" sparkle:edSignature="AAAA" />
+        </item>
+        <item>
+            <title>1.2.0-beta.1</title>
+            <pubDate>Tue, 06 Jan 2026 09:00:00 +0000</pubDate>
+            <sparkle:version>210</sparkle:version>
+            <sparkle:shortVersionString>1.2.0-beta.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:channel>beta</sparkle:channel>
+            <sparkle:criticalUpdate></sparkle:criticalUpdate>
+            <enclosure url="https://example.invalid/Bloom-1.2.0-beta.1.zip" length="2222" type="application/octet-stream" sparkle:edSignature="BBBB" />
+        </item>
+    </channel>
+</rss>
