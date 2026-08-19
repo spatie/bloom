@@ -296,6 +296,9 @@ struct RepoSettingsView: View {
 }
 
 /// Names the file a field will be written to, before anything is written to it.
+///
+/// Three sentences rather than one, because there are three situations and only one of them is
+/// "it goes back where it came from".
 struct SettingsDestinationLabel: View {
     let model: RepoSettingsModel
     let key: SettingsKey
@@ -303,23 +306,49 @@ struct SettingsDestinationLabel: View {
     var body: some View {
         Text(text)
             .font(Typo.caption)
-            .foregroundStyle(Palette.textSecondary)
+            .foregroundStyle(isForking ? Palette.warning : Palette.textSecondary)
             .lineLimit(1)
             .truncationMode(.middle)
+            .help(help)
+    }
+
+    private var destination: String { model.destination(for: key) }
+    private var origin: String? { model.loaded.origins[key] }
+
+    /// True when saving will state this setting in a second file rather than change the first.
+    ///
+    /// Only ever a `.conductor` file: Bloom reads those so an existing repository works with
+    /// nothing to configure, and writes its own. Both files then state the setting, Bloom's wins
+    /// here, and Conductor goes on reading the old one. Nobody should have to work that out from
+    /// a diff, so the label says it and is drawn in the warning colour while it is true.
+    private var isForking: Bool {
+        guard let origin, SettingsLoader.repoPaths(repo: model.repo.path).contains(origin)
+        else { return false }
+        return origin != destination
     }
 
     private var text: String {
-        let destination = model.destination(for: key)
-        let relative = destination.hasPrefix(model.repo.path + "/")
-            ? String(destination.dropFirst(model.repo.path.count + 1))
-            : (destination as NSString).abbreviatingWithTildeInPath
-
+        if isForking, let origin {
+            return "Read from \(short(origin)), saved to \(short(destination))"
+        }
         // A value a machine-wide file states is worth saying out loud: editing it here does not
         // touch that file, it writes an override for this project only.
-        if let origin = model.loaded.origins[key],
-           !SettingsLoader.repoPaths(repo: model.repo.path).contains(origin) {
-            return "Saved to \(relative), overriding \((origin as NSString).abbreviatingWithTildeInPath)"
+        if let origin, !SettingsLoader.repoPaths(repo: model.repo.path).contains(origin) {
+            return "Saved to \(short(destination)), overriding \(short(origin))"
         }
-        return "Saved to \(relative)"
+        return "Saved to \(short(destination))"
+    }
+
+    private var help: String {
+        guard isForking, let origin else { return text }
+        return """
+            \(short(origin)) was written for Conductor. Bloom reads it but does not edit it, so             saving states this setting in \(short(destination)) as well. Bloom uses the new value;             Conductor keeps reading the old one until the line is removed by hand.
+            """
+    }
+
+    private func short(_ path: String) -> String {
+        path.hasPrefix(model.repo.path + "/")
+            ? String(path.dropFirst(model.repo.path.count + 1))
+            : (path as NSString).abbreviatingWithTildeInPath
     }
 }

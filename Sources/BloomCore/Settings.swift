@@ -126,12 +126,17 @@ public enum SettingsLoader {
         /// Records which file had the last word about a key, so an edit can be written back to it.
         func note(_ key: SettingsKey) { settings.origins[key] = source }
 
-        if let setup = toml["scripts.setup"]?.stringValue, !setup.isEmpty {
-            settings.setupScript = setup
+        // An empty string is a statement, not an absent value: it is the only way a file can say
+        // "this repository has no setup script" loudly enough to beat one that a file below it
+        // states. That matters now that Bloom writes to `.bloom` and never to `.conductor`, so
+        // clearing a script a Conductor file states cannot be done by deleting a line, only by
+        // overriding it from higher up.
+        if let setup = toml["scripts.setup"]?.stringValue {
+            settings.setupScript = setup.isEmpty ? nil : setup
             note(.setupScript)
         }
-        if let archive = toml["scripts.archive"]?.stringValue, !archive.isEmpty {
-            settings.archiveScript = archive
+        if let archive = toml["scripts.archive"]?.stringValue {
+            settings.archiveScript = archive.isEmpty ? nil : archive
             note(.archiveScript)
         }
         if let mode = toml["scripts.run_mode"]?.stringValue {

@@ -23,6 +23,51 @@ struct SettingsPrecedenceTests {
         return root
     }
 
+    // MARK: - Which folder wins
+
+    @Test(".bloom outranks .conductor at the same tier, and .local outranks the shared file")
+    func bloomOutranksConductor() throws {
+        let repo = try makeRepo([
+            ".conductor/settings.toml": "[scripts]\nsetup = \"conductor shared\"\n",
+            ".bloom/settings.toml": "[scripts]\nsetup = \"bloom shared\"\n",
+        ])
+        #expect(SettingsLoader.load(repo: repo).setupScript == "bloom shared")
+
+        let withLocals = try makeRepo([
+            ".conductor/settings.toml": "[scripts]\nsetup = \"conductor shared\"\n",
+            ".bloom/settings.toml": "[scripts]\nsetup = \"bloom shared\"\n",
+            ".conductor/settings.local.toml": "[scripts]\nsetup = \"conductor local\"\n",
+        ])
+        #expect(SettingsLoader.load(repo: withLocals).setupScript == "conductor local")
+
+        let all = try makeRepo([
+            ".conductor/settings.toml": "[scripts]\nsetup = \"conductor shared\"\n",
+            ".bloom/settings.toml": "[scripts]\nsetup = \"bloom shared\"\n",
+            ".conductor/settings.local.toml": "[scripts]\nsetup = \"conductor local\"\n",
+            ".bloom/settings.local.toml": "[scripts]\nsetup = \"bloom local\"\n",
+        ])
+        #expect(SettingsLoader.load(repo: all).setupScript == "bloom local")
+    }
+
+    @Test("a repository set up for Conductor alone still works with nothing configured")
+    func conductorOnlyRepositoriesAreRead() throws {
+        let repo = try makeRepo([
+            ".conductor/settings.toml": "[scripts]\nsetup = \"pnpm install\"\narchive = \"docker compose down\"\n",
+        ])
+        let settings = SettingsLoader.load(repo: repo)
+        #expect(settings.setupScript == "pnpm install")
+        #expect(settings.archiveScript == "docker compose down")
+    }
+
+    @Test("a stated empty script beats one a file below states")
+    func anEmptyScriptIsAStatement() throws {
+        let repo = try makeRepo([
+            ".conductor/settings.toml": "[scripts]\nsetup = \"pnpm install\"\n",
+            ".bloom/settings.toml": "[scripts]\nsetup = \"\"\n",
+        ])
+        #expect(SettingsLoader.load(repo: repo).setupScript == nil)
+    }
+
     @Test("a repository file lands in the repo layer, not the home layer")
     func repoFileIsRepoScoped() throws {
         let repo = try makeRepo([
