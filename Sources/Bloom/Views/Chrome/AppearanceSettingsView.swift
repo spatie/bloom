@@ -137,15 +137,19 @@ struct AppearanceSettingsView: View {
             + "always stops its terminals, whatever this is set to."
     }
 
+    /// Says where the size is coming from, and nothing else.
+    ///
+    /// The keys used to be spelled out here too. They are in the View menu now, which is where a
+    /// person looks for them and where they are always visible, so repeating them under a stepper
+    /// was telling someone something they can already see.
     private var terminalFooter: String {
-        let shortcuts = "Cmd+Plus and Cmd+Minus change this from any terminal, Cmd+0 returns to the default."
         if TerminalTextSize.override != nil {
-            return "Set here, so it no longer follows Ghostty. " + shortcuts
+            return "Set here, so it no longer follows Ghostty."
         }
         if let ghostty = TerminalTextSize.ghosttyDefault(for: NSApp.effectiveAppearance) {
-            return "Following your Ghostty configuration's font-size of \(Int(ghostty)) pt. " + shortcuts
+            return "Following your Ghostty configuration's font-size of \(Int(ghostty)) pt."
         }
-        return "No Ghostty configuration was found, so terminals use the system monospaced size. " + shortcuts
+        return "No Ghostty configuration was found, so terminals use the system monospaced size."
     }
 }
 
