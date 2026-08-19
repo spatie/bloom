@@ -381,17 +381,30 @@ enum Metrics {
     /// The box a small button at the trailing edge of a header is drawn and hit in: the project's
     /// `+`, the button that adds a project, the project settings window's own header control.
     ///
-    /// Eighteen points tall, not the twenty four an icon in a sixteen point frame with four points
-    /// of padding comes to. A sidebar list holds a row at 32 points until its content passes about
-    /// nineteen and then sizes to the content, so a twenty four point button put five points of
-    /// extra air above every project header, which read as a gap in the column rather than as the
-    /// top of the next project. Wider than it is tall, which is the shape of every small button in
-    /// a Mac toolbar, and enough to click without hunting.
+    /// Fifteen points tall, not the twenty four an icon in a sixteen point frame with four points
+    /// of padding comes to. A sidebar section header is drawn in a band of nineteen points, and it
+    /// clips: a list row holds its 32 point pitch until the header's content passes nineteen and
+    /// then sizes to the content, so a twenty four point button put five points of extra air above
+    /// every project header, which read as a gap in the column rather than as the top of the next
+    /// project.
+    ///
+    /// The last four of those nineteen points are what this number spends. The button is drawn and
+    /// hit in the same box, and that box is also its hover plate, so an eighteen point plate filled
+    /// the band to within half a point of the bottom of the row. The list's selection fill takes
+    /// the WHOLE of the row under it, top edge included, so a hovered header above a selected
+    /// workspace put a grey plate and a grey pill half a point apart and the two read as one smear.
+    /// Fifteen leaves two points of ground above and below the plate, which is the tight rung of
+    /// the spacing scale and enough to see daylight at both edges. Measured off a window capture:
+    /// plate 24 by 15 at two points clear, selection fill the full 32 point row beneath it.
+    ///
+    /// Three points smaller is three points of click target gone, out of a row that is only
+    /// nineteen tall to begin with. Wider than it is tall, which is the shape of every small button
+    /// in a Mac toolbar, and still enough to hit without hunting.
     ///
     /// Here rather than in `SidebarMetrics`, where it started, because the project settings window
     /// reads it and that window is not the sidebar: a constant named after one pane and used from
     /// another is how the two drift.
-    static let headerButton = CGSize(width: 24, height: 18)
+    static let headerButton = CGSize(width: 24, height: 15)
     /// One point, which on Retina is two physical pixels.
     ///
     /// It was one physical pixel, which is an iOS and web idea rather than a Mac one: AppKit's own

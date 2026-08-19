@@ -14,6 +14,13 @@ import SwiftUI
 /// leaving `.listStyle(.sidebar)`, and with it AppKit selection, keyboard navigation and the
 /// standard insets, which is a far worse trade than four points. What was in reach is the rhythm
 /// being EVEN, and that is what the header's own padding was spent on.
+///
+/// A project header does NOT get those 32 points to draw in. Measured off a window capture, one
+/// header's 32 point pitch is 13 points of section spacing above a drawing band of 19, and the
+/// band CLIPS: content offset up into the spacing is cut off at the band's top edge, so a header
+/// cannot be nudged away from the row below it. Whatever the header draws has to fit in 19 points
+/// and is centred there, which is why `Metrics.headerButton` is 15 tall rather than 18. Anything
+/// taller than 19 does not overflow, it pushes the whole row taller and breaks the pitch.
 enum SidebarMetrics {
     /// The gutter the project's disclosure chevron sits in, at the leading edge of a header.
     ///
