@@ -114,11 +114,58 @@ final class TerminalSessionStore {
             let persistence = self.persistence
             Task { await persistence?.kill(workspaceID: workspaceID, paneIDs: [id]) }
         }
+        closedPanes.insert(id)
         guard let view = terminals[id] else { return }
-        signal(SIGTERM, toGroupOf: view)
+        defer { terminals[id] = nil }
+
+        // Nothing is signalled for a shell that has already ended. Its pid has been reaped, and
+        // macOS hands pids out again, so naming that number now could land on a process group
+        // belonging to somebody else entirely.
+        guard view.process?.running == true else { return }
+        // Read before the shell is terminated, so the escalation below has a number to name.
+        let pid = view.process?.shellPid ?? 0
+
+        // Before the signal, so the exit it causes is read as Bloom closing the pane rather than
+        // as the shell ending by itself and asking for the pane to close a second time.
+        view.willStop()
+        hangUp(on: view)
         view.shutdown()
-        terminals[id] = nil
+
+        // Anything that sat through a hangup is out of chances. The pid is still safe to name:
+        // `terminate` cancels the app's own exit monitor, so nothing reaps the child and macOS
+        // cannot have handed the number to somebody else in the meantime.
+        guard pid > 0 else { return }
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            killpg(pid, SIGKILL)
+        }
     }
+
+    /// Tells a shell its terminal has gone.
+    ///
+    /// SIGHUP rather than SIGTERM alone, which is the fix for a real orphan: an interactive login
+    /// shell ignores SIGTERM, so closing a tab left a zsh alive in the worktree, holding its pty
+    /// and its working directory for the rest of the day, and holding whatever it had running.
+    /// SIGHUP is what a terminal emulator sends when its window closes, and it is the one an
+    /// interactive shell does not ignore. SIGTERM still follows it, for anything in the group that
+    /// answers to that and not to a hangup.
+    private func hangUp(on view: BloomTerminalView) {
+        signal(SIGHUP, toGroupOf: view)
+        signal(SIGTERM, toGroupOf: view)
+    }
+
+    /// Panes that have been closed, which is what stops one from forking a second shell on its way
+    /// off screen.
+    ///
+    /// A view is not torn down the instant its pane goes: SwiftUI redraws on the next pass, and a
+    /// tab whose last pane has just closed is drawn one more time before the strip catches up. That
+    /// draw asks for its shell, finds the closed one gone, and forks a replacement into a worktree
+    /// nobody is looking at. It kept its process group, its port and, with persistence on, its
+    /// tmux session, and nothing ever closed it again because no tab named it any more.
+    ///
+    /// A pane id is a fresh uuid and is never reused, so remembering the ones that are over is
+    /// enough, and each is one small string.
+    private var closedPanes: Set<String> = []
 
     /// Every pane of a tab that is going away, and the shape it was split into.
     ///
@@ -142,6 +189,15 @@ final class TerminalSessionStore {
         if let existing = terminals[tab.id] { return existing }
 
         let view = BloomTerminalView(frame: CGRect(x: 0, y: 0, width: 640, height: 320))
+
+        // A pane that is already over, drawn one last time before SwiftUI catches up. It gets an
+        // empty terminal that forks nothing and is not filed under its id, so the draw after this
+        // one drops it. See `closedPanes`.
+        guard !closedPanes.contains(tab.id) else {
+            view.willStop()
+            return view
+        }
+
         var extra: [String: String] = [:]
         if let repo, let store = repoStore {
             extra = WorkspaceManager(store: store).environment(
@@ -248,6 +304,18 @@ final class TerminalSessionStore {
     /// it. The sessions are matched by name, so this holds even for a tab that was never loaded.
     func discard(workspaceID: String) async {
         ensurePersistence()
+
+        // Every shell of this workspace is told first that Bloom is the one ending it, because the
+        // kill below reaches them without this app signalling anything: a tmux client whose server
+        // destroys its session exits cleanly, and a clean exit is what closes a pane. Without this
+        // a workspace being archived would spend the await closing its own tabs, and the bottom
+        // panel would open a replacement terminal for a worktree that is about to be deleted.
+        for tab in tabs(for: workspaceID) {
+            for pane in TerminalSplitStore.shared.panes(of: tab.id) {
+                terminals[pane]?.willStop()
+            }
+        }
+
         await persistence?.killEverything(workspaceID: workspaceID)
 
         var views: [BloomTerminalView] = []
@@ -289,7 +357,7 @@ final class TerminalSessionStore {
         await stop(terminals: views, runScripts: scripts)
     }
 
-    /// SIGTERM to every process group, a bounded wait, then SIGKILL to whatever is left.
+    /// A hangup to every process group, a bounded wait, then SIGKILL to whatever is left.
     private func stop(terminals views: [BloomTerminalView], runScripts scripts: [RunScriptSession]) async {
         // Only shells that are still running get signalled. A shell the user exited long ago has had
         // its pid reaped, and macOS hands pids out again, so signalling that number now could land
@@ -298,13 +366,15 @@ final class TerminalSessionStore {
         guard !live.isEmpty || !scripts.isEmpty else { return }
 
         for view in live {
-            signal(SIGTERM, toGroupOf: view)
+            // Before the signal, for the reason spelled out in `closePane`.
+            view.willStop()
+            hangUp(on: view)
             view.shutdown()
         }
         for script in scripts { script.stop() }
 
-        // A moment for SIGTERM to be taken. A shell goes immediately, a dev server usually wants to
-        // close its listeners first.
+        // A moment for the signal to be taken. A shell goes immediately, a dev server usually wants
+        // to close its listeners first.
         try? await Task.sleep(for: .milliseconds(250))
         await waitForExit(of: scripts, upTo: .seconds(3.25))
 

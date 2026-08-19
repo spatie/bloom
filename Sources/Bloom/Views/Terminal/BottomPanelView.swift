@@ -244,11 +244,20 @@ struct BottomPanelView: View {
         Task { await sessions.rename(tab, to: name, store: model.store) }
     }
 
+    /// Closes a terminal tab, whether the user asked or its shell ended by itself.
+    ///
+    /// A tab that was not the selected one leaves the selection alone. The selected one hands over
+    /// to its neighbour: the tab that slid into its place, or the new last one when it was at the
+    /// end. Falling back to the first tab, which is what this did, sent the user to the other end
+    /// of the strip whenever they closed the tab they were working in.
     private func close(_ tab: TerminalTab) async {
+        let index = terminalTabs.firstIndex { $0.id == tab.id }
+        let wasSelected = model.bottomTab == .terminal(tab.id)
         let remaining = await sessions.closeTab(tab, store: model.store)
-        if model.bottomTab == .terminal(tab.id), let next = remaining.first {
-            model.bottomTab = .terminal(next.id)
-        }
+
+        guard wasSelected, !remaining.isEmpty else { return }
+        let next = remaining[min(index ?? 0, remaining.count - 1)]
+        model.bottomTab = .terminal(next.id)
     }
 
     /// Settings come off disk, so they are read away from the main thread. The selected tab is

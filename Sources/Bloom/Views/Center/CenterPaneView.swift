@@ -74,7 +74,13 @@ struct CenterPaneView: View {
             }
 
         case nil:
-            if model.isRunningSetup { setupState } else { emptyState }
+            if model.isRunningSetup {
+                setupState
+            } else if model.sessions.isEmpty {
+                noConversationState
+            } else {
+                emptyState
+            }
         }
     }
 
@@ -192,5 +198,26 @@ struct CenterPaneView: View {
             actionTitle: "Start a session",
             action: { Task { await model.createSession() } }
         )
+    }
+
+    /// What a workspace that has no conversation at all falls back to.
+    ///
+    /// That is what "Opens with: Terminal" creates, and it is where its terminal tab lands when
+    /// the shell in it ends: the tab closes like any other, and the pane behind it must not be a
+    /// composer. Somebody who asked for a shell in this worktree is offered a shell in it. The
+    /// other three kinds of tab are one click up, in the `+` the strip carries.
+    private var noConversationState: some View {
+        EmptyStateView(
+            glyph: "apple.terminal",
+            title: "Nothing open in this pane",
+            message: "This workspace has no conversation. Open a terminal in the worktree, or pick another kind of tab from the plus above.",
+            actionTitle: "Open a terminal",
+            action: openTerminal
+        )
+    }
+
+    private func openTerminal() {
+        let tab = CenterTabStore.shared.add(kind: .terminal, workspaceID: model.workspace.id)
+        panes.show(.tool(tab.id), in: model)
     }
 }

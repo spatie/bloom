@@ -68,10 +68,16 @@ final class TerminalSplitStore {
     }
 
     /// Returns false when that was the last pane, which is the tab's cue to close itself.
+    ///
+    /// The keyboard is only asked for when the pane that went was holding it. Cmd+W always closes
+    /// the pane the keystroke came from, so this reads as it always did there, but a shell that
+    /// ends by itself can close a pane the user is not in, and grabbing the keyboard off the back
+    /// of that would pull the caret out of whatever they were typing in.
     func close(pane: String, in ownerID: String) -> Bool {
         var layout = layout(for: ownerID)
+        let hadFocus = layout.focus == pane
         guard layout.close(pane) else { return false }
-        apply(layout, to: ownerID, movingFocus: true)
+        apply(layout, to: ownerID, movingFocus: hadFocus)
         return true
     }
 

@@ -89,6 +89,7 @@ struct TerminalSplitView: View {
             focusRequest: focusRequest,
             onFocus: { splits.focus(id, in: ownerID) },
             onCommand: { handle($0, from: id) },
+            onExit: { finished($0, in: id) },
             onContextMenu: {
                 TerminalPaneMenu.make(
                     canClose: layout.paneCount > 1,
@@ -130,6 +131,34 @@ struct TerminalSplitView: View {
         return Color(nsColor: NSColor(color))
     }
 
+    /// A shell that ended by itself.
+    ///
+    /// A clean exit closes the pane it was in, and the last pane closing is the tab going away.
+    /// That is what typing `exit` means in every terminal on this Mac, and it is the same route
+    /// Cmd+W already takes, so a pane that closes itself leaves exactly the arrangement a pane the
+    /// user closed would.
+    ///
+    /// Anything else leaves the pane where it is. A shell that exited with a status or died under
+    /// a signal has printed why, and that output is the one thing worth keeping: macOS Terminal
+    /// draws the same line, under "Close if the shell exited cleanly", and it is the right one.
+    private func finished(_ exit: TerminalExit, in pane: String) {
+        guard exit.closesPane else { return }
+        close(pane)
+    }
+
+    /// Closes one pane, and the tab with it when it was the last. No `splits.focus` first, unlike
+    /// the keystroke below: a shell can end in a pane the user is not in, and moving the keyboard
+    /// onto it on its way out would take the caret out of whatever they were typing in.
+    private func close(_ pane: String) {
+        guard splits.close(pane: pane, in: ownerID) else {
+            // The last pane, so there is no tab left to show. Whoever owns the strip takes it from
+            // here, and closing the tab is what stops the shell and its tmux session.
+            onCloseTab()
+            return
+        }
+        TerminalSessionStore.shared.closePane(id: pane)
+    }
+
     /// A keystroke that reached a shell. Returning false hands the key back to the app menu, which
     /// is what keeps Cmd+Option+Up stepping through workspaces from a pane with nothing above it.
     private func handle(_ command: TerminalPaneCommand, from pane: String) -> Bool {
@@ -145,13 +174,7 @@ struct TerminalSplitView: View {
             return splits.moveFocus(direction, in: ownerID)
 
         case .close:
-            guard splits.close(pane: pane, in: ownerID) else {
-                // The last pane, so there is no tab left to show. Whoever owns the strip takes it
-                // from here, and closing the tab is what stops the shell.
-                onCloseTab()
-                return true
-            }
-            TerminalSessionStore.shared.closePane(id: pane)
+            close(pane)
             return true
 
         case .toggleZoom:

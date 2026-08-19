@@ -3,8 +3,8 @@ import AppKit
 import SwiftTerm
 import BloomCore
 
-/// Everything needed to fork a shell. Kept as a value so a terminal can relaunch itself with
-/// exactly the same shell, directory and environment after the user's shell exits.
+/// Everything needed to fork a shell: which one, where, and with what in its environment. Kept as
+/// a value so the decision is made once, by whoever knows the workspace, rather than by the view.
 struct TerminalLaunch: Sendable, Hashable {
     var executable: String
     /// argv[0]. A leading dash is what tells zsh and bash to behave as a login shell.
@@ -79,23 +79,21 @@ struct TerminalLaunch: Sendable, Hashable {
 /// inside it. Recreating the view would kill the user's shell, so instances are owned by
 /// `TerminalSessionStore` and handed to SwiftUI as-is.
 final class BloomTerminalView: LocalProcessTerminalView {
-    private(set) var launch: TerminalLaunch?
     private(set) var hasExited = false
+
+    /// Set when Bloom is the one ending this shell rather than the shell ending by itself. The two
+    /// have to be told apart: closing a tab, archiving a workspace and quitting all kill shells,
+    /// and a terminal that reported those the way it reports a user typing `exit` would announce a
+    /// teardown in a pane nobody can see any more, and ask for a close that is already happening.
+    private var isStopping = false
 
     /// Called when this shell takes the keyboard, so the tab it is a pane of can dim the others.
     var onFocus: (@MainActor () -> Void)?
 
-    /// Called when the child process ends, for a terminal the app started to run one command and
-    /// is waiting on. A pane holding the user's shell leaves this nil.
-    var onExit: (@MainActor (Int32?) -> Void)?
-
-    /// Whether Return restarts the command once it has finished.
-    ///
-    /// True for a shell pane, where the user's shell exiting is a thing to undo. False for a
-    /// terminal running one command that something else is watching: restarting `gh auth login`
-    /// under a sheet that has already moved on to checking the result is not a recovery, it is a
-    /// second login nobody asked for.
-    var restartsOnReturn = true
+    /// Called when the child process ends by itself, with the end already decoded. Whoever owns the
+    /// pane decides what that means: `TerminalSplitView` closes the pane on a clean exit, and the
+    /// sign-in sheet reads it as its command having finished.
+    var onExit: (@MainActor (TerminalExit) -> Void)?
 
     /// The split commands, answered by whatever owns this pane. It returns false for a command it
     /// cannot serve, such as an arrow with no pane beyond it, which is what lets the same
@@ -170,7 +168,6 @@ final class BloomTerminalView: LocalProcessTerminalView {
 
     func start(_ launch: TerminalLaunch) {
         guard !process.running else { return }
-        self.launch = launch
         hasExited = false
         startProcess(
             executable: launch.executable,
@@ -181,26 +178,33 @@ final class BloomTerminalView: LocalProcessTerminalView {
         )
     }
 
-    func restart() {
-        guard let launch else { return }
-        getTerminal().resetToInitialState()
-        hasExited = false
-        start(launch)
+    /// Tells the terminal that Bloom is about to end this shell, ahead of whatever signal does it.
+    /// Separate from `shutdown` because the store signals the whole process group first, and
+    /// because archiving kills a tmux session out from under a pane this app never signals at all.
+    func willStop() {
+        isStopping = true
     }
 
     func shutdown() {
+        isStopping = true
         guard process.running else { return }
         terminate()
     }
 
-    fileprivate func handleProcessExit(_ code: Int32?) {
+    fileprivate func handleProcessExit(_ status: Int32?) {
         guard !hasExited else { return }
         hasExited = true
-        let suffix = (code ?? 0) == 0 ? "" : " (exit \(code ?? 0))"
-        let hint = restartsOnReturn ? ", press Return to restart" : ""
-        // SGR 2 is faint, which is exactly the dimmed treatment this line wants.
-        feed(text: "\r\n\u{1b}[2mProcess finished\(suffix)\(hint)\u{1b}[0m\r\n")
-        onExit?(code)
+        // Bloom ended this one, so there is nobody to tell and nothing to close.
+        guard !isStopping else { return }
+
+        let exit = TerminalExit(waitStatus: status)
+        // A clean exit closes the pane, and a line printed into a pane that is going away is a
+        // line nobody reads. Everything else stays on screen with its reason under it.
+        if !exit.closesPane {
+            // SGR 2 is faint, which is exactly the dimmed treatment this line wants.
+            feed(text: "\r\n\u{1b}[2m\(exit.paneMessage)\u{1b}[0m\r\n")
+        }
+        onExit?(exit)
     }
 
     /// A click is the one way a pane takes the keyboard that the tab does not already know about,
@@ -220,13 +224,15 @@ final class BloomTerminalView: LocalProcessTerminalView {
 
     }
 
-    /// Keystrokes on their way to the shell. When the shell is gone they are swallowed, except a
-    /// Return, which is the documented way back to a working terminal.
+    /// Keystrokes on their way to the shell, swallowed once it is gone.
+    ///
+    /// Return used to restart the shell here, and the pane said so. That state is what a terminal
+    /// tab must never be left in: a pane offering to fork a second shell is not a terminal, it is
+    /// a prompt about one. A pane that survives its shell now survives it read-only, holding the
+    /// output that explains the exit until the user closes the tab, which is what every other
+    /// terminal on this Mac does.
     override func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {
-        if hasExited {
-            if restartsOnReturn, data.contains(0x0D) || data.contains(0x0A) { restart() }
-            return
-        }
+        guard !hasExited else { return }
         super.send(source: source, data: data)
     }
 
@@ -526,6 +532,9 @@ struct TerminalView: NSViewRepresentable {
     var focusRequest = 0
     var onFocus: (@MainActor () -> Void)?
     var onCommand: (@MainActor (TerminalPaneCommand) -> Bool)?
+    /// The shell in this pane ended by itself. Set by every pane, split or not, because a tab
+    /// nobody split is still one pane and its shell still ends.
+    var onExit: (@MainActor (TerminalExit) -> Void)?
     var onContextMenu: (@MainActor () -> NSMenu?)?
 
     /// Read here rather than inside the terminal so SwiftUI reruns `updateNSView` when the switch
@@ -553,6 +562,7 @@ struct TerminalView: NSViewRepresentable {
         session.onFocus = onFocus
         session.onCommand = onCommand
         session.onContextMenu = onContextMenu
+        session.onExit = onExit
         // Before the request, whose `didSet` reads it.
         host.isFocusedPane = isFocusedPane
         host.focusRequest = focusRequest

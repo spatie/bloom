@@ -27,7 +27,12 @@ final class GitHubLoginSession {
 
     /// Nil when the program is not on this Mac at all, which is the one case that cannot be a
     /// terminal because there is nothing to run in it.
-    init?(executable: String, arguments: [String], directory: String, onExit: @escaping @MainActor (Int32?) -> Void) {
+    init?(
+        executable: String,
+        arguments: [String],
+        directory: String,
+        onExit: @escaping @MainActor (TerminalExit) -> Void
+    ) {
         guard let path = Shell.which(executable) else { return nil }
 
         var variables = Shell.environment()
@@ -48,12 +53,12 @@ final class GitHubLoginSession {
         )
 
         terminal = BloomTerminalView(frame: .zero)
-        // A Return after this exits belongs to the sheet, which is already checking the result. A
-        // second `gh auth login` started under it is not a recovery.
-        terminal.restartsOnReturn = false
-        terminal.onExit = { [weak self] code in
+        // Nothing here closes on a clean exit the way a terminal pane does: this terminal is one
+        // command inside a sheet, and the sheet decides what to show next from what `gh` says
+        // rather than from the status it exited with.
+        terminal.onExit = { [weak self] exit in
             self?.isRunning = false
-            onExit(code)
+            onExit(exit)
         }
     }
 
