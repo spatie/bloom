@@ -14,12 +14,18 @@ struct PromptEditor: View {
     /// and short enough that the variable reference below stays visible.
     private static let editorHeight: CGFloat = 220
 
+    /// Drawn inside the box's own edge rather than outside it, so nothing around it has to give
+    /// the ring clearance. See `HomeBar.focusRingWidth`.
+    private static let focusRingWidth: CGFloat = 2
+
     private let overrides = PromptOverrides()
 
     @State private var text = ""
     /// Until the stored value has been read, `text` is an empty string that nobody typed. Writing
     /// that back would turn every visit to this tab into an override.
     @State private var isLoaded = false
+
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
@@ -61,10 +67,19 @@ struct PromptEditor: View {
             .scrollContentBackground(.hidden)
             .padding(Metrics.spacingSmall)
             .frame(minHeight: Self.editorHeight)
+            .focused($isFocused)
             .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+            // A hand-built box gets no focus ring from AppKit, and a field that looks identical
+            // whether or not it has the keyboard is the single most reliable way to make a Mac
+            // window feel like a web page. The same overlay `HomeBar`'s search field uses, in the
+            // same colour macOS draws a real one in, so it follows Full Keyboard Access and
+            // Increase Contrast with it.
             .overlay {
                 RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                    .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                    .strokeBorder(
+                        isFocused ? Palette.focusRing : Palette.border,
+                        lineWidth: isFocused ? Self.focusRingWidth : Metrics.hairline
+                    )
             }
             .accessibilityLabel("\(definition.title) prompt")
     }

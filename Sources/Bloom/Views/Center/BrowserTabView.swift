@@ -13,6 +13,10 @@ struct BrowserTabView: View {
     @State private var address = ""
     @FocusState private var isAddressFocused: Bool
 
+    /// Drawn inside the field's own edge rather than outside it, so the toolbar does not have to
+    /// give the ring clearance. See `HomeBar.focusRingWidth`.
+    private static let focusRingWidth: CGFloat = 2
+
     private var tabs: CenterTabStore { .shared }
     private var session: BrowserSession { tabs.browser(for: tab) }
 
@@ -60,9 +64,17 @@ struct BrowserTabView: View {
                 .padding(.horizontal, Metrics.spacingWide)
                 .padding(.vertical, Metrics.spacingSmall)
                 .background(Palette.surfaceRaised, in: .rect(cornerRadius: Metrics.cornerSmall))
+                // A hand-built field gets no focus ring from AppKit, and an address bar that looks
+                // identical whether or not it has the keyboard is the single most reliable way to
+                // make a Mac window feel like a web page. The same overlay `HomeBar`'s search field
+                // uses, in the same colour macOS draws a real one in, so it follows Full Keyboard
+                // Access and Increase Contrast with it.
                 .overlay {
                     RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                        .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                        .strokeBorder(
+                            isAddressFocused ? Palette.focusRing : Palette.border,
+                            lineWidth: isAddressFocused ? Self.focusRingWidth : Metrics.hairline
+                        )
                 }
                 .onSubmit {
                     session.load(address)
