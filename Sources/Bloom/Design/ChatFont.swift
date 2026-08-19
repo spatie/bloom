@@ -36,10 +36,17 @@ enum ChatFont: String, CaseIterable, Identifiable, Sendable {
 
     static let defaultsKey = "chat.font"
 
-    /// New York. San Francisco is drawn for labels, buttons and menus, and it is the right face
-    /// for the chrome around the conversation, which is why nothing outside the chat subtree
-    /// moves. An agent transcript is paragraphs, and this is Apple's own face for those.
-    static let standard = ChatFont.reading
+    /// San Francisco, the same face as the chrome around the conversation.
+    ///
+    /// New York held this slot for a while, on the argument that an agent transcript is
+    /// paragraphs and New York is Apple's face for paragraphs. That argument is sound about
+    /// prose and wrong about this prose. A turn is not an essay: it is a few sentences wrapped
+    /// around filenames, symbols, paths and diff counts, all of which are set in the mono face,
+    /// and a serif body puts a second voice next to that on every line. The reading matter here
+    /// has more in common with the interface than with a book.
+    ///
+    /// The face is still a setting, and Reading is one line down for anyone who wants it.
+    static let standard = ChatFont.system
 
     var id: String { rawValue }
 
