@@ -4,7 +4,7 @@ import SwiftUI
 ///
 /// It exists because adding a project was reachable only from the arrow of the toolbar's `+`
 /// split button and from Settings, neither of which is where anyone looks for it in an app whose
-/// empty state is "Add your first project".
+/// empty state is "No projects yet".
 ///
 /// Three ranks now run down this column and they have to be told apart at a glance in 260 points:
 /// this group label at 11 medium in secondary ink, a project at 13 semibold in primary ink with

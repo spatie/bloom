@@ -147,7 +147,7 @@ struct SidebarView: View {
         } description: {
             Text("Point Bloom at a git repository to start running agents in it.")
         } actions: {
-            Button("Add a Folder", action: addProject)
+            Button("Choose a folder", systemImage: "folder", action: addProject)
                 .buttonStyle(.borderedProminent)
         }
     }
