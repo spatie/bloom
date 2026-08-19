@@ -47,7 +47,7 @@ struct ChangedFolderRow: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button("Reveal in Finder") { Reveal.inFinder(fullPath) }
-            Button("Open in Editor") { Reveal.inEditor(fullPath) }
+            OpenInItems(target: .folder(fullPath))
             Button("Copy path", action: copyPath)
         }
         .help(path)

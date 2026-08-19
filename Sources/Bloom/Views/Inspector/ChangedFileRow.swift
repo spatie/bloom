@@ -54,7 +54,7 @@ struct ChangedFileRow: View {
         // sentence about where it lives. One file per drag: the list carries a single selection.
         .fileDrag(path: fullPath)
         .contextMenu {
-            Button("Open in Editor") { Reveal.inEditor(fullPath) }
+            OpenInItems(target: .file(fullPath))
             Button("Reveal in Finder") { Reveal.inFinder(fullPath) }
             Button("Copy path", action: copyPath)
             Divider()

@@ -71,13 +71,23 @@ struct FilePreview: View {
 
             Spacer(minLength: InspectorLayout.tight)
 
-            Button("Open in Editor", systemImage: "square.and.pencil") {
-                Reveal.inEditor((model.workspace.path as NSString).appendingPathComponent(path))
+            // A menu with a primary action: clicking it opens the file in whatever this project
+            // was last opened in, holding it offers everywhere else. The one control does both,
+            // which is what keeps a bar this narrow from growing a second button.
+            Menu {
+                OpenInItems(target: .file(absolutePath))
+            } label: {
+                Label(openTitle, systemImage: "square.and.pencil")
+            } primaryAction: {
+                openInPreferredApp()
             }
             .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .controlSize(.small)
-            .help("Open \(filename) in your editor")
+            .fixedSize()
+            .help(openTitle)
+            .environment(\.openInRepoID, model.repo?.id)
         }
         .padding(.horizontal, InspectorLayout.inset)
         .frame(height: InspectorLayout.barHeight)
@@ -86,6 +96,25 @@ struct FilePreview: View {
     }
 
     private var filename: String { (path as NSString).lastPathComponent }
+
+    private var absolutePath: String {
+        (model.workspace.path as NSString).appendingPathComponent(path)
+    }
+
+    /// Names the application, so the button says what it will do before it is pressed.
+    private var openTitle: String {
+        guard let app = OpenIn.preferred(for: .file(absolutePath), repo: model.repo?.id)
+        else { return "Open \(filename) in your editor" }
+        return "Open \(filename) in \(app.app.name)"
+    }
+
+    private func openInPreferredApp() {
+        guard let app = OpenIn.preferred(for: .file(absolutePath), repo: model.repo?.id) else {
+            Reveal.inEditor(absolutePath)
+            return
+        }
+        OpenIn.open(absolutePath, with: app, repo: model.repo?.id)
+    }
 
     private var directory: String { (path as NSString).deletingLastPathComponent }
 

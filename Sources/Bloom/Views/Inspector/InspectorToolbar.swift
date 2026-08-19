@@ -83,7 +83,7 @@ struct InspectorToolbar: View {
             Menu {
                 Button("Copy branch name", action: copyBranch)
                 Button("Reveal worktree in Finder") { Reveal.inFinder(model.workspace.path) }
-                Button("Open worktree in Editor") { Reveal.inEditor(model.workspace.path) }
+                OpenInItems(target: .folder(model.workspace.path), noun: "Worktree")
                 if let pullRequest = model.pullRequest {
                     Divider()
                     Button("Open pull request") { GitHubBridge.open(pullRequest.url) }

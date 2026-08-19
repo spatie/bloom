@@ -51,7 +51,10 @@ struct FileTreeRow: View {
         // and the provider carries whichever of the two this row is.
         .fileDrag(path: fullPath)
         .contextMenu {
-            Button("Open in Editor") { Reveal.inEditor(fullPath) }
+            // The one place a row is either kind, so the target is decided per row rather than
+            // per view: a folder is not offered to something that only opens files, and a file is
+            // not handed to a terminal.
+            OpenInItems(target: item.node.isDirectory ? .folder(fullPath) : .file(fullPath))
             Button("Reveal in Finder") { Reveal.inFinder(fullPath) }
             Button("Copy path", action: copyPath)
         }

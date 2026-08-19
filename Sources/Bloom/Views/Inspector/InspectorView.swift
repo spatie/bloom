@@ -22,6 +22,9 @@ struct InspectorView: View {
             content
         }
         .background(Palette.surface)
+        // Once, here, rather than a repository id threaded through every row of two lists that
+        // have no other use for one. See `EnvironmentValues.openInRepoID`.
+        .environment(\.openInRepoID, model.repo?.id)
     }
 
     @ViewBuilder
