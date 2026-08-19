@@ -47,6 +47,11 @@ struct SidebarView: View {
     /// the same reason.
     @State private var hasSettled = false
 
+    /// Which rows have just been added to the list, so they can fade in rather than appear. The
+    /// rules for what counts as "just added" are `RowArrival`'s, and they are the same rules
+    /// Home's list uses.
+    @State private var arrival = RowArrival()
+
     var body: some View {
         List(selection: $listSelection) {
             Section {
@@ -68,6 +73,7 @@ struct SidebarView: View {
                     rows: group.workspaces,
                     isFiltered: filter != .all,
                     hasUnreadWork: group.hasUnreadWork,
+                    arrival: arrival,
                     renaming: $renaming,
                     onCreateWorkspace: presentCreate
                 )
@@ -108,6 +114,7 @@ struct SidebarView: View {
         // a workspace must not make the pane slide, and a running agent rewrites its diff stat
         // every few seconds, which would otherwise animate the whole column once a second.
         .animation(foldMotion, value: foldedProjects)
+        .settlesArrivals($arrival)
         .overlay {
             if app.repos.isEmpty, app.isLoaded {
                 noProjects
@@ -128,7 +135,8 @@ struct SidebarView: View {
         }
         .onChange(of: app.repos, initial: true) { _, _ in regroup() }
         .onChange(of: app.workspaces) { _, _ in regroup() }
-        .onChange(of: filter) { _, _ in regroup() }
+        // Rescoped, so widening the filter is not forty rows fading in at once. See `RowArrival`.
+        .onChange(of: filter) { _, _ in regroup(rescoped: true) }
         .onChange(of: listSelection) { _, _ in commitSelection() }
         // Moving off a row has to close whatever field was open on it, or the rename would carry
         // on editing a workspace that is no longer on screen.
@@ -161,10 +169,26 @@ struct SidebarView: View {
         groups.filter(\.repo.collapsed).map(\.id)
     }
 
-    private func regroup() {
+    /// - Parameter rescoped: whether the list is being rebuilt because the filter moved, in which
+    ///   case nothing in it counts as having arrived.
+    private func regroup(rescoped: Bool = false) {
         groups = SidebarRepoGroup.build(
             repos: app.repos, workspaces: app.workspaces, filter: filter
         )
+        // Every workspace the groups hold, a folded project's included. A fold hides rows rather
+        // than removing them from the list, and unfolding one already has a movement of its own:
+        // counting them out here would make every project the user reopens fade its contents in
+        // underneath `foldMotion` doing the same job.
+        //
+        // In the same breath as the rows themselves, rather than from an `onChange` watching
+        // `groups`, so a row and the fact that it is new land in one update and the row's first
+        // drawn frame is the faded one.
+        let ids = groups.flatMap { $0.workspaces.map(\.id) }
+        if rescoped {
+            arrival.adopt(ids)
+        } else {
+            arrival.absorb(ids)
+        }
     }
 
     // MARK: - Selection

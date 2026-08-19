@@ -48,6 +48,15 @@ struct HomeView: View {
     /// can ever be open. The same arrangement the sidebar's rows use.
     @State private var renaming: String?
 
+    /// Which rows have just been added to the list, so they can fade in rather than appear. The
+    /// same tracker and the same rules as the sidebar's, which is what stops one workspace
+    /// arriving two different ways in two lists on the same screen.
+    ///
+    /// Reset with the view, which is exactly what is wanted. `HomeView` is rebuilt every time the
+    /// selection leaves Home and comes back, and `RowArrival` says nothing arrives into a list it
+    /// has never seen anything in, so coming back to Home lands its forty rows in silence.
+    @State private var arrival = RowArrival()
+
     /// Held by `AppModel` rather than by this view, which is thrown away and rebuilt every time
     /// the selection leaves Home and comes back. A filter in `@State` would be cleared by opening
     /// any workspace at all.
@@ -84,7 +93,10 @@ struct HomeView: View {
         .onChange(of: app.workspaces, initial: true) { _, _ in rebuild() }
         .onChange(of: app.repos) { _, _ in rebuild() }
         .onChange(of: archived) { _, _ in rebuild() }
-        .onChange(of: app.homeFilter) { _, _ in rebuild() }
+        // Rescoped, so a filter widening is not the whole list fading in at once. Home's search,
+        // its project menu and Hide archived are one control's worth of the same decision, and
+        // they answer the same way the sidebar's filter does. See `RowArrival`.
+        .onChange(of: app.homeFilter) { _, _ in rebuild(rescoped: true) }
     }
 
     // MARK: - Body
@@ -119,6 +131,10 @@ struct HomeView: View {
                             onCommitRename: { commitRename(row, to: $0) },
                             onCancelRename: { renaming = nil }
                         )
+                        // Innermost, on the drawing alone. Everything below this line is what the
+                        // list is told about the row, and a row that is fading in is still
+                        // selectable, clickable and right clickable throughout.
+                        .arrivingRow(arrival.isArriving(row.id))
                         .tag(row.id)
                         // Simultaneous rather than `onTapGesture`, so the list still takes the
                         // click for itself: it is what moves the keyboard into the table, and
@@ -151,6 +167,7 @@ struct HomeView: View {
             }
         }
         .listStyle(.inset)
+        .settlesArrivals($arrival)
         .scrollContentBackground(.hidden)
         .focused($isListFocused)
         .task {
@@ -335,7 +352,9 @@ struct HomeView: View {
     /// One pass over every workspace on the machine, run when its inputs change rather than while
     /// drawing. `now` is stamped here so the buckets the rows are filed under and the ages the
     /// rows print can never disagree.
-    private func rebuild() {
+    /// - Parameter rescoped: whether the list is being rebuilt because a filter moved, in which
+    ///   case nothing in it counts as having arrived.
+    private func rebuild(rescoped: Bool = false) {
         let stamp = Date()
         now = stamp
         listing = HomeList.build(
@@ -345,6 +364,21 @@ struct HomeView: View {
             filter: filter,
             now: stamp
         )
+        // Every row in the list, flattened out of its date heading. Which heading a row is filed
+        // under is not identity: a row crosses from Today to Yesterday at midnight and again
+        // whenever `now` is re-stamped, and taking the groups one at a time would read that as a
+        // row leaving one list and arriving in another. The one pass a minute this function makes
+        // to keep the ages honest would then fade something every night.
+        //
+        // In the same breath as `listing` rather than from an `onChange` watching it, so a row
+        // and the fact that it is new land in one update and the row's first drawn frame is the
+        // faded one.
+        let ids = listing.groups.flatMap { $0.rows.map(\.id) }
+        if rescoped {
+            arrival.adopt(ids)
+        } else {
+            arrival.absorb(ids)
+        }
     }
 
     /// Keeps "3h" from sitting at "3h" all afternoon.

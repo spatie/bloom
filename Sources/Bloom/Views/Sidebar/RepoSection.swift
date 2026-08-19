@@ -27,6 +27,11 @@ struct RepoSection: View {
     /// Passed in rather than derived from `rows`, because `rows` is what the filter is letting
     /// through. See `SidebarRepoGroup.hasUnreadWork`.
     var hasUnreadWork: Bool
+    /// Which of this project's rows have only just been added to the list, so they fade in
+    /// rather than appear. Handed down from `SidebarView`, which owns the one tracker the whole
+    /// pane shares: a workspace can move between projects, and two trackers would each read that
+    /// as an arrival and a departure of their own.
+    var arrival: RowArrival
     @Binding var renaming: String?
     /// Raised to the sidebar, which owns the create sheet.
     var onCreateWorkspace: (Repo) -> Void
@@ -318,6 +323,10 @@ struct RepoSection: View {
             renaming: $renaming,
             onArchive: confirmRowArchive
         )
+        // Innermost, on the drawing alone. Everything below this line is what the list is told
+        // about the row, and a workspace that is fading in is still selectable, draggable and
+        // right clickable throughout: it is a row that is fully there and briefly not drawn.
+        .arrivingRow(arrival.isArriving(workspace.id))
         .padding(.leading, SidebarMetrics.rowIndent)
         .tag(SidebarSelection.workspace(workspace.id))
         .draggable(workspace.id)

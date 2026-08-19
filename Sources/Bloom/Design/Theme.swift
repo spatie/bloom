@@ -473,6 +473,21 @@ enum Metrics {
 /// a slower one, because the setting is about movement, not about speed.
 enum Motion {
     static let pane: Animation = .easeOut(duration: 0.18)
+
+    /// A row settling into a list it has just been added to. See `RowArrival`.
+    ///
+    /// The same curve and the same length as `pane`, deliberately and not by accident: a window
+    /// with one speed is the whole argument above, and a row arriving is if anything a smaller
+    /// event than a pane travelling, so it has no case for being the slower of the two. It is
+    /// named separately because it answers a different question and a later answer to one of them
+    /// should not silently become the answer to both.
+    ///
+    /// Opacity only, with no movement under it. A row that slid or grew into place would be
+    /// announcing itself, and what is wanted is the opposite: something that reads as the row
+    /// having settled rather than as anything having been played. `easeOut` is what makes the
+    /// short length carry, because it puts most of the opacity in the first third and spends the
+    /// rest arriving.
+    static let arrival: Animation = .easeOut(duration: 0.18)
 }
 
 // MARK: - Materials
