@@ -75,57 +75,32 @@ struct PullRequestSummary: View {
         }
         // Attached to the merge button's own row, so the dialog animates out of the control that
         // asked for it.
-        .confirmationDialog(
-            pullRequest.mergeConfirmationTitle(base: baseBranch),
-            isPresented: $pendingMerge.isPresent(),
-            titleVisibility: .visible,
-            presenting: pendingMerge
-        ) { method in
-            // Still `.destructive`, and not because red is right. Red is the colour this app
-            // spends on losing work, and a merge is the opposite. On macOS 26 the role does not
-            // merely redden the text either, it fills the button with a pale red plate, so the
-            // one button in this window that means "yes, ship it" is the loudest thing on screen.
-            //
-            // It stays because in a system confirmation dialog the role is two switches wired
-            // together, and the second one is the safety. Measured against a scratch app driving
-            // the real key events, one variant per run:
-            //
-            //   role                      Return        Escape    colour
-            //   .destructive              nothing       cancels   red
-            //   none                      MERGES        cancels   grey
-            //   .close (macOS 26)         MERGES        cancels   grey
-            //   .confirm (macOS 26)       MERGES        cancels   grey
-            //   cancel .defaultAction     cancels       NOTHING   grey
-            //
-            // Dropping the role hands the whole dialog to the Return key, which is exactly what
-            // 3d431e0 exists to prevent, and it was not theoretical: the scratch build merged a
-            // real pull request on one keystroke. Putting `.defaultAction` on the cancel button
-            // to take Return back is the thing 3d431e0 removed, and it still breaks Escape.
-            //
-            // Colour cannot be bought separately either. GitHub's merge purple is unreachable:
-            // `.tint` is ignored, and `.foregroundStyle` or `.buttonStyle` do not restyle the
-            // button, they drop it from the dialog. The whole range is red or grey.
-            //
-            // There is exactly one way to have grey and keep Return off it: give this button a
-            // shortcut of its own, which displaces the default. `.keyboardShortcut(.return,
-            // modifiers: .command)` was measured safe. It is not taken here because it makes an
-            // irreversible action's safety depend on an undocumented side effect of an unrelated
-            // modifier, and adds a chord to the merge path nobody asked for. Grey is worth having,
-            // but not at the price of a guard that a future edit can delete without noticing.
-            Button(method.label, role: .destructive) { onMerge(method) }
-            // Escape keeps the pull request open. See the archive confirmation in `RootView`
-            // for why no cancel button in this app carries `.keyboardShortcut(.defaultAction)`.
-            Button("Keep the pull request open", role: .cancel) { pendingMerge = nil }
-        } message: { _ in
-            // The two things that change the answer, and nothing else. The title above names the
-            // pull request and the button below names the method, so neither is repeated here.
-            Text(
-                pullRequest.mergeConfirmation(
+        //
+        // Bloom's own confirmation and not `.confirmationDialog`, and the reasoning is written
+        // out on `ConfirmationSheet`. The short version is that this is the one confirmation in
+        // the app whose answer is not a loss, a system dialog can only draw its confirm button in
+        // red or grey, and the roles that draw it grey are the same roles that hand the merge to
+        // the Return key. `a595dfb` measured that and kept the red button rather than give up the
+        // guard. This keeps the guard and drops the red: Escape still cancels, Return still does
+        // nothing, and the button that lands the branch is finally the colour of landing it.
+        .confirmation($pendingMerge) { method in
+            Confirmation(
+                title: pullRequest.mergeConfirmationTitle(base: baseBranch),
+                // The two things that change the answer, and nothing else. The title above names
+                // the pull request and the button below names the method, so neither is repeated.
+                message: pullRequest.mergeConfirmation(
                     base: baseBranch,
                     deletesBranch: Self.deletesBranch,
                     local: localWork
-                )
+                ),
+                confirmLabel: method.label,
+                // Escape lands here. See `ConfirmationSheet` for why no confirmation in this app
+                // gives its cancel button `.keyboardShortcut(.defaultAction)`.
+                cancelLabel: "Keep the pull request open",
+                tone: .completing
             )
+        } onConfirm: { method in
+            onMerge(method)
         }
     }
 

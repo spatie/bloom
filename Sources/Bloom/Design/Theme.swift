@@ -218,6 +218,38 @@ enum Palette {
     /// own: "Running, healthy, done. Reuse the accent, do not invent a green."
     static let running = accent
 
+    /// A merge: one that has landed, and the button that lands one.
+    ///
+    /// The one meaning in the app that is neither good news nor bad and needed a colour of its
+    /// own. Merging is the end of the workflow and the outcome everything else is aimed at, and
+    /// the only two colours a system confirmation dialog can draw its confirm button in are red
+    /// and grey. Red is what this app spends on losing work, so a red Merge button says the
+    /// opposite of what merging means, and that is the whole reason `ConfirmationSheet` exists.
+    ///
+    /// Purple rather than a second green, because purple for a merge is not this app's idea:
+    /// GitHub has drawn merged in it for a decade and Conductor draws it in `purple-500` on light
+    /// and `purple-400` on dark. Those two were the reference and neither is the value here.
+    /// Tailwind's purples are magenta-leaning and land badly beside a teal and blue ramp;
+    /// GitHub's own pair is violet, a short step round the wheel from `accentFill` `#197593`, so
+    /// it reads as a sibling of the accent rather than as a colour from another app.
+    ///
+    /// A pair, for the reason `accent` is a pair: `#8250DF` measures 5.0 to 1 on the light
+    /// surface and `#A371F7` measures 5.3 to 1 on the dark one, and neither of them works on the
+    /// other's ground.
+    ///
+    /// Ink, strokes and a wash of itself, which is everything it is asked for today: the merge
+    /// confirmation's button label is this colour and its plate is this colour at thirteen
+    /// percent. Anything that ever fills a control with it and puts white text on top wants the
+    /// LIGHT member in both appearances, the way `accentFill` holds one value for both: white on
+    /// `#8250DF` measures 5.0 to 1, and on `#A371F7` only 3.4, which is under the floor for a 13
+    /// point label.
+    ///
+    /// The strip still draws a merged pull request in `accent`, so this is at present the colour
+    /// of merging rather than the colour of merged. Moving the strip on to it is `PullRequestTint`
+    /// and one case in `PullRequestStatus.Tone`, and it is left alone here only because the strip
+    /// is being moved to another part of the window by other work.
+    static let merged = dynamic(light: 0x8250DF, dark: 0xA371F7)
+
     // MARK: Diffs
     //
     // Stated as an alpha over whatever the line is drawn on, rather than as an opaque hex per
