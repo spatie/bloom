@@ -51,17 +51,19 @@ struct HomeView: View {
         @Bindable var app = app
 
         return VStack(spacing: 0) {
-            HomeHeader(
-                summary: summary,
-                repos: app.repos,
-                archivedCount: archived.count,
-                showsControls: hasAnyWorkspace,
-                showsCreateWorkspace: showsCreateWorkspace,
-                filter: $app.homeFilter,
-                onCreateWorkspace: { requestWorkspace(in: nil) }
-            )
-
-            Hairline()
+            // Only once there is something for the controls to act on. A search field, a project
+            // filter and an archived switch over an empty machine are three controls that cannot
+            // change what is on screen, sitting directly above a panel explaining that there is
+            // nothing on screen. With them gone the pane is entirely empty, which is the one
+            // arrangement macOS does centre a message in.
+            if hasAnyWorkspace {
+                HomeBar(
+                    summary: summary,
+                    repos: app.repos,
+                    archivedCount: archived.count,
+                    filter: $app.homeFilter
+                )
+            }
 
             content
         }
@@ -146,23 +148,30 @@ struct HomeView: View {
     }
 
     private static let rowInsets = EdgeInsets(
-        top: 0, leading: Metrics.spacingWide, bottom: 0, trailing: Metrics.spacingWide
+        top: 0, leading: HomeMetrics.rowInset, bottom: 0, trailing: HomeMetrics.rowInset
     )
 
     // MARK: - Summary
 
-    /// What the heading says under the machine name.
+    /// What the readout at the end of the strip says.
     ///
     /// It describes the list rather than the database whenever the two differ. A line reading "312
     /// workspaces" above eleven rows is how a forgotten filter becomes a bug report about missing
     /// work, so a narrowed list says so in the same breath as the total it was narrowed from.
+    ///
+    /// Empty when there is no list. The strip is not drawn at all then, and with no project on the
+    /// machine there is nothing to count in the first place.
     private var summary: String {
-        // With nothing to describe, the heading says what there is rather than repeating the
-        // sentence the empty panel underneath is already making. With not even a project, it says
-        // nothing at all: "No projects yet" is the title of that panel, and a machine name with a
-        // one line echo of the panel under it reads as two headings for one screen.
-        guard hasAnyWorkspace else {
-            return app.repos.isEmpty ? "" : count(app.repos.count, "project")
+        guard hasAnyWorkspace else { return "" }
+
+        // Everything on this Mac has been archived, and archived is off.
+        //
+        // Said as one fact rather than as a number and then a correction. `HomeListing.considered`
+        // counts only what the archived switch let through, so the general shape below reports "0
+        // workspaces" about a machine holding three of them, directly above a panel that says all
+        // three exist. Neither half of the readout mentioned them.
+        if !filter.isNarrowed, listing.considered == 0, !archived.isEmpty {
+            return "\(count(archived.count, "workspace")), all archived"
         }
 
         var text: String
@@ -175,8 +184,13 @@ struct HomeView: View {
             }
         }
 
+        // Both ways round, for the same reason as the branch above: the count in front of this
+        // clause is a count of what the archived switch let through, so a machine with archived
+        // work it is not being shown has to hear about it here or nowhere.
         if listing.shownArchived > 0 {
             text += ", \(listing.shownArchived) archived"
+        } else if !archived.isEmpty {
+            text += ", \(archived.count) archived hidden"
         }
 
         let running = app.runningCount
@@ -187,26 +201,6 @@ struct HomeView: View {
 
     private var hasAnyWorkspace: Bool {
         !app.workspaces.isEmpty || !archived.isEmpty
-    }
-
-    /// Whether the header keeps its "New workspace" button.
-    ///
-    /// Two of the five empty panels below already carry that button, or would be lying if they
-    /// did, so the header stands down for those two and stays for the other three:
-    ///
-    /// - **No projects at all.** Gone. The button is not merely redundant here, it is a trap: the
-    ///   sheet it opens has no project to start a workspace in, so it opens on its own empty state
-    ///   and the only thing to do in it is cancel. The panel underneath asks for a folder, which
-    ///   is the step that actually has to happen first.
-    /// - **A project, but no workspaces.** Gone. The panel's own button does exactly this, and it
-    ///   is the better of the two because it sits with the sentence saying what a workspace is.
-    /// - **Nothing matches the search, the project filter, or archived being hidden.** Kept. There
-    ///   are workspaces; the user narrowed the list. Those three panels offer a way to widen it
-    ///   again and no way to create anything, so the header is the only route to a new workspace
-    ///   and taking it away would strand a user who narrowed to nothing and then changed their
-    ///   mind about what they wanted.
-    private var showsCreateWorkspace: Bool {
-        !app.repos.isEmpty && hasAnyWorkspace
     }
 
     private func count(_ value: Int, _ noun: String) -> String {
@@ -221,26 +215,41 @@ struct HomeView: View {
     /// to start a workspace, to clear the search, to widen the project filter and to turn archived
     /// on, and a placeholder that names none of them leaves the user to guess which of the five
     /// controls above it did this.
+    ///
+    /// **Why these are still centred, when the rest of Home moved to the leading edge.** macOS
+    /// centres a message in a pane that is empty, and only in a pane that is empty: an empty Finder
+    /// window, an unselected Mail message, a closed Xcode editor. What it never does is float a
+    /// centred block of marketing in the middle of a pane whose chrome is left aligned above it,
+    /// which is what this screen was doing, and the fix for that was the chrome rather than the
+    /// centring. Two of these five appear with no strip above them at all, so the pane really is
+    /// empty; the other three appear under a strip of controls that is the reason the list is
+    /// empty, which is the same arrangement as a Mail search that matches nothing.
+    ///
+    /// The prose is one sentence each. It was two, and the second one was always a description of
+    /// the product rather than of the state, which is what an empty pane on a Mac does not do.
+    /// Each still carries a real button, at the system's own control size: `.controlSize(.large)`
+    /// is an iOS proportion, and next to a 22 point search field it was a slab.
     @ViewBuilder
     private var emptyState: (some View)? {
         if app.repos.isEmpty {
             ContentUnavailableView {
                 Label("No projects yet", systemImage: "folder.badge.plus")
             } description: {
-                Text("Point Bloom at a git repository. Every workspace you start gets its own worktree and its own agent, so they never step on each other.")
+                // Word for word what the sidebar's own empty state says, because on a machine with
+                // no projects both are on screen at once. Two different pitches for the same
+                // missing thing read as two different offers.
+                Text("Point Bloom at a git repository to start running agents in it.")
             } actions: {
                 Button("Choose a folder", systemImage: "folder", action: addProject)
-                    .controlSize(.large)
                     .buttonStyle(.borderedProminent)
             }
         } else if !hasAnyWorkspace {
             ContentUnavailableView {
                 Label("No workspaces yet", systemImage: "square.stack.3d.up")
             } description: {
-                Text("Start one and it gets a branch, a worktree and an agent of its own. Everything they do afterwards is listed here, newest first.")
+                Text("A workspace gets a branch, a worktree and an agent of its own.")
             } actions: {
                 Button("New workspace", systemImage: "plus") { requestWorkspace(in: nil) }
-                    .controlSize(.large)
                     .buttonStyle(.borderedProminent)
             }
         } else if listing.isEmpty {
@@ -256,7 +265,7 @@ struct HomeView: View {
                 ContentUnavailableView {
                     Label("Nothing in \(projectPhrase)", systemImage: "folder")
                 } description: {
-                    Text("The other projects still have work in them. Widen the project filter to see it.")
+                    Text("The other projects still have work in them.")
                 } actions: {
                     Button("Show all projects") { app.homeFilter.projects = [] }
                 }
@@ -264,7 +273,7 @@ struct HomeView: View {
                 ContentUnavailableView {
                     Label("Everything here is archived", systemImage: "archivebox")
                 } description: {
-                    Text("All \(count(archived.count, "workspace")) on this Mac have been archived. Turn archived on to look back at them, or start something new.")
+                    Text("All \(count(archived.count, "workspace")) on this Mac have been archived.")
                 } actions: {
                     Button("Show archived") { app.homeFilter.showsArchived = true }
                 }
