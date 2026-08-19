@@ -41,11 +41,29 @@ struct SetupLogView: View {
         .headerMaterial()
     }
 
-    @ViewBuilder
+    /// The one glyph slot at the head of the bar, the same square whichever of the five states is
+    /// showing.
+    ///
+    /// A square rather than each state sizing itself, because the states swap under a sentence
+    /// that must not move: a spinner wider than the tick that replaces it slides "Setup finished"
+    /// sideways the moment the script ends. `Metrics.glyph` is the size the sidebar gives the same
+    /// job, so the panel and the sidebar agree about how big a status mark is.
     private var statusIcon: some View {
+        statusMark
+            .frame(width: Metrics.glyph, height: Metrics.glyph)
+    }
+
+    @ViewBuilder
+    private var statusMark: some View {
         switch state {
         case .running:
-            LoadingView()
+            // The sidebar's running spinner, to the pixel: `.mini` is what puts a circular
+            // indicator at the scale of the text beside it. `LoadingView` was here, and its
+            // indicator is the regular one, which is half the height of this bar and so the
+            // loudest thing in a panel that is otherwise quiet.
+            ProgressView()
+                .progressViewStyle(.circular)
+                .controlSize(.mini)
         case .succeeded:
             Image(systemName: "checkmark.circle.fill")
                 .font(Typo.label)
@@ -88,9 +106,13 @@ struct SetupLogView: View {
 
     /// "again" only when there was a first time. It read "Run setup again" on a workspace whose
     /// header, one inch to the left, said setup had never run.
+    ///
+    /// It said "Running" while the script ran, which made the row report one state three times:
+    /// a spinner, "Running setup", and a button renamed after the state instead of after what it
+    /// does. A button names its action, and a disabled one already reads as unavailable, so this
+    /// one now says what it will do the moment it comes back, which after any run is a re-run.
     private var buttonTitle: String {
         switch state {
-        case .running: "Running"
         case .pending: model.setupOutput.isEmpty ? "Run setup" : "Run setup again"
         default: "Run setup again"
         }
