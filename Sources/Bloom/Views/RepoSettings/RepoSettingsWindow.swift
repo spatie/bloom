@@ -105,9 +105,11 @@ struct RepoSettingsButton: View {
         } label: {
             Label("Settings for \(repo.name)", systemImage: "gearshape")
                 .labelStyle(.iconOnly)
-                .font(Typo.title)
-                .frame(width: Metrics.repoIcon, height: Metrics.repoIcon)
-                .padding(Metrics.spacingSmall)
+                .font(Typo.label)
+                .frame(
+                    width: Metrics.headerButton.width,
+                    height: Metrics.headerButton.height
+                )
                 .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
                 .background(
                     isHighlighted ? Palette.hover : .clear,

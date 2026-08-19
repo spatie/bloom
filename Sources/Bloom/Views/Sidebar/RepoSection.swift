@@ -119,8 +119,8 @@ struct RepoSection: View {
                     // heading is the loudest thing in a column it is the least important part of.
                     .font(Typo.label)
                     .frame(
-                        width: SidebarMetrics.headerButton.width,
-                        height: SidebarMetrics.headerButton.height
+                        width: Metrics.headerButton.width,
+                        height: Metrics.headerButton.height
                     )
                     .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
                     .background(

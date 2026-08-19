@@ -38,8 +38,8 @@ struct SidebarProjectsHeader: View {
                     .labelStyle(.iconOnly)
                     .font(Typo.label)
                     .frame(
-                        width: SidebarMetrics.headerButton.width,
-                        height: SidebarMetrics.headerButton.height
+                        width: Metrics.headerButton.width,
+                        height: Metrics.headerButton.height
                     )
                     .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
                     .background(

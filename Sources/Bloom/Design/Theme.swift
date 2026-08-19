@@ -377,6 +377,21 @@ enum Metrics {
     static let cornerSmall: CGFloat = 4
 
     static let gutter: CGFloat = 12
+
+    /// The box a small button at the trailing edge of a header is drawn and hit in: the project's
+    /// `+`, the button that adds a project, the project settings window's own header control.
+    ///
+    /// Eighteen points tall, not the twenty four an icon in a sixteen point frame with four points
+    /// of padding comes to. A sidebar list holds a row at 32 points until its content passes about
+    /// nineteen and then sizes to the content, so a twenty four point button put five points of
+    /// extra air above every project header, which read as a gap in the column rather than as the
+    /// top of the next project. Wider than it is tall, which is the shape of every small button in
+    /// a Mac toolbar, and enough to click without hunting.
+    ///
+    /// Here rather than in `SidebarMetrics`, where it started, because the project settings window
+    /// reads it and that window is not the sidebar: a constant named after one pane and used from
+    /// another is how the two drift.
+    static let headerButton = CGSize(width: 24, height: 18)
     /// One point, which on Retina is two physical pixels.
     ///
     /// It was one physical pixel, which is an iOS and web idea rather than a Mac one: AppKit's own
@@ -584,12 +599,16 @@ struct DiffStatLabel: View {
     }
 
     /// 2.8k rather than 2793, because the sidebar has no room for the exact number.
+    ///
+    /// `formatted` rather than `String(format:)`, which is not locale aware: the composer's token
+    /// gauge a few inches away already used `formatted`, so on a machine set to a comma decimal
+    /// separator one number in this window read `174,0k` and the other `2.8k`.
     static func abbreviate(_ value: Int) -> String {
-        if value < 1_000 { return String(value) }
+        if value < 1_000 { return value.formatted(.number.grouping(.never)) }
         let thousands = Double(value) / 1_000
         return thousands < 10
-            ? String(format: "%.1fk", thousands)
-            : String(format: "%.0fk", thousands)
+            ? "\(thousands.formatted(.number.precision(.fractionLength(1))))k"
+            : "\(thousands.formatted(.number.precision(.fractionLength(0)).grouping(.never)))k"
     }
 }
 
