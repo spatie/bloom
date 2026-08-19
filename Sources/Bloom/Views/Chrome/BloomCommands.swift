@@ -45,9 +45,8 @@ struct BloomCommands: Commands {
             // windows and left them with no working Cmd+W of their own.
             Button("Close Session") {
                 guard let workspace = model.selectedModel,
-                      let session = workspace.activeSession,
-                      CloseSessionAlert.allowsClosing(session, in: workspace) else { return }
-                Task { await workspace.closeSession(session) }
+                      let session = workspace.activeSession else { return }
+                CloseSessionAlert.shared.close(session, in: workspace)
             }
             .keyboardShortcut("w", modifiers: .command)
             // Scoped to the main window as well as to there being a session, because this item

@@ -18,6 +18,7 @@ struct RootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @Bindable private var projectSetup = ProjectSetup.shared
+    @Bindable private var closeSession = CloseSessionAlert.shared
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isCreateSheetPresented = false
@@ -128,6 +129,25 @@ struct RootView: View {
             // Naming what disappears, rather than asking "are you sure?". The confirmation only
             // exists because there is something specific to lose, so it should say what.
             Text(Self.losses(in: request))
+        }
+        // The question asked before a session that is still working is closed. On the window for
+        // the reason the archive confirmation above is: it is raised from the tab strip's close
+        // button and from Cmd+W in the menu bar, and there is no one control both of those could
+        // animate out of. See `CloseSessionAlert`.
+        .confirmationDialog(
+            closeSession.request?.title ?? "",
+            isPresented: $closeSession.request.isPresent(),
+            titleVisibility: .visible,
+            presenting: closeSession.request
+        ) { _ in
+            Button("Close anyway", role: .destructive) { closeSession.confirm() }
+            // Return keeps the session, for the same reason the archive confirmation gives: the
+            // destructive answer should cost a deliberate click, not the key your hand is already
+            // on. Cmd+W is a key your hand is already on twice over.
+            Button("Keep working", role: .cancel) { closeSession.cancel() }
+                .keyboardShortcut(.defaultAction)
+        } message: { _ in
+            Text(CloseSessionAlert.message)
         }
         // A single OK that does nothing but dismiss is the system default, so the actions builder
         // is deliberately empty rather than spelling one out.

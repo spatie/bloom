@@ -320,11 +320,7 @@ struct SessionTabsView: View {
     }
 
     private func close(_ session: Session) {
-        guard CloseSessionAlert.allowsClosing(session, in: model) else { return }
-        Task {
-            await model.closeSession(session)
-            panes.forget(.chat(session.id), in: model.workspace.id)
-        }
+        CloseSessionAlert.shared.close(session, in: model)
     }
 
     private func commitRename(_ session: Session, to newTitle: String) {
