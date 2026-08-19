@@ -8,8 +8,6 @@ import BloomCore
 struct SetupLogView: View {
     @Bindable var model: WorkspaceModel
 
-    @State private var lastRunSucceeded: Bool?
-
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -28,13 +26,13 @@ struct SetupLogView: View {
 
             Spacer(minLength: Metrics.spacing)
 
-            Button(model.isRunningSetup ? "Running" : "Run setup again") {
+            Button(buttonTitle) {
                 Task { await runSetup() }
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
             .disabled(model.isRunningSetup || model.repo == nil)
-            .help("Run this repository's setup script in the workspace again")
+            .help("Run this repository's setup script in this workspace")
         }
         .padding(.horizontal, Metrics.gutter)
         // The fixed height the tab strip above it uses, rather than padding around whichever
@@ -45,37 +43,57 @@ struct SetupLogView: View {
 
     @ViewBuilder
     private var statusIcon: some View {
-        if model.isRunningSetup {
+        switch state {
+        case .running:
             LoadingView()
-        } else if succeeded {
+        case .succeeded:
             Image(systemName: "checkmark.circle.fill")
                 .font(Typo.label)
                 .foregroundStyle(Palette.positive)
-        } else if failed {
+        case .failed:
             Image(systemName: "xmark.circle.fill")
                 .font(Typo.label)
                 .foregroundStyle(Palette.negative)
-        } else {
+        case .skipped, .pending:
             Image(systemName: "wrench.and.screwdriver")
                 .font(Typo.label)
                 .foregroundStyle(Palette.textTertiary)
         }
     }
 
-    private var succeeded: Bool {
-        lastRunSucceeded ?? (model.workspace.setupState == .succeeded)
-    }
-
-    private var failed: Bool {
-        if let lastRunSucceeded { return !lastRunSucceeded }
-        return model.workspace.setupState == .failed
+    /// What this tab is looking at.
+    ///
+    /// One value rather than the pair of booleans this used to keep, because the pair could only
+    /// answer "succeeded" or "failed" and there are five states: `.skipped` and `.pending` both
+    /// fell through to "Setup has not run yet". The row itself is the source, which is why
+    /// `WorkspaceModel.refreshSetupState` exists.
+    private var state: SetupState {
+        model.isRunningSetup ? .running : model.workspace.setupState
     }
 
     private var statusText: String {
-        if model.isRunningSetup { return "Running setup" }
-        if succeeded { return "Setup finished" }
-        if failed { return "Setup failed" }
-        return "Setup has not run yet"
+        switch state {
+        case .running: "Running setup"
+        case .succeeded: "Setup finished"
+        case .failed: "Setup failed"
+        // A script the settings file named and nobody committed leaves a note in the log saying
+        // so, and a repository with no setup script at all leaves nothing. Either way nothing ran.
+        case .skipped: "No setup script ran"
+        // `Store.recoverInterruptedSetups` files a run the app was killed during back under
+        // `pending` and appends a line to the log saying what happened. A log with something in it
+        // is the difference between that and a workspace whose setup genuinely never started.
+        case .pending: model.setupOutput.isEmpty ? "Setup has not run yet" : "Setup was interrupted"
+        }
+    }
+
+    /// "again" only when there was a first time. It read "Run setup again" on a workspace whose
+    /// header, one inch to the left, said setup had never run.
+    private var buttonTitle: String {
+        switch state {
+        case .running: "Running"
+        case .pending: model.setupOutput.isEmpty ? "Run setup" : "Run setup again"
+        default: "Run setup again"
+        }
     }
 
     /// Runs the script through the same `WorkspaceManager` path the first run uses, so the state
@@ -85,7 +103,6 @@ struct SetupLogView: View {
 
         model.isRunningSetup = true
         model.setupOutput = ""
-        lastRunSucceeded = nil
         if model.port == 0 { model.port = (try? PortAllocator.allocate(taken: [])) ?? 0 }
 
         let manager = WorkspaceManager(store: store)
@@ -100,7 +117,7 @@ struct SetupLogView: View {
             }
         }
 
-        let succeeded = await manager.runSetup(
+        _ = await manager.runSetup(
             workspace: model.workspace, repo: repo, port: model.port
         ) { line in
             buffer.append(line)
@@ -109,7 +126,7 @@ struct SetupLogView: View {
         flusher.cancel()
         model.appendSetupOutput(buffer.drain())
         model.isRunningSetup = false
-        lastRunSucceeded = succeeded
+        await model.refreshSetupState()
     }
 }
 

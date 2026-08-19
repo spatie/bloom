@@ -345,6 +345,7 @@ final class WorkspaceModel {
             appendSetupOutput(buffer.drain())
             isRunningSetup = false
             setupDurationMS = setupStartedAt.map { Int(Date.now.timeIntervalSince($0) * 1000) }
+            await refreshSetupState()
 
             // Archiving or quitting cancels this task. Starting an agent in a worktree that is on
             // its way out is the one thing that must not happen here.
@@ -365,6 +366,17 @@ final class WorkspaceModel {
         await reloadSessions()
         guard !Task.isCancelled, let prompt, let session = activeSession else { return }
         await transcript(for: session).send(prompt)
+    }
+
+    /// Re-reads what setup ended up as.
+    ///
+    /// `WorkspaceManager.runSetup` writes the outcome onto the workspace row, and the copy of that
+    /// row this model is holding is as old as the run that just finished. Without this the Setup
+    /// tab read its state out of a value that still said `pending`, so its header announced "Setup
+    /// has not run yet" directly above the output the script had printed a second earlier.
+    func refreshSetupState() async {
+        guard let store, let fresh = try? await store.workspace(id: workspace.id) else { return }
+        workspace.setupState = fresh.setupState
     }
 
     /// Appends a batch, keeping only the tail. Called from the flusher, never per line.
