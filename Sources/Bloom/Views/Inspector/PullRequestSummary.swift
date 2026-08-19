@@ -34,9 +34,6 @@ struct PullRequestSummary: View {
     /// what presents the dialog, so there is no way to reach `onMerge` without passing through it.
     @State private var pendingMerge: GitHub.MergeMethod?
 
-    /// Non-nil for as long as it takes the sharing menu to open. See `SharePicker`.
-    @State private var sharing: SharePayload?
-
     /// Merging deletes the branch on GitHub and nothing on this machine. It is named in the
     /// confirmation rather than left as a surprise. See `GitHub.merge` for why the local half of
     /// gh's own clean up is never asked for.
@@ -67,10 +64,11 @@ struct PullRequestSummary: View {
             Button("Open on GitHub") { GitHubBridge.open(pullRequest.url) }
             Button("Copy link", action: copyLink)
             if let url = URL(string: pullRequest.url) {
-                Button("Share") { sharing = .link(url) }
+                // A submenu of this menu rather than a picker that replaces it, which is where
+                // Finder puts Share.
+                ShareLink(item: url) { Text("Share") }
             }
         }
-        .sharePicker(payload: $sharing)
         // Attached to the merge button's own row, so the dialog animates out of the control that
         // asked for it.
         .confirmationDialog(

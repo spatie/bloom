@@ -25,9 +25,6 @@ struct InspectorToolbar: View {
     @AppStorage(ChangedFilePresentation.storageKey)
     private var isTree = ChangedFilePresentation.defaultsToTree
 
-    /// Non-nil for as long as it takes the sharing menu to open. See `SharePicker`.
-    @State private var sharing: SharePayload?
-
     var body: some View {
         // No spacing of its own: there are exactly two things in the row and the gap between them
         // is the spacer's own minimum. Spelled as a gap on both sides of a spacer it was paid
@@ -91,7 +88,13 @@ struct InspectorToolbar: View {
                         // Here rather than in the pull request strip above. That strip already
                         // clips at the pane's narrow widths, and one more control in it buys
                         // discoverability with the merge button's room.
-                        Button("Share pull request") { sharing = .link(url) }
+                        //
+                        // A `ShareLink` rather than a button that presents a picker of its own, so
+                        // the services open as a submenu of the menu the reader is already in,
+                        // which is where Finder puts Share. Labelled with a `Text` rather than a
+                        // title string, because the `.labelStyle(.iconOnly)` below reaches the
+                        // menu's contents too and would leave this item as a bare glyph.
+                        ShareLink(item: url) { Text("Share pull request") }
                     }
                 }
             } label: {
@@ -103,9 +106,6 @@ struct InspectorToolbar: View {
             .controlSize(.small)
             .fixedSize()
             .help("More for this worktree")
-            // The anchor sits on the menu itself, so the sharing menu drops out of the button the
-            // reader just used rather than out of the corner of the window.
-            .sharePicker(payload: $sharing)
         }
     }
 

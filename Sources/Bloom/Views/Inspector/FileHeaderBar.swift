@@ -33,8 +33,6 @@ struct FileHeaderBar: View {
     /// room. `ViewThatFits` cannot: it is handed the share of the row the layout has already
     /// apportioned, so it dropped the folder while there was still most of a pane to spare.
     @State private var width: CGFloat = 0
-    /// Non-nil for as long as it takes the sharing menu to open. See `SharePicker`.
-    @State private var sharing: SharePayload?
 
     /// Below this the bar keeps the filename and the controls and drops the folder beside it.
     /// A readable filename, the collapsed control cluster and the pane's own insets, with just
@@ -70,7 +68,6 @@ struct FileHeaderBar: View {
         .frame(height: InspectorLayout.barHeight)
         .background(Palette.surfaceSunken)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-        .sharePicker(payload: $sharing)
         .confirmationDialog(
             "Revert \(file.filename)?",
             isPresented: $isConfirmingRevert,
@@ -116,7 +113,11 @@ struct FileHeaderBar: View {
                 Toggle("Ignore whitespace", isOn: $ignoresWhitespace)
                 Divider()
                 Button(copyTitle, action: copy)
-                Button("Share the diff", action: share)
+                // A `Text` label rather than a title string, because the `.labelStyle(.iconOnly)`
+                // below reaches this menu's contents too and would leave the item a bare glyph.
+                ShareLink(item: sharedDiff, preview: SharePreview(file.filename)) {
+                    Text("Share the diff")
+                }
                 Button("Revert file", role: .destructive) { isConfirmingRevert = true }
             } label: {
                 Label("More for this file", systemImage: "ellipsis.circle")
@@ -197,10 +198,19 @@ struct FileHeaderBar: View {
     /// Beside the copy button, because they are the same family: one puts the diff where you paste
     /// it yourself, the other hands it to whatever you were going to paste it into.
     private var shareButton: some View {
-        Button("Share the diff", systemImage: "square.and.arrow.up", action: share)
-            .labelStyle(.iconOnly)
-            .inspectorBarControl()
-            .help("Share the diff for \(file.filename)")
+        ShareLink(item: sharedDiff, preview: SharePreview(file.filename)) {
+            Label("Share the diff", systemImage: "square.and.arrow.up")
+        }
+        .labelStyle(.iconOnly)
+        .inspectorBarControl()
+        .help("Share the diff for \(file.filename)")
+    }
+
+    /// What both share controls hand over. The patch is only rendered into a message on export,
+    /// which is what keeps a four thousand line diff out of every redraw of this bar. See
+    /// `SharedDiff`.
+    private var sharedDiff: SharedDiff {
+        SharedDiff(file: file, diff: diff)
     }
 
     private var copyTitle: String {
@@ -226,12 +236,6 @@ struct FileHeaderBar: View {
     }
 
     // MARK: - Actions
-
-    /// Rendered here rather than held in state, so a four thousand line patch is only ever turned
-    /// into a message when somebody asks for one.
-    private func share() {
-        sharing = .text(DiffShareText.make(for: file, diff: diff))
-    }
 
     private func copy() {
         Task {
