@@ -17,15 +17,17 @@ import BloomCore
 @MainActor
 enum RepoIconImage {
     /// What the mark is drawn from, rather than which project it belongs to, so renaming a
-    /// project or recolouring it produces a new tile instead of the old one coming back out.
+    /// project, recolouring it or pointing it at different artwork produces a new tile instead of
+    /// the old one coming back out.
     ///
-    /// Nothing about a project's own artwork is in here, because `RepoIcon` resolves that at most
-    /// once per launch: within one run of the app the mark is a function of the name and the
-    /// accent alone. Anything that makes artwork reloadable has to invalidate this alongside the
-    /// cache it reloads.
+    /// The artwork is its path, which is what a project stores: `RepoIcon` opens the file at most
+    /// once per launch, so within one run the mark is a function of these four. The one thing a
+    /// path cannot notice is the same file becoming a different picture, which is why `forgetAll`
+    /// exists and why `RepoIconArt.forget` calls it.
     private struct Key: Hashable {
         var name: String
         var accent: String?
+        var artwork: String?
         var size: CGFloat
         var scale: CGFloat
     }
@@ -38,7 +40,13 @@ enum RepoIconImage {
         // The screen's own scale. This is the one place in the app a mark is drawn from pixels
         // rather than from vectors, and at 1x on a Retina display it is a soft square.
         let scale = NSScreen.main?.backingScaleFactor ?? 2
-        let key = Key(name: repo.name, accent: repo.accent, size: size, scale: scale)
+        let key = Key(
+            name: repo.name,
+            accent: repo.accent,
+            artwork: repo.hasIcon ? repo.iconPath : nil,
+            size: size,
+            scale: scale
+        )
         if let cached = cache[key] { return cached }
 
         let renderer = ImageRenderer(content: RepoIcon(repo: repo, size: size))
@@ -46,5 +54,14 @@ enum RepoIconImage {
         guard let image = renderer.nsImage else { return nil }
         cache[key] = image
         return image
+    }
+
+    /// Drops every rendered mark, so the next menu draws them again.
+    ///
+    /// Called when a project's artwork is reread. A tile here is a bitmap of a `RepoIcon`, so a
+    /// file that has changed under a path the key still matches would otherwise go on being drawn
+    /// from the picture it used to be.
+    static func forgetAll() {
+        cache.removeAll()
     }
 }

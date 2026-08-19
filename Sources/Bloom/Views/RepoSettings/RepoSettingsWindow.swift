@@ -1,6 +1,15 @@
 import SwiftUI
 import BloomCore
 
+extension Notification.Name {
+    /// Opens the project settings window from outside a view.
+    ///
+    /// The two ways in are a menu item and the gear on a project's row, and a capture run can
+    /// press neither, so without this the window could only be looked at by asking a person for a
+    /// screenshot. `Snapshot`'s `--repo-settings` posts it, carrying a project name or nothing.
+    static let bloomOpenRepoSettings = Notification.Name("bloomOpenRepoSettings")
+}
+
 /// The project settings window.
 ///
 /// A window rather than a sheet on the main window. Two of the three things this screen is for

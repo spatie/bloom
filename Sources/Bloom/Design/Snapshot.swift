@@ -166,6 +166,15 @@ enum Snapshot {
             // `--settings --window-size 900x1150` no window is ever created at all.
             let wantsSettings = arguments.contains("--settings")
 
+            // `--repo-settings [project]` does the same for the PROJECT settings window, which is
+            // a window group of its own and is otherwise reachable only through a menu item or the
+            // gear on a project's row. Same caveat about flag order as above.
+            let repoSettingsIndex = arguments.firstIndex(of: "--repo-settings")
+            let wantsRepoSettings = repoSettingsIndex != nil
+            let repoSettingsProject = repoSettingsIndex
+                .map { $0 + 1 }
+                .flatMap { $0 < arguments.count && !arguments[$0].hasPrefix("--") ? arguments[$0] : nil }
+
             // Polled rather than slept through, and the settings action is re-sent each time round.
             // How long the first window takes depends on how much the store has to read, and a
             // fixed wait that is long enough on a small database is a coin toss on a real one.
@@ -181,13 +190,19 @@ enum Snapshot {
             // showing, and it titles the MAIN window after the selected workspace, so a title
             // comparison against "Bloom" matched neither and every settings capture silently
             // returned a picture of the main window instead.
-            if wantsSettings {
+            if wantsSettings || wantsRepoSettings {
                 let main = candidate
                 candidate = nil
                 for _ in 0..<40 {
                     candidate = capturableWindows().first { $0 !== main }
                     if candidate != nil { break }
-                    openSettingsWindow()
+                    if wantsRepoSettings {
+                        NotificationCenter.default.post(
+                            name: .bloomOpenRepoSettings, object: repoSettingsProject
+                        )
+                    } else {
+                        openSettingsWindow()
+                    }
                     try? await Task.sleep(for: .milliseconds(250))
                 }
             }

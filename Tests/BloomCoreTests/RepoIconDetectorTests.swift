@@ -1,0 +1,506 @@
+import Testing
+import Foundation
+@testable import BloomCore
+
+/// Real directories on disk with real file headers in them, because every interesting case here is
+/// a case about bytes: a `.ico` that holds nothing bigger than sixteen pixels, a `.png` that is not
+/// a PNG, an Icon Composer document whose assets were never committed. A fixture made of paths
+/// alone would pass all of those and prove nothing.
+///
+/// The images are headers rather than complete files. The detector reads headers and never decodes
+/// a pixel, so a header is exactly the surface under test, and writing one by hand is what makes it
+/// possible to state "this file claims to be 512 pixels" as a fact rather than as an artefact of
+/// whatever wrote it.
+@Suite("Finding a project's own icon", .scratchDirectory)
+struct RepoIconDetectorTests {
+    // MARK: - Fixtures
+
+    /// A directory tree, described by relative path.
+    @discardableResult
+    private func repository(_ files: [String: Data]) throws -> String {
+        let root = TestScratch.unique("bloom-icon")
+        for (relative, contents) in files {
+            let full = (root as NSString).appendingPathComponent(relative)
+            try FileManager.default.createDirectory(
+                atPath: (full as NSString).deletingLastPathComponent,
+                withIntermediateDirectories: true
+            )
+            try contents.write(to: URL(fileURLWithPath: full))
+        }
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    /// A PNG signature and a well formed `IHDR`, with the chunk length and CRC that a real encoder
+    /// would write. No image data: nothing here draws it.
+    private func png(_ width: Int, _ height: Int) -> Data {
+        var data = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        var header = Data("IHDR".utf8)
+        header.append(contentsOf: be32(UInt32(width)))
+        header.append(contentsOf: be32(UInt32(height)))
+        header.append(contentsOf: [8, 6, 0, 0, 0])
+        data.append(contentsOf: be32(UInt32(header.count - 4)))
+        data.append(header)
+        data.append(contentsOf: be32(crc32(header)))
+        data.append(contentsOf: be32(0))
+        data.append(Data("IEND".utf8))
+        data.append(contentsOf: be32(crc32(Data("IEND".utf8))))
+        return data
+    }
+
+    /// A Windows icon directory listing the given squares. Zero is how the format writes 256.
+    private func ico(_ sizes: [Int]) -> Data {
+        var data = Data()
+        data.append(contentsOf: le16(0))
+        data.append(contentsOf: le16(1))
+        data.append(contentsOf: le16(UInt16(sizes.count)))
+        for (index, size) in sizes.enumerated() {
+            let byte = UInt8(size == 256 ? 0 : size)
+            data.append(contentsOf: [byte, byte, 0, 0])
+            data.append(contentsOf: le16(1))
+            data.append(contentsOf: le16(32))
+            data.append(contentsOf: be32(0))
+            data.append(contentsOf: be32(UInt32(6 + 16 * sizes.count + index)))
+        }
+        return data
+    }
+
+    /// An `icns` header and a chain of chunks of the given types, each with a byte of payload.
+    private func icns(_ types: [String]) -> Data {
+        var body = Data()
+        for type in types {
+            body.append(Data(type.utf8))
+            body.append(contentsOf: be32(9))
+            body.append(0)
+        }
+        var data = Data("icns".utf8)
+        data.append(contentsOf: be32(UInt32(body.count + 8)))
+        data.append(body)
+        return data
+    }
+
+    private func svgData(_ body: String = "<rect/>") -> Data {
+        Data("<?xml version=\"1.0\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\">\(body)</svg>".utf8)
+    }
+
+    private func be32(_ value: UInt32) -> [UInt8] {
+        [UInt8(value >> 24 & 0xFF), UInt8(value >> 16 & 0xFF), UInt8(value >> 8 & 0xFF), UInt8(value & 0xFF)]
+    }
+
+    private func le16(_ value: UInt16) -> [UInt8] {
+        [UInt8(value & 0xFF), UInt8(value >> 8 & 0xFF)]
+    }
+
+    private func crc32(_ data: Data) -> UInt32 {
+        var crc: UInt32 = 0xFFFF_FFFF
+        for byte in data {
+            crc ^= UInt32(byte)
+            for _ in 0..<8 {
+                crc = (crc & 1) == 1 ? (crc >> 1) ^ 0xEDB8_8320 : crc >> 1
+            }
+        }
+        return crc ^ 0xFFFF_FFFF
+    }
+
+    private func name(of candidate: RepoIconCandidate?) -> String? {
+        candidate.map { ($0.path as NSString).lastPathComponent }
+    }
+
+    // MARK: - Several candidates
+
+    @Test("the small artwork a site drew for a tab wins over its big marketing mark")
+    func favouriteAmongMany() throws {
+        // The shape of a real Laravel site: a favicon at the document root, a full set of brand
+        // artwork beside it, and an .ico kept for the browsers that still ask for one.
+        let root = try repository([
+            "public/favicon.svg": svgData(),
+            "public/favicon.ico": ico([16, 32, 48]),
+            "public/brand/mark.svg": svgData(),
+            "public/brand/icon-512.png": png(512, 512),
+            "public/brand/apple-touch-icon-180.png": png(180, 180),
+            "public/brand/favicon-32.png": png(32, 32),
+            "README.md": Data("hello".utf8),
+        ])
+
+        let best = RepoIconDetector.detect(in: root)
+        #expect(name(of: best) == "favicon.svg")
+        #expect(best?.origin == .favicon)
+        #expect(best?.format == .svg)
+
+        // Everything else is still found, and in an order that says why.
+        let all = RepoIconDetector.candidates(in: root).map { ($0.path as NSString).lastPathComponent }
+        #expect(all == [
+            "favicon.svg",
+            "apple-touch-icon-180.png",
+            "favicon.ico",
+            "favicon-32.png",
+            "mark.svg",
+            "icon-512.png",
+        ])
+    }
+
+    @Test("a raster beats a smaller raster, and vector beats both")
+    func rankingWithinAKind() throws {
+        let small = try repository(["public/favicon-64.png": png(64, 64)])
+        #expect(RepoIconDetector.detect(in: small)?.pixels == 64)
+
+        let bigger = try repository([
+            "public/favicon-64.png": png(64, 64),
+            "public/favicon-256.png": png(256, 256),
+        ])
+        #expect(name(of: RepoIconDetector.detect(in: bigger)) == "favicon-256.png")
+
+        let vector = try repository([
+            "public/favicon-1024.png": png(1024, 1024),
+            "public/favicon.svg": svgData(),
+        ])
+        #expect(name(of: RepoIconDetector.detect(in: vector)) == "favicon.svg")
+    }
+
+    @Test("a wordmark is not a mark, however large it is")
+    func wordmarks() throws {
+        // The commonest wrong answer this could give: `logo.svg` is as often the project's name
+        // written out as it is a square mark, and a band across the middle of a 16 point tile is
+        // worse than the initials it replaced.
+        let wide = try repository(["public/logo.png": png(600, 40)])
+        #expect(RepoIconDetector.detect(in: wide) == nil)
+
+        let svg = try repository([
+            "assets/logo.svg": Data("<svg viewBox=\"0 0 480 64\"><rect/></svg>".utf8),
+        ])
+        #expect(RepoIconDetector.detect(in: svg) == nil)
+
+        // Not square is fine. Not remotely square is not.
+        let nearlySquare = try repository(["public/logo.png": png(200, 160)])
+        #expect(RepoIconDetector.detect(in: nearlySquare)?.pixels == 200)
+
+        // An SVG that states no size at all is taken at its word rather than guessed about.
+        let unstated = try repository(["assets/logo.svg": svgData()])
+        #expect(RepoIconDetector.detect(in: unstated) != nil)
+    }
+
+    @Test("the plain name beats the one drawn for one theme")
+    func themeVariants() throws {
+        let root = try repository([
+            "assets/logo-dark.svg": svgData(),
+            "assets/logo.svg": svgData(),
+        ])
+        #expect(name(of: RepoIconDetector.detect(in: root)) == "logo.svg")
+
+        // On its own it is still an answer: a project that ships only the dark one has still said
+        // what it looks like.
+        let onlyDark = try repository(["assets/logo-dark.svg": svgData()])
+        #expect(name(of: RepoIconDetector.detect(in: onlyDark)) == "logo-dark.svg")
+    }
+
+    // MARK: - Nothing worth drawing
+
+    @Test("a repository with nothing in it keeps its monogram")
+    func nothingToFind() throws {
+        let root = try repository([
+            "README.md": Data("hello".utf8),
+            "src/main.swift": Data("print(1)".utf8),
+            "public/index.php": Data("<?php".utf8),
+            // Named like artwork and not artwork: the rules are about icons, not pictures.
+            "public/images/screenshot.png": png(1600, 900),
+            "public/brand/wordmark.svg": svgData(),
+        ])
+        #expect(RepoIconDetector.detect(in: root) == nil)
+    }
+
+    @Test("a sixteen pixel favicon loses to the monogram rather than being blown up")
+    func tinyIco() throws {
+        let root = try repository(["public/favicon.ico": ico([16])])
+        #expect(RepoIconDetector.detect(in: root) == nil)
+
+        // The floor is the badge's own pixel count on a Retina display, so exactly that passes.
+        let atTheFloor = try repository(["public/favicon.ico": ico([16, 32])])
+        #expect(RepoIconDetector.detect(in: atTheFloor)?.pixels == 32)
+
+        let tinyPNG = try repository(["public/favicon-16.png": png(16, 16)])
+        #expect(RepoIconDetector.detect(in: tinyPNG) == nil)
+    }
+
+    // MARK: - Files that are not what they are called
+
+    @Test("a file that is not the image it is named as is refused, and the next one wins")
+    func corruptCandidates() throws {
+        let root = try repository([
+            // Every one of these is a thing a real checkout contains: a failed download saved as
+            // an image, a truncated file, and an empty one left by an interrupted write.
+            "public/favicon.svg": Data("<!doctype html><html>404 Not Found</html>".utf8),
+            "public/favicon.ico": Data(),
+            "public/apple-touch-icon.png": Data("this is not a png".utf8),
+            "public/brand/icon-256.png": png(256, 256),
+        ])
+
+        let all = RepoIconDetector.candidates(in: root)
+        #expect(all.count == 1)
+        #expect(name(of: all.first) == "icon-256.png")
+    }
+
+    @Test("a broken file that is the only candidate leaves the monogram alone")
+    func onlyCandidateIsBroken() throws {
+        let root = try repository(["public/favicon.png": Data("nope".utf8)])
+        #expect(RepoIconDetector.detect(in: root) == nil)
+    }
+
+    @Test("an icns whose stated length runs past the end of the file is refused")
+    func truncatedICNS() throws {
+        var data = icns(["ic10", "ic09"])
+        data = data.prefix(12)
+        let root = try repository(["Resources/AppIcon.icns": data])
+        #expect(RepoIconDetector.detect(in: root) == nil)
+    }
+
+    @Test("an icns with nothing but bookkeeping chunks in it holds no artwork")
+    func icnsWithoutArtwork() throws {
+        let root = try repository(["Resources/AppIcon.icns": icns(["TOC ", "info"])])
+        #expect(RepoIconDetector.detect(in: root) == nil)
+    }
+
+    // MARK: - Application artwork
+
+    @Test("an app's own icon outranks the favicon of the site in the same checkout")
+    func appIconWins() throws {
+        let root = try repository([
+            "Resources/AppIcon.icns": icns(["ic11", "ic09", "ic10"]),
+            "docs/public/favicon.svg": svgData(),
+        ])
+        let best = RepoIconDetector.detect(in: root)
+        #expect(name(of: best) == "AppIcon.icns")
+        #expect(best?.origin == .appIcon)
+        #expect(best?.pixels == 1024)
+    }
+
+    @Test("the flattened icns outranks the layered document beside it")
+    func icnsBeatsIconBundle() throws {
+        let root = try repository([
+            "Resources/AppIcon.icns": icns(["ic10"]),
+            "Resources/Bloom.icon/icon.json": Data("""
+            {"groups": [{"layers": [{"image-name": "mark.svg"}]},
+                        {"layers": [{"image-name": "ground.svg"}]}]}
+            """.utf8),
+            "Resources/Bloom.icon/Assets/mark.svg": svgData(),
+            "Resources/Bloom.icon/Assets/ground.svg": svgData(),
+        ])
+
+        let all = RepoIconDetector.candidates(in: root)
+        #expect(all.map { ($0.path as NSString).lastPathComponent } == ["AppIcon.icns", "Bloom.icon"])
+        #expect(all.last?.format == .layered)
+    }
+
+    @Test("a layered document is drawn back to front, and needs the assets it names")
+    func iconBundleLayers() throws {
+        let root = try repository([
+            "Bloom.icon/icon.json": Data("""
+            {"groups": [{"layers": [{"image-name": "mark.svg"}]},
+                        {"layers": [{"image-name": "panel.svg"}]},
+                        {"layers": [{"image-name": "ground.svg"}]}]}
+            """.utf8),
+            "Bloom.icon/Assets/mark.svg": svgData(),
+            "Bloom.icon/Assets/panel.svg": svgData(),
+            "Bloom.icon/Assets/ground.svg": svgData(),
+        ])
+
+        let bundle = (root as NSString).appendingPathComponent("Bloom.icon")
+        let layers = RepoIconFile.layers(ofIconBundle: bundle).map { ($0 as NSString).lastPathComponent }
+        // icon.json lists the groups the way a layers panel does, topmost first.
+        #expect(layers == ["ground.svg", "panel.svg", "mark.svg"])
+        #expect(RepoIconDetector.detect(in: root)?.format == .layered)
+
+        // The document committed without its assets is a directory that parses and draws nothing.
+        let empty = try repository([
+            "Bloom.icon/icon.json": Data("""
+            {"groups": [{"layers": [{"image-name": "mark.svg"}]}]}
+            """.utf8),
+        ])
+        #expect(RepoIconDetector.detect(in: empty) == nil)
+    }
+
+    @Test("an asset catalogue's app icon set is answered with its largest image")
+    func appIconSet() throws {
+        let root = try repository([
+            "MyApp/Assets.xcassets/AppIcon.appiconset/Contents.json": Data("{}".utf8),
+            "MyApp/Assets.xcassets/AppIcon.appiconset/icon-32.png": png(32, 32),
+            "MyApp/Assets.xcassets/AppIcon.appiconset/icon-1024.png": png(1024, 1024),
+            "MyApp/Assets.xcassets/AppIcon.appiconset/icon-512.png": png(512, 512),
+        ])
+
+        let all = RepoIconDetector.candidates(in: root)
+        #expect(all.count == 1)
+        #expect(name(of: all.first) == "icon-1024.png")
+        #expect(all.first?.origin == .appIcon)
+    }
+
+    @Test("an icon inside a dependency, a build folder or a bundled app is not this project's")
+    func skippedDirectories() throws {
+        let root = try repository([
+            "node_modules/some-package/icon.png": png(512, 512),
+            "vendor/other/public/favicon.svg": svgData(),
+            ".build/debug/Bloom.app/Contents/Resources/AppIcon.icns": icns(["ic10"]),
+            "Pods/Thing/Assets.xcassets/AppIcon.appiconset/icon-1024.png": png(1024, 1024),
+            ".git/hooks/logo.svg": svgData(),
+        ])
+        #expect(RepoIconDetector.candidates(in: root).isEmpty)
+    }
+
+    // MARK: - Web manifests
+
+    @Test("a manifest's icons are read, and resolved from the manifest's own directory")
+    func webManifest() throws {
+        let root = try repository([
+            "public/site.webmanifest": Data("""
+            {"name": "Thing", "icons": [
+                {"src": "/brand/icon-192.png", "sizes": "192x192"},
+                {"src": "brand/icon-512.png", "sizes": "512x512"}
+            ]}
+            """.utf8),
+            "public/brand/icon-192.png": png(192, 192),
+            "public/brand/icon-512.png": png(512, 512),
+        ])
+
+        let all = RepoIconDetector.candidates(in: root)
+        // Both are found by the manifest and by the brand rules; the manifest reading is the
+        // better one, and a file appears once however many rules reached it.
+        #expect(all.count == 2)
+        #expect(name(of: all.first) == "icon-512.png")
+        #expect(all.first?.origin == .manifest)
+    }
+
+    @Test("a manifest.json that is a build manifest states no icons and is left alone")
+    func buildManifestIsNotAWebManifest() throws {
+        let root = try repository([
+            "public/build/manifest.json": Data("""
+            {"resources/js/app.js": {"file": "assets/app-CQSmo0f.js", "isEntry": true}}
+            """.utf8),
+            "public/build/assets/icon-512.png": png(512, 512),
+        ])
+        #expect(RepoIconDetector.detect(in: root) == nil)
+    }
+
+    @Test("a manifest naming a remote icon or an escape from the repository is ignored")
+    func hostileManifest() throws {
+        let root = try repository([
+            "public/manifest.json": Data("""
+            {"icons": [{"src": "https://example.com/icon.png"}, {"src": ""}]}
+            """.utf8),
+        ])
+        #expect(RepoIconDetector.detect(in: root) == nil)
+    }
+
+    // MARK: - Order
+
+    @Test("the ranking is a total order, so the answer never depends on the file system")
+    func rankingIsTotal() {
+        let candidates = [
+            RepoIconCandidate(path: "/a/favicon.svg", format: .svg, origin: .favicon, pixels: 0),
+            RepoIconCandidate(path: "/a/icon.png", format: .png, origin: .brand, pixels: 512),
+            RepoIconCandidate(path: "/a/AppIcon.icns", format: .icns, origin: .appIcon, pixels: 1024),
+            RepoIconCandidate(path: "/b/favicon.png", format: .png, origin: .favicon, pixels: 512),
+            RepoIconCandidate(path: "/c/favicon.png", format: .png, origin: .favicon, pixels: 512),
+        ]
+        for first in candidates {
+            #expect(first.isBetter(than: first) == false)
+            for second in candidates where first != second {
+                #expect(first.isBetter(than: second) != second.isBetter(than: first))
+            }
+        }
+        #expect(candidates.sorted { $0.isBetter(than: $1) }.map(\.path) == [
+            "/a/AppIcon.icns", "/a/favicon.svg", "/b/favicon.png", "/c/favicon.png", "/a/icon.png",
+        ])
+    }
+
+    // MARK: - This repository
+
+    @Test("Bloom's own checkout answers with the icon it ships")
+    func bloomItself() throws {
+        // Four levels up from Tests/BloomCoreTests/<this file>. Symlinks resolved first, because
+        // `./test-core.sh` compiles these sources through a mirror package whose Tests directory
+        // is a link to this one, and the unresolved path leads to that scratch copy instead.
+        let root = URL(fileURLWithPath: #filePath)
+            .resolvingSymlinksInPath()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .path
+        try #require(FileManager.default.fileExists(atPath: root + "/Resources/AppIcon.icns"))
+
+        let best = RepoIconDetector.detect(in: root)
+        #expect(name(of: best) == "AppIcon.icns")
+        #expect(best?.format == .icns)
+        #expect((best?.pixels ?? 0) >= 512)
+    }
+}
+
+/// What is stored about a project's mark, and what an existing database becomes when the columns
+/// arrive under it.
+@Suite("Storing a project's icon", .tags(.persistence), .scratchDirectory)
+struct RepoIconStorageTests {
+    @Test("a found icon and where it came from survive a round trip")
+    func roundTrip() async throws {
+        let store = try makeTestStore("repo-icon")
+        let repo = try await store.upsert(Repo(
+            name: "runbloom",
+            path: "/tmp/runbloom",
+            iconPath: "/tmp/runbloom/public/favicon.svg",
+            iconSource: .detected
+        ))
+
+        let read = try #require(try await store.repo(id: repo.id))
+        #expect(read.iconPath == "/tmp/runbloom/public/favicon.svg")
+        #expect(read.iconSource == .detected)
+        #expect(read.hasIcon)
+    }
+
+    @Test("asking for the monogram back clears the path rather than hiding it")
+    func backToTheMonogram() async throws {
+        let store = try makeTestStore("repo-icon")
+        var repo = try await store.upsert(Repo(
+            name: "runbloom", path: "/tmp/runbloom",
+            iconPath: "/tmp/x.png", iconSource: .detected
+        ))
+
+        repo.iconPath = nil
+        repo.iconSource = .monogram
+        _ = try await store.upsert(repo)
+
+        let read = try #require(try await store.repo(id: repo.id))
+        #expect(read.iconPath == nil)
+        #expect(read.iconSource == .monogram)
+        #expect(read.hasIcon == false)
+    }
+
+    @Test("a project added before Bloom looked for icons is not silently redrawn")
+    func existingProjectsKeepTheirMonogram() async throws {
+        let path = TestScratch.unique("bloom-icon-migrate") + ".sqlite"
+        let id: String
+        do {
+            // A database written by a build that had never heard of these columns.
+            let db = try SQLiteDatabase(path: path)
+            try db.execute("""
+                CREATE TABLE repos (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    path TEXT NOT NULL UNIQUE,
+                    default_branch TEXT NOT NULL DEFAULT 'main',
+                    accent TEXT NOT NULL DEFAULT '4C8DF6',
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    collapsed INTEGER NOT NULL DEFAULT 0,
+                    created_at REAL NOT NULL
+                );
+                """)
+            id = newID()
+            try db.run(
+                "INSERT INTO repos (id, name, path, created_at) VALUES (?, ?, ?, ?)",
+                [.text(id), .text("there-there"), .text("/tmp/there-there"), .double(0)]
+            )
+        }
+
+        let store = try Store(path: path)
+        let repo = try #require(try await store.repos().first { $0.id == id })
+        #expect(repo.iconSource == .undetected)
+        #expect(repo.iconPath == nil)
+        #expect(repo.hasIcon == false)
+    }
+}

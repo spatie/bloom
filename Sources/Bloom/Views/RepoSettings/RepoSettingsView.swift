@@ -22,6 +22,9 @@ struct RepoSettingsView: View {
     @State private var name = ""
     @State private var mark = ""
     @State private var isConfirmingRemove = false
+    /// What the last thing the Icon row did came to, when it came to nothing. Cleared as soon as
+    /// something else is pressed, because it is about that press and not about the project.
+    @State private var iconNotice: String?
     /// The name and the mark are written to the database on commit rather than on every keystroke,
     /// because each write reloads the whole sidebar and typing a name would do it once a letter.
     @FocusState private var isEditingName: Bool
@@ -111,6 +114,8 @@ struct RepoSettingsView: View {
                 }
             }
 
+            iconRow
+
             ColorPicker("Colour", selection: accentBinding, supportsOpacity: false)
 
             LabeledContent("Folder") {
@@ -130,10 +135,114 @@ struct RepoSettingsView: View {
         } footer: {
             // What the mark field actually does, said plainly, because it edits the name rather
             // than a field of its own. See the note on `mark(in:)` for why that is the design.
-            Text("An emoji at the start of the name becomes the mark. Without one, Bloom draws the initials of the name on the project's colour, which needs no configuration and stays as distinct as the names are.")
+            Text("An emoji at the start of the name becomes the mark. Without one, Bloom draws the initials of the name on the project's colour, which needs no configuration and stays as distinct as the names are. An icon found in the project's own folder, or chosen here, is drawn instead of either.")
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textSecondary)
         }
+    }
+
+    // MARK: - Icon
+
+    /// The project's own artwork, if it turned out to have any.
+    ///
+    /// Bloom looks once, when a project is added, at the places a favicon and an application icon
+    /// conventionally live. Everything about that is a guess, however good, so all three ways out
+    /// are on this row: look again, say which file it is, or have the monogram back. A project
+    /// added before Bloom knew how to look has never been searched, and its button says so rather
+    /// than pretending a search already happened and found nothing.
+    private var iconRow: some View {
+        LabeledContent("Icon") {
+            HStack(alignment: .top, spacing: Metrics.gutter) {
+                RepoIcon(repo: repo, size: Metrics.repoIcon * 1.75)
+
+                VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                    Text(iconSummary)
+                        .font(Typo.caption)
+                        .foregroundStyle(iconNotice == nil ? Palette.textSecondary : Palette.warning)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(repo.iconPath ?? "")
+
+                    HStack(spacing: Metrics.gutter) {
+                        Button(repo.iconSource == .undetected ? "Find icon" : "Look again", action: findIcon)
+                        Button("Choose…", action: chooseIcon)
+                        Button("Use monogram", action: useMonogram)
+                            .disabled(!repo.hasIcon)
+                    }
+                    .controlSize(.small)
+                }
+            }
+        }
+    }
+
+    /// Where the badge beside it comes from, in one line.
+    private var iconSummary: String {
+        if let iconNotice { return iconNotice }
+        guard repo.hasIcon, let path = repo.iconPath else {
+            switch repo.iconSource {
+            case .undetected: return "Initials. This project was added before Bloom looked for icons."
+            case .monogram, .detected, .chosen: return "Initials on the project's colour."
+            }
+        }
+        let location = shortPath(path)
+        return repo.iconSource == .chosen ? "Chosen: \(location)" : "Found in the project: \(location)"
+    }
+
+    /// Runs the same search that runs when a project is added. Off the main actor, because it
+    /// reads directories and this window has a text field in it.
+    private func findIcon() {
+        iconNotice = nil
+        let path = repo.path
+        Task {
+            guard let found = await Task.detached(operation: { RepoIconDetector.detect(in: path) }).value
+            else {
+                iconNotice = "Nothing found. Bloom looks for a favicon, a web manifest icon and an app icon."
+                return
+            }
+            await apply(icon: found.path, source: .detected)
+        }
+    }
+
+    /// A file the user names, which is the last word: no size floor, no ranking, no second guess.
+    private func chooseIcon() {
+        iconNotice = nil
+        Task {
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = true
+            panel.canChooseDirectories = false
+            panel.allowsMultipleSelection = false
+            panel.allowedContentTypes = [.image, .svg]
+            panel.prompt = "Use icon"
+            panel.message = "Choose the picture to draw \(repo.name) with."
+            panel.directoryURL = URL(fileURLWithPath: repo.path)
+            guard await panel.present() == .OK, let url = panel.url else { return }
+
+            // Refused here rather than silently falling back to initials later, which is what an
+            // unreadable file would otherwise look like from the sidebar.
+            guard NSImage(contentsOf: url) != nil else {
+                iconNotice = "That file could not be read as a picture."
+                return
+            }
+            await apply(icon: url.path, source: .chosen)
+        }
+    }
+
+    private func useMonogram() {
+        iconNotice = nil
+        Task { await apply(icon: nil, source: .monogram) }
+    }
+
+    private func apply(icon: String?, source: RepoIconSource) async {
+        guard let store = app.store else { return }
+        // Both paths, because the one being left may be back in a moment and the one arriving may
+        // be a file that has changed since it was last read.
+        RepoIconArt.forget(repo.iconPath)
+        RepoIconArt.forget(icon)
+        _ = try? await store.upsert(repo.with {
+            $0.iconPath = icon
+            $0.iconSource = source
+        })
+        await app.reload()
     }
 
     /// The name as the sidebar would show it, so the preview is the real thing and not an artist's

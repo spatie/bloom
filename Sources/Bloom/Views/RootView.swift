@@ -16,6 +16,7 @@ import BloomCore
 struct RootView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openWindow) private var openWindow
 
     @Bindable private var projectSetup = ProjectSetup.shared
     @Bindable private var closeSession = CloseSessionAlert.shared
@@ -184,6 +185,15 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .bloomOfferProjectSetup)) { note in
             guard let path = note.object as? String else { return }
             Task { await app.addRepository(at: path) }
+        }
+        // Opening this window is otherwise a menu item or a gear on a row, neither of which a
+        // capture run can press, which left the project settings window with no way of being
+        // looked at at all. Named by project, or the first one.
+        .onReceive(NotificationCenter.default.publisher(for: .bloomOpenRepoSettings)) { note in
+            let named = note.object as? String
+            let repo = app.repos.first { $0.name == named } ?? app.repos.first
+            guard let repo else { return }
+            openWindow(id: RepoSettingsWindow.id, value: repo.id)
         }
         .onReceive(NotificationCenter.default.publisher(for: .bloomNewWorkspace)) { note in
             createTargetRepo = note.object as? Repo ?? app.selectedWorkspace.flatMap(app.repo(for:))

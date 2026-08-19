@@ -13,6 +13,10 @@ public struct Repo: Identifiable, Sendable, Hashable, Codable {
     public var sortOrder: Int
     public var collapsed: Bool
     public var createdAt: Date
+    /// Artwork the project already has on disk, absolute. Nil whenever the mark is the monogram.
+    public var iconPath: String?
+    /// Where `iconPath` came from, and whether Bloom has looked at all. See `RepoIconSource`.
+    public var iconSource: RepoIconSource
 
     public init(
         id: String = newID(),
@@ -22,7 +26,9 @@ public struct Repo: Identifiable, Sendable, Hashable, Codable {
         accent: String = Accent.all[0],
         sortOrder: Int = 0,
         collapsed: Bool = false,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        iconPath: String? = nil,
+        iconSource: RepoIconSource = .undetected
     ) {
         self.id = id
         self.name = name
@@ -32,6 +38,40 @@ public struct Repo: Identifiable, Sendable, Hashable, Codable {
         self.sortOrder = sortOrder
         self.collapsed = collapsed
         self.createdAt = createdAt
+        self.iconPath = iconPath
+        self.iconSource = iconSource
+    }
+
+    /// Whether the sidebar should be drawing artwork rather than initials.
+    ///
+    /// Says nothing about whether the file is still there. That is answered where the file is
+    /// read, and a file that has gone falls back to the monogram without changing what is stored:
+    /// an unmounted volume is not the user changing their mind.
+    public var hasIcon: Bool { iconPath != nil && iconSource.drawsIcon }
+}
+
+/// How a project came to have the mark it has.
+///
+/// Four cases rather than a flag, because "we have not looked yet" and "there is nothing to find"
+/// are different answers, and because a picture the user chose must survive a redetection that a
+/// picture Bloom guessed at should not.
+public enum RepoIconSource: String, Sendable, Codable, CaseIterable, Hashable {
+    /// Added before Bloom looked for icons, or added while detection was refused. Draws the
+    /// monogram, and is the one state that invites the settings window to offer a search.
+    case undetected
+    /// Looked, and the monogram is the answer: either nothing was found or the user asked for it
+    /// back. Never overwritten by a later detection without being asked.
+    case monogram
+    /// Found by `RepoIconDetector` when the project was added.
+    case detected
+    /// Picked by the user, and therefore the last word.
+    case chosen
+
+    public var drawsIcon: Bool {
+        switch self {
+        case .undetected, .monogram: false
+        case .detected, .chosen: true
+        }
     }
 }
 

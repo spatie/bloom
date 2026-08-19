@@ -209,6 +209,29 @@ public actor Store {
             CREATE INDEX IF NOT EXISTS review_comments_workspace
                 ON review_comments(workspace_id, file_path, line);
             """),
+
+            // The mark a project is drawn with. Two columns rather than one, because a project
+            // with no icon and a project nobody has looked for an icon for want the same monogram
+            // and must not be treated the same: only the second is a candidate for detection.
+            //
+            // Existing rows land on `undetected`, which is exactly what they are, and which is
+            // what stops an upgrade from silently redrawing a sidebar somebody is used to.
+            //
+            // Real code rather than SQL because `ADD COLUMN` has no `IF NOT EXISTS`, and every
+            // other step in this list can be replayed over a database that already had it applied.
+            // A step that could not would turn a rewound `user_version`, which is how the store's
+            // own tests reproduce an old schema, into a migration that throws.
+            { db in
+                let existing = Set(try db.query("PRAGMA table_info(repos);").compactMap { $0.string("name") })
+                if !existing.contains("icon_path") {
+                    try db.execute("ALTER TABLE repos ADD COLUMN icon_path TEXT;")
+                }
+                if !existing.contains("icon_source") {
+                    try db.execute(
+                        "ALTER TABLE repos ADD COLUMN icon_source TEXT NOT NULL DEFAULT 'undetected';"
+                    )
+                }
+            },
         ]
 
         let current = Int(db.userVersion)
@@ -241,20 +264,27 @@ public actor Store {
     public func upsert(_ repo: Repo) throws -> Repo {
         try db.run(
             """
-            INSERT INTO repos (id, name, path, default_branch, accent, sort_order, collapsed, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO repos (
+                id, name, path, default_branch, accent, sort_order, collapsed, created_at,
+                icon_path, icon_source
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 path = excluded.path,
                 default_branch = excluded.default_branch,
                 accent = excluded.accent,
                 sort_order = excluded.sort_order,
-                collapsed = excluded.collapsed
+                collapsed = excluded.collapsed,
+                icon_path = excluded.icon_path,
+                icon_source = excluded.icon_source
             """,
             [
                 .text(repo.id), .text(repo.name), .text(repo.path), .text(repo.defaultBranch),
                 .text(repo.accent), .int(Int64(repo.sortOrder)), .int(repo.collapsed ? 1 : 0),
                 .double(repo.createdAt.timeIntervalSince1970),
+                repo.iconPath.map { SQLValue.text($0) } ?? .null,
+                .text(repo.iconSource.rawValue),
             ]
         )
         return repo
@@ -800,7 +830,9 @@ public actor Store {
             accent: row.string("accent") ?? Accent.all[0],
             sortOrder: Int(row.int("sort_order") ?? 0),
             collapsed: row.bool("collapsed"),
-            createdAt: row.date("created_at") ?? Date()
+            createdAt: row.date("created_at") ?? Date(),
+            iconPath: row.string("icon_path"),
+            iconSource: RepoIconSource(rawValue: row.string("icon_source") ?? "") ?? .undetected
         )
     }
 

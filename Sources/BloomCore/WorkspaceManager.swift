@@ -58,12 +58,19 @@ public struct WorkspaceManager: Sendable {
         if let existing = try await store.repo(path: root) { return existing }
 
         let existingRepos = try await store.repos()
+        // Detection is done here, once, and stored. It is a bounded read of a fixed list of
+        // directories, so it costs less than the `git` calls on either side of it, and doing it
+        // now is what keeps the sidebar from touching the file system while it draws. A project
+        // whose folder has nothing to find lands on `.monogram`: looked at, and answered.
+        let icon = await Task.detached { RepoIconDetector.detect(in: root) }.value
         let repo = Repo(
             name: (root as NSString).lastPathComponent,
             path: root,
             defaultBranch: try await Git.defaultBranch(of: root),
             accent: Accent.next(usedBy: existingRepos),
-            sortOrder: existingRepos.count
+            sortOrder: existingRepos.count,
+            iconPath: icon?.path,
+            iconSource: icon == nil ? .monogram : .detected
         )
         return try await store.upsert(repo)
     }

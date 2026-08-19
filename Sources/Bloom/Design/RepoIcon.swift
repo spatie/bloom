@@ -15,12 +15,20 @@ import BloomCore
 /// Deliberately not something fetched. See `RepoMonogram` for why a repository avatar was not
 /// worth the asynchrony: the mark has to be right on the first frame of the sidebar, offline, for
 /// a folder that may have no remote at all.
+///
+/// A project that turned out to have artwork of its own on disk is drawn with it instead. That is
+/// a file `RepoIconDetector` picked when the project was added, opened once per launch by
+/// `RepoIconArt`, and it changes nothing above: the monogram is still what a project without one
+/// gets, still what a project whose file has gone falls back to, and still the only thing a search
+/// hit for a removed project can be drawn with.
 struct RepoIcon: View {
     /// What the initials are taken from.
     var name: String
     /// The project's stored hex, or nil for a search hit whose project has gone.
     var accent: String?
     var size: CGFloat = Metrics.repoIcon
+    /// The project's own artwork, when it has some and it could be read.
+    var artwork: RepoArtwork?
 
     /// A selected row is filled with the accent colour, and a coloured tile on it is either
     /// invisible (a blue project on the blue bar) or a clash.
@@ -34,10 +42,50 @@ struct RepoIcon: View {
 
     init(repo: Repo?, size: CGFloat = Metrics.repoIcon) {
         self.init(name: repo?.name ?? "", accent: repo?.accent, size: size)
+        artwork = repo.flatMap(RepoIconArt.artwork(for:))
     }
 
     var body: some View {
+        if let artwork {
+            picture(artwork)
+        } else {
+            monogram
+        }
+    }
+
+    /// The rounded tile every mark is cut to, so a found icon is the same shape as the letters it
+    /// replaced and a row of projects reads as one row.
+    private var shape: RoundedRectangle {
         RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
+    }
+
+    /// Fitted rather than filled, so a mark that is not square is letterboxed inside the tile
+    /// instead of having its ends cropped off. Clipped either way: artwork that is square and
+    /// bigger than the tile has to end at the same rounded corner as everything else.
+    private func picture(_ artwork: RepoArtwork) -> some View {
+        Image(nsImage: artwork.image)
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
+            .frame(width: size, height: size)
+            .clipShape(shape)
+            // Only around artwork that reaches the edges. It is what separates a pale icon from a
+            // pale sidebar, and it is exactly what macOS draws around an app icon in a list. Around
+            // a logo on transparency it would be a box drawn around nothing.
+            .overlay {
+                if artwork.isFullBleed {
+                    shape.strokeBorder(borderInk, lineWidth: Metrics.hairline / 2)
+                }
+            }
+            .accessibilityHidden(true)
+    }
+
+    private var borderInk: Color {
+        isOnSelection ? Palette.selectedEmphasizedText.opacity(0.35) : Palette.textPrimary.opacity(0.15)
+    }
+
+    private var monogram: some View {
+        shape
             .fill(fill)
             .overlay {
                 Text(RepoMonogram.initials(for: name))
