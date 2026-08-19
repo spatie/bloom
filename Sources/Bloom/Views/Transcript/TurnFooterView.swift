@@ -47,9 +47,14 @@ struct TurnFooterView: View {
                     .fixedSize()
 
                 if let cost = result?.usage.costUSD, cost > 0 {
-                    // Narrow presentation, so a footer in a non-US locale reads "$0.177" rather
-                    // than "0,177 US$" and stays the width of a footer.
+                    // Locale pinned to en_US, not merely the currency code, because the two are
+                    // separate decisions and only one of them was being made. Narrow presentation
+                    // fixes the symbol and leaves the separators alone, so on a Belgian region
+                    // this printed a dollar and a European comma together: $1.02 came out as
+                    // "1,020 $", and a session that cost $119 read as "119,000 $". The number is
+                    // dollars from the provider and it is shown as dollars are written.
                     Text(cost, format: .currency(code: "USD")
+                        .locale(Locale(identifier: "en_US"))
                         .presentation(.narrow)
                         .precision(.fractionLength(3)))
                         .font(Typo.caption)
