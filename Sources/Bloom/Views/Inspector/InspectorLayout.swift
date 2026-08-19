@@ -33,6 +33,18 @@ enum InspectorLayout {
     /// headline was therefore two points SMALLER than the file names in the list below it, which
     /// is why the strip read as a caption over the column rather than as the top of it.
     static let pullRequestBarHeight: CGFloat = 48
+    /// The pull request number and the arrow beside it, drawn as one outlined control.
+    ///
+    /// Measured off the control this one is meant to match rather than chosen: 24 points tall,
+    /// 12 point text (`Typo.label`), and a rim at twenty percent of the state's own colour. The
+    /// badge it replaces was 17 points tall, 11 point text and filled, which read as a sticker on
+    /// the band rather than as something to press, and half of it was not pressable at all.
+    ///
+    /// The inset is the horizontal padding of each half, so the seam between them sits at the
+    /// middle of the pair rather than being a third measurement. See `PullRequestBadge`.
+    static let badgeHeight: CGFloat = 24
+    static let badgeInset: CGFloat = Metrics.spacingWide
+    static let badgeStrokeOpacity: Double = 0.2
     /// A meaning colour used as a background rather than as ink. One value, so a green badge and a
     /// blue chip carry the same weight.
     static let tintOpacity: Double = 0.12
@@ -50,9 +62,6 @@ enum InspectorLayout {
     /// land" is worth answering at a glance, and they give up the volume, because there is nothing
     /// left to do about either of them and the band is competing with a diff.
     static let bandOpacityQuiet: Double = 0.08
-    /// The same meaning colour on something that sits ON the wash above, such as the pull request
-    /// number. One step denser, or the chip disappears into the bar it is drawn on.
-    static let tintOpacityStrong: Double = 0.24
     /// Status glyphs share one box, so the names beside them line up whichever symbol lands in it.
     ///
     /// **Leading aligned, everywhere it is used.** The box is what makes the names line up; what

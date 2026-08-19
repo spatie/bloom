@@ -14,7 +14,7 @@ import BloomCore
 /// round, with the state reduced to a grey capsule at the trailing edge, and the strip read as a
 /// caption for something rather than as the top of the column.
 ///
-/// The chip, the headline and the merge button all take the state's colour, and `PullRequestBar`
+/// The badge, the headline and the merge button all take the state's colour, and `PullRequestBar`
 /// washes the bar behind them with it, because a red bar at the top of the inspector is visible
 /// from across the room and a red word is not.
 struct PullRequestSummary: View {
@@ -106,13 +106,20 @@ struct PullRequestSummary: View {
 
     // MARK: - Parts
 
-    /// The number and the way out to the browser, drawn as one cluster. They are the same subject,
-    /// so they sit a tight gap apart rather than at the strip's own spacing.
+    /// The number, the way out to the browser, and whether this is still a draft.
+    ///
+    /// The number and the arrow are one control rather than two: see `PullRequestBadge` for why,
+    /// and for where the numbers in it came from. Draft stays a chip of its own beside it, since
+    /// it says something about the pull request rather than being a way of reaching it.
     private var identity: some View {
         HStack(spacing: InspectorLayout.tight) {
-            numberChip
+            PullRequestBadge(
+                number: pullRequest.number,
+                title: pullRequest.title,
+                url: pullRequest.url,
+                tint: tint
+            )
             if pullRequest.isDraft { draftChip }
-            openButton
         }
         .fixedSize()
     }
@@ -129,52 +136,6 @@ struct PullRequestSummary: View {
         Chip(text: "Draft", tint: Palette.textSecondary, background: Palette.hover)
             .help("This pull request is still a draft, so it cannot be merged.")
             .accessibilityLabel("Draft")
-    }
-
-    private var numberChip: some View {
-        // The number alone. A pull request glyph here repeats what the arrow button beside it and
-        // the whole column around it already say, and the chip is meant to be read at a glance as
-        // an identifier rather than parsed as a badge.
-        Chip(
-            text: "#\(pullRequest.number)",
-            tint: tint ?? Palette.accent,
-            background: chipBackground
-        )
-        .help(pullRequest.title)
-        .accessibilityLabel("Pull request \(pullRequest.number), \(pullRequest.title)")
-    }
-
-    /// What the number is drawn on, which depends on whether the band under it is coloured.
-    ///
-    /// On a washed band it is the pane's own colour, not a second wash of the state's. The bar
-    /// already carries the tint, so a chip filled with more of the same tint is one hue at two
-    /// strengths a millimetre apart: measured on the warning band it came out brown ink on beige,
-    /// which was the muddiest thing the strip drew. On the surface colour the chip lifts off the
-    /// band instead, and the number stays what it is, an identifier rather than a state.
-    ///
-    /// On a band with no wash there is nothing to lift off: a surface coloured chip on the surface
-    /// is no chip at all, which is exactly what Draft and Closed came out as when this was one
-    /// value. Those two keep the accent wash they always had.
-    private var chipBackground: Color {
-        tint == nil
-            ? Palette.accent.opacity(InspectorLayout.tintOpacityStrong)
-            : Palette.surface
-    }
-
-    /// A separate control rather than making the chip itself clickable: the chip is the label of
-    /// the strip, and a label that silently launches a browser is the kind of thing people learn
-    /// by accident.
-    ///
-    /// Opening a page in a browser needs no GitHub sign in of any kind, so this control is never
-    /// gated on `gh`.
-    private var openButton: some View {
-        Button("Open on GitHub", systemImage: "arrow.up.forward.app") {
-            GitHubBridge.open(pullRequest.url)
-        }
-        .labelStyle(.iconOnly)
-        .buttonStyle(.borderless)
-        .controlSize(.small)
-        .help("Open #\(pullRequest.number) on GitHub")
     }
 
     /// The state, in the state's colour, with its numbers under it.
