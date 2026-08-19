@@ -1,5 +1,53 @@
 import AppKit
 import SwiftUI
+import QuartzCore
+
+/// How long each pane spent in layout, while `FrameProbe` is measuring a drag.
+///
+/// Off unless a probe turned it on, and it reads one clock and adds to two doubles when it is on,
+/// so nothing here is a cost the shipping app pays. It exists because "the drag is slow" and "the
+/// centre column's layout is slow" are different claims, and only the second one can be acted on.
+@MainActor
+enum PaneLayoutTiming {
+    static var isEnabled = false
+    private static var counts: [String: Int] = [:]
+    private static var seconds: [String: Double] = [:]
+
+    static func reset() {
+        counts.removeAll()
+        seconds.removeAll()
+    }
+
+    static func record(_ pane: String, _ elapsed: Double) {
+        counts[pane, default: 0] += 1
+        seconds[pane, default: 0] += elapsed
+    }
+
+    static func summary() -> [String: [String: Double]] {
+        var result: [String: [String: Double]] = [:]
+        for (pane, total) in seconds {
+            let count = Double(counts[pane] ?? 0)
+            result[pane] = [
+                "passes": count,
+                "totalMs": total * 1000,
+                "meanMs": count > 0 ? total * 1000 / count : 0,
+            ]
+        }
+        return result
+    }
+}
+
+/// An `NSHostingView` that can be asked how long its layout took. See `PaneLayoutTiming`.
+private final class MeasuredHostingView: NSHostingView<AnyView> {
+    var paneName = ""
+
+    override func layout() {
+        guard PaneLayoutTiming.isEnabled else { return super.layout() }
+        let started = CACurrentMediaTime()
+        super.layout()
+        PaneLayoutTiming.record(paneName, CACurrentMediaTime() - started)
+    }
+}
 
 /// A pane: an `NSHostingView` wrapped in a view controller so a split item can hold it.
 ///
@@ -9,15 +57,16 @@ import SwiftUI
 /// plain controller around an `NSHostingView` has no such channel at all: the pane fills whatever
 /// the split view gives it, and nothing SwiftUI measures ever travels back the other way.
 final class PaneViewController: NSViewController {
-    private let host: NSHostingView<AnyView>
+    private let host: MeasuredHostingView
 
     var rootView: AnyView {
         get { host.rootView }
         set { host.rootView = newValue }
     }
 
-    init(rootView: AnyView) {
-        host = NSHostingView(rootView: rootView)
+    init(rootView: AnyView, name: String) {
+        host = MeasuredHostingView(rootView: rootView)
+        host.paneName = name
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -82,8 +131,8 @@ final class DetailSplitViewController: NSSplitViewController {
     private static let autosaveName = "bloom.detail.split"
 
     init(detail: AnyView, inspector: AnyView) {
-        detailHost = PaneViewController(rootView: detail)
-        inspectorHost = PaneViewController(rootView: inspector)
+        detailHost = PaneViewController(rootView: detail, name: "detail")
+        inspectorHost = PaneViewController(rootView: inspector, name: "inspector")
         super.init(nibName: nil, bundle: nil)
     }
 

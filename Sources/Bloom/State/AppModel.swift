@@ -146,8 +146,10 @@ final class AppModel {
     /// put the window into an unbounded Update Constraints loop that AppKit eventually turned into
     /// a crash. Owning them here makes them a plain bindable value. It also matches how a Mac app
     /// behaves: an inspector is shown or hidden for the window, not remembered per document.
-    var isInspectorVisible = true
-    var isBottomPanelVisible = true
+    /// Both default to on, and both can be started off by `FrameProbe`, which is how a resize
+    /// measurement tells the centre column's cost apart from the inspector's and the terminal's.
+    var isInspectorVisible = FrameProbe.wantsInspector
+    var isBottomPanelVisible = FrameProbe.wantsBottomPanel
 
     var alert: BloomAlert?
     /// The corner notice. See `BloomNotice`. Set from anywhere, drawn once by `RootView`.
