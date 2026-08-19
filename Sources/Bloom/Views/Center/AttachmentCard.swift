@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The card that floats over the composer while the pointer rests on a chip.
 ///
@@ -50,25 +51,21 @@ struct AttachmentCard: View {
                     .frame(maxWidth: .infinity)
                     .padding(Metrics.spacingWide)
 
-                Hairline()
+                // A picture answers the question the hover asked, so a path and a byte count
+                // under it are furniture. Everything else leaves "which file is this" open,
+                // and for those the path is the useful half.
+                if !isImage {
+                    Hairline()
 
-                HStack(spacing: Metrics.spacingSmall) {
                     Text(attachment.path)
                         .font(Typo.codeSmall)
                         .foregroundStyle(Palette.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.head)
-
-                    Spacer(minLength: Metrics.spacing)
-
-                    if let size {
-                        Text(size)
-                            .font(Typo.micro)
-                            .foregroundStyle(Palette.textTertiary)
-                    }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, Metrics.spacingWide)
+                        .padding(.vertical, Metrics.spacingSmall)
                 }
-                .padding(.horizontal, Metrics.spacingWide)
-                .padding(.vertical, Metrics.spacingSmall)
             }
         }
         .frame(maxWidth: width + Metrics.spacingWide * 2)
@@ -82,11 +79,10 @@ struct AttachmentCard: View {
         max(min(availableWidth - Metrics.gutter * 2, Self.maxWidth), 160)
     }
 
-    private var size: String? {
-        let bytes = attachment.byteCount > 0
-            ? attachment.byteCount
-            : AttachmentFiles.byteCount(of: url.path)
-        guard bytes > 0 else { return nil }
-        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    /// Asked of the type rather than of a list of extensions, so HEIC and WebP come along
+    /// without being named. A PDF and a movie do not conform to `.image`, which is where the
+    /// line wants to be: a PDF's first page is often a cover and a poster frame says even less.
+    private var isImage: Bool {
+        UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true
     }
 }
