@@ -72,6 +72,42 @@ final class WorkspaceModel {
     /// none of it is worth re-rendering on every append.
     static let setupLogLimit = 200_000
     var isRunningSetup = false
+    /// Things Bloom did to this workspace that are worth a line in the transcript: a merge, and
+    /// whatever follows it.
+    ///
+    /// In memory and deliberately so. These are notes about what just happened, shown where the
+    /// user is already looking, and they are not messages: nothing here is written to the
+    /// `messages` table, counted against the context window, or seen by anything that assembles a
+    /// prompt. Setup is not in this list because its state is already durable on the workspace
+    /// row; `timeline(isRunningSetup:)` derives that one and puts the two together.
+    var events: [WorkspaceEvent] = []
+
+    /// One line for a caller that has just done something to this workspace.
+    ///
+    ///     model.record(.merged(pullRequest: 42, branchDeleted: false, branch: workspace.branch))
+    func record(_ event: WorkspaceEvent) {
+        events.append(event)
+    }
+
+    /// What the transcript draws above its rows: the setup line, derived from the workspace's own
+    /// stored state, then everything Bloom has recorded since, in the order it happened.
+    func timeline(isRunningSetup running: Bool) -> [WorkspaceEvent] {
+        let setup = WorkspaceEvent.setup(
+            state: running ? .running : workspace.setupState,
+            log: setupOutput,
+            durationMS: setupDurationMS
+        )
+        return [setup].compactMap { $0 } + events
+    }
+
+    /// When the run now in flight started, and what the last finished one cost.
+    ///
+    /// Kept here rather than on the workspace row because it is about this launch's run: a
+    /// duration read back out of the database a week later would be answering a question nobody
+    /// asked. The transcript shows it on the line that says setup ended, and shows no duration at
+    /// all when it does not know one, which is a workspace reopened after the fact.
+    var setupStartedAt: Date?
+    var setupDurationMS: Int?
 
     // Layout.
 
@@ -274,6 +310,8 @@ final class WorkspaceModel {
 
         if settings.setupScript != nil {
             isRunningSetup = true
+            setupStartedAt = .now
+            setupDurationMS = nil
             bottomTab = .setup
             setupOutput = ""
             // A machine with no free block left is not a reason to refuse to run setup. The script
@@ -302,6 +340,7 @@ final class WorkspaceModel {
             flusher.cancel()
             appendSetupOutput(buffer.drain())
             isRunningSetup = false
+            setupDurationMS = setupStartedAt.map { Int(Date.now.timeIntervalSince($0) * 1000) }
 
             // Archiving or quitting cancels this task. Starting an agent in a worktree that is on
             // its way out is the one thing that must not happen here.

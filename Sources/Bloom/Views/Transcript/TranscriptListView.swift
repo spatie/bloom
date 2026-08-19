@@ -39,13 +39,25 @@ struct TranscriptListView: View {
     private static let bubbleShare: CGFloat = 0.7
     private static let bubbleFloor: CGFloat = 240
 
+    /// Whether the workspace event rows are drawing anything, reported by them because only they
+    /// can see the log. See `showsPlaceholder`.
+    @State private var showsSetup = false
+
     /// Only once the rows are known to be absent, so a session that is still loading does not flash
     /// an empty state on its way in.
+    ///
+    /// And not while setup is showing. A workspace whose setup is still running, or whose setup
+    /// failed before the agent was ever started, has an empty session and something worth reading
+    /// at the top of it, and an empty state centred over the pane would be drawn straight across
+    /// it. The old "the setup script is still running" wording lives in `TranscriptPlaceholderView`
+    /// and is now the fallback for the moment before the first line of output arrives rather than
+    /// the whole of what a new workspace gets to see.
     private var showsPlaceholder: Bool {
         transcript.isLoaded
             && transcript.rows.isEmpty
             && !transcript.isRunning
             && !transcript.isStreaming
+            && !showsSetup
     }
 
     /// Already rounded, by `TranscriptGeometry.cap`, and rounded before it reaches this view's
@@ -57,6 +69,18 @@ struct TranscriptListView: View {
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    // Before every row, because setting the workspace up is what happens before
+                    // anything can be said in it. These are drawn from the workspace's own state
+                    // rather than stored as rows, so a setup re-run replaces its line in place
+                    // instead of leaving a second copy further down, and so none of it can ever
+                    // reach the agent. See `WorkspaceEvent`.
+                    WorkspaceEventsView(
+                        workspaceID: transcript.workspace.id,
+                        isRunning: isRunningSetup,
+                        isFirstThing: transcript.rows.isEmpty,
+                        onVisibilityChange: { showsSetup = $0 }
+                    )
+
                     ForEach(transcript.rows) { row in
                         if TranscriptNoise.isHidden(row) {
                             EmptyView()
