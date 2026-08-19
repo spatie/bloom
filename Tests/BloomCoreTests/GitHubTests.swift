@@ -173,6 +173,36 @@ struct GitHubTests {
         #expect(MergeOutcome().leftover == nil)
     }
 
+    /// What the user reads when a merge is refused is what GitHub said, shaped into a sentence.
+    /// The command line is not part of it: it is not something anybody can act on, and putting it
+    /// in the headline is what the old "Something went wrong" alert did.
+    @Test("a refused merge is reported in GitHub's words, without the command")
+    func mergeFailureSentences() {
+        let shell = ShellError(
+            command: "gh pr merge 363 --squash",
+            status: 1,
+            stderr: "GraphQL: Pull request is not mergeable (mergePullRequest)\nUsage: gh pr merge"
+        )
+
+        let sentence = GitHub.mergeFailureSentence(shell)
+        #expect(sentence == "GraphQL: Pull request is not mergeable (mergePullRequest).")
+        #expect(!sentence.contains("gh pr merge 363"))
+        #expect(!sentence.contains("Usage"))
+    }
+
+    @Test("a failure with nothing on stderr still reads as a sentence")
+    func emptyMergeFailure() {
+        let shell = ShellError(command: "gh pr merge 1 --squash", status: 1, stderr: "  \n ")
+
+        #expect(GitHub.mergeFailureSentence(shell) == "GitHub refused the merge.")
+    }
+
+    @Test("an error that is not a shell failure keeps its own message")
+    func nonShellMergeFailure() {
+        #expect(GitHub.mergeFailureSentence(GitHubError("the branch has no upstream"))
+            == "The branch has no upstream.")
+    }
+
     private func decode(_ json: String) throws -> PullRequest {
         try GitHub.decodePullRequest(from: Data(json.utf8))
     }

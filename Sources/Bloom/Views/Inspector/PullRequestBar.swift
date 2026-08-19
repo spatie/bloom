@@ -142,18 +142,20 @@ struct PullRequestBar: View {
                 let outcome = try await GitHubBridge.merge(
                     pullRequest, worktree: worktree, method: method
                 )
-                if let leftover = outcome.leftover {
-                    report = MergeReport(
-                        tone: .leftover,
-                        title: "Merged, with one thing left over",
-                        message: leftover.sentence
-                    )
-                }
+                // The durable record of it goes in the transcript, which is where "what happened
+                // to this workspace" lives now. The strip says the rest by turning purple and
+                // saying Merged a second later.
+                model.record(.merged(pullRequest: pullRequest.number, outcome: outcome))
             } catch {
+                let reason = GitHub.mergeFailureSentence(error)
+                model.record(.mergeFailed(pullRequest: pullRequest.number, reason: reason))
+                // And here as well, because this one means the button the user just pressed did
+                // nothing, and they are looking at the button. The command that failed is behind
+                // the disclosure rather than in the sentence.
                 report = MergeReport(
                     tone: .failure,
                     title: "#\(pullRequest.number) was not merged",
-                    message: "GitHub refused the merge. Nothing on this machine was changed.",
+                    message: reason + " Nothing on this machine was changed.",
                     details: "\(error)"
                 )
             }

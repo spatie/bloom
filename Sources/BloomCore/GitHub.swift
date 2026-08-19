@@ -356,6 +356,30 @@ public enum GitHub {
         )
     }
 
+    /// What to say about a merge that did not happen.
+    ///
+    /// The command line is not part of it. `gh pr merge 363 --squash` in front of somebody who
+    /// pressed a button tells them nothing they can act on, and the interesting half is always
+    /// what GitHub said back, so that is what is kept. Trimmed, because gh follows an error with
+    /// its own usage hints often enough that the sentence would otherwise arrive with a paragraph
+    /// attached.
+    public static func mergeFailureSentence(_ error: Error) -> String {
+        guard let shell = error as? ShellError else { return error.readableMessage }
+
+        let stderr = shell.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = stderr.split(separator: "\n").first.map(String.init), !first.isEmpty else {
+            return "GitHub refused the merge."
+        }
+        var sentence = first
+        if let start = sentence.first, start.isLowercase, start.isLetter {
+            sentence.replaceSubrange(
+                sentence.startIndex...sentence.startIndex, with: start.uppercased()
+            )
+        }
+        if let last = sentence.last, !".!?".contains(last) { sentence.append(".") }
+        return sentence
+    }
+
     /// git has no exit code for "there was nothing to delete".
     public static func indicatesRemoteBranchGone(stderr: String) -> Bool {
         stderr.localizedCaseInsensitiveContains("remote ref does not exist")
