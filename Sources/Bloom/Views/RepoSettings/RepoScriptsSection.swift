@@ -8,6 +8,11 @@ import BloomCore
 /// escaped, quoted or validated on the way in, because a setup script is a shell script and
 /// pretending otherwise would only break the ones that work. What the screen owes the user instead
 /// is an accurate account of what pressing Save will cause to run later, and where.
+///
+/// "Where" is now a real answer. A script long enough to be a program is saved as an executable
+/// file, `.bloom/setup.sh`, and the settings file points at it, so the same program can be linted,
+/// opened in the user's own editor and run straight from a terminal. Every field names the file it
+/// will be written to before a character is typed. See `SettingsWriter.scriptFile`.
 struct RepoScriptsSection: View {
     @Bindable var model: RepoSettingsModel
 
@@ -21,25 +26,29 @@ struct RepoScriptsSection: View {
     private var scriptSection: some View {
         Section {
             RepoScriptField(
+                model: model,
+                location: .setup,
+                key: .setupScript,
                 title: "Setup script",
                 summary: "Runs once, in the new worktree, before the first message is sent. A workspace whose setup fails is created but marked failed.",
                 placeholder: "#!/bin/zsh",
-                text: $model.draft.setupScript,
-                destination: SettingsDestinationLabel(model: model, key: .setupScript)
+                text: $model.draft.setupScript
             )
 
             RepoScriptField(
+                model: model,
+                location: .archive,
+                key: .archiveScript,
                 title: "Archive script",
                 summary: "Runs in the worktree just before it is removed. Undo whatever setup did outside the folder here: a Valet site, a database, a container.",
                 placeholder: "#!/bin/zsh",
-                text: $model.draft.archiveScript,
-                destination: SettingsDestinationLabel(model: model, key: .archiveScript)
+                text: $model.draft.archiveScript
             )
         } header: {
             Text("Scripts")
         } footer: {
             VStack(alignment: .leading, spacing: Metrics.spacingTight) {
-                Text("Run by zsh with the workspace folder as the working directory, not in an interactive shell, so anything a login shell would set up has to be set up in the script.")
+                Text("Run with the workspace folder as the working directory, not in an interactive shell, so anything a login shell would set up has to be set up in the script. A script saved as a file is run as itself, so the shebang on its first line picks the interpreter; one kept as a line of settings is run by zsh.")
                 Text(Self.variables)
                     .font(Typo.codeTiny)
                 Text(Self.alias)
@@ -64,7 +73,7 @@ struct RepoScriptsSection: View {
     private var runSection: some View {
         Section {
             ForEach($model.draft.runScripts) { $script in
-                RepoRunScriptRow(script: $script) {
+                RepoRunScriptRow(model: model, script: $script) {
                     model.draft.runScripts.removeAll { $0.id == script.id }
                 }
             }
@@ -101,12 +110,14 @@ struct RepoScriptsSection: View {
 /// this will be written to is known before a character is typed. The code comes next, in a real
 /// editor with a gutter and syntax colours, because it is code. The sentence describing when it
 /// runs goes underneath, where it can be read once and then ignored.
-struct RepoScriptField<Destination: View>: View {
+struct RepoScriptField: View {
+    let model: RepoSettingsModel
+    let location: ScriptLocation
+    let key: SettingsKey
     let title: String
     let summary: String
     var placeholder = ""
     @Binding var text: String
-    let destination: Destination
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.spacing) {
@@ -117,7 +128,13 @@ struct RepoScriptField<Destination: View>: View {
 
                 Spacer(minLength: Metrics.spacingSmall)
 
-                destination
+                ScriptDestinationLabel(model: model, location: location, key: key, script: text)
+            }
+
+            // Inlined rather than a view that draws nothing, because a `VStack` still spaces
+            // around a child whose body is empty.
+            if let missing = model.missingScriptFile(for: location) {
+                MissingScriptNote(path: missing)
             }
 
             ScriptEditor(text: $text, placeholder: placeholder)
@@ -134,6 +151,84 @@ struct RepoScriptField<Destination: View>: View {
     }
 }
 
+/// Names the script's own file, when it has one, and otherwise the settings file it is a line of.
+///
+/// The distinction is the whole point of the field: `.bloom/setup.sh` is a program somebody can
+/// open, lint and run, and a line inside `settings.toml` is not. Which of the two a script is
+/// depends on the script, so the label is worked out from what is in the box at this moment and
+/// changes under the user's hands the moment a shebang or a second line makes it a program. That
+/// is not a glitch, it is the rule being shown before it is applied.
+struct ScriptDestinationLabel: View {
+    let model: RepoSettingsModel
+    let location: ScriptLocation
+    let key: SettingsKey
+    let script: String
+
+    var body: some View {
+        if let file {
+            Text(text(for: file))
+                .font(Typo.caption)
+                .foregroundStyle(isMoving ? Palette.warning : Palette.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(help(for: file))
+        } else {
+            // Still a line of settings, so the ordinary label, which knows about `.conductor` and
+            // about machine-wide files, is exactly right.
+            SettingsDestinationLabel(model: model, key: key)
+        }
+    }
+
+    private var file: String? { model.scriptFile(for: location, script: script) }
+
+    /// True while saving would move this script out of a settings file and into one of its own.
+    private var isMoving: Bool { model.loaded.scriptFiles[location] == nil }
+
+    private func text(for file: String) -> String {
+        isMoving ? "Moving into \(file)" : "Saved to \(file)"
+    }
+
+    private func help(for file: String) -> String {
+        let settings = short(model.destination(for: key))
+        guard isMoving else {
+            return "Saved to \(file), which \(settings) names as this script."
+        }
+        return """
+            A script with a shebang, or with more than one line, is a program rather than a \
+            setting. Saving writes it to \(file), makes it executable, and leaves \(settings) \
+            naming that path instead of holding the text. It can then be run, and linted, on its \
+            own.
+            """
+    }
+
+    private func short(_ path: String) -> String {
+        path.hasPrefix(model.repo.path + "/")
+            ? String(path.dropFirst(model.repo.path.count + 1))
+            : (path as NSString).abbreviatingWithTildeInPath
+    }
+}
+
+/// Said plainly, because the field underneath is empty and an empty field means something else.
+///
+/// A settings file naming a script that is not on disk is not the same as a project with no setup
+/// script: the first is a repository somebody has not finished checking out, or a file somebody
+/// deleted, and the difference is invisible unless it is stated. It is not an error either.
+/// Workspaces are still created, the script is skipped, and typing here puts the file back at the
+/// path the settings already name.
+struct MissingScriptNote: View {
+    let path: String
+
+    var body: some View {
+        Label(
+            "\(path) is named here but is not on disk. The script is skipped rather than failed, and anything typed below is written back to that path.",
+            systemImage: "exclamationmark.triangle"
+        )
+        .font(Typo.caption)
+        .foregroundStyle(Palette.warning)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 /// One run script. The name is what the tab is called; the command is what runs.
 ///
 /// The name field carries no title of its own. A `TextField` with one, inside a `Form`, is split
@@ -141,6 +236,7 @@ struct RepoScriptField<Destination: View>: View {
 /// on two separate rows of a table and right-aligned a shell command against the far edge of the
 /// window.
 struct RepoRunScriptRow: View {
+    let model: RepoSettingsModel
     @Binding var script: DraftRunScript
     let onRemove: () -> Void
 
@@ -157,14 +253,16 @@ struct RepoRunScriptRow: View {
                     .labelsHidden()
                     .frame(width: Self.nameWidth)
 
-                // The table this script is stored under. Shown because renaming it does not move
-                // it: the table name is fixed when the script is first saved, and it is what a
-                // teammate reading the file sees.
-                if !script.key.isEmpty {
-                    Text("scripts.run.\(script.key)")
+                // Where this script lives: the table it is stored under, or the file it was long
+                // enough to be given. Shown because renaming it does not move it: the table name
+                // is fixed when the script is first saved, and it is what a teammate reading the
+                // file sees.
+                if let storage {
+                    Text(storage)
                         .font(Typo.codeTiny)
                         .foregroundStyle(Palette.textTertiary)
                         .lineLimit(1)
+                        .truncationMode(.middle)
                 }
 
                 Spacer(minLength: Metrics.spacingSmall)
@@ -174,6 +272,10 @@ struct RepoRunScriptRow: View {
                     .buttonStyle(.borderless)
                     .foregroundStyle(Palette.textSecondary)
                     .help("Remove this run script")
+            }
+
+            if !script.key.isEmpty, let missing = model.missingScriptFile(for: .run(script.key)) {
+                MissingScriptNote(path: missing)
             }
 
             // The same editor the setup script gets. A run script is one or two lines rather than
@@ -189,5 +291,16 @@ struct RepoRunScriptRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, Metrics.spacingTight)
+    }
+}
+
+private extension RepoRunScriptRow {
+    /// A file when this script has one or is about to get one, and the TOML table otherwise.
+    var storage: String? {
+        guard !script.key.isEmpty else { return nil }
+        if let file = model.scriptFile(for: .run(script.key), script: script.command) {
+            return file
+        }
+        return "scripts.run.\(script.key)"
     }
 }

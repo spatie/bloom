@@ -32,6 +32,34 @@ public enum SettingsKey: String, Sendable, Hashable, CaseIterable {
     public var path: [String] { rawValue.components(separatedBy: ".") }
 }
 
+/// Which script a `ScriptFile` belongs to. Run scripts are named by their table under
+/// `scripts.run`, which is the same id a `RunScript` carries.
+public enum ScriptLocation: Sendable, Hashable {
+    case setup
+    case archive
+    case run(String)
+}
+
+/// A script that lives in a file of its own rather than inside a TOML string.
+///
+/// A setup script is a program: it has a shebang, it wants `shellcheck`, and it wants to be run
+/// straight from a terminal while it is being written. None of that is true of a string inside a
+/// settings file, where the container's own escaping rules start applying to the user's shell
+/// quoting. So `scripts.setup_file` names a real executable file and `scripts.setup` is what is
+/// still read from settings written before that, and from Conductor's.
+public struct ScriptFile: Sendable, Hashable {
+    /// As the settings file states it, which is relative to the repository unless it is absolute.
+    public var path: String
+    /// The settings file names this path and nothing is there. The script does not run, and the
+    /// window says so rather than showing an empty box.
+    public var isMissing: Bool
+
+    public init(path: String, isMissing: Bool) {
+        self.path = path
+        self.isMissing = isMissing
+    }
+}
+
 /// The effective configuration for one repository, after layering every settings file that
 /// applies. Conductor's own files are read as-is so an existing repo needs no new config.
 public struct RepoSettings: Sendable, Hashable {
@@ -54,6 +82,9 @@ public struct RepoSettings: Sendable, Hashable {
     /// Conductor file silently overrode every choice made in Settings.
     public var homeDefaultModel: String?
     public var homeDefaultEffort: String?
+    /// For each script whose settings file named a file rather than embedding the text, that
+    /// file. Absent means the script is a string inside the settings file, or there is none.
+    public var scriptFiles: [ScriptLocation: ScriptFile] = [:]
     /// Paths of the settings files that contributed, newest last. Shown in the settings UI.
     public var sources: [String] = []
 
@@ -103,7 +134,7 @@ public enum SettingsLoader {
         for path in homePaths() {
             guard let toml = try? TOML.parse(contentsOf: path) else { continue }
             settings.sources.append(path)
-            apply(toml, from: path, to: &settings)
+            apply(toml, from: path, to: &settings, repo: repo)
         }
 
         // Everything a home file said about the model belongs to the home layer. Moving it aside
@@ -116,13 +147,46 @@ public enum SettingsLoader {
         for path in repoPaths(repo: repo) {
             guard let toml = try? TOML.parse(contentsOf: path) else { continue }
             settings.sources.append(path)
-            apply(toml, from: path, to: &settings)
+            apply(toml, from: path, to: &settings, repo: repo)
         }
 
         return settings
     }
 
-    static func apply(_ toml: TOMLValue, from source: String, to settings: inout RepoSettings) {
+    /// The absolute path a settings file's script reference points at.
+    ///
+    /// Relative to the repository rather than to the settings file, so `.bloom/setup.sh` reads
+    /// the same whichever of the four files names it, and so a path stays meaningful when a value
+    /// is promoted from `.conductor` to `.bloom`.
+    public static func resolve(_ path: String, repo: String) -> String {
+        if path.hasPrefix("/") { return path }
+        if path.hasPrefix("~") { return (path as NSString).expandingTildeInPath }
+        return (repo as NSString).appendingPathComponent(path)
+    }
+
+    /// One script a settings file states, either as a path or as an embedded string.
+    ///
+    /// The path wins inside a single file. Across files nothing special happens: the ordinary
+    /// layering already means the last file to state a script replaces what the ones below it
+    /// said, in whichever of the two forms each of them used.
+    private static func readScript(
+        _ toml: TOMLValue, inline: String, file: String, repo: String
+    ) -> (text: String?, file: ScriptFile?)? {
+        if let stated = toml[file]?.stringValue, !stated.isEmpty {
+            let full = resolve(stated, repo: repo)
+            guard let text = try? String(contentsOfFile: full, encoding: .utf8) else {
+                return (nil, ScriptFile(path: stated, isMissing: true))
+            }
+            let hasContent = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return (hasContent ? text : nil, ScriptFile(path: stated, isMissing: false))
+        }
+        guard let text = toml[inline]?.stringValue else { return nil }
+        return (text.isEmpty ? nil : text, nil)
+    }
+
+    static func apply(
+        _ toml: TOMLValue, from source: String, to settings: inout RepoSettings, repo: String = ""
+    ) {
         /// Records which file had the last word about a key, so an edit can be written back to it.
         func note(_ key: SettingsKey) { settings.origins[key] = source }
 
@@ -131,12 +195,14 @@ public enum SettingsLoader {
         // states. That matters now that Bloom writes to `.bloom` and never to `.conductor`, so
         // clearing a script a Conductor file states cannot be done by deleting a line, only by
         // overriding it from higher up.
-        if let setup = toml["scripts.setup"]?.stringValue {
-            settings.setupScript = setup.isEmpty ? nil : setup
+        if let setup = readScript(toml, inline: "scripts.setup", file: "scripts.setup_file", repo: repo) {
+            settings.setupScript = setup.text
+            settings.scriptFiles[.setup] = setup.file
             note(.setupScript)
         }
-        if let archive = toml["scripts.archive"]?.stringValue {
-            settings.archiveScript = archive.isEmpty ? nil : archive
+        if let archive = readScript(toml, inline: "scripts.archive", file: "scripts.archive_file", repo: repo) {
+            settings.archiveScript = archive.text
+            settings.scriptFiles[.archive] = archive.file
             note(.archiveScript)
         }
         if let mode = toml["scripts.run_mode"]?.stringValue {
@@ -154,19 +220,27 @@ public enum SettingsLoader {
                 settings.runScripts = [RunScript(id: "run", name: "Run", command: command)]
                 note(.runScripts)
             case .table(let named):
+                var files: [ScriptLocation: ScriptFile] = [:]
                 let scripts = named
                     .sorted { $0.key < $1.key }
                     .compactMap { key, value -> RunScript? in
+                        let name = value["name"]?.stringValue ?? key.capitalizedFirst
+                        // A run script is usually one command and stays a string. It gets a file
+                        // of its own on the same terms as the setup script: when it is long
+                        // enough to be a program. See `SettingsWriter.wantsAFile`.
+                        if let stated = value["file"]?.stringValue, !stated.isEmpty {
+                            let full = resolve(stated, repo: repo)
+                            let text = try? String(contentsOfFile: full, encoding: .utf8)
+                            files[.run(key)] = ScriptFile(path: stated, isMissing: text == nil)
+                            return RunScript(id: key, name: name, command: text ?? "")
+                        }
                         let command = value["command"]?.stringValue ?? value.stringValue
                         guard let command, !command.isEmpty else { return nil }
-                        return RunScript(
-                            id: key,
-                            name: value["name"]?.stringValue ?? key.capitalizedFirst,
-                            command: command
-                        )
+                        return RunScript(id: key, name: name, command: command)
                     }
                 if !scripts.isEmpty {
                     settings.runScripts = scripts
+                    for (location, file) in files { settings.scriptFiles[location] = file }
                     note(.runScripts)
                 }
             default:

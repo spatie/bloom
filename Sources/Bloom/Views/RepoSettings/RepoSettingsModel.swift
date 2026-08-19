@@ -120,6 +120,24 @@ final class RepoSettingsModel {
         SettingsWriter.destination(for: key, in: loaded, repo: repo.path)
     }
 
+    /// Where this script would be stored if Save were pressed now: a file of its own, stated
+    /// repository-relative, or `nil` when it stays a string in the settings file.
+    ///
+    /// Asked of the writer rather than worked out again here, so the path named under the field is
+    /// the path Save actually uses and the two can never drift apart.
+    func scriptFile(for location: ScriptLocation, script: String) -> String? {
+        SettingsWriter.scriptFile(for: location, script: script, in: loaded, repo: repo.path)
+    }
+
+    /// The script file the settings name and that is not on disk, if there is one.
+    ///
+    /// Worth its own line on screen: the field below it is empty, and an empty field otherwise
+    /// means "there is no setup script" rather than "there is one and it has gone".
+    func missingScriptFile(for location: ScriptLocation) -> String? {
+        guard let file = loaded.scriptFiles[location], file.isMissing else { return nil }
+        return file.path
+    }
+
     /// The destinations this save would touch.
     var pendingDestinations: [String] {
         Array(Set(edits.map { destination(for: $0.key) })).sorted()

@@ -127,9 +127,10 @@ struct SettingsWriterTests {
         let repo = try makeRepo()
         try SettingsWriter.write([.setupScript("bun install")], repo: repo, settings: RepoSettings())
 
-        // `settings.toml` is meant to be committed: sharing the setup script is why it lives in
-        // the repository at all. `settings.local.toml` is the opposite.
-        #expect(read(repo, ".bloom/.gitignore") == "settings.local.toml\n")
+        // `settings.toml` and the scripts beside it are meant to be committed: sharing the setup
+        // script is why it lives in the repository at all. The `.local` pair is the opposite, and
+        // a personal script is written as `setup.local.sh`, so the rule covers both spellings.
+        #expect(read(repo, ".bloom/.gitignore") == "settings.local.toml\n*.local.sh\n")
     }
 
     @Test("a .gitignore already in the folder is left alone")
