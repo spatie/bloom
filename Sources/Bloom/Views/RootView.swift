@@ -17,6 +17,8 @@ struct RootView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    @Bindable private var projectSetup = ProjectSetup.shared
+
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isCreateSheetPresented = false
     @State private var createTargetRepo: Repo?
@@ -90,6 +92,14 @@ struct RootView: View {
         }
         .sheet(isPresented: $isCreateSheetPresented) {
             CreateWorkspaceSheet(initialRepo: createTargetRepo)
+        }
+        // The offer to turn a folder into a repository. Presented here rather than at each of the
+        // controls that can raise it, because there are five of them across two windows and they
+        // all reach it through `AppModel.addRepository`.
+        .sheet(item: $projectSetup.request.on(.main)) { request in
+            ProjectSetupSheet(request: request) { path in
+                Task { await app.finishProjectSetup(path) }
+            }
         }
         // This one stays on the window rather than moving to the row that asked for it. It is not
         // presented by a click: `AppModel.archive` runs a git safety check first and only refuses

@@ -11,9 +11,14 @@ enum ProjectFolderPicker {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = false
+        // A new folder is now a perfectly good answer: an empty one becomes a repository with an
+        // empty first commit, which is exactly what a branch needs.
+        panel.canCreateDirectories = true
         panel.prompt = "Add project"
-        panel.message = "Choose the git repository you want to run agents in."
+        // It no longer has to be a repository. `AppModel.addRepository` offers to make one out of
+        // a folder that is not, so asking for a repository here would turn the offer into a
+        // secret.
+        panel.message = "Choose the folder you want to run agents in."
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         return url.path
     }

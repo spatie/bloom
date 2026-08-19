@@ -113,6 +113,9 @@ private struct GeneralSettingsView: View {
 /// Pairs editable project metadata with the effective layered settings developers need to debug.
 private struct ProjectSettingsView: View {
     @Environment(AppModel.self) private var app
+    /// This window raises its own copy of the offer. `RootView` presents the one belonging to the
+    /// main window, and `Binding.on` keeps a request from appearing on both at once.
+    @Bindable private var projectSetup = ProjectSetup.shared
     @State private var selectedRepoID: String?
     @State private var repoPendingRemoval: Repo?
 
@@ -186,6 +189,11 @@ private struct ProjectSettingsView: View {
         } message: { _ in
             Text("Existing workspace records for this project will also be removed.")
         }
+        .sheet(item: $projectSetup.request.on(.settings)) { request in
+            ProjectSetupSheet(request: request) { path in
+                Task { await app.finishProjectSetup(path) }
+            }
+        }
     }
 
     private func remove(_ repo: Repo) {
@@ -195,7 +203,9 @@ private struct ProjectSettingsView: View {
 
     private func addProjectFolder() {
         guard let path = ProjectFolderPicker.choose() else { return }
-        Task { await app.addRepository(at: path) }
+        // Named, because a folder that is not a repository yet raises an offer, and the offer has
+        // to appear on this window rather than on the one behind it.
+        Task { await app.addRepository(at: path, presentedIn: .settings) }
     }
 }
 

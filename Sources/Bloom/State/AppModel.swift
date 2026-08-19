@@ -498,7 +498,36 @@ final class AppModel {
 
     // MARK: - Repos
 
-    func addRepository(at path: String) async {
+    /// Adds a folder as a project, or offers to make it into one.
+    ///
+    /// A folder that is not a git repository used to end here, in an alert reading "... is not a
+    /// git repository", which is true and useless: it names the problem and offers nothing. Every
+    /// route in now asks the same three questions first. A repository is added. A folder that has
+    /// no business becoming one, a home directory or somebody's whole projects folder, is refused
+    /// with a reason. Anything else is offered `ProjectSetupSheet`.
+    ///
+    /// - Parameter surface: which window asked, so the offer appears on that one. See
+    ///   `ProjectSetupSurface`.
+    func addRepository(at path: String, presentedIn surface: ProjectSetupSurface = .main) async {
+        guard manager != nil else { return }
+
+        let facts = await RepositoryStarter.inspect(path)
+        switch FolderVerdict.of(facts) {
+        case .alreadyRepository:
+            await addKnownRepository(at: facts.path)
+
+        case .refuse(let refusal):
+            alert = BloomAlert(
+                title: "Bloom will not make a repository here", message: refusal.sentence
+            )
+
+        case .offer:
+            await offerToStartRepository(at: facts.path, presentedIn: surface)
+        }
+    }
+
+    /// The original path, for a folder git already recognises.
+    private func addKnownRepository(at path: String) async {
         guard let manager else { return }
         do {
             _ = try await manager.addRepository(at: path)
@@ -506,6 +535,30 @@ final class AppModel {
         } catch {
             alert = BloomAlert(title: "Could not add that folder", message: error.readableMessage)
         }
+    }
+
+    /// Walks the folder off the main actor and raises the offer.
+    ///
+    /// The walk is what the dialog's promises are made of, and a folder with a large
+    /// `node_modules` in it takes long enough to count that doing it here would freeze the window
+    /// between the file panel closing and the sheet appearing.
+    private func offerToStartRepository(at path: String, presentedIn surface: ProjectSetupSurface) async {
+        let contents = await Task.detached { RepositoryStarter.scan(path) }.value
+        let identityProblem = await RepositoryStarter.identityProblem(at: path)
+
+        ProjectSetup.shared.present(ProjectSetup.Request(
+            path: path,
+            contents: contents,
+            surface: surface,
+            identityProblem: identityProblem
+        ))
+    }
+
+    /// Called by `ProjectSetupSheet` once the folder really is a repository.
+    func finishProjectSetup(_ path: String?) async {
+        ProjectSetup.shared.dismiss()
+        guard let path else { return }
+        await addKnownRepository(at: path)
     }
 
     func removeRepository(_ repo: Repo) async {
@@ -538,12 +591,22 @@ final class AppModel {
     /// `opensWith` decides the starting layout, not a mode: see `WorkspaceStartMode`. A terminal
     /// workspace skips the session and the opening message, because there is nobody to send one
     /// to, and names its own branch since there is no task to derive one from.
+    /// `controls` are the model, effort, permission mode and fast mode chosen in the create sheet's
+    /// composer footer, which have to be written onto the session before its first turn runs rather
+    /// than left to the app-wide defaults. Nil everywhere else, which keeps those callers exactly
+    /// as they were.
+    ///
+    /// `staged` are attachments written before this worktree existed. They are moved into it here,
+    /// between the worktree being cut and the opening turn being handed over, because that is the
+    /// only moment at which the destination exists and nothing is reading the prompt yet.
     func createWorkspace(
         in repo: Repo,
         prompt: String,
         baseBranch: String? = nil,
         opensWith: WorkspaceStartMode = .chat,
-        branch: String? = nil
+        branch: String? = nil,
+        controls: ComposerControls? = nil,
+        staged: StagedAttachments? = nil
     ) async -> Workspace? {
         guard let manager, let store else { return nil }
         isCreatingWorkspace = true
@@ -588,12 +651,29 @@ final class AppModel {
 
             let session = try await store.upsert(Session(
                 workspaceID: workspace.id,
-                title: Git.title(from: prompt, maxLength: 40)
+                title: Git.title(from: prompt, maxLength: 40),
+                model: controls?.model ?? AppDefaults.fallbackModel,
+                effort: controls?.effort ?? AppDefaults.fallbackEffort,
+                permissionMode: controls?.permissionMode ?? AppDefaults.fallbackPermissionMode
             ))
+            // Fast mode has no column, and the marker stops the composer's first-open defaults
+            // from overruling any of the four the moment the workspace is opened.
+            await controls?.store(sessionID: session.id, in: store)
             await model.reloadSessions()
             model.activeSessionID = session.id
 
-            model.startSetupThenSend(prompt: prompt, repo: repo)
+            // The trailer is composed last and only for the agent. The branch, the workspace name
+            // and the session title all come from what the user typed, and a list of attachment
+            // paths appended to that would name a workspace after a screenshot.
+            var opening = prompt
+            if let staged, !staged.attachments.isEmpty {
+                let moved = AttachmentFiles.adopt(
+                    staged.attachments, from: staged.directory, into: workspace.path
+                )
+                opening = PromptAttachments.compose(text: prompt, attachments: moved)
+            }
+
+            model.startSetupThenSend(prompt: opening, repo: repo)
             return workspace
         } catch {
             alert = BloomAlert(title: "Could not create the workspace", message: error.readableMessage)
