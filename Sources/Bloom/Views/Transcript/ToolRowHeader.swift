@@ -1,4 +1,5 @@
 import SwiftUI
+import BloomCore
 
 /// The single line a tool call occupies while it is closed: what it did, to what, and how long it
 /// took, on the columns every other row uses.
