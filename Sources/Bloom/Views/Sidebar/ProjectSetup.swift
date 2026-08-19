@@ -59,6 +59,20 @@ final class ProjectSetup {
     func isPresenting(_ surface: ProjectSetupSurface) -> Bool {
         request?.surface == surface
     }
+
+    /// Which half of the dialog a capture run wants to see, from `--project-setup-choice github`.
+    ///
+    /// The GitHub half only appears once its radio button has been pressed, and a capture run has
+    /// no way to press one. Without this the owner picker, the name field and the availability
+    /// line could not be looked at at all, which is exactly the situation that leaves an interface
+    /// shipping unseen. Nil in every ordinary launch, and it changes nothing but which option
+    /// starts selected.
+    static var capturedChoice: String? {
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: "--project-setup-choice"),
+              index + 1 < arguments.count else { return nil }
+        return arguments[index + 1]
+    }
 }
 
 extension Binding where Value == ProjectSetup.Request? {
@@ -77,4 +91,15 @@ extension Binding where Value == ProjectSetup.Request? {
             }
         )
     }
+}
+
+extension Notification.Name {
+    /// Hands a folder to `AppModel.addRepository` from outside the file panel.
+    ///
+    /// The only way into this dialog is an `NSOpenPanel`, and a modal file panel cannot be
+    /// answered by anything but a person, so without this the offer could not be looked at
+    /// without asking one for a screenshot. `Snapshot`'s `--project-setup` posts it. Nothing
+    /// short-circuits: the path goes through the same inspection, the same verdict and the same
+    /// walk as a folder somebody chose.
+    static let bloomOfferProjectSetup = Notification.Name("bloomOfferProjectSetup")
 }

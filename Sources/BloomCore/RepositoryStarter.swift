@@ -364,6 +364,15 @@ public enum RepositoryStarter {
             )
         }
 
+        // An origin that is already set is proof that both of the next two steps have run: Bloom
+        // only ever points origin at a repository it has just created. Without this, a retry after
+        // a failed push would try to create the repository a second time and be told, correctly,
+        // that the name is taken.
+        if let existing = await Git.remoteURL("origin", in: folder), !existing.isEmpty {
+            done.insert(.createRemoteRepository)
+            done.insert(.addOrigin)
+        }
+
         // 3. The repository on GitHub. Empty: nothing is uploaded by this step.
         var url = await GitHub.remoteURL(owner: owner, name: name)
         if !done.contains(.createRemoteRepository) {

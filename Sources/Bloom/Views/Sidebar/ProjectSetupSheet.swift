@@ -31,7 +31,7 @@ struct ProjectSetupSheet: View {
         case finished(RepositoryStartOutcome)
     }
 
-    @State private var choice: Choice = .local
+    @State private var choice: Choice
     @State private var owners: [GitHubOwner] = []
     @State private var owner = ""
     @State private var name = ""
@@ -48,25 +48,36 @@ struct ProjectSetupSheet: View {
     /// the user is still looking at the field.
     private static let availabilityDelay = Duration.milliseconds(450)
     private static let width: CGFloat = 560
+    /// Enough to see what is being kept out without the list becoming the dialog.
+    private static let excludedShown = 8
+
+    init(request: ProjectSetup.Request, onFinish: @escaping (String?) -> Void) {
+        self.request = request
+        self.onFinish = onFinish
+        // Local unless a capture run asked for the other half. See `ProjectSetup.capturedChoice`
+        // for why that exists at all.
+        _choice = State(initialValue: ProjectSetup.capturedChoice == "github" ? .gitHub : .local)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Hairline()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: Metrics.gutter) {
-                    switch phase {
-                    case .choosing: offer
-                    case .working(let step): working(step)
-                    case .failed(let failure): failed(failure)
-                    case .finished(let outcome): finished(outcome)
-                    }
+            // Deliberately not a ScrollView. One takes every point it is offered, so a dialog with
+            // two paragraphs in it stood 420 points tall with 200 of them empty. The content is
+            // bounded instead: the file list is capped and the GitHub half only exists once it
+            // has been chosen, so the sheet is as tall as what is in it.
+            VStack(alignment: .leading, spacing: Metrics.gutter) {
+                switch phase {
+                case .choosing: offer
+                case .working(let step): working(step)
+                case .failed(let failure): failed(failure)
+                case .finished(let outcome): finished(outcome)
                 }
-                .padding(Metrics.gutter)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxHeight: 420)
+            .padding(Metrics.gutter)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Hairline()
             footer
@@ -219,7 +230,7 @@ struct ProjectSetupSheet: View {
 
                 if isShowingExcluded {
                     VStack(alignment: .leading, spacing: Metrics.spacingTight) {
-                        ForEach(request.contents.excluded) { item in
+                        ForEach(request.contents.excluded.prefix(Self.excludedShown)) { item in
                             HStack(spacing: Metrics.spacingSmall) {
                                 Image(systemName: item.reason == .sensitive
                                     ? "key.fill" : "folder.badge.gearshape")
@@ -231,6 +242,11 @@ struct ProjectSetupSheet: View {
                                     .lineLimit(1)
                                     .truncationMode(.middle)
                             }
+                        }
+                        if request.contents.excluded.count > Self.excludedShown {
+                            Text("and \(request.contents.excluded.count - Self.excludedShown) more")
+                                .font(Typo.codeTiny)
+                                .foregroundStyle(Palette.textTertiary)
                         }
                     }
                     .padding(.leading, Metrics.inset)
@@ -491,6 +507,12 @@ struct ProjectSetupSheet: View {
                     // in it, so it is a project Bloom can run, and refusing to add it over a
                     // GitHub failure would throw away work that succeeded.
                     Button("Add the project anyway") { onFinish(request.path) }
+                }
+                if failure.step >= .createRemoteRepository {
+                    // The local half stands, so going back is a way to change the name after
+                    // GitHub said it was taken. Running again skips whatever already worked: the
+                    // commit is detected, and so is an origin that was already added.
+                    Button("Back") { phase = .choosing }
                 }
                 Button("Close", role: .cancel) { onFinish(nil) }
                     .keyboardShortcut(.cancelAction)

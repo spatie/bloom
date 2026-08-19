@@ -141,6 +141,10 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .bloomToggleSidebar)) { _ in
             columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
         }
+        .onReceive(NotificationCenter.default.publisher(for: .bloomOfferProjectSetup)) { note in
+            guard let path = note.object as? String else { return }
+            Task { await app.addRepository(at: path) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .bloomNewWorkspace)) { note in
             createTargetRepo = note.object as? Repo ?? app.selectedWorkspace.flatMap(app.repo(for:))
             isCreateSheetPresented = true
