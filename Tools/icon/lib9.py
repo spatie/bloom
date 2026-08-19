@@ -28,12 +28,18 @@ import math
 import os
 import sys
 
-sys.path.insert(0, "/Users/freek/dev/code/Baton/Tools/icon")
-import lib  # noqa: E402  the app's own drawing library, read only
+# lib.py is the app's own drawing library and is VENDORED beside this file, so
+# a round of icon work cannot be broken by somebody editing the app while it is
+# in progress and so this folder still builds after the app has moved on. The
+# app's copy is appended as a fallback and is byte for byte the same file.
+HERE_FIRST = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE_FIRST)
+sys.path.append("/Users/freek/dev/code/Baton/Tools/icon")
+import lib  # noqa: E402
 from lib import (C, contact, flat, sh_circle, sh_group, sh_move, sh_path,  # noqa: F401
                  sh_poly, sh_rect, shade, sheen, step, thick)  # noqa: F401
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = HERE_FIRST
 D = os.path.expanduser("~/Desktop/bloom-icons-v9")
 
 CANVAS = 1024
@@ -101,6 +107,47 @@ def wrap_layer(body):
     system owns the shape. Anything drawn past the edge is cut by the system,
     which is the only reason a piece can meet the edge cleanly."""
     return HEAD + "<defs>" + lib.defs() + "</defs>" + body + "</svg>"
+
+
+# The Big Sur template, kept for one job only. macOS 26 masks a layered icon
+# and a flat .icns alike, but macOS 15 does not: there the .icns is drawn as it
+# is, and it has to carry the old 824 body inside a 1024 canvas or it lands in
+# the dock a fifth too big. Bloom's Info.plist still says 15.0, so the flat
+# fallback is drawn to the old template and only the layered document is full
+# bleed. There is no third option: Apple refused separate icons per OS version.
+LEGACY_INSET = 100.0
+LEGACY_BODY = 824.0
+LEGACY_TILE = lib.TILE
+
+
+def wrap_legacy(body):
+    """The flat fallback for anything that does not draw a layered icon.
+
+    The whole composition is scaled down about the centre by 824/1024 and
+    clipped to the Big Sur tile, so what fills the canvas in the layered
+    document fills the old body here and the two are the same picture at two
+    scales rather than two drawings.
+    """
+    k = LEGACY_BODY / CANVAS
+    return (HEAD + "<defs>" + lib.defs()
+            + '<clipPath id="l"><path d="%s"/></clipPath>' % LEGACY_TILE
+            + "</defs>"
+            + '<g clip-path="url(#l)">'
+            + '<g transform="translate(%.4f %.4f) scale(%.6f)">' % (CX * (1 - k),
+                                                                   CY * (1 - k), k)
+            + body + "</g></g></svg>")
+
+
+def wrap(body):
+    """Deliberately not a function. There are two wraps in this round and they
+    are not interchangeable: a layered asset must NOT be masked, because the
+    system masks it and Apple's guidance says a pre-masked layer damages the
+    specular, and a flat file must be. Ask for the one you mean, or use
+    gen9.render, which hands back both already wrapped."""
+    raise TypeError(
+        "lib9 has no single wrap. Use wrap_layer(body) for a layered asset, "
+        "wrap_flat(body) for a full canvas flat file, wrap_legacy(body) for "
+        "the pre macOS 26 .icns, or gen9.render(fn, small) for all of them.")
 
 
 def fullbleed(colour):

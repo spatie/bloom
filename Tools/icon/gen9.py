@@ -33,7 +33,7 @@ import lib9
 import lib  # noqa: E402  reached through lib9's sys.path
 from lib9 import (CX, CY, S, band, capped, clipped, contact, flat, fullbleed,
                   outside, sh_circle, sh_group, sh_squircle, sheen, squircle,
-                  wrap_flat, wrap_layer)
+                  wrap_flat, wrap_layer, wrap_legacy)
 
 D = lib9.D
 
@@ -360,26 +360,34 @@ BLURB = {
     "02-inset": "every piece off the edge, nothing to catch a rim",
     "03-stop": "ground to the edge, the bar stopping short",
     "04-plate": "our own margin instead of the system's",
-    "05-quiet": "01 with specular and shadow off in icon.json",
+    "05-quiet": "specular and shadow off in icon.json",
     "06-breach": "the lanes held in, the bar alone leaving",
     "07-corner": "cut on the curve of the lower right corner",
     "08-lift": "raised, wider than the tile, laid across it",
     "09-pierce": "the plate broken on both sides by one thread",
-    "10-tab": "the thread leaves the body and ends in the open",
+    "10-tab": "the thread leaves the body, ends in the open",
 }
 
 
 def render(fn, small=False):
     """One direction, both ways round.
 
-    Returns the layered document's layers, front to back, each already a whole
-    SVG, and the flat composite as a whole SVG. lib keeps its gradients and
-    clip paths in a module level list, so the list is reset once, the direction
-    is drawn once, and every file written out carries the same set of defs.
-    Unused defs in a layer cost bytes and nothing else.
+    Returns three things.
+
+      layers  the layered document's groups, front to back, each already a
+              whole SVG and none of them masked
+      flat    the composite filling the canvas, clipped to the system's shape.
+              For the sheets, for the web, and for anything on macOS 26
+      legacy  the same composite at the Big Sur template, 824 inside 1024, for
+              the `.icns` that macOS 15 will draw as it is
+
+    lib keeps its gradients and clip paths in a module level list, so the list
+    is reset once, the direction is drawn once, and every file written out
+    carries the same set of defs. Unused defs in a layer cost bytes and nothing
+    else.
     """
     lib.SMALL = small
     lib.reset()
     layers, body = fn(small)
     out = [(name, wrap_layer(b), keys) for name, b, keys in layers]
-    return out, wrap_flat(body)
+    return out, wrap_flat(body), wrap_legacy(body)

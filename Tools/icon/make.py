@@ -18,11 +18,16 @@ geometry.
 
 Three rules worth knowing before editing this file.
 
-THE ARTWORK CARRIES NO TILE OF ITS OWN. An earlier version drew the rounded
-rectangle itself and then let the system draw its tile over it, and the sliver
-of ours that showed past theirs was the white border the owner reported. The
-system's tile is the only tile. That is the whole difference between `flush` and
-what shipped before it.
+THE LAYERED ARTWORK CARRIES NO TILE OF ITS OWN, AND THE FLAT ARTWORK DOES.
+
+On macOS 26 the 1024 canvas IS the tile: the system takes the whole canvas,
+masks it and lights it. An earlier version drew its own 824 tile inside that, so
+it sat at 80.5 percent of the system's, and the ring of bare material left over
+was the white border the owner reported. Not a specular, not a rim: 100 units
+per side of the system's own tile showing past ours.
+
+The flat `.icns` is the opposite case. The app runs on macOS 15 too, where
+nothing draws a tile for us, so there the figure keeps the Big Sur template.
 
 THE 16 AND 32 POINT BITMAPS COME FROM SEPARATE ARTWORK with the lanes opened
 up. At that size the three bands are a few pixels each and they close into a
@@ -67,12 +72,18 @@ def icns():
     """Apple asks for each size twice, at 1x and 2x, and the 2x of one size is
     the same pixels as the 1x of the next, so each pixel size is rendered once
     and copied into both names."""
-    # `gen9.render` is what turns a design into SVG documents. Calling
-    # `flush()` directly returns raw bodies with no defs and no header, and it
-    # also skips the reset that stops gradient ids leaking between the full and
-    # the small artwork.
-    _, full = gen9.render(gen9.flush)
-    _, small = gen9.render(gen9.flush, small=True)
+    # THE THIRD RETURN VALUE, not the second. `render` gives back the layers,
+    # the full bleed composite, and the same composite drawn at the Big Sur
+    # template with the figure at 824 inside 1024. The `.icns` wants the third.
+    #
+    # Measured on macOS 26: a full canvas opaque icns is mapped onto the system
+    # tile, a classic 824-in-1024 squircle is passed straight through at the
+    # same size a layered icon lands at, and anything else gets the grey jail.
+    # The app runs on macOS 15 as well, where nothing draws a tile for us, so
+    # the flat icon has to carry its own. Only the layered document goes full
+    # bleed.
+    _, _, full = gen9.render(gen9.flush)
+    _, _, small = gen9.render(gen9.flush, small=True)
 
     iconset = os.path.join(HERE, ".build", "AppIcon.iconset")
     shutil.rmtree(iconset, ignore_errors=True)
@@ -103,7 +114,7 @@ def layered():
     """The three pieces the system composites, back to front: the ground, the
     two arriving lanes, the leaving bar. Written with the app's own contact
     shadows left out, because the system seats the layers itself."""
-    layers, _ = gen9.render(gen9.flush)
+    layers, _, _ = gen9.render(gen9.flush)
     bundle = os.path.join(RESOURCES, "Bloom.icon")
     assets = os.path.join(bundle, "Assets")
     os.makedirs(assets, exist_ok=True)
