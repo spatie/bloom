@@ -41,6 +41,12 @@ struct HomeView: View {
     /// without this, the only way into the list is to click a row, and clicking a row opens it.
     /// A list you cannot arrow down is not a list.
     @FocusState private var isListFocused: Bool
+    /// The row under the pointer, held here rather than in each row, so crossing the pane lights
+    /// one row at a time and a hover invalidates the list rather than nothing at all.
+    @State private var hovered: String?
+    /// The id of the row being renamed in place, shared across the whole list so only one field
+    /// can ever be open. The same arrangement the sidebar's rows use.
+    @State private var renaming: String?
 
     /// Held by `AppModel` rather than by this view, which is thrown away and rebuilt every time
     /// the selection leaves Home and comes back. A filter in `@State` would be cleared by opening
@@ -93,10 +99,13 @@ struct HomeView: View {
         }
     }
 
-    /// A real `List`, so the rows come with the things a hand-built stack never gets right:
-    /// AppKit's own selection fill (the accent while the list holds the keyboard, a quiet grey
-    /// when it does not), arrow key navigation between rows, and row recycling, which is what
+    /// A real `List`, so the rows come with the things a hand-built stack never gets right: arrow
+    /// key navigation between rows, section headers that stick, and row recycling, which is what
     /// keeps five hundred workspaces from being five hundred live views.
+    ///
+    /// The one thing it is NOT allowed to bring is its own selection fill. Under `.listStyle(.inset)`
+    /// that is a full bleed bar of the system accent, which was a third selection treatment in a
+    /// window that already has one. `HomeRowBackground` is painted over it.
     private var list: some View {
         List(selection: $selected) {
             ForEach(listing.groups) { group in
@@ -106,8 +115,9 @@ struct HomeView: View {
                             row: row,
                             isRunning: app.isRunning(row.workspace),
                             now: now,
-                            isSelected: selected == row.id,
-                            isListFocused: isListFocused
+                            isRenaming: renaming == row.id,
+                            onCommitRename: { commitRename(row, to: $0) },
+                            onCancelRename: { renaming = nil }
                         )
                         .tag(row.id)
                         // Simultaneous rather than `onTapGesture`, so the list still takes the
@@ -115,6 +125,20 @@ struct HomeView: View {
                         // without it the arrow keys have no way of ever reaching these rows.
                         .simultaneousGesture(TapGesture().onEnded { open(row) })
                         .listRowInsets(Self.rowInsets)
+                        // Home's rows answered to the pointer with nothing at all: no tint under
+                        // it, and no menu on a right click, while the identical row in the sidebar
+                        // two hundred points to the left had both. See `HomeRowBackground` for why
+                        // the fill is drawn here rather than left to the list.
+                        .onHoverChange { hovered = $0 ? row.id : (hovered == row.id ? nil : hovered) }
+                        .listRowBackground(
+                            HomeRowBackground(
+                                isSelected: selected == row.id,
+                                isHovered: hovered == row.id
+                            )
+                        )
+                        .contextMenu {
+                            HomeRowMenu(row: row) { renaming = $0 }
+                        }
                         // An archived workspace has no worktree to open, so the keyboard skips
                         // it rather than landing on a row where Return does nothing. It is still
                         // drawn, still readable and still says what it is.
@@ -233,12 +257,27 @@ struct HomeView: View {
     private var emptyState: (some View)? {
         if app.repos.isEmpty {
             ContentUnavailableView {
-                Label("No projects yet", systemImage: "folder.badge.plus")
+                // A different heading and a different mark from the sidebar's, for the same
+                // reason as the sentence under it: on first run the two panels are on screen
+                // together and they were the same panel drawn twice. The sidebar's names what is
+                // missing, because it is standing where the projects will be. This one names what
+                // this pane is for.
+                Label("Nothing running yet", systemImage: "square.stack.3d.up")
             } description: {
-                // Word for word what the sidebar's own empty state says, because on a machine with
-                // no projects both are on screen at once. Two different pitches for the same
-                // missing thing read as two different offers.
-                Text("Point Bloom at a git repository to start running agents in it.")
+                // NOT word for word what the sidebar says, which is what this was.
+                //
+                // The argument for matching it was that two different pitches for one missing
+                // thing read as two different offers. That is true of two pitches; it is not what
+                // this was. On first run both panels are on screen at once, one in the sidebar and
+                // one in the middle of the window, and they were the same sentence printed twice,
+                // eight inches apart, under two headings that also matched. A window that says the
+                // same thing to you twice reads as a rendering bug.
+                //
+                // So the sidebar keeps the pitch, because it is the panel standing where projects
+                // will be and it is the one with the button that adds one. Home says what Home
+                // will show, in the future tense, which is the one thing the sidebar's copy does
+                // not say and the thing that makes the second panel worth reading.
+                Text("Everything running on this Mac will be listed here, newest first.")
             } actions: {
                 Button("Choose a folder", systemImage: "folder", action: addProject)
                     .buttonStyle(.borderedProminent)
@@ -257,7 +296,10 @@ struct HomeView: View {
                 ContentUnavailableView {
                     Label("No workspace matches", systemImage: "magnifyingglass")
                 } description: {
-                    Text("Nothing here is called, branched or filed under \"\(filter.query)\".")
+                    // Typographic quotes. Everything else in the window is careful about this,
+                    // and a straight pair in the one sentence that quotes the user reads as a
+                    // string literal that escaped.
+                    Text("Nothing here is called, branched or filed under \u{201C}\(filter.query)\u{201D}.")
                 } actions: {
                     Button("Clear the search") { app.homeFilter.query = "" }
                 }
@@ -341,5 +383,12 @@ struct HomeView: View {
 
     private func addProject() {
         Task { await app.addProjectByAsking() }
+    }
+
+    private func commitRename(_ row: HomeRow, to newName: String) {
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        renaming = nil
+        guard !name.isEmpty, name != row.workspace.name else { return }
+        Task { await app.rename(row.workspace, to: name) }
     }
 }

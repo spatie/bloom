@@ -36,9 +36,9 @@ struct TurnDurationTests {
     @Test(
         "a value that would print as sixty seconds is a minute, not a minute shaped second",
         arguments: [
-            (59_950, "1m, 0.0s"),
-            (59_990, "1m, 0.0s"),
-            (60_000, "1m, 0.0s"),
+            (59_950, "1m 0.0s"),
+            (59_990, "1m 0.0s"),
+            (60_000, "1m 0.0s"),
         ]
     )
     func sixtySecondsRollsOver(milliseconds: Int, expected: String) {
@@ -48,9 +48,9 @@ struct TurnDurationTests {
     @Test(
         "under ten minutes keeps the tenths, past that it drops them",
         arguments: [
-            (112_600, "1m, 52.6s"),
-            (599_000, "9m, 59.0s"),
-            (1_903_000, "31m, 43s"),
+            (112_600, "1m 52.6s"),
+            (599_000, "9m 59.0s"),
+            (1_903_000, "31m 43s"),
         ]
     )
     func minutes(milliseconds: Int, expected: String) {
@@ -60,9 +60,9 @@ struct TurnDurationTests {
     @Test(
         "a remainder that would print as sixty carries into the minutes at either precision",
         arguments: [
-            (599_990, "10m, 0.0s"),
-            (1_919_600, "32m, 0s"),
-            (1_919_990, "32m, 0s"),
+            (599_990, "10m 0.0s"),
+            (1_919_600, "32m 0s"),
+            (1_919_990, "32m 0s"),
         ]
     )
     func remainderCarries(milliseconds: Int, expected: String) {

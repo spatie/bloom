@@ -28,6 +28,8 @@ struct AttachmentPreview: View {
         /// pixels: at 2x a 520 point thumbnail comes back 1040 wide, and drawing that as points
         /// puts a card twice the width of the window over the composer.
         case ready(CGImage, scale: CGFloat)
+        /// The head of a text file, already trimmed to what will fit, and whether there was more.
+        case text([String], truncated: Bool)
         case unavailable
         case missing
     }
@@ -58,6 +60,8 @@ struct AttachmentPreview: View {
             // resizable one has no height until something proposes one, and the only height on
             // offer up there is the composer's own.
             Image(image, scale: scale, label: Text("Preview of \(url.lastPathComponent)"))
+        case .text(let lines, let truncated):
+            source(lines, truncated: truncated)
         case .unavailable:
             unpreviewable
         case .missing:
@@ -67,6 +71,42 @@ struct AttachmentPreview: View {
                 detail: "It is no longer on disk."
             )
         }
+    }
+
+    /// The head of a source file, set the way the transcript sets code.
+    ///
+    /// Quick Look can draw a text file and the answer was never worth having: it renders the
+    /// content onto a page, and a page is a portrait rectangle whatever is on it, so a seventeen
+    /// line file came back as a 422 by 445 thumbnail with the text in the top third and two
+    /// hundred and fifty points of white underneath. The card was that shape because the bitmap
+    /// was. Real text has the height of the text in it, which is the whole of what "size to
+    /// content" means here, and it is drawn as glyphs rather than as a picture of glyphs, so it is
+    /// sharp at any scale and legible at this size, which the thumbnail was not.
+    ///
+    /// Leading aligned and not wrapped: code that soft wraps in a hover card reads as different
+    /// code. A long line is cut and says so with the same ellipsis a truncated file gets.
+    private func source(_ lines: [String], truncated: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // One `Text` a line rather than one `Text` with newlines in it. A single run wraps,
+            // and a wrapped line of code is a line of code that is not there; per line, each one
+            // truncates at the card's own width instead, which is also what makes the block as
+            // wide as its widest line and no wider.
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            if truncated {
+                Text("\u{2026}")
+                    .foregroundStyle(Palette.textTertiary)
+            }
+        }
+        .font(Typo.codeSmall)
+        .foregroundStyle(Palette.textPrimary)
+        .textSelection(.disabled)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("The first lines of \(url.lastPathComponent)")
     }
 
     /// A file Quick Look cannot draw. The file's own icon, its kind and its size: everything that
@@ -132,6 +172,18 @@ struct AttachmentPreview: View {
             return
         }
 
+        // Text before Quick Look, because for text Quick Look is the wrong answer. See `source`.
+        if !FileMediaView.isMedia(path: url.path),
+           AttachmentFiles.byteCount(of: url.path) <= SourceHead.byteLimit {
+            let path = url.path
+            let head = await Task.detached(priority: .utility) { SourceHead.read(path) }.value
+            guard !Task.isCancelled else { return }
+            if let head, !head.lines.isEmpty {
+                phase = .text(head.lines, truncated: head.truncated)
+                return
+            }
+        }
+
         let scale = NSScreen.main?.backingScaleFactor ?? 2
         let request = QLThumbnailGenerator.Request(
             fileAt: url,
@@ -149,5 +201,49 @@ struct AttachmentPreview: View {
             guard !Task.isCancelled else { return }
             phase = .unavailable
         }
+    }
+}
+
+/// Reading the head of a text file, off the main actor.
+///
+/// Its own type rather than a method on the view, because a `View` is main actor isolated and so
+/// are its statics, and this runs on a detached task: the limits below would be main actor state
+/// read from a background thread.
+enum SourceHead {
+    /// How many lines of a text file are shown, and how wide a line may be before it is cut.
+    ///
+    /// Both are about the card rather than about the file: past this it stops being a glance and
+    /// starts being a reader, and the file is one click away in a review tab. Twenty four lines at
+    /// the code rung fit inside the card's own height cap with room to spare.
+    static let lines = 24
+    static let columns = 160
+
+    /// Past this, a file is an attachment rather than something to print. Half a megabyte of one
+    /// line JSON has nothing to show and reading it is not free.
+    static let byteLimit = 512 * 1024
+
+    /// The first lines of a file, or nil for anything that is not UTF-8 after all.
+    static func read(_ path: String) -> (lines: [String], truncated: Bool)? {
+        guard let data = FileManager.default.contents(atPath: path),
+              let text = String(data: data, encoding: .utf8)
+        else { return nil }
+
+        // A file with no newline at the end must not gain a blank last line, and a file that is
+        // nothing but whitespace has nothing to show.
+        var all = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        while let last = all.last, last.trimmingCharacters(in: .whitespaces).isEmpty {
+            all.removeLast()
+        }
+        guard !all.isEmpty else { return nil }
+
+        let truncated = all.count > lines
+        let head = all.prefix(lines).map { line -> String in
+            // Tabs drawn at their own width make one long line as wide as the screen.
+            let expanded = line.replacingOccurrences(of: "\t", with: "    ")
+            return expanded.count > columns
+                ? String(expanded.prefix(columns)) + "\u{2026}"
+                : expanded
+        }
+        return (head, truncated)
     }
 }

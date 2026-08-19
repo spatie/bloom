@@ -1,7 +1,11 @@
 import Foundation
 
-/// Turn durations read the way Conductor writes them: "1m, 52.6s" while the tenths still mean
-/// something, "31m, 43s" once they do not.
+/// Turn durations read the way Conductor writes them: "1m 52.6s" while the tenths still mean
+/// something, "31m 43s" once they do not.
+///
+/// The minutes and the seconds are separated by a space rather than by a comma, because the
+/// decimal separator is already a comma on half the machines this runs on and "3m, 34,0s" asks
+/// one mark to mean two different things in one string.
 ///
 /// The rounding is done before the unit is chosen rather than after. Formatting first and picking
 /// the unit from the unrounded number is how 1,919,600 milliseconds came out as "31m, 60s" and
@@ -31,12 +35,12 @@ public enum TurnDuration {
         if minutes < 10 {
             // Same again one level up: 9m 59.97s prints its remainder as 60.0.
             return (remainder * 10).rounded() < 600
-                ? "\(minutes)m, \(remainder.formatted(tenths(locale)))s"
-                : "\(minutes + 1)m, \(Double.zero.formatted(tenths(locale)))s"
+                ? "\(minutes)m \(remainder.formatted(tenths(locale)))s"
+                : "\(minutes + 1)m \(Double.zero.formatted(tenths(locale)))s"
         }
         return remainder.rounded() < 60
-            ? "\(minutes)m, \(remainder.formatted(whole(locale)))s"
-            : "\(minutes + 1)m, 0s"
+            ? "\(minutes)m \(remainder.formatted(whole(locale)))s"
+            : "\(minutes + 1)m 0s"
     }
 
     /// The compact form a single row uses, where there is room for four characters at most.

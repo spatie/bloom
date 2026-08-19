@@ -7,6 +7,8 @@ import BloomCore
 struct TurnFooterView: View {
     var rows: [TranscriptRow]
     var row: TranscriptRow
+    /// What the file chips show their paths relative to. See `TurnFile.display(in:)`.
+    var worktree: String
 
     /// More chips than this and the footer stops being a footer.
     private static let visibleFileLimit = 6
@@ -141,7 +143,7 @@ struct TurnFooterView: View {
     private func fileChips(limit: Int) -> some View {
         HStack(spacing: TranscriptLayout.block) {
             ForEach(files.prefix(limit)) { file in
-                TurnFileChip(file: file)
+                TurnFileChip(file: file, worktree: worktree)
             }
             if files.count > limit {
                 Chip(text: "+\(files.count - limit) more")

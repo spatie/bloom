@@ -20,29 +20,30 @@ import BloomCore
 /// the edge of the row rather than a second one. Nothing is carried by the rail alone: the same
 /// state is in the glyph's shape, in the row's accessibility label and, for an unread turn, in the
 /// weight of the name.
+///
+/// **The row draws no selection of its own and inverts nothing.** It used to take `isSelected` and
+/// `isListFocused` and flip every colour on the row to white when the list held the keyboard,
+/// because that is what `.listStyle(.inset)` paints underneath: a full bleed bar of the system
+/// accent. That made Home's keyboard selection a third selection treatment, next to the sidebar's
+/// and the inspector's soft inset grey, and by a distance the loudest thing in the window. The
+/// fill is now `HomeRowBackground`, handed to the list as a `listRowBackground`, which covers
+/// AppKit's own and is the same quiet grey the rest of the app selects with. Nothing on the row
+/// has to know it is selected any more, which is why every `isEmphasized` branch is gone.
 struct HomeListRow: View {
     var row: HomeRow
     var isRunning: Bool
     var now: Date
-    /// Whether this is the row the list has selected, and whether the list has the keyboard.
-    ///
-    /// Passed in rather than read from `\.backgroundProminence`, which is what the sidebar's rows
-    /// use. That environment value is only set for us by `.listStyle(.sidebar)`; under the inset
-    /// style a selected row is painted with the accent and told nothing about it, so the project
-    /// tile kept its own colour and the diff counts stayed green and red on a blue bar.
-    var isSelected: Bool
-    var isListFocused: Bool
+    /// Whether the row is the one being renamed in place. The list owns the id, so only one field
+    /// can ever be open.
+    var isRenaming: Bool
+    /// Raised to the list, which is also where the rename is committed from.
+    var onCommitRename: (String) -> Void
+    var onCancelRename: () -> Void
 
-    /// AppKit fills a selected row with the accent only while the list holds the keyboard in an
-    /// active window, and with a quiet grey otherwise. Inverting on anything less than all three
-    /// draws white text on that grey.
-    @Environment(\.controlActiveState) private var activeState
+    @State private var draft = ""
+    @FocusState private var fieldFocused: Bool
 
     private var workspace: Workspace { row.workspace }
-
-    private var isEmphasized: Bool {
-        isSelected && isListFocused && activeState == .key
-    }
 
     /// A hairline is too thin to read as a colour and a full chip is a second badge. Three points
     /// is what a coloured edge marker is on a Mac. Local rather than in `Metrics` because nothing
@@ -67,24 +68,45 @@ struct HomeListRow: View {
 
             RepoIcon(repo: row.repo)
 
-            WorkspaceNameText(workspace)
-                .fontWeight(workspace.unread ? .semibold : .regular)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            if isRenaming {
+                TextField("Workspace name", text: $draft)
+                    .textFieldStyle(.plain)
+                    .focused($fieldFocused)
+                    .onSubmit { onCommitRename(draft) }
+                    .onExitCommand(perform: onCancelRename)
+                    .task {
+                        draft = workspace.name
+                        // A beat, so the field exists before focus moves to it.
+                        try? await Task.sleep(for: .milliseconds(30))
+                        fieldFocused = true
+                    }
+            } else {
+                WorkspaceNameText(workspace)
+                    .fontWeight(workspace.unread ? .semibold : .regular)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
 
-            if workspace.pinned {
-                Image(systemName: "pin.fill")
-                    .font(Typo.micro)
-                    .foregroundStyle(
-                        isEmphasized ? Palette.selectedEmphasizedText : Palette.textTertiary
-                    )
-                    .accessibilityHidden(true)
+                if workspace.pinned {
+                    Image(systemName: "pin.fill")
+                        .font(Typo.micro)
+                        .foregroundStyle(Palette.textTertiary)
+                        .accessibilityHidden(true)
+                }
             }
 
             Spacer(minLength: Metrics.spacingWide)
 
             trailing
         }
+        // Said rather than inherited, and this is what stops the list from bleaching the row.
+        //
+        // `List` still knows which row is selected, because the arrow keys need it to, and AppKit
+        // still inverts a selected row's text to white for the accent fill it thinks it drew. The
+        // fill is covered by `HomeRowBackground`; the inversion is not, and without this the
+        // selected row's name went white on a pale grey plate and all but disappeared. Everything
+        // on the row that carries a colour of its own (the rail, the glyph, the counts) already
+        // states it; this is for everything that does not.
+        .foregroundStyle(Palette.textPrimary)
         // Dimmed as a whole rather than colour by colour. An archived workspace still has a
         // project mark, a diff and an age, and picking a quieter variant of each of them
         // would be four decisions where the row only makes one: this is over.
@@ -101,9 +123,6 @@ struct HomeListRow: View {
         .accessibilityInputLabels([workspace.name])
         .accessibilityAddTraits(.isButton)
         .help(help)
-        // The counts and the glyph carry their own colours, and the list inverts a selected row's
-        // text without knowing about them. This is the same signal the sidebar's rows send.
-        .environment(\.isOnEmphasizedSelection, isEmphasized)
     }
 
     // MARK: - Parts
@@ -130,13 +149,11 @@ struct HomeListRow: View {
                 // report about something that no longer exists.
                 Image(systemName: "archivebox")
                     .font(Typo.caption)
-                    .foregroundStyle(
-                        isEmphasized ? Palette.selectedEmphasizedText : Palette.textTertiary
-                    )
+                    .foregroundStyle(Palette.textTertiary)
                     .frame(width: Metrics.glyph, height: Metrics.glyph)
                     .accessibilityHidden(true)
             } else {
-                WorkspaceStatusGlyph(status: status, isOnSelection: isEmphasized)
+                WorkspaceStatusGlyph(status: status, isOnSelection: false)
                     .accessibilityHidden(true)
             }
 
@@ -151,6 +168,13 @@ struct HomeListRow: View {
                         deletions: workspace.deletions,
                         compact: true
                     )
+                    // The row's own dimming is not enough for these two. Everything else on an
+                    // archived row is grey to begin with, so 55 per cent of it reads as "over";
+                    // a saturated green and a saturated red at 55 per cent are still a saturated
+                    // green and a saturated red, and they were the loudest thing left on a row
+                    // that is supposed to be the quietest in the list. Drained of their hue they
+                    // dim with everything else, and the counts are still there to be read.
+                    .saturation(row.isArchived ? 0 : 1)
                 }
             }
             .frame(width: Self.diffWidth)
@@ -158,7 +182,7 @@ struct HomeListRow: View {
             Text(HomeAge.short(for: workspace.lastActivityAt, now: now))
                 .font(Typo.caption)
                 .monospacedDigit()
-                .foregroundStyle(isEmphasized ? Palette.selectedEmphasizedText : Palette.textTertiary)
+                .foregroundStyle(Palette.textTertiary)
                 .frame(width: Self.ageWidth, alignment: .trailing)
         }
     }
@@ -185,9 +209,7 @@ struct HomeListRow: View {
     }
 
     private var railTint: AnyShapeStyle {
-        isEmphasized
-            ? AnyShapeStyle(Palette.selectedEmphasizedText)
-            : WorkspaceStatusGlyph.tint(for: status)
+        WorkspaceStatusGlyph.tint(for: status)
     }
 
     // MARK: - Words
@@ -218,5 +240,45 @@ struct HomeListRow: View {
             )
         )
         return parts.joined(separator: ", ")
+    }
+}
+
+/// What a Home row is filled with: nothing at rest, the hover tint under the pointer, the quiet
+/// selection grey when it is the selected row.
+///
+/// It is handed to `List` as a `listRowBackground`, and it is opaque on purpose. AppKit paints its
+/// own selection behind every row of an inset list, in the system accent while the table holds the
+/// keyboard, and there is no way to ask it not to; a row background is drawn over the top of it,
+/// so painting the pane's own ground here is what takes the blue bar away. That leaves the row's
+/// selection entirely in Bloom's hands, which is the only way it could be made to match the
+/// sidebar and the inspector.
+///
+/// The fill is `Palette.selected` whether or not the list has focus, and that is a deliberate
+/// difference from `RowBackground`, whose emphasized branch exists for lists the arrow keys really
+/// do drive with a live consequence. Arrowing down Home moves a highlight and opens nothing until
+/// Return, so the emphatic fill would be promising something the list does not do.
+struct HomeRowBackground: View {
+    var isSelected: Bool
+    var isHovered: Bool
+
+    /// How far the fill stops short of the pane's edges. `List` adds an inset of its own that it
+    /// does not expose (see `HomeMetrics.rowInset`), so this is measured against the rail rather
+    /// than derived: it puts the fill's leading edge a spacing step outside the rail, which is
+    /// where the sidebar's own selection sits relative to its glyphs.
+    private static let inset: CGFloat = Metrics.spacing
+
+    var body: some View {
+        Palette.windowBackground
+            .overlay {
+                RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
+                    .fill(fill)
+                    .padding(.horizontal, Self.inset)
+                    .padding(.vertical, 1)
+            }
+    }
+
+    private var fill: Color {
+        if isSelected { return Palette.selected }
+        return isHovered ? Palette.hover : .clear
     }
 }

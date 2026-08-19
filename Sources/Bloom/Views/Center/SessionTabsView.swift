@@ -38,7 +38,7 @@ struct SessionTabsView: View {
     }
 
     var body: some View {
-        TabStrip(pane: Self.pane) {
+        TabStrip(pane: Self.pane, selection: selectedID) {
             HStack(spacing: 0) {
                 ForEach(Array(model.sessions.enumerated()), id: \.element.id) { index, session in
                     if index > 0 {
@@ -47,6 +47,7 @@ struct SessionTabsView: View {
                         )
                     }
                     sessionTab(session)
+                        .id(session.id)
                 }
 
                 ForEach(Array(toolTabs.enumerated()), id: \.element.id) { index, tab in
@@ -56,6 +57,7 @@ struct SessionTabsView: View {
                         )
                     }
                     toolTab(tab)
+                        .id(tab.id)
                 }
             }
         } trailing: {
@@ -82,6 +84,19 @@ struct SessionTabsView: View {
     /// changes must not make the strip move.
     private var order: [String] {
         model.sessions.map(\.id) + toolTabs.map(\.id)
+    }
+
+    /// Which tab the strip scrolls into view, as a plain id rather than as `CenterPaneContent`.
+    ///
+    /// Nil when the focused pane is showing something the strip does not have a tab for, which is
+    /// the moment after a tab is closed: aiming a scroll at an id that is no longer laid out does
+    /// nothing, and this says so rather than relying on that.
+    private var selectedID: AnyHashable? {
+        switch focused {
+        case .chat(let id): model.sessions.contains { $0.id == id } ? AnyHashable(id) : nil
+        case .tool(let id): toolTabs.contains { $0.id == id } ? AnyHashable(id) : nil
+        case nil: nil
+        }
     }
 
     private func isSelected(_ session: Session) -> Bool {

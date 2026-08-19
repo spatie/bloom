@@ -124,7 +124,7 @@ struct WorkspaceEvent: Identifiable, Equatable {
             return WorkspaceEvent(
                 id: "setup", kind: .setup, outcome: .failed,
                 title: "Setup failed", detail: LogTail.lastLine(log),
-                note: "The agent was not started. Run setup again from the Setup tab below.",
+                note: SetupFailure.instruction,
                 log: log, durationMS: durationMS
             )
 
@@ -172,4 +172,21 @@ struct WorkspaceEvent: Identifiable, Equatable {
             note: reason
         )
     }
+}
+
+/// What a workspace whose setup script failed is told, in one place.
+///
+/// It was written out three times, in three files, in three different shapes: "Run setup again
+/// from the Setup tab below" on the transcript row, "Check the Setup tab for the output" on the
+/// workspace's own error, "the output is in the Setup tab" in the notification. Three sentences
+/// about one event, and a reader who saw two of them had to work out that they were the same.
+///
+/// It names no tab, and that is the second half of the fix. The Setup tab is only in the bottom
+/// panel's strip while the repository has a setup script configured (see `BottomPanelView.tabRow`),
+/// so a workspace whose script was removed after a failed run was being sent to a tab that is not
+/// there. What is always true is that the output is in the panel below, which is what the row's
+/// own log tail and its "Show the full log" link already open onto, and that running setup again
+/// is the way out.
+enum SetupFailure {
+    static let instruction = "No agent was started. Check the setup output and run setup again."
 }

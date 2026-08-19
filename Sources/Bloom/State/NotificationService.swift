@@ -170,7 +170,8 @@ final class NotificationService {
             event: .setupFailed,
             workspaceID: workspace.id,
             workspaceName: workspace.name,
-            detail: "The setup script failed. No agent was started, and the output is in the Setup tab."
+            // One sentence for this event wherever it is said. See `SetupFailure`.
+            detail: SetupFailure.instruction
         ))
     }
 

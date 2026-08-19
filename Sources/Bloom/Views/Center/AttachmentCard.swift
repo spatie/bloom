@@ -47,9 +47,15 @@ struct AttachmentCard: View {
     var body: some View {
         MenuPanel {
             VStack(alignment: .leading, spacing: 0) {
+                // The same air on all four sides. It was `Metrics.spacingWide` here and then a
+                // hairline and a caption row underneath, which measured ten points above the
+                // preview and forty six below it: the caption was reading as the bottom half of
+                // the padding rather than as a label, and the preview sat off centre in its own
+                // card. `Metrics.spacing` above and below with the caption's own inset matching
+                // puts the block in the middle of what surrounds it.
                 AttachmentPreview(url: url, maxWidth: width, maxHeight: Self.maxHeight)
-                    .frame(maxWidth: .infinity)
-                    .padding(Metrics.spacingWide)
+                    .frame(maxWidth: .infinity, alignment: isImage ? .center : .leading)
+                    .padding(Metrics.inset)
 
                 // A picture answers the question the hover asked, so a path and a byte count
                 // under it are furniture. Everything else leaves "which file is this" open,
@@ -63,12 +69,12 @@ struct AttachmentCard: View {
                         .lineLimit(1)
                         .truncationMode(.head)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, Metrics.spacingWide)
-                        .padding(.vertical, Metrics.spacingSmall)
+                        .padding(.horizontal, Metrics.inset)
+                        .padding(.vertical, Metrics.spacing)
                 }
             }
         }
-        .frame(maxWidth: width + Metrics.spacingWide * 2)
+        .frame(maxWidth: width + Metrics.inset * 2)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }

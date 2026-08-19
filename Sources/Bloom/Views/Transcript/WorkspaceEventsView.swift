@@ -66,7 +66,7 @@ struct WorkspaceEventRow: View {
     private static let runningTail = 3
     /// A failure is read rather than glanced at.
     private static let failedTail = 12
-    /// What the disclosure opens onto. The rest stays in the Setup tab.
+    /// What the disclosure opens onto. The rest stays in the panel below.
     private static let expandedTail = 200
 
     var body: some View {
@@ -154,7 +154,9 @@ struct WorkspaceEventRow: View {
                     .buttonStyle(.link)
                     .font(Typo.caption)
                     .padding(.leading, TranscriptLayout.block)
-                    .help("Opens the Setup tab, which holds the whole log")
+                    // Not "the Setup tab", which is only in the strip while the repository has
+                    // a setup script configured. The panel shows the log either way.
+                    .help("Opens the whole log in the panel below")
             }
         }
         .padding(.leading, TranscriptLayout.detailIndent)

@@ -88,10 +88,14 @@ struct TranscriptListView: View {
                             // No top padding: the rule inside the footer carries its own air, and
                             // a couple of points added out here only ever made the gap above the
                             // rule differ from the gap below it.
-                            TurnFooterView(rows: transcript.rows, row: row)
-                                .padding(.horizontal, TranscriptLayout.inset)
-                                .padding(.bottom, TranscriptLayout.block + TranscriptLayout.tight)
-                                .id(row.seq)
+                            TurnFooterView(
+                                rows: transcript.rows,
+                                row: row,
+                                worktree: transcript.workspace.path
+                            )
+                            .padding(.horizontal, TranscriptLayout.inset)
+                            .padding(.bottom, TranscriptLayout.block + TranscriptLayout.tight)
+                            .id(row.seq)
                         } else {
                             TranscriptRowView(
                                 row: row,
@@ -117,9 +121,21 @@ struct TranscriptListView: View {
                 .padding(.vertical, TranscriptLayout.block)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            // A conversation shorter than the pane hangs from the bottom, just above the composer,
-            // rather than floating at the top with a field of white under it.
-            .defaultScrollAnchor(.bottom, for: .alignment)
+            // A conversation shorter than the pane starts at the top of it, and only once there is
+            // more of it than fits does the view sit at the live end.
+            //
+            // This anchor is ONLY about content that does not fill the pane, and it used to say
+            // `.bottom`, on the argument that a conversation should hang just above the composer.
+            // What that actually produced was a new workspace whose first line, "Session started",
+            // was pinned to the bottom of a window with six hundred points of white above it: the
+            // beginning of a conversation drawn at the end of the pane. A page of text starts at
+            // the top of the page.
+            //
+            // Nothing about following a running turn changes. The stick-to-bottom behaviour is the
+            // `.sizeChanges` anchor below, and opening a session on its live end is
+            // `scrollPosition.scrollTo(edge: .bottom)` in `position`. Both are about content that
+            // is longer than the pane, which is the case this one never sees.
+            .defaultScrollAnchor(.top, for: .alignment)
             .scrollPosition($scrollPosition)
             // What keeps the view at the live end while a turn runs, and it replaces a `scrollTo`
             // that used to be issued on every row that arrived. Any scroll that names a position
