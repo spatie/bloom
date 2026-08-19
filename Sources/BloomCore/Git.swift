@@ -39,6 +39,59 @@ public struct ChangedFile: Identifiable, Sendable, Hashable {
     }
 }
 
+/// What this worktree is holding that GitHub has not been told about.
+///
+/// The question a pull request strip has to answer alongside GitHub's own: is the branch on the
+/// server still the work that is on this disk. Every state GitHub reports ("checks passed",
+/// "ready to merge") is about a commit that was pushed, and the moment anything is edited or
+/// committed afterwards those states describe something that no longer exists here.
+///
+/// Deliberately NOT `WorkspaceSafetyReport`. That one asks "what would deleting this worktree
+/// destroy", and its `unpushedCommits` means "reachable from this branch and from no other ref",
+/// which counts a commit as safe when a tag or another local branch happens to point at it. That
+/// is the right question before an archive and the wrong one here: a commit sitting on a local
+/// tag is still a commit GitHub does not have. It is also expensive, walking every ref in the
+/// repository and byte-comparing every ignored file, which is not something to run beside a poll.
+public struct LocalWork: Sendable, Hashable {
+    /// Tracked files with changes that are not committed, staged or not.
+    public var modifiedFiles: Int
+    /// Files git has never been told about. Counted apart from the ones above because they are
+    /// the half a reader is most likely to have meant to leave lying around.
+    public var untrackedFiles: Int
+    /// Commits on this branch that its upstream does not have. Zero when there is no upstream,
+    /// which `hasUpstream` is what distinguishes.
+    public var unpushedCommits: Int
+    /// Whether this branch is tracking anything at all. False means it has never been pushed, so
+    /// there is no count to give: everything on it is unpushed by definition.
+    public var hasUpstream: Bool
+
+    public init(
+        modifiedFiles: Int = 0,
+        untrackedFiles: Int = 0,
+        unpushedCommits: Int = 0,
+        hasUpstream: Bool = true
+    ) {
+        self.modifiedFiles = modifiedFiles
+        self.untrackedFiles = untrackedFiles
+        self.unpushedCommits = unpushedCommits
+        self.hasUpstream = hasUpstream
+    }
+
+    /// Anything in the worktree that a push alone would not carry.
+    public var hasUncommitted: Bool { modifiedFiles > 0 || untrackedFiles > 0 }
+
+    /// Committed work the remote does not have.
+    ///
+    /// False on a branch with no upstream, and that is deliberate rather than an oversight: with
+    /// nothing to compare against there is no count, and guessing one would be worse than saying
+    /// nothing. The strip only ever asks this about a branch that already has a pull request, and
+    /// a branch with a pull request has an upstream.
+    public var hasUnpushed: Bool { hasUpstream && unpushedCommits > 0 }
+
+    /// Whether GitHub's idea of this branch is out of date.
+    public var isAhead: Bool { hasUncommitted || hasUnpushed }
+}
+
 public struct WorktreeEntry: Sendable, Hashable {
     public var path: String
     public var head: String
@@ -663,6 +716,64 @@ public enum Git {
         ).stdout
     }
 
+    /// What this worktree is holding that the remote has not got, in one `git` call.
+    ///
+    /// `status --porcelain=v1 -z --branch` answers all of it at once: the first record is a header
+    /// reading `## branch...upstream [ahead N, behind M]`, and every record after it is a changed
+    /// file. Asking separately would be a `status` plus a `rev-list`, and this runs beside a poll
+    /// that already spends three git calls every six seconds.
+    ///
+    /// The header is the only way to get the ahead count without naming a remote ref by hand.
+    /// `@{upstream}` in a `rev-list` fails outright on a branch that has never been pushed, and a
+    /// branch that has never been pushed is precisely the case this has to be able to describe.
+    public static func localWork(worktree: String) async throws -> LocalWork {
+        let status = try await checkRaw(
+            ["status", "--porcelain=v1", "-z", "--branch"], in: worktree
+        )
+        return parseLocalWork(status.stdout)
+    }
+
+    /// The records of `status --porcelain=v1 -z --branch`, header first.
+    ///
+    /// One pass, counting rather than collecting: the strip says how many, never which, and a
+    /// worktree mid `npm install` can hold thousands of untracked paths that nothing would read.
+    /// A rename or a copy is two records and one file, so its second record is skipped, which is
+    /// the same rule `parseStatus` follows before an archive.
+    static func parseLocalWork(_ data: Data) -> LocalWork {
+        var records = nulRecords(data)[...]
+        var work = LocalWork()
+
+        guard let header = records.first,
+              String(decoding: header.prefix(2), as: UTF8.self) == "##" else {
+            // No header means git answered something this does not understand. Reporting "nothing
+            // local" would be a claim, and so would reporting a clean worktree, so the caller gets
+            // the empty value and the strip says nothing rather than something wrong.
+            return work
+        }
+        records.removeFirst()
+
+        // `## branch...upstream [ahead 2, behind 1]`, or `## branch` with no upstream at all, or
+        // `## HEAD (no branch)` on a detached head.
+        let line = String(decoding: header.dropFirst(3), as: UTF8.self)
+        work.hasUpstream = line.contains("...")
+        if let ahead = line.range(of: "[ahead "),
+           let end = line[ahead.upperBound...].firstIndex(where: { $0 == "," || $0 == "]" }) {
+            work.unpushedCommits = Int(line[ahead.upperBound..<end]) ?? 0
+        }
+
+        while let record = records.popFirst() {
+            guard record.count > 3 else { continue }
+            let code = String(decoding: record.prefix(2), as: UTF8.self)
+            if code == "??" {
+                work.untrackedFiles += 1
+            } else {
+                work.modifiedFiles += 1
+                if code.contains("R") || code.contains("C") { _ = records.popFirst() }
+            }
+        }
+        return work
+    }
+
     public static func hasUncommittedChanges(worktree: String) async throws -> Bool {
         !(try await check(["status", "--porcelain"], in: worktree).trimmed.isEmpty)
     }
@@ -1032,5 +1143,144 @@ private final class ByteCollector: @unchecked Sendable {
     var err: Data {
         lock.lock(); defer { lock.unlock() }
         return stderr
+    }
+}
+
+// MARK: - Starting a repository
+
+/// Everything needed to turn a folder that is not a repository into one that a worktree can be
+/// cut from. Kept apart from the rest of `Git` because it is the only place in the app that
+/// writes to a folder the user chose rather than to a worktree Bloom made.
+public extension Git {
+    /// Runs `git init` and returns the branch it left HEAD pointing at.
+    ///
+    /// The branch name is the user's `init.defaultBranch` when they have set one, and `main`
+    /// otherwise. Passing `-b main` unconditionally would override a deliberate setting, and
+    /// passing nothing at all leaves anybody without the setting on `master`.
+    @discardableResult
+    static func initRepository(at path: String) async throws -> String {
+        let configured = try? await run(["config", "--get", "init.defaultBranch"], in: path)
+        let preference = (configured?.ok ?? false) ? configured?.trimmed ?? "" : ""
+        let arguments = preference.isEmpty ? ["init", "-b", "main"] : ["init"]
+        try await check(arguments, in: path)
+        // `rev-parse --abbrev-ref HEAD` says "HEAD" before the first commit. `symbolic-ref` reads
+        // the ref that HEAD points at, which exists from the moment init finishes.
+        return try await check(["symbolic-ref", "--short", "HEAD"], in: path).trimmed
+    }
+
+    /// Whether HEAD resolves. False in a repository that has been initialised and never committed,
+    /// which is the state `git worktree add` cannot start a branch from.
+    static func hasCommits(in path: String) async -> Bool {
+        let result = try? await run(["rev-parse", "--verify", "--quiet", "HEAD"], in: path)
+        return result?.ok ?? false
+    }
+
+    /// The name and address git would put on a commit made here. Either can be missing, and a
+    /// commit with neither fails with a page of advice, so this is asked before anything is done.
+    static func commitIdentity(in path: String) async -> (name: String?, email: String?) {
+        func value(_ key: String) async -> String? {
+            guard let result = try? await run(["config", "--get", key], in: path), result.ok else {
+                return nil
+            }
+            let trimmed = result.trimmed
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return await (value("user.name"), value("user.email"))
+    }
+
+    /// The repository this folder sits inside, if any, found by walking up rather than by asking
+    /// git.
+    ///
+    /// git is asked first everywhere else, and `rev-parse --is-inside-work-tree` already answers
+    /// yes for a subdirectory of a repository. This exists for what that misses: a folder inside
+    /// somebody's `.git`, a ceiling set in the environment, or a repository whose work tree git
+    /// declines to claim. Initialising inside any of them produces a repository nested in another,
+    /// so it is worth a second, dumber check.
+    static func enclosingRepositoryRoot(of path: String) -> String? {
+        let manager = FileManager.default
+        var current = URL(fileURLWithPath: FolderPath.normalize(path)).deletingLastPathComponent()
+        while current.path != "/" && !current.path.isEmpty {
+            if manager.fileExists(atPath: current.appendingPathComponent(".git").path) {
+                return current.path
+            }
+            let parent = current.deletingLastPathComponent()
+            if parent.path == current.path { break }
+            current = parent
+        }
+        return nil
+    }
+
+    /// Whether the repository's own ignore rules already cover this path. Asked so Bloom only
+    /// writes a `.gitignore` line for a file that would otherwise really be committed.
+    static func isIgnored(_ relativePath: String, in repo: String) async -> Bool {
+        let result = try? await run(["check-ignore", "--quiet", "--", relativePath], in: repo)
+        return result?.ok ?? false
+    }
+
+    static func stageAll(in repo: String) async throws {
+        try await check(["add", "--all", "--", "."], in: repo)
+    }
+
+    /// The paths currently in the index, one per entry. Used to count what a first commit will
+    /// contain and to prove that nothing that was meant to be excluded ended up in it.
+    static func stagedPaths(in repo: String) async throws -> [String] {
+        let output = try await checkRaw(["diff", "--cached", "--name-only", "-z", "--"], in: repo)
+        return String(decoding: output.stdout, as: UTF8.self)
+            .split(separator: "\0")
+            .map(String.init)
+    }
+
+    static func unstage(_ paths: [String], in repo: String) async throws {
+        guard !paths.isEmpty else { return }
+        try await check(["rm", "--cached", "--quiet", "-r", "--"] + paths, in: repo)
+    }
+
+    /// Makes the commit and says whether it had to be made without a signature.
+    ///
+    /// A machine configured to sign every commit signs this one too. When the signing itself
+    /// fails, which it does whenever the key needs a passphrase there is no terminal to type into,
+    /// the commit is retried unsigned rather than abandoned: the alternative is a repository with
+    /// no commits, which is the one state that cannot be used. The caller is told, so the dialog
+    /// can say it happened instead of leaving the user to notice later.
+    static func commit(
+        message: String, in repo: String, allowEmpty: Bool
+    ) async throws -> Bool {
+        var arguments = ["commit", "--message", message]
+        if allowEmpty { arguments.append("--allow-empty") }
+
+        let result = try await run(arguments, in: repo)
+        if result.ok { return false }
+
+        let output = result.stderr + result.stdout
+        guard indicatesSigningFailure(output) else {
+            throw error(arguments, result.status, result.stderr, result.stdout)
+        }
+
+        try await check(["-c", "commit.gpgsign=false"] + arguments, in: repo)
+        return true
+    }
+
+    /// git reports a key it could not use in several different sentences, none of which has an
+    /// exit code of its own.
+    static func indicatesSigningFailure(_ output: String) -> Bool {
+        let lowered = output.lowercased()
+        return lowered.contains("gpg failed to sign")
+            || lowered.contains("failed to write commit object")
+            || lowered.contains("failed to fill whole buffer")
+            || lowered.contains("signing failed")
+            || lowered.contains("no secret key")
+    }
+
+    /// Adds a remote. The URL travels after `--` so a value that begins with a dash cannot be read
+    /// as an option, the same rule every other ref and name in this file follows.
+    static func addRemote(_ name: String, url: String, in repo: String) async throws {
+        try await check(["remote", "add", "--", name, url], in: repo)
+    }
+
+    static func remoteURL(_ name: String, in repo: String) async -> String? {
+        guard let result = try? await run(["remote", "get-url", "--", name], in: repo),
+              result.ok else { return nil }
+        let trimmed = result.trimmed
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

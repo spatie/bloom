@@ -161,28 +161,39 @@ public enum FolderPath {
 
     /// Folders nobody means to turn into a repository.
     ///
-    /// The list is short on purpose. It covers the roots macOS owns and the handful of folders in
-    /// a home directory that are containers by definition. Anything else is the user's business.
+    /// Three different shapes, because one blanket rule got it wrong in both directions. Refusing
+    /// a whole subtree is right for the parts of the disk macOS owns and wrong for `/tmp`, where
+    /// a scratch repository is an entirely reasonable thing to want. Refusing only exact matches
+    /// is right for `/tmp` and wrong for `/Volumes`, where one level down is a whole mounted disk.
     public static func isReserved(_ path: String, home: String) -> Bool {
         let normalized = normalize(path)
-        if systemRoots.contains(normalized) { return true }
-        // Everything directly under a system root that is not a user's own folder, such as
-        // /Volumes/Backup or /Library/Fonts.
-        for root in systemRoots where root != "/" && root != "/Users" {
-            if normalized.hasPrefix(root + "/") { return true }
-        }
+
+        if ownedTrees.contains(normalized) { return true }
+        for tree in ownedTrees where normalized.hasPrefix(tree + "/") { return true }
+
+        if containerRoots.contains(normalized) { return true }
+        // One level under a container root is an application bundle, a mounted volume or another
+        // account's home directory. All three are containers themselves.
+        let parent = (normalized as NSString).deletingLastPathComponent
+        if containerRoots.contains(parent) { return true }
+
+        if bareRoots.contains(normalized) { return true }
 
         let normalizedHome = normalize(home)
-        for name in reservedHomeChildren where normalized == normalizedHome + "/" + name {
-            return true
-        }
-        return false
+        return reservedHomeChildren.contains { normalized == normalizedHome + "/" + $0 }
     }
 
-    static let systemRoots: Set<String> = [
-        "/", "/Applications", "/Library", "/System", "/Users", "/Volumes",
-        "/bin", "/sbin", "/usr", "/opt", "/private", "/tmp", "/var", "/etc", "/cores", "/dev",
+    /// Owned by macOS from the top down. Nothing anywhere inside these is somebody's project.
+    static let ownedTrees: Set<String> = [
+        "/System", "/Library", "/bin", "/sbin", "/usr", "/etc", "/dev", "/cores",
     ]
+
+    /// Containers whose immediate children are containers too.
+    static let containerRoots: Set<String> = ["/Applications", "/Users", "/Volumes"]
+
+    /// Refused as themselves, while what is inside them stays the user's business. `/tmp/scratch`
+    /// is exactly the kind of folder a local repository is the right answer for.
+    static let bareRoots: Set<String> = ["/", "/opt", "/private", "/tmp", "/var"]
 
     static let reservedHomeChildren: Set<String> = [
         "Applications", "Desktop", "Documents", "Downloads", "Library", "Movies", "Music",

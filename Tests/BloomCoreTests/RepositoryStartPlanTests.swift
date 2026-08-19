@@ -49,8 +49,11 @@ struct FolderVerdictTests {
     }
 
     @Test("system folders and the containers in a home directory are refused", arguments: [
-        "/", "/Applications", "/Users", "/Volumes", "/Volumes/Backup", "/Library/Fonts",
-        "/System/Library", "/usr/local", "/tmp", "/private/var",
+        "/", "/Applications", "/Users", "/Volumes", "/tmp", "/var", "/opt", "/private",
+        // One level under a container root: a mounted disk, an app bundle, another account.
+        "/Volumes/Backup", "/Applications/Xcode.app", "/Users/other",
+        // Trees macOS owns from the top down.
+        "/Library/Fonts", "/System/Library", "/usr/local", "/etc/paths.d",
         "/Users/tester/Desktop", "/Users/tester/Documents", "/Users/tester/Downloads",
         "/Users/tester/Library", "/Users/tester/Pictures",
     ])
@@ -58,8 +61,12 @@ struct FolderVerdictTests {
         #expect(FolderVerdict.of(facts(path)) == .refuse(.systemDirectory))
     }
 
+    /// Refusing whole subtrees was the first attempt and it was wrong twice over. A scratch
+    /// repository under `/tmp` is exactly what the local-only option is for, and a project on an
+    /// external disk is an ordinary place to keep one.
     @Test("a project inside those containers is still fine", arguments: [
         "/Users/tester/Desktop/scratch", "/Users/tester/Documents/site", "/Users/other/code",
+        "/tmp/scratch", "/Volumes/SSD/code/thing", "/opt/mine", "/private/tmp/x",
     ])
     func notReserved(path: String) {
         #expect(FolderVerdict.of(facts(path)) == .offer)
