@@ -57,7 +57,6 @@ struct ChangedFolderRow: View {
     }
 
     private func copyPath() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(path, forType: .string)
+        Clipboard.copy(path)
     }
 }

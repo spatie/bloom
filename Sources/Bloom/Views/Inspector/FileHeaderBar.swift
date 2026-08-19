@@ -77,7 +77,10 @@ struct FileHeaderBar: View {
             titleVisibility: .visible
         ) {
             Button("Revert and lose those changes", role: .destructive, action: onRevert)
+            // Return keeps the changes. See the archive confirmation in `RootView`, and
+            // `CloseSessionAlert`, for why the destructive answer is never the default one.
             Button("Keep the changes", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
         } message: {
             // Naming what disappears, rather than asking "are you sure?", the way archiving a
             // workspace does.
@@ -243,7 +246,7 @@ struct FileHeaderBar: View {
             didCopy = true
             copyReset?.cancel()
             copyReset = Task {
-                try? await Task.sleep(for: .seconds(1.5))
+                try? await Task.sleep(for: Clipboard.flashDuration)
                 guard !Task.isCancelled else { return }
                 didCopy = false
             }

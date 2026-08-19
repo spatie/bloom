@@ -256,11 +256,14 @@ private struct ProjectRow: View {
         }
     }
 
+    /// The unchanged check is not a nicety. A colour well reports on every frame of a drag, and
+    /// without it each of those frames is a SQLite write plus a full `app.reload()`. The project
+    /// settings window has the same binding and the same guard.
     private var accentBinding: Binding<Color> {
         Binding(
             get: { Color(hexString: repo.accent) },
             set: { color in
-                guard let hex = color.hexString else { return }
+                guard let hex = color.hexString, hex != repo.accent else { return }
                 Task {
                     guard let store = app.store else { return }
                     _ = try? await store.upsert(repo.with { $0.accent = hex })

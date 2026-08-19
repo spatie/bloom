@@ -72,7 +72,6 @@ struct FileTreeRow: View {
     }
 
     private func copyPath() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(item.node.path, forType: .string)
+        Clipboard.copy(item.node.path)
     }
 }

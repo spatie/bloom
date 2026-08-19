@@ -859,6 +859,13 @@ final class AppModel {
         selection = .workspace(target.id)
     }
 
+    /// Asks for a folder and adds it, which is the whole of what every "Add project" control
+    /// does. Four views spelled the pair out themselves.
+    func addProjectByAsking() async {
+        guard let path = ProjectFolderPicker.choose() else { return }
+        await addRepository(at: path)
+    }
+
     // MARK: - Search
 
     struct SearchHit: Identifiable {

@@ -177,8 +177,7 @@ struct BloomCommands: Commands {
 
             Button("Copy Branch Name") {
                 guard let workspace = model.selectedWorkspace else { return }
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(workspace.branch, forType: .string)
+                Clipboard.copy(workspace.branch)
             }
             .keyboardShortcut("c", modifiers: [.command, .shift])
             .disabled(model.selectedWorkspace == nil)
@@ -226,20 +225,17 @@ struct BloomCommands: Commands {
         Task { await model.addRepository(at: path) }
     }
 
+    /// Straight through to `AppModel.archive`, exactly as the sidebar's context menu and the
+    /// window title's menu do.
+    ///
+    /// It used to raise an alert of its own first, which said only "The worktree will be removed."
+    /// That is the one thing an archive always does, so it named nothing that was actually at
+    /// stake, and it appeared on the routine archive as well, which is how a confirmation stops
+    /// being read. `AppModel.archive` runs a git safety check and only stops when there is
+    /// something specific to lose, and then it says what. Keeping both meant this shortcut alone
+    /// asked twice on the dangerous archive and asked a useless question on the safe one.
     private func archiveSelectedWorkspace() {
         guard let workspace = model.selectedWorkspace else { return }
-
-        let stored = UserDefaults.standard.object(forKey: "confirmBeforeArchiving") as? Bool
-        if stored ?? true {
-            let alert = NSAlert()
-            alert.messageText = "Archive \(workspace.name)?"
-            alert.informativeText = "The worktree will be removed."
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "Archive")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-        }
-
         Task { await model.archive(workspace) }
     }
 }

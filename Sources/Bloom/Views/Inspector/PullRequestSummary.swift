@@ -82,6 +82,7 @@ struct PullRequestSummary: View {
         ) { method in
             Button(method.label, role: .destructive) { onMerge(method) }
             Button("Keep the pull request open", role: .cancel) { pendingMerge = nil }
+                .keyboardShortcut(.defaultAction)
         } message: { method in
             // Naming the pull request, the branch and the base, rather than asking "are you
             // sure?". Nothing in Bloom can put any of it back afterwards.
@@ -168,8 +169,7 @@ struct PullRequestSummary: View {
     }
 
     private func copyLink() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(pullRequest.url, forType: .string)
+        Clipboard.copy(pullRequest.url)
     }
 
     // MARK: - Tint

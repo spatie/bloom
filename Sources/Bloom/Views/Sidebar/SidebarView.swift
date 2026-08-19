@@ -159,7 +159,6 @@ struct SidebarView: View {
     }
 
     private func addProject() {
-        guard let path = ProjectFolderPicker.choose() else { return }
-        Task { await app.addRepository(at: path) }
+        Task { await app.addProjectByAsking() }
     }
 }

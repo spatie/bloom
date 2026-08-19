@@ -125,7 +125,6 @@ struct InspectorToolbar: View {
     // MARK: - Actions
 
     private func copyBranch() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(model.workspace.branch, forType: .string)
+        Clipboard.copy(model.workspace.branch)
     }
 }

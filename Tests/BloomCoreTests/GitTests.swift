@@ -239,3 +239,23 @@ struct GitTests {
         #expect(Git.uniqueBranch("fix-thing", taken: ["fix-thing", "fix-thing-2"]) == "fix-thing-3")
     }
 }
+
+@Suite("Counting lines")
+struct CountLinesTests {
+    @Test(
+        "a trailing newline terminates the last line rather than starting an empty one",
+        arguments: [
+            ("", 0),
+            ("a", 1),
+            ("a\n", 1),
+            ("a\nb", 2),
+            ("a\nb\n", 2),
+            ("\n", 1),
+            ("\n\n", 2),
+            ("a\n\nb\n", 3),
+        ]
+    )
+    func countLines(text: String, expected: Int) {
+        #expect(Git.countLines(text) == expected)
+    }
+}

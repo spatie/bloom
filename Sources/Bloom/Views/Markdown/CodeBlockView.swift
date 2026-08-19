@@ -11,6 +11,7 @@ public struct CodeBlockView: View {
     private let language: Language
     private let showsLineNumbers: Bool
     @State private var copied = false
+    @State private var copyReset: Task<Void, Never>?
     @State private var showsAllLines = false
 
     /// The gutter follows the conversation's text size, otherwise a raised size runs the numbers
@@ -100,11 +101,14 @@ public struct CodeBlockView: View {
     }
 
     private func copy() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(code, forType: .string)
+        Clipboard.copy(code)
         copied = true
-        Task {
-            try? await Task.sleep(for: .seconds(1.2))
+        // Cancelled and restarted, so a second copy inside the window does not have the first
+        // one's timer clear the label out from under it a moment later.
+        copyReset?.cancel()
+        copyReset = Task {
+            try? await Task.sleep(for: Clipboard.flashDuration)
+            guard !Task.isCancelled else { return }
             copied = false
         }
     }

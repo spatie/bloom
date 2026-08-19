@@ -119,6 +119,11 @@ struct HomeView: View {
                     }
                 } header: {
                     HomeGroupHeading(title: group.title, count: group.rows.count)
+                        // The rows' own leading inset, said as padding because a section header
+                        // ignores `listRowInsets` under the inset style. Without it the heading
+                        // hangs a spacing step to the left of the column it heads, which is the
+                        // one misalignment on this screen the eye actually catches.
+                        .padding(.leading, Self.rowInsets.leading)
                 }
             }
         }
@@ -303,7 +308,6 @@ struct HomeView: View {
     }
 
     private func addProject() {
-        guard let path = ProjectFolderPicker.choose() else { return }
-        Task { await app.addRepository(at: path) }
+        Task { await app.addProjectByAsking() }
     }
 }

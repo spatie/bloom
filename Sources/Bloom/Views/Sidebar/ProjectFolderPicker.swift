@@ -1,7 +1,9 @@
 import AppKit
 
-/// Asking the user for a project folder. Wrapped so the places that need it (the toolbar, the
-/// sidebar's empty state and Home's empty state) cannot drift apart on panel configuration.
+/// Asking the user for a project folder. Wrapped so the four places that offer it (the toolbar,
+/// the sidebar's empty state, Home's empty state and the new workspace sheet) cannot drift apart
+/// on panel configuration. What happens to the folder afterwards is `AppModel.addProjectByAsking`,
+/// for the same reason.
 @MainActor
 enum ProjectFolderPicker {
     static func choose() -> String? {

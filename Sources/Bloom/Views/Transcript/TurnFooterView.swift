@@ -13,6 +13,7 @@ struct TurnFooterView: View {
 
     @State private var files: [TurnFile] = []
     @State private var copied = false
+    @State private var copyReset: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -158,11 +159,14 @@ struct TurnFooterView: View {
     }
 
     private func copy(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        Clipboard.copy(text)
         copied = true
-        Task {
-            try? await Task.sleep(for: .seconds(1.2))
+        // Cancelled and restarted, so a second copy inside the window does not have the first
+        // one's timer clear the label out from under it a moment later.
+        copyReset?.cancel()
+        copyReset = Task {
+            try? await Task.sleep(for: Clipboard.flashDuration)
+            guard !Task.isCancelled else { return }
             copied = false
         }
     }

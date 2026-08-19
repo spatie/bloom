@@ -424,8 +424,14 @@ enum ToolPresenter {
         return parsed.host() ?? oneLine(url)
     }
 
+    /// `Git.countLines`, not a second rule.
+    ///
+    /// This counted a trailing newline as starting an empty last line, so a file written with one,
+    /// which is nearly every file, was reported one line longer here than in the inspector beside
+    /// it. The turn footer's rollup is built from this, so a turn that wrote three files read
+    /// three lines heavier than the changed file list showed.
     static func lineCount(_ text: String) -> Int {
-        text.isEmpty ? 0 : text.reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+        Git.countLines(text)
     }
 
     /// The first scalar in the input, keys in sorted order so the same tool always shows the same

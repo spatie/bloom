@@ -50,7 +50,7 @@ struct RepoSection: View {
             if rows.isEmpty {
                 Text(isFiltered ? "Nothing matches the filter" : "No workspaces yet")
                     .font(Typo.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Palette.textTertiary)
             }
         } header: {
             header
@@ -323,7 +323,6 @@ struct RepoSection: View {
     }
 
     private func copy(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        Clipboard.copy(text)
     }
 }

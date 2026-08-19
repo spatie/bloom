@@ -106,7 +106,6 @@ struct ChangedFileRow: View {
     }
 
     private func copyPath() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(file.path, forType: .string)
+        Clipboard.copy(file.path)
     }
 }
