@@ -337,7 +337,9 @@ public extension WorkspaceManager {
 
         try await Git.checkoutNewBranch(branch, at: resolved.revision, in: workspace.path)
 
-        let saved = try await store.upsert(workspace.with { $0.branch = branch })
+        // The branch alone: `git checkout -b` ran between the read and here.
+        let updated = try await store.update(workspaceID: workspace.id) { $0.branch = branch }
+        guard let saved = updated else { throw WorkspaceError.workspaceGone(workspace.name) }
         return WorkspaceContinuation(
             workspace: saved,
             previousBranch: workspace.branch,

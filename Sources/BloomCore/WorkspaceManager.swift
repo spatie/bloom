@@ -7,6 +7,10 @@ public enum WorkspaceError: Error, CustomStringConvertible {
     /// can list what is at stake instead of asking "are you sure?" about nothing in particular.
     case unsafeToArchive(WorkspaceSafetyReport)
     case archiveScriptFailed(status: Int32, output: String)
+    /// The row was read, the work was done, and by the time it came to write the result there was
+    /// no such workspace in the database any more. Only reachable when the project it belonged to
+    /// was removed while this was running, which cascades its workspaces away.
+    case workspaceGone(String)
 
     public var description: String {
         switch self {
@@ -17,6 +21,7 @@ public enum WorkspaceError: Error, CustomStringConvertible {
         case .archiveScriptFailed(let status, let output):
             "the archive script exited \(status), so nothing was removed: "
                 + output.trimmingCharacters(in: .whitespacesAndNewlines).suffix(500)
+        case .workspaceGone(let name): "\(name) is no longer in the database"
         }
     }
 }
@@ -360,10 +365,14 @@ public struct WorkspaceManager: Sendable {
             }
         }
 
-        try await store.upsert(workspace.with {
+        // The two columns this method owns, and nothing else. The value handed in was read
+        // before the safety report, the archive script, the worktree removal and the branch
+        // delete, which on a real project is seconds; a rename or an automatic name landing in
+        // that window used to be written back out of existence here.
+        try await store.update(workspaceID: workspace.id) {
             $0.state = .archived
             $0.archivedAt = Date()
-        })
+        }
     }
 
     /// Deliberately leaves the stored counts alone when git fails, rather than writing zeroes.

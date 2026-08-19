@@ -1298,13 +1298,15 @@ final class AppModel {
 
     func rename(_ workspace: Workspace, to name: String) async {
         guard let store, !name.isEmpty else { return }
-        _ = try? await store.upsert(workspace.with { $0.name = name })
+        _ = try? await store.update(workspaceID: workspace.id) { $0.name = name }
         await reload()
     }
 
     func togglePinned(_ workspace: Workspace) async {
         guard let store else { return }
-        _ = try? await store.upsert(workspace.with { $0.pinned.toggle() })
+        // Toggled against the stored row rather than against the copy this view was handed,
+        // so two presses in quick succession cannot both write the same value.
+        _ = try? await store.update(workspaceID: workspace.id) { $0.pinned.toggle() }
         await reload()
     }
 
@@ -1334,7 +1336,7 @@ final class AppModel {
     /// when something went wrong.
     func markRead(_ workspace: Workspace) async {
         guard let store, workspace.unread else { return }
-        _ = try? await store.upsert(workspace.with { $0.unread = false })
+        _ = try? await store.update(workspaceID: workspace.id) { $0.unread = false }
         await reload()
     }
 
@@ -1344,9 +1346,8 @@ final class AppModel {
         guard let from = siblings.firstIndex(where: { $0.id == workspace.id }) else { return }
         let moved = siblings.remove(at: from)
         siblings.insert(moved, at: min(max(index, 0), siblings.count))
-        for (order, var sibling) in siblings.enumerated() where sibling.sortOrder != order {
-            sibling.sortOrder = order
-            _ = try? await store.upsert(sibling)
+        for (order, sibling) in siblings.enumerated() where sibling.sortOrder != order {
+            _ = try? await store.update(workspaceID: sibling.id) { $0.sortOrder = order }
         }
         await reload()
     }

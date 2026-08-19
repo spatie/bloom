@@ -112,7 +112,16 @@ extension WorkspaceManager {
 
         renamed.name = suggestion.name
 
-        let saved = try await store.upsert(renamed)
+        // Re-reading at the top was not enough on its own. The branch rename between there and
+        // here is a `git` call, and the whole value written after it carried every other column
+        // back to what it was before that call.
+        let name = renamed.name
+        let branch = renamed.branch
+        let saved = try await store.update(workspaceID: workspaceID) {
+            $0.name = name
+            $0.branch = branch
+        }
+        guard let saved else { return nil }
         return WorkspaceNamingResult(workspace: saved, didRename: true, branchRefusal: refusal)
     }
 }

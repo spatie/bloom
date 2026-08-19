@@ -314,6 +314,13 @@ public actor Store {
         try db.query("SELECT * FROM workspaces WHERE id = ?", [.text(id)]).first.map(Self.workspace(from:))
     }
 
+    /// Writes a whole workspace row. This is how a workspace is created, and it is worth reaching
+    /// for only when the value being written was built here and now.
+    ///
+    /// Changing something about a workspace that already exists is `update(workspaceID:_:)`
+    /// instead. Everything in the conflict clause below is written from the value handed in, so a
+    /// value read a few seconds ago carries every column back to what it was then, including
+    /// `state`. See `update` for what that cost.
     @discardableResult
     public func upsert(_ workspace: Workspace) throws -> Workspace {
         try db.run(
@@ -354,6 +361,49 @@ public actor Store {
             ]
         )
         return workspace
+    }
+
+    /// Changes an existing workspace without writing the columns it did not mean to change.
+    ///
+    /// The row is read here, inside the actor, immediately before it is written back, so what
+    /// lands in the database is the row as it stands now with one change applied, rather than a
+    /// copy somebody read at some earlier moment. Neither SQLite call suspends and `Store` is an
+    /// actor, so nothing can write between the two.
+    ///
+    /// That is the point of it, and it is not a style preference. Every writer of this table used
+    /// to send a whole `Workspace` value it had been holding: the sidebar's pin, the rename, the
+    /// drag that reorders rows, the archive itself. Meanwhile the diff stat refresh writes to
+    /// every row every six seconds, a finishing turn writes `last_activity_at` and `unread`, and
+    /// a setup script writes its outcome minutes after it started. Anything landing between such
+    /// a read and its write was silently rolled back by the write.
+    ///
+    /// The archive is what made this worth fixing rather than noting, in both directions. Its own
+    /// write carried every column back across the seconds it spent on disk, so the mark saying a
+    /// turn finished unseen, the time it finished at and the counts were rolled back on every
+    /// archive. And `state` is a column like any other, so a writer that had read the row before
+    /// the archive and wrote after it put `active` back over `archived`. Automatic naming is that
+    /// writer: it re-reads, renames the branch with `git`, and writes, and the archive finishing
+    /// inside that gap left a workspace whose worktree is gone and whose row says it is live.
+    /// Unlike a stale count, that one does not heal. It is still there after a relaunch.
+    ///
+    /// `updateDiffStat`, `touch` and `updateSetup` are the same rule written out column by column
+    /// for the three writers that already had it. This is the rule itself, so a column added to
+    /// `Workspace` next year does not quietly reopen the hole for everybody else.
+    ///
+    /// Identity is not the caller's to move: `id` is pinned after the change runs, and `repo_id`
+    /// and `created_at` are not in `upsert`'s conflict clause at all.
+    ///
+    /// Returns nil when there is no such row rather than inserting one. Creating a workspace is
+    /// `upsert`, and that is the only thing `upsert` should be reached for.
+    @discardableResult
+    public func update(
+        workspaceID: String,
+        _ change: @Sendable (inout Workspace) -> Void
+    ) throws -> Workspace? {
+        guard var row = try workspace(id: workspaceID) else { return nil }
+        change(&row)
+        row.id = workspaceID
+        return try upsert(row)
     }
 
     public func deleteWorkspace(id: String) throws {

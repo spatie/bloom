@@ -215,11 +215,15 @@ public extension WorkspaceManager {
         let settings = SettingsLoader.load(repo: repo.path)
         try copyFiles(settings.filesToCopy, from: repo.path, to: path)
 
-        let restored = try await store.upsert(workspace.with {
+        // Three columns, not eighteen. `git worktree add` and the file copy above take long
+        // enough for a turn to finish or a diff stat pass to land, and a restore that put the
+        // whole value back would undo whatever they wrote.
+        let updated = try await store.update(workspaceID: workspace.id) {
             $0.state = .active
             $0.archivedAt = nil
             $0.path = path
-        })
+        }
+        guard let restored = updated else { throw WorkspaceError.workspaceGone(workspace.name) }
         return RestoreOutcome(
             workspace: restored,
             source: source,
