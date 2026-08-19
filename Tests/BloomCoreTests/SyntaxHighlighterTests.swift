@@ -189,6 +189,51 @@ struct SyntaxHighlighterTests {
         _ = checked("'unterminated", language: .shell)
     }
 
+    /// The setup and archive scripts in a project's settings are the only shell buffers Bloom
+    /// edits, and before this they fell through to the generic keyword set, which knows `class`
+    /// and `interface` and not `then`, `fi` or `export`.
+    @Test("colours shell control flow and the builtins that declare something")
+    func shellKeywords() {
+        for word in ["if", "then", "elif", "else", "fi", "for", "while", "until", "do", "done",
+                     "case", "esac", "function", "return", "export", "local", "readonly", "set",
+                     "unset", "source", "trap", "eval", "exec", "exit", "shift", "alias"] {
+            let line = "\(word) something"
+            #expect(
+                has(.keyword, text: word, in: line, tokens: checked(line, language: .shell)),
+                "\(word) should be a shell keyword"
+            )
+        }
+    }
+
+    /// The words the generic set contributed that a shell has no idea about. Colouring them made
+    /// an ordinary command look like a branch.
+    @Test("leaves words that are not shell keywords alone")
+    func shellNonKeywords() {
+        for word in ["class", "interface", "public", "static", "var", "new", "extends"] {
+            let line = "\(word) something"
+            #expect(
+                !has(.keyword, text: word, in: line, tokens: checked(line, language: .shell)),
+                "\(word) is not a shell keyword"
+            )
+        }
+    }
+
+    @Test("colours a shell comment, string, number and variable")
+    func shellSpans() {
+        let comment = "# bring the worktree up"
+        #expect(has(.comment, text: comment, in: comment, tokens: checked(comment, language: .shell)))
+
+        let assignment = "PORT=\"${CONDUCTOR_PORT:-8080}\""
+        let tokens = checked(assignment, language: .shell)
+        #expect(tokens.contains { $0.kind == .string })
+
+        let number = "sleep 30"
+        #expect(has(.number, text: "30", in: number, tokens: checked(number, language: .shell)))
+
+        let variable = "echo $SITE"
+        #expect(has(.variable, text: "$SITE", in: variable, tokens: checked(variable, language: .shell)))
+    }
+
     @Test("finishes a very long line")
     func longLine() {
         let line = String(repeating: "a", count: 100_000)

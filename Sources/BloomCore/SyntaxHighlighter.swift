@@ -687,6 +687,11 @@ private struct Lexer {
             ["and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while", "with", "yield"]
         case .ruby:
             ["begin", "break", "case", "class", "def", "defined", "do", "else", "elsif", "end", "ensure", "for", "if", "in", "module", "next", "redo", "rescue", "retry", "return", "self", "super", "then", "unless", "until", "when", "while", "yield"]
+        // Control flow and the builtins that declare something, not every command a shell knows.
+        // `echo`, `cd` and `git` are ordinary commands: colouring them would mark most of the
+        // lines in a setup script and tell the reader nothing about which ones branch.
+        case .shell:
+            ["alias", "break", "case", "continue", "declare", "do", "done", "elif", "else", "esac", "eval", "exec", "exit", "export", "fi", "for", "function", "if", "in", "local", "readonly", "return", "select", "set", "shift", "source", "then", "trap", "typeset", "unalias", "unset", "until", "while"]
         default:
             ["break", "case", "catch", "class", "const", "continue", "default", "else", "enum", "extends", "false", "final", "for", "fun", "func", "if", "import", "interface", "let", "new", "package", "private", "protected", "public", "return", "static", "struct", "switch", "throw", "true", "try", "var", "void", "while"]
         }
