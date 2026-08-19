@@ -15,7 +15,7 @@ struct TranscriptRowFrame: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(.horizontal, TranscriptLayout.inset)
-            .frame(height: Metrics.rowHeight * fontScale)
+            .frame(height: TranscriptLayout.rowHeight * fontScale)
     }
 }
 

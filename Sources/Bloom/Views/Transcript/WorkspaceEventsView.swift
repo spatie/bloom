@@ -95,7 +95,7 @@ struct WorkspaceEventRow: View {
                     .padding(.bottom, TranscriptLayout.block)
             }
         }
-        .modifier(ExpandableRow(isHovered: isHovered, isError: event.isFailure))
+        .modifier(ExpandableRow(isHovered: isHovered))
         .onHover { isHovered = $0 }
     }
 
@@ -198,8 +198,10 @@ struct WorkspaceEventRow: View {
                 .padding(.leading, TranscriptLayout.block)
                 .padding(.vertical, TranscriptLayout.tight)
                 .overlay(alignment: .leading) {
+                    // A quote mark, not a state: what failed is said by the text and by the word
+                    // on the row above it.
                     Rectangle()
-                        .fill(event.isFailure ? Palette.negative : Palette.border)
+                        .fill(Palette.border)
                         .frame(width: TranscriptLayout.rule)
                 }
 

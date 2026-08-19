@@ -23,6 +23,16 @@ enum TranscriptLayout {
     /// Between stacked blocks inside an expanded row.
     static let block = Metrics.spacingWide
 
+    /// The pitch of a one line row, and the transcript's own rather than the window's.
+    ///
+    /// A source list row is 28 points because it holds a name the user chose and clicks on all
+    /// day. A transcript row holds a receipt: it is read in blocks of twenty at a time, it is
+    /// clicked rarely, and at the source list's pitch a turn's worth of them took more of the pane
+    /// than the answer they led to. Four points off each closed the gaps inside the block without
+    /// touching the text in it, and the row is still taller than the line it draws at any text
+    /// size, which is what `fontScale` here is for.
+    static let rowHeight: CGFloat = 24
+
     static let glyphWidth: CGFloat = 16
     static let glyphGap: CGFloat = 8
     /// The label column, at the default text size. Read through `transcriptLabelColumn()` rather

@@ -22,7 +22,7 @@ struct SessionStartRowView: View {
             TranscriptGlyph(symbol: "bolt.horizontal.circle")
 
             Text("Session started")
-                .font(Typo.labelEmphasis)
+                .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
                 .transcriptLabelColumn()
 

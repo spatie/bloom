@@ -42,7 +42,7 @@ struct ToolRowView: View {
                     .padding(.bottom, TranscriptLayout.block)
             }
         }
-        .modifier(ExpandableRow(isHovered: isHovered, isError: isError, refusal: refusal))
+        .modifier(ExpandableRow(isHovered: isHovered))
         .onHover { isHovered = $0 }
     }
 }

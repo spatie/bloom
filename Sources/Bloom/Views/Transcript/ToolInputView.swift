@@ -15,7 +15,7 @@ struct ToolInputView: View {
         case "Bash":
             DetailCodeBlock(text: input["command"]?.stringValue ?? "")
             DetailChips(values: [
-                input["timeout"]?.intValue.map { "timeout \($0)ms" },
+                input["timeout"]?.intValue.map { "timeout \(TurnDuration.short($0))" },
                 input["run_in_background"]?.boolValue == true ? "runs in the background" : nil,
             ])
 

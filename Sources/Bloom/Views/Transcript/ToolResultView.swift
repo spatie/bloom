@@ -2,6 +2,11 @@ import SwiftUI
 
 /// What the tool gave back. A rule down the left rather than a filled block, so the answer reads as
 /// quoted output rather than as another thing the agent wrote.
+///
+/// The rule is the quote mark and nothing else, so it stays the border colour whatever the output
+/// says. Failure is carried by the text, which is set in the alarm colour from the first character
+/// to the last, and by the word on the row above. A rule that changed colour too was the third
+/// copy of one fact.
 struct ToolResultView: View {
     var text: String
     var isError: Bool
@@ -20,7 +25,7 @@ struct ToolResultView: View {
                 .padding(.vertical, TranscriptLayout.tight)
                 .overlay(alignment: .leading) {
                     Rectangle()
-                        .fill(isError ? Palette.negative : Palette.border)
+                        .fill(Palette.border)
                         .frame(width: TranscriptLayout.rule)
                 }
 

@@ -23,8 +23,10 @@ struct AgentErrorRowView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, TranscriptLayout.block)
                     .overlay(alignment: .leading) {
+                        // The quote mark for the block, in the colour every quote rule in the
+                        // transcript uses. The text inside it is already the alarm colour.
                         Rectangle()
-                            .fill(Palette.negative)
+                            .fill(Palette.border)
                             .frame(width: TranscriptLayout.rule)
                     }
                     .padding(.leading, TranscriptLayout.detailIndent)
@@ -32,7 +34,7 @@ struct AgentErrorRowView: View {
                     .padding(.bottom, TranscriptLayout.block)
             }
         }
-        .modifier(ExpandableRow(isHovered: isHovered, isError: true))
+        .modifier(ExpandableRow(isHovered: isHovered))
         .onHover { isHovered = $0 }
     }
 
@@ -41,7 +43,7 @@ struct AgentErrorRowView: View {
             TranscriptGlyph(symbol: "exclamationmark.triangle", tint: Palette.negative)
 
             Text(status.map { "Agent exited (\($0))" } ?? "Agent error")
-                .font(Typo.labelEmphasis)
+                .font(Typo.label)
                 .foregroundStyle(Palette.negative)
                 .lineLimit(1)
                 .truncationMode(.tail)

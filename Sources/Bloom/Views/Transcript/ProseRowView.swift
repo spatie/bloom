@@ -14,6 +14,9 @@ struct ProseRowView: View {
             .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, TranscriptLayout.inset)
-            .padding(.vertical, TranscriptLayout.inset)
+            // More than a row keeps, and deliberately. An answer is the one thing in this pane
+            // that is read rather than scanned, and what sets it apart from the list of actions
+            // above and below it is the space around it as much as the size it is set in.
+            .padding(.vertical, TranscriptLayout.block)
     }
 }

@@ -40,7 +40,7 @@ struct ThinkingRowView: View {
             TranscriptGlyph(symbol: "sparkle")
 
             Text("Thinking")
-                .font(Typo.labelEmphasis)
+                .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
                 .italic()
                 .lineLimit(1)

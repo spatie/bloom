@@ -20,7 +20,7 @@ struct RateLimitRowView: View {
             TranscriptGlyph(symbol: "gauge.with.dots.needle.33percent", tint: Palette.warning)
 
             Text("Rate limit")
-                .font(Typo.labelEmphasis)
+                .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
                 .transcriptLabelColumn()
 

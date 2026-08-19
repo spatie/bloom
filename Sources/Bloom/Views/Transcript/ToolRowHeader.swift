@@ -28,8 +28,15 @@ struct ToolRowHeader: View {
 
     /// A chip that repeats the detail replaces it: `Read [notes.txt]` rather than
     /// `Read notes.txt [notes.txt]`.
+    ///
+    /// And an open row replaces it too. Every expanded body states the target in full, in the face
+    /// it deserves: a command as a code block, a path as a path, an edit as a before and after. The
+    /// header's copy is the same string truncated to one line, so an open Bash row printed its
+    /// command twice, once directly above the other. The full one is the one worth keeping.
     private var showsDetail: Bool {
-        !presentation.detail.isEmpty && !presentation.chips.contains { $0.text == presentation.detail }
+        !isExpanded
+            && !presentation.detail.isEmpty
+            && !presentation.chips.contains { $0.text == presentation.detail }
     }
 
     /// What the row says happened, in the slot where a failure says "error".
@@ -63,9 +70,15 @@ struct ToolRowHeader: View {
                 tint: outcome?.tint ?? presentation.tint
             )
 
+            // A rung below the prose beside it, and in the secondary colour, because that is the
+            // whole hierarchy of this pane: what the agent wrote is the content, and what it ran
+            // is the receipt. Set in medium at reading size it was the loudest thing in the
+            // window, and forty of them in a row buried the answer underneath. Quieter, not
+            // smaller: it is still the label column of a row that has to be scannable, and the
+            // size it drops to is the one every other label in the window is set at.
             Text(presentation.label)
-                .font(Typo.labelEmphasis)
-                .foregroundStyle(Palette.textPrimary)
+                .font(Typo.label)
+                .foregroundStyle(Palette.textSecondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .transcriptLabelColumn()
@@ -97,9 +110,14 @@ struct ToolRowHeader: View {
             // Both of these are last in a row whose detail carries `layoutPriority`, so
             // without `fixedSize` the detail takes the slack and the outcome word wraps to "e"
             // over "r" inside a row that is one line tall by construction.
+            //
+            // The outcome is set in medium, which it was not before the coloured rule down the
+            // left of the row was taken away. That word and the glyph's tint are now the whole of
+            // what says a call failed or was declined, so the word carries a little more weight
+            // than the duration it sits next to.
             if let outcome {
                 Text(outcome.text)
-                    .font(Typo.caption)
+                    .font(Typo.captionEmphasis)
                     .foregroundStyle(outcome.tint)
                     .fixedSize()
                     .help(outcome.help)

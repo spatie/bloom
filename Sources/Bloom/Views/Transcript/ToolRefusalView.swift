@@ -49,8 +49,11 @@ struct ToolRefusalView: View {
         .padding(.leading, TranscriptLayout.block)
         .padding(.vertical, TranscriptLayout.tight)
         .overlay(alignment: .leading) {
+            // The same quote rule every other block in the transcript draws. The caution colour is
+            // on the hand and on the word "denied" in the row above, which is where a reader looks
+            // for it.
             Rectangle()
-                .fill(Palette.warning)
+                .fill(Palette.border)
                 .frame(width: TranscriptLayout.rule)
         }
     }
