@@ -196,15 +196,34 @@ struct HomeBar: View {
 
     // MARK: - Archived
 
-    /// Three signals rather than one, because an archived workspace looks exactly like a live one
-    /// at a glance: the button says "Showing archived" rather than "Archived", a button-style
-    /// toggle draws itself filled while it is on, and the box fills in. The rows themselves are
-    /// dimmed and carry the same box, and the readout at the end of this strip counts them.
+    /// A hide, not a show, and that is the whole of what changed here.
+    ///
+    /// This was "Archived" / "Showing archived", off by default, and the list it governed left
+    /// every archived workspace out until somebody found the button. Home is the only screen in
+    /// the app that lists an archived workspace at all, so that default made the one place they
+    /// exist the one place they could not be seen. Home now opens on everything, and a switch
+    /// whose only power is to add rows nobody hid has no job left: what is worth keeping is the
+    /// other direction, for the machine where a year of finished work buries the four things
+    /// still being worked in.
+    ///
+    /// The two labels are deliberately different kinds of phrase. At rest it offers the action,
+    /// because showing everything is simply what Home does and there is no state there worth
+    /// announcing. Turned on it reports the state, because rows are missing and something on this
+    /// strip has to say so.
+    ///
+    /// The label carries that on its own because nothing else here can. Measured off a window
+    /// capture, a small button-style toggle's filled plate is a step of grey away from its resting
+    /// one and the filled `archivebox` differs from the outlined one by a few pixels of tray: with
+    /// one fixed label, a filter that is hiding a third of the machine's work looks exactly like
+    /// one that is not. This control used to change its words too, and that was the signal doing
+    /// the work rather than the fill. The readout at the end of the strip still counts what is
+    /// being held back, but it is at the other end of the strip, and a filter you cannot see is
+    /// how somebody comes to report that their workspaces have disappeared.
     private var archivedToggle: some View {
-        Toggle(isOn: $filter.showsArchived) {
+        Toggle(isOn: $filter.hidesArchived) {
             Label(
-                filter.showsArchived ? "Showing archived" : "Archived",
-                systemImage: filter.showsArchived ? "archivebox.fill" : "archivebox"
+                filter.hidesArchived ? "Archived hidden" : "Hide archived",
+                systemImage: filter.hidesArchived ? "archivebox.fill" : "archivebox"
             )
             .lineLimit(1)
         }
@@ -215,8 +234,12 @@ struct HomeBar: View {
         .help(
             archivedCount == 0
                 ? "Nothing has been archived yet"
-                : "Show the \(archivedCount) archived workspaces in the list too"
+                : "Leave the \(count(archivedCount, "archived workspace")) out of the list"
         )
+    }
+
+    private func count(_ value: Int, _ noun: String) -> String {
+        value == 1 ? "1 \(noun)" : "\(value) \(noun)s"
     }
 
     // MARK: - Actions

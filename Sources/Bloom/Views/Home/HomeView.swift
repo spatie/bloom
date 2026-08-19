@@ -184,14 +184,14 @@ struct HomeView: View {
     private var summary: String {
         guard hasAnyWorkspace else { return "" }
 
-        // Everything on this Mac has been archived, and archived is off.
+        // Everything on this Mac has been archived, and archived is being hidden.
         //
         // Said as one fact rather than as a number and then a correction. `HomeListing.considered`
         // counts only what the archived switch let through, so the general shape below reports "0
         // workspaces" about a machine holding three of them, directly above a panel that says all
         // three exist. Neither half of the readout mentioned them.
         if !filter.isNarrowed, listing.considered == 0, !archived.isEmpty {
-            return "\(count(archived.count, "workspace")), all archived"
+            return "\(count(archived.count, "workspace")), all archived and hidden"
         }
 
         var text: String
@@ -206,7 +206,9 @@ struct HomeView: View {
 
         // Both ways round, for the same reason as the branch above: the count in front of this
         // clause is a count of what the archived switch let through, so a machine with archived
-        // work it is not being shown has to hear about it here or nowhere.
+        // work it is not being shown has to hear about it here or nowhere. The first half is the
+        // ordinary case now that Home lists archived work by default, and it is worth saying:
+        // "48 workspaces" reads very differently once you know 30 of them are over.
         if listing.shownArchived > 0 {
             text += ", \(listing.shownArchived) archived"
         } else if !archived.isEmpty {
@@ -232,9 +234,9 @@ struct HomeView: View {
     /// Four different sentences, plus the one for a machine with no projects on it at all.
     ///
     /// One generic "nothing to show" would be wrong in every case: the fixes are to add a project,
-    /// to start a workspace, to clear the search, to widen the project filter and to turn archived
-    /// on, and a placeholder that names none of them leaves the user to guess which of the five
-    /// controls above it did this.
+    /// to start a workspace, to clear the search, to widen the project filter and to stop hiding
+    /// archived, and a placeholder that names none of them leaves the user to guess which of the
+    /// five controls above it did this.
     ///
     /// **Why these are still centred, when the rest of Home moved to the leading edge.** macOS
     /// centres a message in a pane that is empty, and only in a pane that is empty: an empty Finder
@@ -311,9 +313,12 @@ struct HomeView: View {
                 ContentUnavailableView {
                     Label("Everything here is archived", systemImage: "archivebox")
                 } description: {
-                    Text("All \(count(archived.count, "workspace")) on this Mac have been archived.")
+                    Text(
+                        "All \(count(archived.count, "workspace")) on this Mac have been archived, "
+                            + "and archived ones are being hidden."
+                    )
                 } actions: {
-                    Button("Show archived") { app.homeFilter.showsArchived = true }
+                    Button("Show archived") { app.homeFilter.hidesArchived = false }
                 }
             }
         }

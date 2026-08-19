@@ -4,8 +4,17 @@ import BloomCore
 /// A workspace's name, which resolves out of a scramble on the one occasion Bloom renames it.
 ///
 /// A drop-in for `Text(workspace.name)`. It is a `View` rather than a `Text`, but every modifier
-/// the call sites use on it (`font`, `fontWeight`, `lineLimit`, `truncationMode`, `foregroundStyle`)
-/// travels through the environment, so adopting it is one word at the call site and nothing else.
+/// the call sites use on it (`font`, `lineLimit`, `truncationMode`, `foregroundStyle`) travels
+/// through the environment, so adopting it is one word at the call site and nothing else.
+///
+/// ## The one thing it decides for itself is the weight
+///
+/// A workspace with a finished turn nobody has read is set heavier than one without, and that is
+/// the same fact in the sidebar and on Home. It is settled here rather than at the two call sites
+/// because that is exactly how the two came apart: the sidebar asked for `.medium`, Home was
+/// written later and asked for `.semibold`, and the same workspace was a different weight in two
+/// lists two hundred points apart. Whether a row is unread is still the caller's to say. What
+/// that looks like is not.
 ///
 /// ## Why it never changes the row's layout
 ///
@@ -23,18 +32,31 @@ import BloomCore
 struct WorkspaceNameText: View {
     let workspaceID: String
     let name: String
+    /// Whether this row has finished work nobody has read yet.
+    ///
+    /// Passed in rather than read off the workspace, because the flag alone is not the question in
+    /// every list. Home lists archived workspaces, whose `unread` is a leftover with nothing
+    /// behind it, and it says so by handing this `false`. See `HomeListRow`.
+    let isUnread: Bool
+
+    /// What an unread row's name weighs. The sidebar's value, which is the one the owner asked
+    /// Home to match, and a step rather than a shout: on a list where a third of the rows can be
+    /// unread at once, bold is a paragraph in bold.
+    private static let unreadWeight: Font.Weight = .medium
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var frame: String?
 
-    init(_ workspace: Workspace) {
+    init(_ workspace: Workspace, isUnread: Bool) {
         self.workspaceID = workspace.id
         self.name = workspace.name
+        self.isUnread = isUnread
     }
 
-    init(workspaceID: String, name: String) {
+    init(workspaceID: String, name: String, isUnread: Bool = false) {
         self.workspaceID = workspaceID
         self.name = name
+        self.isUnread = isUnread
     }
 
     var body: some View {
@@ -50,6 +72,10 @@ struct WorkspaceNameText: View {
                 // be the one way this ornament could actively cost somebody something.
                 .accessibilityLabel(name)
         }
+        // On the stack rather than on the drawn copy, so the hidden sizer is measured at the same
+        // weight. Set on the visible `Text` alone, an unread name would be measured light and
+        // drawn heavy, and the last letter of every unread row would be clipped.
+        .fontWeight(isUnread ? Self.unreadWeight : .regular)
         .clipped()
         .task(id: reveal?.id) { await play() }
     }

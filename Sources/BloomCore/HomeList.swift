@@ -46,7 +46,8 @@ public struct HomeListing: Sendable {
     public var groups: [HomeGroup]
     /// Rows in the list, after every filter.
     public var shown: Int
-    /// Workspaces the filters were applied to, archived ones included only when they are on.
+    /// Workspaces the filters were applied to, archived ones included unless they are being
+    /// hidden.
     public var considered: Int
     /// Archived workspaces that exist, whether or not they are being shown.
     public var archived: Int
@@ -77,14 +78,32 @@ public struct HomeFilter: Equatable, Sendable {
     /// the same state, which is what stops the menu from reaching a configuration that shows
     /// nothing and offers no way back.
     public var projects: Set<String> = []
-    public var showsArchived = false
+    /// Whether archived workspaces are being kept OUT of the list. Off by default, so Home opens
+    /// on everything on the machine.
+    ///
+    /// It was the other way round, `showsArchived`, defaulting to off, and the inversion is not a
+    /// rename. Home is the flat list of every workspace on this Mac and it is the only screen that
+    /// lists an archived one at all, so a default that hid them meant the one place they could be
+    /// found never showed them until you knew to ask. Turning the default around leaves a switch
+    /// that only ever adds rows nobody hid, which is a control with no job, so it became the
+    /// narrowing it now is: a way to put a machine with two hundred finished workspaces back down
+    /// to the ones still being worked in.
+    public var hidesArchived = false
 
-    public init(query: String = "", projects: Set<String> = [], showsArchived: Bool = false) {
+    public init(query: String = "", projects: Set<String> = [], hidesArchived: Bool = false) {
         self.query = query
         self.projects = projects
-        self.showsArchived = showsArchived
+        self.hidesArchived = hidesArchived
     }
 
+    /// Whether the list is a subset of what was counted, which is what makes the readout say
+    /// "Showing 11 of 312" rather than a bare total.
+    ///
+    /// Hiding archived narrows the list too, and is deliberately not part of this. The two things
+    /// `isNarrowed` drives both compare `shown` against `considered`, and a hidden archived
+    /// workspace is never considered in the first place, so it would produce "Showing 11 of 11".
+    /// It is reported by the clause that says how many archived rows are being held back instead,
+    /// which is a number the shown-of-considered pair cannot carry.
     public var isNarrowed: Bool {
         !query.trimmingCharacters(in: .whitespaces).isEmpty || !projects.isEmpty
     }
@@ -130,7 +149,7 @@ public enum HomeList {
         }
 
         for workspace in workspaces { consider(workspace) }
-        if filter.showsArchived {
+        if !filter.hidesArchived {
             for workspace in archived { consider(workspace) }
         }
 

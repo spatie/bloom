@@ -183,9 +183,11 @@ final class AppModel {
     /// the list to one project, opens something from it and comes back to a list of everything
     /// has been overruled by the app without being told.
     ///
-    /// Deliberately not persisted to disk. "Showing archived" is something you turn on to go and
-    /// look at a thing, not a preference, and an app that starts up showing archived workspaces
-    /// because of something you did last Tuesday has to be worked out rather than read.
+    /// Deliberately not persisted to disk. "Hide archived" is something you turn on to get through
+    /// a long list, not a preference, and an app that starts up with a third of the machine's work
+    /// missing because of something you did last Tuesday has to be worked out rather than read.
+    /// A launch state that hides rows is worse than one that shows them, so this matters more now
+    /// that the switch narrows the list rather than widening it.
     var homeFilter = HomeFilter()
     var isCreatingWorkspace = false
 

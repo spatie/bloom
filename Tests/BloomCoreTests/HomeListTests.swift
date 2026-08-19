@@ -354,33 +354,22 @@ struct HomeListTests {
         #expect(listing.groups.first?.rows.count == 2)
     }
 
-    @Test("archived workspaces are counted even while they are hidden")
-    func archivedIsCountedButNotShown() {
+    @Test("archived workspaces are listed by default and counted while they are hidden")
+    func archivedIsListedByDefaultAndCountedWhileHidden() {
         let now = date(2025, 8, 19, 12, 0, 0)
         let archived = [
             workspace("gone", at: date(2025, 8, 18, 9, 0, 0), state: .archived),
             workspace("older", at: date(2025, 8, 10, 9, 0, 0), state: .archived),
         ]
 
-        let hidden = HomeList.build(
-            repos: [repo("repo")],
-            workspaces: [workspace("live", at: now)],
-            archived: archived,
-            filter: HomeFilter(),
-            now: now,
-            calendar: Self.calendar
-        )
-
-        #expect(hidden.shown == 1)
-        #expect(hidden.considered == 1)
-        #expect(hidden.archived == 2)
-        #expect(hidden.shownArchived == 0)
-
+        // The default. Home is the flat list of every workspace on the machine, and it is the
+        // only screen that lists an archived one at all, so leaving them out until somebody
+        // found a switch meant the one place they exist was the one place they could not be seen.
         let shown = HomeList.build(
             repos: [repo("repo")],
             workspaces: [workspace("live", at: now)],
             archived: archived,
-            filter: HomeFilter(showsArchived: true),
+            filter: HomeFilter(),
             now: now,
             calendar: Self.calendar
         )
@@ -390,6 +379,22 @@ struct HomeListTests {
         #expect(shown.archived == 2)
         #expect(shown.shownArchived == 2)
         #expect(shown.groups.flatMap(\.rows).map(\.id) == ["live", "gone", "older"])
+
+        let hidden = HomeList.build(
+            repos: [repo("repo")],
+            workspaces: [workspace("live", at: now)],
+            archived: archived,
+            filter: HomeFilter(hidesArchived: true),
+            now: now,
+            calendar: Self.calendar
+        )
+
+        #expect(hidden.shown == 1)
+        #expect(hidden.considered == 1)
+        // Still counted while hidden, which is what lets the readout say how many rows are being
+        // held back rather than reporting a total that quietly disagrees with the database.
+        #expect(hidden.archived == 2)
+        #expect(hidden.shownArchived == 0)
     }
 
     @Test("an archived row sorts by recency like any other, not to the bottom")
@@ -399,7 +404,7 @@ struct HomeListTests {
             repos: [repo("repo")],
             workspaces: [workspace("old", at: date(2025, 8, 1, 9, 0, 0))],
             archived: [workspace("recent", at: now, state: .archived)],
-            filter: HomeFilter(showsArchived: true),
+            filter: HomeFilter(),
             now: now,
             calendar: Self.calendar
         )
@@ -494,7 +499,9 @@ struct HomeListTests {
         #expect(!HomeFilter(query: "   ").isNarrowed)
         #expect(HomeFilter(query: "sidebar").isNarrowed)
         #expect(HomeFilter(projects: ["a"]).isNarrowed)
-        // Showing archived widens the list, so it is not a narrowing and must not say it is.
-        #expect(!HomeFilter(showsArchived: true).isNarrowed)
+        // Hiding archived narrows the list, and is still deliberately not a narrowing by this
+        // measure: `isNarrowed` drives a "showing 11 of 312" readout, and a hidden archived
+        // workspace is never one of the 312. It is reported by its own clause instead.
+        #expect(!HomeFilter(hidesArchived: true).isNarrowed)
     }
 }

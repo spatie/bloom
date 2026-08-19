@@ -19,7 +19,8 @@ import BloomCore
 /// `WorkspaceStatusGlyph` gives that state, so it is the sidebar's colour language projected onto
 /// the edge of the row rather than a second one. Nothing is carried by the rail alone: the same
 /// state is in the glyph's shape, in the row's accessibility label and, for an unread turn, in the
-/// weight of the name.
+/// weight of the name. That weight is `WorkspaceNameText`'s to pick rather than this row's, so the
+/// same workspace cannot be one weight here and another in the sidebar.
 ///
 /// **The row draws no selection of its own and inverts nothing.** It used to take `isSelected` and
 /// `isListFocused` and flip every colour on the row to white when the list held the keyboard,
@@ -81,8 +82,7 @@ struct HomeListRow: View {
                         fieldFocused = true
                     }
             } else {
-                WorkspaceNameText(workspace)
-                    .fontWeight(workspace.unread ? .semibold : .regular)
+                WorkspaceNameText(workspace, isUnread: isUnread)
                     .lineLimit(1)
                     .truncationMode(.tail)
 
@@ -107,10 +107,27 @@ struct HomeListRow: View {
         // on the row that carries a colour of its own (the rail, the glyph, the counts) already
         // states it; this is for everything that does not.
         .foregroundStyle(Palette.textPrimary)
-        // Dimmed as a whole rather than colour by colour. An archived workspace still has a
-        // project mark, a diff and an age, and picking a quieter variant of each of them
-        // would be four decisions where the row only makes one: this is over.
-        .opacity(row.isArchived ? 0.55 : 1)
+        // Greyed as a whole rather than colour by colour. An archived workspace still has a
+        // project mark, a diff and an age, and picking a quieter variant of each of them would be
+        // four decisions where the row only makes one: this is over.
+        //
+        // Two lines because "grey" is two things. The hue goes first, which is what the diff
+        // counts used to ask for on their own: a saturated green and a saturated red at 60 per
+        // cent are still a saturated green and a saturated red, and they were the loudest thing
+        // left on the row that is meant to be the quietest in the list. Drained, they dim with
+        // everything else, and so does the project mark, which is the other thing on the row with
+        // a colour of its own and no reason to keep it once the work is over.
+        //
+        // Then the whole thing steps back, and one step further than it used to. Measured off a
+        // window capture in light appearance, the name on an archived row came out #838383 at
+        // 0.55, which is 3.8 to 1 against the pane; at 0.6 it is #7D7D7D and 4.1 to 1, a shade
+        // above where macOS's own `secondaryLabelColor` sits at 3.9. That is the right rung: it
+        // is what the system uses for text that recedes and still has to be read. Receding is the
+        // point, unreadable is not, and with the hue gone the row has one fewer signal carrying
+        // the state, so the ink can afford it. These rows are no longer an occasional visit
+        // either; they are part of the list Home opens on.
+        .grayscale(row.isArchived ? 1 : 0)
+        .opacity(row.isArchived ? 0.6 : 1)
         .frame(minHeight: Metrics.rowHeight)
         // The whole row, including the gap the name does not fill, is the click target. Without
         // it only the text is, and a list where half of each row ignores the pointer feels broken
@@ -162,19 +179,16 @@ struct HomeListRow: View {
             // status mark to its left slid two centimetres right on every row without a diff.
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
+                // No archived case of its own any more. These two counts used to drain their own
+                // hue, because they were the only thing on the row loud enough to need it; the
+                // row now drains itself, and a second copy of that decision here would be the
+                // one place the treatment could drift from the rest of the line.
                 if workspace.hasDiff {
                     DiffStatLabel(
                         additions: workspace.additions,
                         deletions: workspace.deletions,
                         compact: true
                     )
-                    // The row's own dimming is not enough for these two. Everything else on an
-                    // archived row is grey to begin with, so 55 per cent of it reads as "over";
-                    // a saturated green and a saturated red at 55 per cent are still a saturated
-                    // green and a saturated red, and they were the loudest thing left on a row
-                    // that is supposed to be the quietest in the list. Drained of their hue they
-                    // dim with everything else, and the counts are still there to be read.
-                    .saturation(row.isArchived ? 0 : 1)
                 }
             }
             .frame(width: Self.diffWidth)
@@ -194,6 +208,23 @@ struct HomeListRow: View {
     /// forty rows on screen that is forty processes for a screen nobody has clicked into yet.
     private var pullRequest: PullRequest? {
         WorkspacePullRequests.shared.pullRequest(for: workspace.id)
+    }
+
+    /// Whether the name is set in the unread weight. Archived wins over unread, deliberately.
+    ///
+    /// The two do meet: archiving does not clear the flag, so a workspace whose agent finished
+    /// while nobody was looking and was archived that evening arrives here both unread and over.
+    /// Three things settle it the same way. The flag would be unclearable: reading an archived
+    /// workspace opens `ArchivedWorkspaceView`, which deliberately marks nothing read because
+    /// there is nothing to go back to, so the row would be heavy forever with no way to answer
+    /// it. It would be the only unread mark in the app that no other part of the app agrees
+    /// with: `DockBadge` counts `AppModel.workspaces`, which holds active workspaces only, and
+    /// the sidebar never lists an archived one at all, so Home would be shouting about a
+    /// workspace the badge and the sidebar both consider settled. And the two states say opposite
+    /// things: unread means "this wants you", archived means "this is done with you". A row
+    /// cannot be both, and the one the user acted on last is the one that is true.
+    private var isUnread: Bool {
+        !row.isArchived && workspace.unread
     }
 
     private var status: WorkspaceStatus {

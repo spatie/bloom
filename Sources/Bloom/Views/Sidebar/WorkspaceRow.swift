@@ -78,8 +78,7 @@ struct WorkspaceRow: View {
                             fieldFocused = true
                         }
                 } else {
-                    WorkspaceNameText(workspace)
-                        .fontWeight(workspace.unread ? .medium : .regular)
+                    WorkspaceNameText(workspace, isUnread: workspace.unread)
                         .lineLimit(1)
                         .truncationMode(.tail)
 
