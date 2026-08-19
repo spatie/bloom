@@ -236,6 +236,11 @@ public enum GitHub {
         try decodeSnapshot(from: data).pullRequest
     }
 
+    /// The same seam for the runs themselves, which the pull request rolls up and therefore hides.
+    public static func decodeChecks(from data: Data) throws -> [CheckRun] {
+        try decodeSnapshot(from: data).runs
+    }
+
     /// This seam applies the same requiredness policy to live output and deterministic tests.
     public static func rollup(_ runs: [CheckRun]) -> (PullRequest.Checks, String) {
         guard !runs.isEmpty else { return (.none, "No checks") }
@@ -539,7 +544,11 @@ public enum GitHub {
     }
 
     private static func parseDate(_ value: String?) -> Date? {
-        guard let value else { return nil }
+        // gh marshals a Go `time.Time` that was never set as year one rather than omitting it, so
+        // a check that has not started carries a real, parseable, meaningless date at both ends of
+        // its clock. Taken at face value a queued run measured zero seconds and the list reported
+        // "0s" beside a job nothing had begun.
+        guard let value, !value.isEmpty, !value.hasPrefix("0001-01-01") else { return nil }
         return (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(value))
             ?? (try? Date.ISO8601FormatStyle(includingFractionalSeconds: false).parse(value))
     }
