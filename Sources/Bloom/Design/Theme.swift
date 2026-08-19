@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import BloomCore
 
 /// Bloom's colours.
 ///
@@ -290,9 +291,21 @@ extension NSColor {
 
 extension Color {
     /// Repo accent colours are stored as plain hex strings in SQLite.
+    ///
+    /// Read by `HexColor`, in the core and unit tested, rather than by a second rule here: this
+    /// used to hand the string to `UInt32(_:radix:)`, which reads `abc` as the number `0x000ABC`
+    /// and paints a project near black where every other tool reads `#AABBCC`.
     init(hexString: String) {
-        let cleaned = hexString.hasPrefix("#") ? String(hexString.dropFirst()) : hexString
-        self.init(nsColor: NSColor(rgb: UInt32(cleaned, radix: 16) ?? 0x4C8DF6))
+        guard let parsed = HexColor(hex: hexString) else {
+            self.init(nsColor: NSColor(rgb: 0x4C8DF6))
+            return
+        }
+        self.init(nsColor: NSColor(
+            srgbRed: CGFloat(parsed.red) / 255,
+            green: CGFloat(parsed.green) / 255,
+            blue: CGFloat(parsed.blue) / 255,
+            alpha: 1
+        ))
     }
 
     /// The way back, for a colour the user picked in a colour well.

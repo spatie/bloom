@@ -15,36 +15,15 @@ public struct GhosttyColor: Sendable, Hashable {
         self.blue = blue
     }
 
-    /// `#rrggbb`, `rrggbb`, `#rgb` or `rgb`. Ghostty accepts the hash as optional, and the three
-    /// digit form expands each digit to a byte, so `#abc` is `#aabbcc`.
+    /// `#rrggbb`, `rrggbb`, `#rgb` or `rgb`, read by `HexColor`, which Bloom's own palette reads
+    /// its stored accents with too.
     ///
-    /// X11 colour names are valid in Ghostty too but are not understood here: an unparseable
-    /// value leaves the key untouched rather than resetting it, so a name falls back to Bloom's
-    /// own colour instead of to something wrong.
+    /// X11 colour names are valid in Ghostty but are not understood here: an unparseable value
+    /// leaves the key untouched rather than resetting it, so a name falls back to Bloom's own
+    /// colour instead of to something wrong.
     public init?(hex: String) {
-        var text = hex.trimmingCharacters(in: .whitespaces)
-        if text.hasPrefix("#") { text.removeFirst() }
-
-        let digits = text.compactMap(\.hexDigitValue)
-        guard digits.count == text.count else { return nil }
-
-        switch digits.count {
-        // Each digit is doubled, so `#abc` is `#aabbcc`.
-        case 3:
-            self.init(
-                red: UInt8(digits[0] * 17),
-                green: UInt8(digits[1] * 17),
-                blue: UInt8(digits[2] * 17)
-            )
-        case 6:
-            self.init(
-                red: UInt8(digits[0] * 16 + digits[1]),
-                green: UInt8(digits[2] * 16 + digits[3]),
-                blue: UInt8(digits[4] * 16 + digits[5])
-            )
-        default:
-            return nil
-        }
+        guard let parsed = HexColor(hex: hex) else { return nil }
+        self.init(red: parsed.red, green: parsed.green, blue: parsed.blue)
     }
 }
 
