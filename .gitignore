@@ -3,3 +3,4 @@
 *.xcodeproj
 .DS_Store
 fixtures/*.local.jsonl
+dist/
