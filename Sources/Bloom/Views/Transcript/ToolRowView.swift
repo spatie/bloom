@@ -9,6 +9,11 @@ struct ToolRowView: View {
     var workspace: Workspace
     var result: AgentToolResult?
     var isError: Bool
+    /// Set when the call never ran. A refusal is drawn as one throughout: not the red a failure
+    /// gets, because nothing failed. See `ToolRefusal`.
+    var refusal: ToolRefusal?
+    /// What the CLI said about the refusal, in one line.
+    var refusalReason: String = ""
     var durationMS: Int?
     var isExpanded: Bool
     var onToggle: () -> Void
@@ -22,6 +27,8 @@ struct ToolRowView: View {
                     presentation: ToolPresenter.present(use),
                     workspace: workspace,
                     isError: isError,
+                    refusal: refusal,
+                    refusalReason: refusalReason,
                     durationMS: durationMS,
                     isExpanded: isExpanded,
                     isHovered: isHovered
@@ -29,13 +36,13 @@ struct ToolRowView: View {
             }
 
             if isExpanded {
-                ToolDetailView(use: use, result: result)
+                ToolDetailView(use: use, result: result, refusal: refusal, refusalReason: refusalReason)
                     .padding(.leading, TranscriptLayout.detailIndent)
                     .padding(.trailing, TranscriptLayout.inset)
                     .padding(.bottom, TranscriptLayout.block)
             }
         }
-        .modifier(ExpandableRow(isHovered: isHovered, isError: isError))
+        .modifier(ExpandableRow(isHovered: isHovered, isError: isError, refusal: refusal))
         .onHover { isHovered = $0 }
     }
 }

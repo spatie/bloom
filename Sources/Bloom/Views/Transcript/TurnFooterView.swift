@@ -9,6 +9,9 @@ struct TurnFooterView: View {
     var row: TranscriptRow
     /// What the file chips show their paths relative to. See `TurnFile.display(in:)`.
     var worktree: String
+    /// What the session is set to, so a turn whose calls were declined can name the setting that
+    /// declined them. See `deniedNotice`.
+    var permissionMode: PermissionMode = .acceptEdits
 
     /// More chips than this and the footer stops being a footer.
     private static let visibleFileLimit = 6
@@ -36,11 +39,11 @@ struct TurnFooterView: View {
             // A turn's cost and duration are the numbers a user goes looking for, so they sit a
             // rung above the counts and timings that decorate a single row.
             HStack(spacing: TranscriptLayout.block) {
-                Image(systemName: succeeded ? "checkmark.circle" : "exclamationmark.circle")
+                Image(systemName: outcome.glyph)
                     .font(Typo.caption)
                     .imageScale(.medium)
-                    .foregroundStyle(succeeded ? Palette.positive : Palette.negative)
-                    .accessibilityLabel(succeeded ? "Finished" : "Failed")
+                    .foregroundStyle(outcome.tint)
+                    .accessibilityLabel(outcome.label)
 
                 Text(TurnDuration.format(durationMS))
                     .font(Typo.caption)
@@ -106,6 +109,18 @@ struct TurnFooterView: View {
             .foregroundStyle(Palette.textSecondary)
             .padding(.horizontal, TranscriptLayout.inset)
             .padding(.vertical, TranscriptLayout.inset)
+
+            // Under the row rather than in it, and only when there is something to say. This is
+            // the one place in a turn that can name what went undone and what would undo it, and
+            // it is where somebody looks after a button appeared to do nothing.
+            if let notice = deniedNotice {
+                Text(notice)
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, TranscriptLayout.inset)
+                    .padding(.bottom, TranscriptLayout.inset)
+            }
         }
         .task(id: row.seq) { await scanFiles() }
     }
@@ -122,6 +137,27 @@ struct TurnFooterView: View {
     }
 
     private var succeeded: Bool { result?.succeeded != false }
+
+    /// How many calls the CLI declined during the turn. Reported on the `result` line, which is
+    /// otherwise a plain success: a turn in which every shell call was denied ends with
+    /// `is_error` false and `subtype` "success", so without this the footer put a green tick under
+    /// an agent that had been stopped at every door.
+    private var denials: Int { result?.permissionDenials ?? 0 }
+
+    private var outcome: (glyph: String, tint: Color, label: String) {
+        if !succeeded { return ("exclamationmark.circle", Palette.negative, "Failed") }
+        if denials > 0 { return ("hand.raised.circle", Palette.warning, "Finished, with calls denied") }
+        return ("checkmark.circle", Palette.positive, "Finished")
+    }
+
+    /// Said once for the turn rather than on each declined row, because the answer is one setting
+    /// and repeating it fifteen times would be noise.
+    private var deniedNotice: String? {
+        guard succeeded, denials > 0 else { return nil }
+        let count = denials == 1 ? "1 tool call was" : "\(denials) tool calls were"
+        return "\(count) denied in \(permissionMode.label). "
+            + "Pick another permission mode under the composer, then ask again."
+    }
 
     private var durationMS: Int { row.durationMS ?? result?.durationMS ?? 0 }
 

@@ -19,6 +19,12 @@ struct TranscriptRow: Identifiable, Hashable {
     /// Set once the matching tool_result arrives, so a tool call and its outcome render as one row.
     var resultPayload: Data?
     var isError = false
+    /// Set when the result says the call never ran, and why. A refusal carries `is_error` as well,
+    /// so the two are held together and every reader that draws a failure checks this first.
+    var refusal: ToolRefusal?
+    /// The one line the CLI gave for a refusal, so a collapsed row can say what happened without
+    /// decoding a result payload that is usually the largest in the session.
+    var refusalReason = ""
     /// Non-nil when the row came from inside a subagent, so it can be indented under its parent.
     var parentToolUseID: String?
 
@@ -94,7 +100,10 @@ final class TranscriptModel {
         if message.kind == .toolResult, let refID = message.refID,
            let index = indexByRefID[refID] {
             rows[index].resultPayload = message.payload
-            rows[index].isError = ToolResultProbe.isError(message.payload)
+            let summary = ToolResultSummary.decode(message.payload)
+            rows[index].isError = summary.isError
+            rows[index].refusal = summary.refusal
+            rows[index].refusalReason = summary.reason
             if let duration = message.durationMS { rows[index].durationMS = duration }
             return
         }
@@ -363,16 +372,8 @@ final class TranscriptModel {
 }
 
 /// Small helpers that peek at a stored payload without decoding the whole event, used while
-/// folding rows together.
-enum ToolResultProbe {
-    static func isError(_ payload: Data) -> Bool {
-        guard let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
-              let message = object["message"] as? [String: Any],
-              let content = message["content"] as? [[String: Any]] else { return false }
-        return content.contains { ($0["is_error"] as? Bool) == true }
-    }
-}
-
+/// folding rows together. How a result went is read by `ToolResultSummary`, which lives in the
+/// core so that telling a denial from a failure is covered by tests.
 enum ParentProbe {
     static func parentToolUseID(_ payload: Data) -> String? {
         guard let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any] else {

@@ -11,7 +11,8 @@ struct OrphanResultRowView: View {
 
             Text(ToolPresenter.oneLine(result.text))
                 .font(Typo.label)
-                .foregroundStyle(result.isError ? Palette.negative : Palette.textTertiary)
+                // A refused call is not a failed one, here as anywhere else. See `ToolRefusal`.
+                .foregroundStyle(tint)
                 .lineLimit(1)
                 // The only copy of an output whose call never arrived, so it has to be liftable.
                 .textSelection(.enabled)
@@ -19,5 +20,10 @@ struct OrphanResultRowView: View {
             Spacer(minLength: 0)
         }
         .transcriptRowFrame()
+    }
+
+    private var tint: Color {
+        if result.refusal != nil { return Palette.warning }
+        return result.isError ? Palette.negative : Palette.textTertiary
     }
 }

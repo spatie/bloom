@@ -282,6 +282,9 @@ public struct AgentToolResult: Sendable, Hashable {
     public let toolUseID: String
     public let text: String
     public let isError: Bool
+    /// Set when the call never ran. `is_error` is true for a refusal as well as for a failure, so
+    /// this is what separates the two. See `ToolRefusal`.
+    public let refusal: ToolRefusal?
     /// Screenshots come back as image blocks. The bytes are not lifted out, only the fact that
     /// they were there, so a row can offer to pull them from the raw payload.
     public let hasImages: Bool
@@ -294,6 +297,7 @@ public struct AgentToolResult: Sendable, Hashable {
         toolUseID: String,
         text: String,
         isError: Bool = false,
+        refusal: ToolRefusal? = nil,
         hasImages: Bool = false,
         raw: Data = Data(),
         parentToolUseID: String? = nil,
@@ -303,6 +307,7 @@ public struct AgentToolResult: Sendable, Hashable {
         self.toolUseID = toolUseID
         self.text = text
         self.isError = isError
+        self.refusal = refusal
         self.hasImages = hasImages
         self.raw = raw
         self.parentToolUseID = parentToolUseID
@@ -707,16 +712,29 @@ public enum AgentEvent: Sendable {
         }
 
         let rendered = renderToolResultContent(block["content"])
+        let toolUseID = block["tool_use_id"]?.stringValue ?? ""
+        let isError = block["is_error"]?.boolValue ?? false
         return .toolResult(AgentToolResult(
-            toolUseID: block["tool_use_id"]?.stringValue ?? "",
+            toolUseID: toolUseID,
             text: rendered.text,
-            isError: block["is_error"]?.boolValue ?? false,
+            isError: isError,
+            refusal: isError ? refusal(in: json, for: toolUseID) : nil,
             hasImages: rendered.hasImages,
             raw: raw,
             parentToolUseID: json["parent_tool_use_id"]?.stringValue,
             uuid: json["uuid"]?.stringValue,
             sessionID: json["session_id"]?.stringValue
         ))
+    }
+
+    /// Whether the CLI says this call never ran, and why.
+    ///
+    /// `tool_result_meta` sits beside the message rather than inside the block, and one `user`
+    /// event can close more than one call, so the entry is found by id. See `ToolRefusal`.
+    private static func refusal(in json: JSONValue, for toolUseID: String) -> ToolRefusal? {
+        let entry = json["tool_result_meta"]?.arrayValue?
+            .first { $0["id"]?.stringValue == toolUseID }
+        return ToolRefusal(protocolKind: entry?["non_execution_kind"]?.stringValue)
     }
 
     /// Tool result content is either a bare string or an array of blocks, and the array can hold

@@ -91,7 +91,8 @@ struct TranscriptListView: View {
                             TurnFooterView(
                                 rows: transcript.rows,
                                 row: row,
-                                worktree: transcript.workspace.path
+                                worktree: transcript.workspace.path,
+                                permissionMode: transcript.session.permissionMode
                             )
                             .padding(.horizontal, TranscriptLayout.inset)
                             .padding(.bottom, TranscriptLayout.block + TranscriptLayout.tight)

@@ -8,6 +8,11 @@ struct ToolRowHeader: View {
     /// Which worktree the row's paths are relative to, and which review a file chip opens into.
     var workspace: Workspace
     var isError: Bool
+    /// Set when the call never ran, which the protocol reports with the same `is_error` a real
+    /// failure carries. See `ToolRefusal`.
+    var refusal: ToolRefusal?
+    /// The sentence the CLI gave for the refusal, in one line.
+    var refusalReason: String = ""
     var durationMS: Int?
     var isExpanded: Bool
     var isHovered: Bool
@@ -27,11 +32,35 @@ struct ToolRowHeader: View {
         !presentation.detail.isEmpty && !presentation.chips.contains { $0.text == presentation.detail }
     }
 
+    /// What the row says happened, in the slot where a failure says "error".
+    ///
+    /// A refusal is drawn in the caution colour rather than the alarm one, and it keeps the
+    /// detail beside it: the command that was declined is the thing the user needs to see, so the
+    /// CLI's sentence goes in the tooltip and into the accessible label rather than displacing it.
+    /// Every one of these rows opens onto the full sentence and what to do about it.
+    private var outcome: (text: String, tint: Color, help: String)? {
+        if let refusal {
+            var sentence = refusalReason.isEmpty ? refusal.summary : refusalReason
+            // The CLI's sentences are not all punctuated: "This command requires approval" has no
+            // full stop, and running the remedy straight onto it read as one run-on line.
+            if let last = sentence.last, !".!?:".contains(last) { sentence += "." }
+            return (
+                refusal.label,
+                Palette.warning,
+                [sentence, refusal.remedy].compactMap { $0 }.joined(separator: " ")
+            )
+        }
+        if isError {
+            return ("error", Palette.negative, "The tool reported an error. Open the row for what it said.")
+        }
+        return nil
+    }
+
     var body: some View {
         HStack(spacing: TranscriptLayout.glyphGap) {
             TranscriptGlyph(
                 symbol: presentation.glyph,
-                tint: isError ? Palette.negative : presentation.tint
+                tint: outcome?.tint ?? presentation.tint
             )
 
             Text(presentation.label)
@@ -66,13 +95,15 @@ struct ToolRowHeader: View {
             Spacer(minLength: TranscriptLayout.tight)
 
             // Both of these are last in a row whose detail carries `layoutPriority`, so
-            // without `fixedSize` the detail takes the slack and "error" wraps to "e" over "r"
-            // inside a row that is one line tall by construction.
-            if isError {
-                Text("error")
+            // without `fixedSize` the detail takes the slack and the outcome word wraps to "e"
+            // over "r" inside a row that is one line tall by construction.
+            if let outcome {
+                Text(outcome.text)
                     .font(Typo.caption)
-                    .foregroundStyle(Palette.negative)
+                    .foregroundStyle(outcome.tint)
                     .fixedSize()
+                    .help(outcome.help)
+                    .accessibilityLabel(outcome.help)
             }
 
             if let durationMS, durationMS > 0 {

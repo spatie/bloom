@@ -35,6 +35,7 @@ struct TranscriptRowView: View, Equatable {
             && lhs.row.seq == rhs.row.seq
             && lhs.row.kind == rhs.row.kind
             && lhs.row.isError == rhs.row.isError
+            && lhs.row.refusal == rhs.row.refusal
             && lhs.row.durationMS == rhs.row.durationMS
             && lhs.row.resultPayload?.count == rhs.row.resultPayload?.count
             && lhs.row.parentToolUseID == rhs.row.parentToolUseID
@@ -98,6 +99,8 @@ struct TranscriptRowView: View, Equatable {
                     workspace: workspace,
                     result: toolResult,
                     isError: row.isError,
+                    refusal: row.refusal,
+                    refusalReason: row.refusalReason,
                     durationMS: row.durationMS,
                     isExpanded: isExpanded,
                     onToggle: onToggle
