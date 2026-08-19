@@ -11,6 +11,9 @@ struct BloomCommands: Commands {
     /// See `TextZoomAvailability`.
     private let zoom = TextZoomAvailability.shared
 
+    /// Nil in every scene but the main window. See `MainWindowFocusKey`.
+    @FocusedValue(\.isMainWindowFocused) private var isMainWindowFocused: Bool?
+
     init(model: AppModel) {
         self.model = model
     }
@@ -35,6 +38,11 @@ struct BloomCommands: Commands {
             // Cmd+W belongs to the session, not the window. Bloom has no Save item, so a group
             // anchored after `.saveItem` is dropped whole and Cmd+W falls through to the system
             // Close, which used to end the process and every agent with it.
+            //
+            // It belongs to the session in the MAIN window, though, which is why it is scoped to
+            // that scene below. The menu bar is shared with Settings and with each project's
+            // settings window, and unscoped this item both closed the wrong thing from those
+            // windows and left them with no working Cmd+W of their own.
             Button("Close Session") {
                 guard let workspace = model.selectedModel,
                       let session = workspace.activeSession,
@@ -42,7 +50,9 @@ struct BloomCommands: Commands {
                 Task { await workspace.closeSession(session) }
             }
             .keyboardShortcut("w", modifiers: .command)
-            .disabled(model.selectedModel?.activeSession == nil)
+            // Scoped to the main window as well as to there being a session, because this item
+            // holds Cmd+W for the whole app. See `MainWindowFocusKey`.
+            .disabled(isMainWindowFocused != true || model.selectedModel?.activeSession == nil)
 
             Divider()
 

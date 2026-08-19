@@ -74,6 +74,10 @@ struct RootView: View {
         // called `xqbn hgue` in a menu the user is reading to find it by name.
         .navigationTitle(app.selectedWorkspace?.name ?? "Bloom")
 
+        // Marks this scene as the main window, so the menu items that act on a workspace grey out
+        // while Settings or a project settings window is key. See `MainWindowFocusKey`.
+        .focusedSceneValue(\.isMainWindowFocused, true)
+
         // Bottom trailing, out of the way of the sidebar and of the composer's send button.
         .overlay(alignment: .bottomTrailing) {
             if let notice = app.notice {
