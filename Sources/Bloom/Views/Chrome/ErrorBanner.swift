@@ -33,6 +33,8 @@ struct ErrorBanner: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            // An error in a developer tool is something you paste somewhere else.
+            .textSelection(.enabled)
 
             Spacer(minLength: Metrics.gutter)
 

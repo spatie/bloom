@@ -64,6 +64,10 @@ struct InspectorNotice: View {
                     .font(Typo.micro)
                     .foregroundStyle(Palette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    // The expandable details below were already selectable and the sentence
+                    // saying what failed was not, so the git output could be pasted and the
+                    // explanation of it could not.
+                    .textSelection(.enabled)
 
                 if details != nil {
                     Button(isShowingDetails ? "Hide details" : "Show details") {

@@ -27,6 +27,8 @@ struct NoticeBanner: View {
                 .font(Typo.label)
                 .foregroundStyle(Palette.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
+                // Worth pasting somewhere else, like every other message the app shows.
+                .textSelection(.enabled)
 
             Button("Dismiss", systemImage: "xmark", action: onDismiss)
                 .labelStyle(.iconOnly)
