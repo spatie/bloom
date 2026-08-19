@@ -153,14 +153,28 @@ public struct WorkspaceManager: Sendable {
 
     // MARK: - Scripts
 
-    /// `CONDUCTOR_` is not a leftover. It is deliberate compatibility with Conductor, whose
-    /// `.conductor/settings.toml` files this app reads, so a setup script written for that product
-    /// binds the names it already expects.
-    public static let environmentPrefixes = ["BLOOM", "CONDUCTOR"]
+    /// The prefix Bloom's own interface uses. Everything the app documents, and everything a
+    /// script written for it should bind, is `BLOOM_*`.
+    public static let environmentPrefix = "BLOOM"
 
+    /// Kept alongside it, and deprecated.
+    ///
+    /// `CONDUCTOR_*` is not a second interface and nothing here should be read as Bloom being
+    /// Conductor. It is compatibility: repositories whose committed setup scripts already say
+    /// `$CONDUCTOR_ROOT_PATH` would otherwise break at setup time, with a shell error, in a file
+    /// their team shares. Dropping it is a decision for the day those scripts have been moved
+    /// over, not a rename anybody can do quietly.
+    public static let deprecatedEnvironmentPrefix = "CONDUCTOR"
+
+    public static let environmentPrefixes = [environmentPrefix, deprecatedEnvironmentPrefix]
+
+    /// What a setup, archive or run script is launched with, on top of the user's own shell
+    /// environment.
+    ///
+    /// One function for all three, so the three cannot drift into binding different names. The
+    /// deprecated prefix carries exactly the same values as the real one, so a script written
+    /// either way sees the same workspace.
     public func environment(for workspace: Workspace, repo: Repo, port: Int) -> [String: String] {
-        // Both prefixes carry the same values, so a script can bind whichever it was written
-        // against.
         let pairs: [(String, String)] = [
             ("IS_LOCAL", "1"),
             ("WORKSPACE_NAME", workspace.branch.replacingOccurrences(of: "/", with: "-")),

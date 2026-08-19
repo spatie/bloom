@@ -42,6 +42,7 @@ struct RepoScriptsSection: View {
                 Text("Run by zsh with the workspace folder as the working directory, not in an interactive shell, so anything a login shell would set up has to be set up in the script.")
                 Text(Self.variables)
                     .font(Typo.codeTiny)
+                Text(Self.alias)
             }
             .font(Typo.caption)
             .foregroundStyle(Palette.textSecondary)
@@ -49,13 +50,14 @@ struct RepoScriptsSection: View {
         }
     }
 
-    /// Named rather than described, because a script writer needs the exact spelling. Both
-    /// prefixes carry the same values, which is what lets a script written for Conductor run here
-    /// unchanged.
-    private static let variables = WorkspaceManager.environmentPrefixes
-        .map { "\($0)_*" }
-        .joined(separator: " and ")
-        + ": WORKSPACE_NAME, WORKSPACE_ID, WORKSPACE_PATH, ROOT_PATH, DEFAULT_BRANCH, PORT, IS_LOCAL"
+    /// Named rather than described, because a script writer needs the exact spelling.
+    private static let variables = "\(WorkspaceManager.environmentPrefix)_"
+        + "{WORKSPACE_NAME, WORKSPACE_ID, WORKSPACE_PATH, ROOT_PATH, DEFAULT_BRANCH, PORT, IS_LOCAL}"
+
+    /// Said once, quietly, and not given equal billing with the real names above it. A script
+    /// written for Conductor keeps working; a script written today should not be written that way.
+    private static let alias = "Each is also set as "
+        + "\(WorkspaceManager.deprecatedEnvironmentPrefix)_*, for scripts written for Conductor."
 
     // MARK: - Run scripts
 
