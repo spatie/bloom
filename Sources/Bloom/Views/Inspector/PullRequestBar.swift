@@ -1,7 +1,7 @@
 import SwiftUI
 import BloomCore
 
-/// The pull request strip above the inspector tabs.
+/// The pull request strip along the top edge of the window, over the inspector column.
 ///
 /// The bar owns the state colour rather than its contents doing, so the tint runs the full width
 /// of the pane including the insets its rows keep. A wash painted by the row inside had to grow
@@ -12,6 +12,14 @@ import BloomCore
 /// shows changes on GitHub's schedule rather than the user's. The poll is silent: a machine
 /// without `gh`, or with `gh` signed out, simply never gets a pull request back, and a background
 /// refresh is never a reason to put a dialog in front of anybody.
+///
+/// It is exactly one row tall, always, and that is a hard requirement rather than a preference.
+/// The strip is a title bar accessory now (`TitleBarStrip`), and an accessory is laid out from a
+/// frame its controller sets by hand rather than from anything SwiftUI measures. Anything this
+/// view draws below that one row is drawn into a band with no room for it: the content is centred
+/// in the frame and cut off at both ends, which is what happened to the Continue notice. So what
+/// the strip has to SAY, as opposed to show, goes to `model.pullRequestNotice` and is drawn by
+/// `InspectorView` at the top of the column, one row lower and as tall as it needs to be.
 struct PullRequestBar: View {
     let model: WorkspaceModel
 
@@ -24,35 +32,20 @@ struct PullRequestBar: View {
     private static let pollInterval = Duration.seconds(20)
 
     @State private var isWorking = false
-    @State private var report: MergeReport?
 
-    /// What is left to say after a button was pressed. Not an alert: see `InspectorNotice`.
-    private struct MergeReport: Identifiable {
-        let id = UUID()
-        let tone: InspectorNotice.Tone
-        let title: String
-        let message: String
-        var details: String?
+    /// Where an answer goes. Set here, drawn in the column: see the note on the type.
+    private var report: PullRequestNotice? {
+        get { model.pullRequestNotice }
+        nonmutating set { model.pullRequestNotice = newValue }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            strip
-            if let report {
-                Hairline()
-                InspectorNotice(
-                    tone: report.tone,
-                    title: report.title,
-                    message: report.message,
-                    details: report.details,
-                    onDismiss: { self.report = nil }
-                )
-            }
-        }
-        .task(id: model.workspace.id) { await poll() }
-        // The other half of the button. `WorkspaceModel` counts the turns that Create pull request
-        // started and that ended with no pull request; this is where one gets said out loud.
-        .onChange(of: model.pullRequestShortfalls) { _, _ in reportShortfall() }
+        strip
+            .task(id: model.workspace.id) { await poll() }
+            // The other half of the button. `WorkspaceModel` counts the turns that Create pull
+            // request started and that ended with no pull request; this is where one gets said
+            // out loud.
+            .onChange(of: model.pullRequestShortfalls) { _, _ in reportShortfall() }
     }
 
     private var strip: some View {
@@ -146,7 +139,7 @@ struct PullRequestBar: View {
         Task {
             defer { isWorking = false }
             if let refusal = await model.requestPullRequest() {
-                report = MergeReport(
+                report = PullRequestNotice(
                     tone: .info, title: "Nothing was sent", message: refusal
                 )
             }
@@ -164,7 +157,7 @@ struct PullRequestBar: View {
     /// claiming to know what stopped it.
     private func reportShortfall() {
         guard GitHubAvailability.shared.state.isUsable else { return }
-        report = MergeReport(
+        report = PullRequestNotice(
             tone: .leftover,
             title: "No pull request was opened",
             message: "\(model.workspace.name) finished the turn without one. The end of the "
@@ -186,7 +179,7 @@ struct PullRequestBar: View {
         Task {
             defer { isWorking = false }
             if let refusal = await model.requestPush() {
-                report = MergeReport(
+                report = PullRequestNotice(
                     tone: .info, title: "Nothing was sent", message: refusal
                 )
             }
@@ -208,18 +201,18 @@ struct PullRequestBar: View {
             defer { isWorking = false }
             switch await app.continueAfterMerge(model.workspace, pullRequest: pullRequest) {
             case .continued(let continuation):
-                report = MergeReport(
+                report = PullRequestNotice(
                     tone: continuation.base == .fetched ? .info : .leftover,
                     title: "Continuing on \(continuation.branch)",
                     message: continuation.sentence,
                     details: continuation.base.warning
                 )
             case .refused(let refusal):
-                report = MergeReport(
+                report = PullRequestNotice(
                     tone: .info, title: "Nothing was changed", message: refusal.sentence
                 )
             case .failed(let reason):
-                report = MergeReport(
+                report = PullRequestNotice(
                     tone: .failure,
                     title: "Could not continue",
                     message: reason + " This worktree is where it was.",
@@ -265,7 +258,7 @@ struct PullRequestBar: View {
                 // And here as well, because this one means the button the user just pressed did
                 // nothing, and they are looking at the button. The command that failed is behind
                 // the disclosure rather than in the sentence.
-                report = MergeReport(
+                report = PullRequestNotice(
                     tone: .failure,
                     title: "#\(pullRequest.number) was not merged",
                     message: reason + " Nothing on this machine was changed.",

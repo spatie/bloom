@@ -1,5 +1,21 @@
 import SwiftUI
 
+/// What a press on the pull request strip left to say.
+///
+/// A value on `WorkspaceModel` rather than `@State` inside the strip, because the strip and the
+/// notice are no longer in the same SwiftUI root: the strip is a title bar accessory and the
+/// notice is the first row of the inspector column, and a title bar accessory is hosted in a
+/// window of its own. The one thing they have to agree about is this.
+struct PullRequestNotice: Identifiable, Equatable {
+    let id = UUID()
+    var tone: InspectorNotice.Tone
+    var title: String
+    var message: String
+    /// The command and its output, for someone who wants to see it. Nil when there is nothing
+    /// behind the sentence.
+    var details: String?
+}
+
 /// Something the inspector has to say about what a button just did, said in the column rather than
 /// in a modal.
 ///
@@ -38,15 +54,15 @@ struct InspectorNotice: View {
         }
     }
 
-    let tone: Tone
-    let title: String
-    let message: String
-    /// The command and its output, for someone who wants to see it. Nil when there is nothing
-    /// behind the sentence.
-    var details: String?
+    let notice: PullRequestNotice
     let onDismiss: () -> Void
 
     @State private var isShowingDetails = false
+
+    private var tone: Tone { notice.tone }
+    private var title: String { notice.title }
+    private var message: String { notice.message }
+    private var details: String? { notice.details }
 
     var body: some View {
         HStack(alignment: .top, spacing: InspectorLayout.gap) {
@@ -56,9 +72,18 @@ struct InspectorNotice: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: InspectorLayout.tight) {
+                // Two lines at most, and truncated in the middle rather than at the tail.
+                // The titles that can be any length are the ones that name a branch, and a
+                // branch name a model wrote can be longer than this column will ever be: the
+                // middle is what a reader can spare, since the prefix says whose it is and the
+                // suffix says which attempt. The sentence under it names the branch again in
+                // full and wraps freely, so nothing is only ever available truncated.
                 Text(title)
                     .font(Typo.captionEmphasis)
                     .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Text(message)
                     .font(Typo.micro)

@@ -64,6 +64,15 @@ final class WorkspaceModel {
     var changesError: String?
     var pullRequest: PullRequest?
     var isLoadingPullRequest = false
+    /// What the last press on the pull request strip left to say, drawn at the top of the
+    /// inspector column.
+    ///
+    /// It lives on the model rather than in the strip because the two are no longer in the same
+    /// SwiftUI root, and it is drawn in the column rather than in the strip because the strip is
+    /// in the title bar now. A title bar accessory is laid out from a frame set by hand, one row
+    /// tall, so a notice added under the strip was drawn into a band with no room for it and cut
+    /// off mid sentence. See `TitleBarStrip` and `InspectorView`.
+    var pullRequestNotice: PullRequestNotice?
     /// How many times a turn started by Create pull request has ended with no pull request.
     ///
     /// The button cannot itself fail. It succeeds the moment the turn is handed to the agent, and
