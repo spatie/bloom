@@ -14,6 +14,9 @@ struct ComposerEditor: View {
     var height: CGFloat
     var onContentHeightChange: @MainActor (CGFloat) -> Void
     var onKey: @MainActor (ComposerKey) -> Bool
+    /// Files dropped or pasted onto the text. Handed straight through to the composer, which owns
+    /// what an attachment is.
+    var onAttach: @MainActor ([AttachmentSource]) -> Bool
 
     private static let placeholder = "Ask to make changes, @mention files, run /commands"
 
@@ -38,7 +41,8 @@ struct ComposerEditor: View {
                 caret: $caret,
                 isFocused: $isFocused,
                 onHeightChange: onContentHeightChange,
-                onKey: onKey
+                onKey: onKey,
+                onAttach: onAttach
             )
             .frame(height: max(height, ComposerTextEditor.lineHeight))
         }

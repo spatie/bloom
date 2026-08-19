@@ -46,6 +46,14 @@ struct ComposerView: View {
     @State private var isFastMode = false
     @State private var draftSaveTask: Task<Void, Never>?
 
+    /// The chip the pointer has settled on, which is the card that is up. Nil is the resting
+    /// state and also what a click, a send and a removal all put it back to.
+    @State private var previewed: PromptAttachment?
+    /// Whether a drag is currently over the box, so the border can say it will be taken.
+    @State private var isDropTarget = false
+    /// How wide the box is, which is all the hover card is allowed to be.
+    @State private var boxWidth: CGFloat = 0
+
     @State private var slashCatalog = SlashCommandCatalog()
     @State private var fileMatches: [FileMatch] = []
     @State private var menuIndex = 0
@@ -71,13 +79,24 @@ struct ComposerView: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: Metrics.spacingWide) {
+            if !attachments.isEmpty {
+                AttachmentBar(
+                    attachments: attachments,
+                    worktree: transcript.workspace.path,
+                    onOpen: open(attachment:),
+                    onRemove: remove(attachment:),
+                    onHover: { previewed = $0 }
+                )
+            }
+
             ComposerEditor(
                 text: $transcript.draft,
                 caret: $caret,
                 isFocused: $isFocused,
                 height: editorHeight,
                 onContentHeightChange: { contentHeight = $0 },
-                onKey: handle(key:)
+                onKey: handle(key:),
+                onAttach: attach(sources:)
             )
 
             ComposerFooterView(
@@ -86,14 +105,32 @@ struct ComposerView: View {
                 context: ContextWindowUsage.latest(in: transcript.rows),
                 isRunning: transcript.isRunning,
                 isFastMode: isFastMode,
-                canSend: hasBody,
+                canSend: canSend,
                 onToggleFastMode: toggleFastMode,
                 onAttach: attachFiles,
                 onSend: send,
                 onStop: transcript.stop
             )
         }
-        .composerBox(isFocused: $isFocused)
+        .composerBox(isFocused: $isFocused, isDropTarget: isDropTarget)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { boxWidth = $0 }
+        // The editor takes the drops that land on the text itself; this takes the ones that land
+        // on the chips, the footer and the padding, which is most of the box.
+        .dropDestination(for: URL.self) { urls, _ in
+            attach(sources: urls.filter(\.isFileURL).map { .file($0) })
+        } isTargeted: { isDropTarget = $0 }
+        .overlay(alignment: .topLeading) {
+            // Above the composer, in the same place and the same card as the two completion
+            // menus, and never at the same time as one of them: they would sit on top of each
+            // other, and a menu the user is typing into outranks a preview they are only looking
+            // at.
+            AttachmentCardOverlay(
+                attachment: activeMenu == .none ? previewed : nil,
+                worktree: transcript.workspace.path,
+                availableWidth: boxWidth
+            )
+            .alignmentGuide(.top) { $0[.bottom] + Metrics.spacing }
+        }
         .overlay(alignment: .topLeading) {
             ComposerMenuOverlay(
                 menu: activeMenu,
@@ -115,6 +152,7 @@ struct ComposerView: View {
         .padding(.horizontal, Metrics.gutter)
         .padding(.bottom, Metrics.gutter)
         .task(id: transcript.session.id) { await prepare() }
+        .onAppear { PromptAttachmentStore.shared.load(sessionID: transcript.session.id) }
         .task(id: transcript.workspace.path) {
             await slashCatalog.load(workspacePath: transcript.workspace.path)
         }
@@ -188,6 +226,15 @@ struct ComposerView: View {
     private var hasBody: Bool {
         !transcript.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
+
+    private var attachments: [PromptAttachment] {
+        PromptAttachmentStore.shared.attachments(for: transcript.session.id)
+    }
+
+    /// Attachments alone are a turn. Dropping a screenshot in and pressing send is a sentence, and
+    /// making the user type a word to unlock the button would be asking them to talk to the guard
+    /// rather than to the agent.
+    private var canSend: Bool { hasBody || !attachments.isEmpty }
 
     /// What the text alone asks for, before Escape gets a say.
     private var menu: ComposerMenu {
@@ -307,9 +354,22 @@ struct ComposerView: View {
     // MARK: - Actions
 
     private func send() {
-        guard hasBody, !transcript.isRunning else { return }
+        guard canSend, !transcript.isRunning else { return }
         draftSaveTask?.cancel()
-        let text = transcript.draft
+
+        // A file can be moved or deleted between being attached and the prompt going, and naming a
+        // path that is not there any more only teaches the agent that Bloom lies about paths. The
+        // chip carries a warning while it is on screen; this is the last check before it matters.
+        let worktree = transcript.workspace.path
+        let ready = attachments.filter {
+            FileManager.default.fileExists(atPath: $0.url(in: worktree).path)
+        }
+
+        let text = PromptAttachments.compose(text: transcript.draft, attachments: ready)
+        // The chips go and the files stay. The prompt the agent is now reading names those paths,
+        // and deleting them out from under it would break the one thing they were for.
+        PromptAttachmentStore.shared.clear(sessionID: transcript.session.id)
+        previewed = nil
         caret = 0
         let transcript = transcript
         Task { await transcript.send(text) }
@@ -342,15 +402,62 @@ struct ComposerView: View {
     }
 
     private func attachFiles() {
-        Task { await attach() }
+        Task { await pickFiles() }
+    }
+
+    /// The one way a file becomes an attachment, whichever door it came through: the paperclip, a
+    /// drag onto the box, a drag onto the text, or the clipboard.
+    ///
+    /// Returns true because two of those callers are AppKit asking "did you take this", and an
+    /// answer of no is what makes a drop fall through to the text system and write a path into the
+    /// draft again.
+    @discardableResult
+    private func attach(sources: [AttachmentSource]) -> Bool {
+        guard !sources.isEmpty else { return false }
+        Task { await add(sources) }
+        return true
+    }
+
+    private func add(_ sources: [AttachmentSource]) async {
+        let failures = await PromptAttachmentStore.shared.add(
+            sources,
+            sessionID: transcript.session.id,
+            workspace: transcript.workspace.path
+        )
+        isFocused = true
+        guard !failures.isEmpty else { return }
+        app.alert = BloomAlert(
+            title: failures.count == 1 ? "That file was not attached" : "Some files were not attached",
+            message: failures.joined(separator: "\n\n")
+        )
+    }
+
+    /// A chip opens the file where every other file in Bloom opens: the review tab, through
+    /// `FileReview`. An attachment is not a special kind of file and does not get a special kind
+    /// of tab.
+    private func open(attachment: PromptAttachment) {
+        previewed = nil
+        guard let model else { return }
+        FileReview.open(path: attachment.path, in: model)
+    }
+
+    private func remove(attachment: PromptAttachment) {
+        previewed = nil
+        PromptAttachmentStore.shared.remove(
+            attachment,
+            sessionID: transcript.session.id,
+            workspace: transcript.workspace.path
+        )
     }
 
     /// A sheet rather than an application-modal panel: `runModal()` stops the run loop, which stops
     /// every other workspace's transcript from streaming for as long as the picker is open.
-    private func attach() async {
+    private func pickFiles() async {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
-        panel.canChooseDirectories = true
+        // Files only. A folder has nothing to preview, nothing to open and no honest size, and
+        // `@mention` already says "this directory" without pretending it is one attachment.
+        panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
         panel.directoryURL = URL(filePath: transcript.workspace.path)
 
@@ -362,18 +469,7 @@ struct ComposerView: View {
         }
         guard response == .OK else { return }
 
-        let root = transcript.workspace.path
-        let mentions = panel.urls.map { url -> String in
-            let path = url.path
-            let relative = path.hasPrefix(root + "/") ? String(path.dropFirst(root.count + 1)) : path
-            return "@\(relative)"
-        }
-        guard !mentions.isEmpty else { return }
-
-        let separator = transcript.draft.isEmpty || transcript.draft.hasSuffix(" ") ? "" : " "
-        transcript.draft += separator + mentions.joined(separator: " ") + " "
-        caret = (transcript.draft as NSString).length
-        isFocused = true
+        await add(panel.urls.map { .file($0) })
     }
 
     // MARK: - First open

@@ -1,0 +1,131 @@
+import Foundation
+
+/// A file the next prompt carries.
+///
+/// It is deliberately not a piece of text in the draft. What the user dropped is a file, so the
+/// composer keeps a file: the chip can name it, the hover card can draw it and the centre column
+/// can open it, none of which is possible once the same thing has been flattened into a path
+/// inside a sentence.
+///
+/// The path is relative to the worktree because that is where the agent is standing. Every agent
+/// Bloom runs is spawned with the worktree as its working directory, so a relative path inside it
+/// is the one reference that needs no special casing per agent and no permission to read a
+/// directory the agent was not given.
+struct PromptAttachment: Identifiable, Hashable, Codable, Sendable {
+    var id: String = PromptAttachments.newShortID()
+    /// Where the agent will find it, relative to the worktree.
+    var path: String
+    /// Where it came from on this Mac. Empty for something pasted out of the clipboard, which
+    /// never had a file of its own. Kept so the same file dropped twice is recognised as the same
+    /// attachment rather than copied in again under a second id.
+    var source: String = ""
+    /// True when Bloom made this copy under `.bloom/attachments`, which is what makes removing the
+    /// chip also delete the file. A file that was already in the worktree is only ever referenced,
+    /// so taking its chip off must not touch the user's work.
+    var isCopy: Bool
+    var byteCount: Int = 0
+
+    var filename: String { (path as NSString).lastPathComponent }
+    var directory: String { (path as NSString).deletingLastPathComponent }
+
+    func url(in worktree: String) -> URL {
+        URL(filePath: (worktree as NSString).appendingPathComponent(path))
+    }
+}
+
+/// Where an attachment came from, before it is a file Bloom can point at.
+///
+/// Three doors lead here and they hand over different things: the panel and a drag give a file
+/// that already exists, the clipboard gives bytes that never did. Naming both means the copying
+/// rules are written once instead of three times.
+enum AttachmentSource: Hashable, Sendable {
+    case file(URL)
+    /// Raw bytes plus the name they should be written under, which is how a pasted screenshot
+    /// arrives: the clipboard carries TIFF or PNG data and no filename at all.
+    case data(Data, filename: String)
+}
+
+/// The rules about attachments that are pure: what the agent is told, where a copy goes, and what
+/// an id looks like.
+///
+/// Split out from the views and from the file system on purpose. These are the parts worth
+/// asserting on, and they are the parts that will move into `BloomCore` once the sending path is
+/// free to be edited.
+enum PromptAttachments {
+    /// Where a copy lands inside the worktree.
+    ///
+    /// Inside, rather than in Bloom's application support directory, because the agent has to be
+    /// able to read it. Claude Code will not read a path outside its working directory without
+    /// asking, Bloom has nothing that can answer that question, and a turn that stalls on an
+    /// unanswerable permission prompt is worse than no attachments at all. Inside the worktree the
+    /// read is ordinary.
+    ///
+    /// Under `.bloom`, which is already Bloom's corner of a repository, and made invisible to git
+    /// by `AttachmentFiles.shield`. See that function for why an untracked folder here would be a
+    /// bug rather than a detail.
+    static let folder = ".bloom/attachments"
+
+    /// The trailer the agent actually receives.
+    ///
+    /// Paths, in the prompt, in plain words. Every agent Bloom can run reads files by path, so
+    /// this works the same for Claude Code and for Codex with nothing conditional anywhere, and it
+    /// is legible in the transcript afterwards: what the agent got is what the user can read back.
+    /// The alternative, encoding images as content blocks in the turn, is Claude Code's own
+    /// protocol and would leave every other agent seeing an empty message.
+    static func compose(text: String, attachments: [PromptAttachment]) -> String {
+        guard !attachments.isEmpty else { return text }
+
+        let header = attachments.count == 1 ? "Attached file:" : "Attached files:"
+        let list = attachments.map { "- \($0.path)" }.joined(separator: "\n")
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // A prompt of nothing but attachments is allowed: dropping a screenshot and pressing send
+        // is a sentence in itself, and refusing it would make the user type a word for the sake of
+        // the guard rather than for the agent.
+        guard !body.isEmpty else { return "\(header)\n\(list)" }
+        return "\(body)\n\n\(header)\n\(list)"
+    }
+
+    /// Six characters, in the alphabet a URL would accept.
+    ///
+    /// Short because the whole of it is read: it is a directory in the path chip above the file
+    /// and in the prompt the agent is handed, and a UUID there is thirty six characters of noise
+    /// in both places. Six is enough that two attachments in one worktree colliding is not
+    /// something that happens.
+    static func newShortID() -> String {
+        let alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        return String((0..<6).map { _ in alphabet.randomElement() ?? "a" })
+    }
+
+    /// The name a copy is written under: the file's own, with anything that would change what the
+    /// path means taken out.
+    ///
+    /// A slash would silently put the file somewhere else, and a leading dot would hide it from
+    /// the person who came looking for it in Finder. Everything else is left alone, spaces and
+    /// accents included, because the name is the one part of an attachment the user recognises.
+    static func safeFilename(_ name: String) -> String {
+        var cleaned = name
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Every leading dot, not just the first: `..` is a name git and Finder both refuse, and
+        // one pass over a name of nothing but dots leaves another dot in front.
+        while cleaned.hasPrefix(".") { cleaned.removeFirst() }
+        guard !cleaned.isEmpty else { return "attachment" }
+        return cleaned
+    }
+
+    /// Where a copy of `filename` goes, relative to the worktree.
+    static func destination(filename: String, id: String) -> String {
+        "\(folder)/\(id)/\(safeFilename(filename))"
+    }
+
+    /// The name a pasted image is written under. Modelled on what macOS calls a screenshot, so a
+    /// folder of them sorts by when they were taken.
+    static func pastedFilename(extension ext: String, at date: Date = .now) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
+        return "Pasted \(formatter.string(from: date)).\(ext)"
+    }
+}

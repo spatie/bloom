@@ -29,6 +29,9 @@ struct ComposerTextEditor: NSViewRepresentable {
     var maxLines: Int = 12
     var onHeightChange: @MainActor (CGFloat) -> Void
     var onKey: @MainActor (ComposerKey) -> Bool
+    /// Files dropped or pasted into the editor. Returns true when the composer attached them,
+    /// which is what keeps AppKit from typing their paths into the draft instead.
+    var onAttach: @MainActor ([AttachmentSource]) -> Bool
 
     /// The conversation's text size, so what you type is set at the size you read. Without it the
     /// SwiftUI placeholder behind this view would grow and the typed text would not.
@@ -91,6 +94,14 @@ struct ComposerTextEditor: NSViewRepresentable {
         textView.onFocusChange = { [weak coordinator = context.coordinator] focused in
             coordinator?.focusChanged(to: focused)
         }
+        textView.onAttach = { [weak coordinator = context.coordinator] sources in
+            coordinator?.parent.onAttach(sources) ?? false
+        }
+        // A text view already accepts a file drag, which is exactly the behaviour being replaced:
+        // it writes the path into the text. Registering the type explicitly means the drop is
+        // offered to `performDragOperation` on every macOS version rather than relying on which
+        // types AppKit happens to have registered for a plain text view.
+        textView.registerForDraggedTypes(textView.registeredDraggedTypes + [.fileURL])
         textView.font = Self.font(scale: fontScale, face: chatFont)
         textView.textColor = .labelColor
         // The colour macOS uses for a caret, which is not always the accent colour: it stays

@@ -6,6 +6,9 @@ import SwiftUI
 /// lands on the text view and only the padding acts as a focus target.
 struct ComposerBox: ViewModifier {
     @Binding var isFocused: Bool
+    /// A file is being dragged over the box. Said with the border rather than with a plate over
+    /// the content, so the draft stays readable while the drop is being aimed.
+    var isDropTarget: Bool = false
 
     /// What AppKit draws around a focused control. Not a token, because nothing else in Bloom
     /// draws a focus ring and a three point line is the ring's definition rather than a spacing
@@ -27,7 +30,10 @@ struct ComposerBox: ViewModifier {
             }
             .overlay {
                 RoundedRectangle(cornerRadius: Metrics.corner)
-                    .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                    .strokeBorder(
+                        isDropTarget ? Palette.accent : Palette.border,
+                        lineWidth: isDropTarget ? Metrics.hairline * 2 : Metrics.hairline
+                    )
             }
             .overlay {
                 // The ring sits outside the border rather than replacing it, in the colour macOS
@@ -43,7 +49,7 @@ struct ComposerBox: ViewModifier {
 }
 
 extension View {
-    func composerBox(isFocused: Binding<Bool>) -> some View {
-        modifier(ComposerBox(isFocused: isFocused))
+    func composerBox(isFocused: Binding<Bool>, isDropTarget: Bool = false) -> some View {
+        modifier(ComposerBox(isFocused: isFocused, isDropTarget: isDropTarget))
     }
 }

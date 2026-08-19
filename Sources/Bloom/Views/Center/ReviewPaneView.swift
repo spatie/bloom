@@ -46,6 +46,12 @@ struct ReviewPaneView: View {
             // the new file's defaults key.
             DiffView(model: model, file: changed)
                 .id(changed.path)
+        } else if exists, FileMediaView.isMedia(path: tab.path) {
+            // An image, a PDF, a video. `FilePreview` reads a file as text and would say there is
+            // nothing to show, which for the screenshot somebody just attached is both wrong and
+            // the whole reason they clicked.
+            FileMediaView(worktree: model.workspace.path, path: tab.path)
+                .id(tab.path)
         } else if exists {
             FilePreview(model: model, path: tab.path)
                 .id(tab.path)
