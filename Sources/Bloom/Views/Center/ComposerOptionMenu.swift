@@ -7,6 +7,9 @@ import SwiftUI
 struct ComposerOptionMenu: View {
     var options: [ComposerOption]
     var selection: String
+    /// What the list is a list of, drawn as the menu's own heading. Short, because it sits above
+    /// three or five one-word rows and a sentence over them would be the widest thing in the menu.
+    var title: String
     var systemImage: String
     var tint: Color = Palette.textSecondary
     /// Drops the word and keeps the glyph, for a footer that has run out of room. The tooltip and
@@ -17,19 +20,20 @@ struct ComposerOptionMenu: View {
 
     var body: some View {
         Menu {
-            ForEach(options) { option in
-                Button {
-                    onSelect(option.id)
-                } label: {
-                    // A real checkmark rather than a text glyph, so the menu reads the way every
-                    // other Mac menu does, to the eye and to VoiceOver.
-                    if option.id == selection {
-                        Label(option.label, systemImage: "checkmark")
-                    } else {
-                        Text(option.label)
-                    }
+            // A `Picker` rather than a column of buttons, and the reason is the tick.
+            //
+            // These were `Button { } label: { Label(text, systemImage: "checkmark") }`, which is a
+            // shape AppKit has no room for: an item in an `NSMenu` draws its state marker in the
+            // one column reserved for it, and an image supplied by the label is dropped on the
+            // floor. So every one of these menus opened with no sign at all of what it was set to,
+            // in an app whose whole footer is a row of settings. An inline picker hands the job to
+            // the platform, which is how the sidebar's Filter menu has always drawn its own.
+            Picker(title, selection: binding) {
+                ForEach(options) { option in
+                    Text(option.label).tag(option.id)
                 }
             }
+            .pickerStyle(.inline)
         } label: {
             ComposerControlLabel(
                 systemImage: systemImage,
@@ -52,6 +56,13 @@ struct ComposerOptionMenu: View {
         .help(help)
         .accessibilityLabel(help)
         .accessibilityValue(label)
+    }
+
+    /// The picker writes back through the caller rather than into storage of its own, because
+    /// where the choice lives is the caller's business: a session row in a conversation, a value
+    /// carried into a workspace that does not exist yet in the create sheet.
+    private var binding: Binding<String> {
+        Binding(get: { selection }, set: { id in MainActor.assumeIsolated { onSelect(id) } })
     }
 
     private var label: String {

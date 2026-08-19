@@ -24,6 +24,28 @@ struct ComposerOption: Identifiable, Hashable {
         ComposerOption(id: $0.rawValue, label: $0.label)
     }
 
+    /// The built-in list plus any id the app is in, or has been in, that is not on it.
+    ///
+    /// Model and effort ids are an open set. A repository's settings file, `~/.conductor` or the
+    /// Models screen can pin one Bloom has no name for, and `opus-5-1m` in a settings file is a
+    /// real example: the chip read "Opus 5 1m" and the agent ran on it, while the menu offered
+    /// three models, none of them the one in force. Picking any of the three was then a one-way
+    /// door, because the id that was configured had disappeared from the only control that could
+    /// have put it back.
+    ///
+    /// So whatever the app has been set to is on the list, and it stays on the list. It goes after
+    /// the named ones, because those are the ones almost every reader wants.
+    static func adding(_ extras: [String], to options: [ComposerOption]) -> [ComposerOption] {
+        var known = Set(options.map(\.id))
+        var result = options
+        for id in extras {
+            let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, known.insert(trimmed).inserted else { continue }
+            result.append(ComposerOption(id: trimmed, label: label(for: trimmed, in: options)))
+        }
+        return result
+    }
+
     /// Falls back to a tidied form of the raw value, so a model set in a settings file that Bloom
     /// has never heard of is still shown rather than silently rewritten. Ids such as `opus-5-1m`
     /// and `claude-opus-5[1m]` reach us verbatim and read as "Opus 5 1m" and "Opus 5 (1m)".

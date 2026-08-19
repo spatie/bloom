@@ -21,6 +21,13 @@ struct ComposerFooterView: View {
     var onAttach: @MainActor () -> Void
     var onSend: @MainActor () -> Void
     var onStop: @MainActor () -> Void = {}
+    /// Model and effort ids this footer has been set to that are not on the built-in lists, kept
+    /// so the menu can offer the way back. See `ComposerOption.adding`.
+    ///
+    /// Held here rather than in `ComposerOptionMenu` because `ViewThatFits` below builds the row
+    /// three times, and three copies of the menu would be three separate pieces of state.
+    @State private var extraModels: [String] = []
+    @State private var extraEfforts: [String] = []
 
     var body: some View {
         // The footer is a fixed row of controls in a pane whose width the user owns: the centre
@@ -35,13 +42,26 @@ struct ComposerFooterView: View {
             row(isCompact: true, showsContext: true)
             row(isCompact: true, showsContext: false)
         }
+        .onChange(of: controls.model, initial: true) { _, id in
+            remember(id, known: ComposerOption.models, in: &extraModels)
+        }
+        .onChange(of: controls.effort, initial: true) { _, id in
+            remember(id, known: ComposerOption.efforts, in: &extraEfforts)
+        }
+    }
+
+    /// Files an id the built-in list has no entry for, once.
+    private func remember(_ id: String, known: [ComposerOption], in list: inout [String]) {
+        guard !id.isEmpty, !known.contains(where: { $0.id == id }), !list.contains(id) else { return }
+        list.append(id)
     }
 
     private func row(isCompact: Bool, showsContext: Bool) -> some View {
         HStack(spacing: Metrics.spacingTight) {
             ComposerOptionMenu(
-                options: ComposerOption.models,
+                options: ComposerOption.adding(extraModels, to: ComposerOption.models),
                 selection: controls.model,
+                title: "Model",
                 systemImage: "sparkle",
                 isCompact: isCompact,
                 help: "Choose the model",
@@ -49,8 +69,9 @@ struct ComposerFooterView: View {
             )
 
             ComposerOptionMenu(
-                options: ComposerOption.efforts,
+                options: ComposerOption.adding(extraEfforts, to: ComposerOption.efforts),
                 selection: controls.effort,
+                title: "Reasoning effort",
                 systemImage: "chart.bar.fill",
                 isCompact: isCompact,
                 help: "Choose reasoning effort",
@@ -60,6 +81,7 @@ struct ComposerFooterView: View {
             ComposerOptionMenu(
                 options: ComposerOption.permissionModes,
                 selection: controls.permissionMode.rawValue,
+                title: "Permission mode",
                 systemImage: Self.permissionGlyph(controls.permissionMode),
                 tint: controls.permissionMode == .bypassPermissions
                     ? Palette.warning

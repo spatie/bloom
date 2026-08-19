@@ -153,17 +153,19 @@ struct CreateWorkspaceSheet: View {
         // worktree without naming the repository would be asking for trust it has not earned.
         if app.repos.count > 1 {
             Menu {
-                ForEach(app.repos) { candidate in
-                    Button {
-                        repoID = candidate.id
-                    } label: {
-                        if candidate.id == repoID {
-                            Label(candidate.name, systemImage: "checkmark")
-                        } else {
-                            Text(candidate.name)
-                        }
+                // An inline `Picker` inside the menu, not a `Picker` in place of it. The tile
+                // above still needs a `Menu`, for the reason written just above; the tick beside
+                // the project you are already in is the platform's to draw, and a `Button` whose
+                // label carries a checkmark image never got one. See `ComposerOptionMenu`.
+                Picker("Project", selection: Binding(
+                    get: { repoID ?? "" },
+                    set: { repoID = $0.isEmpty ? nil : $0 }
+                )) {
+                    ForEach(app.repos) { candidate in
+                        Text(candidate.name).tag(candidate.id)
                     }
                 }
+                .pickerStyle(.inline)
             } label: {
                 label
             }
@@ -184,17 +186,12 @@ struct CreateWorkspaceSheet: View {
     /// stale base is discovered at merge time.
     private var baseBranchControl: some View {
         Menu {
-            ForEach(branchOptions, id: \.self) { branch in
-                Button {
-                    baseBranch = branch
-                } label: {
-                    if branch == baseBranch {
-                        Label(branch, systemImage: "checkmark")
-                    } else {
-                        Text(branch)
-                    }
+            Picker("Start from", selection: $baseBranch) {
+                ForEach(branchOptions, id: \.self) { branch in
+                    Text(branch).tag(branch)
                 }
             }
+            .pickerStyle(.inline)
         } label: {
             ComposerControlLabel(
                 systemImage: "arrow.triangle.branch",
@@ -217,19 +214,14 @@ struct CreateWorkspaceSheet: View {
     /// should not be taking room from the one thing they came here to write.
     private var overflowMenu: some View {
         Menu {
-            Section("Opens with") {
+            // The picker's own title is the section heading, so "Opens with" is still written
+            // above the two rows and the one in force is ticked.
+            Picker("Opens with", selection: $mode) {
                 ForEach(WorkspaceStartMode.allCases) { candidate in
-                    Button {
-                        mode = candidate
-                    } label: {
-                        if candidate == mode {
-                            Label(candidate.label, systemImage: "checkmark")
-                        } else {
-                            Text(candidate.label)
-                        }
-                    }
+                    Text(candidate.label).tag(candidate)
                 }
             }
+            .pickerStyle(.inline)
 
             Section {
                 Text("Worktree in \(WorkspaceManager.workspacesRoot.path)")
