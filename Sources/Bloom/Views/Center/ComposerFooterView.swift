@@ -3,19 +3,24 @@ import BloomCore
 
 /// Everything the user can change about the next turn: the model, the effort, the permission mode,
 /// whether it runs fast, what it has attached, and whether it goes now.
+///
+/// It is written against `ComposerControls` rather than against a `Session`, because the create
+/// sheet uses this same row before any session exists. Both callers hand over the four choices and
+/// take back the changed set; where they keep them is their own business.
 struct ComposerFooterView: View {
-    var session: Session
-    var editor: ComposerSessionEditor
+    var controls: ComposerControls
+    var onChange: @MainActor (ComposerControls) -> Void
     /// Nil until the session has run a turn, because that is the first moment the agent says
     /// anything about the window. Absent rather than zero: a gauge reading 0% would be a claim.
+    /// Always nil in the create sheet, where there is not yet anything to report.
     var context: ContextWindowUsage?
-    var isRunning: Bool
-    var isFastMode: Bool
+    var isRunning: Bool = false
     var canSend: Bool
-    var onToggleFastMode: @MainActor () -> Void
+    /// What the button at the end of the row does. See `ComposerIntent`.
+    var intent: ComposerIntent = .send
     var onAttach: @MainActor () -> Void
     var onSend: @MainActor () -> Void
-    var onStop: @MainActor () -> Void
+    var onStop: @MainActor () -> Void = {}
 
     var body: some View {
         // The footer is a fixed row of controls in a pane whose width the user owns: the centre
@@ -36,27 +41,27 @@ struct ComposerFooterView: View {
         HStack(spacing: Metrics.spacingTight) {
             ComposerOptionMenu(
                 options: ComposerOption.models,
-                selection: session.model,
+                selection: controls.model,
                 systemImage: "sparkle",
                 isCompact: isCompact,
                 help: "Choose the model",
-                onSelect: selectModel
+                onSelect: { id in edit { $0.model = id } }
             )
 
             ComposerOptionMenu(
                 options: ComposerOption.efforts,
-                selection: session.effort,
+                selection: controls.effort,
                 systemImage: "chart.bar.fill",
                 isCompact: isCompact,
                 help: "Choose reasoning effort",
-                onSelect: selectEffort
+                onSelect: { id in edit { $0.effort = id } }
             )
 
             ComposerOptionMenu(
                 options: ComposerOption.permissionModes,
-                selection: session.permissionMode.rawValue,
-                systemImage: Self.permissionGlyph(session.permissionMode),
-                tint: session.permissionMode == .bypassPermissions
+                selection: controls.permissionMode.rawValue,
+                systemImage: Self.permissionGlyph(controls.permissionMode),
+                tint: controls.permissionMode == .bypassPermissions
                     ? Palette.warning
                     : Palette.textSecondary,
                 isCompact: isCompact,
@@ -86,6 +91,7 @@ struct ComposerFooterView: View {
             .accessibilityLabel("Attach a file")
 
             ComposerSendButton(
+                intent: intent,
                 isRunning: isRunning,
                 canSend: canSend,
                 onSend: onSend,
@@ -94,36 +100,35 @@ struct ComposerFooterView: View {
         }
     }
 
-    /// Fast mode has no column on `Session`, so the composer keeps it in the store's key value
-    /// table. It is still per session and it still survives a relaunch, which is all it promises.
     private func fastToggle(isCompact: Bool) -> some View {
-        Button(action: onToggleFastMode) {
+        Button {
+            edit { $0.isFastMode.toggle() }
+        } label: {
             ComposerControlLabel(
                 systemImage: "bolt.fill",
                 text: isCompact ? nil : "Fast",
-                tint: isFastMode ? Palette.accent : Palette.textSecondary,
-                isActive: isFastMode
+                tint: controls.isFastMode ? Palette.accent : Palette.textSecondary,
+                isActive: controls.isFastMode
             )
         }
         .buttonStyle(.plain)
         .help("Fast mode trades some reasoning for a quicker reply")
         .accessibilityLabel("Fast mode")
-        .accessibilityAddTraits(isFastMode ? .isSelected : [])
+        .accessibilityAddTraits(controls.isFastMode ? .isSelected : [])
     }
 
     // MARK: - Edits
 
-    private func selectModel(_ id: String) {
-        editor.apply { $0.model = id }
-    }
-
-    private func selectEffort(_ id: String) {
-        editor.apply { $0.effort = id }
+    private func edit(_ change: (inout ComposerControls) -> Void) {
+        var changed = controls
+        change(&changed)
+        guard changed != controls else { return }
+        onChange(changed)
     }
 
     private func selectPermissionMode(_ id: String) {
         guard let mode = PermissionMode(rawValue: id) else { return }
-        editor.apply { $0.permissionMode = mode }
+        edit { $0.permissionMode = mode }
     }
 
     private static func permissionGlyph(_ mode: PermissionMode) -> String {

@@ -126,6 +126,38 @@ enum AttachmentFiles {
         return (png, (filename as NSString).deletingPathExtension + ".png")
     }
 
+    // MARK: - Handing a staged draft over
+
+    /// Moves attachments that were staged before the worktree existed into the worktree they were
+    /// written for, and answers with the ones that arrived.
+    ///
+    /// A move rather than a copy, and no path is rewritten: `AttachmentStaging` lays a draft out
+    /// under exactly the relative path the attachment will have in the worktree, so this only has
+    /// to put the same tree in its real place. Anything that fails to move is dropped from the
+    /// answer rather than reported, because the prompt is composed from what comes back: naming a
+    /// path the agent cannot read is worse than sending one attachment fewer.
+    static func adopt(
+        _ attachments: [PromptAttachment], from staging: String, into workspace: String
+    ) -> [PromptAttachment] {
+        guard !attachments.isEmpty else { return [] }
+        shield(workspace: workspace)
+
+        return attachments.filter { attachment in
+            let from = attachment.url(in: staging)
+            let to = attachment.url(in: workspace)
+            guard FileManager.default.fileExists(atPath: from.path) else { return false }
+            do {
+                try FileManager.default.createDirectory(
+                    at: to.deletingLastPathComponent(), withIntermediateDirectories: true
+                )
+                try FileManager.default.moveItem(at: from, to: to)
+                return true
+            } catch {
+                return false
+            }
+        }
+    }
+
     /// Takes a copy back off the disk. Only ever called for a copy Bloom made and that has not
     /// been sent, so there is nothing on the other side of it that could still be reading.
     static func discard(_ attachment: PromptAttachment, workspace: String) {

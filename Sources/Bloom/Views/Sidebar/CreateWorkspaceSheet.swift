@@ -1,15 +1,27 @@
 import SwiftUI
+import AppKit
 import BloomCore
 
 /// The sheet that starts a workspace.
 ///
-/// Creating a workspace is irreversible enough to be worth a moment of thought (it cuts a branch
-/// and a worktree on disk), so the sheet shows the branch name it is about to create before the
-/// user commits. That preview mirrors what `WorkspaceManager` does, prefix included, which is the
-/// only way the feedback is worth anything.
+/// It is the composer, not a form that happens to contain a text box.
+///
+/// Creating a workspace is writing the first message of a conversation. The thing you actually do
+/// is describe a task, and everything else on the sheet is a qualifier on that sentence: which
+/// project, which base, which model, how hard to think, what it may do without asking. So the
+/// surface is the same surface as every other message in the app, with the same controls in the
+/// same places: `ComposerPrompt` with `ComposerFooterView` under it, exactly as at the bottom of
+/// the centre column. The form this replaced put the task in the fourth row of five, gave the
+/// model and the effort no representation at all, and could not take an attachment.
+///
+/// What it gains by being the composer, rather than by anything written here: a screenshot can be
+/// dropped, pasted or picked into the first message, `@` offers the repository's files, `/` offers
+/// its commands, and the model, effort, permission mode and fast mode are chosen with the controls
+/// you already know, then carried onto the session that gets made so the first turn runs with them.
 struct CreateWorkspaceSheet: View {
     /// Which project to start in. The sidebar passes the repo whose `+` was clicked, otherwise
-    /// the repo of whatever is selected.
+    /// the repo of whatever is selected. Either way the project arrives decided, so the control
+    /// for it never asks a question: it reports, and opens only if you want to change your mind.
     var initialRepo: Repo?
 
     @Environment(AppModel.self) private var app
@@ -17,21 +29,46 @@ struct CreateWorkspaceSheet: View {
 
     @State private var repoID: String?
     @State private var prompt = ""
+    @State private var caret = 0
+    @State private var isFocused = false
+    @State private var contentHeight = ComposerTextEditor.lineHeight
+
+    /// The model, effort, permission mode and fast mode this workspace's first turn will run with.
+    /// Resolved from the same precedence chain a new session would use, so the sheet opens showing
+    /// what would have happened anyway rather than a second set of defaults.
+    @State private var controls = ComposerControls()
+
     @State private var mode: WorkspaceStartMode = .chat
-    /// Only used in terminal mode, where there is no task to derive a branch name from.
-    @State private var branchName = ""
     @State private var baseBranch = ""
     @State private var branches: [String] = []
     @State private var branchPrefix: String?
     @State private var isLoading = false
 
-    @FocusState private var promptFocused: Bool
+    /// Whether a model will be asked to name this workspace, which decides what the sheet may
+    /// honestly promise about the branch. Both halves are settled off the main actor in `load`,
+    /// because one of them looks for a binary on the PATH.
+    @State private var isNamingAvailable = false
 
-    /// Wide enough for two branch pickers side by side without the sheet reading as a window.
-    private static let width: CGFloat = 560
-    /// Minimums, not fixed heights, so the bars still fit their contents at larger text sizes.
-    private static let headerHeight: CGFloat = 38
-    private static let footerHeight: CGFloat = 46
+    /// Which bucket of `PromptAttachmentStore` this draft is filling, and the name of the staging
+    /// directory its files are copied into. A fresh one per draft, so the second workspace fired
+    /// off with "Create more" cannot pick up the first one's screenshots.
+    @State private var draftID = PromptAttachments.newShortID()
+
+    /// What was created a moment ago, shown in place of the branch hint so that firing off three
+    /// workspaces in a row is not three identical sheets with no sign anything happened.
+    @State private var lastCreated: String?
+
+    /// Kept between openings on purpose. Somebody who works in threes will work in threes again
+    /// tomorrow, and a toggle that reset every time would have to be found every time.
+    @AppStorage("create.more") private var createMore = false
+
+    /// Wider than the form was. The composer's footer carries four pickers, a paperclip and the
+    /// create button, and this is the width at which that row draws in full rather than dropping
+    /// its words to `ViewThatFits`.
+    private static let width: CGFloat = 620
+    /// What the writing area opens at. Five lines, because the question is "what do you want to
+    /// work on" and a one-line box answers it with "something short".
+    private static let minEditorLines: CGFloat = 5
 
     private var repo: Repo? { app.repos.first { $0.id == repoID } }
 
@@ -39,13 +76,12 @@ struct CreateWorkspaceSheet: View {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var trimmedBranchName: String {
-        branchName.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
+    /// Text is required, where in a conversation an attachment alone is enough to send. The
+    /// difference is deliberate: a turn with nothing but a screenshot is a sentence, but a
+    /// workspace with nothing but a screenshot has no name, no branch and nothing for the namer to
+    /// read, and `Git.slug` would call it `workspace`.
     private var canCreate: Bool {
-        guard repo != nil else { return false }
-        return mode == .chat ? !trimmedPrompt.isEmpty : !trimmedBranchName.isEmpty
+        repo != nil && !trimmedPrompt.isEmpty && !app.isCreatingWorkspace
     }
 
     var body: some View {
@@ -55,12 +91,10 @@ struct CreateWorkspaceSheet: View {
 
             if app.repos.isEmpty {
                 noProjects
+                    .padding(Metrics.gutter)
             } else {
-                form
+                composer
             }
-
-            Hairline()
-            buttons
         }
         .frame(width: Self.width)
         .background(Palette.surface)
@@ -68,27 +102,24 @@ struct CreateWorkspaceSheet: View {
         .onChange(of: repoID) { _, _ in
             Task { await load() }
         }
+        // The confirmation stands until there is something new to say, which is the moment the
+        // next task starts being written. No timer, so it cannot vanish mid sentence.
+        .onChange(of: prompt) { _, _ in lastCreated = nil }
+        // The draft's chips and the files behind them belong to a sheet that is going away.
+        .onDisappear(perform: discardDraft)
     }
 
-    // MARK: - Pieces
+    // MARK: - The bar above the box
 
+    /// Where the two choices that are not about the next turn live: which project, and which
+    /// branch it is cut from. They sit above the box rather than in the footer because they are
+    /// about the workspace, and the footer is about the turn.
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingWide) {
-            Image(systemName: "plus.rectangle.on.folder")
-                .font(Typo.bodyEmphasis)
-                .foregroundStyle(Palette.accent)
-                .accessibilityHidden(true)
+        HStack(spacing: Metrics.spacingSmall) {
+            projectControl
 
-            VStack(alignment: .leading, spacing: Metrics.spacingTight) {
-                Text("New workspace")
-                    .font(Typo.title)
-                    .foregroundStyle(Palette.textPrimary)
-                // The question the sheet is really asking. It sat on the prompt field as a label,
-                // where it stretched the form's label column far wider than the two pickers above
-                // it needed and pushed every control out of line with every other.
-                Text("Describe the task. Bloom cuts a branch and a worktree for it.")
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textSecondary)
+            if repo != nil {
+                baseBranchControl
             }
 
             Spacer(minLength: 0)
@@ -98,105 +129,222 @@ struct CreateWorkspaceSheet: View {
                     .controlSize(.small)
                     .accessibilityLabel("Loading branches")
             }
+
+            overflowMenu
         }
-        .padding(.horizontal, Metrics.gutter)
-        .padding(.vertical, Metrics.inset)
-        .frame(minHeight: Self.headerHeight)
+        .padding(.horizontal, Metrics.spacing)
+        .padding(.vertical, Metrics.spacingSmall)
     }
 
-    /// A `Form` in its column style, so every label sits in one column and every control starts
-    /// on the same edge. The hand-stacked version put each picker's label immediately before its
-    /// own popup, so nothing in the sheet lined up with anything else.
-    private var form: some View {
-        Form {
-            // No `RepoIcon` here, though every other place a project is named now carries one.
-            // A picker on macOS is an `NSPopUpButton`, and an `NSMenuItem` draws a title and an
-            // `NSImage`: a `Label` whose icon is a SwiftUI view has the icon dropped, verified in
-            // isolation rather than assumed. Rendering the tile to a bitmap to get it in would be
-            // a second drawing of a mark this change exists to have exactly one of.
-            Picker("Project", selection: $repoID) {
-                ForEach(app.repos) { candidate in
-                    Text(candidate.name).tag(Optional(candidate.id))
-                }
-            }
-
-            Picker("Start from", selection: $baseBranch) {
-                ForEach(branchOptions, id: \.self) { branch in
-                    Text(branch).tag(branch)
-                }
-            }
-            .disabled(branchOptions.isEmpty)
-
-            // A starting layout, not a mode: both kinds are the same workspace, and either can
-            // gain the other kind of tab afterwards. See `WorkspaceStartMode`.
-            Picker("Opens with", selection: $mode) {
-                ForEach(WorkspaceStartMode.allCases) { candidate in
-                    Text(candidate.label).tag(candidate)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            if mode == .terminal {
-                // Terminal workspaces name their own branch, because there is no task to slug.
-                LabeledContent("Branch") {
-                    TextField(
-                        "Branch",
-                        text: $branchName,
-                        prompt: Text("try-out-new-caching")
-                    )
-                    .labelsHidden()
-                    .textFieldStyle(.roundedBorder)
-                    .font(Typo.body)
-                    .focused($promptFocused)
-                }
-            }
-
-            // A vertical `TextField` rather than a `TextEditor`: it takes a placeholder, it
-            // grows with the user's text size instead of clipping inside a pinned 150pt box,
-            // and it is still a multi-line field.
-            //
-            // `.roundedBorder` rather than a plain field inside a stroked rectangle we draw
-            // ourselves: the bezel and, more importantly, the focus ring are then the system's,
-            // so the field shows focus the way every other text field on the Mac does and
-            // follows increased contrast and the accent colour without being told.
-            if mode == .chat {
-                LabeledContent("Task") {
-                    // The example goes in `prompt:`, not in the title. On macOS a text field's
-                    // title is a visible label, so passing the example there draws it beside the
-                    // field instead of inside it.
-                    TextField(
-                        "Task",
-                        text: $prompt,
-                        prompt: Text("Fix the flaky upload test, and say why it was flaky"),
-                        axis: .vertical
-                    )
-                    .labelsHidden()
-                    .textFieldStyle(.roundedBorder)
-                    .font(Typo.body)
-                    .lineLimit(6...12)
-                    .focused($promptFocused)
-                }
-            }
-
-            LabeledContent(mode == .chat ? "Branch" : "Worktree") {
-                HStack(spacing: Metrics.spacing) {
-                    Chip(
-                        text: branchPreview,
-                        systemImage: "arrow.triangle.branch",
-                        monospaced: true
-                    )
-                    // Beside the branch it qualifies rather than pushed to the far edge of the
-                    // form, where it read as a second, unrelated field.
-                    Text("worktree in ~/bloom/workspaces")
-                        .font(Typo.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                }
-            }
+    /// The project, with its mark on it. A `Menu` rather than a `Picker`, which is what finally
+    /// gets the tile into this control: a picker on macOS is an `NSPopUpButton` whose items draw a
+    /// title and an `NSImage`, so a `Label` with a SwiftUI icon had the icon silently dropped.
+    @ViewBuilder
+    private var projectControl: some View {
+        let label = ComposerControlLabel(
+            text: repo?.name ?? "Choose a project",
+            tint: Palette.textPrimary,
+            showsMenuIndicator: app.repos.count > 1
+        ) {
+            RepoIcon(repo: repo, size: Metrics.repoIconSmall)
         }
-        .formStyle(.columns)
+
+        // One project is not a choice. It still says which project, because a sheet that cut a
+        // worktree without naming the repository would be asking for trust it has not earned.
+        if app.repos.count > 1 {
+            Menu {
+                ForEach(app.repos) { candidate in
+                    Button {
+                        repoID = candidate.id
+                    } label: {
+                        if candidate.id == repoID {
+                            Label(candidate.name, systemImage: "checkmark")
+                        } else {
+                            Text(candidate.name)
+                        }
+                    }
+                }
+            } label: {
+                label
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Choose the project")
+            .accessibilityLabel("Project")
+            .accessibilityValue(repo?.name ?? "")
+        } else {
+            label
+        }
+    }
+
+    /// The branch the worktree is cut from. Visible rather than filed under the overflow menu,
+    /// because it is the one setting here whose wrong value is expensive: work started from a
+    /// stale base is discovered at merge time.
+    private var baseBranchControl: some View {
+        Menu {
+            ForEach(branchOptions, id: \.self) { branch in
+                Button {
+                    baseBranch = branch
+                } label: {
+                    if branch == baseBranch {
+                        Label(branch, systemImage: "checkmark")
+                    } else {
+                        Text(branch)
+                    }
+                }
+            }
+        } label: {
+            ComposerControlLabel(
+                systemImage: "arrow.triangle.branch",
+                text: "from \(baseBranch.isEmpty ? (repo?.defaultBranch ?? "") : baseBranch)",
+                showsMenuIndicator: true
+            )
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(branchOptions.isEmpty)
+        .help("Cut the worktree from this branch")
+        .accessibilityLabel("Start from")
+        .accessibilityValue(baseBranch)
+    }
+
+    /// Everything real but rarely changed. Conductor puts the same class of thing behind the same
+    /// glyph, and for the same reason: a control nobody touches on nineteen creations out of twenty
+    /// should not be taking room from the one thing they came here to write.
+    private var overflowMenu: some View {
+        Menu {
+            Section("Opens with") {
+                ForEach(WorkspaceStartMode.allCases) { candidate in
+                    Button {
+                        mode = candidate
+                    } label: {
+                        if candidate == mode {
+                            Label(candidate.label, systemImage: "checkmark")
+                        } else {
+                            Text(candidate.label)
+                        }
+                    }
+                }
+            }
+
+            Section {
+                Text("Worktree in \(WorkspaceManager.workspacesRoot.path)")
+            }
+        } label: {
+            ComposerControlLabel(systemImage: "ellipsis", text: nil)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("More options")
+        .accessibilityLabel("More options")
+    }
+
+    // MARK: - The box
+
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: Metrics.gutter) {
+            Text("What do you want to work on?")
+                .font(Typo.heading)
+                .foregroundStyle(Palette.textPrimary)
+
+            ComposerPrompt(
+                text: $prompt,
+                caret: $caret,
+                isFocused: $isFocused,
+                mentionRoot: repo?.path ?? NSHomeDirectory(),
+                attachmentRoot: stagingDirectory,
+                attachmentKey: draftID,
+                placeholder: mode == .chat
+                    ? "Describe the task, @mention files, run /commands"
+                    : "Describe what you are about to do, so the branch has a name",
+                editorHeight: editorHeight,
+                onContentHeightChange: { contentHeight = $0 },
+                onKey: handle(key:),
+                onOpenAttachment: open(attachment:)
+            ) { onAttach in
+                ComposerFooterView(
+                    controls: controls,
+                    onChange: { controls = $0 },
+                    canSend: canCreate,
+                    intent: .create,
+                    onAttach: onAttach,
+                    onSend: create
+                )
+            }
+
+            statusRow
+        }
         .padding(Metrics.gutter)
+    }
+
+    /// Grows with what is written, from five lines, and stops where the editor starts scrolling.
+    private var editorHeight: CGFloat {
+        max(contentHeight, ComposerTextEditor.lineHeight * Self.minEditorLines)
+    }
+
+    private var statusRow: some View {
+        HStack(spacing: Metrics.spacingWide) {
+            // The one thing in the overflow menu whose effect is not visible anywhere else on the
+            // sheet, said out loud while it is on. The default needs no chip: chat is what the box
+            // above already looks like.
+            if mode == .terminal {
+                Chip(text: "Opens a terminal", systemImage: "apple.terminal")
+            }
+
+            hint
+
+            Spacer(minLength: 0)
+
+            // More useful here than it is in Conductor, because running several agents at once is
+            // what this app is for: three workspaces on one repository is the core motion, and a
+            // sheet that closed between them made it three trips to the sidebar.
+            Toggle("Create more", isOn: $createMore)
+                .toggleStyle(.checkbox)
+                .font(Typo.caption)
+                .help("Keep this sheet open after creating, ready for the next one")
+
+            Button("Cancel", role: .cancel) { dismiss() }
+                .keyboardShortcut(.cancelAction)
+        }
+    }
+
+    /// What the sheet is allowed to promise about the name and the branch.
+    ///
+    /// It used to say "named from your prompt", which stopped being true when workspaces started
+    /// naming themselves: a chat workspace now opens under a plant codename and a model rewrites
+    /// both the name and the branch a few seconds later. The mechanical slug is still the answer
+    /// when nothing is going to be asked, so both cases are stated rather than one being told for
+    /// both.
+    @ViewBuilder
+    private var hint: some View {
+        if let lastCreated {
+            Label("Started \(lastCreated)", systemImage: "checkmark.circle")
+                .font(Typo.caption)
+                .foregroundStyle(Palette.accent)
+                .lineLimit(1)
+        } else if willBeNamedByModel {
+            Label(
+                "Opens under a codename, then takes its name and branch from your task",
+                systemImage: "sparkle"
+            )
+            .font(Typo.caption)
+            .foregroundStyle(Palette.textTertiary)
+            .lineLimit(1)
+        } else if trimmedPrompt.isEmpty {
+            Text("The branch is named from what you write")
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textTertiary)
+                .lineLimit(1)
+        } else {
+            Chip(text: branchPreview, systemImage: "arrow.triangle.branch", monospaced: true)
+                .lineLimit(1)
+        }
     }
 
     private var noProjects: some View {
@@ -210,22 +358,11 @@ struct CreateWorkspaceSheet: View {
         }
     }
 
-    private var buttons: some View {
-        HStack(spacing: Metrics.spacingWide) {
-            Spacer(minLength: 0)
-            Button("Cancel", role: .cancel) { dismiss() }
-                .keyboardShortcut(.cancelAction)
-            Button("Create", action: create)
-                .keyboardShortcut(.return, modifiers: .command)
-                .buttonStyle(.borderedProminent)
-                .disabled(!canCreate)
-        }
-        .padding(.horizontal, Metrics.gutter)
-        .padding(.vertical, Metrics.spacingWide)
-        .frame(minHeight: Self.footerHeight)
-    }
-
     // MARK: - Derived
+
+    private var stagingDirectory: String {
+        AttachmentStaging.directory(draftID: draftID)
+    }
 
     private var branchOptions: [String] {
         guard let repo else { return branches }
@@ -233,20 +370,47 @@ struct CreateWorkspaceSheet: View {
         return branches
     }
 
+    /// The same question `AppModel` will ask a moment from now, so the hint and what happens cannot
+    /// disagree. See `WorkspaceNaming.shouldName` for what each condition rules out.
+    ///
+    /// An empty box is asked about as though something had been written. `shouldName` answers no
+    /// to an empty prompt, which is right for it and wrong here: Create is disabled without a task,
+    /// so an empty box means "not written yet" rather than "there will be nothing to name from",
+    /// and a hint that changed its story the moment you started typing would be the worse of the
+    /// two answers.
+    private var willBeNamedByModel: Bool {
+        WorkspaceNaming.shouldName(
+            userSuppliedName: nil,
+            prompt: trimmedPrompt.isEmpty ? "a task" : trimmedPrompt,
+            isChatWorkspace: mode == .chat,
+            isEnabled: WorkspaceNamingPreferences().isEnabled,
+            isAgentAvailable: isNamingAvailable
+        )
+    }
+
     /// Mirrors `WorkspaceManager.createWorkspace`, minus the uniquing suffix which depends on
-    /// branches that could appear between now and Create.
-    /// In terminal mode the branch is what was typed, so the preview shows the slug git will
-    /// actually accept rather than repeating the raw text back.
+    /// branches that could appear between now and Create. Only shown when no model is going to
+    /// rewrite it, because a preview that is about to be replaced is a lie with a monospaced font.
     private var branchPreview: String {
-        let source = mode == .chat ? trimmedPrompt : trimmedBranchName
-        guard !source.isEmpty else {
-            return mode == .chat ? "named from your prompt" : "name it above"
-        }
-        let slug = Git.slug(from: source)
-        // A branch typed by hand is taken as typed: the prefix exists to label branches a prompt
-        // named, and silently prefixing an explicit name would be overruling the user.
-        guard mode == .chat, let prefix = branchPrefix, !prefix.isEmpty else { return slug }
+        let slug = Git.slug(from: trimmedPrompt)
+        guard let prefix = branchPrefix, !prefix.isEmpty else { return slug }
         return "\(prefix)/\(slug)"
+    }
+
+    // MARK: - Keys
+
+    /// Whatever `ComposerPrompt` did not claim for a completion menu it has open.
+    private func handle(key: ComposerKey) -> Bool {
+        switch key {
+        case .returnKey, .commandReturn:
+            create()
+            return true
+        case .escape:
+            dismiss()
+            return true
+        case .up, .down, .tab:
+            return false
+        }
     }
 
     // MARK: - Actions
@@ -259,18 +423,31 @@ struct CreateWorkspaceSheet: View {
         }
         guard let repo else { return }
 
-        promptFocused = true
+        isFocused = true
         isLoading = true
         defer { isLoading = false }
 
         let path = repo.path
-        let loaded = await Task.detached(priority: .userInitiated) { () -> ([String], String?) in
+        var appDefaults = AppDefaults()
+        if let store = app.store {
+            appDefaults = await AppDefaults.load(from: store)
+        }
+
+        // One hop off the main actor for all three: a branch listing, a settings file chain and a
+        // PATH lookup, none of which belongs on the actor drawing the sheet.
+        let loaded = await Task.detached(priority: .userInitiated) {
             let names = (try? await Git.branches(of: path)) ?? []
-            return (names, SettingsLoader.load(repo: path).branchPrefix)
+            let settings = SettingsLoader.load(repo: path)
+            return (names, settings, WorkspaceNamer.isAvailable)
         }.value
 
         branches = loaded.0
-        branchPrefix = loaded.1
+        branchPrefix = loaded.1.branchPrefix
+        isNamingAvailable = loaded.2
+        controls = ComposerControls(
+            defaults: ComposerDefaults.resolve(repo: loaded.1, app: appDefaults),
+            isFastMode: appDefaults.fastMode
+        )
 
         if !branches.contains(baseBranch) {
             baseBranch = branches.contains(repo.defaultBranch)
@@ -283,17 +460,74 @@ struct CreateWorkspaceSheet: View {
         Task { await app.addProjectByAsking() }
     }
 
+    /// A chip in the sheet has no review tab to open into, so it opens where a file opens when
+    /// nothing in the app owns it.
+    private func open(attachment: PromptAttachment) {
+        NSWorkspace.shared.open(attachment.url(in: stagingDirectory))
+    }
+
     private func create() {
         guard let repo, canCreate else { return }
+
         let text = trimmedPrompt
         let base = baseBranch.isEmpty ? repo.defaultBranch : baseBranch
         let chosen = mode
-        let branch = chosen == .terminal ? Git.slug(from: trimmedBranchName) : nil
-        dismiss()
+        let chosenControls = controls
+
+        // A file can be moved or deleted between being attached and Create being pressed, and
+        // naming a path that is not there only teaches the agent that Bloom lies about paths.
+        let directory = stagingDirectory
+        let handedOver = draftID
+        let ready = PromptAttachmentStore.shared.attachments(for: handedOver).filter {
+            FileManager.default.fileExists(atPath: $0.url(in: directory).path)
+        }
+        let staged = StagedAttachments(directory: directory, attachments: ready)
+        // The chips go now; the files stay until the worktree has taken them.
+        PromptAttachmentStore.shared.clear(sessionID: handedOver)
+        // Rotated here rather than in `resetDraft`, and on both paths. Dismissing the sheet
+        // discards whatever draft it is holding, and without this that would be the draft whose
+        // files are at this moment on their way into a worktree.
+        draftID = PromptAttachments.newShortID()
+
+        if createMore {
+            resetDraft()
+        } else {
+            dismiss()
+        }
+
         Task {
-            await app.createWorkspace(
-                in: repo, prompt: text, baseBranch: base, opensWith: chosen, branch: branch
+            let workspace = await app.createWorkspace(
+                in: repo,
+                prompt: text,
+                baseBranch: base,
+                opensWith: chosen,
+                controls: chosenControls,
+                staged: staged
             )
+            // Whatever survived is in the worktree now, and whatever did not was never going to be.
+            AttachmentStaging.discard(draftID: handedOver)
+            lastCreated = workspace?.name
+        }
+    }
+
+    /// What "Create more" clears, and what it keeps.
+    ///
+    /// The task goes, because it has been sent and a second workspace on the same sentence is
+    /// never what anybody wanted. Everything else stays: the project, the base branch, what it
+    /// opens with and every choice in the footer are answers about this batch of work, and asking
+    /// for them again three times in a row is what would make the toggle not worth having.
+    private func resetDraft() {
+        prompt = ""
+        caret = 0
+        contentHeight = ComposerTextEditor.lineHeight
+        isFocused = true
+    }
+
+    private func discardDraft() {
+        let id = draftID
+        PromptAttachmentStore.shared.clear(sessionID: id)
+        Task.detached(priority: .utility) {
+            AttachmentStaging.discard(draftID: id)
         }
     }
 }

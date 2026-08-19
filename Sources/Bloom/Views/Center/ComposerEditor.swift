@@ -17,8 +17,11 @@ struct ComposerEditor: View {
     /// Files dropped or pasted onto the text. Handed straight through to the composer, which owns
     /// what an attachment is.
     var onAttach: @MainActor ([AttachmentSource]) -> Bool
+    /// What an empty box says. A parameter rather than a constant because the create sheet asks a
+    /// different question of the same box: there is no conversation yet to ask for changes to.
+    var placeholder: String = ComposerEditor.chatPlaceholder
 
-    private static let placeholder = "Ask to make changes, @mention files, run /commands"
+    static let chatPlaceholder = "Ask to make changes, @mention files, run /commands"
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -26,7 +29,7 @@ struct ComposerEditor: View {
                 // `textPlaceholder`, not the tertiary label: they are different colours, and
                 // the tertiary label at 26% is faint enough that the prompt hint read as a
                 // rendering fault rather than as a hint.
-                Text(Self.placeholder)
+                Text(placeholder)
                     .font(Typo.body)
                     .foregroundStyle(Palette.textPlaceholder)
                     // The text view's own container inset, so the hint and the first character

@@ -4,10 +4,10 @@ import BloomCore
 
 /// The prompt box at the bottom of the centre column.
 ///
-/// The view owns the draft, the caret and which completion menu is open, and nothing else: the
-/// chrome, the footer controls and the two menus are their own views, and the rules for what the
-/// draft means live in `ComposerMenu`. What is left here is the wiring between them, plus the keys,
-/// because the text view keeps first responder the whole time and is the only thing that sees them.
+/// The surface itself is `ComposerPrompt`, which the create sheet uses too. What is left here is
+/// everything that is true of a conversation and of nothing else: the draft belongs to a
+/// transcript and is saved back to it, the divider above the box, the unread pill, the footer's
+/// values coming off a `Session` row, and the first-open defaults.
 struct ComposerView: View {
     @Bindable var transcript: TranscriptModel
     /// Optional so the composer can be dropped anywhere a transcript exists. When it is passed,
@@ -46,19 +46,6 @@ struct ComposerView: View {
     @State private var isFastMode = false
     @State private var draftSaveTask: Task<Void, Never>?
 
-    /// The chip the pointer has settled on, which is the card that is up. Nil is the resting
-    /// state and also what a click, a send and a removal all put it back to.
-    @State private var previewed: PromptAttachment?
-    /// Whether a drag is currently over the box, so the border can say it will be taken.
-    @State private var isDropTarget = false
-    /// How wide the box is, which is all the hover card is allowed to be.
-    @State private var boxWidth: CGFloat = 0
-
-    @State private var slashCatalog = SlashCommandCatalog()
-    @State private var fileMatches: [FileMatch] = []
-    @State private var menuIndex = 0
-    @State private var isMenuDismissed = false
-
     var body: some View {
         VStack(spacing: 0) {
             ComposerResizeHandle(
@@ -78,70 +65,28 @@ struct ComposerView: View {
     }
 
     private var composer: some View {
-        VStack(alignment: .leading, spacing: Metrics.spacingWide) {
-            if !attachments.isEmpty {
-                AttachmentBar(
-                    attachments: attachments,
-                    worktree: transcript.workspace.path,
-                    onOpen: open(attachment:),
-                    onRemove: remove(attachment:),
-                    onHover: { previewed = $0 }
-                )
-            }
-
-            ComposerEditor(
-                text: $transcript.draft,
-                caret: $caret,
-                isFocused: $isFocused,
-                height: editorHeight,
-                onContentHeightChange: { contentHeight = $0 },
-                onKey: handle(key:),
-                onAttach: attach(sources:)
-            )
-
+        ComposerPrompt(
+            text: $transcript.draft,
+            caret: $caret,
+            isFocused: $isFocused,
+            mentionRoot: transcript.workspace.path,
+            attachmentRoot: transcript.workspace.path,
+            attachmentKey: transcript.session.id,
+            editorHeight: editorHeight,
+            onContentHeightChange: { contentHeight = $0 },
+            onKey: handle(key:),
+            onOpenAttachment: open(attachment:)
+        ) { onAttach in
             ComposerFooterView(
-                session: transcript.session,
-                editor: sessionEditor,
+                controls: controls,
+                onChange: apply(controls:),
                 context: ContextWindowUsage.latest(in: transcript.rows),
                 isRunning: transcript.isRunning,
-                isFastMode: isFastMode,
                 canSend: canSend,
-                onToggleFastMode: toggleFastMode,
-                onAttach: attachFiles,
+                onAttach: onAttach,
                 onSend: send,
                 onStop: transcript.stop
             )
-        }
-        .composerBox(isFocused: $isFocused, isDropTarget: isDropTarget)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { boxWidth = $0 }
-        // The editor takes the drops that land on the text itself; this takes the ones that land
-        // on the chips, the footer and the padding, which is most of the box.
-        .dropDestination(for: URL.self) { urls, _ in
-            attach(sources: urls.filter(\.isFileURL).map { .file($0) })
-        } isTargeted: { isDropTarget = $0 }
-        .overlay(alignment: .topLeading) {
-            // Above the composer, in the same place and the same card as the two completion
-            // menus, and never at the same time as one of them: they would sit on top of each
-            // other, and a menu the user is typing into outranks a preview they are only looking
-            // at.
-            AttachmentCardOverlay(
-                attachment: activeMenu == .none ? previewed : nil,
-                worktree: transcript.workspace.path,
-                availableWidth: boxWidth
-            )
-            .alignmentGuide(.top) { $0[.bottom] + Metrics.spacing }
-        }
-        .overlay(alignment: .topLeading) {
-            ComposerMenuOverlay(
-                menu: activeMenu,
-                commands: slashResults,
-                files: fileMatches,
-                selectedIndex: menuIndex,
-                onPickCommand: pick(command:),
-                onPickFile: pick(file:),
-                onHighlight: { menuIndex = $0 }
-            )
-            .alignmentGuide(.top) { $0[.bottom] + Metrics.spacing }
         }
         .overlay(alignment: .top) {
             if isScrolledUp, transcript.unreadCount > 0 {
@@ -152,21 +97,7 @@ struct ComposerView: View {
         .padding(.horizontal, Metrics.gutter)
         .padding(.bottom, Metrics.gutter)
         .task(id: transcript.session.id) { await prepare() }
-        .onAppear { PromptAttachmentStore.shared.load(sessionID: transcript.session.id) }
-        .task(id: transcript.workspace.path) {
-            await slashCatalog.load(workspacePath: transcript.workspace.path)
-        }
-        .task(id: activeMenu.mention?.query) { await refreshFileMatches() }
-        .onChange(of: transcript.draft) { _, _ in
-            menuIndex = 0
-            scheduleDraftSave()
-        }
-        .onChange(of: menu) { old, new in
-            menuIndex = 0
-            // Escape only dismisses the menu that was open. Starting a different one, or clearing
-            // the token entirely, makes the menu available again.
-            if old.kind != new.kind { isMenuDismissed = false }
-        }
+        .onChange(of: transcript.draft) { _, _ in scheduleDraftSave() }
         .onDisappear(perform: saveDraftNow)
     }
 
@@ -223,6 +154,10 @@ struct ComposerView: View {
         ComposerSessionEditor(transcript: transcript, model: model)
     }
 
+    private var controls: ComposerControls {
+        ComposerControls(session: transcript.session, isFastMode: isFastMode)
+    }
+
     private var hasBody: Bool {
         !transcript.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -236,115 +171,16 @@ struct ComposerView: View {
     /// rather than to the agent.
     private var canSend: Bool { hasBody || !attachments.isEmpty }
 
-    /// What the text alone asks for, before Escape gets a say.
-    private var menu: ComposerMenu {
-        ComposerMenu.resolve(draft: transcript.draft, caret: caret)
-    }
-
-    private var activeMenu: ComposerMenu {
-        isMenuDismissed ? .none : menu
-    }
-
-    private var isMenuOpen: Bool { activeMenu != .none }
-
-    /// Only scored while the slash menu is actually on screen, so a keystroke in an ordinary draft
-    /// costs nothing.
-    private var slashResults: [SlashCommand] {
-        guard case .slash(let query) = activeMenu else { return [] }
-        return slashCatalog.matches(query)
-    }
-
-    private var menuCount: Int {
-        switch activeMenu {
-        case .slash: slashResults.count
-        case .mention: fileMatches.count
-        case .none: 0
-        }
-    }
-
-    // MARK: - Completion
-
-    private func refreshFileMatches() async {
-        guard let token = activeMenu.mention else {
-            fileMatches = []
-            return
-        }
-        let paths = await FileIndex.shared.files(workspacePath: transcript.workspace.path)
-        let query = token.query
-        // Off the main actor: a large repository has tens of thousands of tracked files and this
-        // runs on every keystroke after the `@`.
-        fileMatches = await Task.detached(priority: .userInitiated) {
-            FileMatch.search(paths, query: query, limit: 200)
-        }.value
-    }
-
-    private func pick(command: SlashCommand) {
-        let text = "/\(command.name) "
-        transcript.draft = text
-        caret = (text as NSString).length
-        isFocused = true
-    }
-
-    private func pick(file: FileMatch) {
-        guard let token = activeMenu.mention else { return }
-        let replacement = "@\(file.path) "
-        let text = NSMutableString(string: transcript.draft)
-        text.replaceCharacters(
-            in: NSRange(location: token.start, length: token.length),
-            with: replacement
-        )
-        transcript.draft = text as String
-        caret = token.start + (replacement as NSString).length
-        isFocused = true
-    }
-
-    private func pickHighlighted() {
-        switch activeMenu {
-        case .slash:
-            guard slashResults.indices.contains(menuIndex) else { return }
-            pick(command: slashResults[menuIndex])
-        case .mention:
-            guard fileMatches.indices.contains(menuIndex) else { return }
-            pick(file: fileMatches[menuIndex])
-        case .none:
-            break
-        }
-    }
-
     // MARK: - Keys
 
-    /// Returns true when the key was consumed, which is how the text view knows not to type it.
+    /// Everything `ComposerPrompt` did not claim for a menu it has open.
     private func handle(key: ComposerKey) -> Bool {
-        if isMenuOpen, menuCount > 0 {
-            switch key {
-            case .up:
-                menuIndex = (menuIndex - 1 + menuCount) % menuCount
-                return true
-            case .down:
-                menuIndex = (menuIndex + 1) % menuCount
-                return true
-            case .returnKey, .tab:
-                pickHighlighted()
-                return true
-            case .escape:
-                isMenuDismissed = true
-                return true
-            case .commandReturn:
-                send()
-                return true
-            }
-        }
-
         switch key {
         case .returnKey, .commandReturn:
             send()
             return true
         case .escape:
-            if isMenuOpen {
-                isMenuDismissed = true
-            } else {
-                isFocused = false
-            }
+            isFocused = false
             return true
         case .up, .down, .tab:
             return false
@@ -352,6 +188,31 @@ struct ComposerView: View {
     }
 
     // MARK: - Actions
+
+    /// Writes the footer's choices back where a conversation keeps them: the three that are columns
+    /// go on the session row, and fast mode goes in the store's key value table.
+    private func apply(controls new: ComposerControls) {
+        if new.isFastMode != isFastMode {
+            isFastMode = new.isFastMode
+            if let store = app.store {
+                let key = ComposerControls.fastModeKey(sessionID: transcript.session.id)
+                let value = new.isFastMode ? "1" : nil
+                Task { try? await store.setSetting(key, value) }
+            }
+        }
+
+        let session = transcript.session
+        guard new.model != session.model
+            || new.effort != session.effort
+            || new.permissionMode != session.permissionMode
+        else { return }
+
+        sessionEditor.apply {
+            $0.model = new.model
+            $0.effort = new.effort
+            $0.permissionMode = new.permissionMode
+        }
+    }
 
     private func send() {
         guard canSend, !transcript.isRunning else { return }
@@ -369,7 +230,6 @@ struct ComposerView: View {
         // The chips go and the files stay. The prompt the agent is now reading names those paths,
         // and deleting them out from under it would break the one thing they were for.
         PromptAttachmentStore.shared.clear(sessionID: transcript.session.id)
-        previewed = nil
         caret = 0
         let transcript = transcript
         Task { await transcript.send(text) }
@@ -393,83 +253,12 @@ struct ComposerView: View {
         Task { await transcript.saveDraft() }
     }
 
-    private func toggleFastMode() {
-        isFastMode.toggle()
-        guard let store = app.store else { return }
-        let key = Self.fastModeKey(sessionID: transcript.session.id)
-        let value = isFastMode ? "1" : nil
-        Task { try? await store.setSetting(key, value) }
-    }
-
-    private func attachFiles() {
-        Task { await pickFiles() }
-    }
-
-    /// The one way a file becomes an attachment, whichever door it came through: the paperclip, a
-    /// drag onto the box, a drag onto the text, or the clipboard.
-    ///
-    /// Returns true because two of those callers are AppKit asking "did you take this", and an
-    /// answer of no is what makes a drop fall through to the text system and write a path into the
-    /// draft again.
-    @discardableResult
-    private func attach(sources: [AttachmentSource]) -> Bool {
-        guard !sources.isEmpty else { return false }
-        Task { await add(sources) }
-        return true
-    }
-
-    private func add(_ sources: [AttachmentSource]) async {
-        let failures = await PromptAttachmentStore.shared.add(
-            sources,
-            sessionID: transcript.session.id,
-            workspace: transcript.workspace.path
-        )
-        isFocused = true
-        guard !failures.isEmpty else { return }
-        app.alert = BloomAlert(
-            title: failures.count == 1 ? "That file was not attached" : "Some files were not attached",
-            message: failures.joined(separator: "\n\n")
-        )
-    }
-
     /// A chip opens the file where every other file in Bloom opens: the review tab, through
     /// `FileReview`. An attachment is not a special kind of file and does not get a special kind
     /// of tab.
     private func open(attachment: PromptAttachment) {
-        previewed = nil
         guard let model else { return }
         FileReview.open(path: attachment.path, in: model)
-    }
-
-    private func remove(attachment: PromptAttachment) {
-        previewed = nil
-        PromptAttachmentStore.shared.remove(
-            attachment,
-            sessionID: transcript.session.id,
-            workspace: transcript.workspace.path
-        )
-    }
-
-    /// A sheet rather than an application-modal panel: `runModal()` stops the run loop, which stops
-    /// every other workspace's transcript from streaming for as long as the picker is open.
-    private func pickFiles() async {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        // Files only. A folder has nothing to preview, nothing to open and no honest size, and
-        // `@mention` already says "this directory" without pretending it is one attachment.
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = true
-        panel.directoryURL = URL(filePath: transcript.workspace.path)
-
-        let response: NSApplication.ModalResponse
-        if let window = NSApp.keyWindow {
-            response = await panel.beginSheetModal(for: window)
-        } else {
-            response = panel.runModal()
-        }
-        guard response == .OK else { return }
-
-        await add(panel.urls.map { .file($0) })
     }
 
     // MARK: - First open
@@ -482,12 +271,15 @@ struct ComposerView: View {
 
         guard let store = app.store else { return }
         let sessionID = transcript.session.id
-        isFastMode = (try? await store.setting(Self.fastModeKey(sessionID: sessionID))) == "1"
+        isFastMode = (try? await store.setting(
+            ComposerControls.fastModeKey(sessionID: sessionID)
+        )) == "1"
 
         // The marker is what separates "never opened" from "opened and left alone", which the
         // column values cannot express: a session created with the built-in defaults looks exactly
-        // like one the user deliberately set to the same values.
-        let appliedKey = Self.defaultsAppliedKey(sessionID: sessionID)
+        // like one the user deliberately set to the same values. The create sheet writes it too,
+        // so a model chosen there is never overruled the first time the workspace is opened.
+        let appliedKey = ComposerControls.defaultsAppliedKey(sessionID: sessionID)
         let wasPrepared = (try? await store.setting(appliedKey)) == "1"
         guard !wasPrepared, transcript.session.agentSessionID == nil else { return }
 
@@ -508,7 +300,7 @@ struct ComposerView: View {
         if appDefaults.fastMode != isFastMode {
             isFastMode = appDefaults.fastMode
             try? await store.setSetting(
-                Self.fastModeKey(sessionID: sessionID),
+                ComposerControls.fastModeKey(sessionID: sessionID),
                 appDefaults.fastMode ? "1" : nil
             )
         }
@@ -526,15 +318,5 @@ struct ComposerView: View {
 
         // Written last, so a cancelled preparation is retried rather than silently skipped.
         try? await store.setSetting(appliedKey, "1")
-    }
-
-    private static func fastModeKey(sessionID: String) -> String {
-        "session.\(sessionID).fastMode"
-    }
-
-    /// Records that a session has been through `prepare()`, so reopening it never re-applies the
-    /// defaults over choices the user has since made in the footer.
-    private static func defaultsAppliedKey(sessionID: String) -> String {
-        "session.\(sessionID).defaultsApplied"
     }
 }

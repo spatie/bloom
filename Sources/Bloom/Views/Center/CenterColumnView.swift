@@ -17,6 +17,28 @@ struct CenterColumnView: View {
             CenterPanesView(model: model)
         }
         .background(Palette.windowBackground)
-        .task(id: model.workspace.id) { await model.onAppear() }
+        .task(id: model.workspace.id) {
+            openStartingTerminal()
+            await model.onAppear()
+        }
+    }
+
+    /// Opens the terminal a workspace created with "Opens with: Terminal" was promised.
+    ///
+    /// This is the consumer `WorkspaceStartMode.consumeOpensOnTerminal` never had. Creating a
+    /// terminal workspace wrote the flag, skipped the session and the opening turn, and then
+    /// nothing read the flag: the workspace opened on an empty conversation, which is not what the
+    /// control said and not what anybody picking it wanted. The tab is opened here rather than at
+    /// creation because a tab is a thing the centre column owns, and because the flag has to be
+    /// consumed exactly once, on the first open, and never forced in front of an arrangement the
+    /// user has since made for themselves.
+    private func openStartingTerminal() {
+        let workspaceID = model.workspace.id
+        // Idempotent, and first: adding a tab to a workspace whose stored list has not been read
+        // back yet would replace that list rather than extend it.
+        CenterTabStore.shared.load(workspaceID: workspaceID)
+        guard WorkspaceStartMode.consumeOpensOnTerminal(workspaceID: workspaceID) else { return }
+        let tab = CenterTabStore.shared.add(kind: .terminal, workspaceID: workspaceID)
+        CenterPaneStore.shared.show(.tool(tab.id), in: model)
     }
 }

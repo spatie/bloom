@@ -133,6 +133,29 @@ enum Snapshot {
                 try? await Task.sleep(for: .seconds(3))
             }
 
+            // `--create-sheet` opens the New Workspace sheet and captures the sheet rather than
+            // the window behind it. Without it that sheet could only be looked at by asking a
+            // human for a screenshot, which is why it went years without one. Pass it LAST, for
+            // the reason spelled out for `--settings` just below.
+            let wantsCreateSheet = arguments.contains("--create-sheet")
+            if wantsCreateSheet {
+                NotificationCenter.default.post(name: .bloomNewWorkspace, object: nil)
+                try? await Task.sleep(for: .seconds(2))
+            }
+
+            // `--project-setup <folder>` hands a folder to the same code path the file panel
+            // does, so the offer to turn it into a repository can be looked at. It has to be
+            // driven from here because the only other way in is an `NSOpenPanel`, and a modal
+            // file panel cannot be answered by a capture run.
+            var wantsProjectSetup = false
+            if let index = arguments.firstIndex(of: "--project-setup"), index + 1 < arguments.count {
+                wantsProjectSetup = true
+                NotificationCenter.default.post(
+                    name: .bloomOfferProjectSetup, object: arguments[index + 1]
+                )
+                try? await Task.sleep(for: .seconds(3))
+            }
+
             // `--settings` captures the Settings window instead of the main one. Without it the
             // only way to look at a preferences pane was to ask a human for a screenshot, which
             // meant every change to that window went in unverified.
@@ -167,6 +190,16 @@ enum Snapshot {
                     openSettingsWindow()
                     try? await Task.sleep(for: .milliseconds(250))
                 }
+            }
+
+            // A sheet is its own window, hanging off the one it was presented from, and it is
+            // never in `capturableWindows()`: it carries no title bar. Asked for by name here
+            // rather than searched for, so nothing else on screen can be picked by mistake.
+            if wantsCreateSheet || wantsProjectSetup {
+                for _ in 0..<20 where candidate?.attachedSheet == nil {
+                    try? await Task.sleep(for: .milliseconds(250))
+                }
+                candidate = candidate?.attachedSheet ?? candidate
             }
 
             guard let window = candidate, let contentView = window.contentView else {
