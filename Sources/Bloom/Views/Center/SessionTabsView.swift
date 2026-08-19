@@ -15,13 +15,11 @@ struct SessionTabsView: View {
     @Bindable var model: WorkspaceModel
 
     @Environment(AppModel.self) private var app
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var renamingID: String?
     /// Which workspace's strip has finished arriving, so the first draw of a workspace is not
     /// animated. Switching workspace replaces every id in the strip at once, and without this the
     /// selection would fly in from wherever the previous workspace happened to have it.
-    @State private var settledWorkspaceID: String?
     @Namespace private var selection
 
     private var tabs: CenterTabStore { .shared }
@@ -60,19 +58,6 @@ struct SessionTabsView: View {
                     toolTab(tab)
                 }
             }
-            // Two values, not one, because they are two different pieces of news and each of them
-            // has to be able to arrive on its own. `order` covers opening, closing and dragging a
-            // tab; `focused` covers the selection moving. Keying the animation to a value rather
-            // than wrapping every mutation in `withAnimation` is what lets the asynchronous ones
-            // animate at all: a session is closed and reordered through an actor, so by the time
-            // the array changes the call that asked for it is long gone.
-            //
-            // It also decides, correctly and for free, what must NOT animate. Typing in the rename
-            // field changes neither value, so the field cannot creep as the title grows. A busy
-            // session's close is refused by a modal until the user answers, and the id only leaves
-            // the array once they have said yes, so nothing slides out from under the question.
-            .animation(motion, value: order)
-            .animation(motion, value: focused)
         } trailing: {
             TabStripSeparator()
 
@@ -84,13 +69,7 @@ struct SessionTabsView: View {
         }
         .background { shortcuts }
         .task(id: model.workspace.id) {
-            settledWorkspaceID = nil
             tabs.load(workspaceID: model.workspace.id)
-            // One frame is not enough: the sessions arrive from the store after this view first
-            // draws, and animating that first fill would slide a whole strip in from the left.
-            try? await Task.sleep(for: .milliseconds(250))
-            guard !Task.isCancelled else { return }
-            settledWorkspaceID = model.workspace.id
         }
     }
 
@@ -98,20 +77,6 @@ struct SessionTabsView: View {
     /// filled with and how far the track under it is sunk. See `TabPane`, which carries the
     /// measurements that used to live here.
     private static let pane = TabPane.content
-
-    // MARK: - Motion
-
-    /// `Motion.pane`, not a curve of this strip's own. It is the one movement the window has, it
-    /// is short and it does not overshoot, and a tab highlight that travelled at a different speed
-    /// from the inspector it sits beside would read as a second app's idea of how fast things go.
-    ///
-    /// Nothing moves under Reduce Motion, and nothing moves while a workspace is still arriving.
-    /// The setting is dropped rather than slowed, matching every other call site: it is about
-    /// movement, not about speed, and the strip says everything it says without any.
-    private var motion: Animation? {
-        guard !reduceMotion, settledWorkspaceID == model.workspace.id else { return nil }
-        return Motion.pane
-    }
 
     /// Every tab in the strip, in the order it is drawn. Identity and order only: a title that
     /// changes must not make the strip move.
