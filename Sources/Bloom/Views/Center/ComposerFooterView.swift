@@ -70,7 +70,9 @@ struct ComposerFooterView: View {
                 ComposerOptionMenu(
                     options: ComposerOption.adding(extraModels, to: ComposerOption.models),
                     selection: controls.model,
-                    title: "Model",
+                    // No heading. Opus 5 and Sonnet 5 are names, and the chip this opened from is
+                    // showing one of them.
+                    heading: nil,
                     systemImage: "sparkle",
                     isCompact: isCompact,
                     help: "Choose the model",
@@ -80,7 +82,7 @@ struct ComposerFooterView: View {
                 ComposerOptionMenu(
                     options: ComposerOption.adding(extraEfforts, to: ComposerOption.efforts),
                     selection: controls.effort,
-                    title: "Reasoning effort",
+                    heading: "Reasoning effort",
                     systemImage: "chart.bar.fill",
                     isCompact: isCompact,
                     help: "Choose reasoning effort",
@@ -90,7 +92,7 @@ struct ComposerFooterView: View {
                 ComposerOptionMenu(
                     options: ComposerOption.permissionModes,
                     selection: controls.permissionMode.rawValue,
-                    title: "Permission mode",
+                    heading: "Permission mode",
                     systemImage: Self.permissionGlyph(controls.permissionMode),
                     tint: controls.permissionMode == .bypassPermissions
                         ? Palette.warning

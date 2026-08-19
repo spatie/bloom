@@ -7,9 +7,13 @@ import SwiftUI
 struct ComposerOptionMenu: View {
     var options: [ComposerOption]
     var selection: String
-    /// What the list is a list of, drawn as the menu's own heading. Short, because it sits above
-    /// three or five one-word rows and a sentence over them would be the widest thing in the menu.
-    var title: String
+    /// What the list is a list of, drawn as the menu's own heading, or nil when the items name
+    /// their own category and a heading over them would only be a word to read past.
+    ///
+    /// Effort is Low through Max and permission mode is Ask through Plan: bare adjectives and
+    /// bare verbs that say nothing about what they are settings for. Models are Opus 5 and Sonnet
+    /// 5, which are names, and the chip the menu opened from is already showing one of them.
+    var heading: String?
     var systemImage: String
     var tint: Color = Palette.textSecondary
     /// Drops the word and keeps the glyph, for a footer that has run out of room. The tooltip and
@@ -22,18 +26,13 @@ struct ComposerOptionMenu: View {
         Menu {
             // A `Picker` rather than a column of buttons, and the reason is the tick.
             //
-            // These were `Button { } label: { Label(text, systemImage: "checkmark") }`, which is a
-            // shape AppKit has no room for: an item in an `NSMenu` draws its state marker in the
-            // one column reserved for it, and an image supplied by the label is dropped on the
-            // floor. So every one of these menus opened with no sign at all of what it was set to,
-            // in an app whose whole footer is a row of settings. An inline picker hands the job to
-            // the platform, which is how the sidebar's Filter menu has always drawn its own.
-            Picker(title, selection: binding) {
-                ForEach(options) { option in
-                    Text(option.label).tag(option.id)
-                }
-            }
-            .pickerStyle(.inline)
+            // These were `Button { } label: { Label(text, systemImage: "checkmark") }`, and a
+            // symbol handed to a button's label that way is dropped: the menu came up as three
+            // bare names with no marker on any of them, in an app whose whole footer is a row of
+            // settings. The state column of an `NSMenu` item is the menu's to draw and not the
+            // label's, and an inline picker is what asks the platform to draw it. The sidebar's
+            // Filter menu has always been built this way.
+            items
         } label: {
             ComposerControlLabel(
                 systemImage: systemImage,
@@ -56,6 +55,24 @@ struct ComposerOptionMenu: View {
         .help(help)
         .accessibilityLabel(help)
         .accessibilityValue(label)
+    }
+
+    /// The rows, headed or not. `labelsHidden` takes the heading off while leaving the picker its
+    /// own name, so a menu with nothing written over it still announces itself to VoiceOver.
+    @ViewBuilder
+    private var items: some View {
+        let picker = Picker(heading ?? help, selection: binding) {
+            ForEach(options) { option in
+                Text(option.label).tag(option.id)
+            }
+        }
+        .pickerStyle(.inline)
+
+        if heading == nil {
+            picker.labelsHidden()
+        } else {
+            picker
+        }
     }
 
     /// The picker writes back through the caller rather than into storage of its own, because
