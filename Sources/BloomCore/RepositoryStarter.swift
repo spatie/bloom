@@ -47,6 +47,117 @@ public enum RepositoryStartStep: String, Sendable, CaseIterable, Comparable {
     public static func steps(for destination: RepositoryDestination) -> [RepositoryStartStep] {
         destination.isGitHub ? allCases : [.initialise, .commit]
     }
+
+    /// How long this step is given before the dialog says out loud that it has not finished.
+    ///
+    /// Not a deadline. Nothing here is cancelled when the time is up: the step is still running
+    /// and may still succeed, and killing a push two minutes into somebody's first upload would
+    /// be worse than the silence it replaced. What runs out is Bloom's willingness to keep
+    /// claiming that everything is fine.
+    ///
+    /// The numbers are generous multiples of what each step really costs, because the point is to
+    /// catch a step that has stopped rather than one that is slow. `git init` and `git remote add`
+    /// are local and instant. The commit is the one that hangs in practice, and it hangs on
+    /// something outside git: a signing helper waiting on an approval that never appeared. The
+    /// push is legitimately long, so it is given three minutes before anything is said, and what
+    /// is said about it is not alarming.
+    public var patience: Duration {
+        switch self {
+        case .initialise: .seconds(15)
+        case .commit: .seconds(20)
+        case .createRemoteRepository: .seconds(30)
+        case .addOrigin: .seconds(15)
+        case .push: .seconds(180)
+        }
+    }
+
+    /// What to say once `patience` has run out. It names the command, because that is what a
+    /// person needs in order to go and look at it, and it names the likeliest cause.
+    public var slowNotice: String {
+        switch self {
+        case .initialise:
+            """
+            git init has not come back. It is normally instant, so something outside git is \
+            holding it up. You can stop and try again.
+            """
+        case .commit:
+            """
+            git commit has not come back. The usual cause is commit signing: a key, a smart card \
+            or a helper such as 1Password is waiting for an approval, and the prompt can be \
+            behind another window or missing altogether. Look for it, or stop and try again.
+            """
+        case .createRemoteRepository:
+            """
+            gh has not answered. It may be waiting on the network, or on a login that has to be \
+            finished in a browser. You can stop and try again.
+            """
+        case .addOrigin:
+            """
+            git remote add has not come back, which is a local command that should be instant. \
+            You can stop and try again.
+            """
+        case .push:
+            """
+            Still uploading. A first push of a large folder takes a while, so this is not \
+            necessarily wrong. Stopping now leaves the commit here and nothing on GitHub.
+            """
+        }
+    }
+}
+
+/// What was left behind when a start was stopped part way through.
+///
+/// Stopping is not the same as failing, and it needs its own answer for the same reason
+/// `RepositoryStartFailure.state` exists: a person who has just abandoned a dialog has to be told
+/// what is now on their disk. The difference is that a stop can also UNDO something, which a
+/// failure never does.
+///
+/// The rule is that Bloom cleans up exactly what it made and nothing else. A `git init` with no
+/// commit after it is a folder that is a repository and cannot be used as one: Bloom cannot cut a
+/// worktree from it, git tools behave differently inside it, and nobody asked for it. So it goes.
+/// The moment there is a commit it stops being Bloom's to remove: that commit holds the user's
+/// files, it is a project Bloom can run, and deleting it would be throwing away the only half of
+/// the job that worked.
+public enum RepositoryStartAbandonment: Sendable, Equatable {
+    /// No repository was made, so there is nothing to undo.
+    case nothingToUndo
+    /// The `git init` Bloom ran was undone. The folder is a plain folder again.
+    case repositoryRemoved
+    /// There is a commit, so the folder is a project Bloom can run and it is left exactly as it is.
+    case projectKept
+
+    /// Pure, and the whole decision.
+    ///
+    /// - Parameter hasGitDirectory: whether a `.git` sits directly in this folder. Deliberately
+    ///   not "is a repository", which git also answers yes to for a folder inside somebody else's
+    ///   checkout, and which would make this remove a `.git` belonging to a repository further up
+    ///   the tree.
+    public static func decide(hasGitDirectory: Bool, hasCommits: Bool) -> Self {
+        guard hasGitDirectory else { return .nothingToUndo }
+        return hasCommits ? .projectKept : .repositoryRemoved
+    }
+
+    /// Whether the folder is a repository Bloom can already run workspaces in, which is what makes
+    /// "add the project anyway" an honest offer after a stop.
+    public var isUsableProject: Bool { self == .projectKept }
+
+    /// What the folder is now, in the same voice as `RepositoryStartFailure.state`.
+    public var state: String {
+        switch self {
+        case .nothingToUndo:
+            "Nothing was changed. The folder is exactly as it was."
+        case .repositoryRemoved:
+            """
+            The repository Bloom had started making was removed again, so the folder is exactly \
+            as it was. Anything the run had already written to .gitignore is still there.
+            """
+        case .projectKept:
+            """
+            The folder is a git repository and your files are in its first commit, so Bloom can \
+            run workspaces in it. Nothing was sent to GitHub.
+            """
+        }
+    }
 }
 
 /// What actually happened, once all of it worked.
@@ -421,6 +532,33 @@ public enum RepositoryStarter {
             remoteURL: url,
             page: GitHub.repositoryPage(owner: owner, name: name)
         )
+    }
+
+    /// Undoes a start that was stopped part way through, and says what is left.
+    ///
+    /// Only ever correct for a folder Bloom itself initialised, which is the only kind the setup
+    /// dialog is offered for: `FolderVerdict.of` refuses a folder that already is a repository and
+    /// refuses one that sits inside another, so a `.git` here is one this run made. Called from a
+    /// fresh task rather than from the cancelled one, because a cancelled task's subprocesses
+    /// refuse to start.
+    ///
+    /// Deliberately does NOT touch a remote. A repository created on GitHub is a thing that exists
+    /// in somebody's account, under their name, and an app deleting one because a dialog was
+    /// closed is not a cleanup. The state sentence says it is there instead.
+    @discardableResult
+    public static func abandon(at path: String) async -> RepositoryStartAbandonment {
+        let folder = FolderPath.normalize((path as NSString).expandingTildeInPath)
+        let gitDirectory = (folder as NSString).appendingPathComponent(".git")
+        let hasGitDirectory = FileManager.default.fileExists(atPath: gitDirectory)
+
+        let hasCommits = hasGitDirectory ? await Git.hasCommits(in: folder) : false
+        let outcome = RepositoryStartAbandonment.decide(
+            hasGitDirectory: hasGitDirectory, hasCommits: hasCommits
+        )
+        if outcome == .repositoryRemoved {
+            try? FileManager.default.removeItem(atPath: gitDirectory)
+        }
+        return outcome
     }
 
     /// Stages the folder, keeps the credentials out, and commits.

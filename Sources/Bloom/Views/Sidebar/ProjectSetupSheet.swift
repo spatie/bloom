@@ -28,6 +28,8 @@ struct ProjectSetupSheet: View {
         case choosing
         case working(RepositoryStartStep)
         case failed(RepositoryStartFailure)
+        /// The user stopped it part way through. See `RepositoryStartAbandonment`.
+        case stopped(RepositoryStartAbandonment)
         case finished(RepositoryStartOutcome)
     }
 
@@ -42,6 +44,17 @@ struct ProjectSetupSheet: View {
     @State private var isShowingExcluded = false
     @State private var availabilityCheck: Task<Void, Never>?
     @State private var isLoadingOwners = false
+    /// The run in flight, held so it can be stopped.
+    ///
+    /// Without it this sheet had no way out at all. The footer's only button in the working phase
+    /// was a Cancel that did nothing and was disabled, so a step that never came back left the app
+    /// with a modal sheet nobody could dismiss and no answer but killing the process. It happened:
+    /// `git commit` sat waiting on a signing helper's approval that was never shown.
+    @State private var startTask: Task<Void, Never>?
+    /// Whether the step now running has been going longer than `RepositoryStartStep.patience`.
+    @State private var isStepSlow = false
+    /// True while the folder is being put back after a stop.
+    @State private var isStopping = false
 
     /// A network call per keystroke is the lazy version of this. Long enough that typing a name
     /// costs one request rather than one per character, short enough that the answer arrives while
@@ -73,6 +86,7 @@ struct ProjectSetupSheet: View {
                 case .choosing: offer
                 case .working(let step): working(step)
                 case .failed(let failure): failed(failure)
+                case .stopped(let left): stopped(left)
                 case .finished(let outcome): finished(outcome)
                 }
             }
@@ -86,7 +100,13 @@ struct ProjectSetupSheet: View {
         .background(Palette.surface)
         .task { await probeGitHub() }
         .onAppear { name = GitHubRepositoryName.suggestion(from: request.folderName) }
-        .onDisappear { availabilityCheck?.cancel() }
+        .onDisappear {
+            availabilityCheck?.cancel()
+            // Not a stop: the sheet is only taken off screen by a path that has already finished
+            // with the run. What this covers is the window closing under it, and a run left
+            // pumping git into a dialog that is gone is worse than one that ends.
+            startTask?.cancel()
+        }
         .sheet(item: $signIn) { pending in
             GitHubSignInSheet(request: pending) { connected in
                 signIn = nil
@@ -127,6 +147,7 @@ struct ProjectSetupSheet: View {
         case .choosing: "\(request.folderName) is not a git repository"
         case .working: "Setting up \(request.folderName)"
         case .failed(let failure): failure.title
+        case .stopped: "Stopped setting up \(request.folderName)"
         case .finished: "\(request.folderName) is ready"
         }
     }
@@ -411,24 +432,67 @@ struct ProjectSetupSheet: View {
     // MARK: - Running, failing, finishing
 
     private func working(_ step: RepositoryStartStep) -> some View {
-        VStack(alignment: .leading, spacing: Metrics.spacing) {
-            ForEach(RepositoryStartStep.steps(for: destination), id: \.self) { candidate in
-                HStack(spacing: Metrics.spacingWide) {
-                    if candidate < step {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(Palette.positive)
-                    } else if candidate == step {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "circle")
-                            .foregroundStyle(Palette.textTertiary)
+        VStack(alignment: .leading, spacing: Metrics.gutter) {
+            VStack(alignment: .leading, spacing: Metrics.spacing) {
+                ForEach(RepositoryStartStep.steps(for: destination), id: \.self) { candidate in
+                    HStack(spacing: Metrics.spacingWide) {
+                        if candidate < step {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(Palette.positive)
+                        } else if candidate == step {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "circle")
+                                .foregroundStyle(Palette.textTertiary)
+                        }
+                        Text(candidate.label)
+                            .font(Typo.label)
+                            .foregroundStyle(candidate == step ? Palette.textPrimary : Palette.textSecondary)
                     }
-                    Text(candidate.label)
-                        .font(Typo.label)
-                        .foregroundStyle(candidate == step ? Palette.textPrimary : Palette.textSecondary)
+                }
+            }
+
+            // A step that has stopped looks exactly like a step that is working, and the spinner
+            // says nothing either way. After `patience` it stops being a spinner and starts being
+            // a sentence, which names the command and the likeliest reason it is stuck.
+            if isStepSlow {
+                Callout(text: step.slowNotice, symbol: "clock.badge.exclamationmark", tone: .warning)
+            }
+
+            if isStopping {
+                HStack(spacing: Metrics.spacingWide) {
+                    ProgressView().controlSize(.small)
+                    Text("Stopping, and putting the folder back")
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textSecondary)
                 }
             }
         }
+        // Keyed on the step, so the clock restarts each time the sequence moves on and a slow
+        // commit does not leave the warning standing over a push that has only just begun.
+        .task(id: step) {
+            isStepSlow = false
+            try? await Task.sleep(for: step.patience)
+            guard !Task.isCancelled else { return }
+            isStepSlow = true
+        }
+    }
+
+    /// What is on disk after a stop, and nothing about why it was stopped: the user did that and
+    /// knows. See `RepositoryStartAbandonment`.
+    private func stopped(_ left: RepositoryStartAbandonment) -> some View {
+        VStack(alignment: .leading, spacing: Metrics.spacingTight) {
+            Text("What the folder is now")
+                .font(Typo.captionEmphasis)
+                .foregroundStyle(Palette.textPrimary)
+            Text(left.state)
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Metrics.inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
     }
 
     /// A failure names the step, quotes what git or gh said, and then says what the folder is now.
@@ -498,8 +562,22 @@ struct ProjectSetupSheet: View {
                     .disabled(!canStart)
 
             case .working:
-                Button("Cancel", role: .cancel) {}
-                    .disabled(true)
+                // Enabled, and carrying Escape, which is the whole fix. It was a disabled Cancel
+                // that did nothing, and there was no other way out of the sheet.
+                Button("Stop", role: .cancel) { stop() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(isStopping)
+
+            case .stopped(let left):
+                if left.isUsableProject {
+                    Button("Add the project anyway") { onFinish(request.path) }
+                }
+                Button("Close", role: .cancel) { onFinish(nil) }
+                    .keyboardShortcut(.cancelAction)
+                Button("Try again") { phase = .choosing }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Palette.accentFill)
+                    .keyboardShortcut(.defaultAction)
 
             case .failed(let failure):
                 if failure.isUsableProject {
@@ -602,9 +680,11 @@ struct ProjectSetupSheet: View {
 
     private func start(resuming completed: Set<RepositoryStartStep> = []) {
         let target = destination
+        isStepSlow = false
         phase = .working(RepositoryStartStep.steps(for: target).first ?? .initialise)
 
-        Task {
+        startTask?.cancel()
+        startTask = Task {
             do {
                 let outcome = try await RepositoryStarter.start(
                     at: request.path,
@@ -613,6 +693,10 @@ struct ProjectSetupSheet: View {
                 ) { step in
                     phase = .working(step)
                 }
+                // A stopped run's git is killed mid command, so it comes back here as a failure a
+                // moment after `stop` has already worked out what the folder is. Whichever of the
+                // two writes second wins, so the cancelled one writes nothing.
+                guard !Task.isCancelled else { return }
                 // Nothing worth reporting means nothing worth a second click. A plain local
                 // repository with no exclusions is finished the moment it is finished.
                 if target.isGitHub || !outcome.excluded.isEmpty || outcome.commitWasUnsigned {
@@ -621,8 +705,10 @@ struct ProjectSetupSheet: View {
                     onFinish(request.path)
                 }
             } catch let failure as RepositoryStartFailure {
+                guard !Task.isCancelled else { return }
                 phase = .failed(failure)
             } catch {
+                guard !Task.isCancelled else { return }
                 phase = .failed(RepositoryStartFailure(
                     step: .initialise,
                     message: error.readableMessage,
@@ -630,6 +716,23 @@ struct ProjectSetupSheet: View {
                     destination: target
                 ))
             }
+        }
+    }
+
+    /// Abandons the run, and puts the folder back to something honest.
+    ///
+    /// Cancelling reaches the subprocess: `Shell.run` terminates the command it is waiting on, so
+    /// the hung `git commit` really does go away rather than being orphaned. What is left behind
+    /// is then worked out and, where Bloom made it, undone. See `RepositoryStarter.abandon`.
+    private func stop() {
+        startTask?.cancel()
+        startTask = nil
+        isStopping = true
+        Task {
+            let left = await RepositoryStarter.abandon(at: request.path)
+            isStopping = false
+            isStepSlow = false
+            phase = .stopped(left)
         }
     }
 }

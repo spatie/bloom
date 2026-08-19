@@ -372,3 +372,129 @@ struct RepositoryStartFailureTests {
         #expect(Git.indicatesSigningFailure("nothing to commit, working tree clean") == false)
     }
 }
+
+/// Stopping a setup part way through.
+///
+/// The dialog used to have no way out at all while a step was running: its only button was a
+/// disabled Cancel. A `git commit` that never returned, because a signing helper was waiting on an
+/// approval nobody was shown, left a modal sheet that could only be escaped by killing the app.
+/// What is pinned here is the other half of the fix: stopping has to leave the folder in a state
+/// somebody can be told about, and it must not leave a repository behind that Bloom made and
+/// nobody asked for.
+@Suite("Stopping a repository setup", .tags(.git), .scratchDirectory)
+struct RepositoryStartAbandonmentTests {
+    private func folder(_ files: [String: String] = [:]) throws -> String {
+        let root = TestScratch.unique("bloom-stop")
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        for (relative, contents) in files {
+            let full = (root as NSString).appendingPathComponent(relative)
+            try contents.write(toFile: full, atomically: true, encoding: .utf8)
+        }
+        return root
+    }
+
+    private func hasIdentity() async -> Bool {
+        await RepositoryStarter.identityProblem(at: NSTemporaryDirectory()) == nil
+    }
+
+    // MARK: - The decision
+
+    @Test("a folder that never became a repository has nothing to undo")
+    func nothingToUndo() {
+        #expect(
+            RepositoryStartAbandonment.decide(hasGitDirectory: false, hasCommits: false)
+                == .nothingToUndo
+        )
+        // Nonsense on its face, and it still must not reach for a .git that is not there.
+        #expect(
+            RepositoryStartAbandonment.decide(hasGitDirectory: false, hasCommits: true)
+                == .nothingToUndo
+        )
+    }
+
+    @Test("an initialised repository with no commit is Bloom's to remove")
+    func removesTheHalfMadeRepository() {
+        #expect(
+            RepositoryStartAbandonment.decide(hasGitDirectory: true, hasCommits: false)
+                == .repositoryRemoved
+        )
+    }
+
+    @Test("a repository with a commit in it is left alone, because the commit holds the files")
+    func keepsACommittedRepository() {
+        let left = RepositoryStartAbandonment.decide(hasGitDirectory: true, hasCommits: true)
+        #expect(left == .projectKept)
+        #expect(left.isUsableProject)
+    }
+
+    @Test("only the kept project counts as one Bloom can run", arguments: [
+        RepositoryStartAbandonment.nothingToUndo,
+        RepositoryStartAbandonment.repositoryRemoved,
+    ])
+    func theOthersAreNotProjects(left: RepositoryStartAbandonment) {
+        #expect(left.isUsableProject == false)
+    }
+
+    @Test("each outcome says what the folder is now, in its own words")
+    func states() {
+        let states = [
+            RepositoryStartAbandonment.nothingToUndo,
+            .repositoryRemoved,
+            .projectKept,
+        ].map(\.state)
+        #expect(Set(states).count == 3)
+        #expect(states.allSatisfy { !$0.isEmpty })
+    }
+
+    // MARK: - On disk
+
+    @Test("stopping after git init takes the repository away again")
+    func abandonRemovesTheRepository() async throws {
+        let root = try folder(["README.md": "hi\n"])
+        _ = try await Git.initRepository(at: root)
+        #expect(FileManager.default.fileExists(atPath: root + "/.git"))
+
+        #expect(await RepositoryStarter.abandon(at: root) == .repositoryRemoved)
+
+        #expect(FileManager.default.fileExists(atPath: root + "/.git") == false)
+        // Everything that was the user's is untouched. Only what Bloom made is gone.
+        #expect(FileManager.default.fileExists(atPath: root + "/README.md"))
+        #expect(await Git.isRepository(root) == false)
+    }
+
+    @Test("stopping after the first commit keeps the project")
+    func abandonKeepsACommittedProject() async throws {
+        try #require(await hasIdentity())
+        let root = try folder(["README.md": "hi\n"])
+        try await RepositoryStarter.start(at: root, destination: .local)
+
+        #expect(await RepositoryStarter.abandon(at: root) == .projectKept)
+        #expect(FileManager.default.fileExists(atPath: root + "/.git"))
+        #expect(await Git.hasCommits(in: root))
+    }
+
+    @Test("stopping before anything happened touches nothing")
+    func abandonLeavesAPlainFolderAlone() async throws {
+        let root = try folder(["README.md": "hi\n"])
+        #expect(await RepositoryStarter.abandon(at: root) == .nothingToUndo)
+        #expect(FileManager.default.fileExists(atPath: root + "/README.md"))
+        #expect(await Git.isRepository(root) == false)
+    }
+
+    // MARK: - Patience
+
+    @Test("every step is given a limit and has something to say once it runs out")
+    func patience() {
+        for step in RepositoryStartStep.allCases {
+            #expect(step.patience > .zero)
+            #expect(!step.slowNotice.isEmpty)
+            // It names the thing to go and look at, which is the only reason to print it.
+            #expect(step.slowNotice.count > 40)
+        }
+        // The push is the one step that is legitimately long, so it is the most patient of them.
+        #expect(RepositoryStartStep.push.patience > RepositoryStartStep.commit.patience)
+        #expect(Set(RepositoryStartStep.allCases.map(\.slowNotice)).count
+            == RepositoryStartStep.allCases.count)
+    }
+}
+
