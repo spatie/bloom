@@ -170,6 +170,19 @@ final class TranscriptModel {
         } catch {
             isRunning = false
             statusLabel = nil
+            // The composer was emptied on the assumption the turn would start. It did not, so
+            // the words go back where they were typed. An unsent prompt is often minutes of
+            // thought and this app holds the only copy of it; an alert the user cannot paste
+            // out of is not somewhere to leave it.
+            //
+            // Prepended rather than assigned when something is already there, because the only
+            // way that happens is somebody typing while the start failed, and their new sentence
+            // is not this method's to throw away either.
+            draft = draft.isEmpty ? body : body + "\n\n" + draft
+            try? await store.saveDraft(sessionID: session.id, body: draft)
+            Log.composer.error(
+                "the agent would not start, so the prompt was put back in the composer: \(error.readableMessage, privacy: .public)"
+            )
             app.alert = BloomAlert(title: "Could not start the agent", message: error.readableMessage)
         }
     }

@@ -41,8 +41,6 @@ struct RepoSection: View {
     @FocusState private var repoFieldFocused: Bool
 
     @State private var isConfirmingRemove = false
-    /// The workspace whose archive button has been pressed, and what archiving it would do.
-    @State private var rowArchive: RowArchiveRequest?
     /// Lights the `+`. It belongs to this header rather than to a hover id shared across the whole
     /// list, so crossing the pane lights one project at a time.
     @State private var isHeaderHovered = false
@@ -184,21 +182,6 @@ struct RepoSection: View {
             Button("Reveal in Finder") { Reveal.inFinder(repo.path) }
             Divider()
             Button("Remove project", role: .destructive) { isConfirmingRemove = true }
-        }
-        .confirmationDialog(
-            "Archive \(rowArchive?.workspace.name ?? "")?",
-            isPresented: $rowArchive.isPresent(),
-            titleVisibility: .visible,
-            presenting: rowArchive
-        ) { request in
-            Button("Archive", role: .destructive) { archive(request.workspace) }
-            // Return keeps the workspace, the same way the model's own confirmation does it: the
-            // destructive answer should cost a deliberate click rather than the key your hand is
-            // already on.
-            Button("Keep the workspace", role: .cancel) { rowArchive = nil }
-                .keyboardShortcut(.defaultAction)
-        } message: { request in
-            Text(request.summary)
         }
         .confirmationDialog(
             "Remove \(repo.name)?",
@@ -398,18 +381,15 @@ struct RepoSection: View {
     /// A hover button is a different thing. It appears under the pointer, unbidden, a few points
     /// from the row you meant to click, which makes it the easiest way in the app to archive
     /// something by accident. So the asking is a property of THIS ENTRY POINT rather than of the
-    /// archive, and `AppModel.archive` is left exactly as it was: everything else still archives
-    /// silently when there is nothing to lose.
+    /// archive: everything else still archives silently when there is nothing to lose.
     ///
-    /// Saying yes goes through the same `archive` above that the context menu calls, so the
-    /// conditional check still runs, undo is still registered, and a workspace with real work in
-    /// it still gets the model's own confirmation naming what would be lost. See `RowArchiveRequest`
-    /// for what that means for the rare case where both are shown.
+    /// It used to ask with a compact dialog of its own, and answering yes could then raise the
+    /// model's larger one, so a workspace with real work in it produced two dialogs of different
+    /// shapes for a single decision. The asking is still a property of THIS ENTRY POINT, but it
+    /// is now said as an argument, and the one dialog that appears is the one that knows what is
+    /// at stake. See `AppModel.archive(_:deleteBranch:alwaysConfirm:)`.
     private func confirmRowArchive(_ workspace: Workspace) {
-        rowArchive = RowArchiveRequest(
-            workspace: workspace,
-            deletesBranch: SettingsLoader.load(repo: repo.path).deleteBranchOnArchive
-        )
+        Task { await app.archive(workspace, alwaysConfirm: true) }
     }
 
     private func removeRepo() {
@@ -434,32 +414,5 @@ struct RepoSection: View {
 
     private func copy(_ text: String) {
         Clipboard.copy(text)
-    }
-}
-
-/// What the row's archive button is asking about.
-///
-/// It exists because the question this dialog asks is not the question `AppModel`'s own archive
-/// confirmation asks. That one only ever appears when there is something specific to lose and it
-/// names it. This one appears every time, so it has nothing to warn about and must not pretend to:
-/// it says plainly what archiving does instead, and whether the branch goes with the worktree,
-/// which is the repository's setting rather than a question asked per workspace.
-///
-/// When there IS something at stake the user sees this check and then the model's warning, in that
-/// order, which reads as "are you sure" followed by "here is specifically what you would lose".
-/// Collapsing the two into one would mean `AppModel.archive` learning that a caller wants to be
-/// asked regardless, as `archive(_:deleteBranch:alwaysConfirm:)`, and that file is not this one's
-/// to change.
-struct RowArchiveRequest: Identifiable {
-    var workspace: Workspace
-    /// From the repository's settings, so the sentence can say whether the branch survives.
-    var deletesBranch: Bool
-
-    var id: String { workspace.id }
-
-    var summary: String {
-        deletesBranch
-            ? "The worktree is removed and the branch is deleted. The workspace moves to Archived."
-            : "The worktree is removed and the branch is kept. The workspace moves to Archived."
     }
 }

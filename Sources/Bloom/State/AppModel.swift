@@ -802,18 +802,32 @@ final class AppModel {
     /// shells and dev servers with it anyway, which is a strange thing to happen after being told
     /// the workspace was too valuable to remove.
     ///
-    /// Whether an entry point asks on TOP of this is a property of that entry point, and the two
-    /// that differ each say why where they live. The sidebar row's hover button asks every single
-    /// time, even when this method would have archived silently, because it appears under the
-    /// pointer unbidden: see `RepoSection.confirmRowArchive`. The merged pull request strip's
-    /// Archive button adds nothing at all and lets this method decide, because it is a deliberate
-    /// press on a strip whose headline says Merged: see `PullRequestSummary.archiveButton`.
+    /// Whether an entry point asks even when there is nothing to lose is that entry point's own
+    /// business, and `alwaysConfirm` is how it says so. Exactly one caller passes it: the sidebar
+    /// row's hover archive button, which appears under the pointer unbidden and is the easiest
+    /// way in the app to archive something by accident. The context menu, the Workspace menu, the
+    /// keyboard shortcut and the merged pull request strip all leave it alone, because opening a
+    /// menu or pressing a shortcut is already saying what you mean, and a confirmation with
+    /// nothing to warn about is how a confirmation stops being read.
     ///
-    /// That second one needs no new logic here and gets none. A merged pull request already
-    /// clears the commits through `isPullRequestMerged`, so what is left to stop an archive is an
-    /// agent mid turn and work that exists nowhere but that directory. Neither is weakened for it.
-    func archive(_ workspace: Workspace, deleteBranch: Bool? = nil) async {
-        guard let manager, let repo = repo(for: workspace) else { return }
+    /// It is a flag here rather than a second dialog at the call site, and that is deliberate.
+    /// The row used to raise a compact "are you sure" of its own, so a workspace with real work
+    /// in it produced two dialogs of different shapes for one decision: a small one that warned
+    /// about nothing, then a large one listing what was at stake. One question, asked once, in
+    /// one shape.
+    ///
+    /// A merged pull request needs no new logic and gets none. It already clears the commits
+    /// through `isPullRequestMerged`, so what is left to stop an archive is an agent mid turn and
+    /// work that exists nowhere but that directory. Neither is weakened for it.
+    func archive(
+        _ workspace: Workspace, deleteBranch: Bool? = nil, alwaysConfirm: Bool = false
+    ) async {
+        guard let manager, let repo = repo(for: workspace) else {
+            Log.archive.error(
+                "asked to archive \(workspace.name, privacy: .public), but the app has no manager or no project for it"
+            )
+            return
+        }
 
         let hazards = ArchiveHazards(
             isAgentRunning: isRunning(workspace),
@@ -845,7 +859,7 @@ final class AppModel {
             isPullRequestMerged: hazards.isPullRequestMerged
         )
 
-        guard isSafe, !hazards.isAgentRunning else {
+        guard isSafe, !hazards.isAgentRunning, !alwaysConfirm else {
             pendingArchive = ArchiveRequest(
                 workspace: workspace, report: report, deleteBranch: deleteBranch, hazards: hazards
             )
@@ -875,9 +889,25 @@ final class AppModel {
     }
 
     /// The user has seen exactly what would be destroyed and asked for it anyway.
-    func confirmPendingArchive() async {
-        guard let request = pendingArchive, let repo = repo(for: request.workspace) else { return }
+    ///
+    /// Takes the request as an argument, and that is the whole of the fix for an archive that did
+    /// nothing at all. This used to read `pendingArchive` back out of the model, and by the time
+    /// it ran there was nothing there to read: the confirmation's own dismissal writes `false`
+    /// into the `isPresented` binding, `Binding.isPresent()` turns that into `pendingArchive =
+    /// nil`, and the button's action is a `Task` that reaches the main actor about 270ms later,
+    /// after the dismissal. The guard then failed and the method returned, silently, every single
+    /// time. Pressing "Archive and lose that work" genuinely did nothing.
+    ///
+    /// So nothing here may depend on state a dismissal can clear. The value the dialog was built
+    /// from is the value it acts on.
+    func confirmArchive(_ request: ArchiveRequest) async {
         pendingArchive = nil
+        guard let repo = repo(for: request.workspace) else {
+            Log.archive.error(
+                "confirmed the archive of \(request.workspace.name, privacy: .public), but its project is gone"
+            )
+            return
+        }
         // A request that carries a problem has no report at all, only the reason git could not be
         // asked. Passing it on would let an empty report be read as "nothing was at stake".
         await performArchive(
@@ -902,12 +932,40 @@ final class AppModel {
         report: WorkspaceSafetyReport?,
         hazards: ArchiveHazards
     ) async {
-        guard let manager else { return }
+        guard let manager else {
+            Log.archive.error(
+                "archiving \(workspace.name, privacy: .public) stopped before it began: no workspace manager"
+            )
+            return
+        }
 
         // The agents go first: they are the ones writing to the worktree that is about to be
-        // removed. The shells and dev servers only go once the removal has actually happened, so a
-        // failing archive script does not cost the user their terminals for nothing.
+        // removed, and `git worktree remove --force` unlinking files under a running agent is how
+        // work gets corrupted rather than merely lost. The shells and dev servers only go once the
+        // removal has actually happened, so a failing archive script does not cost the user their
+        // terminals for nothing.
+        //
+        // This does mean an archive that the manager then refuses has already stopped the agent.
+        // That trade is deliberate and it is the reason the archive script's failure message says
+        // so rather than claiming the workspace is untouched. Moving the teardown after the
+        // script would mean the script running while an agent still writes, which is worse.
         workspaceModels[workspace.id]?.teardown()
+
+        // Out of the sidebar now, before a single byte moves.
+        //
+        // Archiving used to show nothing at all until every last thing had finished: a safety
+        // report over the whole worktree, an archive script, `git worktree remove` deleting a
+        // `node_modules` file by file, a branch delete, and a reload. On a real project that is
+        // seconds of a window that looks broken, and the report above is the reason people press
+        // the button twice.
+        //
+        // None of that work decides anything the user has not already decided. The decision was
+        // made before this method was called, so the row can go at once and the disk can catch
+        // up. If the disk refuses, the `catch` below reloads from the store, where the row is
+        // still active, and it comes back with the reason in front of it.
+        let previousSelection = selection
+        workspaces.removeAll { $0.id == workspace.id }
+        if selection.workspaceID == workspace.id { selection = .home }
 
         do {
             try await manager.archive(
@@ -924,32 +982,64 @@ final class AppModel {
             workspaceModels[workspace.id] = nil
             // One more workspace is archived now, so anything holding the old answer is wrong.
             invalidateArchived()
-            if selection.workspaceID == workspace.id { selection = .home }
             await reload()
             await offerUndo(of: workspace, repo: repo, report: report)
+            Log.archive.info("archived \(workspace.name, privacy: .public)")
         } catch let error as WorkspaceError {
+            await undoOptimisticArchive(restoring: previousSelection)
             switch error {
             case .archiveScriptFailed(let status, let output):
+                Log.archive.error(
+                    "the archive script for \(workspace.name, privacy: .public) exited \(status), so nothing was removed"
+                )
                 // Worth its own wording: the manager stops before removing anything, so the user
-                // needs to hear that the workspace is still there rather than fear the worst.
+                // needs to hear that the worktree is still there rather than fear the worst. It
+                // does not claim the workspace is untouched, because the agent went first: see
+                // the teardown above.
+                //
+                // Titled without the workspace name. Names here are whole sentences, and a title
+                // built from one wraps to three lines of bold text that reads as the warning
+                // itself. The name goes in the message, which has room for it.
                 alert = BloomAlert(
-                    title: "The archive script for \(workspace.name) failed",
-                    message: "Nothing was removed and the workspace is intact. "
+                    title: "The archive script failed",
+                    message: "\u{201C}\(workspace.name)\u{201D} is still here: its worktree and "
+                        + "its branch are untouched. Any agent it was running has been stopped.\n\n"
                         + "The script exited with status \(status).\n\n"
                         // The tail is where a script says why it gave up.
                         + String(output.trimmingCharacters(in: .whitespacesAndNewlines).suffix(1_000))
                 )
             case .unsafeToArchive(let fresh):
+                Log.archive.notice(
+                    "\(workspace.name, privacy: .public) changed between the check and the archive, so it is being asked about again"
+                )
                 // Only reachable when the worktree changed between the check and the archive.
                 pendingArchive = ArchiveRequest(
                     workspace: workspace, report: fresh, deleteBranch: deleteBranch, hazards: hazards
                 )
             default:
+                Log.archive.error(
+                    "could not archive \(workspace.name, privacy: .public): \(error.readableMessage, privacy: .public)"
+                )
                 alert = BloomAlert(title: "Could not archive the workspace", message: error.readableMessage)
             }
         } catch {
+            await undoOptimisticArchive(restoring: previousSelection)
+            Log.archive.error(
+                "could not archive \(workspace.name, privacy: .public): \(error.readableMessage, privacy: .public)"
+            )
             alert = BloomAlert(title: "Could not archive the workspace", message: error.readableMessage)
         }
+    }
+
+    /// Puts a workspace back in the sidebar after the disk refused to let it go.
+    ///
+    /// Reloaded from the store rather than reinstated from a copy held in memory. `Workspace.state`
+    /// is only written once the removal has actually happened, so a failed archive leaves the row
+    /// exactly as it was, and reading it back is the one version that cannot disagree with what
+    /// every other part of the app is about to read.
+    private func undoOptimisticArchive(restoring selection: SidebarSelection) async {
+        await reload()
+        self.selection = selection
     }
 
     // MARK: - Undoing an archive

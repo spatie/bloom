@@ -112,22 +112,30 @@ struct RootView: View {
         // menu, the Workspace menu or a keyboard shortcut. There is no single control it could
         // animate out of, and anchoring it to the sidebar row would lose the refusals that arrive
         // for the selected workspace from the menu bar.
+        //
+        // The title is fixed rather than "Archive <name>?". Workspace names here are whole
+        // sentences ("Show me the technolgies-used-in-this-project"), and a title built from one
+        // wraps to two lines of bold text that the eye reads as the warning. The name belongs in
+        // the message, where a long one costs nothing.
         .confirmationDialog(
-            "Archive \(app.pendingArchive?.workspace.name ?? "")?",
+            "Archive this workspace?",
             isPresented: $app.pendingArchive.isPresent(),
             titleVisibility: .visible,
             presenting: app.pendingArchive
-        ) { _ in
-            Button("Archive and lose that work", role: .destructive, action: confirmArchive)
+        ) { request in
+            // The request comes from `presenting:` and is handed straight to the model. Reading
+            // `app.pendingArchive` back inside the action is what made Archive do nothing at all:
+            // dismissing the dialog clears it before the action's task ever reaches the main
+            // actor. See `AppModel.confirmArchive`.
+            Button(Self.confirmLabel(for: request), role: .destructive) { confirmArchive(request) }
             // Return keeps the workspace, for the reason `CloseSessionAlert` gives for the same
             // choice: the destructive answer should cost a deliberate click, not the key your hand
-            // is already on. Without this the dialog opens with "Archive and lose that work" as the
+            // is already on. Without this the dialog opens with the destructive button as the
             // default, so Cmd+Delete and then Return destroys a worktree without a word being read.
             Button("Keep the workspace", role: .cancel, action: app.cancelPendingArchive)
                 .keyboardShortcut(.defaultAction)
         } message: { request in
-            // Naming what disappears, rather than asking "are you sure?". The confirmation only
-            // exists because there is something specific to lose, so it should say what.
+            // Naming what disappears, rather than asking "are you sure?".
             Text(Self.losses(in: request))
         }
         // The question asked before a session that is still working is closed. On the window for
@@ -190,22 +198,38 @@ struct RootView: View {
 
     // MARK: - Actions
 
-    private func confirmArchive() {
-        Task { await app.confirmPendingArchive() }
+    private func confirmArchive(_ request: ArchiveRequest) {
+        Task { await app.confirmArchive(request) }
+    }
+
+    /// The destructive button's label, which only promises a loss when there is one.
+    ///
+    /// This dialog is now raised by the sidebar row's hover button as well, which asks every time
+    /// precisely because it appears under the pointer unbidden. Telling somebody they are about
+    /// to "lose that work" when the worktree is clean is the fastest way to teach them that this
+    /// dialog exaggerates.
+    private static func confirmLabel(for request: ArchiveRequest) -> String {
+        request.reasons.isEmpty && request.problem == nil ? "Archive" : "Archive and lose that work"
     }
 
     /// What the user is about to lose, said as a list rather than as a question.
     ///
     /// Built here rather than in the message builder so the string work is a plain function that
     /// can be read, and changed, without going through a view body.
-    /// Names the specific reason this sheet appeared.
     ///
-    /// A confirmation that only asks "are you sure?" is one people learn to click through, and
-    /// this one is now rare enough to be worth reading: the routine archive, with a clean
-    /// worktree and nothing running, no longer raises it at all. `ArchiveRequest.reasons` puts the
-    /// agent mid turn first, because that is the work that is not in git yet.
+    /// A confirmation that only asks "are you sure?" is one people learn to click through, so
+    /// this one always says what archiving does to this particular workspace, and adds the list
+    /// only when there is something on it. `ArchiveRequest.reasons` puts the agent mid turn
+    /// first, because that is the work that is not in git yet.
     private static func losses(in request: ArchiveRequest) -> String {
-        var text = "Archiving deletes the worktree at \(request.workspace.path)."
+        // The worktree's path used to open this message and it took five wrapped lines of a
+        // narrow dialog to say something the name above it had already said. What has to be read
+        // here is the list, so the path is gone and the name is what identifies the workspace,
+        // which is what it does everywhere else in the app.
+        var text = "\u{201C}\(request.workspace.name)\u{201D}\n\n"
+        text += "The worktree is deleted and the branch is "
+        text += request.hazards.isDeletingBranch ? "deleted too." : "kept."
+        text += " The workspace moves to Archived."
         let reasons = request.reasons
         if !reasons.isEmpty {
             text += "\n\nThis would lose:\n"
