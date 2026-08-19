@@ -24,13 +24,20 @@ struct TreeGuides: View {
                 Rectangle()
                     .fill(.tertiary)
                     .frame(width: Metrics.hairline)
-                    // The rule sits under the centre of the chevron of the level it belongs to,
-                    // which is where the eye already is when it follows a folder down to its
-                    // children.
+                    // One glyph box per level, which is what `indentStep` is.
                     .frame(width: InspectorLayout.indentStep, alignment: .leading)
             }
         }
-        .padding(.leading, InspectorLayout.gap + InspectorLayout.glyphWidth / 2)
+        // The rule runs down the column its level's own glyph STARTS in, rather than the column
+        // that glyph's centre happens to fall in. Those were the same number while the glyph was
+        // centred in its box, and are not any more: the glyphs are leading aligned now, so that
+        // the first mark in a row lands on the column's inset like everything else in the pane
+        // (see `InspectorLayout.glyphWidth`). Kept at the centre the rule came out four points to
+        // the right of the chevron it belongs to, in the gap between the chevron and the name,
+        // which reads as a rule at no particular place. This is also the simpler arithmetic: a
+        // level steps by exactly one glyph box, so level k's rule is at the same offset as level
+        // k's glyph.
+        .padding(.leading, InspectorLayout.gap)
         .accessibilityHidden(true)
     }
 }

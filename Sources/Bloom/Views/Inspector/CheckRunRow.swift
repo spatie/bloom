@@ -85,7 +85,7 @@ struct CheckRunRow: View {
         }
         .font(Typo.label)
         .imageScale(.medium)
-        .frame(width: InspectorLayout.glyphWidth, height: InspectorLayout.glyphWidth)
+        .frame(width: InspectorLayout.glyphWidth, height: InspectorLayout.glyphWidth, alignment: .leading)
         .accessibilityLabel(CheckState(run).description)
     }
 

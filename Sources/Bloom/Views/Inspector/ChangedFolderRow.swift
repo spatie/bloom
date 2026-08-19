@@ -28,7 +28,7 @@ struct ChangedFolderRow: View {
                     .font(Typo.micro)
                     .imageScale(.small)
                     .foregroundStyle(.tertiary)
-                    .frame(width: InspectorLayout.glyphWidth)
+                    .frame(width: InspectorLayout.glyphWidth, alignment: .leading)
                     .accessibilityHidden(true)
                 // The same size as the files under it, one step quieter, and said hierarchically
                 // so it still inverts if the row is ever drawn on a fill. It used to be two rungs

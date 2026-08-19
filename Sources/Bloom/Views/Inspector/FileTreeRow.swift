@@ -26,7 +26,7 @@ struct FileTreeRow: View {
                     .font(Typo.micro)
                     .imageScale(.small)
                     .foregroundStyle(.tertiary)
-                    .frame(width: InspectorLayout.glyphWidth)
+                    .frame(width: InspectorLayout.glyphWidth, alignment: .leading)
                     .accessibilityHidden(true)
                 // A directory is one step quieter than a file, said with the hierarchical style so
                 // it still inverts on a selected row.

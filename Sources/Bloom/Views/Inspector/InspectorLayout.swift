@@ -54,6 +54,17 @@ enum InspectorLayout {
     /// number. One step denser, or the chip disappears into the bar it is drawn on.
     static let tintOpacityStrong: Double = 0.24
     /// Status glyphs share one box, so the names beside them line up whichever symbol lands in it.
+    ///
+    /// **Leading aligned, everywhere it is used.** The box is what makes the names line up; what
+    /// makes the ROWS line up with everything else in the column is where the first mark inside
+    /// the box lands. `ChangedFileRow` fills its box with a letter on a rounded plate, so its ink
+    /// starts at the box's own edge; the two trees and the checks list put a symbol in the same
+    /// box, and a symbol centred in it starts its ink wherever that symbol happens to be wide.
+    /// Measured at the pane's default width: the changed files tab drew its first mark 10 points
+    /// inside the pane, matching the tab row's control and the strip's badge above it, and the
+    /// all files tab drew its first mark at 14.7, because `doc` is about nine points wide in a
+    /// sixteen point box. Switching tabs moved the column. Leading alignment is what makes the
+    /// box's edge and the ink's edge the same number.
     static let glyphWidth: CGFloat = 16
     /// One level of indent in the file tree. Exactly one glyph box, so a row's chevron starts
     /// where its parent's chevron ended and the column of names steps in visibly. It was 12, which
