@@ -37,6 +37,14 @@ final class RunScriptSession {
     func start(environment: [String: String], port: Int) {
         guard !isRunning else { return }
 
+        // The only way a run script arrives with nothing to run is a settings file naming a
+        // script file that is not on disk. Saying so beats a terminal that flashes and exits.
+        guard !script.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            output = "This run script names a file that is not there, so there is nothing to run.\n"
+            exitStatus = nil
+            return
+        }
+
         output = ""
         exitStatus = nil
         detectedPort = port > 0 ? port : nil

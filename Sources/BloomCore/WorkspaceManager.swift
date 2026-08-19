@@ -203,17 +203,35 @@ public struct WorkspaceManager: Sendable {
         onOutput: @escaping @Sendable (String) -> Void
     ) async -> Bool {
         let settings = SettingsLoader.load(repo: repo.path)
-        guard let script = settings.setupScript, !script.isEmpty else {
+        let launch = ScriptLaunch.resolve(
+            text: settings.setupScript, file: settings.scriptFiles[.setup], repo: repo.path
+        )
+
+        guard let launch else {
             try? await store.updateSetup(workspaceID: workspace.id, state: .skipped)
             return true
+        }
+
+        switch launch {
+        case .missing(let path):
+            // Skipped, not failed. A settings file pointing at a script somebody deleted or has
+            // not committed yet is not a reason to refuse them the worktree they asked for. It is
+            // a reason to say so where they will see it, which is this workspace's setup log.
+            let note = "The settings file names \(path) as the setup script and there is nothing "
+                + "there, so nothing ran."
+            onOutput(note)
+            try? await store.updateSetup(workspaceID: workspace.id, state: .skipped, log: note)
+            return true
+        case .executable, .source:
+            break
         }
 
         try? await store.updateSetup(workspaceID: workspace.id, state: .running)
 
         let env = environment(for: workspace, repo: repo, port: port)
         let runner = StreamingProcess(
-            executable: "/bin/zsh",
-            arguments: ["-c", script],
+            executable: launch.executable,
+            arguments: launch.arguments,
             cwd: workspace.path,
             environment: Shell.environment(extra: env)
         )
@@ -293,10 +311,23 @@ public struct WorkspaceManager: Sendable {
         // A failing archive script means the workspace was not wound down: containers still
         // running, a database still there. Deleting the worktree anyway leaves that mess with
         // nothing left to clean it up from.
-        if let script = settings.archiveScript, !script.isEmpty,
+        let archiveLaunch = ScriptLaunch.resolve(
+            text: settings.archiveScript, file: settings.scriptFiles[.archive], repo: repo.path
+        )
+        // A `.missing` archive script is not run and does not stop the archive, for the same
+        // reason a missing setup script does not stop a workspace being created.
+        let archiveRuns: Bool
+        switch archiveLaunch {
+        case .executable, .source: archiveRuns = true
+        case .missing, nil: archiveRuns = false
+        }
+        if let archiveLaunch, archiveRuns,
            FileManager.default.fileExists(atPath: workspace.path) {
             let env = environment(for: workspace, repo: repo, port: 0)
-            let result = try await Shell.script(script, cwd: workspace.path, env: env, timeout: .seconds(120))
+            let result = try await Shell.run(
+                archiveLaunch.executable, archiveLaunch.arguments,
+                cwd: workspace.path, env: env, timeout: .seconds(120)
+            )
             guard result.ok else {
                 throw WorkspaceError.archiveScriptFailed(
                     status: result.status,

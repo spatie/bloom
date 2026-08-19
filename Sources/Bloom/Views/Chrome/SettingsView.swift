@@ -345,23 +345,36 @@ private struct SettingValue: View {
     }
 }
 
-/// Constrains long scripts while preserving their whitespace and making them easy to copy.
+/// A script this project resolves to, read only.
+///
+/// Not a `LabeledContent`. A form's value column carries `multilineTextAlignment(.trailing)` in
+/// its environment, and `Text` obeys it, so a forty line setup script was set flush right: every
+/// line ragged on the left, the indentation destroyed, and the whole thing squeezed into whatever
+/// the label column left over. Shell is code, so it is shown the way the rest of the app shows
+/// code, in the editor `ScriptEditor` wraps: left aligned, line numbered, syntax coloured, and
+/// bounded so a long script scrolls instead of stretching the pane.
 private struct ScriptValue: View {
     let title: String
     let value: String?
 
     var body: some View {
-        LabeledContent(title) {
-            ScrollView([.horizontal, .vertical]) {
-                Text(value ?? "None")
-                    .font(Typo.codeSmall)
-                    .foregroundStyle(Palette.textSecondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(Metrics.spacingSmall)
-            .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+        VStack(alignment: .leading, spacing: Metrics.spacing) {
+            Text(title)
+                .font(Typo.labelEmphasis)
+                .foregroundStyle(Palette.textPrimary)
+
+            ScriptEditor(
+                text: .constant(value ?? ""),
+                isEditable: false,
+                placeholder: "None",
+                minimumHeight: 56,
+                maximumHeight: 280
+            )
+            .accessibilityLabel(title)
         }
+        .multilineTextAlignment(.leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, Metrics.spacingSmall)
     }
 }
 
