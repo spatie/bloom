@@ -9,8 +9,11 @@ import BloomCore
 /// AppKit selection (accent when the window is key, grey when it is not), the standard row
 /// insets, and keyboard navigation between rows.
 ///
-/// It does not bring a disclosure triangle on a section header. `Section(isExpanded:)` draws
-/// nothing here, which was captured rather than assumed, so `RepoSection` draws its own chevron.
+/// It does bring a disclosure control on a section header, and that is why `RepoSection` uses a
+/// plain `Section`. Hand the list an `isExpanded` binding and it draws a chevron of its own at the
+/// trailing end of the header, under the pointer only, which on a project header landed past the
+/// gear and the `+` and said what the header's own leading chevron already said. A comment here
+/// used to claim the opposite, from a capture taken with the pointer nowhere near the window.
 ///
 /// There is no account row. Bloom is local and single user, so a row naming the logged-in Mac
 /// user said nothing, and on macOS `Menu { } label: { }` with `.borderlessButton` throws the

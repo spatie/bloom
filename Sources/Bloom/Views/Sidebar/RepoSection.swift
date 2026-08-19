@@ -12,9 +12,10 @@ import BloomCore
 /// The rows are handed in already filtered and sorted (see `SidebarRepoGroup`), so nothing here
 /// walks the workspace list.
 ///
-/// Collapsing is bound to the repo's stored `collapsed` flag through `Section(isExpanded:)`, but
-/// the control that drives it is the header's own leading mark. See `disclosure` for why: the
-/// list draws no triangle of its own here, so before this the flag had no affordance at all.
+/// Collapsing reads the repo's stored `collapsed` flag directly: when it is set the section hands
+/// the list no rows at all. The control that drives it is the header's own leading mark. See
+/// `body` for why it is not `Section(isExpanded:)`, which the list answers with a second
+/// disclosure control of its own.
 struct RepoSection: View {
     var repo: Repo
     var rows: [Workspace]
@@ -42,31 +43,40 @@ struct RepoSection: View {
     /// list, so crossing the pane lights one project at a time.
     @State private var isHeaderHovered = false
 
+    /// A plain `Section`, and the rows themselves are what comes and goes.
+    ///
+    /// It was a `Section(isExpanded:)`, which is the obvious way to fold a source list section and
+    /// is the wrong one here. Handing the list a binding is what makes it offer a collapse control
+    /// of its own, and on macOS 26 that control is a chevron pinned to the trailing end of the
+    /// header, drawn only while the pointer is over the header. So a hovered project header carried
+    /// two disclosure controls: this section's own chevron in its gutter at the leading edge, and
+    /// the list's, past the gear and the `+`, saying the same thing a second time.
+    ///
+    /// Two things went with the binding, both measured rather than guessed. The list's own fold
+    /// animation: rows now appear and disappear rather than sliding. And the left arrow key on the
+    /// header row, which the outline used to answer by folding the project. Neither is worth the
+    /// duplicate control. The arrow in particular was only ever reachable by clicking the header
+    /// first, and a click on the header is a click one gutter away from the chevron that does the
+    /// same thing; arrowing through the rows never reached it, because the header carries no tag
+    /// and so is never in the selection. Everything else survived: `repo.collapsed` in the database
+    /// was always the source of truth rather than the list's, so the state still restores across a
+    /// relaunch, and the header row is still an `AXOutlineRow` reporting `AXDisclosing` with the
+    /// workspace rows as its disclosed rows.
     var body: some View {
-        Section(isExpanded: isExpanded) {
-            ForEach(rows) { workspace in
-                row(workspace)
-            }
-            if rows.isEmpty {
-                Text(isFiltered ? "Nothing matches the filter" : "No workspaces yet")
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
+        Section {
+            if !repo.collapsed {
+                ForEach(rows) { workspace in
+                    row(workspace)
+                }
+                if rows.isEmpty {
+                    Text(isFiltered ? "Nothing matches the filter" : "No workspaces yet")
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                }
             }
         } header: {
             header
         }
-    }
-
-    /// The stored flag is the source of truth, so the binding only writes when the list is asking
-    /// for the state it is not already in. Anything else would toggle back on every redraw.
-    private var isExpanded: Binding<Bool> {
-        Binding(
-            get: { !repo.collapsed },
-            set: { expanded in
-                guard expanded == repo.collapsed else { return }
-                Task { await app.toggleCollapsed(repo) }
-            }
-        )
     }
 
     // MARK: - Header
@@ -220,9 +230,15 @@ struct RepoSection: View {
     /// beside it opens, and then it should get out of the way of everything that has something to
     /// say. Measured off the reference render at roughly five points across in a secondary ink.
     ///
-    /// `Section(isExpanded:)` draws no triangle of its own here, captured with the pointer on a
-    /// header and with it off, so this is the only disclosure control the header has. The binding
-    /// stays because it is what tells the list to fold the rows away.
+    /// This is the only disclosure control the header has, and keeping it that way is what cost the
+    /// section its `isExpanded` binding. A comment here used to say the list drew no control of
+    /// its own, on the strength of a capture. The capture was real and the reading of it was not:
+    /// every sidebar shot in that session came out of a launch, wait, capture, exit run with no
+    /// pointer anywhere near the window, and the list's control is drawn only under the pointer.
+    /// The tell is in the picture: in a genuinely hovered header the `+` sits on its hover plate.
+    /// In those shots it did not. Hover here needs a real pointer, moved with real events, over
+    /// the header's own rect; it does NOT need the app to be frontmost, which was measured both
+    /// ways.
     ///
     /// A real `Button`, present at rest, so Full Keyboard Access can reach it and VoiceOver reads
     /// it with its expanded state as a value.
