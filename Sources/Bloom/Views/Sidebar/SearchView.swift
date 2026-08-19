@@ -35,7 +35,7 @@ struct SearchView: View {
                     Button("Clear the search", systemImage: "xmark.circle.fill", action: clear)
                         .labelStyle(.iconOnly)
                         .font(Typo.body)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Palette.textTertiary)
                         .buttonStyle(.plain)
                         .help("Clear the search")
                 }
@@ -78,7 +78,7 @@ struct SearchView: View {
             ContentUnavailableView.search(text: app.searchQuery)
         } else {
             ScrollView {
-                LazyVStack(spacing: 2) {
+                LazyVStack(spacing: Metrics.spacingTight) {
                     ForEach(hits) { hit in
                         SearchResultRow(
                             hit: hit,

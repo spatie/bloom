@@ -135,7 +135,7 @@ struct HomeControls: View {
                 Button("Clear the search", systemImage: "xmark.circle.fill", action: clear)
                     .labelStyle(.iconOnly)
                     .font(Typo.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Palette.textTertiary)
                     .buttonStyle(.plain)
             }
         }

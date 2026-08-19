@@ -22,7 +22,7 @@ struct CheckRunRow: View {
                     if let workflow = run.workflowName, workflow != run.name {
                         Text(workflow)
                             .font(Typo.caption)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Palette.textTertiary)
                             .lineLimit(1)
                     }
                 }
@@ -31,13 +31,13 @@ struct CheckRunRow: View {
                     Text(duration)
                         .font(Typo.micro)
                         .monospacedDigit()
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Palette.textTertiary)
                 }
                 if run.detailsURL != nil {
                     Image(systemName: "arrow.up.right")
                         .font(Typo.micro)
                         .imageScale(.small)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Palette.textTertiary)
                         .accessibilityHidden(true)
                 }
             }

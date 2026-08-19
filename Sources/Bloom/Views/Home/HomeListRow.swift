@@ -75,7 +75,9 @@ struct HomeListRow: View {
             if workspace.pinned {
                 Image(systemName: "pin.fill")
                     .font(Typo.micro)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(
+                        isEmphasized ? Palette.selectedEmphasizedText : Palette.textTertiary
+                    )
                     .accessibilityHidden(true)
             }
 
@@ -128,7 +130,9 @@ struct HomeListRow: View {
                 // report about something that no longer exists.
                 Image(systemName: "archivebox")
                     .font(Typo.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(
+                        isEmphasized ? Palette.selectedEmphasizedText : Palette.textTertiary
+                    )
                     .frame(width: Metrics.glyph, height: Metrics.glyph)
                     .accessibilityHidden(true)
             } else {

@@ -164,7 +164,7 @@ struct SessionTabsView: View {
     private func separator(isHidden: Bool) -> some View {
         Rectangle()
             .fill(Palette.border.opacity(0.7))
-            .frame(width: 1, height: Metrics.barHeight / 2)
+            .frame(width: Metrics.hairline, height: Metrics.barHeight / 2)
             .opacity(isHidden ? 0 : 1)
     }
 
