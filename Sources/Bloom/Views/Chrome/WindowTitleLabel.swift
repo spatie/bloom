@@ -2,24 +2,28 @@ import SwiftUI
 import AppKit
 import BloomCore
 
-/// What the toolbar says you are looking at: the project, followed by the actions that apply to
+/// What the title bar says you are looking at: the project, followed by the actions that apply to
 /// the whole worktree.
 ///
-/// It belongs to a workspace and to nothing else. `BloomWindowToolbar` leaves the item out
-/// entirely on Home and on Search, so this view is never asked to describe them.
+/// It belongs to a workspace and to nothing else. `TitleBarStrip` leaves it out entirely on Home
+/// and on Search, so this view is never asked to describe them.
 ///
 /// The workspace's own name is not here. It is the window's title, one row up and a few
 /// millimetres to the left, where it comes with the proxy icon that lets the worktree be dragged
 /// out of the title bar and the path above it be reached with a Command-click. Repeating the name
 /// here would have been the same word twice on one row.
 ///
-/// The branch used to sit here as a chip, and the inspector's pull request strip repeats it a
-/// centimetre lower, so the window showed the same branch name twice above itself. The inspector
-/// keeps it, since that is where the pull request it belongs to lives, and the menu below carries
-/// the one thing the chip was still good for: reading the branch name off the screen.
+/// The branch used to sit here as a chip, and the pull request strip repeats it, so the window
+/// showed the same branch name twice above itself. The strip keeps it, since that is where the
+/// pull request it belongs to lives, and the menu below carries the one thing the chip was still
+/// good for: reading the branch name off the screen. The two are side by side now rather than
+/// stacked, which makes the repetition more obvious rather than less.
 ///
-/// It draws its own swatch and spacing, so on macOS 26 the toolbar is told not to put a glass
-/// background behind it. See `BloomWindowToolbar`.
+/// It was a trailing toolbar item until the pull request strip took the trailing end of the title
+/// bar; it now sits one place to the left of that strip, at the centre column's own edge. Nothing
+/// about how it draws changed with the move, and a title bar accessory brings no background of its
+/// own, so the glass a macOS 26 toolbar item would have put behind it is not a question any more.
+/// See `TitleBarStrip`.
 struct WindowTitleLabel: View {
     @Environment(AppModel.self) private var app
 

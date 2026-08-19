@@ -139,6 +139,10 @@ final class DetailSplitViewController: NSSplitViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not decoded from a nib") }
 
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -193,6 +197,34 @@ final class DetailSplitViewController: NSSplitViewController {
 
         // Replaces the `@AppStorage("inspector.width")` the SwiftUI version kept by hand.
         splitView.autosaveName = Self.autosaveName
+
+        watchInspectorWidth()
+    }
+
+    /// Tells the title bar how wide the inspector currently is.
+    ///
+    /// The pull request strip sits above this pane now rather than inside it, and a band that does
+    /// not end where the pane ends reads as a misalignment rather than as a heading.
+    ///
+    /// Two sources, because neither covers the other. A divider drag and a window resize move the
+    /// pane's frame and post a notification for it; collapsing the pane does not, since a collapsed
+    /// item here keeps the frame it had and is simply not drawn, so that half is published from
+    /// `update` where the collapse is asked for. `viewDidLayout` was the first attempt at a single
+    /// source and it is neither: it fired three times during launch and never again.
+    private func watchInspectorWidth() {
+        inspectorHost.view.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(publishInspectorWidth),
+            name: NSView.frameDidChangeNotification,
+            object: inspectorHost.view
+        )
+    }
+
+    @objc private func publishInspectorWidth() {
+        let pane = inspectorHost.view
+        let width = inspectorItem.isCollapsed ? 0 : pane.frame.width
+        InspectorGeometry.shared.setInspectorWidth(width)
     }
 
     func update(detail: AnyView, inspector: AnyView, isInspectorPresented: Bool, animated: Bool) {
@@ -209,6 +241,7 @@ final class DetailSplitViewController: NSSplitViewController {
         } else {
             inspectorItem.isCollapsed = shouldCollapse
         }
+        publishInspectorWidth()
     }
 }
 

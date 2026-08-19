@@ -3,8 +3,9 @@ import BloomCore
 
 /// The right hand column: what the agent changed, and what GitHub thinks of it.
 ///
-/// Everything here is a thin arrangement of the pieces below it: the pull request strip, the tab
-/// row, and whichever pane the tab row selected.
+/// Everything here is a thin arrangement of the pieces below it: the tab row, and whichever pane
+/// the tab row selected. The pull request strip is above the column rather than in it, in the
+/// title bar, at the width this pane happens to be. See `TitleBarStrip`.
 ///
 /// It shows no file contents. It used to: the list sat above a drawer that held the diff, and the
 /// two shared the column's height, so a wide diff got a narrow pane and a long list got a short
@@ -18,9 +19,10 @@ struct InspectorView: View {
     @Bindable private var signIn = GitHubSignIn.shared
 
     var body: some View {
+        // The pull request strip used to be the first row here. It is in the title bar now, as
+        // wide as this pane and directly above it, so the column starts at its tab row. See
+        // `TitleBarStrip`.
         VStack(spacing: 0) {
-            PullRequestBar(model: model)
-            Hairline()
             InspectorToolbar(model: model)
             Hairline()
             content

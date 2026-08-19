@@ -13,8 +13,9 @@ import BloomCore
 /// says nothing about which of them it moves, and on macOS 26 a `.button` toggle's on state is a
 /// saturated accent fill, which made two permanently-on panes read as two alarms. Both controls
 /// now live on the boundary they open: the inspector's on the end of the centre tab strip, the
-/// terminal panel's on the panel's own strip. What is left is starting work, on the leading edge,
-/// and which project you are in, on the trailing one.
+/// terminal panel's on the panel's own strip. The project mark went the same way and for the same
+/// reason: it is in the title bar over the column it describes, in `TitleBarStrip`. What is left
+/// is starting work, on the leading edge.
 ///
 /// There is no Refresh Changes either. The changed file list polls every six seconds and redraws
 /// itself, so the command could only ever do what had already happened, and a control that does
@@ -38,41 +39,14 @@ struct BloomWindowToolbar: ToolbarContent {
             .help("Start a workspace")
         }
 
-        // Trailing, not principal.
-        //
-        // Principal placement drops an item next to the window title, which put the project mark
-        // and its menu in the middle of the toolbar, over the transcript, a few millimetres from
-        // the workspace name it was already sitting beside. It reads as a second title. Every
-        // other Mac app puts the thing you are signed in as, or working under, at the far right
-        // of the toolbar, and that is also where it lines up with the inspector below it: the
-        // project the changes belong to, directly above the changes.
-        //
-        // Only on a workspace. On Home and on Search the item used to spell out the name of the
-        // screen, which named nothing: there is one Home and one Search, the sidebar row that
-        // took you there is still selected in front of you, and the screen's own heading says the
-        // same word a few points below. On a workspace it earns its place, because there are many
-        // of those and the mark says which project this one cuts from.
-        //
-        // Leaving the item out is safe now that it is trailing. It was kept on Home while it sat
-        // in principal placement, where an empty item collapsed the flexible space that pinned
-        // the trailing controls to the right edge. Trailing items are packed against that edge by
-        // the toolbar itself, and this is the only one, so its absence moves nothing.
-        //
-        // On macOS 26 every toolbar item is handed its own Liquid Glass background. This one
-        // draws its whole content itself, so the system capsule would be a second background on
-        // top of it: a rim with no clearance around the project swatch and the overflow menu.
-        if let workspace = app.selectedWorkspace {
-            if #available(macOS 26.0, *) {
-                ToolbarItem(placement: .primaryAction) {
-                    WindowTitleLabel(workspace: workspace)
-                }
-                .sharedBackgroundVisibility(.hidden)
-            } else {
-                ToolbarItem(placement: .primaryAction) {
-                    WindowTitleLabel(workspace: workspace)
-                }
-            }
-        }
+        // The project mark and its menu are not here any more. They were a trailing toolbar item,
+        // pinned to the window's own edge, which put them directly above the inspector's pull
+        // request strip: two stacked rows in the top right corner, both describing the same
+        // workspace. The strip has taken the top row, since it is the one with a state in it, and
+        // the mark moved one place left to where the centre column ends. Both now live in
+        // `TitleBarStrip`, which is a title bar accessory rather than a toolbar item, because a
+        // toolbar item is sized by its content and this band has to be as wide as the pane under
+        // it.
     }
 
     // MARK: - Actions

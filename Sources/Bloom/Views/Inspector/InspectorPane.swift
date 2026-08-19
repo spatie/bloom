@@ -30,8 +30,10 @@ struct InspectorPane: View {
     /// files above it.
     private static let defaultHeight: Double = 260
     /// Below these the pane on either side of the divider stops being worth drawing: a few file
-    /// rows above, a few terminal lines below. The files' floor counts the pull request strip and
-    /// the tab row above the list, which is two bars of it before a single row is drawn.
+    /// rows above, a few terminal lines below. The files' floor counts the tab row above the list,
+    /// which is a bar of it before a single row is drawn. It used to count the pull request strip
+    /// as well, and that strip is in the title bar now, so the floor is roomier than it has to be
+    /// rather than tighter.
     private static let minimumFiles: Double = 220
     private static let minimumPanel: Double = 120
 
