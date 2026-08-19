@@ -85,6 +85,18 @@ final class BloomTerminalView: LocalProcessTerminalView {
     /// Called when this shell takes the keyboard, so the tab it is a pane of can dim the others.
     var onFocus: (@MainActor () -> Void)?
 
+    /// Called when the child process ends, for a terminal the app started to run one command and
+    /// is waiting on. A pane holding the user's shell leaves this nil.
+    var onExit: (@MainActor (Int32?) -> Void)?
+
+    /// Whether Return restarts the command once it has finished.
+    ///
+    /// True for a shell pane, where the user's shell exiting is a thing to undo. False for a
+    /// terminal running one command that something else is watching: restarting `gh auth login`
+    /// under a sheet that has already moved on to checking the result is not a recovery, it is a
+    /// second login nobody asked for.
+    var restartsOnReturn = true
+
     /// The split commands, answered by whatever owns this pane. It returns false for a command it
     /// cannot serve, such as an arrow with no pane beyond it, which is what lets the same
     /// keystroke fall through to the app menu instead of being swallowed.
@@ -185,8 +197,10 @@ final class BloomTerminalView: LocalProcessTerminalView {
         guard !hasExited else { return }
         hasExited = true
         let suffix = (code ?? 0) == 0 ? "" : " (exit \(code ?? 0))"
+        let hint = restartsOnReturn ? ", press Return to restart" : ""
         // SGR 2 is faint, which is exactly the dimmed treatment this line wants.
-        feed(text: "\r\n\u{1b}[2mProcess finished\(suffix), press Return to restart\u{1b}[0m\r\n")
+        feed(text: "\r\n\u{1b}[2mProcess finished\(suffix)\(hint)\u{1b}[0m\r\n")
+        onExit?(code)
     }
 
     /// A click is the one way a pane takes the keyboard that the tab does not already know about,
@@ -210,7 +224,7 @@ final class BloomTerminalView: LocalProcessTerminalView {
     /// Return, which is the documented way back to a working terminal.
     override func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {
         if hasExited {
-            if data.contains(0x0D) || data.contains(0x0A) { restart() }
+            if restartsOnReturn, data.contains(0x0D) || data.contains(0x0A) { restart() }
             return
         }
         super.send(source: source, data: data)

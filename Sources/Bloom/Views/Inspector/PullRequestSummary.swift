@@ -20,6 +20,8 @@ import BloomCore
 struct PullRequestSummary: View {
     var pullRequest: PullRequest
     var baseBranch: String
+    /// Where the login runs if it turns out GitHub is not connected. See `propose`.
+    var worktree: String
     var isWorking: Bool
     var onMerge: (GitHub.MergeMethod) -> Void
 
@@ -177,14 +179,14 @@ struct PullRequestSummary: View {
     /// that is what it says; nothing here ever performs one.
     private var mergeButton: some View {
         HStack(spacing: Metrics.spacingTight) {
-            Button("Merge", systemImage: "arrow.triangle.merge") { pendingMerge = .squash }
+            Button("Merge", systemImage: "arrow.triangle.merge") { propose(.squash) }
                 .buttonStyle(.borderedProminent)
                 .tint(tint ?? Palette.accentFill)
                 .controlSize(.regular)
 
             Menu {
                 ForEach(GitHub.MergeMethod.allCases, id: \.self) { method in
-                    Button(method.label) { pendingMerge = method }
+                    Button(method.label) { propose(method) }
                 }
             } label: {
                 Label("Choose a merge method", systemImage: "chevron.down")
@@ -216,6 +218,19 @@ struct PullRequestSummary: View {
 
     private var accessibilityText: String {
         [status.text, status.detail].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    // MARK: - Actions
+
+    /// Merging is the one thing in this strip that genuinely needs `gh`, so it is the one thing
+    /// gated on it. Opening the page, copying the link and sharing it are ordinary URL handling
+    /// and work signed out.
+    ///
+    /// What is handed to the gate is "open the confirmation", never "merge". A sign in that
+    /// succeeds re-raises the dialog the user was heading for and they still have to say yes to
+    /// it, which is what makes running it for them safe.
+    private func propose(_ method: GitHub.MergeMethod) {
+        GitHubSignIn.shared.run(directory: worktree) { pendingMerge = method }
     }
 
     private func copyLink() {

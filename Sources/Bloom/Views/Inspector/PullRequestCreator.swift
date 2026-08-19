@@ -23,11 +23,18 @@ struct PullRequestCreator: View {
     /// The workspace's agent is mid turn. The request is a turn of its own, so it has to wait
     /// rather than interleave with whatever was asked a moment ago.
     var isAgentBusy: Bool
+    /// Where a sign in would run, if the quiet line below the branch is pressed.
+    var worktree: String
     /// Whether this branch has anything on it at all. A worktree identical to its base has nothing
     /// to open a pull request for, and Bloom knows that for free, so it says so here rather than
     /// spending a whole agent turn on the agent finding out.
     var hasChanges: Bool
     var action: () -> Void
+
+    /// Whether Bloom itself can talk to GitHub. It has no bearing on the button, which goes to the
+    /// agent, and every bearing on whether this strip can be trusted when it says there is no pull
+    /// request: signed out, Bloom simply never found out.
+    @State private var github: GitHubAvailability.State = .unknown
 
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {
@@ -46,11 +53,27 @@ struct PullRequestCreator: View {
                     .help(branch)
                     .accessibilityLabel("Branch \(branch)")
 
-                Text(subtitle)
+                if github.isUsable {
+                    Text(subtitle)
+                        .font(Typo.micro)
+                        .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                } else {
+                    // The one place the strip admits it cannot see GitHub, and the natural place
+                    // to hang the fix off. Quiet, because the button beside it works regardless.
+                    Button("Connect GitHub to see pull requests") {
+                        GitHubSignIn.shared.present(directory: worktree)
+                    }
+                    .buttonStyle(.link)
                     .font(Typo.micro)
-                    .foregroundStyle(Palette.textTertiary)
                     .lineLimit(1)
-                    .truncationMode(.tail)
+                    .help(
+                        github == .notInstalled
+                            ? "The gh command is not installed, so Bloom cannot tell whether this branch has a pull request."
+                            : "The GitHub CLI is signed out, so Bloom cannot tell whether this branch has a pull request."
+                    )
+                }
             }
             .layoutPriority(-1)
 
@@ -68,6 +91,10 @@ struct PullRequestCreator: View {
                 .fixedSize()
             }
         }
+        // Optimistic while the probe runs, and silent about the answer either way. Learning that
+        // gh is signed out is worth one quiet line here; it is never worth a dialog nobody asked
+        // for.
+        .task { github = await GitHubAvailability.shared.check() }
     }
 
     /// What the branch is for, in the one line under it: where it is headed, or why the button is

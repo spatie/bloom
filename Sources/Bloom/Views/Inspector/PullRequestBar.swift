@@ -75,6 +75,7 @@ struct PullRequestBar: View {
             PullRequestSummary(
                 pullRequest: pullRequest,
                 baseBranch: model.workspace.baseBranch,
+                worktree: model.workspace.path,
                 isWorking: isWorking,
                 onMerge: merge
             )
@@ -84,6 +85,7 @@ struct PullRequestBar: View {
                 baseBranch: model.workspace.baseBranch,
                 isWorking: isWorking || model.isLoadingPullRequest,
                 isAgentBusy: model.isRunning,
+                worktree: model.workspace.path,
                 hasChanges: hasChanges,
                 action: createPullRequest
             )

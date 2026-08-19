@@ -39,6 +39,17 @@ public struct CheckRun: Sendable, Hashable, Identifiable {
     }
 }
 
+/// Whether the GitHub CLI can be used, and if not, why not.
+///
+/// Two failures rather than one, because they are different problems: `gh` missing is fixed by
+/// installing it, `gh` signed out is fixed by signing in, and a sentence that covers both says
+/// nothing useful about either.
+public enum GitHubAccess: Sendable, Equatable {
+    case ready
+    case notInstalled
+    case signedOut
+}
+
 /// What merging did, and what it could not finish afterwards.
 ///
 /// Merging is two things happening in order: a network call that lands the pull request, and some
@@ -180,11 +191,28 @@ public enum GitHub {
     ].joined(separator: ",")
 
     public static func isAvailable() async -> Bool {
-        guard Shell.which("gh") != nil else { return false }
+        await access() == .ready
+    }
+
+    /// Why gh cannot be used, when it cannot.
+    ///
+    /// The two failures are different problems with different fixes, and collapsing them into one
+    /// "unavailable" means the app cannot write the right sentence: a machine with no `gh` needs
+    /// to install it, and a login button there could only fail.
+    ///
+    /// Nothing about the answer is kept but the case. `gh auth status` prints the account, the
+    /// host and the token's scopes, and with `--show-token`, which is never passed, the token
+    /// itself. None of that output is stored, logged or shown anywhere.
+    public static func access() async -> GitHubAccess {
+        guard Shell.which("gh") != nil else { return .notInstalled }
         guard let result = try? await Shell.run(
             "gh", ["auth", "status"], timeout: .seconds(20)
-        ) else { return false }
-        return result.ok
+        ) else {
+            // Installed, but the probe itself did not finish. Signing in is the fix that fixes
+            // this too, and it is the only one there is a button for.
+            return .signedOut
+        }
+        return result.ok ? .ready : .signedOut
     }
 
     public static func pullRequest(

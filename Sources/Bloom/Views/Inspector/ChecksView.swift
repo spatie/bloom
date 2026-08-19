@@ -100,14 +100,25 @@ struct ChecksView: View {
 
     @ViewBuilder
     private var emptyContent: some View {
-        if github == .unavailable {
+        if !github.isUsable {
             // Honest rather than alarming: an empty list here means Bloom could not ask, not that
-            // GitHub reported nothing.
-            EmptyStateView(
-                glyph: "questionmark.circle",
-                title: "GitHub CLI unavailable",
-                message: "Install gh and run gh auth login to see this branch's checks."
-            )
+            // GitHub reported nothing. The two reasons are different problems with different
+            // fixes, so they get different sentences.
+            VStack(spacing: Metrics.gutter) {
+                EmptyStateView(
+                    glyph: "questionmark.circle",
+                    title: github == .notInstalled ? "The GitHub CLI is not installed" : "GitHub is not connected",
+                    message: github == .notInstalled
+                        ? "Checks come from GitHub through the gh command, and it is not on this Mac."
+                        : "Checks come from GitHub through the gh command, and it is signed out."
+                )
+                // A deliberate press, which is the only thing that may raise the sheet.
+                Button(github == .notInstalled ? "Install the GitHub CLI" : "Connect GitHub") {
+                    GitHubSignIn.shared.present(directory: model.workspace.path)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Palette.accentFill)
+            }
         } else if hasLoaded {
             EmptyStateView(
                 glyph: "checkmark.seal",
@@ -140,7 +151,7 @@ struct ChecksView: View {
     /// The header says which of the three things is true: nobody has asked yet, gh cannot be
     /// asked, or this is what GitHub said.
     private func summaryText(_ rollup: String) -> String {
-        if github == .unavailable { return "GitHub CLI unavailable" }
+        if !github.isUsable { return github == .notInstalled ? "No GitHub CLI" : "GitHub not connected" }
         return runs.isEmpty && !hasLoaded ? "Loading checks" : rollup
     }
 
@@ -160,10 +171,10 @@ struct ChecksView: View {
             // Asked every pass rather than once: gh can be signed in from a terminal while this
             // tab is open, and the answer is cached, so this costs a subprocess only when it
             // has actually expired.
-            let ready = await GitHubAvailability.shared.isReady()
-            github = ready ? .ready : .unavailable
+            let state = await GitHubAvailability.shared.check()
+            github = state
 
-            if ready {
+            if state == .ready {
                 let found = await GitHubBridge.checks(
                     branch: model.workspace.branch, worktree: model.workspace.path
                 )

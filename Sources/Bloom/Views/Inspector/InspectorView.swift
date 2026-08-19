@@ -13,6 +13,10 @@ import BloomCore
 struct InspectorView: View {
     let model: WorkspaceModel
 
+    /// The one Connect GitHub sheet, presented from the column's root rather than from whichever
+    /// control raised it, so the pull request strip and the checks tab share one presentation.
+    @Bindable private var signIn = GitHubSignIn.shared
+
     var body: some View {
         VStack(spacing: 0) {
             PullRequestBar(model: model)
@@ -22,6 +26,11 @@ struct InspectorView: View {
             content
         }
         .background(Palette.surface)
+        .sheet(item: $signIn.request) { request in
+            GitHubSignInSheet(request: request) { connected in
+                signIn.finish(connected: connected)
+            }
+        }
         // Once, here, rather than a repository id threaded through every row of two lists that
         // have no other use for one. See `EnvironmentValues.openInRepoID`.
         .environment(\.openInRepoID, model.repo?.id)
