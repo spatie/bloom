@@ -61,6 +61,8 @@ struct WorkspaceEventRow: View {
     @State private var isExpanded = false
     @State private var isHovered = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     /// Enough to see that something is happening, and not so much that a build log pushes the
     /// conversation off the screen.
     private static let runningTail = 3
@@ -132,11 +134,63 @@ struct WorkspaceEventRow: View {
         }
     }
 
+    /// The tail's own lines, drawn one `Text` each while the script is running so that the window
+    /// moves instead of jumping.
+    ///
+    /// A running tail is three lines wide and never changes height, so nothing here is a scroll:
+    /// the block stayed exactly where it was and its contents were replaced between one frame and
+    /// the next, which is what "it just immediately shows next lines" was. Given each line an
+    /// identity of its own, a line that is still in the window when the next one arrives is the
+    /// same view moved to a new place, and SwiftUI slides it there.
+    ///
+    /// Only while it is running, and only while it is closed. A finished, failed or expanded tail
+    /// is a fixed piece of text that is read rather than watched, and it stays one `Text`: that
+    /// keeps a selection able to run across its lines, and keeps an expanded two hundred line log
+    /// from becoming two hundred views.
+    @ViewBuilder
+    private var tailText: some View {
+        if event.isRunning, !isExpanded {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(lines) { line in
+                    Text(line.text)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        // In at the bottom, out at the top, one line of travel each, which is the
+                        // same line of travel the two survivors between them are making. Every
+                        // line in the block moves together and stays a line apart, so none of
+                        // them is ever drawn across another. Fading an arrival into place instead
+                        // put the new line under the one still sliding through it.
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .move(edge: .top).combined(with: .opacity)
+                        ))
+                }
+            }
+            // So the departing line leaves the block rather than being drawn over the row above.
+            .clipped()
+            .animation(reduceMotion ? nil : Self.settle, value: lines)
+        } else {
+            Text(tail)
+        }
+    }
+
+    private var lines: [SetupTailLine] {
+        SetupTailLine.lines(of: tail, endingAt: event.log)
+    }
+
+    /// One line of travel, and it is over before the next line is due.
+    ///
+    /// `WorkspaceModel` flushes what the script has printed every 120ms, so 0.12s is the longest
+    /// this can take and still be finished when the fastest possible next line lands. A script
+    /// printing a line every second gets a settle; one printing faster than the flusher gets a
+    /// tail that reads as moving rather than one that stutters half a line behind itself. Ease
+    /// out and no overshoot, which is the curve the panes already use.
+    private static let settle: Animation = .easeOut(duration: 0.12)
+
     /// The same quoted block a tool result is drawn in, rule down the left and all, because it is
     /// the same thing: output from something that ran.
     private var logBlock: some View {
         VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
-            Text(tail)
+            tailText
                 .font(Typo.code)
                 .foregroundStyle(event.isFailure ? Palette.negative : Palette.textSecondary)
                 .textSelection(.enabled)
@@ -162,5 +216,63 @@ struct WorkspaceEventRow: View {
         .padding(.leading, TranscriptLayout.detailIndent)
         .padding(.trailing, TranscriptLayout.inset)
         .padding(.bottom, TranscriptLayout.block)
+    }
+}
+
+/// One line of a running log's tail, with an identity that survives the window moving past it.
+///
+/// The identity is where the line starts, counted in UTF-8 bytes from the start of the log. That
+/// is the one thing about a line that does not change as more output arrives, and it is what lets
+/// SwiftUI recognise the line it drew a moment ago in the row below and move it up rather than
+/// draw a second one. The line's own text will not do: a log repeats itself constantly, and two
+/// identical `bun install` lines in one window would be one view.
+///
+/// It costs nothing to work out. A native Swift string knows its own UTF-8 count without walking
+/// itself, and everything else here is measured over the three lines being drawn rather than over
+/// the log, which runs to two hundred thousand characters.
+///
+/// Past that cap `WorkspaceModel.appendSetupOutput` drops text off the front, every offset shifts,
+/// and the window crossfades instead of sliding. That is the right way round: a script that has
+/// printed two hundred thousand characters is going faster than a reader follows a line at a time
+/// anyway, and it is the same fallback a batch of a dozen lines arriving in one flush already
+/// gets, since it shares no line with the window it replaces.
+struct SetupTailLine: Identifiable, Equatable {
+    var id: Int
+    var text: String
+
+    /// The lines of `tail`, which must be the end of `log` as `LogTail.last` returns it.
+    static func lines(of tail: String, endingAt log: String) -> [SetupTailLine] {
+        guard !tail.isEmpty else { return [] }
+
+        // `LogTail.last` drops the newlines the log ends with, so what lies between the end of the
+        // window and the end of the log is exactly those, and counting them back is what puts the
+        // window's first line at its true offset.
+        var trailing = 0
+        var index = log.endIndex
+        while index > log.startIndex {
+            let previous = log.index(before: index)
+            guard log[previous].isNewline else { break }
+            trailing += log[previous].utf8.count
+            index = previous
+        }
+
+        var start = log.utf8.count - tail.utf8.count - trailing
+        var result: [SetupTailLine] = []
+        var text = ""
+
+        // Walked by character rather than split on "\n", so a script that ends its lines with a
+        // carriage return breaks into the same lines `LogTail` counted, and so a "\r\n" is charged
+        // the two bytes it takes rather than one.
+        for character in tail {
+            if character.isNewline {
+                result.append(SetupTailLine(id: start, text: text))
+                start += text.utf8.count + character.utf8.count
+                text = ""
+            } else {
+                text.append(character)
+            }
+        }
+        result.append(SetupTailLine(id: start, text: text))
+        return result
     }
 }
