@@ -10,7 +10,7 @@ import SwiftUI
 /// Insettable so it can be drawn with `strokeBorder`. A centred `stroke` puts half its width
 /// outside the tab, and the strip sits directly under a unified toolbar, so that half would be
 /// painted into the toolbar's inset rather than onto the tab.
-struct CenterTabOutline: InsettableShape {
+struct TabItemOutline: InsettableShape {
     var radius: CGFloat
     var inset: CGFloat = 0
 

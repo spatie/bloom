@@ -13,10 +13,9 @@ struct BottomPanelView: View {
 
     @State private var settings = RepoSettings()
     @State private var renamingTabID: String?
-    @State private var draftName = ""
-    /// Which terminal tab the pointer is over, so only that one shows its close button. A row of
-    /// permanent crosses is noise, and no tab strip on this platform draws one.
-    @State private var hoveredTabID: String?
+    /// The strip's namespace, so the selected tab's fill is one view that moves between tabs
+    /// rather than one that is destroyed here and built again over there.
+    @Namespace private var selection
 
     /// Read here as well as in the terminal itself, because the selected tab takes its colour from
     /// the pane it opens and that pane is only the user's theme while this is on.
@@ -31,11 +30,11 @@ struct BottomPanelView: View {
 
     var body: some View {
         // No rule above the strip: the boundary between the files and the panel is the inspector's
-        // divider, and a second hairline under it reads as a double rule.
+        // divider, and a second hairline under it reads as a double rule. The rule BELOW the strip
+        // is `TabStrip`'s own, painted behind the tabs so the selected one breaks it.
         VStack(spacing: 0) {
             tabStrip
             if app.isBottomPanelVisible {
-                Hairline()
                 content
             }
         }
@@ -47,15 +46,15 @@ struct BottomPanelView: View {
 
     // MARK: - Tab strip
 
-    /// Wide enough for the names terminals actually get, and the same width for every tab so the
-    /// strip does not jump as the rename editor opens.
-    private static let renameWidth: CGFloat = 90
+    /// The bottom panel opens onto the recessed ground rather than the reading one, which is what
+    /// its ordinary tabs are filled with and what the track under them is measured against.
+    private static let pane = TabPane.sunken
 
     private var tabStrip: some View {
         // Collapse first, then the tabs, then the one control that adds to them. The chevron leads
         // because it acts on the whole panel rather than on any tab, and it stays put as tabs come
         // and go, which a control at the end of a scrolling row does not.
-        HStack(spacing: 0) {
+        TabStrip(pane: Self.pane) {
             iconButton(
                 app.isBottomPanelVisible ? "chevron.down" : "chevron.up",
                 help: app.isBottomPanelVisible ? "Collapse the panel" : "Expand the panel"
@@ -63,14 +62,11 @@ struct BottomPanelView: View {
                 app.isBottomPanelVisible.toggle()
             }
 
-            Hairline(axis: .vertical)
-
-            ScrollView(.horizontal) {
-                tabRow
-            }
-            .scrollIndicators(.never)
-
-            Hairline(axis: .vertical)
+            TabStripSeparator()
+        } tabs: {
+            tabRow
+        } trailing: {
+            TabStripSeparator()
 
             iconButton("plus", help: "New terminal tab") {
                 Task {
@@ -82,12 +78,10 @@ struct BottomPanelView: View {
                 }
             }
         }
-        .frame(height: Metrics.barHeight)
-        .headerMaterial()
     }
 
-    /// A rule between neighbours and never before the first tab, which is what makes a run of
-    /// labels read as tabs now that the selected one is no longer a coloured pill.
+    /// A rule between neighbours and never before the first tab, and never beside the selected one,
+    /// whose fill is the edge instead. The same arrangement as the centre column's strip.
     private var tabRow: some View {
         let hasSetup = settings.setupScript != nil
         let hasScripts = !settings.runScripts.isEmpty
@@ -98,94 +92,76 @@ struct BottomPanelView: View {
             }
 
             ForEach(Array(settings.runScripts.enumerated()), id: \.element.id) { index, script in
-                if hasSetup || index > 0 { Hairline(axis: .vertical) }
+                if hasSetup || index > 0 {
+                    TabStripSeparator(isHidden: isSelected(before: .run(script.id)))
+                }
                 tabButton(.run(script.id), title: script.name, icon: "play")
             }
 
             ForEach(Array(terminalTabs.enumerated()), id: \.element.id) { index, tab in
-                if hasSetup || hasScripts || index > 0 { Hairline(axis: .vertical) }
+                if hasSetup || hasScripts || index > 0 {
+                    TabStripSeparator(isHidden: isSelected(before: .terminal(tab.id)))
+                }
                 terminalTabButton(tab)
             }
         }
     }
 
-    private func tabButton(_ tab: BottomTab, title: String, icon: String) -> some View {
-        let isSelected = model.bottomTab == tab
-        let pane = surface(of: tab)
+    /// Every tab in the strip, in the order it is drawn, which is what the separators either side
+    /// of a selection are worked out from.
+    private var order: [BottomTab] {
+        (settings.setupScript == nil ? [] : [BottomTab.setup])
+            + settings.runScripts.map { BottomTab.run($0.id) }
+            + terminalTabs.map { BottomTab.terminal($0.id) }
+    }
 
-        return Button {
-            select(tab)
-        } label: {
-            HStack(spacing: Metrics.spacingSmall) {
-                Image(systemName: icon)
-                    .imageScale(.small)
-                Text(title).lineLimit(1)
-            }
-            .font(Typo.label)
-            .foregroundStyle(isSelected ? pane.ink : Palette.textSecondary)
-            .tabChrome(isSelected: isSelected, fill: pane.fill)
-        }
-        .buttonStyle(.plain)
-        .help(title)
+    /// Whether the rule immediately before `tab` sits next to the selected tab, on either side of
+    /// it. A selected tab's own fill is its edge, so a rule against it reads as a box.
+    private func isSelected(before tab: BottomTab) -> Bool {
+        guard let index = order.firstIndex(of: tab) else { return false }
+        if model.bottomTab == tab { return true }
+        return index > 0 && model.bottomTab == order[index - 1]
+    }
+
+    private func tabButton(_ tab: BottomTab, title: String, icon: String) -> some View {
+        TabItemView(
+            title: title,
+            icon: icon,
+            isActive: model.bottomTab == tab,
+            surface: surface(of: tab),
+            isRenaming: false,
+            editableTitle: title,
+            // A setup log and a run script are the repository's, not the panel's: they come and go
+            // with `.conductor/settings.toml` and there is nothing here to close or to rename.
+            canClose: false,
+            canRename: false,
+            closeTitle: title,
+            onSelect: { select(tab) },
+            onStartRename: {},
+            onCommitRename: { _ in },
+            onCancelRename: {},
+            onClose: {},
+            namespace: selection
+        )
     }
 
     private func terminalTabButton(_ tab: TerminalTab) -> some View {
-        let isSelected = model.bottomTab == .terminal(tab.id)
-        let pane = surface(of: .terminal(tab.id))
-
-        return HStack(spacing: Metrics.spacingSmall) {
-            Image(systemName: "terminal")
-                .imageScale(.small)
-
-            if renamingTabID == tab.id {
-                TextField("Name", text: $draftName)
-                    .textFieldStyle(.plain)
-                    .frame(width: Self.renameWidth)
-                    .onSubmit { commitRename(tab) }
-                    .onExitCommand { renamingTabID = nil }
-            } else {
-                Text(tab.title).lineLimit(1)
-            }
-
-            // Kept in the layout at all times, so a tab does not change width under the pointer as
-            // it arrives, which would walk the whole strip sideways.
-            Button("Close this terminal", systemImage: "xmark") {
-                Task { await close(tab) }
-            }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.accessoryBar)
-            .controlSize(.small)
-            // The size the tab's own glyph is drawn at. Without it the cross came out larger than
-            // the terminal mark it sits beside.
-            .imageScale(.small)
-            // `.accessoryBar` tints its glyph with the label colour, which is the one colour that
-            // is guaranteed NOT to read once the selected tab is carrying a dark terminal's ground
-            // in a light window.
-            .foregroundStyle(isSelected ? pane.ink : Palette.textSecondary)
-            .opacity(hoveredTabID == tab.id || isSelected ? 1 : 0)
-            .help("Close this terminal")
-        }
-        .font(Typo.label)
-        .foregroundStyle(isSelected ? pane.ink : Palette.textSecondary)
-        .tabChrome(isSelected: isSelected, fill: pane.fill)
-        .onHoverChange { inside in
-            hoveredTabID = inside ? tab.id : (hoveredTabID == tab.id ? nil : hoveredTabID)
-        }
-        .onTapGesture { select(.terminal(tab.id)) }
-        .help(tab.title)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(tab.title)
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        // The tabs beside this one are real buttons; this one selects through a tap gesture, so
-        // without a default action it announced itself as a button that could not be pressed.
-        .accessibilityAction { select(.terminal(tab.id)) }
-        .contextMenu {
-            Button("Rename") {
-                draftName = tab.title
-                renamingTabID = tab.id
-            }
-            Button("Close") { Task { await close(tab) } }
-        }
+        TabItemView(
+            title: tab.title,
+            icon: "terminal",
+            isActive: model.bottomTab == .terminal(tab.id),
+            surface: surface(of: .terminal(tab.id)),
+            isRenaming: renamingTabID == tab.id,
+            editableTitle: tab.title,
+            canClose: true,
+            closeTitle: "Close this terminal",
+            onSelect: { select(.terminal(tab.id)) },
+            onStartRename: { renamingTabID = tab.id },
+            onCommitRename: { commitRename(tab, to: $0) },
+            onCancelRename: { renamingTabID = nil },
+            onClose: { Task { await close(tab) } },
+            namespace: selection
+        )
     }
 
     /// The glyph carries neither a font nor a colour of its own: `.accessoryBar` is the system's
@@ -202,27 +178,27 @@ struct BottomPanelView: View {
 
     /// What the pane under the strip is actually painted with, and the ink that sits on it.
     ///
-    /// A selected tab is the top of the pane it opens rather than a lid laid over it, which is
-    /// what the fill is for. Every pane here draws the sunken surface except a terminal running
-    /// the user's own Ghostty theme, which draws whatever that theme says: a light grey tab above
-    /// a black shell is the seam that gave the panel away as two views stacked by accident.
+    /// Every pane here draws the sunken surface except a terminal running the user's own Ghostty
+    /// theme, which draws whatever that theme says: a light grey tab above a black shell is the
+    /// seam that gave the panel away as two views stacked by accident.
     ///
-    /// The pairing is taken whole or not at all. A theme that names a ground but no ink leaves
-    /// nothing that is guaranteed to read on it, and a tab whose own name has disappeared is
-    /// worse than one that does not match the shell below it.
-    private func surface(of tab: BottomTab) -> (fill: Color, ink: Color) {
-        let panel = (fill: Palette.surfaceSunken, ink: Palette.textPrimary)
-
-        guard case .terminal = tab, usesGhosttyTheme else { return panel }
+    /// The pairing is taken whole or not at all, which is `TabSurface.themed`: a theme that names a
+    /// ground but no ink leaves nothing that is guaranteed to read on it, and a tab whose own name
+    /// has disappeared is worse than one that does not match the shell below it.
+    private func surface(of tab: BottomTab) -> TabSurface {
+        guard case .terminal = tab, usesGhosttyTheme else { return Self.pane.surface }
 
         let appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
         guard let appearance,
               let theme = TerminalGhostty.theme(for: appearance),
               let background = theme.background,
               let foreground = theme.foreground
-        else { return panel }
+        else { return Self.pane.surface }
 
-        return (Color(nsColor: NSColor(background)), Color(nsColor: NSColor(foreground)))
+        return .themed(
+            fill: Color(nsColor: NSColor(background)),
+            ink: Color(nsColor: NSColor(foreground))
+        )
     }
 
     // MARK: - Content
@@ -276,8 +252,7 @@ struct BottomPanelView: View {
         renamingTabID = nil
     }
 
-    private func commitRename(_ tab: TerminalTab) {
-        let name = draftName
+    private func commitRename(_ tab: TerminalTab, to name: String) {
         renamingTabID = nil
         Task { await sessions.rename(tab, to: name, store: model.store) }
     }
@@ -321,34 +296,5 @@ struct BottomPanelView: View {
     private func selectFirstTerminal() {
         guard let first = terminalTabs.first else { return }
         model.bottomTab = .terminal(first.id)
-    }
-}
-
-/// The shape every tab in this strip shares: the full height of the bar, the panel's own colour
-/// when it is the selected one, and nothing at all when it is not.
-///
-/// A rounded rectangle of selection grey floating inside the strip is a browser idiom. Filling the
-/// bar and taking the colour of the surface below is what an editor tab does on this platform, and
-/// it is what stops the selected tab reading as a painted block.
-private struct BottomTabChrome: ViewModifier {
-    var isSelected: Bool
-    /// The colour of the pane this tab opens. See `BottomPanelView.surface(of:)`.
-    var fill: Color
-
-    @State private var isHovered = false
-
-    func body(content: Content) -> some View {
-        content
-            .padding(.horizontal, Metrics.inset)
-            .frame(height: Metrics.barHeight)
-            .background(isSelected ? fill : (isHovered ? Palette.hover : .clear))
-            .contentShape(Rectangle())
-            .onHover { isHovered = $0 }
-    }
-}
-
-private extension View {
-    func tabChrome(isSelected: Bool, fill: Color) -> some View {
-        modifier(BottomTabChrome(isSelected: isSelected, fill: fill))
     }
 }

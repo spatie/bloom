@@ -1,21 +1,27 @@
 import SwiftUI
 
-/// The chrome every tab in the centre strip wears, whatever it holds.
+/// The chrome every tab in Bloom wears, whatever it holds and whichever strip it is in.
 ///
-/// A conversation, a shell and a web page have nothing in common except that the user switches
-/// between them, so the switching is the only part they share. Height, hover, the rename editor
-/// and the close button live here rather than in three places that would drift apart the first
-/// time one of them was restyled.
+/// A conversation, a shell, a web page, a setup log and a run script have nothing in common except
+/// that the user switches between them, so the switching is the only part they share. Height,
+/// hover, the rename editor and the close button live here rather than in five places that would
+/// drift apart the first time one of them was restyled. The bottom panel used to draw its own,
+/// which is how it ended up with square corners, a different rename field and no outline while the
+/// centre column was being measured against Safari.
 ///
 /// The tab owns its own hover and its own rename field. The strip only says which tab is being
 /// renamed, so two tabs can never both think they hold the editor.
-struct CenterTabView: View {
+struct TabItemView: View {
     var title: String
     /// The kinds that need telling apart carry one; a chat tab does not, because it is what the
     /// strip is mostly made of and a glyph on every tab is noise rather than information.
     var icon: String?
     var isActive: Bool
     var isRunning = false
+    /// The ground of the pane this tab opens and the ink that reads on it, worn while the tab is
+    /// the selected one. `TabPane.content.surface` for the centre column, `.sunken` for the bottom
+    /// panel, and the user's own Ghostty colours for a terminal running their theme.
+    var surface: TabSurface = TabPane.content.surface
     var isRenaming: Bool
     /// What the rename field opens with. Kept apart from `title` because a session that has not
     /// been named yet shows "Untitled", and putting that word into the editor hands the user a
@@ -35,8 +41,12 @@ struct CenterTabView: View {
     var onClose: @MainActor () -> Void
     /// Opening the tab beside the pane it is already in, for anyone who would rather pick a menu
     /// item than drag the tab into the half of the pane they want it in.
-    var onSplitRight: @MainActor () -> Void
-    var onSplitDown: @MainActor () -> Void
+    ///
+    /// Absent in the bottom panel, which is one pane and cannot be split from its strip: a
+    /// terminal there splits inside its own view. The menu items go with them rather than being
+    /// shown greyed, because a permanently disabled item is a worse answer than no item.
+    var onSplitRight: (@MainActor () -> Void)?
+    var onSplitDown: (@MainActor () -> Void)?
     /// The strip's namespace, so the selected tab's fill is one view that moves rather than one
     /// that is destroyed here and built again over there. Without it the highlight blinks from
     /// tab to tab, and a highlight that blinks is the single clearest tell that a tab strip was
@@ -58,7 +68,7 @@ struct CenterTabView: View {
     /// a dome, so this is the editor-tab radius the window already uses everywhere else.
     private static let cornerRadius = Metrics.corner
     /// One highlight for the whole strip, so `matchedGeometryEffect` has something to match on.
-    private static let selectionID = "centerTab.selection"
+    private static let selectionID = "tabItem.selection"
 
     @State private var isHovered = false
     @State private var renameText = ""
@@ -74,12 +84,16 @@ struct CenterTabView: View {
             if let icon {
                 Image(systemName: icon)
                     .imageScale(.small)
-                    .foregroundStyle(isActive ? Palette.textPrimary : Palette.textSecondary)
+                    .foregroundStyle(isActive ? surface.ink : Palette.textSecondary)
             }
 
             if isRenaming {
+                // The field's ink is the tab's, not the environment's. A terminal tab carrying a
+                // dark Ghostty ground was being renamed in the window's own label colour, which
+                // over that fill is a line of black on black.
                 TextField("Name", text: $renameText)
                     .textFieldStyle(.plain)
+                    .foregroundStyle(isActive ? surface.ink : Palette.textPrimary)
                     .focused($isRenameFocused)
                     .frame(width: Self.renameWidth)
                     .onSubmit { onCommitRename(renameText) }
@@ -96,7 +110,7 @@ struct CenterTabView: View {
                 // leading aligned rather than centred, so dropping to the secondary label is what
                 // keeps an unselected run from competing with the pane it is sitting above.
                 Text(title)
-                    .foregroundStyle(isActive ? Palette.textPrimary : Palette.textSecondary)
+                    .foregroundStyle(isActive ? surface.ink : Palette.textSecondary)
                     .lineLimit(1)
             }
 
@@ -155,9 +169,11 @@ struct CenterTabView: View {
         .accessibilityAction { onSelect() }
         .accessibilityActions { if canRename { Button("Rename", action: onStartRename) } }
         .contextMenu {
-            Button("Open in Split Right", systemImage: PaneSymbol.splitRight, action: onSplitRight)
-            Button("Open in Split Down", systemImage: PaneSymbol.splitDown, action: onSplitDown)
-            Divider()
+            if let onSplitRight, let onSplitDown {
+                Button("Open in Split Right", systemImage: PaneSymbol.splitRight, action: onSplitRight)
+                Button("Open in Split Down", systemImage: PaneSymbol.splitDown, action: onSplitDown)
+                Divider()
+            }
             if canRename {
                 Button("Rename", systemImage: PaneSymbol.rename, action: onStartRename)
             }
@@ -179,9 +195,9 @@ struct CenterTabView: View {
     private var background: some View {
         if isActive {
             shape
-                .fill(Palette.surface)
+                .fill(surface.fill)
                 .overlay {
-                    CenterTabOutline(radius: Self.cornerRadius)
+                    TabItemOutline(radius: Self.cornerRadius)
                         .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
                 }
                 .matchedGeometryEffect(id: Self.selectionID, in: namespace)
@@ -217,7 +233,7 @@ struct CenterTabView: View {
                 // old cross had it the other way round, large enough to be the heaviest mark in
                 // the strip while being too faint to look deliberate.
                 .imageScale(.small)
-                .foregroundStyle(Palette.textSecondary)
+                .foregroundStyle(isActive ? surface.inkMuted : Palette.textSecondary)
                 .frame(width: Metrics.glyph, height: Metrics.glyph)
                 .contentShape(Rectangle())
         }

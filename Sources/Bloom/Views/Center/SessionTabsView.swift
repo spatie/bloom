@@ -16,7 +16,6 @@ struct SessionTabsView: View {
 
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorScheme) private var colorScheme
 
     @State private var renamingID: String?
     /// Which workspace's strip has finished arriving, so the first draw of a workspace is not
@@ -41,64 +40,48 @@ struct SessionTabsView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 0) {
-                    ForEach(Array(model.sessions.enumerated()), id: \.element.id) { index, session in
-                        if index > 0 {
-                            separator(
-                                isHidden: isSelected(model.sessions[index - 1]) || isSelected(session)
-                            )
-                        }
-                        sessionTab(session)
+        TabStrip(pane: Self.pane) {
+            HStack(spacing: 0) {
+                ForEach(Array(model.sessions.enumerated()), id: \.element.id) { index, session in
+                    if index > 0 {
+                        TabStripSeparator(
+                            isHidden: isSelected(model.sessions[index - 1]) || isSelected(session)
+                        )
                     }
-
-                    ForEach(Array(toolTabs.enumerated()), id: \.element.id) { index, tab in
-                        if index > 0 || !model.sessions.isEmpty {
-                            separator(
-                                isHidden: isSelected(before: tab, at: index) || isSelected(tab)
-                            )
-                        }
-                        toolTab(tab)
-                    }
+                    sessionTab(session)
                 }
-                // Two values, not one, because they are two different pieces of news and each of
-                // them has to be able to arrive on its own. `order` covers opening, closing and
-                // dragging a tab; `focused` covers the selection moving. Keying the animation to a
-                // value rather than wrapping every mutation in `withAnimation` is what lets the
-                // asynchronous ones animate at all: a session is closed and reordered through an
-                // actor, so by the time the array changes the call that asked for it is long gone.
-                //
-                // It also decides, correctly and for free, what must NOT animate. Typing in the
-                // rename field changes neither value, so the field cannot creep as the title
-                // grows. A busy session's close is refused by a modal until the user answers, and
-                // the id only leaves the array once they have said yes, so nothing slides out from
-                // under the question.
-                .animation(motion, value: order)
-                .animation(motion, value: focused)
-            }
-            .scrollIndicators(.never)
 
-            separator(isHidden: false)
+                ForEach(Array(toolTabs.enumerated()), id: \.element.id) { index, tab in
+                    if index > 0 || !model.sessions.isEmpty {
+                        TabStripSeparator(
+                            isHidden: isSelected(before: tab, at: index) || isSelected(tab)
+                        )
+                    }
+                    toolTab(tab)
+                }
+            }
+            // Two values, not one, because they are two different pieces of news and each of them
+            // has to be able to arrive on its own. `order` covers opening, closing and dragging a
+            // tab; `focused` covers the selection moving. Keying the animation to a value rather
+            // than wrapping every mutation in `withAnimation` is what lets the asynchronous ones
+            // animate at all: a session is closed and reordered through an actor, so by the time
+            // the array changes the call that asked for it is long gone.
+            //
+            // It also decides, correctly and for free, what must NOT animate. Typing in the rename
+            // field changes neither value, so the field cannot creep as the title grows. A busy
+            // session's close is refused by a modal until the user answers, and the id only leaves
+            // the array once they have said yes, so nothing slides out from under the question.
+            .animation(motion, value: order)
+            .animation(motion, value: focused)
+        } trailing: {
+            TabStripSeparator()
 
             newTabMenu
 
-            separator(isHidden: false)
+            TabStripSeparator()
 
             inspectorToggle
         }
-        .frame(height: Metrics.barHeight)
-        // A recess under the tabs, painted over the material and under them.
-        //
-        // Safari's strip is about five per cent darker than the tab sitting on it, which is the
-        // whole of how a selected tab is told from an unselected one there. Bloom's strip had no
-        // such step: the header material over a light window resolves to the same white as
-        // `Palette.surface`, so a selected tab was an invisible white rectangle on white and only
-        // its bold text said anything. An opacity on the primary label colour rather than a colour
-        // of its own, so it darkens the strip in a light appearance and lightens it in a dark one,
-        // which is the direction each of them needs.
-        .background { Color.primary.opacity(recess) }
-        .tabStripMaterial()
         .background { shortcuts }
         .task(id: model.workspace.id) {
             settledWorkspaceID = nil
@@ -111,27 +94,12 @@ struct SessionTabsView: View {
         }
     }
 
-    // MARK: - Motion
+    /// The centre column opens onto the reading ground, which settles both what a selected tab is
+    /// filled with and how far the track under it is sunk. See `TabPane`, which carries the
+    /// measurements that used to live here.
+    private static let pane = TabPane.content
 
-    /// How far the strip is tinted away from the tab that is selected on it: lighter under a dark
-    /// appearance, because the tint is an opacity on the primary label colour rather than a
-    /// colour of its own.
-    ///
-    /// Nothing in light, and this is a measurement rather than a preference. Safari's strip sits
-    /// about twelve units out of 255 off the tab selected on it. A selected tab is filled with
-    /// `Palette.surface` and the strip is `Palette.sidebar`, and in a light appearance those two
-    /// are already `#FFFFFF` against `#F1F5F6`: a step of 14, 10 and 9, which is Safari's figure
-    /// without any tint at all. Adding 0.045 of black on top took it to 25, 21 and 20, roughly
-    /// double, and that read as a grey band under the tabs rather than as a recess.
-    ///
-    /// Dark keeps it. There `#0A1A25` against `#0E202D` is a step of 4, 6 and 8, which is nothing,
-    /// and 0.045 of white brings it to 15, 16 and 17.
-    ///
-    /// Re-measure rather than trust these numbers if either ground moves: what is being kept is
-    /// the twelve unit step, not the 0.045.
-    private var recess: Double {
-        colorScheme == .dark ? 0.045 : 0
-    }
+    // MARK: - Motion
 
     /// `Motion.pane`, not a curve of this strip's own. It is the one movement the window has, it
     /// is short and it does not overshoot, and a tab highlight that travelled at a different speed
@@ -149,23 +117,6 @@ struct SessionTabsView: View {
     /// changes must not make the strip move.
     private var order: [String] {
         model.sessions.map(\.id) + toolTabs.map(\.id)
-    }
-
-    /// The rule between two tabs. Half the height of the strip and one point wide, measured off
-    /// Safari, where the rule between two unselected tabs is exactly half the bar and two device
-    /// pixels across. It used to be a hairline over a taller run, which read as a grid line.
-    ///
-    /// Softened, because the same measurement covers the contrast: Safari's rule is about six per
-    /// cent darker than the strip it is on, and the separator colour at full strength was nearly
-    /// twice that. A rule between two tabs is there to be found, not to be seen.
-    ///
-    /// It is kept in the layout when it is not wanted rather than removed, because a rule that came
-    /// and went as the selection moved would shift every tab beside it by half a point.
-    private func separator(isHidden: Bool) -> some View {
-        Rectangle()
-            .fill(Palette.border.opacity(0.7))
-            .frame(width: Metrics.hairline, height: Metrics.barHeight / 2)
-            .opacity(isHidden ? 0 : 1)
     }
 
     private func isSelected(_ session: Session) -> Bool {
@@ -208,10 +159,11 @@ struct SessionTabsView: View {
     }
 
     private func toolTab(_ tab: CenterTab) -> some View {
-        CenterTabView(
+        TabItemView(
             title: tabs.displayTitle(of: tab, in: model),
             icon: tab.icon,
             isActive: isSelected(tab),
+            surface: Self.pane.surface,
             isRenaming: renamingID == tab.id,
             editableTitle: tab.title,
             canClose: true,

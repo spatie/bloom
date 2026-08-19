@@ -3,8 +3,9 @@ import BloomCore
 
 /// One conversation in the tab strip.
 ///
-/// The chrome is `CenterTabView`, shared with the terminal and browser tabs beside it, so all
-/// three are the same height with the same close affordance and the same selected treatment.
+/// The chrome is `TabItemView`, shared with the terminal and browser tabs beside it and with the
+/// bottom panel's strip, so all of them are the same height with the same close affordance and the
+/// same selected treatment.
 /// What is left here is only what a `Session` means: an untitled session still needs a name on
 /// screen, and that placeholder must not end up in the rename field as if the user had typed it.
 struct SessionTabView: View {
@@ -23,11 +24,12 @@ struct SessionTabView: View {
     var namespace: Namespace.ID
 
     var body: some View {
-        CenterTabView(
+        TabItemView(
             title: session.title.isEmpty ? "Untitled" : session.title,
             icon: nil,
             isActive: isActive,
             isRunning: isRunning,
+            surface: TabPane.content.surface,
             isRenaming: isRenaming,
             editableTitle: session.title,
             canClose: canClose,
