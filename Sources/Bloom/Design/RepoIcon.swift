@@ -7,7 +7,7 @@ import BloomCore
 /// One view, because this mark had already been drawn three different ways in four places, and a
 /// project that is a circle in the toolbar and a square in the sidebar reads as two projects.
 /// Everywhere a project is named without room for the whole name goes through here: the sidebar
-/// section header, Home, a search result, a workspace card and the toolbar title.
+/// section header, a row on Home, a search result and the toolbar title.
 ///
 /// The letters come from `RepoMonogram`, which is in the core and unit tested, so the rule that
 /// decides what `there-there` looks like is not something only a screenshot can answer.

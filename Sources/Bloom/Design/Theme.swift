@@ -5,11 +5,16 @@ import AppKit
 ///
 /// Two kinds of colour live here, and the split is the whole design.
 ///
-/// **Ink, selection and meaning stay semantic.** Text, the focus ring, the caret, the accent and
-/// the system reds and greens all resolve to an AppKit semantic colour, because those already
-/// track the user's accent choice, Increase Contrast, Differentiate Without Colour and the
-/// keyboard access setting. Hard-coding them is what made the first version of this app look like
-/// a web page pretending to be a Mac.
+/// **Ink stays semantic.** Text, the focus ring, the caret and the text selection resolve to an
+/// AppKit semantic colour, because those already track Increase Contrast, Differentiate Without
+/// Colour and the keyboard access setting. Hard-coding them is what made the first version of
+/// this app look like a web page pretending to be a Mac.
+///
+/// **The accent and the meaning colours no longer do.** They were semantic once, and the reason
+/// they stopped is written out on `accent` and on `negative`: an app whose accent is whatever the
+/// user last picked in System Settings cannot be part of a brand built on one ramp, and the
+/// system reds are tuned to be the one saturated thing on a screen rather than one of a dozen
+/// small marks in a narrow column. Read those two before adding a third exception.
 ///
 /// **Ground is Bloom's own.** The five surfaces and the rule between them are named colours, not
 /// `windowBackgroundColor` and friends. On macOS 26 every one of those semantic grounds resolves
@@ -72,10 +77,11 @@ enum Palette {
 
     // MARK: Overlays
     //
-    // These are neutral tints painted over whatever is underneath, so they are expressed as an
-    // opacity on the primary label colour rather than as a colour of their own. Writing them as
-    // 0xRRGGBBAA was the original bug behind the solid black selection bar: 0x00000014 is the
-    // number 20, indistinguishable from an opaque dark blue, so the alpha was never applied.
+    // `hover` is a tint painted over whatever is underneath, so it is an alpha on white or black
+    // rather than a colour of its own. The two selection fills below are not: they are opaque
+    // steps of Bloom's ramp, for the reasons written on each. Never write any of the three as
+    // 0xRRGGBBAA, which was the original bug behind the solid black selection bar: 0x00000014 is
+    // the number 20, indistinguishable from an opaque dark blue, so the alpha was never applied.
 
     /// Measured off the mockup: four percent ink in light, five and a half in dark. It was six in
     /// both, and six percent black on white is a visibly grey slab under the pointer where the
@@ -111,9 +117,6 @@ enum Palette {
     /// draws it at a full point, which is what AppKit's own split view divider has always been.
     static let border = dynamic(light: 0xD6E0E4, dark: 0x1E3F53)
 
-    /// The same rule where it has to be noticed: a card under the pointer, a focused boundary.
-    static let borderStrong = dynamic(light: 0xBCCDD4, dark: 0x2C5872)
-
     // MARK: Text
 
     static let textPrimary = Color(nsColor: .labelColor)
@@ -127,8 +130,6 @@ enum Palette {
     /// system's second and third.
     static let textTertiary = dynamic(light: 0x8A9AA2, dark: 0x62808E)
 
-    /// The system's third rung, kept for the one thing it is right for: something switched off.
-    static let textDisabled = Color(nsColor: .tertiaryLabelColor)
     static let textInverted = Color(nsColor: .alternateSelectedControlTextColor)
 
     /// What a field says before anything is typed into it. Half ink, where the tertiary label is
@@ -202,9 +203,10 @@ enum Palette {
     ///
     /// `negative` is right for something that went wrong. The stop button is not a failure: it sits
     /// in the composer for the whole length of a turn, and at full saturation it reads as an alarm
-    /// about work that is going perfectly well. This keeps the meaning and drops the volume, and it
-    /// is `negative` mixed 28 percent into the secondary ink of its own appearance rather than a
-    /// red chosen separately, so the two cannot drift apart.
+    /// about work that is going perfectly well. This keeps the meaning and drops the volume.
+    ///
+    /// Two hex values rather than a blend of `negative`, so retuning that does not carry across to
+    /// this: the pair has to be moved with it by hand.
     static let stop = dynamic(light: 0x994842, dark: 0xCC7B76)
 
     /// Something needs attention but nothing is broken: setup that failed and can be run again,
@@ -370,8 +372,6 @@ enum Metrics {
     /// step, the rules in this window were not so much subtle as absent, and every pane floated.
     /// The name stays because a one point rule is still what everyone calls a hairline.
     static let hairline: CGFloat = 1
-    /// Clearance for the traffic lights when the title bar is hidden.
-    static let titleBarHeight: CGFloat = 28
 
     // MARK: Spacing
     //
@@ -390,8 +390,6 @@ enum Metrics {
     static let spacingWide: CGFloat = 8
     /// What a row keeps from the edge of its pane.
     static let inset: CGFloat = 10
-    /// Between the blocks of a full-width pane, such as one project's block on Home.
-    static let spacingSection: CGFloat = 20
     /// What a full-width pane of content keeps from the window edge. Larger than `inset`, which
     /// is a row's margin inside a narrow column.
     static let pane: CGFloat = 24
@@ -492,7 +490,9 @@ extension View {
 
 // MARK: - Reusable chrome
 
-/// A separator that stays one physical pixel on Retina.
+/// A separator drawn at `Metrics.hairline`: one point, which is two physical pixels on Retina and
+/// what AppKit's own split view divider has always been. See that constant for why it is not half
+/// a point.
 struct Hairline: View {
     var axis: Axis = .horizontal
 

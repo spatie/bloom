@@ -99,7 +99,7 @@ final class TerminalPersistence {
 
     /// Kills the sessions of panes that are going away for good.
     ///
-    /// Deliberately not gated on `isEnabled`. Sessions outlive the setting: a user who turns
+    /// Deliberately not gated on `isSwitchedOn`. Sessions outlive the setting: a user who turns
     /// persistence off, or who archives a workspace whose shells were started while it was on,
     /// must still be left with nothing running in a worktree that is being deleted.
     func kill(workspaceID: String, paneIDs: [String]) async {

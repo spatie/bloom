@@ -122,7 +122,8 @@ struct RootView: View {
     /// nothing to say. It used to sit there as a 380pt column holding a single "No workspace
     /// selected" glyph, and because its divider hairline is almost invisible on white that glyph
     /// read as a stray mark floating in the middle of the window. Hiding it also hands those
-    /// points back to Home, which is what lets its grid run three cards wide rather than two.
+    /// points back to Home's list, which is what keeps a workspace name, its diff counts and its
+    /// age on one line without truncating any of them.
     ///
     /// Keyed on `selectedWorkspace` rather than on `selection`, because `DetailColumn` already
     /// falls back to Home when a selected id no longer resolves to a workspace.

@@ -2,8 +2,8 @@ import SwiftUI
 
 /// The inspector's spacing scale.
 ///
-/// One set of numbers rather than a literal per call site, because three stacked panes only read
-/// as one column if their rows, insets and gutters agree.
+/// One set of numbers rather than a literal per call site, because two stacked bars and the pane
+/// under them only read as one column if their rows, insets and gutters agree.
 ///
 /// The shared values are the window's, not the inspector's own: a file row and a sidebar row are
 /// the same kind of thing and used to sit a point or two apart because each column kept its own

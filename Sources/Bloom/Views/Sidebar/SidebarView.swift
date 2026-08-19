@@ -6,8 +6,11 @@ import BloomCore
 ///
 /// A real `List` with `.listStyle(.sidebar)`, not a `ScrollView` over a `LazyVStack`. The list
 /// brings the source list treatment that was previously hand-drawn and always slightly wrong:
-/// AppKit selection (accent when the window is key, grey when it is not), disclosure triangles on
-/// section headers, the standard row insets, and keyboard navigation between rows.
+/// AppKit selection (accent when the window is key, grey when it is not), the standard row
+/// insets, and keyboard navigation between rows.
+///
+/// It does not bring a disclosure triangle on a section header. `Section(isExpanded:)` draws
+/// nothing here, which was captured rather than assumed, so `RepoSection` draws its own chevron.
 ///
 /// There is no account row. Bloom is local and single user, so a row naming the logged-in Mac
 /// user said nothing, and on macOS `Menu { } label: { }` with `.borderlessButton` throws the

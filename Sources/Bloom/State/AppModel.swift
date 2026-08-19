@@ -454,7 +454,11 @@ final class AppModel {
         model(for: workspace)
     }
 
-    /// Workspaces with an agent currently running, for the dock badge and the window title.
+    /// Workspaces with an agent currently running, for the sidebar's status bar and Home's
+    /// summary line.
+    ///
+    /// Not the Dock badge, which counts unread finished work instead: see `DockBadge`. Not the
+    /// sleep assertion either, which is driven from `runningAgentCount`.
     var runningCount: Int {
         workspaceModels.values.count { $0.isRunning }
     }

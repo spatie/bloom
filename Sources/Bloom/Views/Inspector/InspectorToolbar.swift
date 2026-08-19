@@ -45,8 +45,9 @@ struct InspectorToolbar: View {
 
             trailing
         }
-        // The same inset as the pull request strip above and the file header bar below, so the
-        // three stacked bars start their contents on one line rather than a few points apart.
+        // The same inset as the pull request strip above it, so the two stacked bars start their
+        // contents on one line rather than a few points apart. `FileHeaderBar` uses it too, but it
+        // draws in the centre column now rather than under this one.
         .padding(.horizontal, InspectorLayout.inset)
         .frame(height: InspectorLayout.barHeight)
     }
