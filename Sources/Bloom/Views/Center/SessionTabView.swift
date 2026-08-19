@@ -12,6 +12,8 @@ struct SessionTabView: View {
     var session: Session
     var isActive: Bool
     var isRunning: Bool
+    /// Whether this is the tab the pane's leading edge runs through. See `TabItemView`.
+    var isAtPaneEdge: Bool
     var isRenaming: Bool
     var canClose: Bool
     var onSelect: @MainActor () -> Void
@@ -29,6 +31,7 @@ struct SessionTabView: View {
             icon: nil,
             isActive: isActive,
             isRunning: isRunning,
+            isAtPaneEdge: isAtPaneEdge,
             surface: TabPane.content.surface,
             isRenaming: isRenaming,
             editableTitle: session.title,

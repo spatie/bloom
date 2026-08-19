@@ -12,17 +12,29 @@ import SwiftUI
 /// painted into the toolbar's inset rather than onto the tab.
 struct TabItemOutline: InsettableShape {
     var radius: CGFloat
+    /// Whether the leading side is left undrawn, for a tab whose leading edge IS the edge of the
+    /// pane. See `TabItemView.isAtPaneEdge`, which is where the measurement is written down.
+    var skipsLeadingEdge = false
     var inset: CGFloat = 0
 
     func path(in rect: CGRect) -> Path {
         let box = rect.insetBy(dx: inset, dy: inset)
         var path = Path()
-        path.move(to: CGPoint(x: box.minX, y: rect.maxY))
-        path.addArc(
-            tangent1End: CGPoint(x: box.minX, y: box.minY),
-            tangent2End: CGPoint(x: box.maxX, y: box.minY),
-            radius: radius
-        )
+
+        if skipsLeadingEdge {
+            // From the pane's own rule rather than from the inset box, so the top line starts
+            // hard against it. Half a point of daylight between the two would be the same
+            // mismatch this branch exists to remove, only smaller.
+            path.move(to: CGPoint(x: rect.minX, y: box.minY))
+        } else {
+            path.move(to: CGPoint(x: box.minX, y: rect.maxY))
+            path.addArc(
+                tangent1End: CGPoint(x: box.minX, y: box.minY),
+                tangent2End: CGPoint(x: box.maxX, y: box.minY),
+                radius: radius
+            )
+        }
+
         path.addArc(
             tangent1End: CGPoint(x: box.maxX, y: box.minY),
             tangent2End: CGPoint(x: box.maxX, y: box.maxY),

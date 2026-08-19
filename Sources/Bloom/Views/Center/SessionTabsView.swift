@@ -86,6 +86,18 @@ struct SessionTabsView: View {
         model.sessions.map(\.id) + toolTabs.map(\.id)
     }
 
+    /// Whether a tab is the one the pane's leading edge runs through.
+    ///
+    /// This strip begins at that edge: it has no leading control, so its first tab starts where
+    /// the centre column starts. Whichever tab that is drops the line and the corner down that
+    /// side and lets the pane's own rule be its edge. See `TabItemView.isAtPaneEdge`.
+    ///
+    /// Asked of the strip's whole order rather than of either run on its own, because a workspace
+    /// whose conversations have all been closed opens with a terminal or a browser first.
+    private func isAtPaneEdge(_ id: String) -> Bool {
+        order.first == id
+    }
+
     /// Which tab the strip scrolls into view, as a plain id rather than as `CenterPaneContent`.
     ///
     /// Nil when the focused pane is showing something the strip does not have a tab for, which is
@@ -123,6 +135,7 @@ struct SessionTabsView: View {
             session: session,
             isActive: isSelected(session),
             isRunning: model.isRunning(session),
+            isAtPaneEdge: isAtPaneEdge(session.id),
             isRenaming: renamingID == session.id,
             canClose: model.sessions.count > 1,
             onSelect: { select(session) },
@@ -143,6 +156,7 @@ struct SessionTabsView: View {
             title: tabs.displayTitle(of: tab, in: model),
             icon: tab.icon,
             isActive: isSelected(tab),
+            isAtPaneEdge: isAtPaneEdge(tab.id),
             surface: Self.pane.surface,
             isRenaming: renamingID == tab.id,
             editableTitle: tab.title,

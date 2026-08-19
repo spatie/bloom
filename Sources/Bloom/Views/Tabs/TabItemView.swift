@@ -18,6 +18,25 @@ struct TabItemView: View {
     var icon: String?
     var isActive: Bool
     var isRunning = false
+    /// Whether this tab's leading edge is the leading edge of the pane itself, which is true of
+    /// the first tab in a strip that begins at the pane's own edge and of nothing else.
+    ///
+    /// Such a tab has no line of its own to draw down that side, because the pane already has
+    /// one there. In the centre column that line is the rule down the sidebar's trailing edge,
+    /// and it is a point wide. The tab's outline is a point wide too and is drawn INSIDE the
+    /// tab, so the two sat side by side: measured off a two times capture, the rule beside the
+    /// selected first tab was four device pixels across where the same rule a row lower, beside
+    /// the pane, was two. The tab's fill therefore began a point to the right of the content it
+    /// is the top of, and the join between the two read as a step in the line.
+    ///
+    /// So the leading side is dropped and the leading corner is squared, and the pane's rule
+    /// becomes this tab's left edge: one unbroken point of it from the toolbar to the foot of the
+    /// window, with the tab's fill starting exactly where the pane's does.
+    ///
+    /// Only the strip's own first tab, and only where the strip has no control before it. The
+    /// bottom panel opens with the chevron that collapses it, so its first tab is nowhere near
+    /// the edge and keeps both corners.
+    var isAtPaneEdge = false
     /// The ground of the pane this tab opens and the ink that reads on it, worn while the tab is
     /// the selected one. `TabPane.content.surface` for the centre column, `.sunken` for the bottom
     /// panel, and the user's own Ghostty colours for a terminal running their theme.
@@ -197,7 +216,7 @@ struct TabItemView: View {
             shape
                 .fill(surface.fill)
                 .overlay {
-                    TabItemOutline(radius: Self.cornerRadius)
+                    TabItemOutline(radius: Self.cornerRadius, skipsLeadingEdge: isAtPaneEdge)
                         .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
                 }
                 .matchedGeometryEffect(id: Self.selectionID, in: namespace)
@@ -206,9 +225,13 @@ struct TabItemView: View {
         }
     }
 
+    /// The fill's shape, and the hover plate's, so a hovered tab and a selected one are obviously
+    /// the same object in two states. Square at the leading corner for a tab at the pane's edge,
+    /// for the reason written out on `isAtPaneEdge`: a corner that curved away there would leave
+    /// the same step against the pane's rule, only rounded.
     private var shape: UnevenRoundedRectangle {
         UnevenRoundedRectangle(
-            topLeadingRadius: Self.cornerRadius,
+            topLeadingRadius: isAtPaneEdge ? 0 : Self.cornerRadius,
             topTrailingRadius: Self.cornerRadius,
             style: .circular
         )
