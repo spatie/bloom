@@ -15,6 +15,11 @@ import BloomCore
 struct PullRequestBar: View {
     let model: WorkspaceModel
 
+    /// Continue and Archive are both about the workspace rather than about the pull request, so
+    /// they go through the app the way every other archive does rather than being reimplemented
+    /// against git from a view.
+    @Environment(AppModel.self) private var app
+
     /// How often GitHub is asked again while the bar is on screen.
     private static let pollInterval = Duration.seconds(20)
 
@@ -94,7 +99,9 @@ struct PullRequestBar: View {
                 localWork: model.localWork,
                 isWorking: isWorking,
                 onMerge: merge,
-                onPush: push
+                onPush: push,
+                onContinue: { carryOn(after: pullRequest) },
+                onArchive: archive
             )
         } else {
             PullRequestCreator(
@@ -160,6 +167,52 @@ struct PullRequestBar: View {
                 )
             }
         }
+    }
+
+    /// Cuts a fresh branch in this worktree and hands the session on to it.
+    ///
+    /// Reported here rather than silently, in all three directions. A refusal names the condition
+    /// that stopped it, because Continue is the sort of button that looks broken when nothing
+    /// happens. A success says which branch and which base, because those are the two facts the
+    /// reader now has to hold, and it repeats the warning when the base could not be fetched: a
+    /// branch cut from a stale copy of main is a thing you want to know before you build on it.
+    private func carryOn(after pullRequest: PullRequest) {
+        isWorking = true
+        report = nil
+
+        Task {
+            defer { isWorking = false }
+            switch await app.continueAfterMerge(model.workspace, pullRequest: pullRequest) {
+            case .continued(let continuation):
+                report = MergeReport(
+                    tone: continuation.base == .fetched ? .info : .leftover,
+                    title: "Continuing on \(continuation.branch)",
+                    message: continuation.sentence,
+                    details: continuation.base.warning
+                )
+            case .refused(let refusal):
+                report = MergeReport(
+                    tone: .info, title: "Nothing was changed", message: refusal.sentence
+                )
+            case .failed(let reason):
+                report = MergeReport(
+                    tone: .failure,
+                    title: "Could not continue",
+                    message: reason + " This worktree is where it was.",
+                    details: nil
+                )
+            }
+        }
+    }
+
+    /// Archives, through the app's own path with every safety check intact.
+    ///
+    /// No confirmation is raised here. `AppModel.archive` decides for itself whether to ask, and
+    /// on a merged pull request it will not unless there is genuinely something to lose. Why this
+    /// button is allowed to be quiet while the sidebar's hover button never is, is written out at
+    /// `PullRequestSummary.archiveButton`.
+    private func archive() {
+        Task { await app.archive(model.workspace) }
     }
 
     /// Merging is two things happening in order, and they are reported separately.

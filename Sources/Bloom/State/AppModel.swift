@@ -681,11 +681,137 @@ final class AppModel {
         }
     }
 
+    // MARK: - Continuing after a merge
+
+    /// What pressing Continue on a merged pull request came to.
+    ///
+    /// Three cases rather than an optional sentence, because they read differently to the person
+    /// standing in front of the strip. A refusal is Bloom declining on purpose and naming the
+    /// condition; a failure is git or the network; and the success carries its own line, because
+    /// the branch it cut and the base it cut from are the two things worth confirming.
+    enum ContinuationOutcome {
+        case continued(WorkspaceContinuation)
+        case refused(ContinuationRefusal)
+        case failed(String)
+    }
+
+    /// Carries a merged workspace on to a fresh branch, in place.
+    ///
+    /// Merging leaves a workspace at a dead end: the branch is finished, the pull request is
+    /// closed, and the only move the app offered was to archive it and start again. Starting again
+    /// throws away everything that makes a warmed-up workspace worth having, and none of it is in
+    /// git: the installed dependencies, the copied `.env`, the dev servers on their ports, and
+    /// above all the agent's session, which has read this codebase and been corrected about it for
+    /// an hour. Continuing keeps every one of those and changes only the thing that is genuinely
+    /// finished, which is the branch.
+    ///
+    /// In order: decide, cut, tell the app, tell the agent. The decision is
+    /// `ContinuationGate.decide` in BloomCore and is the only thing here allowed to say yes; the
+    /// git work is `WorkspaceManager.continueOnNewBranch`; and the turn that goes to the agent is
+    /// the `continueAfterMerge` prompt, editable in Settings like every other one.
+    ///
+    /// The session is NOT restarted. That is the point: a new session would know nothing, which is
+    /// the outcome archiving already gives for free.
+    func continueAfterMerge(
+        _ workspace: Workspace, pullRequest: PullRequest
+    ) async -> ContinuationOutcome {
+        guard let manager else { return .failed("Bloom is still starting up.") }
+
+        let facts: ContinuationFacts
+        do {
+            facts = try await manager.continuationFacts(
+                workspace: workspace,
+                // GitHub's own answer, from the strip the button lives in rather than from a
+                // fresh lookup. The strip is the reason the button is on screen at all, so
+                // asking again would only introduce a way for the two to disagree.
+                isPullRequestMerged: pullRequest.isMerged,
+                isAgentRunning: isRunning(workspace)
+            )
+        } catch {
+            return .failed(error.readableMessage)
+        }
+
+        let branch: String
+        switch ContinuationGate.decide(facts) {
+        case .cut(let cut): branch = cut
+        case .refuse(let refusal): return .refused(refusal)
+        }
+
+        let continuation: WorkspaceContinuation
+        do {
+            continuation = try await manager.continueOnNewBranch(
+                workspace: workspace, branch: branch
+            )
+        } catch {
+            return .failed(error.readableMessage)
+        }
+
+        await reload()
+        await adopt(continuation, pullRequest: pullRequest)
+        return .continued(continuation)
+    }
+
+    /// Everything the app has to forget or refresh now that the worktree is on another branch.
+    private func adopt(_ continuation: WorkspaceContinuation, pullRequest: PullRequest) async {
+        let model = model(for: continuation.workspace)
+
+        // The merged pull request belonged to the old branch. Left in place it would keep the
+        // strip purple and keep offering the button that has just been pressed, and the sidebar's
+        // own cache never clears itself: it ignores a nil answer on purpose, so that a slow
+        // network does not make the mark flicker, which means nothing else would ever drop it.
+        model.pullRequest = nil
+        WorkspacePullRequests.shared.forget(continuation.workspace.id)
+
+        // The diff is measured against the base, and the base just moved under it.
+        await model.refreshChanges()
+
+        await tellAgent(about: continuation, pullRequest: pullRequest, in: model)
+    }
+
+    /// Sends the `continueAfterMerge` prompt into the session that was already running here.
+    ///
+    /// Silent when there is no session and none can be made. The branch has already moved by this
+    /// point and that is the part that matters; an alert about a missing session would be raising
+    /// a dialog over the least important half of what was asked for.
+    private func tellAgent(
+        about continuation: WorkspaceContinuation,
+        pullRequest: PullRequest,
+        in model: WorkspaceModel
+    ) async {
+        let template = PromptOverrides().template(for: .continueAfterMerge)
+        let render = continuation.render(template: template, pullRequest: pullRequest.number)
+
+        guard let session = await continuationSession(in: model) else { return }
+        // The reader pressed a button and a turn is about to stream: put them in front of it.
+        model.activeSessionID = session.id
+        await model.transcript(for: session).send(render.text)
+    }
+
+    /// The session the continue turn goes to: the one the workspace was already using, or a new
+    /// one for a workspace whose agent was never started.
+    private func continuationSession(in model: WorkspaceModel) async -> Session? {
+        if let session = model.activeSession { return session }
+        await model.reloadSessions()
+        if let session = model.activeSession { return session }
+        return await model.createSession(title: "Continue")
+    }
+
     /// Archives when there is nothing to lose, and asks first when there is.
     ///
     /// Nothing is torn down before the decision: a refused archive used to take the workspace's
     /// shells and dev servers with it anyway, which is a strange thing to happen after being told
     /// the workspace was too valuable to remove.
+    ///
+    /// Whether an entry point asks on TOP of this is a property of that entry point, and the two
+    /// that differ each say why where they live. The sidebar row's hover button asks every single
+    /// time, even when this method would have archived silently, because it appears under the
+    /// pointer unbidden: see `RepoSection.confirmRowArchive`. The merged pull request strip's
+    /// Archive button adds nothing at all and lets this method decide, because it is a deliberate
+    /// press on a strip whose headline says Merged: see `PullRequestSummary.archiveButton`.
+    ///
+    /// That second one needs no new logic here and gets none. A merged pull request already
+    /// clears the commits through `isPullRequestMerged`, so what is left to stop an archive is an
+    /// agent mid turn and work that exists nowhere but that directory. Neither is weakened for it.
     func archive(_ workspace: Workspace, deleteBranch: Bool? = nil) async {
         guard let manager, let repo = repo(for: workspace) else { return }
 

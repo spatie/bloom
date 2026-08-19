@@ -36,6 +36,18 @@ final class WorkspacePullRequests {
         pullRequests[workspaceID]
     }
 
+    /// Drops what is remembered about one workspace, for a caller that knows the answer is now
+    /// about a branch this workspace is no longer on.
+    ///
+    /// Needed because `refresh` deliberately never clears: it treats nil as "gh could not answer"
+    /// rather than "there is no pull request", so a stale entry outlives every poll. That is the
+    /// right trade for a slow network and the wrong one after `AppModel.continueAfterMerge` moves
+    /// the worktree to a fresh branch, where the merged pull request in here would keep marking
+    /// the row for the rest of the session.
+    func forget(_ workspaceID: String) {
+        pullRequests[workspaceID] = nil
+    }
+
     /// Keeps one workspace's answer fresh for as long as its row is on screen.
     func track(_ workspace: Workspace) async {
         while !Task.isCancelled {

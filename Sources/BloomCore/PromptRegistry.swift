@@ -7,6 +7,7 @@ import Foundation
 public enum PromptID: String, Sendable, Hashable, CaseIterable, Codable {
     case createPullRequest
     case pushLocalWork
+    case continueAfterMerge
     case review
     case nameWorkspace
 }
@@ -58,7 +59,7 @@ public struct PromptDefinition: Sendable, Hashable, Identifiable {
 /// none of that and can only fail.
 public enum PromptRegistry {
     public static let all: [PromptDefinition] = [
-        createPullRequest, pushLocalWork, review, nameWorkspace,
+        createPullRequest, pushLocalWork, continueAfterMerge, review, nameWorkspace,
     ]
 
     public static func definition(for id: PromptID) -> PromptDefinition {
@@ -82,6 +83,15 @@ public enum PromptRegistry {
         public static let branch = "branch"
         public static let baseBranch = "base_branch"
         public static let changes = "changes"
+    }
+
+    /// The names the continue-after-merge prompt may use.
+    public enum ContinueAfterMerge {
+        public static let workspace = "workspace"
+        public static let branch = "branch"
+        public static let previousBranch = "previous_branch"
+        public static let baseBranch = "base_branch"
+        public static let pullRequest = "pull_request"
     }
 
     /// The names the workspace-naming prompt may use.
@@ -159,6 +169,58 @@ public enum PromptRegistry {
         Commit everything outstanding in this worktree, with a message that describes the change \
         the way this project words one, then push {{branch}} so its pull request reflects what is \
         here. If there is nothing to commit, just push.
+        """
+    )
+
+    /// Sent when the merged pull request strip's Continue button has already moved the worktree.
+    ///
+    /// A turn rather than a note, and that is the one place Bloom deliberately parts company with
+    /// Conductor, which attaches its equivalent to the composer as a file and lets the user's next
+    /// message carry it. Bloom sends it, for two reasons. The session is the thing being kept
+    /// alive, so what happened to it belongs in the session; and the branch under the agent has
+    /// moved, which is exactly the sort of fact an agent will otherwise discover an hour later by
+    /// running `git status` and drawing the wrong conclusion from it.
+    ///
+    /// The template is expected to tell the agent NOT to start anything. Nobody has asked for work
+    /// yet: Continue is a press on a strip, not an instruction, and an agent that reads this as a
+    /// brief will invent one.
+    static let continueAfterMerge = PromptDefinition(
+        id: .continueAfterMerge,
+        title: "Continue after a merge",
+        summary: """
+        Sent to the workspace's agent when you press Continue on a merged pull request. By the \
+        time it arrives the worktree is already on a new branch, cut from an updated base, in the \
+        same directory and the same session. This only tells the agent what moved, so it does not \
+        find out an hour later from a confusing `git status`.
+        """,
+        variables: [
+            PromptVariable(name: ContinueAfterMerge.workspace, summary: "The workspace's name."),
+            PromptVariable(
+                name: ContinueAfterMerge.branch,
+                summary: "The new branch this worktree is on now."
+            ),
+            PromptVariable(
+                name: ContinueAfterMerge.previousBranch,
+                summary: "The branch that was merged."
+            ),
+            PromptVariable(
+                name: ContinueAfterMerge.baseBranch,
+                summary: "The branch the new one was cut from."
+            ),
+            PromptVariable(
+                name: ContinueAfterMerge.pullRequest,
+                summary: "The number of the pull request that landed."
+            ),
+        ],
+        defaultTemplate: """
+        Pull request #{{pull_request}} is merged, so {{previous_branch}} is finished with.
+
+        This worktree is now on a new branch, {{branch}}, cut from an up to date \
+        {{base_branch}}, so everything that just landed is already underneath you. Nothing else \
+        moved: same directory, same session, and anything that was uncommitted is still here.
+
+        Do not redo what the pull request landed, and do not start anything new yet. Say in one \
+        line that you are ready, then wait for what I ask next.
         """
     )
 

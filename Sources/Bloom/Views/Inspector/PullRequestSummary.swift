@@ -29,6 +29,10 @@ struct PullRequestSummary: View {
     var onMerge: (GitHub.MergeMethod) -> Void
     /// Hands the outstanding work to the workspace's agent to commit and push.
     var onPush: () -> Void
+    /// Carries a merged workspace on to a fresh branch, in place. See `continueButton`.
+    var onContinue: () -> Void
+    /// Archives, through the app's ordinary archive with all its checks intact.
+    var onArchive: () -> Void
 
     /// Which method the user picked, held only for as long as the confirmation is up. Non-nil is
     /// what presents the dialog, so there is no way to reach `onMerge` without passing through it.
@@ -217,10 +221,91 @@ struct PullRequestSummary: View {
                 mergeMenu
             }
             .fixedSize()
+        } else if pullRequest.isMerged {
+            HStack(spacing: Metrics.spacingTight) {
+                continueButton
+                archiveButton
+            }
+            .fixedSize()
         }
-        // A merged or closed pull request needs no control here. The headline says which of the
-        // two it is and the strip carries its colour, so a capsule repeating the same word was
-        // only ever taking the place of the button that used to be there.
+        // A CLOSED pull request still gets nothing, and that is not an oversight. Continue is
+        // built on the merge: the work is on the base branch, so cutting a fresh branch from the
+        // base loses none of it. A closed pull request landed nothing, its branch is still the
+        // only place its commits live, and moving off it would be exactly the wrong offer. Archive
+        // on its own would be a control that says "throw this away" over a branch nobody has
+        // agreed to throw away.
+    }
+
+    /// Carry this workspace on, on a new branch, without giving up the session.
+    ///
+    /// A merged workspace used to be a dead end: the branch is finished, the strip goes quiet and
+    /// the only move left is to archive and start again. Starting again is not free. The worktree
+    /// has its dependencies installed, its `.env` copied in and its dev servers on their ports,
+    /// and the agent's session has read this codebase and been corrected about it for an hour.
+    /// None of that is in git and all of it is thrown away by an archive. Continuing keeps every
+    /// bit of it and replaces only the part that is genuinely over, which is the branch.
+    ///
+    /// Outlined rather than filled, and first in the pair. It is the constructive move, but it is
+    /// not the one this state is asking for: most merged workspaces really are finished, so the
+    /// filled control stays on Archive, and Continue is the one you reach for when you know you
+    /// want it.
+    ///
+    /// The two forms are the same trick `pushButton` uses. "Continue" beside "Archive" and a
+    /// headline is more than the pane's default width carries, and the headline is the part that
+    /// must not be the thing that truncates.
+    private var continueButton: some View {
+        ViewThatFits(in: .horizontal) {
+            continueControl.labelStyle(.titleAndIcon)
+            continueControl.labelStyle(.iconOnly)
+        }
+        .fixedSize()
+    }
+
+    private var continueControl: some View {
+        Button("Continue", systemImage: "chevron.forward.2", action: onContinue)
+            .buttonStyle(.bordered)
+            .tint(tint ?? Palette.accent)
+            .controlSize(.regular)
+            .help(
+                "Cut a new branch from \(baseBranch) in this worktree and carry on, keeping this "
+                    + "workspace's session, its setup and anything uncommitted."
+            )
+    }
+
+    /// Archive, without a confirmation of its own.
+    ///
+    /// **This deliberately differs from the sidebar row's hover archive button, which asks every
+    /// single time.** They are not in disagreement; they are different presses. The row's button
+    /// appears under the pointer unbidden, a few points from the row you meant to click, so the
+    /// asking is a property of that entry point rather than of archiving (the reasoning is written
+    /// out in full at `RepoSection.confirmRowArchive`). This one is a deliberate press on a strip
+    /// whose headline says Merged, in a pane the reader opened to look at the work that landed. A
+    /// confirmation here would be asking "are you sure?" about a branch GitHub has already merged,
+    /// which is how confirmations stop being read.
+    ///
+    /// Quiet is not the same as unguarded. This goes through `AppModel.archive` exactly as every
+    /// other entry point does, and that method still builds the full `WorkspaceSafetyReport` and
+    /// still stops to ask when there is genuinely something to lose: an agent mid turn, files git
+    /// has never seen, an edited `.env`, commits made on a detached HEAD. What the merge changes
+    /// is only the commits, and only through `isPullRequestMerged`, which is true here because
+    /// GitHub said so. Nothing about the safety checks is weakened to make this button quiet.
+    private var archiveButton: some View {
+        ViewThatFits(in: .horizontal) {
+            archiveControl.labelStyle(.titleAndIcon)
+            archiveControl.labelStyle(.iconOnly)
+        }
+        .fixedSize()
+    }
+
+    private var archiveControl: some View {
+        Button("Archive", systemImage: "archivebox", action: onArchive)
+            .buttonStyle(.borderedProminent)
+            .tint(tint ?? Palette.accentFill)
+            .controlSize(.regular)
+            .help(
+                "Remove this workspace's worktree. #\(pullRequest.number) is merged, so this asks "
+                    + "first only when something here exists nowhere else."
+            )
     }
 
     /// Commit what is outstanding and push it, by asking the agent to.
