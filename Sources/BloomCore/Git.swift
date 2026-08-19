@@ -548,6 +548,69 @@ public enum Git {
         return try await check(["rev-parse", "--verify", "\(base)^{commit}"], in: path).trimmed
     }
 
+    /// Whether `ancestor` is reachable from `descendant`. A commit is its own ancestor, as git
+    /// counts it. False when either ref does not resolve, because the question was unanswerable
+    /// and every caller reads a no as "leave it alone".
+    public static func isAncestor(
+        _ ancestor: String, of descendant: String, in path: String
+    ) async -> Bool {
+        guard (try? validate(ref: ancestor, label: "revision")) != nil,
+              (try? validate(ref: descendant, label: "revision")) != nil
+        else { return false }
+        let result = try? await run(
+            ["merge-base", "--is-ancestor", ancestor, descendant], in: path
+        )
+        return result?.ok ?? false
+    }
+
+    /// Where this worktree left the base branch, in the sense the review tab means it.
+    ///
+    /// A workspace records its base as a plain branch name, and reading that as the local branch
+    /// alone is what produced the bug this exists for. Bloom never moves a repository's local
+    /// `main`: that branch is the user's own checkout, they may have commits on it, it may be
+    /// dirty, and fast-forwarding it behind their back is not this app's to do. So once a pull
+    /// request is squashed and the workspace is continued, the new branch is correctly cut from
+    /// `origin/main` while the local `main` is still where it was, and every file that has just
+    /// been merged shows up in the diff as though this workspace had written it. It survived
+    /// workspace switches and restarts, because the wrong answer was on disk rather than in
+    /// memory.
+    ///
+    /// The fix is to ask both refs and take whichever divergence point is FURTHER ALONG, which is
+    /// the one that is a descendant of the other. Not simply the remote one:
+    ///
+    /// - Continued after a merge, the branch is cut from `origin/main`, so the remote's merge
+    ///   base is the newer of the two and the diff narrows to the new work alone.
+    /// - With unpushed commits on local `main` and a branch cut from those, the local merge base
+    ///   is the newer one, and the user's own unpushed work is correctly not counted as this
+    ///   workspace's.
+    ///
+    /// Nothing is fetched, nothing is moved and nothing is written. A repository with no remote,
+    /// a base branch with no upstream, and a base branch that exists only on the remote all go
+    /// through the same path and none of them is an error: a candidate that does not resolve is
+    /// simply not a candidate. Only a base that resolves nowhere at all throws, exactly as
+    /// `mergeBase` already does, because an empty diff reading as "this workspace changed
+    /// nothing" is the failure worth being loud about.
+    public static func baseline(_ base: String, in worktree: String) async throws -> String {
+        try validate(ref: base, label: "base branch")
+
+        let local = try? await mergeBase(base, in: worktree)
+
+        let tracking = "refs/remotes/\(remote)/\(base)"
+        guard await revision(of: tracking, in: worktree) != nil,
+              let remoteSide = try? await mergeBase(tracking, in: worktree)
+        else {
+            // No remote-tracking copy, so the local answer is the only answer. Asking for it
+            // again rather than giving up lets `mergeBase` throw its own error when the base
+            // resolves nowhere.
+            if let local { return local }
+            return try await mergeBase(base, in: worktree)
+        }
+
+        guard let local else { return remoteSide }
+        guard local != remoteSide else { return local }
+        return await isAncestor(local, of: remoteSide, in: worktree) ? remoteSide : local
+    }
+
     // MARK: - Worktrees
 
     public static func worktrees(of repo: String) async throws -> [WorktreeEntry] {
@@ -655,7 +718,7 @@ public enum Git {
     /// Throws if any of the git calls fail, because an empty list has to mean "nothing changed"
     /// and never "we could not find out".
     public static func changedFiles(worktree: String, base: String) async throws -> [ChangedFile] {
-        let mergeBase = try await mergeBase(base, in: worktree)
+        let mergeBase = try await baseline(base, in: worktree)
 
         let nameStatus = try await checkRaw(
             ["diff", "--name-status", "-M", "-z", mergeBase, "--"], in: worktree
@@ -795,7 +858,7 @@ public enum Git {
             // --no-index exits 1 whenever there is a difference, which is the normal case here.
             return result.stdout
         }
-        let mergeBase = try await mergeBase(base, in: worktree)
+        let mergeBase = try await baseline(base, in: worktree)
         return try await check(
             ["diff", "--no-color", "-M", mergeBase, "--", file.path], in: worktree
         ).stdout

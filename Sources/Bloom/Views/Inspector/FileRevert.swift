@@ -56,7 +56,9 @@ enum FileRevert {
         }
 
         do {
-            let base = try await Git.mergeBase(workspace.baseBranch, in: worktree)
+            // The same divergence point the diff was drawn from. Reverting to a different one
+            // would restore a version of the file the user was never shown.
+            let base = try await Git.baseline(workspace.baseBranch, in: worktree)
 
             // A rename is two paths: the old one has to come back and the new one has to go, and
             // doing only half of it leaves the file present under both names.
