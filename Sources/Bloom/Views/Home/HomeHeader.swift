@@ -16,6 +16,15 @@ struct HomeHeader: View {
     /// an archived switch over an empty machine are three controls that cannot change what is on
     /// screen, sitting directly above a panel explaining that there is nothing on screen.
     var showsControls: Bool
+    /// Whether this row carries the create button.
+    ///
+    /// Off exactly when the panel below is the one whose own call to action is "New workspace", or
+    /// the one that has no project to create a workspace in. Two prominent buttons on one screen,
+    /// eight hundred points apart, firing the same action is a screen that reads as two offers; the
+    /// one that sits with the sentence explaining what a workspace is wins, because it is the one
+    /// with an answer to "what happens if I press this". Once the list has rows, the panel is gone
+    /// and this is the only create button on Home, so it comes back.
+    var showsCreateWorkspace: Bool
     @Binding var filter: HomeFilter
     var onCreateWorkspace: () -> Void
 
@@ -61,10 +70,15 @@ struct HomeHeader: View {
                     .truncationMode(.tail)
                     .accessibilityAddTraits(.isHeader)
 
-                Text(summary)
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textSecondary)
-                    .lineLimit(1)
+                // Empty on a machine with no projects, where the panel below is already titled
+                // with the only fact there is to state. A subtitle repeating that title word for
+                // word is the same duplication as two create buttons, in prose.
+                if !summary.isEmpty {
+                    Text(summary)
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineLimit(1)
+                }
             }
 
             Spacer(minLength: Metrics.gutter)
@@ -74,9 +88,11 @@ struct HomeHeader: View {
             // the capsule drawn around it. Called "New workspace" rather than Conductor's "Create
             // workspace" because that is what the toolbar, the sidebar and the menu bar all call
             // the same sheet.
-            Button("New workspace", systemImage: "plus", action: onCreateWorkspace)
-                .controlSize(.large)
-                .buttonStyle(.borderedProminent)
+            if showsCreateWorkspace {
+                Button("New workspace", systemImage: "plus", action: onCreateWorkspace)
+                    .controlSize(.large)
+                    .buttonStyle(.borderedProminent)
+            }
         }
     }
 

@@ -56,6 +56,7 @@ struct HomeView: View {
                 repos: app.repos,
                 archivedCount: archived.count,
                 showsControls: hasAnyWorkspace,
+                showsCreateWorkspace: showsCreateWorkspace,
                 filter: $app.homeFilter,
                 onCreateWorkspace: { requestWorkspace(in: nil) }
             )
@@ -157,9 +158,11 @@ struct HomeView: View {
     /// work, so a narrowed list says so in the same breath as the total it was narrowed from.
     private var summary: String {
         // With nothing to describe, the heading says what there is rather than repeating the
-        // sentence the empty panel underneath is already making.
+        // sentence the empty panel underneath is already making. With not even a project, it says
+        // nothing at all: "No projects yet" is the title of that panel, and a machine name with a
+        // one line echo of the panel under it reads as two headings for one screen.
         guard hasAnyWorkspace else {
-            return app.repos.isEmpty ? "No projects yet" : count(app.repos.count, "project")
+            return app.repos.isEmpty ? "" : count(app.repos.count, "project")
         }
 
         var text: String
@@ -186,6 +189,26 @@ struct HomeView: View {
         !app.workspaces.isEmpty || !archived.isEmpty
     }
 
+    /// Whether the header keeps its "New workspace" button.
+    ///
+    /// Two of the five empty panels below already carry that button, or would be lying if they
+    /// did, so the header stands down for those two and stays for the other three:
+    ///
+    /// - **No projects at all.** Gone. The button is not merely redundant here, it is a trap: the
+    ///   sheet it opens has no project to start a workspace in, so it opens on its own empty state
+    ///   and the only thing to do in it is cancel. The panel underneath asks for a folder, which
+    ///   is the step that actually has to happen first.
+    /// - **A project, but no workspaces.** Gone. The panel's own button does exactly this, and it
+    ///   is the better of the two because it sits with the sentence saying what a workspace is.
+    /// - **Nothing matches the search, the project filter, or archived being hidden.** Kept. There
+    ///   are workspaces; the user narrowed the list. Those three panels offer a way to widen it
+    ///   again and no way to create anything, so the header is the only route to a new workspace
+    ///   and taking it away would strand a user who narrowed to nothing and then changed their
+    ///   mind about what they wanted.
+    private var showsCreateWorkspace: Bool {
+        !app.repos.isEmpty && hasAnyWorkspace
+    }
+
     private func count(_ value: Int, _ noun: String) -> String {
         value == 1 ? "1 \(noun)" : "\(value) \(noun)s"
     }
@@ -202,7 +225,7 @@ struct HomeView: View {
     private var emptyState: (some View)? {
         if app.repos.isEmpty {
             ContentUnavailableView {
-                Label("Add your first project", systemImage: "folder.badge.plus")
+                Label("No projects yet", systemImage: "folder.badge.plus")
             } description: {
                 Text("Point Bloom at a git repository. Every workspace you start gets its own worktree and its own agent, so they never step on each other.")
             } actions: {
