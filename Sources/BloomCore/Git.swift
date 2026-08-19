@@ -821,6 +821,86 @@ public enum Git {
         return count
     }
 
+    // MARK: - Renaming a branch
+
+    /// `git branch -m`, refusing anything git would read as an option.
+    ///
+    /// Safe to run against a branch that is checked out in a worktree: git moves the ref and
+    /// rewrites the worktree's HEAD to point at the new name, and nothing on disk moves. The
+    /// worktree's directory keeps whatever name it was created with, which is deliberate. A
+    /// worktree's path is recorded in three places at once and is the working directory of every
+    /// shell, agent and dev server the workspace has open, so it is never moved.
+    public static func renameBranch(_ old: String, to new: String, in directory: String) async throws {
+        try validate(branch: old)
+        try validate(branch: new)
+        try await check(["branch", "-m", "--", old, new], in: directory)
+    }
+
+    /// How many commits `head` has that `base` does not.
+    ///
+    /// Answers 0 rather than throwing when the range cannot be resolved. Every caller of this is
+    /// deciding whether something is safe, and "git could not tell me" has to be handled by the
+    /// caller as its own thing rather than arriving disguised as a number.
+    public static func commitsAhead(base: String, head: String = "HEAD", in directory: String) async throws -> Int {
+        try validate(ref: base, label: "base branch")
+        try validate(ref: head, label: "revision")
+        let result = try await run(["rev-list", "--count", "\(base)..\(head)"], in: directory)
+        guard result.ok else { return 0 }
+        return Int(result.trimmed) ?? 0
+    }
+
+    /// The tracking branch configured for `branch`, or nil when there is none.
+    public static func upstream(of branch: String, in directory: String) async throws -> String? {
+        try validate(branch: branch)
+        let result = try await run(
+            ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "\(branch)@{upstream}"],
+            in: directory
+        )
+        guard result.ok, !result.trimmed.isEmpty else { return nil }
+        return result.trimmed
+    }
+
+    /// Whether any remote-tracking ref carries this branch's name.
+    ///
+    /// Local knowledge only, no network. It catches the branch that was pushed without
+    /// `--set-upstream`, which leaves no upstream to find but still leaves a branch on the remote
+    /// that a local rename would strand.
+    public static func hasRemoteCounterpart(_ branch: String, in directory: String) async -> Bool {
+        guard isValidBranchName(branch) else { return false }
+        guard let result = try? await run(
+            ["for-each-ref", "--format=%(refname:short)", "refs/remotes"], in: directory
+        ), result.ok else { return false }
+
+        return result.lines.contains { ref in
+            // `origin/feature/x` for branch `feature/x`. Suffix matching rather than a glob,
+            // because a branch name may itself contain slashes and a remote may be called
+            // anything at all.
+            ref.hasSuffix("/" + branch)
+        }
+    }
+
+    /// Whether a rebase, merge, cherry-pick, revert or bisect is half finished here.
+    ///
+    /// `git branch -m` on a branch in this state is how a half-applied rebase loses the ref it was
+    /// going to return to.
+    public static func hasOperationInProgress(in directory: String) async -> Bool {
+        let markers = [
+            "rebase-merge", "rebase-apply", "MERGE_HEAD",
+            "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG",
+        ]
+        for marker in markers {
+            guard let result = try? await run(["rev-parse", "--git-path", marker], in: directory),
+                  result.ok else { continue }
+            let path = result.trimmed
+            guard !path.isEmpty else { continue }
+            let absolute = path.hasPrefix("/")
+                ? path
+                : (directory as NSString).appendingPathComponent(path)
+            if FileManager.default.fileExists(atPath: absolute) { return true }
+        }
+        return false
+    }
+
     // MARK: - Naming
 
     private static let stopWords: Set<String> = [

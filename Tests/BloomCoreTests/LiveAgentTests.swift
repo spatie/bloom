@@ -200,3 +200,38 @@ final class EventLog: @unchecked Sendable {
         }
     }
 }
+
+/// The naming call, against the real CLI.
+///
+/// Same bargain as `LiveAgentTests`: it spends tokens and needs auth, so it only runs when asked
+/// for. It exists because everything else about naming is proven against captured envelopes, and
+/// a captured envelope only proves Bloom still reads what the CLI emitted on the day it was
+/// captured. The flags this invocation depends on (`--json-schema`, `--tools ""`,
+/// `--system-prompt`, `--safe-mode`) are the CLI's, not Bloom's, and this is the only thing that
+/// notices when one of them changes.
+///
+///     BLOOM_LIVE=1 ./test-core.sh LiveNaming
+@Suite("LiveNaming", .enabled(if: liveEnabled), .tags(.subprocess), .scratchDirectory)
+struct LiveNamingTests {
+    @Test("a real model names a real task, in a shape Bloom will accept", .timeLimit(.minutes(2)))
+    func namesATask() async throws {
+        let namer = WorkspaceNamer()
+        let started = Date()
+
+        let suggestion = try #require(await namer.suggest(
+            task: "Fix the N+1 query on the invoices index page, it loads a customer per row",
+            project: "billing",
+            template: PromptRegistry.definition(for: .nameWorkspace).defaultTemplate
+        ))
+
+        // Nothing about the wording is asserted: what matters is that the answer is usable.
+        #expect(!suggestion.name.isEmpty)
+        #expect(suggestion.name.count <= WorkspaceNaming.nameLimit)
+        #expect(!suggestion.name.contains("\n"))
+        #expect(Git.isValidBranchName(suggestion.branch))
+
+        // The owner's yardstick was "a few seconds". Generous here, because a live test that fails
+        // on a slow morning is a test people learn to ignore.
+        #expect(Date().timeIntervalSince(started) < 60)
+    }
+}

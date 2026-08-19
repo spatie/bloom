@@ -7,6 +7,7 @@ import Foundation
 public enum PromptID: String, Sendable, Hashable, CaseIterable, Codable {
     case createPullRequest
     case review
+    case nameWorkspace
 }
 
 /// A substitution a prompt may use, and the one line of help shown beside it in Settings.
@@ -55,7 +56,7 @@ public struct PromptDefinition: Sendable, Hashable, Identifiable {
 /// context, and it can react when a push is rejected. A `gh pr create` fired from the app knows
 /// none of that and can only fail.
 public enum PromptRegistry {
-    public static let all: [PromptDefinition] = [createPullRequest, review]
+    public static let all: [PromptDefinition] = [createPullRequest, review, nameWorkspace]
 
     public static func definition(for id: PromptID) -> PromptDefinition {
         // Total by construction: every case is in `all`, and the test suite pins that.
@@ -70,6 +71,12 @@ public enum PromptRegistry {
         public static let baseBranch = "base_branch"
         public static let task = "task"
         public static let changes = "changes"
+    }
+
+    /// The names the workspace-naming prompt may use.
+    public enum NameWorkspace {
+        public static let task = "task"
+        public static let project = "project"
     }
 
     /// The names the review prompt may use.
@@ -170,6 +177,45 @@ public enum PromptRegistry {
         and tell me if you cannot. If you disagree with one, say so instead of changing the code.
 
         {{comments}}
+        """
+    )
+
+    /// The one prompt here that does not go to the workspace's own agent.
+    ///
+    /// It is answered by a separate, short-lived `claude -p` process with every tool switched off
+    /// and the default system prompt replaced, because naming a task needs none of the context
+    /// that makes a coding agent expensive to start. See `WorkspaceNamer`.
+    static let nameWorkspace = PromptDefinition(
+        id: .nameWorkspace,
+        title: "Name a new workspace",
+        summary: """
+        Sent a moment after a workspace is created, to turn what you asked for into a short name \
+        and a branch. Until the answer arrives the workspace wears a plant name. Answered by a \
+        small model with no tools and no access to the repository, and it never becomes part of \
+        the workspace's own conversation.
+        """,
+        variables: [
+            PromptVariable(
+                name: NameWorkspace.task,
+                summary: "The first thing you asked this workspace for."
+            ),
+            PromptVariable(name: NameWorkspace.project, summary: "The project it was created in."),
+        ],
+        defaultTemplate: """
+        Name this coding task, for a workspace sitting in a list beside twenty others.
+
+        Project: {{project}}
+
+        Answer at once, without deliberating.
+
+        - name: at most five words, sentence case, no full stop, no quotes. Say what the work is, \
+        in the words someone would use out loud. Never start it with "Task" or "Workspace".
+        - branch: lowercase, words joined by hyphens, at most four words, letters, digits and \
+        hyphens only, no slashes and no prefix.
+
+        ## Task
+
+        {{task}}
         """
     )
 }

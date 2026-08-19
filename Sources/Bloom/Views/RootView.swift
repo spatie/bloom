@@ -65,7 +65,21 @@ struct RootView: View {
         }
         // The window title is hidden in the toolbar (see BloomApp), but it still names the window
         // in the Window menu and in Mission Control, so it is worth setting.
+        //
+        // It takes an automatic rename straight, with no reveal. A window title is also its entry
+        // in the Window menu and its label in Mission Control, and neither of those can be
+        // animated: what they would show is one arbitrary frame of a scramble, which is a window
+        // called `xqbn hgue` in a menu the user is reading to find it by name.
         .navigationTitle(app.selectedWorkspace?.name ?? "Bloom")
+
+        // Bottom trailing, out of the way of the sidebar and of the composer's send button.
+        .overlay(alignment: .bottomTrailing) {
+            if let notice = app.notice {
+                NoticeBanner(notice: notice) { app.notice = nil }
+                    .transition(.opacity)
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: app.notice)
 
         .task { await app.bootstrap() }
         // The terminal panel lives at the bottom of the inspector now, so anything that asks for

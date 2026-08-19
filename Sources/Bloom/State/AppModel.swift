@@ -20,6 +20,17 @@ struct BloomAlert: Identifiable {
     var message: String
 }
 
+/// Something the app did that the user did not ask for and should still know about.
+///
+/// Not an alert. An alert stops the window and demands a click, which is far too much for "the
+/// name moved and the branch did not"; and staying silent about it is the one thing that would
+/// leave somebody believing their branch had been renamed when it had not. So: one sentence, in
+/// the corner, that goes away by itself.
+struct BloomNotice: Identifiable, Equatable {
+    let id = UUID()
+    var message: String
+}
+
 /// An archive the app refused to carry out, waiting on the user.
 ///
 /// It carries the report rather than a yes or no question, because "are you sure?" tells the user
@@ -139,6 +150,8 @@ final class AppModel {
     var isBottomPanelVisible = true
 
     var alert: BloomAlert?
+    /// The corner notice. See `BloomNotice`. Set from anywhere, drawn once by `RootView`.
+    var notice: BloomNotice?
     /// Non-nil while an archive is waiting for the user to confirm that the work it would destroy
     /// really is expendable. RootView presents the confirmation from this.
     var pendingArchive: ArchiveRequest?
@@ -534,15 +547,32 @@ final class AppModel {
         isCreatingWorkspace = true
         defer { isCreatingWorkspace = false }
 
+        // The codename the workspace wears until a model answers. Decided before the worktree
+        // exists so the row never appears under one name and changes to another in the same
+        // breath, and nil whenever nothing is going to be asked, in which case `createWorkspace`
+        // falls back to `Git.title` exactly as it always has.
+        let placeholder = shouldNameAutomatically(name: nil, prompt: prompt, opensWith: opensWith)
+            ? await placeholderName()
+            : nil
+
         do {
             let workspace = try await manager.createWorkspace(
                 repo: repo,
                 prompt: prompt,
-                name: opensWith == .terminal ? branch : nil,
+                name: opensWith == .terminal ? branch : placeholder,
                 branch: branch,
                 baseBranch: baseBranch
             )
             await reload()
+
+            if let placeholder {
+                beginAutomaticNaming(
+                    workspace: workspace,
+                    repo: repo,
+                    prompt: prompt,
+                    placeholder: placeholder
+                )
+            }
             selection = .workspace(workspace.id)
             WorkspaceStartMode.record(opensWith, workspaceID: workspace.id)
 
