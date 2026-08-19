@@ -266,7 +266,12 @@ struct CreateWorkspaceSheet: View {
                     canSend: canCreate,
                     intent: .create,
                     onAttach: onAttach,
-                    onSend: create
+                    onSend: create,
+                    // A terminal workspace opens a shell and never starts an agent, so the model,
+                    // the effort, the permission mode, fast mode and the paperclip have nothing to
+                    // act on. They were drawn anyway, which made the sheet offer five settings that
+                    // the workspace it was about to create would ignore.
+                    showsAgentControls: mode == .chat
                 )
             }
 

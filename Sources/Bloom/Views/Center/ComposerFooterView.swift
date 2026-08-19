@@ -21,6 +21,14 @@ struct ComposerFooterView: View {
     var onAttach: @MainActor () -> Void
     var onSend: @MainActor () -> Void
     var onStop: @MainActor () -> Void = {}
+    /// Whether the row carries the choices the agent runs on.
+    ///
+    /// False for a terminal workspace, which has no agent: the create sheet was offering a model,
+    /// a reasoning effort, a permission mode, fast mode and a paperclip for a workspace that opens
+    /// a shell and never sends any of them anywhere. What is left is the send button, which is the
+    /// one control on the row that still does something.
+    var showsAgentControls: Bool = true
+
     /// Model and effort ids this footer has been set to that are not on the built-in lists, kept
     /// so the menu can offer the way back. See `ComposerOption.adding`.
     ///
@@ -58,42 +66,44 @@ struct ComposerFooterView: View {
 
     private func row(isCompact: Bool, showsContext: Bool) -> some View {
         HStack(spacing: Metrics.spacingTight) {
-            ComposerOptionMenu(
-                options: ComposerOption.adding(extraModels, to: ComposerOption.models),
-                selection: controls.model,
-                title: "Model",
-                systemImage: "sparkle",
-                isCompact: isCompact,
-                help: "Choose the model",
-                onSelect: { id in edit { $0.model = id } }
-            )
+            if showsAgentControls {
+                ComposerOptionMenu(
+                    options: ComposerOption.adding(extraModels, to: ComposerOption.models),
+                    selection: controls.model,
+                    title: "Model",
+                    systemImage: "sparkle",
+                    isCompact: isCompact,
+                    help: "Choose the model",
+                    onSelect: { id in edit { $0.model = id } }
+                )
 
-            ComposerOptionMenu(
-                options: ComposerOption.adding(extraEfforts, to: ComposerOption.efforts),
-                selection: controls.effort,
-                title: "Reasoning effort",
-                systemImage: "chart.bar.fill",
-                isCompact: isCompact,
-                help: "Choose reasoning effort",
-                onSelect: { id in edit { $0.effort = id } }
-            )
+                ComposerOptionMenu(
+                    options: ComposerOption.adding(extraEfforts, to: ComposerOption.efforts),
+                    selection: controls.effort,
+                    title: "Reasoning effort",
+                    systemImage: "chart.bar.fill",
+                    isCompact: isCompact,
+                    help: "Choose reasoning effort",
+                    onSelect: { id in edit { $0.effort = id } }
+                )
 
-            ComposerOptionMenu(
-                options: ComposerOption.permissionModes,
-                selection: controls.permissionMode.rawValue,
-                title: "Permission mode",
-                systemImage: Self.permissionGlyph(controls.permissionMode),
-                tint: controls.permissionMode == .bypassPermissions
-                    ? Palette.warning
-                    : Palette.textSecondary,
-                isCompact: isCompact,
-                help: "Choose permission mode",
-                onSelect: selectPermissionMode
-            )
+                ComposerOptionMenu(
+                    options: ComposerOption.permissionModes,
+                    selection: controls.permissionMode.rawValue,
+                    title: "Permission mode",
+                    systemImage: Self.permissionGlyph(controls.permissionMode),
+                    tint: controls.permissionMode == .bypassPermissions
+                        ? Palette.warning
+                        : Palette.textSecondary,
+                    isCompact: isCompact,
+                    help: "Choose permission mode",
+                    onSelect: selectPermissionMode
+                )
 
-            // After the three pickers rather than between them: the pickers all answer "which",
-            // and a toggle wedged into that run made the row read as four unrelated controls.
-            fastToggle(isCompact: isCompact)
+                // After the three pickers rather than between them: the pickers all answer "which",
+                // and a toggle wedged into that run made the row read as four unrelated controls.
+                fastToggle(isCompact: isCompact)
+            }
 
             Spacer(minLength: Metrics.spacing)
 
@@ -105,12 +115,15 @@ struct ComposerFooterView: View {
 
             // A paperclip, not the plus that used to sit here: a plus already means "new session"
             // in the tab strip directly above, and it says nothing about what is being added.
-            Button(action: onAttach) {
-                ComposerControlLabel(systemImage: "paperclip", text: nil)
+            // Gone with the rest when there is no agent: nothing reads an attachment into a shell.
+            if showsAgentControls {
+                Button(action: onAttach) {
+                    ComposerControlLabel(systemImage: "paperclip", text: nil)
+                }
+                .buttonStyle(.plain)
+                .help("Attach a file")
+                .accessibilityLabel("Attach a file")
             }
-            .buttonStyle(.plain)
-            .help("Attach a file")
-            .accessibilityLabel("Attach a file")
 
             ComposerSendButton(
                 intent: intent,
