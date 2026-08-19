@@ -1,5 +1,4 @@
 import Foundation
-import BloomCore
 
 /// The alignment declared by a table separator row is retained so presentation stays outside parsing.
 public enum TableAlignment: Sendable, Hashable {
@@ -366,6 +365,9 @@ private func quoteContent(_ source: String) -> String? {
 }
 
 private func listMarker(_ source: String) -> ListMarker? {
+    // A rule wins over a list item when a line could be read as either, which is the only thing
+    // that keeps `- - -` from becoming a bullet holding a bullet holding a dash.
+    guard !isThematicBreak(source) else { return nil }
     let indent = leadingSpaces(source)
     guard indent <= 3 || indent > 0 else { return nil }
     let line = dropLeadingColumns(source, indent)
@@ -406,7 +408,12 @@ private func tableAlignments(_ source: String) -> [TableAlignment]? {
         let leading = trimmed.hasPrefix(":")
         let trailing = trimmed.hasSuffix(":")
         let core = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: ":"))
-        guard core.count >= 3, core.allSatisfy({ $0 == "-" }) else { return nil }
+        // Three characters of separator, counting the colons. A shorter rule than that is far more
+        // often a sentence with pipes in it than a table, and the width check below is not enough
+        // on its own. Counting the colons is what lets the compact `:-:` and `--:` forms through:
+        // requiring three dashes as well would leave the most common way of writing a centred
+        // column rendering as a paragraph of pipes.
+        guard trimmed.count >= 3, !core.isEmpty, core.allSatisfy({ $0 == "-" }) else { return nil }
         result.append(leading && trailing ? .center : (trailing ? .trailing : .leading))
     }
     return result

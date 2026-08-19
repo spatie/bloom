@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import BloomCore
 
 private final class MarkdownBlockBox: NSObject {
     let blocks: [MarkdownBlock]
