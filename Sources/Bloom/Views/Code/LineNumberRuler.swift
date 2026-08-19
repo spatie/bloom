@@ -136,8 +136,8 @@ final class LineNumberRuler: NSRulerView {
             let start = lineStarts[index]
             guard start <= text.length else { break }
 
-            let glyph = layoutManager.glyphIndexForCharacter(at: start)
-            let fragment = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+            guard let fragment = fragment(for: start, in: text, layoutManager: layoutManager)
+            else { break }
             let y = origin + fragment.minY
             if y > rect.maxY { break }
 
@@ -154,6 +154,32 @@ final class LineNumberRuler: NSRulerView {
             }
             index += 1
         }
+    }
+
+    /// Where one line sits, in the text view's own coordinates.
+    ///
+    /// The line a buffer ending in a newline leaves behind has no glyphs at all, and the layout
+    /// manager holds it apart from every other line as the "extra" fragment. Asked for it the
+    /// ordinary way, `glyphIndexForCharacter(at:)` runs off the end of the glyph store and hands
+    /// back a zero rect, so the number for that last line was drawn at the top of the gutter,
+    /// stacked on top of the 1. A script pasted in with a trailing newline is the common case, so
+    /// nearly every box in the settings window showed it.
+    private func fragment(
+        for start: Int, in text: NSString, layoutManager: NSLayoutManager
+    ) -> NSRect? {
+        guard start == text.length else {
+            let glyph = layoutManager.glyphIndexForCharacter(at: start)
+            return layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        }
+        // An empty buffer is the same case: line one has no glyphs either, and asking for its
+        // fragment the ordinary way made AppKit log `invalid glyph index 0` on every draw of an
+        // empty script field.
+        guard layoutManager.extraLineFragmentTextContainer != nil else {
+            // Layout has not run yet, which only happens before the first pass. Line one sits at
+            // the top of the container either way, and the next draw has the real rect.
+            return start == 0 ? NSRect(x: 0, y: 0, width: 0, height: CodeMetrics.rowHeight) : nil
+        }
+        return layoutManager.extraLineFragmentRect
     }
 
     /// The character offset each line starts at. Index `i` is the offset of line `i + 1` as the
