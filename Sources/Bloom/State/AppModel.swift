@@ -297,7 +297,11 @@ final class AppModel {
             let loadedRepos = try await store.repos()
             let loadedWorkspaces = try await store.workspaces()
             repos = loadedRepos
-            workspaces = loadedWorkspaces
+            // Minus whatever is being archived right now, which the store has not heard about
+            // yet: see `archivingWorkspaceIDs`.
+            workspaces = WorkspaceListReconciliation.afterStoreReload(
+                fresh: loadedWorkspaces, archiving: archivingWorkspaceIDs
+            )
             // The models hold a copy of their `Workspace`, and this is where those copies go
             // stale. Refreshing here keeps `model(for:)` out of every view body.
             for workspace in workspaces {
@@ -361,8 +365,18 @@ final class AppModel {
             }
         }
         if let updated = try? await store.workspaces() {
+            // Never assigned straight over the top, because this answer is about the world as the
+            // store knew it and the list can have moved on while all of those git calls ran. The
+            // case that made it visible: archiving hides the row first and writes to the store
+            // last, so a pass landing in between read a workspace that was still active and put
+            // the row back on screen for as long as the archive had left to run.
+            // `WorkspaceListReconciliation` is the rule, and the reason it is a rule rather than
+            // a special case for archiving.
+            let reconciled = WorkspaceListReconciliation.reconciled(
+                held: workspaces, snapshot: current, fresh: updated
+            )
             // Only reassign when something actually changed, to avoid pointless view updates.
-            if updated != workspaces { workspaces = updated }
+            if reconciled != workspaces { workspaces = reconciled }
         }
     }
 
@@ -1039,6 +1053,7 @@ final class AppModel {
         // up. If the disk refuses, the `catch` below reloads from the store, where the row is
         // still active, and it comes back with the reason in front of it.
         let previousSelection = selection
+        archivingWorkspaceIDs.insert(workspace.id)
         workspaces.removeAll { $0.id == workspace.id }
         if selection.workspaceID == workspace.id { selection = .home }
 
@@ -1050,6 +1065,9 @@ final class AppModel {
                 force: force,
                 isPullRequestMerged: hazards.isPullRequestMerged
             )
+            // The store agrees the workspace is archived now, so nothing needs protecting from a
+            // reload any more.
+            archivingWorkspaceIDs.remove(workspace.id)
             // The worktree is gone from disk now. Its shells are sitting in a directory that no
             // longer exists and its dev servers are still holding their ports, and nothing else in
             // the app will ever come back for them.
@@ -1064,7 +1082,7 @@ final class AppModel {
             await offerUndo(of: workspace, repo: repo, report: report)
             Log.archive.info("archived \(workspace.name, privacy: .public)")
         } catch let error as WorkspaceError {
-            await undoOptimisticArchive(restoring: previousSelection)
+            await undoOptimisticArchive(workspace, restoring: previousSelection)
             switch error {
             case .archiveScriptFailed(let status, let output):
                 Log.archive.error(
@@ -1101,7 +1119,7 @@ final class AppModel {
                 alert = BloomAlert(title: "Could not archive the workspace", message: error.readableMessage)
             }
         } catch {
-            await undoOptimisticArchive(restoring: previousSelection)
+            await undoOptimisticArchive(workspace, restoring: previousSelection)
             Log.archive.error(
                 "could not archive \(workspace.name, privacy: .public): \(error.readableMessage, privacy: .public)"
             )
@@ -1109,13 +1127,29 @@ final class AppModel {
         }
     }
 
+    /// Workspaces whose row has already left the sidebar while their archive is still running.
+    ///
+    /// The archive hides the row before any filesystem work starts, on purpose, and the store is
+    /// not told until the very end. Between those two moments the store still answers "active",
+    /// and every full read of it, a reload after a rename, after a pin, after an automatic name
+    /// arriving, would put the row back on screen for the rest of the archive. This is how a
+    /// reload knows about a decision the store has not caught up with yet. See
+    /// `WorkspaceListReconciliation.afterStoreReload`.
+    ///
+    /// Outside observation deliberately: nothing draws from it, `reload` is the only reader, and
+    /// the write that matters to the UI is the one it makes to `workspaces`.
+    @ObservationIgnored private var archivingWorkspaceIDs: Set<String> = []
+
     /// Puts a workspace back in the sidebar after the disk refused to let it go.
     ///
     /// Reloaded from the store rather than reinstated from a copy held in memory. `Workspace.state`
     /// is only written once the removal has actually happened, so a failed archive leaves the row
     /// exactly as it was, and reading it back is the one version that cannot disagree with what
     /// every other part of the app is about to read.
-    private func undoOptimisticArchive(restoring selection: SidebarSelection) async {
+    private func undoOptimisticArchive(_ workspace: Workspace, restoring selection: SidebarSelection) async {
+        // Before the reload rather than after it. The reload is the thing that puts the row back,
+        // and it can only do that once this workspace has stopped being filtered out of it.
+        archivingWorkspaceIDs.remove(workspace.id)
         await reload()
         self.selection = selection
     }
