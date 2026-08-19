@@ -41,9 +41,10 @@ struct TranscriptListView: View {
             && !transcript.isStreaming
     }
 
-    private var maxBubbleWidth: CGFloat {
-        max(Self.bubbleFloor, (geometry.width - Metrics.gutter * 2) * Self.bubbleShare)
-    }
+    /// Already rounded, by `TranscriptGeometry.cap`, and rounded before it reaches this view's
+    /// state rather than after. A cap that changed on every pixel of a drag failed the row
+    /// equality check on every realised row, once a frame.
+    private var maxBubbleWidth: CGFloat { geometry.bubbleCap }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -134,12 +135,22 @@ struct TranscriptListView: View {
 
     /// How far the end of the content is below the bottom edge of the viewport. Negative when the
     /// content is shorter than the pane, which counts as being at the bottom.
+    ///
+    /// The bubble cap is worked out here, inside the projection, rather than in the body from a
+    /// stored width. `onScrollGeometryChange` only calls its handler when the projected value
+    /// changes, so rounding on this side of the line means a drag stops writing state, and stops
+    /// re-running the list body, for the eleven points of travel between one cap and the next.
     private static func measure(_ scroll: ScrollGeometry) -> TranscriptGeometry {
         let distanceFromEnd = scroll.contentSize.height
             - scroll.contentOffset.y
             - scroll.containerSize.height
         return TranscriptGeometry(
-            width: scroll.containerSize.width,
+            bubbleCap: TranscriptGeometry.cap(
+                width: scroll.containerSize.width,
+                share: bubbleShare,
+                gutter: Metrics.gutter,
+                floor: bubbleFloor
+            ),
             isNearBottom: distanceFromEnd < stickyThreshold
         )
     }

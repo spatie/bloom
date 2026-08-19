@@ -16,12 +16,33 @@ struct TranscriptRowView: View, Equatable {
     /// A row redraws when what it holds changes, and not because the closure beside it is a new
     /// closure. Functions are never equal to one another, so without this SwiftUI has to assume
     /// every row differs from the one it drew a moment ago.
+    ///
+    /// **Written out field by field, and it must stay that way.** `lhs.row == rhs.row` is one
+    /// character shorter and it compares `payload: Data` byte by byte, which in a real session is
+    /// 1.6MB of JSON across 189 rows, on the main thread, on every layout pass. Dragging the
+    /// sidebar divider runs a layout pass per frame, so the comparison that exists to avoid work
+    /// was doing more work than the redraw it prevented. Both `Data.==` and
+    /// `TranscriptRow.__derived_struct_equals` showed up on the drag path in a profile.
+    ///
+    /// What is compared instead is what identifies the row and what can change about it after it
+    /// has been stored. `id` and `seq` name a persisted message, whose payload is written once and
+    /// never rewritten. `resultPayload` arrives later, and its length is enough to see it arrive
+    /// or grow without reading it. `isError` and `durationMS` are set at the same moment. The
+    /// workspace is compared on the two fields a row actually reads, which are where its file
+    /// chips open and which model they open into.
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.row == rhs.row
+        lhs.row.id == rhs.row.id
+            && lhs.row.seq == rhs.row.seq
+            && lhs.row.kind == rhs.row.kind
+            && lhs.row.isError == rhs.row.isError
+            && lhs.row.durationMS == rhs.row.durationMS
+            && lhs.row.resultPayload?.count == rhs.row.resultPayload?.count
+            && lhs.row.parentToolUseID == rhs.row.parentToolUseID
             && lhs.isExpanded == rhs.isExpanded
             && lhs.isNested == rhs.isNested
             && lhs.maxBubbleWidth == rhs.maxBubbleWidth
-            && lhs.workspace == rhs.workspace
+            && lhs.workspace.id == rhs.workspace.id
+            && lhs.workspace.path == rhs.workspace.path
     }
 
     var row: TranscriptRow
