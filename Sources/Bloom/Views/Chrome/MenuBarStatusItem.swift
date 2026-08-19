@@ -62,6 +62,52 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         created.menu = menu
         item = created
         refreshButton()
+        claimPlaceInMenuBar(created)
+    }
+
+    // MARK: - Placement
+
+    /// Makes sure the item ends up where it is drawn.
+    ///
+    /// A new status item's window is parked flush against the right-hand edge of the screen while
+    /// the system works out where in the menu bar it belongs, and is moved to its real slot about
+    /// a tenth of a second later. On macOS 26 that move sometimes never arrives: the window is
+    /// given the menu bar's height and left at the parked position, while the item itself is drawn
+    /// in its proper slot by the system, out of this process. It happened on eleven launches out of
+    /// forty, and on none out of twenty an hour earlier, so it is a race whose odds move with
+    /// whatever else is inserting and removing items at the same moment.
+    ///
+    /// Nothing looks wrong until the item is clicked. A menu opens against the window rather than
+    /// against the drawn item, so it appears at the far right of the screen, under the clock, a
+    /// third of a screen away from the icon that opened it. That is the whole bug.
+    ///
+    /// Taking the item out of the bar and putting it straight back asks for a place again, and the
+    /// second ask lands. Checked rather than done blindly, so an item that was placed correctly is
+    /// never disturbed, and checked more than once, because an answer that went missing can go
+    /// missing twice.
+    private func claimPlaceInMenuBar(_ item: NSStatusItem, attemptsLeft: Int = 3) {
+        guard attemptsLeft > 0 else { return }
+        Task { @MainActor in
+            // Long enough for the system to have answered one way or the other. Before it has,
+            // the window is still at the parked position legitimately and there is nothing to fix.
+            try? await Task.sleep(for: .milliseconds(250))
+            guard self.item === item, Self.isParked(item) else { return }
+            item.isVisible = false
+            item.isVisible = true
+            claimPlaceInMenuBar(item, attemptsLeft: attemptsLeft - 1)
+        }
+    }
+
+    /// Whether the item's window is still where the system parks one it has not placed: flush
+    /// against the right-hand edge of the screen.
+    ///
+    /// A real slot never reaches that edge, because the clock and Control Center sit to the right
+    /// of anything an app can add, so there is no correctly placed item this can mistake for a
+    /// parked one.
+    private static func isParked(_ item: NSStatusItem) -> Bool {
+        guard let window = item.button?.window else { return false }
+        guard let screen = window.screen ?? NSScreen.main else { return false }
+        return window.frame.maxX >= screen.frame.maxX
     }
 
     func setRunningCount(_ count: Int) {
