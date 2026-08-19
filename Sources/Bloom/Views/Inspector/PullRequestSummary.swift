@@ -39,6 +39,13 @@ struct PullRequestSummary: View {
 
     private var status: PullRequestStatus { pullRequest.status }
 
+    /// Whether this strip is asking for something or reporting something.
+    ///
+    /// Open is a request: there is a button in the band and a state you are waiting on. Merged and
+    /// closed are answers, and they are drawn a rung quieter for it. The same question decides the
+    /// band's own wash, in `PullRequestBar`.
+    private var isPending: Bool { pullRequest.isOpen }
+
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {
             identity
@@ -98,10 +105,27 @@ struct PullRequestSummary: View {
         Chip(
             text: "#\(pullRequest.number)",
             tint: tint ?? Palette.accent,
-            background: (tint ?? Palette.accent).opacity(InspectorLayout.tintOpacityStrong)
+            background: chipBackground
         )
         .help(pullRequest.title)
         .accessibilityLabel("Pull request \(pullRequest.number), \(pullRequest.title)")
+    }
+
+    /// What the number is drawn on, which depends on whether the band under it is coloured.
+    ///
+    /// On a washed band it is the pane's own colour, not a second wash of the state's. The bar
+    /// already carries the tint, so a chip filled with more of the same tint is one hue at two
+    /// strengths a millimetre apart: measured on the warning band it came out brown ink on beige,
+    /// which was the muddiest thing the strip drew. On the surface colour the chip lifts off the
+    /// band instead, and the number stays what it is, an identifier rather than a state.
+    ///
+    /// On a band with no wash there is nothing to lift off: a surface coloured chip on the surface
+    /// is no chip at all, which is exactly what Draft and Closed came out as when this was one
+    /// value. Those two keep the accent wash they always had.
+    private var chipBackground: Color {
+        tint == nil
+            ? Palette.accent.opacity(InspectorLayout.tintOpacityStrong)
+            : Palette.surface
     }
 
     /// A separate control rather than making the chip itself clickable: the chip is the label of
@@ -125,18 +149,36 @@ struct PullRequestSummary: View {
     /// A flexible frame rather than a `Spacer` and a negative layout priority: this is the one
     /// thing in the strip that can be any length, so it takes whatever width is left and truncates
     /// inside it, which is a rule the layout cannot resolve any other way.
+    ///
+    /// Two rungs, not one, because the two kinds of state are not the same kind of sentence.
+    ///
+    /// A pull request that is still open is asking for something, and it is the top of this
+    /// column: `Typo.heading`, 15 points, the only rung above reading size. It was
+    /// `Typo.captionEmphasis`, 11 points, which is two points SMALLER than the file names in the
+    /// list underneath. A heading that is smaller than the rows it heads is not a heading, and
+    /// no amount of colour fixes that; it is the whole of the "still small font" complaint.
+    ///
+    /// Merged and closed are reports of something already finished. They drop to `Typo.title`,
+    /// which is the system's own heading style at reading size, so they still read as a heading
+    /// and stop competing with the diff. Flattening the two to one treatment is how a strip ends
+    /// up either shouting about a merged branch or whispering about one that is ready to land.
     private var headline: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(status.text)
-                .font(Typo.captionEmphasis)
+                .font(isPending ? Typo.heading : Typo.title)
                 .foregroundStyle(tint ?? Palette.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)
 
             if let detail = status.detail {
                 Text(detail)
-                    .font(Typo.micro)
-                    .foregroundStyle(Palette.textTertiary)
+                    .font(Typo.caption)
+                    // Grey, and deliberately so: it is a count read off the headline above it, and
+                    // a second coloured line would leave the strip with nothing quiet in it. What
+                    // it is NOT any more is `textTertiary`, which is the palette's faded rung at
+                    // 2.9 to 1 on white. A number nobody can read is not a quiet number, it is a
+                    // missing one, and two faded rungs stacked is most of what "ugly grey" meant.
+                    .foregroundStyle(Palette.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -169,11 +211,18 @@ struct PullRequestSummary: View {
     /// to carry. The other two methods moved to the chevron beside it, which stays a menu and stays
     /// quiet because it is not the thing being pointed at.
     ///
-    /// Always explicitly tinted. An untinted `.borderedProminent` follows the SYSTEM accent on
-    /// this platform, which is whatever blue or pink the user set in General, and on macOS 26 it
-    /// renders as a grey glass capsule instead. Both are wrong: the fill is the state's own
-    /// colour, so the strip is one decision from end to end and a red bar ends in a red button.
-    /// Failing checks do not block merging, which is the whole reason that has to hold.
+    /// Always explicitly tinted, and the tint does take effect: measured on this SDK the fill
+    /// comes out at the tint's own value, where an untinted `.borderedProminent` comes out at
+    /// `#3478F6`, the system accent, which is whatever blue or pink the user set in General. The
+    /// fill is the state's own colour instead, so the strip is one decision from end to end and a
+    /// red bar ends in a red button. Failing checks do not block merging, which is the whole
+    /// reason that has to hold.
+    ///
+    /// The one thing no tint survives is the window losing key. AppKit draws every prominent
+    /// button in an inactive window as a neutral glass capsule, this one included, and there is no
+    /// override for it short of building the control by hand. That is the platform being
+    /// consistent rather than a bug here, and it is worth knowing before reading a screenshot of
+    /// this strip: a grey Merge button means the screenshot was taken with another app in front.
     ///
     /// Every path through it opens the confirmation. The button proposes a squash merge because
     /// that is what it says; nothing here ever performs one.
@@ -194,7 +243,10 @@ struct PullRequestSummary: View {
             .labelStyle(.iconOnly)
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
-            .foregroundStyle(Palette.textSecondary)
+            // The state's colour rather than a neutral grey. It stands beside a filled button in
+            // that colour and belongs to it, and a grey chevron a few points off a teal capsule
+            // reads as a stray control that wandered into the strip.
+            .foregroundStyle(tint ?? Palette.accent)
             .controlSize(.small)
         }
         .fixedSize()

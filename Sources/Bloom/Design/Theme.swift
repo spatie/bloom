@@ -338,8 +338,15 @@ extension Color {
 /// step the app actually wanted, was never used at all. `.subheadline` is that step, and it is
 /// where everything that sat at 10 for want of anywhere else has moved to.
 enum Typo {
-    /// 15. The only rung above reading size, and only for a heading inside agent prose, where a
-    /// heading set at body size with a weight on it is not a heading, it is a bold sentence.
+    /// 15. The only rung above reading size, for the two places something has to read as a heading
+    /// rather than as a bold sentence: a heading inside agent prose, and the state of the pull
+    /// request at the top of the inspector.
+    ///
+    /// The second one is here rather than local to the inspector because it is the same judgement,
+    /// not a second one. A heading set at body size with a weight on it is a bold sentence, and
+    /// the inspector's state line was a rung BELOW the file names it heads, which is worse again.
+    /// Anything that has to sit above reading size belongs on this rung; a sixth rung invented for
+    /// one strip is how a five rung scale stops being one.
     static let heading = ScaledFont(.title3, weight: .bold)
     /// 13 bold. `.headline` is the system's own heading style at reading size, so saying so lets
     /// macOS treat it as a heading rather than as body with a weight bolted on.

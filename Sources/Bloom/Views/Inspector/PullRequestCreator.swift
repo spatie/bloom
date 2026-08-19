@@ -16,6 +16,13 @@ import BloomCore
 /// button so a long branch truncates from the head, which keeps the readable end of it, rather
 /// than pushing the only action in the strip off the edge of the pane. Below even that width the
 /// button drops its title, the way a toolbar item does.
+///
+/// A rung below the state headline `PullRequestSummary` draws in the same band, on purpose. That
+/// one is a state you are waiting on and it is the top of the column; this one is a branch name
+/// the reader chose and already knows, so it is reading size rather than above it. At 15 points a
+/// realistic branch name truncates from the head at the pane's default width and the strip turns
+/// into a row about an ellipsis. Both strips carry the same detail rung underneath, so the two
+/// states of the same band still share one rhythm.
 struct PullRequestCreator: View {
     var branch: String
     var baseBranch: String
@@ -43,14 +50,14 @@ struct PullRequestCreator: View {
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {
             Image(systemName: "arrow.triangle.branch")
-                .font(Typo.caption)
+                .font(Typo.title)
                 .imageScale(.medium)
                 .foregroundStyle(Palette.textTertiary)
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(branch)
-                    .font(Typo.captionEmphasis)
+                    .font(Typo.title)
                     .foregroundStyle(Palette.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.head)
@@ -59,8 +66,8 @@ struct PullRequestCreator: View {
 
                 if github.isUsable {
                     Text(subtitle)
-                        .font(Typo.micro)
-                        .foregroundStyle(Palette.textTertiary)
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 } else {
@@ -70,7 +77,7 @@ struct PullRequestCreator: View {
                         GitHubSignIn.shared.present(directory: worktree)
                     }
                     .buttonStyle(.link)
-                    .font(Typo.micro)
+                    .font(Typo.caption)
                     .lineLimit(1)
                     .help(
                         github == .notInstalled
@@ -108,7 +115,8 @@ struct PullRequestCreator: View {
     }
 
     /// Tinted explicitly. An untinted `.borderedProminent` follows the system accent on this
-    /// platform and renders as grey glass on macOS 26, and this is the button the strip exists for.
+    /// platform, and this is the button the strip exists for. See `PullRequestSummary.mergeButton`
+    /// for the measurement, and for the one case no tint survives.
     private var createButton: some View {
         Button("Create pull request", systemImage: "arrow.triangle.pull", action: action)
             .buttonStyle(.borderedProminent)

@@ -109,20 +109,30 @@ struct InspectorToolbar: View {
         }
     }
 
-    /// Tinted, because a segmented control left alone fills its selected segment with the SYSTEM
-    /// accent. On a default install that is a saturated blue, which made the selected tab the most
-    /// saturated thing in the entire window: louder than the merge button above it, which is the
-    /// one control here that is meant to shout, and in a colour that is not the app's at all.
+    /// Untinted, and that is not an oversight.
     ///
-    /// `Palette.selected` is the same fill a selected row in the sidebar carries, so choosing a
-    /// tab now reads the way choosing anything else in this window reads.
+    /// This carried `.tint(Palette.selected)` for a while, against a comment saying a segmented
+    /// control left alone fills its selected segment with the system accent. Neither half of that
+    /// is true on this SDK, and both were measured to settle it. Three pickers were drawn side by
+    /// side in one window, one tinted `Palette.selected`, one untinted and one tinted
+    /// `Palette.positive`, and the selected segment came out of all three at exactly `#CFCFCF` in
+    /// light and `#4B4E54` in dark. `.tint` does not reach the control: SwiftUI's segmented picker
+    /// is an `NSSegmentedControl`, and the only thing that recolours its selected cell is
+    /// `selectedSegmentBezelColor` on the instance, which there is no supported way to reach from
+    /// here. AppKit has no `appearance()` proxy to set it globally either.
+    ///
+    /// So the tint was a line of code that did nothing, sitting under a comment claiming a colour
+    /// decision that was never being made. What it wanted is what the system now does anyway: this
+    /// SDK draws the selected segment as a neutral capsule rather than in the accent colour, so
+    /// the tab row is already the quiet grey the pull request band above it needs it to be, and
+    /// there is nothing left for a tint to fix. If a future SDK puts the accent back in it, this is
+    /// the note to come back to, and the answer will be a control of our own rather than a tint.
     private var tabPicker: some View {
         Picker("Inspector view", selection: $model.inspectorTab) {
             ForEach(InspectorTab.allCases, id: \.self) { tab in
                 Text(title(for: tab)).tag(tab)
             }
         }
-        .tint(Palette.selected)
     }
 
     private func title(for tab: InspectorTab) -> String {

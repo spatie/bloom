@@ -58,7 +58,7 @@ struct PullRequestBar: View {
                 ZStack {
                     Palette.surface
                     if let tint {
-                        tint.opacity(InspectorLayout.tintOpacity)
+                        tint.opacity(washOpacity)
                     }
                 }
             }
@@ -67,6 +67,18 @@ struct PullRequestBar: View {
     /// Nil until there is a pull request, and for the states that have nothing to signal.
     private var tint: Color? {
         model.pullRequest?.status.tone.color
+    }
+
+    /// How hard the band carries its colour.
+    ///
+    /// An open pull request is asking for something and gets the full wash. Merged and closed are
+    /// answers: they keep the hue, so "did this land" is still one glance, and they give it up as
+    /// volume, because the reading matter in this column is the diff below and a finished branch
+    /// has no business competing with it. `PullRequestSummary` makes the same split in type.
+    private var washOpacity: Double {
+        model.pullRequest?.isOpen == false
+            ? InspectorLayout.bandOpacityQuiet
+            : InspectorLayout.bandOpacity
     }
 
     @ViewBuilder

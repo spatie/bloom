@@ -19,16 +19,37 @@ enum InspectorLayout {
     static let barHeight = Metrics.barHeight
     /// The pull request strip, which is taller than the rest of them on purpose.
     ///
-    /// It carries the state of the work as a headline with its numbers under it, and the one
-    /// prominent button in this column. Two lines of text is 30 points at the sizes used here
-    /// (a 13 point headline, a point of leading, an 11 point detail), and a regular button is 24,
-    /// so 44 leaves seven points of air above and below whichever of the two is taller. At the 32
-    /// the tab row uses, the button had to drop to `.small` and the detail line had nowhere to go,
-    /// which is why the strip read as a caption rather than as the top of the column.
-    static let pullRequestBarHeight: CGFloat = 44
+    /// Derived from the type it holds, measured rather than guessed. `NSFont` reports the line
+    /// height of each rung on this system as: `.title3` bold 18, `.subheadline` medium 13. The
+    /// headline is `Typo.heading` and the detail under it is `Typo.caption`, a point apart, so
+    /// the text block is 18 + 1 + 13 = 32. Eight points of air above and below it is 48.
+    ///
+    /// The button is the shorter of the two things in the band: a `.regular` `.borderedProminent`
+    /// button measures 24 points on this system, so it sits with twelve points either side and the
+    /// text is what sets the height.
+    ///
+    /// It was 44, and the arithmetic written here for it described a design that never shipped: it
+    /// claimed a 13 point headline where the code drew `Typo.captionEmphasis`, which is 11. The
+    /// headline was therefore two points SMALLER than the file names in the list below it, which
+    /// is why the strip read as a caption over the column rather than as the top of it.
+    static let pullRequestBarHeight: CGFloat = 48
     /// A meaning colour used as a background rather than as ink. One value, so a green badge and a
     /// blue chip carry the same weight.
     static let tintOpacity: Double = 0.12
+    /// The pull request strip's own wash, which is denser than `tintOpacity`.
+    ///
+    /// A chip is a mark a centimetre wide and twelve percent is plenty to colour one. This wash
+    /// runs the whole width of the pane and has to read as a coloured BAND from across the room,
+    /// which is the whole reason the bar owns the colour rather than its contents. At twelve
+    /// percent the teal band measured `#E2EFEE` on white: a step of thirteen units off the surface
+    /// beside it, which is not a colour, it is a smudge. Eighteen measures `#D3E7E4`.
+    static let bandOpacity: Double = 0.18
+    /// The same wash on a pull request that is finished.
+    ///
+    /// Merged and closed are reports, not requests. They keep their colour, because "did this
+    /// land" is worth answering at a glance, and they give up the volume, because there is nothing
+    /// left to do about either of them and the band is competing with a diff.
+    static let bandOpacityQuiet: Double = 0.08
     /// The same meaning colour on something that sits ON the wash above, such as the pull request
     /// number. One step denser, or the chip disappears into the bar it is drawn on.
     static let tintOpacityStrong: Double = 0.24
