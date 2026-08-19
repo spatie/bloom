@@ -39,6 +39,16 @@ public struct MarkdownView: View {
     public var body: some View {
         MarkdownBlocksView(blocks: MarkdownParseCache.blocks(for: text))
             .environment(\.openURL, OpenURLAction { url in
+                // Only a web address or a mail address is handed to the system. Everything drawn
+                // here was written by an agent, and `[text](url)` puts whatever it likes in the
+                // target: `file:///Applications/...` or a private scheme registered by some other
+                // app would otherwise launch that thing on a click in a transcript. The bare and
+                // angle bracketed forms the parser recognises are already http(s) only; this is
+                // the one that is not.
+                guard let scheme = url.scheme?.lowercased(),
+                      scheme == "https" || scheme == "http" || scheme == "mailto" else {
+                    return .discarded
+                }
                 NSWorkspace.shared.open(url)
                 return .handled
             })
