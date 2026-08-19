@@ -53,7 +53,9 @@ struct BottomPanelView: View {
     private var tabStrip: some View {
         // Collapse first, then the tabs, then the one control that adds to them. The chevron leads
         // because it acts on the whole panel rather than on any tab, and it stays put as tabs come
-        // and go, which a control at the end of a scrolling row does not.
+        // and go, which a control at the end of a scrolling row does not. The `+` goes in `append`
+        // rather than at the end of the strip, so it follows the last tab the way it does in the
+        // centre column.
         TabStrip(pane: Self.pane) {
             iconButton(
                 app.isBottomPanelVisible ? "chevron.down" : "chevron.up",
@@ -65,8 +67,11 @@ struct BottomPanelView: View {
             TabStripSeparator()
         } tabs: {
             tabRow
-        } trailing: {
-            TabStripSeparator()
+        } append: {
+            // Against the last tab rather than out at the end of the panel, and behind the same
+            // rule the tabs have between each other, which hides against the selected one and
+            // when the strip has no tab for it to come after.
+            TabStripSeparator(isHidden: order.last.map { $0 == model.bottomTab } ?? true)
 
             iconButton("plus", help: "New terminal tab") {
                 Task {

@@ -60,11 +60,16 @@ struct SessionTabsView: View {
                         .id(tab.id)
                 }
             }
-        } trailing: {
-            TabStripSeparator()
+        } append: {
+            // The rule between the last tab and the `+`, which is the same rule the tabs have
+            // between each other and goes the same way: hidden against the selected tab, whose
+            // own fill is its edge, and hidden again when there is no tab for it to come after.
+            // A workspace whose conversations have all been closed would otherwise open with a
+            // hairline standing against the rule down the edge of the pane.
+            TabStripSeparator(isHidden: order.last.map(isSelected) ?? true)
 
             newTabMenu
-
+        } trailing: {
             TabStripSeparator()
 
             inspectorToggle
@@ -117,6 +122,12 @@ struct SessionTabsView: View {
 
     private func isSelected(_ tab: CenterTab) -> Bool {
         focused == .tool(tab.id)
+    }
+
+    /// Whether a tab is selected, named by id alone. The strip's two runs answer to two different
+    /// cases of `CenterPaneContent`, and `order` has already thrown that distinction away.
+    private func isSelected(_ id: String) -> Bool {
+        focused == .chat(id) || focused == .tool(id)
     }
 
     /// Whether whatever sits immediately before this tool tab is the selected one, which is the

@@ -98,12 +98,17 @@ enum TabPane {
 /// bottom panel's setup, scripts and shells. What they share is everything that makes a run of
 /// labels read as tabs, which is the bar's height, the recess under it, the rule that closes it
 /// off from the pane, and the fact that only the tabs scroll. What they do not share are the
-/// controls at each end, which is why those are slots rather than options: the centre column ends
-/// in a `+` and the inspector's toggle, the bottom panel begins with the chevron that collapses it.
+/// controls around them, which is why those are slots rather than options: the centre column ends
+/// in the inspector's toggle, the bottom panel begins with the chevron that collapses it.
+///
+/// There are three of those slots and the middle one is the interesting one. `leading` and
+/// `trailing` are the ends of the strip and stay there. `append` rides the end of the TABS: it is
+/// where the `+` goes, and it sits against the last tab while the tabs fit and against the end of
+/// the strip once they do not. Both strips put their `+` there.
 ///
 /// The slots carry their own separators. A strip knows whether a rule belongs before its first
 /// control; this view does not, and guessing produced a stray hairline at one end or the other.
-struct TabStrip<Leading: View, Tabs: View, Trailing: View>: View {
+struct TabStrip<Leading: View, Tabs: View, Append: View, Trailing: View>: View {
     var pane: TabPane
     /// The id of the selected tab, if the caller tags its tabs with `.id`.
     ///
@@ -120,12 +125,21 @@ struct TabStrip<Leading: View, Tabs: View, Trailing: View>: View {
     var selection: AnyHashable?
     var leading: Leading
     var tabs: Tabs
+    var append: Append
     var trailing: Trailing
 
     @Environment(\.colorScheme) private var colorScheme
     /// The width the tabs have to fit in. Only used to re-aim the scroll when the window is
     /// resized, so it is stored rounded to whole points and changes about as often as they do.
     @State private var width: CGFloat = 0
+    /// What the tabs come to when nothing is holding them back, which is what the scrolling part
+    /// of the strip is capped at. See `body`.
+    ///
+    /// Optional so that a strip with no tabs at all is told apart from one that has not been
+    /// measured yet. They want opposite answers: no tabs means no room for tabs, so whatever
+    /// follows them starts at the leading edge, while no measurement means carry on as before and
+    /// let the scroller have the row.
+    @State private var tabsWidth: CGFloat?
     /// Which ends of the strip have tabs beyond them. Rounded to whole points for the same reason
     /// as `width`: a drag must not write state once a frame.
     @State private var overflow = TabStripOverflow()
@@ -136,12 +150,14 @@ struct TabStrip<Leading: View, Tabs: View, Trailing: View>: View {
         selection: AnyHashable? = nil,
         @ViewBuilder leading: () -> Leading,
         @ViewBuilder tabs: () -> Tabs,
+        @ViewBuilder append: () -> Append,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.pane = pane
         self.selection = selection
         self.leading = leading()
         self.tabs = tabs()
+        self.append = append()
         self.trailing = trailing()
     }
 
@@ -152,8 +168,26 @@ struct TabStrip<Leading: View, Tabs: View, Trailing: View>: View {
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
                     tabs
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width.rounded(.up) } action: {
+                            tabsWidth = $0
+                        }
                 }
                 .scrollIndicators(.never)
+                // Only as wide as the tabs, so whatever `append` holds sits against the last tab
+                // rather than out at the end of the strip with a lake of empty chrome between
+                // them. The cap is an upper bound and nothing more: the moment the tabs come to
+                // more than the strip can show, the row hands the scroller everything that is
+                // left and the `+` lands exactly where it has always been, hard against the
+                // controls at the end. There is no threshold to cross and nothing jumps, because
+                // the two positions are the same position at the width where the tabs stop
+                // fitting.
+                //
+                // Uncapped until the first measurement, which is the greedy scroller this has
+                // always been.
+                //
+                // The measurement cannot chase itself: a horizontal scroller proposes no width to
+                // what it holds, so the tabs come to the same total whatever this cap says.
+                .frame(maxWidth: tabsWidth ?? .infinity)
                 .onGeometryChange(for: CGFloat.self) { $0.size.width.rounded() } action: { width = $0 }
                 // A tab that runs off the end used to be sliced down the middle of a letter, which
                 // reads as a layout bug rather than as an edge: "All changes" came out as "All
@@ -172,6 +206,14 @@ struct TabStrip<Leading: View, Tabs: View, Trailing: View>: View {
                 .onChange(of: selection, initial: true) { _, _ in reveal(proxy) }
                 .onChange(of: width) { _, _ in reveal(proxy) }
             }
+
+            append
+
+            // What is left of the strip once the tabs and the `+` have had theirs. It is the whole
+            // of the gap the user sees to the right of the tabs, and it belongs to this view
+            // rather than to a caller: a strip whose slots were all intrinsically sized would not
+            // fill the column it is drawn in.
+            Spacer(minLength: 0)
 
             trailing
         }
@@ -231,11 +273,29 @@ extension TabStrip where Leading == EmptyView {
         pane: TabPane = .content,
         selection: AnyHashable? = nil,
         @ViewBuilder tabs: () -> Tabs,
+        @ViewBuilder append: () -> Append,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.init(
             pane: pane, selection: selection,
-            leading: { EmptyView() }, tabs: tabs, trailing: trailing
+            leading: { EmptyView() }, tabs: tabs, append: append, trailing: trailing
+        )
+    }
+}
+
+extension TabStrip where Trailing == EmptyView {
+    /// A strip that ends with whatever follows its tabs, which is the bottom panel: the `+` is the
+    /// last thing in it and there is no control pinned past that.
+    init(
+        pane: TabPane = .content,
+        selection: AnyHashable? = nil,
+        @ViewBuilder leading: () -> Leading,
+        @ViewBuilder tabs: () -> Tabs,
+        @ViewBuilder append: () -> Append
+    ) {
+        self.init(
+            pane: pane, selection: selection,
+            leading: leading, tabs: tabs, append: append, trailing: { EmptyView() }
         )
     }
 }
