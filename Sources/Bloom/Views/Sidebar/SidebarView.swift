@@ -20,6 +20,7 @@ import BloomCore
 /// custom label away and draws only the indicator, which is why it rendered as a lone letter.
 struct SidebarView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The window's undo manager. Only a view can see it, and `AppModel` is where the archive
     /// that wants it happens, so the sidebar hands it over. Any view in the window would do; this
     /// is the one that is always on screen.
@@ -37,6 +38,14 @@ struct SidebarView: View {
     /// Derived state held in `@State` rather than recomputed in `body`, with the three inputs it
     /// depends on invalidating it explicitly below. See `SidebarRepoGroup` for why.
     @State private var groups: [SidebarRepoGroup] = []
+
+    /// Whether the pane has finished arriving, so the first fill is not animated.
+    ///
+    /// Session restore reads every project's `collapsed` flag out of the store after this view
+    /// first draws, so without this a window that opens with two projects folded would unfold and
+    /// refold them in front of the user. Same shape as `SessionTabsView`'s settle window, and for
+    /// the same reason.
+    @State private var hasSettled = false
 
     var body: some View {
         List(selection: $listSelection) {
@@ -83,6 +92,22 @@ struct SidebarView: View {
         // that. What was in reach was making the rhythm EVEN, which is what `RepoSection` spends
         // its header padding on.
         .listStyle(.sidebar)
+        // What puts the fold back.
+        //
+        // A `List` animates nothing on its own: rows arrive and leave in whatever transaction the
+        // data change happened in, and `repo.collapsed` is written through an actor, so by the
+        // time `groups` changes the call that asked for it is long gone and there is no
+        // `withAnimation` left to wrap. Keying the animation to a value is what reaches an
+        // asynchronous change at all, and it has to sit HERE, on the list, rather than on the
+        // section or on the rows: a `Section` is a layout instruction rather than a view, so a
+        // modifier on it never reaches the table, and a `.transition` on a row is likewise never
+        // read. Both were tried and both did exactly nothing. The list is the view that owns the
+        // rows, so it is the view whose transaction has to carry the curve.
+        //
+        // The value is which projects are folded and nothing else. Adding, renaming or reordering
+        // a workspace must not make the pane slide, and a running agent rewrites its diff stat
+        // every few seconds, which would otherwise animate the whole column once a second.
+        .animation(foldMotion, value: foldedProjects)
         .overlay {
             if app.repos.isEmpty, app.isLoaded {
                 noProjects
@@ -90,6 +115,16 @@ struct SidebarView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             SidebarStatusBar(filter: $filter)
+        }
+        // Keyed to `isLoaded` rather than run once, because the projects arrive from the store
+        // after the first draw. Timing the settle from an empty pane would let the whole restored
+        // set of folds animate as it lands.
+        .task(id: app.isLoaded) {
+            hasSettled = false
+            guard app.isLoaded else { return }
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            hasSettled = true
         }
         .onChange(of: app.repos, initial: true) { _, _ in regroup() }
         .onChange(of: app.workspaces) { _, _ in regroup() }
@@ -105,6 +140,25 @@ struct SidebarView: View {
         .onChange(of: undoManager, initial: true) { _, manager in
             app.undoManager = manager
         }
+    }
+
+    // MARK: - Motion
+
+    /// `Motion.pane`, the same curve the centre tab strip moves on. A project folding is the same
+    /// class of movement as a pane changing: short, flat, no overshoot. A fold with a spring of
+    /// its own would read as a second app's idea of how fast this window goes.
+    ///
+    /// Dropped rather than slowed under Reduce Motion, matching every other call site, and
+    /// dropped while the pane is still arriving.
+    private var foldMotion: Animation? {
+        guard !reduceMotion, hasSettled else { return nil }
+        return Motion.pane
+    }
+
+    /// Which projects are folded, in order. Identity only: this must change when a project is
+    /// folded or unfolded and at no other time.
+    private var foldedProjects: [String] {
+        groups.filter(\.repo.collapsed).map(\.id)
     }
 
     private func regroup() {
