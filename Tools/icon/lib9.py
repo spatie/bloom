@@ -40,7 +40,6 @@ from lib import (C, contact, flat, sh_circle, sh_group, sh_move, sh_path,  # noq
                  sh_poly, sh_rect, shade, sheen, step, thick)  # noqa: F401
 
 HERE = HERE_FIRST
-D = os.path.expanduser("~/Desktop/bloom-icons-v9")
 
 CANVAS = 1024
 CX = CY = 512.0

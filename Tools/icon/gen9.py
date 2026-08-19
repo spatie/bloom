@@ -35,8 +35,6 @@ from lib9 import (CX, CY, S, band, capped, clipped, contact, flat, fullbleed,
                   outside, sh_circle, sh_group, sh_squircle, sheen, squircle,
                   wrap_flat, wrap_layer, wrap_legacy)
 
-D = lib9.D
-
 H = 150 * S            # the settled lane height, against the new tile
 HS = 168 * S           # the same lane opened up for 16 and 32
 YA = CY - 362 * S      # where the upper lane arrives on the left
