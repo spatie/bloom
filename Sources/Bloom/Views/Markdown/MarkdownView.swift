@@ -26,18 +26,41 @@ private enum MarkdownParseCache {
         values.setObject(MarkdownBlockBox(blocks), forKey: key, cost: text.utf8.count)
         return blocks
     }
+
+    /// The live tail gets a cache of exactly one entry rather than a share of the one above.
+    ///
+    /// Streaming an answer produces one prefix per token, every one of them seen for a few
+    /// milliseconds and never again. Put through `values`, which holds 160 entries, a single
+    /// streamed answer would evict every finished row in it and leave the visible transcript
+    /// re-parsing settled prose on its next redraw. One entry is still worth keeping, because
+    /// SwiftUI is free to evaluate a body more than once for the same value.
+    private static var streamed: (text: String, blocks: [MarkdownBlock])?
+
+    static func streamingBlocks(for text: String) -> [MarkdownBlock] {
+        if let streamed, streamed.text == text { return streamed.blocks }
+        let blocks = MarkdownParser.parse(text)
+        streamed = (text, blocks)
+        return blocks
+    }
 }
 
 /// Agent prose needs structural rendering and a parse cache because transcript rows update while streaming.
 public struct MarkdownView: View {
     private let text: String
+    private let isStreaming: Bool
 
-    public init(_ text: String) {
+    /// - Parameter isStreaming: whether this text is still being written. It changes nothing about
+    ///   what is drawn, only which cache the parse goes through. See
+    ///   `MarkdownParseCache.streamingBlocks(for:)`.
+    public init(_ text: String, isStreaming: Bool = false) {
         self.text = text
+        self.isStreaming = isStreaming
     }
 
     public var body: some View {
-        MarkdownBlocksView(blocks: MarkdownParseCache.blocks(for: text))
+        MarkdownBlocksView(blocks: isStreaming
+            ? MarkdownParseCache.streamingBlocks(for: text)
+            : MarkdownParseCache.blocks(for: text))
             .environment(\.openURL, OpenURLAction { url in
                 // Only a web address or a mail address is handed to the system. Everything drawn
                 // here was written by an agent, and `[text](url)` puts whatever it likes in the

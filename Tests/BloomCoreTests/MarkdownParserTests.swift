@@ -94,6 +94,26 @@ struct MarkdownParserTests {
         ])
     }
 
+    @Test("a fence keeps the same shape from the moment it opens to the moment it closes")
+    func fenceShapeIsStableWhileStreaming() {
+        // What the streaming row leans on. Every prefix of a fenced block from the opening marker
+        // onwards is one code block of the same language, so the row never has to swap one layout
+        // for another as the closing marker lands: the block that is already on screen simply
+        // grows. A prefix that parsed as a paragraph first would flicker.
+        let message = "```swift\nlet x = 1\nlet y = 2\n```"
+        let opening = message.range(of: "```swift")!.upperBound
+
+        for end in message.indices[opening...] {
+            let blocks = MarkdownParser.parse(String(message[..<end]))
+            #expect(blocks.count == 1)
+            guard case .codeBlock(_, let language, _)? = blocks.first else {
+                Issue.record("a partial fence stopped being a code block at \(String(message[..<end]))")
+                continue
+            }
+            #expect(language == .swift)
+        }
+    }
+
     @Test("a four space indent is a code block")
     func indentedCode() {
         #expect(MarkdownParser.parse("    let x = 1") == [
