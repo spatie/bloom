@@ -64,6 +64,21 @@ final class WorkspaceModel {
     var changesError: String?
     var pullRequest: PullRequest?
     var isLoadingPullRequest = false
+    /// How many times a turn started by Create pull request has ended with no pull request.
+    ///
+    /// The button cannot itself fail. It succeeds the moment the turn is handed to the agent, and
+    /// everything that decides whether a pull request exists happens minutes later and somewhere
+    /// else. A run whose shell calls were denied ended with the strip quietly back at "No pull
+    /// request yet", no error and no toast, and the only trace of it a hundred rows up the
+    /// transcript. Somebody who presses a button is owed the answer to it where they pressed it.
+    ///
+    /// A count rather than a flag, because two attempts that both come to nothing are two things
+    /// to be told and a flag set twice is one. `PullRequestBar` watches it.
+    private(set) var pullRequestShortfalls = 0
+
+    /// Whether the turn now in flight was started by that button, so the count above is only ever
+    /// bumped for a turn somebody did ask for a pull request in.
+    private var isExpectingPullRequest = false
     /// What this worktree is holding that the remote has not got, refreshed alongside the changed
     /// file list. Nil until the first refresh has answered, which is what stops the strip from
     /// claiming a clean branch before it has looked.
@@ -562,6 +577,7 @@ final class WorkspaceModel {
         // Bring the session forward first: the turn is about to start streaming, and a user who
         // pressed a button in the inspector should be looking at the answer to it.
         activeSessionID = session.id
+        isExpectingPullRequest = true
         await transcript(for: session).send(await pullRequestTurn(text: render.text))
         return nil
     }
@@ -668,7 +684,19 @@ final class WorkspaceModel {
             await manager.refreshDiffStat(workspace: workspace)
         }
         await app.reload()
-        Task { await refreshPullRequest() }
+
+        // The turn Create pull request sent is waited on rather than fired and forgotten, because
+        // what came of it is the answer to a button somebody pressed. Every other turn keeps the
+        // refresh it always had: a background poll nobody is standing over.
+        guard isExpectingPullRequest else {
+            Task { await refreshPullRequest() }
+            return
+        }
+        isExpectingPullRequest = false
+        await refreshPullRequest()
+        if pullRequest == nil {
+            pullRequestShortfalls += 1
+        }
     }
 }
 
