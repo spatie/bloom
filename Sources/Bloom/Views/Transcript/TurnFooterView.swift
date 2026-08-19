@@ -20,8 +20,16 @@ struct TurnFooterView: View {
             // Inset to the column the footer's own contents start on, rather than to the pane.
             // A rule that stops six points short of the text under it looks like a mistake, and
             // this one closes a turn, so it has to read as drawn on purpose.
+            //
+            // The vertical air is the same rung on both sides, because this rule belongs to
+            // neither: it separates a reply from the reply's own footer, and a rule that sits
+            // nearer one side reads as a heading for that side. Six of its own above and six
+            // below; the paragraph above it already carries the prose row's own six point inset,
+            // and the footer row below adds its six, so both gaps are drawn at twelve. Measured
+            // off a window capture: ten and six before, twelve and twelve now.
             Hairline()
                 .padding(.horizontal, TranscriptLayout.inset)
+                .padding(.vertical, TranscriptLayout.inset)
 
             // A turn's cost and duration are the numbers a user goes looking for, so they sit a
             // rung above the counts and timings that decorate a single row.
