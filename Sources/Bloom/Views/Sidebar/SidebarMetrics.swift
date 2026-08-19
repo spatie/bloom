@@ -44,6 +44,19 @@ enum SidebarMetrics {
     /// indented past the project's icon, and asked for this one.
     static let rowIndent: CGFloat = caretGutter
 
+    /// The gap between a workspace row's status mark and the name beside it.
+    ///
+    /// Measured off the rows as the system's own `Label` drew them, so that `SidebarRowLabelStyle`
+    /// could take the layout over without moving anything: the mark's ink ran from 33 to 46.5
+    /// points off the pane's edge and the name's ink began at 57.5.
+    static let markToText: CGFloat = 10.5
+
+    /// What the system's `Label` was insetting a sidebar row's icon column by, on top of the row
+    /// indent, and which `SidebarRowLabelStyle` has to put back by hand now that it does the
+    /// layout itself. Measured: without it every mark and name sat 6.5 points left of where they
+    /// had been, which would have unpicked the alignment `rowIndent` was chosen for.
+    static let markInset: CGFloat = 6.5
+
     /// How large the chevron itself is drawn. Roughly a five point mark: the smallest thing in
     /// the pane, because it is furniture rather than content.
     static let caretSize: CGFloat = 9

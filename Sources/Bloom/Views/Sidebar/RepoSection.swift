@@ -303,8 +303,11 @@ struct RepoSection: View {
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textTertiary)
         } icon: {
-            Color.clear.frame(width: Metrics.glyph, height: Metrics.glyph)
+            Color.clear
         }
+        // The same layout the rows it stands in for use, so the sentence starts on the name's
+        // column rather than on a column of its own.
+        .labelStyle(SidebarRowLabelStyle())
         .padding(.leading, SidebarMetrics.rowIndent)
     }
 

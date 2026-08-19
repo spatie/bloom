@@ -96,6 +96,9 @@ struct WorkspaceRow: View {
         } icon: {
             WorkspaceStatusGlyph(status: status, isOnSelection: isEmphasized)
         }
+        // See `SidebarRowLabelStyle`. The mark has to be laid out by this row rather than by the
+        // list, or it does not travel with the row when a project folds.
+        .labelStyle(SidebarRowLabelStyle())
         // The glyph is the row's whole state in one mark, so VoiceOver has to be told what it
         // means rather than being handed an unlabelled image, and a pointer resting on it gets the
         // same sentence. Both sit on the row: the icon of a `Label` is not a hit target of its own.
