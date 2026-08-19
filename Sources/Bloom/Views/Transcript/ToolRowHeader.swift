@@ -17,6 +17,10 @@ struct ToolRowHeader: View {
     /// `body` touches it, so no row observes it and no row is invalidated when it changes.
     @Environment(AppModel.self) private var app
 
+    /// Where a hovered chip says it is, so the transcript can draw the preview card over the
+    /// scroll view. Nil in any context that is not drawing one.
+    @Environment(\.filePreviewHost) private var previewHost
+
     /// A chip that repeats the detail replaces it: `Read [notes.txt]` rather than
     /// `Read notes.txt [notes.txt]`.
     private var showsDetail: Bool {
@@ -104,6 +108,8 @@ struct ToolRowHeader: View {
     /// behaviour this change should not have altered.
     private func fileChip(_ path: String) -> some View {
         let inside = FilePathGuess.relative(path, to: workspace.path)
+        let attachment = PromptAttachment.sent(path: inside ?? path)
+        let worktree = inside == nil ? "" : workspace.path
         // Spelled out rather than mapped over the optional, so the closure's actor is written down
         // rather than inferred through two layers of optional.
         let onOpen: (@MainActor () -> Void)?
@@ -117,9 +123,14 @@ struct ToolRowHeader: View {
         // a record of what happened rather than a draft, and nothing asked of the file system,
         // since there are hundreds of these in a turn. See `AttachmentChip.verifiesOnDisk`.
         return AttachmentChip(
-            attachment: .sent(path: inside ?? path),
-            worktree: inside == nil ? "" : workspace.path,
+            attachment: attachment,
+            worktree: worktree,
             onOpen: onOpen,
+            onPreview: { frame in
+                previewHost?.request = frame.map {
+                    FilePreviewRequest(attachment: attachment, worktree: worktree, frame: $0)
+                }
+            },
             verifiesOnDisk: false
         )
         .fixedSize()

@@ -19,6 +19,13 @@ struct TranscriptListView: View {
     @State private var geometry = TranscriptGeometry()
     @State private var didPosition = false
 
+    /// The file whose chip the pointer is resting on, shared with every chip in every row.
+    ///
+    /// Held here because the card has to be drawn here: a card next to a chip inside the lazy
+    /// stack is clipped by the pane. Only `FilePreviewOverlay` reads it, so a hover never re-runs
+    /// this body. See `FilePreviewHost`.
+    @State private var previewHost = FilePreviewHost()
+
     /// Only used to open a session on its end. An edge needs no identity, so this does not need
     /// the sentinel row the `ScrollViewReader` used to be pointed at.
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
@@ -124,6 +131,19 @@ struct TranscriptListView: View {
             }
             .task(id: transcript.session.id) {
                 await transcript.load()
+            }
+            // Every chip in every row reports to this one object, which is why it is handed down
+            // rather than passed as a closure through five layers of view. A closure would be a
+            // new closure on every pass over the list and would invalidate every row that read it.
+            .environment(\.filePreviewHost, previewHost)
+            .overlay {
+                FilePreviewOverlay(host: previewHost)
+            }
+            // A card that stayed up while the content moved under it would be pointing at a chip
+            // that is no longer there. Phase changes rather than offsets: this fires when a scroll
+            // begins and ends, not on every frame of one.
+            .onScrollPhaseChange { _, phase in
+                if phase != .idle { previewHost.request = nil }
             }
             .overlay {
                 if showsPlaceholder {

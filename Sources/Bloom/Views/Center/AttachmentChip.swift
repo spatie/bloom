@@ -45,6 +45,17 @@ struct AttachmentChip: View {
     /// Raised once the pointer has settled, and lowered the moment it leaves. Nil where nobody is
     /// listening, which costs the chip its hover timer rather than running one for no reader.
     var onHover: (@MainActor (Bool) -> Void)?
+    /// Where this chip is in the window, reported on the same timer `onHover` uses, and nil again
+    /// when the pointer leaves.
+    ///
+    /// The transcript's answer to "show me the file". Its chips live inside a `LazyVStack` in a
+    /// `ScrollView`, where a card drawn beside the chip is clipped by the pane, so the card is
+    /// drawn over the scroll view instead and has to be told where the chip it belongs to is. In
+    /// window coordinates rather than a named space, so the chip needs to know nothing about which
+    /// view is going to draw the card.
+    ///
+    /// Nil in the composer, which has its own card and positions it by an alignment guide.
+    var onPreview: (@MainActor (CGRect?) -> Void)?
     /// Whether to ask the file system if this file is still there, which paints the warning
     /// triangle when it is not.
     ///
@@ -59,6 +70,8 @@ struct AttachmentChip: View {
     @State private var isHovered = false
     @State private var isMissing = false
     @State private var hoverTask: Task<Void, Never>?
+    /// Read once, when the pointer enters, and only where a preview is wanted. See `probe`.
+    @State private var frameInWindow: CGRect = .zero
 
     /// True inside a sent user turn, where the ground is the accent fill rather than the page.
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
@@ -109,6 +122,7 @@ struct AttachmentChip: View {
             RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                 .strokeBorder(stroke, lineWidth: Metrics.hairline)
         }
+        .background { probe }
         .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
         .modifier(TapWhenOffered(action: onOpen))
         .onHover(perform: hover(_:))
@@ -172,19 +186,44 @@ struct AttachmentChip: View {
 
     private var url: URL { attachment.url(in: worktree) }
 
+    /// Where the chip is, measured only while the pointer is on it.
+    ///
+    /// Reading a frame behind every chip in a transcript would be a read per chip per layout pass,
+    /// on the list that re-lays out on every frame of a sidebar drag. Behind the hovered chip
+    /// alone it is one chip's worth of reads, for the one chip that is about to be asked where it
+    /// is, and nothing at all for the other four hundred.
+    ///
+    /// `onGeometryChange` rather than a `GeometryReader` with an `onAppear`: the frame is right
+    /// even if the row is still settling when the pointer arrives, which `onAppear` cannot
+    /// promise. It goes stale only if the content moves after the card is up, and moving the
+    /// content is what dismisses the card.
+    @ViewBuilder
+    private var probe: some View {
+        if onPreview != nil, isHovered {
+            Color.clear
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                    frameInWindow = $0
+                }
+        }
+    }
+
     private func hover(_ hovering: Bool) {
         isHovered = hovering
         hoverTask?.cancel()
 
-        guard let onHover else { return }
+        guard onHover != nil || onPreview != nil else { return }
         guard hovering else {
-            onHover(false)
+            onHover?(false)
+            onPreview?(nil)
             return
         }
         hoverTask = Task {
             try? await Task.sleep(for: Self.hoverDelay)
             guard !Task.isCancelled else { return }
-            onHover(true)
+            onHover?(true)
+            // Zero only if the probe has not been laid out yet, which would place the card in the
+            // pane's top left corner. Saying nothing is better than saying it in the wrong place.
+            if frameInWindow != .zero { onPreview?(frameInWindow) }
         }
     }
 }

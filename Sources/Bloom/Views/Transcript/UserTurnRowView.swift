@@ -30,6 +30,9 @@ struct UserTurnRowView: View {
     var maxWidth: CGFloat
 
     @Environment(AppModel.self) private var app
+    /// Where a hovered chip says it is, so the card is drawn over the scroll view rather than
+    /// inside a bubble that would clip it. See `FilePreviewOverlay`.
+    @Environment(\.filePreviewHost) private var previewHost
 
     /// How much of the pane a user turn always leaves empty on its left, so it reads as one side of
     /// a conversation even when it is short.
@@ -121,7 +124,8 @@ struct UserTurnRowView: View {
                         AttachmentChip(
                             attachment: .sent(path: path),
                             worktree: workspace.path,
-                            onOpen: { open(path) }
+                            onOpen: { open(path) },
+                            onPreview: { frame in preview(path, frame) }
                         )
                     }
                 }
@@ -135,6 +139,16 @@ struct UserTurnRowView: View {
     private func open(_ path: String) {
         guard let model = app.existingModel(for: workspace.id) else { return }
         FileReview.open(path: path, in: model)
+    }
+
+    /// The same card the composer showed while the file was being attached, drawn over the
+    /// transcript instead of over the box. A bubble cannot hold it: it is a plate a few hundred
+    /// points wide inside a lazy stack inside a scroll view, and it would be clipped at the first
+    /// edge it met.
+    private func preview(_ path: String, _ frame: CGRect?) {
+        previewHost?.request = frame.map {
+            FilePreviewRequest(attachment: .sent(path: path), worktree: workspace.path, frame: $0)
+        }
     }
 }
 
