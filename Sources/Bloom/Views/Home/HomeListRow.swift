@@ -67,7 +67,7 @@ struct HomeListRow: View {
 
             RepoIcon(repo: row.repo)
 
-            Text(workspace.name)
+            WorkspaceNameText(workspace)
                 .fontWeight(workspace.unread ? .semibold : .regular)
                 .lineLimit(1)
                 .truncationMode(.tail)
