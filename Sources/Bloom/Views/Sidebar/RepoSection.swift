@@ -69,9 +69,7 @@ struct RepoSection: View {
                     row(workspace)
                 }
                 if rows.isEmpty {
-                    Text(isFiltered ? "Nothing matches the filter" : "No workspaces yet")
-                        .font(Typo.caption)
-                        .foregroundStyle(Palette.textTertiary)
+                    emptyNotice
                 }
             }
         } header: {
@@ -220,11 +218,10 @@ struct RepoSection: View {
     /// away to do it: the one thing in the header worth scanning vanished exactly when you looked
     /// at the header. A gutter costs eleven points and gives the tile back for good.
     ///
-    /// Eleven points is also what sets the column relationship the rest of the pane hangs off.
-    /// With the chevron at the leading edge and the tile behind it, a workspace row's status mark
-    /// falls between the two: right of the chevron, left of the tile. That is what makes a project
-    /// read as containing its rows. With the tile at the leading edge instead, as it was, the rows
-    /// started right of the project's own mark and the column read the other way round.
+    /// Eleven points is also the step the workspace rows are indented by, which is what makes a
+    /// project read as containing its rows: the chevron sits alone at the pane's leading edge, the
+    /// project's tile starts one gutter in, and a row's status mark starts on that same column
+    /// rather than to the left of it. See `SidebarMetrics.rowIndent`, which is this number.
     ///
     /// The chevron is the smallest mark in the pane on purpose. It is furniture: it says the thing
     /// beside it opens, and then it should get out of the way of everything that has something to
@@ -264,12 +261,29 @@ struct RepoSection: View {
 
     // MARK: - Rows
 
+    /// What stands where the workspaces would be when there are none to draw.
+    ///
+    /// A `Label` with nothing in its icon, so the sentence starts on the same column a workspace's
+    /// name starts on rather than on a column of its own. It is a sentence about the project, not
+    /// an item in the list, so it takes the name's column and not the mark's.
+    private var emptyNotice: some View {
+        Label {
+            Text(isFiltered ? "Nothing matches the filter" : "No workspaces yet")
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textTertiary)
+        } icon: {
+            Color.clear.frame(width: Metrics.glyph, height: Metrics.glyph)
+        }
+        .padding(.leading, SidebarMetrics.rowIndent)
+    }
+
     private func row(_ workspace: Workspace) -> some View {
         WorkspaceRow(
             workspace: workspace,
             isRunning: app.isRunning(workspace),
             renaming: $renaming
         )
+        .padding(.leading, SidebarMetrics.rowIndent)
         .tag(SidebarSelection.workspace(workspace.id))
         .draggable(workspace.id)
         .dropDestination(for: String.self) { items, _ in

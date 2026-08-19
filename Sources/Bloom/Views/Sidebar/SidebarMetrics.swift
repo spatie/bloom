@@ -24,11 +24,25 @@ import SwiftUI
 enum SidebarMetrics {
     /// The gutter the project's disclosure chevron sits in, at the leading edge of a header.
     ///
-    /// Wide enough for the chevron and nothing else. It is what pushes the project's tile far
-    /// enough right that a workspace row's status mark falls between the two, which is the
-    /// relationship that makes a project read as containing its rows rather than as standing in
-    /// the same column as them.
+    /// Wide enough for the chevron and nothing else. It is what pushes the project's tile clear of
+    /// the pane's own edge, and it is the step the rows underneath are indented by, so the two
+    /// numbers are one number.
     static let caretGutter: CGFloat = 11
+
+    /// How far a workspace row, and the notice that stands in for one, are pushed right of the
+    /// leading edge the list hands them.
+    ///
+    /// The chevron gutter, so a row starts where the project's own tile starts rather than left of
+    /// it. Measured on the drawn marks: the tile spans 31 to 47 points from the pane's edge, and
+    /// with this indent a row's status mark is drawn from 33.5 to 46.5, sitting inside the tile's
+    /// column instead of in a column of its own two points to the left of it. The workspace names
+    /// then start five points right of the project's name.
+    ///
+    /// This reverses an earlier arrangement, where the mark deliberately fell BETWEEN the chevron
+    /// and the tile. That reads as a third column rather than as nesting: the rows began left of
+    /// the thing they belong to. The owner compared the two against Conductor, where the rows are
+    /// indented past the project's icon, and asked for this one.
+    static let rowIndent: CGFloat = caretGutter
 
     /// How large the chevron itself is drawn. Roughly a five point mark: the smallest thing in
     /// the pane, because it is furniture rather than content.
