@@ -1,8 +1,11 @@
 import SwiftUI
 import AppKit
 
-/// One attached file, as it appears above what you are typing: the icon Finder would draw for it,
-/// then its name.
+/// One attached file: the icon Finder would draw for it, then its name.
+///
+/// Drawn twice, above what you are typing and again in the turn once it has been sent, and it is
+/// deliberately one view. The chips in a sent prompt are the same files the reader chose a moment
+/// earlier, and a second implementation of the same label is how the two stop looking alike.
 ///
 /// The name only. A path in a chip is a path in the composer again, which is the thing this
 /// replaces, and the folder an attachment came from is never the interesting part: the reader
@@ -16,9 +19,13 @@ struct AttachmentChip: View {
     var attachment: PromptAttachment
     var worktree: String
     var onOpen: @MainActor () -> Void
-    var onRemove: @MainActor () -> Void
-    /// Raised once the pointer has settled, and lowered the moment it leaves.
-    var onHover: @MainActor (Bool) -> Void
+    /// Nil where there is nothing to take the chip off, which is a turn that has already been
+    /// sent: the prompt the agent read named that file, so the transcript cannot un-name it. The
+    /// icon then stays an icon rather than swapping under the pointer.
+    var onRemove: (@MainActor () -> Void)?
+    /// Raised once the pointer has settled, and lowered the moment it leaves. Nil where nobody is
+    /// listening, which costs the chip its hover timer rather than running one for no reader.
+    var onHover: (@MainActor (Bool) -> Void)?
 
     @State private var isHovered = false
     @State private var isMissing = false
@@ -81,7 +88,7 @@ struct AttachmentChip: View {
 
     @ViewBuilder
     private var leading: some View {
-        if isHovered {
+        if isHovered, let onRemove {
             Button(action: onRemove) {
                 Image(systemName: "xmark.circle.fill")
                     .resizable()
@@ -106,6 +113,7 @@ struct AttachmentChip: View {
         isHovered = hovering
         hoverTask?.cancel()
 
+        guard let onHover else { return }
         guard hovering else {
             onHover(false)
             return

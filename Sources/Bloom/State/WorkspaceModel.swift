@@ -494,13 +494,18 @@ final class WorkspaceModel {
     /// What this workspace was created to do, read back out of the oldest session's first user
     /// turn. Sessions come back in sort order, so the first one that has a user turn is the one
     /// the workspace opened with.
+    ///
+    /// Without the attachment trailer. This becomes the `task:` line of the prompt that writes the
+    /// pull request, and a scratch path under `.bloom/attachments` is invisible to git, means
+    /// nothing to a reviewer, and is exactly the sort of thing that ends up quoted in a
+    /// description. What the workspace was for is the sentence, not the screenshot.
     private func openingPrompt() async -> String {
         guard let store else { return "" }
         for session in sessions {
             let messages = (try? await store.messages(sessionID: session.id, limit: 200)) ?? []
             guard let first = messages.first(where: { $0.kind == .user }),
                   let text = UserTurnPayload.text(from: first.payload) else { continue }
-            return text
+            return AttachmentTrailer.split(text).body
         }
         return ""
     }

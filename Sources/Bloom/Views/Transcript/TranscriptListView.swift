@@ -63,6 +63,7 @@ struct TranscriptListView: View {
                         } else {
                             TranscriptRowView(
                                 row: row,
+                                workspace: transcript.workspace,
                                 isExpanded: expanded.contains(row.seq),
                                 isNested: row.parentToolUseID != nil,
                                 maxBubbleWidth: maxBubbleWidth,

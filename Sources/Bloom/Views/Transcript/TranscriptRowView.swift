@@ -21,9 +21,14 @@ struct TranscriptRowView: View, Equatable {
             && lhs.isExpanded == rhs.isExpanded
             && lhs.isNested == rhs.isNested
             && lhs.maxBubbleWidth == rhs.maxBubbleWidth
+            && lhs.workspace == rhs.workspace
     }
 
     var row: TranscriptRow
+    /// Which worktree the row's paths are relative to. Only a user turn's attachment chips read
+    /// it, but it is constant for a whole transcript, so it is handed down rather than looked up
+    /// per row.
+    var workspace: Workspace
     var isExpanded = false
     var isNested = false
     /// The width a user bubble is allowed to fill, handed down because the enclosing scroll view
@@ -48,7 +53,12 @@ struct TranscriptRowView: View, Equatable {
     private var content: some View {
         switch row.kind {
         case .user:
-            UserTurnRowView(text: userText, maxWidth: maxBubbleWidth)
+            UserTurnRowView(
+                text: userTurn.body,
+                attachments: userTurn.paths,
+                workspace: workspace,
+                maxWidth: maxBubbleWidth
+            )
 
         case .assistantText:
             if let text = assistantText, !text.isEmpty {
@@ -145,6 +155,17 @@ struct TranscriptRowView: View, Equatable {
               case .toolResult(let result)? = TranscriptEventCache.event(rowID: row.id, payload: payload)
         else { return nil }
         return result
+    }
+
+    /// What the user typed, and what they attached to it.
+    ///
+    /// Attachments reach the agent as paths in the prompt text, which is the only reference every
+    /// agent can follow, so this is the point where they are taken back out of the sentence and
+    /// handed to the row as files. `AttachmentTrailer.split` returns the text untouched at the
+    /// first thing that is not exactly the shape the composer writes, so a message that merely
+    /// talks about attached files is never edited.
+    private var userTurn: (body: String, paths: [String]) {
+        AttachmentTrailer.split(userText)
     }
 
     /// A user turn is the line Bloom itself wrote to stdin, so it is read straight out of the

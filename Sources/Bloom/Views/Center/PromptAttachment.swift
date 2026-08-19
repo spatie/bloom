@@ -1,4 +1,5 @@
 import Foundation
+import BloomCore
 
 /// A file the next prompt carries.
 ///
@@ -30,6 +31,17 @@ struct PromptAttachment: Identifiable, Hashable, Codable, Sendable {
 
     func url(in worktree: String) -> URL {
         URL(filePath: (worktree as NSString).appendingPathComponent(path))
+    }
+
+    /// An attachment as it survives in a transcript, where the prompt text is all that was kept
+    /// and a path is all it named.
+    ///
+    /// Identified by that path rather than by a fresh short id, so a row redrawn on every streamed
+    /// token hands `ForEach` the same identity each time instead of a new one. The other fields
+    /// are the honest answers for something Bloom is only reading back: it is not a copy this
+    /// prompt is responsible for, and its size is whatever the file on disk says now.
+    static func sent(path: String) -> PromptAttachment {
+        PromptAttachment(id: path, path: path, isCopy: false)
     }
 }
 
@@ -67,23 +79,11 @@ enum PromptAttachments {
 
     /// The trailer the agent actually receives.
     ///
-    /// Paths, in the prompt, in plain words. Every agent Bloom can run reads files by path, so
-    /// this works the same for Claude Code and for Codex with nothing conditional anywhere, and it
-    /// is legible in the transcript afterwards: what the agent got is what the user can read back.
-    /// The alternative, encoding images as content blocks in the turn, is Claude Code's own
-    /// protocol and would leave every other agent seeing an empty message.
+    /// The shape itself lives in `AttachmentTrailer`, in BloomCore, next to the reader that takes
+    /// it back off again for the transcript. Two halves of one format, so neither can be changed
+    /// without the other being in view, and so both can be asserted on.
     static func compose(text: String, attachments: [PromptAttachment]) -> String {
-        guard !attachments.isEmpty else { return text }
-
-        let header = attachments.count == 1 ? "Attached file:" : "Attached files:"
-        let list = attachments.map { "- \($0.path)" }.joined(separator: "\n")
-        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // A prompt of nothing but attachments is allowed: dropping a screenshot and pressing send
-        // is a sentence in itself, and refusing it would make the user type a word for the sake of
-        // the guard rather than for the agent.
-        guard !body.isEmpty else { return "\(header)\n\(list)" }
-        return "\(body)\n\n\(header)\n\(list)"
+        AttachmentTrailer.compose(text: text, paths: attachments.map(\.path))
     }
 
     /// Six characters, in the alphabet a URL would accept.
