@@ -11,6 +11,14 @@ import AppKit
 /// replaces, and the folder an attachment came from is never the interesting part: the reader
 /// dropped it a second ago and the hover card and the tab both say where it went.
 ///
+/// Drawn on two very different grounds. Above the text field it sits on the composer's sunken
+/// grey; inside a sent turn it sits on the filled blue bubble `UserTurnRowView` draws. The second
+/// case is read from `isOnEmphasizedSelection`, the same environment value a selected sidebar row
+/// sets, so the chip needs to know nothing about either caller: on the fill it becomes a light
+/// plate with light ink, exactly as `Chip` and `DiffStatLabel` already do on the same colour. A
+/// chip that kept its raised white plate and its primary ink would be the one thing in the bubble
+/// still coloured for a white page, and it is the piece a reader looks straight at.
+///
 /// Hovering swaps the icon for the close control rather than adding one beside it, which is what
 /// Conductor does and is worth copying: the chip keeps exactly the width it had, so a row of them
 /// does not reflow under the pointer and the thing you were aiming at stays where it was. The slot
@@ -31,6 +39,9 @@ struct AttachmentChip: View {
     @State private var isMissing = false
     @State private var hoverTask: Task<Void, Never>?
 
+    /// True inside a sent user turn, where the ground is the accent fill rather than the page.
+    @Environment(\.isOnEmphasizedSelection) private var isOnSelection
+
     /// Shorter than a list row: this is a label above the text field, and at 28 points a row of
     /// them read as a second toolbar. Not private: the bar reads it to know how tall one row of
     /// chips is before it has measured any.
@@ -50,7 +61,7 @@ struct AttachmentChip: View {
 
             Text(attachment.filename)
                 .font(Typo.caption)
-                .foregroundStyle(isMissing ? Palette.textTertiary : Palette.textPrimary)
+                .foregroundStyle(nameColor)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: Self.maxNameWidth, alignment: .leading)
@@ -59,7 +70,11 @@ struct AttachmentChip: View {
             if isMissing {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .imageScale(.small)
-                    .foregroundStyle(Palette.warning)
+                    // Amber is a warning colour picked to be seen on the page's ground, and on the
+                    // blue fill it is the one saturated mark in the turn. The chip is already
+                    // saying "missing" in the shape of the glyph, so on the fill it says it in the
+                    // fill's own ink instead.
+                    .foregroundStyle(isOnSelection ? Palette.selectedEmphasizedText : Palette.warning)
                     .help("This file is no longer on disk")
             }
         }
@@ -67,11 +82,11 @@ struct AttachmentChip: View {
         .frame(height: Self.height)
         .background {
             RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                .fill(isHovered ? Palette.hover : Palette.surfaceRaised)
+                .fill(plate)
         }
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                .strokeBorder(stroke, lineWidth: Metrics.hairline)
         }
         .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
         .onTapGesture(perform: onOpen)
@@ -86,6 +101,35 @@ struct AttachmentChip: View {
         .onDisappear { hoverTask?.cancel() }
     }
 
+    // MARK: Ground
+
+    /// The plate under the chip. On the accent fill it is the same twenty percent of the inverted
+    /// ink `Chip` uses there, which reads as a lighter patch of the bubble rather than as a white
+    /// card sitting on top of it. Hover lifts it by a further tenth.
+    private var plate: Color {
+        guard isOnSelection else {
+            return isHovered ? Palette.hover : Palette.surfaceRaised
+        }
+        return Palette.selectedEmphasizedText.opacity(isHovered ? 0.3 : 0.2)
+    }
+
+    /// A hairline in the page's border colour disappears into the fill, so on the accent the edge
+    /// is drawn in the same ink as the label, kept faint enough to stay an edge.
+    private var stroke: Color {
+        isOnSelection ? Palette.selectedEmphasizedText.opacity(0.35) : Palette.border
+    }
+
+    /// A file that is no longer on disk is said quietly rather than in a different hue, which is
+    /// what `textTertiary` does on the page and what three quarters of the inverted ink does here.
+    private var nameColor: Color {
+        guard isOnSelection else {
+            return isMissing ? Palette.textTertiary : Palette.textPrimary
+        }
+        return isMissing
+            ? Palette.selectedEmphasizedText.opacity(0.75)
+            : Palette.selectedEmphasizedText
+    }
+
     @ViewBuilder
     private var leading: some View {
         if isHovered, let onRemove {
@@ -93,7 +137,7 @@ struct AttachmentChip: View {
                 Image(systemName: "xmark.circle.fill")
                     .resizable()
                     .frame(width: Self.slot, height: Self.slot)
-                    .foregroundStyle(Palette.textSecondary)
+                    .foregroundStyle(isOnSelection ? Palette.selectedEmphasizedText : Palette.textSecondary)
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)

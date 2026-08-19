@@ -3,6 +3,19 @@ import BloomCore
 
 /// What the user asked for, as one side of a conversation.
 ///
+/// A filled bubble in the brand blue, with light text, drawn the way iMessage draws the messages
+/// you sent. It replaced a near white plate with a hairline around it, which sat on a near white
+/// transcript and separated from the reply under it by almost nothing: you scrolled past your own
+/// question without noticing it went by. A fill is the cheapest thing that says "this half is
+/// yours" without adding a second border to a column that already has enough lines in it.
+///
+/// **Only this side is bubbled, and that is deliberate.** The agent's replies stay unbubbled prose
+/// and must not be "finished off" later. iMessage works because both sides are a sentence long. An
+/// agent turn is paragraphs, tool rows, code blocks and a footer, and wrapping that in a tinted
+/// plate would put a box around ninety percent of the window, cap prose at the bubble's measure and
+/// leave the tool rows either inside a bubble they do not belong in or outside one, breaking the
+/// column they align on. The asymmetry IS the design: one side is a remark, the other is a report.
+///
 /// Files attached to the turn are drawn as the same chips the composer showed a moment before it
 /// was sent, rather than as the list of paths the agent was handed. The agent needs paths in the
 /// text and always will, but the reader already knows what they attached and a scratch path under
@@ -22,19 +35,59 @@ struct UserTurnRowView: View {
     /// a conversation even when it is short.
     private static let inset: CGFloat = 32
 
+    /// The bubble's radius, which is its own number rather than `Metrics.corner`.
+    ///
+    /// Six is the radius of a control: a button, a chip, the composer's box. A speech bubble is not
+    /// a control, and at six a filled one reads as a coloured button with a paragraph in it. Twice
+    /// that is the roundness the shape wants and is still short of the pill iMessage draws, which
+    /// on a Mac full of six point corners would look borrowed rather than chosen.
+    ///
+    /// Local on purpose: `Metrics` is where radii live and this is a candidate to move there as
+    /// `Metrics.cornerBubble` the moment anything else needs it. Nothing else does yet.
+    private static let corner: CGFloat = 12
+
+    /// Air inside the fill. Wider than the plate it replaces, because a hairline lets text sit
+    /// close to the edge and a fill does not: on a coloured ground the words need to look placed
+    /// in it rather than pressed against the side of it.
+    private static let padding = EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
+
     var body: some View {
         HStack(spacing: 0) {
             Spacer(minLength: Self.inset)
 
-            bubble
-                .padding(.horizontal, TranscriptLayout.block)
-                .padding(.vertical, TranscriptLayout.inset)
-                .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
-                .overlay {
-                    RoundedRectangle(cornerRadius: Metrics.corner)
-                        .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
-                }
-                .frame(maxWidth: maxWidth, alignment: .trailing)
+            CappedWidth(width: maxWidth) {
+                bubble.padding(Self.padding)
+            }
+            .background(Palette.accentFill, in: RoundedRectangle(cornerRadius: Self.corner))
+            // No stroke around the fill. A border on a filled shape is a control's outline,
+            // and the fill already separates the turn from the ground in both appearances.
+            //
+            // No tail either. The little pointer is iMessage's signature rather than a
+            // property of speech bubbles, and reproducing it would read as an imitation of
+            // another app instead of as this one's own decision.
+            //
+            // Everything inside is told it is sitting on the accent fill, which is the same
+            // signal a selected sidebar row sends. `Chip`, `DiffStatLabel`, `RepoIcon` and now
+            // `AttachmentChip` all read it and swap to the variant that survives the
+            // inversion, so a chip inside a user turn needs no knowledge of this view.
+            .environment(\.isOnEmphasizedSelection, true)
+            // And that the ground under them is dark, which on a light page it now is.
+            //
+            // This is not a stylistic flourish, it is what makes the text selectable in any
+            // useful sense. Selecting text in a `Text` paints `selectedTextBackgroundColor`
+            // BEHIND the glyphs and leaves the foreground exactly as it was: on the light ramp
+            // that colour is a pale blue, so dragging over a white sentence on this fill wrote
+            // it in white on near white and the selection was unreadable while it was being
+            // made. Measured off a probe of this exact bubble: the highlight comes out
+            // #BAD6FB and white on it is 1.5 to 1.
+            //
+            // Naming the scheme resolves that colour, and every other appearance-dependent
+            // colour inside the bubble, on the dark ramp, where it is a muted slate that sits
+            // clearly on Spatie Blue and leaves the white text alone: #466288, which carries the
+            // same white text at 6.2 to 1. The claim is honest rather than a trick: this bubble IS
+            // a dark surface whatever the page around it is doing, and the selection is simply the
+            // one piece of it that had to be told.
+            .environment(\.colorScheme, .dark)
         }
         .padding(.horizontal, TranscriptLayout.inset)
         .padding(.vertical, TranscriptLayout.inset)
@@ -51,11 +104,13 @@ struct UserTurnRowView: View {
             if !text.isEmpty {
                 Text(text)
                     .font(Typo.body)
-                    .foregroundStyle(Palette.textPrimary)
+                    // White, the same ink a selected row uses on the same fill. Measured 5.2 to 1
+                    // on Spatie Blue, which passes AA for body text in both appearances.
+                    .foregroundStyle(Palette.textInverted)
                     .lineSpacing(TranscriptLayout.proseLeading)
                     .textSelection(.enabled)
                     .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if !attachments.isEmpty {
@@ -80,5 +135,38 @@ struct UserTurnRowView: View {
     private func open(_ path: String) {
         guard let model = app.existingModel(for: workspace.id) else { return }
         FileReview.open(path: path, in: model)
+    }
+}
+
+/// Lays one view out at no more than `width`, and then takes the size that view actually used.
+///
+/// This is the whole of the bubble's measure, and it is a `Layout` rather than a modifier because
+/// neither of the two obvious modifiers does the job. `frame(maxWidth:)` takes whatever width it
+/// is offered up to the cap, so the word "yes" came out in a bubble seventy percent of the pane
+/// wide with one word floating in it. Adding `fixedSize(horizontal: true)` fixes the width and
+/// breaks the height: the frame is then measured against no proposal at all, so a paragraph
+/// reports the height of the single unwrapped line it would rather be, and the bubble draws four
+/// paragraphs in the space of two with the rest clipped away.
+///
+/// Measuring once at the capped width answers both questions with the same number: a short turn
+/// comes out short, a long one comes out at the cap and wraps inside it, and the height is the
+/// height of the text as it will actually be drawn.
+private struct CappedWidth: Layout {
+    var width: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        // The pane can be narrower than the cap, and a bubble wider than the pane is worse than a
+        // bubble that never reaches its cap.
+        let limit = min(proposal.width ?? width, width)
+        return subview.sizeThatFits(ProposedViewSize(width: limit, height: proposal.height))
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        subviews.first?.place(
+            at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(bounds.size)
+        )
     }
 }
