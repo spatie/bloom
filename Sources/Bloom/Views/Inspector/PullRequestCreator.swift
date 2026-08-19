@@ -73,12 +73,19 @@ struct PullRequestCreator: View {
                 } else {
                     // The one place the strip admits it cannot see GitHub, and the natural place
                     // to hang the fix off. Quiet, because the button beside it works regardless.
-                    Button("Connect GitHub to see pull requests") {
+                    //
+                    // Two words rather than a sentence, and pinned to the leading edge. The full
+                    // "Connect GitHub to see pull requests" did not fit the inspector's default
+                    // width, and `.link` centres its title in whatever frame it is given, so it
+                    // wrapped to two centred lines under a left-aligned branch name. The reason
+                    // is in the tooltip, where a sentence has room to be a sentence.
+                    Button("Connect GitHub") {
                         GitHubSignIn.shared.present(directory: worktree)
                     }
                     .buttonStyle(.link)
                     .font(Typo.caption)
                     .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .help(
                         github == .notInstalled
                             ? "The gh command is not installed, so Bloom cannot tell whether this branch has a pull request."

@@ -82,8 +82,9 @@ struct PullRequestSummary: View {
             presenting: pendingMerge
         ) { method in
             Button(method.label, role: .destructive) { onMerge(method) }
+            // Escape keeps the pull request open. See the archive confirmation in `RootView`
+            // for why no cancel button in this app carries `.keyboardShortcut(.defaultAction)`.
             Button("Keep the pull request open", role: .cancel) { pendingMerge = nil }
-                .keyboardShortcut(.defaultAction)
         } message: { method in
             // Naming the pull request, the branch and the base, rather than asking "are you
             // sure?". Nothing in Bloom can put any of it back afterwards.
@@ -105,9 +106,24 @@ struct PullRequestSummary: View {
     private var identity: some View {
         HStack(spacing: InspectorLayout.tight) {
             numberChip
+            if pullRequest.isDraft { draftChip }
             openButton
         }
         .fixedSize()
+    }
+
+    /// Draft, said beside the number rather than in the headline.
+    ///
+    /// The headline is a precedence: one thing at a time, worst first. Draft sits low in it, so a
+    /// draft that also conflicts, or that has a failing check, drew "Merge conflicts" and said
+    /// nothing about being a draft at all. Draftness is not a state that competes with those; it
+    /// is a property of the pull request that stays true underneath whatever else is wrong, and
+    /// it changes what the reader expects of the whole strip. So it lives with the number, which
+    /// is the other thing about this pull request that is simply true.
+    private var draftChip: some View {
+        Chip(text: "Draft", tint: Palette.textSecondary, background: Palette.hover)
+            .help("This pull request is still a draft, so it cannot be merged.")
+            .accessibilityLabel("Draft")
     }
 
     private var numberChip: some View {
@@ -245,10 +261,13 @@ struct PullRequestSummary: View {
     /// None of that is in git and all of it is thrown away by an archive. Continuing keeps every
     /// bit of it and replaces only the part that is genuinely over, which is the branch.
     ///
-    /// Outlined rather than filled, and first in the pair. It is the constructive move, but it is
-    /// not the one this state is asking for: most merged workspaces really are finished, so the
-    /// filled control stays on Archive, and Continue is the one you reach for when you know you
-    /// want it.
+    /// Filled, and first in the pair. It used to be the outlined one, on the reasoning that most
+    /// merged workspaces really are finished so the filled control belonged on Archive. That put
+    /// the app's visual default on the button that deletes a worktree, which is the same mistake
+    /// as making a destructive answer the default button in a confirmation, and this app has now
+    /// stopped doing that in both places. The filled control marks what is recommended, not what
+    /// is likely, and nothing is recommended less than the irreversible one. Archive is still
+    /// right beside it, at full size, one click away.
     ///
     /// The two forms are the same trick `pushButton` uses. "Continue" beside "Archive" and a
     /// headline is more than the pane's default width carries, and the headline is the part that
@@ -263,8 +282,8 @@ struct PullRequestSummary: View {
 
     private var continueControl: some View {
         Button("Continue", systemImage: "chevron.forward.2", action: onContinue)
-            .buttonStyle(.bordered)
-            .tint(tint ?? Palette.accent)
+            .buttonStyle(.borderedProminent)
+            .tint(tint ?? Palette.accentFill)
             .controlSize(.regular)
             .help(
                 "Cut a new branch from \(baseBranch) in this worktree and carry on, keeping this "
@@ -299,8 +318,8 @@ struct PullRequestSummary: View {
 
     private var archiveControl: some View {
         Button("Archive", systemImage: "archivebox", action: onArchive)
-            .buttonStyle(.borderedProminent)
-            .tint(tint ?? Palette.accentFill)
+            .buttonStyle(.bordered)
+            .tint(tint ?? Palette.accent)
             .controlSize(.regular)
             .help(
                 "Remove this workspace's worktree. #\(pullRequest.number) is merged, so this asks "

@@ -123,8 +123,9 @@ struct LocalWorkTests {
     private let dirty = LocalWork(modifiedFiles: 3)
     private let unpushed = LocalWork(unpushedCommits: 2)
 
-    /// The whole point. Green checks describe the commit that was pushed, and a worktree holding
-    /// work says that commit is not what the reader is looking at.
+    /// The whole point, and now the only headline local work takes. Green checks describe the
+    /// commit that was pushed, and a worktree holding work says that commit is not what the reader
+    /// is looking at, so "Ready to merge" is not a stale answer here but a wrong one.
     @Test("local work outranks ready to merge")
     func outranksReady() {
         #expect(pullRequest().status.text == "Ready to merge")
@@ -132,25 +133,38 @@ struct LocalWorkTests {
         #expect(pullRequest().status(local: dirty).tone == .warning)
     }
 
-    @Test("local work outranks every state read off the check and review rollup")
-    func outranksRollup() {
-        let cases: [PullRequest] = [
-            pullRequest(checks: .failing),
-            pullRequest(checks: .pending),
-            pullRequest(review: "CHANGES_REQUESTED"),
-            pullRequest(review: "REVIEW_REQUIRED"),
-        ]
+    /// A state that is already bad news keeps its own words, because the sidebar row for the same
+    /// workspace is painting an error mark and saying "Checks failing". A strip that answered
+    /// "Local changes" to the same question gave one workspace two verdicts in two panes.
+    @Test(
+        "a state the reader has to act on keeps its headline and gains the local count",
+        arguments: [
+            (PullRequest.Checks.failing, nil, "Checks failing"),
+            (PullRequest.Checks.pending, nil, "Checks running"),
+            (PullRequest.Checks.passing, "CHANGES_REQUESTED", "Changes requested"),
+            (PullRequest.Checks.passing, "REVIEW_REQUIRED", "Waiting for review"),
+        ] as [(PullRequest.Checks, String?, String)]
+    )
+    func keepsHeadline(checks: PullRequest.Checks, review: String?, headline: String) {
+        let status = pullRequest(checks: checks, review: review).status(local: dirty)
 
-        for candidate in cases {
-            #expect(candidate.status(local: dirty).text == "Local changes")
-        }
+        #expect(status.text == headline)
+        #expect(status.detail?.contains("3 files to commit") == true)
+        // The headline did not change, so the button still has to. Both facts are true and the
+        // one that decides what to press next is the local one.
+        #expect(status.remedy == .commitAndPush)
     }
 
-    /// Draft is a property the reader set and already knows. Local work is news.
-    @Test("local work outranks draft")
-    func outranksDraft() {
+    /// Draft is a property the reader set and already knows, so it does not need the headline and
+    /// it does not lose to one either: `PullRequestSummary` draws it as a chip beside the number,
+    /// where it stays true underneath whatever the headline says.
+    @Test("draft keeps its headline and gains the local count")
+    func draftKeepsHeadline() {
         #expect(pullRequest(isDraft: true).status.text == "Draft")
-        #expect(pullRequest(isDraft: true).status(local: dirty).text == "Local changes")
+
+        let status = pullRequest(isDraft: true).status(local: dirty)
+        #expect(status.text == "Draft")
+        #expect(status.detail?.contains("3 files to commit") == true)
     }
 
     /// A conflict is the one thing a push cannot clear, and the one that needs a person.

@@ -117,17 +117,43 @@ public extension PullRequest {
     /// disabled the app's most important control over an untracked `notes.md` would be wrong far
     /// more often than it was right. Telling the truth loudly and letting the reader decide is the
     /// trade this makes.
+    ///
+    /// Local work TAKES the headline; it does not hide one. A state that is already bad news keeps
+    /// its own words and gains the local count on the line below, because the sidebar row for the
+    /// same workspace is painting an error mark and saying "Checks failing", and a strip that
+    /// answered "Local changes" to the same question left one workspace with two verdicts in two
+    /// panes. What local work must never leave standing is the state that invites a merge:
+    /// "Ready to merge" over work that is still on disk is not a stale answer but a wrong one, and
+    /// acting on it merges without the change the reader is looking at. So the swap happens
+    /// exactly there, where the headline is positive, and nowhere else.
     func status(local: LocalWork?) -> PullRequestStatus {
         let base = status
         guard let local, local.isAhead, isOpen, !hasConflicts else { return base }
 
+        let remedy: PullRequestStatus.Remedy = local.hasUncommitted ? .commitAndPush : .push
+        let localDetail = Self.localDetail(local)
+
+        guard base.tone == .positive else {
+            return PullRequestStatus(
+                tone: base.tone,
+                text: base.text,
+                detail: [base.detail, localDetail]
+                    .compactMap { $0 }
+                    .filter { !$0.isEmpty }
+                    .joined(separator: ", "),
+                canMerge: base.canMerge,
+                blockedReason: base.blockedReason,
+                remedy: remedy
+            )
+        }
+
         return PullRequestStatus(
             tone: .warning,
             text: "Local changes",
-            detail: Self.localDetail(local),
+            detail: localDetail,
             canMerge: base.canMerge,
             blockedReason: base.blockedReason,
-            remedy: local.hasUncommitted ? .commitAndPush : .push
+            remedy: remedy
         )
     }
 
