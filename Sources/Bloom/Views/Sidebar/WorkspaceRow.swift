@@ -38,6 +38,9 @@ struct WorkspaceRow: View {
     /// The id of the row being renamed in place, shared across the whole list so only one field
     /// can ever be open.
     @Binding var renaming: String?
+    /// Raised to `RepoSection`, which owns both the confirmation and the call into the model, so
+    /// this button and the row's context menu cannot end up on different paths.
+    var onArchive: (Workspace) -> Void
 
     @Environment(AppModel.self) private var app
     /// Whether this row is the one the list is painting with the accent colour.
@@ -47,7 +50,11 @@ struct WorkspaceRow: View {
     /// inverted whenever the window was merely key drew white counts on the grey unfocused bar
     /// every time focus was in the composer or a terminal.
     @Environment(\.backgroundProminence) private var backgroundProminence
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// Whether the pointer is on this row. Per row rather than an id shared across the list, so
+    /// crossing the pane lights one row at a time.
+    @State private var isHovered = false
     @State private var draft = ""
     @FocusState private var fieldFocused: Bool
 
@@ -84,13 +91,7 @@ struct WorkspaceRow: View {
                             .foregroundStyle(.tertiary)
                             .accessibilityLabel("Pinned")
                     }
-                    if workspace.hasDiff {
-                        DiffStatLabel(
-                            additions: workspace.additions,
-                            deletions: workspace.deletions,
-                            compact: true
-                        )
-                    }
+                    trailingSlot
                 }
             }
         } icon: {
@@ -105,6 +106,7 @@ struct WorkspaceRow: View {
         .accessibilityValue(statusDescription)
         .help(statusDescription)
         .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
         // Only rows that exist ask GitHub anything, and the id carries the branch and whether
         // there is any work at all, because both change what is worth asking about.
         .task(id: "\(workspace.id)|\(workspace.branch)|\(workspace.hasDiff)") {
@@ -113,6 +115,66 @@ struct WorkspaceRow: View {
         // The list inverts the row's text for us, but a label that carries its own colour, such as
         // the green plus count, has to be told. This is the same signal the inspector's lists send.
         .environment(\.isOnEmphasizedSelection, isEmphasized)
+    }
+
+    // MARK: - Trailing
+
+    /// What the trailing edge of the row shows: the diff counts at rest, the archive button under
+    /// the pointer.
+    ///
+    /// Conductor swaps the two, the owner asked for the same, and a swap is the right shape here
+    /// because the two are never both worth reading: the counts say how much changed and the
+    /// button is what you press when you have finished caring.
+    ///
+    /// Stacked rather than switched, and both halves stay in the hierarchy at every moment with
+    /// only their opacity moving. That is what stops the name reflowing as the pointer crosses the
+    /// row: the slot is as wide as the wider of the two whether the pointer is there or not, so a
+    /// row with no counts at all reserves exactly the same space and its button appears in exactly
+    /// the same place. It also keeps one view identity on each side of the hover rather than
+    /// building and tearing one down.
+    ///
+    /// The reveal follows the project header's GEAR rather than its `+`: from nothing, not lit
+    /// from a resting state. The `+` is present at rest because creating is the thing anyone does
+    /// often enough to go looking for. Archiving is the opposite, and a column of archive boxes
+    /// down a pane whose job is to name the work would read as an invitation.
+    @ViewBuilder
+    private var trailingSlot: some View {
+        ZStack(alignment: .trailing) {
+            if workspace.hasDiff {
+                DiffStatLabel(
+                    additions: workspace.additions,
+                    deletions: workspace.deletions,
+                    compact: true
+                )
+                .opacity(isHovered ? 0 : 1)
+            }
+
+            archiveButton
+                .opacity(isHovered ? 1 : 0)
+                // An invisible button still takes clicks, which at the trailing edge of a row
+                // would be the worst possible bug in a destructive control. The pointer has to be
+                // on the row for the button to be drawn at all, so this costs nothing real.
+                .allowsHitTesting(isHovered)
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.12), value: isHovered)
+    }
+
+    private var archiveButton: some View {
+        Button {
+            onArchive(workspace)
+        } label: {
+            Image(systemName: "archivebox")
+                .font(Typo.caption)
+                .frame(width: SidebarMetrics.rowButton, height: SidebarMetrics.rowButton)
+                // The padding is the click target and it is inside the label, because a button's
+                // hit area is its label. A `contentShape` outside the button widens nothing.
+                .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isEmphasized ? Palette.textInverted : Palette.textSecondary)
+        // The shortcut is named the way Conductor names its own, with ours rather than theirs.
+        .help("Archive workspace  ⌘⌫")
+        .accessibilityLabel("Archive \(workspace.name)")
     }
 
     // MARK: - Status

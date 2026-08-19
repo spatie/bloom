@@ -57,6 +57,15 @@ enum SidebarMetrics {
     /// had been, which would have unpicked the alignment `rowIndent` was chosen for.
     static let markInset: CGFloat = 6.5
 
+    /// The click target of a control that lives on a workspace row, such as the archive button
+    /// that is revealed under the pointer.
+    ///
+    /// Deliberately small. A destructive control at the trailing edge of a row you are about to
+    /// click has to be unambiguous, and every point it grows is a point of the row it steals. It
+    /// is square and a little larger than the mark it draws, so it is comfortable to hit without
+    /// reaching towards the name.
+    static let rowButton: CGFloat = 20
+
     /// How large the chevron itself is drawn. Roughly a five point mark: the smallest thing in
     /// the pane, because it is furniture rather than content.
     static let caretSize: CGFloat = 9
