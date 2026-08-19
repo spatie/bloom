@@ -23,15 +23,21 @@ struct WorkspaceEntityQuery: EntityStringQuery {
         )
     }
 
-    /// Branch as well as name, because half the time the thing the user remembers about a
-    /// workspace is what it is called on GitHub.
+    /// Branch and project as well as name, because half the time the thing the user remembers
+    /// about a workspace is what it is called on GitHub or which project it is in. The rule is
+    /// `WorkspaceSearch`, the same one the search field and Home's filter use: this used to match
+    /// two of the three fields, so a workspace findable by typing was not findable by asking.
     func entities(matching string: String) async throws -> [WorkspaceEntity] {
-        let needle = string.trimmingCharacters(in: .whitespaces).lowercased()
+        let needle = WorkspaceSearch.needle(string)
         guard !needle.isEmpty else { return try await suggestedEntities() }
 
         let store = try await IntentDatabase.store()
+        var reposByID: [String: Repo] = [:]
+        for repo in try await store.repos() { reposByID[repo.id] = repo }
         let workspaces = try await store.workspaces().filter {
-            $0.name.lowercased().contains(needle) || $0.branch.lowercased().contains(needle)
+            WorkspaceSearch.match(
+                workspace: $0, repo: reposByID[$0.repoID], needle: needle
+            ) != nil
         }
         return try await WorkspaceLookup.entities(
             for: workspaces, store: store, includePullRequests: false

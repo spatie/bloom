@@ -114,7 +114,7 @@ public enum HomeList {
         byID.reserveCapacity(repos.count)
         for repo in repos { byID[repo.id] = repo }
 
-        let needle = filter.query.trimmingCharacters(in: .whitespaces).lowercased()
+        let needle = WorkspaceSearch.needle(filter.query)
         var considered = 0
         var rows: [HomeRow] = []
         rows.reserveCapacity(workspaces.count)
@@ -123,7 +123,9 @@ public enum HomeList {
             considered += 1
             if !filter.projects.isEmpty, !filter.projects.contains(workspace.repoID) { return }
             let repo = byID[workspace.repoID]
-            guard matches(workspace, repo: repo, needle: needle) else { return }
+            guard WorkspaceSearch.matchesOrIsUnfiltered(
+                workspace: workspace, repo: repo, needle: needle
+            ) else { return }
             rows.append(HomeRow(workspace: workspace, repo: repo))
         }
 
@@ -144,16 +146,6 @@ public enum HomeList {
             archived: archived.count,
             shownArchived: rows.count { $0.isArchived }
         )
-    }
-
-    /// The same three fields `AppModel.search` matches, so a workspace that Home's field finds is
-    /// one the Search screen would find too. Two search rules over one list is a bug report.
-    private static func matches(_ workspace: Workspace, repo: Repo?, needle: String) -> Bool {
-        guard !needle.isEmpty else { return true }
-        if workspace.name.lowercased().contains(needle) { return true }
-        if workspace.branch.lowercased().contains(needle) { return true }
-        if let repo, repo.name.lowercased().contains(needle) { return true }
-        return false
     }
 
     /// Walks the sorted rows once and starts a new group whenever the bucket changes. No sorting

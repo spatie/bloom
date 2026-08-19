@@ -868,21 +868,17 @@ final class AppModel {
         var reason: String
     }
 
+    /// The rule lives in `WorkspaceSearch`, in the core, because Home's filter field and the
+    /// Shortcuts entity query ask the same question and used to answer it differently.
     func search(_ query: String) -> [SearchHit] {
-        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
+        let needle = WorkspaceSearch.needle(query)
         guard !needle.isEmpty else { return [] }
         return workspaces.compactMap { workspace in
             let repo = repo(for: workspace)
-            if workspace.name.lowercased().contains(needle) {
-                return SearchHit(workspace: workspace, repo: repo, reason: workspace.name)
-            }
-            if workspace.branch.lowercased().contains(needle) {
-                return SearchHit(workspace: workspace, repo: repo, reason: workspace.branch)
-            }
-            if let repo, repo.name.lowercased().contains(needle) {
-                return SearchHit(workspace: workspace, repo: repo, reason: repo.name)
-            }
-            return nil
+            guard let reason = WorkspaceSearch.match(
+                workspace: workspace, repo: repo, needle: needle
+            ) else { return nil }
+            return SearchHit(workspace: workspace, repo: repo, reason: reason)
         }
     }
 }
