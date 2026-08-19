@@ -227,36 +227,45 @@ public extension PullRequest {
         "Merge #\(number) into \(base)?"
     }
 
-    /// What merging does, said as a list of consequences rather than as a question.
+    /// What merging does, said as consequences rather than as a question.
     ///
-    /// Merging is not undoable from here: gh has no reverse for it, and the branch is gone from
-    /// GitHub afterwards. So the dialog names the pull request, the branch and the base by name,
-    /// and repeats a red check rather than letting the button hide it.
+    /// Two facts change the answer: the branch does not survive it, and nothing here can put it
+    /// back. Everything else that used to be in here was true and none of it was decisive. The
+    /// opening sentence restated the method, the number and the title, and the title line above
+    /// already carries the number while the button below carries the method. The worktree stayed,
+    /// because in an app built on worktrees "the branch is deleted" reads as a threat to the one
+    /// on this machine unless it is answered, but it is worth a clause, not a sentence.
+    ///
+    /// The two conditional paragraphs are not compression candidates. Each of them only appears
+    /// when it is the most important thing on screen.
     func mergeConfirmation(
-        method: GitHub.MergeMethod,
         base: String,
         deletesBranch: Bool,
         local: LocalWork? = nil
     ) -> String {
-        var text = "\(method.label) puts #\(number) \"\(title)\" into \(base) on GitHub."
+        var paragraphs: [String] = []
         // First, above the rest, because it is the one line here that says the merge will land
         // something OTHER than what the reader is looking at. The strip lets the button stay live
         // over local work rather than disabling it, so this is where that trade is paid back.
         if let local, local.isAhead {
-            text += "\n\nGitHub does not have everything in this worktree: "
-                + Self.localDetail(local) + ". None of that is part of what is merged."
+            paragraphs.append(
+                "GitHub does not have everything in this worktree: "
+                    + Self.localDetail(local) + ". None of that is part of what is merged."
+            )
+        }
+        if checks == .failing || hasConflicts {
+            paragraphs.append(
+                checks == .failing ? checksSummary : "This branch conflicts with \(base)."
+            )
         }
         // An older gh does not report the head branch, and naming a branch we are guessing at
         // would be worse than not naming one.
+        var closing = ""
         if deletesBranch, !branch.isEmpty {
-            text += "\n\nThe branch \(branch) is deleted on GitHub. The worktree on this machine "
-                + "is left alone."
+            closing = "The branch \(branch) is deleted on GitHub, not here. "
         }
-        if checks == .failing || hasConflicts {
-            text += "\n\n\(checks == .failing ? checksSummary : "This branch conflicts with \(base).")"
-        }
-        text += "\n\nBloom cannot undo this."
-        return text
+        paragraphs.append(closing + "Bloom cannot undo this.")
+        return paragraphs.joined(separator: "\n\n")
     }
 
     /// The headline for an open, unblocked pull request.

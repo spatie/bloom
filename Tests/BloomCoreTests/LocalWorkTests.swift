@@ -248,7 +248,7 @@ struct LocalWorkTests {
     @Test("the merge confirmation says what GitHub has not got")
     func confirmationNamesLocalWork() {
         let text = pullRequest().mergeConfirmation(
-            method: .squash, base: "main", deletesBranch: true, local: dirty
+            base: "main", deletesBranch: true, local: dirty
         )
 
         #expect(text.contains("3 files to commit"))
@@ -258,7 +258,7 @@ struct LocalWorkTests {
     @Test("a clean worktree adds nothing to the merge confirmation")
     func confirmationStaysQuiet() {
         let text = pullRequest().mergeConfirmation(
-            method: .squash, base: "main", deletesBranch: true, local: LocalWork()
+            base: "main", deletesBranch: true, local: LocalWork()
         )
 
         #expect(!text.contains("does not have everything"))

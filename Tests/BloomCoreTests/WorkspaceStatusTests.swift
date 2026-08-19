@@ -257,26 +257,36 @@ struct WorkspaceStatusTests {
 
         #expect(pullRequest.mergeConfirmationTitle(base: "main") == "Merge #42 into main?")
 
-        let text = pullRequest.mergeConfirmation(
-            method: .squash, base: "main", deletesBranch: true
-        )
-        #expect(text.contains("Squash and merge"))
-        #expect(text.contains("#42"))
-        #expect(text.contains("Better glyphs"))
+        let text = pullRequest.mergeConfirmation(base: "main", deletesBranch: true)
         #expect(text.contains("feature/glyphs"))
-        #expect(text.contains("main"))
         // A red check is repeated here rather than being hidden behind the button.
         #expect(text.contains("1 required check failed"))
         #expect(text.contains("Bloom cannot undo this."))
+        // The number, the title and the method are on the title line and on the button, and were
+        // said a second time here for no gain. The dialog is the two facts that change the answer.
+        #expect(!text.contains("Better glyphs"))
+        #expect(!text.contains("Squash and merge"))
+    }
+
+    /// Four paragraphs became one, and the worktree reassurance became the clause that keeps the
+    /// branch deletion from reading as a threat to the copy on this machine.
+    @Test("a clean merge confirmation is one short paragraph")
+    func mergeConfirmationIsShort() throws {
+        let text = try decode(json(state: "OPEN")).mergeConfirmation(
+            base: "main", deletesBranch: true
+        )
+        #expect(text == "The branch feature/glyphs is deleted on GitHub, not here. "
+            + "Bloom cannot undo this.")
+        #expect(!text.contains("\n"))
     }
 
     @Test("a confirmation that does not delete the branch does not claim to")
     func confirmationWithoutBranchDeletion() throws {
         let text = try decode(json(state: "OPEN")).mergeConfirmation(
-            method: .merge, base: "main", deletesBranch: false
+            base: "main", deletesBranch: false
         )
         #expect(!text.contains("is deleted on GitHub"))
-        #expect(text.contains("Merge commit"))
+        #expect(text == "Bloom cannot undo this.")
     }
 
     // MARK: - Fixtures
