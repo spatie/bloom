@@ -974,7 +974,7 @@ final class AppModel {
     /// Asks for a folder and adds it, which is the whole of what every "Add project" control
     /// does. Four views spelled the pair out themselves.
     func addProjectByAsking() async {
-        guard let path = ProjectFolderPicker.choose() else { return }
+        guard let path = await ProjectFolderPicker.choose() else { return }
         await addRepository(at: path)
     }
 

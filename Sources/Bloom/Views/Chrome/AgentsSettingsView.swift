@@ -297,6 +297,13 @@ struct AgentsSettingsView: View {
     }
 
     private func chooseExecutable() {
+        Task { await pickExecutable() }
+    }
+
+    /// A sheet rather than an application-modal panel, for the reason `NSSavePanel.present` gives:
+    /// `runModal()` would stop every other workspace's transcript from streaming for as long as
+    /// this window is asking for a file.
+    private func pickExecutable() async {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
@@ -304,7 +311,7 @@ struct AgentsSettingsView: View {
         panel.showsHiddenFiles = true
         panel.prompt = "Use Executable"
         panel.message = "Choose the \(selection.executableName) executable"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard await panel.present() == .OK, let url = panel.url else { return }
         pathDraft = url.path
         commitPathDraft()
     }

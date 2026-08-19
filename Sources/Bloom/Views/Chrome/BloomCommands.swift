@@ -231,8 +231,10 @@ struct BloomCommands: Commands {
     }
 
     private func addProjectFolder() {
-        guard let path = ProjectFolderPicker.choose() else { return }
-        Task { await model.addRepository(at: path) }
+        Task {
+            guard let path = await ProjectFolderPicker.choose() else { return }
+            await model.addRepository(at: path)
+        }
     }
 
     /// Straight through to `AppModel.archive`, exactly as the sidebar's context menu and the

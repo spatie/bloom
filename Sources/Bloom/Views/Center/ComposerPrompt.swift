@@ -304,8 +304,9 @@ struct ComposerPrompt<Footer: View>: View {
         Task { await pickFiles() }
     }
 
-    /// A sheet rather than an application-modal panel: `runModal()` stops the run loop, which stops
-    /// every other workspace's transcript from streaming for as long as the picker is open.
+    /// A sheet rather than an application-modal panel, for the reason `NSSavePanel.present`
+    /// gives: `runModal()` stops the run loop, which stops every other workspace's transcript from
+    /// streaming for as long as the picker is open.
     private func pickFiles() async {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -315,13 +316,7 @@ struct ComposerPrompt<Footer: View>: View {
         panel.allowsMultipleSelection = true
         panel.directoryURL = URL(filePath: mentionRoot)
 
-        let response: NSApplication.ModalResponse
-        if let window = NSApp.keyWindow {
-            response = await panel.beginSheetModal(for: window)
-        } else {
-            response = panel.runModal()
-        }
-        guard response == .OK else { return }
+        guard await panel.present() == .OK else { return }
 
         await add(panel.urls.map { .file($0) })
     }

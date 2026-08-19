@@ -6,7 +6,10 @@ import AppKit
 /// for the same reason.
 @MainActor
 enum ProjectFolderPicker {
-    static func choose() -> String? {
+    /// A sheet rather than an application-modal panel, for the reason `NSSavePanel.present`
+    /// gives: `runModal()` would stop every other workspace's transcript from streaming for as
+    /// long as the folder picker is open.
+    static func choose() async -> String? {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -19,7 +22,7 @@ enum ProjectFolderPicker {
         // a folder that is not, so asking for a repository here would turn the offer into a
         // secret.
         panel.message = "Choose the folder you want to run agents in."
-        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        guard await panel.present() == .OK, let url = panel.url else { return nil }
         return url.path
     }
 }

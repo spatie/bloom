@@ -202,10 +202,12 @@ private struct ProjectSettingsView: View {
     }
 
     private func addProjectFolder() {
-        guard let path = ProjectFolderPicker.choose() else { return }
-        // Named, because a folder that is not a repository yet raises an offer, and the offer has
-        // to appear on this window rather than on the one behind it.
-        Task { await app.addRepository(at: path, presentedIn: .settings) }
+        Task {
+            guard let path = await ProjectFolderPicker.choose() else { return }
+            // Named, because a folder that is not a repository yet raises an offer, and the offer
+            // has to appear on this window rather than on the one behind it.
+            await app.addRepository(at: path, presentedIn: .settings)
+        }
     }
 }
 
