@@ -9,7 +9,9 @@ import BloomCore
 /// inset by hand.
 ///
 /// It polls while it is on screen and stops when the inspector is hidden, because the state it
-/// shows changes on GitHub's schedule rather than the user's.
+/// shows changes on GitHub's schedule rather than the user's. The poll is silent: a machine
+/// without `gh`, or with `gh` signed out, simply never gets a pull request back, and a background
+/// refresh is never a reason to put a dialog in front of anybody.
 struct PullRequestBar: View {
     let model: WorkspaceModel
 
@@ -17,12 +19,38 @@ struct PullRequestBar: View {
     private static let pollInterval = Duration.seconds(20)
 
     @State private var isWorking = false
-    @State private var errorMessage: String?
+    @State private var report: MergeReport?
+
+    /// What is left to say after a button was pressed. Not an alert: see `InspectorNotice`.
+    private struct MergeReport: Identifiable {
+        let id = UUID()
+        let tone: InspectorNotice.Tone
+        let title: String
+        let message: String
+        var details: String?
+    }
 
     var body: some View {
+        VStack(spacing: 0) {
+            strip
+            if let report {
+                Hairline()
+                InspectorNotice(
+                    tone: report.tone,
+                    title: report.title,
+                    message: report.message,
+                    details: report.details,
+                    onDismiss: { self.report = nil }
+                )
+            }
+        }
+        .task(id: model.workspace.id) { await poll() }
+    }
+
+    private var strip: some View {
         content
             .padding(.horizontal, InspectorLayout.inset)
-            .frame(height: InspectorLayout.barHeight)
+            .frame(height: InspectorLayout.pullRequestBarHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 // A tint over the surface rather than instead of it, so the strip keeps the
@@ -33,12 +61,6 @@ struct PullRequestBar: View {
                         tint.opacity(InspectorLayout.tintOpacity)
                     }
                 }
-            }
-            .task(id: model.workspace.id) { await poll() }
-            .alert("Something went wrong", isPresented: $errorMessage.isPresent()) {
-                // A lone OK that only dismisses is the system default.
-            } message: {
-                Text(errorMessage ?? "")
             }
     }
 
@@ -62,9 +84,17 @@ struct PullRequestBar: View {
                 baseBranch: model.workspace.baseBranch,
                 isWorking: isWorking || model.isLoadingPullRequest,
                 isAgentBusy: model.isRunning,
+                hasChanges: hasChanges,
                 action: createPullRequest
             )
         }
+    }
+
+    /// Whether the branch has anything on it. The inspector's own list first, because it is the
+    /// freshest thing here, and the workspace row's counts behind it for the moment before the
+    /// list has been read.
+    private var hasChanges: Bool {
+        !model.changedFiles.isEmpty || model.workspace.hasDiff
     }
 
     // MARK: - Actions
@@ -76,30 +106,54 @@ struct PullRequestBar: View {
         }
     }
 
-    /// Creation is the agent's job now: it pushes, writes the description and calls `gh` with the
-    /// project's own conventions in context. Bloom only composes the request. Reading the pull
+    /// Creation is the agent's job: it pushes, writes the description and calls `gh` with the
+    /// project's own conventions in context. Bloom only composes the turn. Reading the pull
     /// request's status afterwards, and merging it, still go through `gh` from here, because those
     /// are questions with one right answer rather than work that needs judgement.
     private func createPullRequest() {
         isWorking = true
+        report = nil
 
         Task {
             defer { isWorking = false }
-            errorMessage = await model.requestPullRequest()
+            if let refusal = await model.requestPullRequest() {
+                report = MergeReport(
+                    tone: .info, title: "Nothing was sent", message: refusal
+                )
+            }
         }
     }
 
+    /// Merging is two things happening in order, and they are reported separately.
+    ///
+    /// The pull request lands over the network, and only then is there any tidying up. A merge
+    /// that worked is never announced as a failure, and a leftover is described as a leftover.
     private func merge(_ method: GitHub.MergeMethod) {
         guard let pullRequest = model.pullRequest else { return }
         isWorking = true
+        report = nil
         let worktree = model.workspace.path
 
         Task {
             defer { isWorking = false }
             do {
-                try await GitHubBridge.merge(pullRequest, worktree: worktree, method: method)
+                let outcome = try await GitHubBridge.merge(
+                    pullRequest, worktree: worktree, method: method
+                )
+                if let leftover = outcome.leftover {
+                    report = MergeReport(
+                        tone: .leftover,
+                        title: "Merged, with one thing left over",
+                        message: leftover.sentence
+                    )
+                }
             } catch {
-                errorMessage = "\(error)"
+                report = MergeReport(
+                    tone: .failure,
+                    title: "#\(pullRequest.number) was not merged",
+                    message: "GitHub refused the merge. Nothing on this machine was changed.",
+                    details: "\(error)"
+                )
             }
             await model.refreshPullRequest()
         }

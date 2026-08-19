@@ -15,8 +15,17 @@ enum InspectorLayout {
     static let gap = Metrics.spacing
     /// The inset a list row keeps from the edge of the pane.
     static let inset = Metrics.inset
-    /// The pull request strip and the toolbar under it.
+    /// The tab row, and every other strip in the column.
     static let barHeight = Metrics.barHeight
+    /// The pull request strip, which is taller than the rest of them on purpose.
+    ///
+    /// It carries the state of the work as a headline with its numbers under it, and the one
+    /// prominent button in this column. Two lines of text is 30 points at the sizes used here
+    /// (a 13 point headline, a point of leading, an 11 point detail), and a regular button is 24,
+    /// so 44 leaves seven points of air above and below whichever of the two is taller. At the 32
+    /// the tab row uses, the button had to drop to `.small` and the detail line had nowhere to go,
+    /// which is why the strip read as a caption rather than as the top of the column.
+    static let pullRequestBarHeight: CGFloat = 44
     /// A meaning colour used as a background rather than as ink. One value, so a green badge and a
     /// blue chip carry the same weight.
     static let tintOpacity: Double = 0.12

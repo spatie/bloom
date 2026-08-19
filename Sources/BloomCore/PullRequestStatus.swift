@@ -18,15 +18,29 @@ public struct PullRequestStatus: Sendable, Hashable {
     }
 
     public var tone: Tone
-    /// One line. The strip truncates it, so the most specific words come first.
+    /// The headline: what state this pull request is in, in as few words as say it.
+    ///
+    /// The state rather than the title. The title is the workspace's name a few points to the
+    /// left of it and is on GitHub besides; the state is the thing that changes, the thing you are
+    /// waiting for, and the thing that says whether to press the button.
     public var text: String
+    /// The specifics behind the headline, such as how many checks passed. Nil when the headline
+    /// is all there is to say. The strip drops it before it drops anything else.
+    public var detail: String?
     public var canMerge: Bool
     /// Why not, in a sentence a tooltip can show. Nil when merging is allowed.
     public var blockedReason: String?
 
-    public init(tone: Tone, text: String, canMerge: Bool, blockedReason: String? = nil) {
+    public init(
+        tone: Tone,
+        text: String,
+        detail: String? = nil,
+        canMerge: Bool,
+        blockedReason: String? = nil
+    ) {
         self.tone = tone
         self.text = text
+        self.detail = detail
         self.canMerge = canMerge
         self.blockedReason = blockedReason
     }
@@ -73,7 +87,8 @@ public extension PullRequest {
         if hasConflicts {
             return PullRequestStatus(
                 tone: .negative,
-                text: "Conflicts with the base branch",
+                text: "Merge conflicts",
+                detail: "This branch conflicts with the base branch",
                 canMerge: false,
                 blockedReason: "Resolve the conflicts with the base branch first."
             )
@@ -81,13 +96,16 @@ public extension PullRequest {
         if isDraft {
             return PullRequestStatus(
                 tone: .neutral,
-                text: checksText,
+                text: "Draft",
+                detail: checksDetail,
                 canMerge: false,
                 blockedReason: "This pull request is still a draft."
             )
         }
 
-        return PullRequestStatus(tone: openTone, text: checksText, canMerge: true)
+        return PullRequestStatus(
+            tone: openTone, text: openHeadline, detail: checksDetail, canMerge: true
+        )
     }
 
     /// The title of the confirmation, which is the one line a user reliably reads.
@@ -115,20 +133,43 @@ public extension PullRequest {
         return text
     }
 
-    /// The check rollup if gh gave us one, the review state if it did not, and the plain fact
-    /// that a pull request exists if neither is known.
-    private var checksText: String {
-        if !checksSummary.isEmpty, checks != .none { return checksSummary }
-        if let reviewLabel { return reviewLabel }
-        return checksSummary.isEmpty ? "Open" : checksSummary
+    /// The headline for an open, unblocked pull request.
+    ///
+    /// One thing at a time, worst first. A branch with a failing check and a pending review has
+    /// two problems and only the first of them is worth a headline, because it is the one that has
+    /// to be fixed before the second one matters.
+    private var openHeadline: String {
+        switch checks {
+        case .failing: return "Checks failing"
+        case .pending: return "Checks running"
+        case .passing, .none: break
+        }
+        switch reviewDecision?.uppercased() {
+        case "CHANGES_REQUESTED": return "Changes requested"
+        case "REVIEW_REQUIRED": return "Waiting for review"
+        default: return "Ready to merge"
+        }
+    }
+
+    /// The numbers behind the headline. Nil when GitHub has reported no checks at all, because
+    /// "No checks" under "Ready to merge" reads as something missing rather than as a fact.
+    private var checksDetail: String? {
+        guard checks != .none, !checksSummary.isEmpty else { return nil }
+        return checksSummary
     }
 
     private var openTone: PullRequestStatus.Tone {
         switch checks {
-        case .failing: .negative
-        case .pending: .warning
-        case .passing: reviewDecision?.uppercased() == "CHANGES_REQUESTED" ? .warning : .positive
-        case .none: reviewDecision?.uppercased() == "CHANGES_REQUESTED" ? .warning : .neutral
+        case .failing: return .negative
+        case .pending: return .warning
+        case .passing, .none: break
+        }
+        switch reviewDecision?.uppercased() {
+        case "CHANGES_REQUESTED", "REVIEW_REQUIRED": return .warning
+        // Nothing failing, nothing pending and nobody blocking it. Teal rather than GitHub's
+        // green: the brand ramp says to reuse the accent instead of inventing a green, and this
+        // is the state the whole strip is tinted for.
+        default: return .positive
         }
     }
 }

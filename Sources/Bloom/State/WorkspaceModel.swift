@@ -497,9 +497,15 @@ final class WorkspaceModel {
             return "\(workspace.name) is still working. Wait for the turn to finish, then ask again."
         }
 
-        // The list of changed files goes into the prompt, so it has to describe the worktree now
-        // rather than whenever the inspector last looked at it.
-        await refreshChanges()
+        let template = overrides.template(for: .createPullRequest)
+        let wanted = Set(PromptTemplate.variableNames(in: template))
+
+        // Only what this template actually asks for. The built-in one names the target branch and
+        // nothing else, and reading every session's first turn back out of the store to fill a
+        // variable nobody used was a page of work per press.
+        if wanted.contains(PromptRegistry.CreatePullRequest.changes) {
+            await refreshChanges()
+        }
 
         guard let session = await sessionForPullRequest() else {
             return "Could not open a session in \(workspace.name) to send the request to."
@@ -509,16 +515,33 @@ final class WorkspaceModel {
             workspaceName: workspace.name,
             branch: workspace.branch,
             baseBranch: workspace.baseBranch,
-            task: await openingPrompt(),
-            changes: PullRequestPromptContext.changeSummary(changedFiles)
+            task: wanted.contains(PromptRegistry.CreatePullRequest.task) ? await openingPrompt() : "",
+            changes: wanted.contains(PromptRegistry.CreatePullRequest.changes)
+                ? PullRequestPromptContext.changeSummary(changedFiles)
+                : ""
         )
-        let render = context.render(template: overrides.template(for: .createPullRequest))
+        let render = context.render(template: template)
 
         // Bring the session forward first: the turn is about to start streaming, and a user who
         // pressed a button in the inspector should be looking at the answer to it.
         activeSessionID = session.id
-        await transcript(for: session).send(render.text)
+        await transcript(for: session).send(pullRequestTurn(text: render.text))
         return nil
+    }
+
+    /// The turn that goes down the wire, with the instructions attached to it.
+    ///
+    /// The attachment goes through the same trailer the composer writes, so a pull request request
+    /// is a user turn like any other: the transcript reads the trailer back off, draws the chip and
+    /// can open the file, and the agent is handed a path inside its own working directory.
+    ///
+    /// When the file cannot be written, the instructions go into the message itself. A read-only
+    /// checkout is a reason to say it differently, not a reason for the button to stop working.
+    private func pullRequestTurn(text: String) -> String {
+        if let path = PullRequestInstructions.ensure(in: workspace.path) {
+            return AttachmentTrailer.compose(text: text, paths: [path])
+        }
+        return text + "\n\n" + PullRequestInstructions.defaultMarkdown
     }
 
     /// A workspace whose agent was never started still has a button to press. Rather than doing

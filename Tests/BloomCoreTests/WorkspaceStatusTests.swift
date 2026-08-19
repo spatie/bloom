@@ -130,64 +130,92 @@ struct WorkspaceStatusTests {
 
     // MARK: - Inspector strip
 
-    @Test("the strip's tone, sentence and merge button follow the pull request", arguments: [
+    @Test("the strip's headline, tone and merge button follow the pull request", arguments: [
         (
-            name: "green checks are positive and mergeable",
+            name: "green checks are ready to merge, with the count underneath",
             json: #"{"number":1,"title":"t","url":"u","state":"OPEN","statusCheckRollup":[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"SUCCESS"}]}"#,
-            tone: PullRequestStatus.Tone.positive, text: "1 check passed", canMerge: true
+            tone: PullRequestStatus.Tone.positive,
+            text: "Ready to merge", detail: "1 check passed" as String?, canMerge: true
         ),
         (
-            name: "an optional failure stays positive, and says so",
+            name: "an optional failure does not change the headline, only the detail",
             json: #"{"number":1,"title":"t","url":"u","state":"OPEN","statusCheckRollup":[{"__typename":"StatusContext","context":"preview","state":"FAILURE","isRequired":false}]}"#,
-            tone: .positive, text: "1 optional check failed", canMerge: true
+            tone: .positive,
+            text: "Ready to merge", detail: "1 optional check failed", canMerge: true
         ),
         (
             name: "a required failure is negative but still mergeable by hand",
             json: #"{"number":1,"title":"t","url":"u","state":"OPEN","statusCheckRollup":[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"FAILURE","isRequired":true}]}"#,
-            tone: .negative, text: "1 required check failed", canMerge: true
+            tone: .negative,
+            text: "Checks failing", detail: "1 required check failed", canMerge: true
         ),
         (
             name: "pending checks are a warning",
             json: #"{"number":1,"title":"t","url":"u","state":"OPEN","statusCheckRollup":[{"__typename":"CheckRun","name":"a","status":"QUEUED"}]}"#,
-            tone: .warning, text: "1 check pending", canMerge: true
+            tone: .warning,
+            text: "Checks running", detail: "1 check pending", canMerge: true
         ),
         (
             name: "changes requested is a warning even with green checks",
             json: #"{"number":1,"title":"t","url":"u","state":"OPEN","reviewDecision":"CHANGES_REQUESTED","statusCheckRollup":[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"SUCCESS"}]}"#,
-            tone: .warning, text: "1 check passed", canMerge: true
+            tone: .warning,
+            text: "Changes requested", detail: "1 check passed", canMerge: true
+        ),
+        (
+            name: "a review nobody has done yet is a warning, not a green light",
+            json: #"{"number":1,"title":"t","url":"u","state":"OPEN","reviewDecision":"REVIEW_REQUIRED","statusCheckRollup":[]}"#,
+            tone: .warning,
+            text: "Waiting for review", detail: nil, canMerge: true
+        ),
+        (
+            name: "a pull request with no checks at all is still ready, and says nothing more",
+            json: #"{"number":1,"title":"t","url":"u","state":"OPEN","statusCheckRollup":[]}"#,
+            tone: .positive,
+            text: "Ready to merge", detail: nil, canMerge: true
         ),
         (
             name: "a draft cannot be merged",
             json: #"{"number":1,"title":"t","url":"u","state":"OPEN","isDraft":true,"statusCheckRollup":[]}"#,
-            tone: .neutral, text: "No checks", canMerge: false
+            tone: .neutral,
+            text: "Draft", detail: nil, canMerge: false
         ),
         (
             name: "conflicts outrank green checks",
             json: #"{"number":1,"title":"t","url":"u","state":"OPEN","mergeable":"CONFLICTING","statusCheckRollup":[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"SUCCESS"}]}"#,
-            tone: .negative, text: "Conflicts with the base branch", canMerge: false
+            tone: .negative,
+            text: "Merge conflicts",
+            detail: "This branch conflicts with the base branch", canMerge: false
         ),
         (
             name: "an older gh reports the same conflict as DIRTY",
             json: #"{"number":1,"title":"t","url":"u","state":"OPEN","mergeStateStatus":"DIRTY","statusCheckRollup":[]}"#,
-            tone: .negative, text: "Conflicts with the base branch", canMerge: false
+            tone: .negative,
+            text: "Merge conflicts",
+            detail: "This branch conflicts with the base branch", canMerge: false
         ),
         (
             name: "a merged pull request is done, not mergeable",
             json: #"{"number":1,"title":"t","url":"u","state":"MERGED","statusCheckRollup":[]}"#,
-            tone: .accent, text: "Merged", canMerge: false
+            tone: .accent, text: "Merged", detail: nil, canMerge: false
         ),
         (
             name: "a closed one is quiet",
             json: #"{"number":1,"title":"t","url":"u","state":"CLOSED","statusCheckRollup":[]}"#,
-            tone: .neutral, text: "Closed", canMerge: false
+            tone: .neutral, text: "Closed", detail: nil, canMerge: false
         ),
     ])
     func stripPresentation(
-        name: String, json: String, tone: PullRequestStatus.Tone, text: String, canMerge: Bool
+        name: String,
+        json: String,
+        tone: PullRequestStatus.Tone,
+        text: String,
+        detail: String?,
+        canMerge: Bool
     ) throws {
         let status = try decode(json).status
         #expect(status.tone == tone, "\(name)")
         #expect(status.text == text, "\(name)")
+        #expect(status.detail == detail, "\(name)")
         #expect(status.canMerge == canMerge, "\(name)")
     }
 

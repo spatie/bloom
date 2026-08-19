@@ -14,9 +14,17 @@ enum GitHubBridge {
         (try? await GitHub.checks(forBranch: branch, worktree: worktree)) ?? []
     }
 
-    static func merge(_ pullRequest: PullRequest, worktree: String, method: GitHub.MergeMethod) async throws {
+    /// The branch is deleted on GitHub and nowhere else. See `GitHub.merge` for why the local half
+    /// of gh's own clean up can never be used from a worktree.
+    static func merge(
+        _ pullRequest: PullRequest, worktree: String, method: GitHub.MergeMethod
+    ) async throws -> MergeOutcome {
         try await GitHub.merge(
-            number: pullRequest.number, worktree: worktree, method: method, deleteBranch: true
+            number: pullRequest.number,
+            branch: pullRequest.branch,
+            worktree: worktree,
+            method: method,
+            deleteRemoteBranch: true
         )
     }
 

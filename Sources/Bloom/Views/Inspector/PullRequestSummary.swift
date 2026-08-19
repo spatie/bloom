@@ -2,14 +2,21 @@ import SwiftUI
 import AppKit
 import BloomCore
 
-/// The strip when a pull request already exists: its number, how CI feels about it, and the one
+/// The strip when a pull request already exists: which one it is, what state it is in, and the one
 /// button that finishes the job.
 ///
 /// Reading left to right it is the same order as the question a user is asking: which pull
-/// request is this, where do I read it, what is wrong with it, and can I land it. The chip, the
-/// sentence and the merge button all take the state's colour, and `PullRequestBar` washes the bar
-/// behind them with it, because a red bar at the top of the inspector is visible from across the
-/// room and a red word is not.
+/// request is this, where do I read it, what is going on with it, and can I land it.
+///
+/// The headline is the STATE and not the title. The title is the workspace's name a few points to
+/// the left and is on GitHub besides, while the state is the thing that changes, the thing you are
+/// waiting for and the thing that says whether to press the button. It used to be the other way
+/// round, with the state reduced to a grey capsule at the trailing edge, and the strip read as a
+/// caption for something rather than as the top of the column.
+///
+/// The chip, the headline and the merge button all take the state's colour, and `PullRequestBar`
+/// washes the bar behind them with it, because a red bar at the top of the inspector is visible
+/// from across the room and a red word is not.
 struct PullRequestSummary: View {
     var pullRequest: PullRequest
     var baseBranch: String
@@ -23,45 +30,21 @@ struct PullRequestSummary: View {
     /// Non-nil for as long as it takes the sharing menu to open. See `SharePicker`.
     @State private var sharing: SharePayload?
 
-    /// gh deletes the branch on the remote as part of merging. It is named in the confirmation
-    /// rather than left as a surprise.
+    /// Merging deletes the branch on GitHub and nothing on this machine. It is named in the
+    /// confirmation rather than left as a surprise. See `GitHub.merge` for why the local half of
+    /// gh's own clean up is never asked for.
     private static let deletesBranch = true
 
     private var status: PullRequestStatus { pullRequest.status }
 
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {
-            numberChip
-            openButton
-
-            if pullRequest.isDraft {
-                Chip(text: "Draft")
-            }
-
-            // The one thing in the strip that can be any length, so it is the one that gives way.
-            // A flexible frame rather than a `Spacer` and a negative layout priority: it takes
-            // whatever width is left and truncates inside it, which is a rule the layout cannot
-            // resolve any other way, instead of a preference it weighs against the button's.
-            Text(sentence)
-                .font(Typo.caption)
-                .foregroundStyle(tint ?? Palette.textSecondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .help(sentence)
-
-            if isWorking {
-                ProgressView()
-                    .controlSize(.small)
-                    .accessibilityLabel("Merging")
-            } else if pullRequest.isOpen {
-                mergeButton
-            } else {
-                Chip(text: status.text)
-            }
+            identity
+            headline
+            trailing
         }
         // Sharing lives here rather than as another control in the strip. The strip has one length
-        // that can give way and it is already the sentence, so a button added to it comes out of
+        // that can give way and it is already the headline, so a button added to it comes out of
         // the part the reader is trying to read. A right click costs no width at all, and it is
         // where a link is asked for everywhere else on this system.
         .contextMenu {
@@ -94,14 +77,17 @@ struct PullRequestSummary: View {
         }
     }
 
-    /// What the strip says in the middle. A closed or merged pull request has its state on the
-    /// chip at the end of the strip already, so the sentence spends its width on the title
-    /// instead of saying "Merged" twice.
-    private var sentence: String {
-        pullRequest.isOpen ? status.text : pullRequest.title
-    }
-
     // MARK: - Parts
+
+    /// The number and the way out to the browser, drawn as one cluster. They are the same subject,
+    /// so they sit a tight gap apart rather than at the strip's own spacing.
+    private var identity: some View {
+        HStack(spacing: InspectorLayout.tight) {
+            numberChip
+            openButton
+        }
+        .fixedSize()
+    }
 
     private var numberChip: some View {
         // The number alone. A pull request glyph here repeats what the arrow button beside it and
@@ -119,6 +105,9 @@ struct PullRequestSummary: View {
     /// A separate control rather than making the chip itself clickable: the chip is the label of
     /// the strip, and a label that silently launches a browser is the kind of thing people learn
     /// by accident.
+    ///
+    /// Opening a page in a browser needs no GitHub sign in of any kind, so this control is never
+    /// gated on `gh`.
     private var openButton: some View {
         Button("Open on GitHub", systemImage: "arrow.up.forward.app") {
             GitHubBridge.open(pullRequest.url)
@@ -129,6 +118,47 @@ struct PullRequestSummary: View {
         .help("Open #\(pullRequest.number) on GitHub")
     }
 
+    /// The state, in the state's colour, with its numbers under it.
+    ///
+    /// A flexible frame rather than a `Spacer` and a negative layout priority: this is the one
+    /// thing in the strip that can be any length, so it takes whatever width is left and truncates
+    /// inside it, which is a rule the layout cannot resolve any other way.
+    private var headline: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(status.text)
+                .font(Typo.captionEmphasis)
+                .foregroundStyle(tint ?? Palette.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            if let detail = status.detail {
+                Text(detail)
+                    .font(Typo.micro)
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .help(helpText)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    @ViewBuilder
+    private var trailing: some View {
+        if isWorking {
+            ProgressView()
+                .controlSize(.small)
+                .accessibilityLabel("Merging")
+        } else if pullRequest.isOpen {
+            mergeButton
+        }
+        // A merged or closed pull request needs no control here. The headline says which of the
+        // two it is and the strip carries its colour, so a capsule repeating the same word was
+        // only ever taking the place of the button that used to be there.
+    }
+
     /// The one prominent control in the inspector, and the only solid colour in the strip.
     ///
     /// A real `Button` rather than a `Menu` with a primary action. A menu styled `.button` ignores
@@ -137,8 +167,11 @@ struct PullRequestSummary: View {
     /// to carry. The other two methods moved to the chevron beside it, which stays a menu and stays
     /// quiet because it is not the thing being pointed at.
     ///
-    /// The fill is the state's colour rather than the accent, so the strip is one decision from end
-    /// to end: failing checks do not block merging, so a red bar has to end in a red button.
+    /// Always explicitly tinted. An untinted `.borderedProminent` follows the SYSTEM accent on
+    /// this platform, which is whatever blue or pink the user set in General, and on macOS 26 it
+    /// renders as a grey glass capsule instead. Both are wrong: the fill is the state's own
+    /// colour, so the strip is one decision from end to end and a red bar ends in a red button.
+    /// Failing checks do not block merging, which is the whole reason that has to hold.
     ///
     /// Every path through it opens the confirmation. The button proposes a squash merge because
     /// that is what it says; nothing here ever performs one.
@@ -146,7 +179,8 @@ struct PullRequestSummary: View {
         HStack(spacing: Metrics.spacingTight) {
             Button("Merge", systemImage: "arrow.triangle.merge") { pendingMerge = .squash }
                 .buttonStyle(.borderedProminent)
-                .tint(tint ?? Palette.accent)
+                .tint(tint ?? Palette.accentFill)
+                .controlSize(.regular)
 
             Menu {
                 ForEach(GitHub.MergeMethod.allCases, id: \.self) { method in
@@ -159,13 +193,29 @@ struct PullRequestSummary: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .foregroundStyle(Palette.textSecondary)
+            .controlSize(.small)
         }
-        .controlSize(.small)
         .fixedSize()
         .disabled(!status.canMerge)
         // Disabled controls do not explain themselves, and "why is this greyed out" is the whole
         // question a blocked pull request raises.
         .help(status.blockedReason ?? "Squash and merge, or choose another method")
+    }
+
+    // MARK: - Text
+
+    /// The title belongs somewhere, and a tooltip on the state is where: it answers "which pull
+    /// request is this" without spending any of the strip's width on an answer the reader already
+    /// has from the workspace name.
+    private var helpText: String {
+        var text = "#\(pullRequest.number) \(pullRequest.title)"
+        if let detail = status.detail { text += "\n\(detail)" }
+        if let reason = status.blockedReason { text += "\n\(reason)" }
+        return text
+    }
+
+    private var accessibilityText: String {
+        [status.text, status.detail].compactMap { $0 }.joined(separator: ", ")
     }
 
     private func copyLink() {

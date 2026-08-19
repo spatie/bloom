@@ -90,9 +90,11 @@ public enum PromptRegistry {
         id: .createPullRequest,
         title: "Create pull request",
         summary: """
-        Sent to the workspace's agent when you press Create pull request. The agent does the \
-        pushing and the `gh` call itself, so it can follow the project's own commit and PR \
-        conventions.
+        Sent to the workspace's agent when you press Create pull request, with \
+        `.bloom/pr-instructions.md` attached. The agent does the pushing and the `gh` call itself, \
+        so it can follow the project's own commit and PR conventions. How it does that lives in \
+        that file rather than here, because it belongs to the project and not to Bloom. This is \
+        only the sentence that carries it.
         """,
         variables: [
             PromptVariable(name: CreatePullRequest.workspace, summary: "The workspace's name."),
@@ -111,37 +113,7 @@ public enum PromptRegistry {
             ),
         ],
         defaultTemplate: """
-        I am happy with the state of this workspace and want a pull request for it.
-
-        Workspace: {{workspace}}
-        Branch: {{branch}}
-        Target branch: {{base_branch}}
-
-        Do this:
-
-        - If this project has a skill or an instruction file about opening pull requests, follow \
-        that first. It outranks everything below.
-        - Run `git status`. If anything is uncommitted, review it and commit it, following whatever \
-        this project says about commit messages.
-        - Push the branch with `git push -u origin HEAD`. If it already tracks a different \
-        upstream, push to that one instead.
-        - Read the whole branch with `git diff {{base_branch}}...` before you write anything. The \
-        description has to cover every change on the branch, not only what we did in this session.
-        - Open the pull request with `gh pr create --base {{base_branch}} --title <title> --body \
-        <description>`. If the repository has a pull request template, fill that in instead of \
-        writing your own structure. Keep the title under 80 characters and the description under \
-        five sentences.
-        - Tell me the pull request URL when it exists.
-
-        If a step fails, stop and tell me what went wrong instead of working around it.
-
-        ## What I originally asked for
-
-        {{task}}
-
-        ## Changed files
-
-        {{changes}}
+        Create a pull request for this workspace against {{base_branch}}.
         """
     )
 

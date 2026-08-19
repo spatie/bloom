@@ -122,7 +122,7 @@ struct PromptRegistryTests {
         }
     }
 
-    @Test("the create pull request default renders with nothing left over")
+    @Test("the create pull request default is one sentence naming the target branch")
     func createPullRequestDefaultRendersFully() throws {
         let definition = PromptRegistry.definition(for: .createPullRequest)
         let context = PullRequestPromptContext(
@@ -137,13 +137,15 @@ struct PromptRegistryTests {
 
         #expect(render.unknown.isEmpty)
         #expect(render.missing.isEmpty)
-        #expect(render.text.contains("freek/prompts"))
-        #expect(render.text.contains("gh pr create --base main"))
-        #expect(render.text.contains("Move PR creation onto the agent"))
+        #expect(render.text.contains("main"))
         #expect(!render.text.contains(PromptTemplate.open))
+        // The how lives in the attached file, not in the message. A turn that carried the whole
+        // procedure inline is the thing this replaced.
+        #expect(!render.text.contains("gh pr create"))
+        #expect(render.text.count < 120)
     }
 
-    @Test("a workspace that can answer nothing still sends readable prose")
+    @Test("a template that does ask for the facts gets prose when the workspace has none")
     func fallsBackForEmptyFacts() {
         let context = PullRequestPromptContext(
             workspaceName: "Bloom",
@@ -153,13 +155,69 @@ struct PromptRegistryTests {
             changes: ""
         )
 
-        let render = context.render(
-            template: PromptRegistry.definition(for: .createPullRequest).defaultTemplate
-        )
+        // Not the built-in one, which asks for neither. The fallbacks exist for an override that
+        // does, and a heading followed by nothing is what they prevent.
+        let render = context.render(template: "{{task}}\n{{changes}}")
 
         #expect(render.missing.isEmpty)
         #expect(render.text.contains(PullRequestPromptContext.noTask))
         #expect(render.text.contains(PullRequestPromptContext.noChanges))
+    }
+}
+
+@Suite("Pull request instructions", .scratchDirectory)
+struct PullRequestInstructionsTests {
+    @Test("the file is written on demand, inside the worktree, and answers with a relative path")
+    func writesOnDemand() throws {
+        let worktree = TestScratch.unique("worktree")
+        try FileManager.default.createDirectory(atPath: worktree, withIntermediateDirectories: true)
+
+        let path = PullRequestInstructions.ensure(in: worktree)
+
+        #expect(path == PullRequestInstructions.path)
+        let full = (worktree as NSString).appendingPathComponent(PullRequestInstructions.path)
+        let written = try String(contentsOfFile: full, encoding: .utf8)
+        #expect(written == PullRequestInstructions.defaultMarkdown)
+    }
+
+    /// Once it exists it belongs to the project. Rewriting it would silently undo somebody's
+    /// edit every time the button was pressed.
+    @Test("a file that is already there is never rewritten")
+    func neverOverwrites() throws {
+        let worktree = TestScratch.unique("worktree")
+        let full = (worktree as NSString).appendingPathComponent(PullRequestInstructions.path)
+        try FileManager.default.createDirectory(
+            atPath: (full as NSString).deletingLastPathComponent, withIntermediateDirectories: true
+        )
+        try "Ours, not yours.".write(toFile: full, atomically: true, encoding: .utf8)
+
+        #expect(PullRequestInstructions.ensure(in: worktree) == PullRequestInstructions.path)
+        #expect(try String(contentsOfFile: full, encoding: .utf8) == "Ours, not yours.")
+    }
+
+    @Test("a worktree that cannot be written to answers nil rather than throwing")
+    func failsSoftly() {
+        #expect(PullRequestInstructions.ensure(in: "/dev/null/nowhere") == nil)
+    }
+
+    /// The instructions are shared by every workspace in the repository, so a branch name in them
+    /// would be wrong for all but one.
+    @Test("the default instructions name no branch")
+    func namesNoBranch() {
+        #expect(!PullRequestInstructions.defaultMarkdown.contains("--base main"))
+        #expect(PullRequestInstructions.defaultMarkdown.contains("<target branch>"))
+    }
+
+    @Test("the turn the agent receives is the sentence plus a normal attachment trailer")
+    func composesAsAnAttachment() {
+        let text = AttachmentTrailer.compose(
+            text: "Create a pull request for this workspace against main.",
+            paths: [PullRequestInstructions.path]
+        )
+
+        let (body, paths) = AttachmentTrailer.split(text)
+        #expect(body == "Create a pull request for this workspace against main.")
+        #expect(paths == [PullRequestInstructions.path])
     }
 }
 
