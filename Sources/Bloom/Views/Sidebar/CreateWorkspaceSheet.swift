@@ -153,19 +153,41 @@ struct CreateWorkspaceSheet: View {
         // worktree without naming the repository would be asking for trust it has not earned.
         if app.repos.count > 1 {
             Menu {
-                // An inline `Picker` inside the menu, not a `Picker` in place of it. The tile
-                // above still needs a `Menu`, for the reason written just above; the tick beside
-                // the project you are already in is the platform's to draw, and a `Button` whose
-                // label carries a checkmark image never got one. See `ComposerOptionMenu`.
+                // An inline `Picker` inside the menu, not a `Picker` in place of it. The tile on
+                // the control above still needs a `Menu`, for the reason written just above; the
+                // tick beside the project you are already in is the platform's to draw, and a
+                // `Button` whose label carries a checkmark symbol never got one. See
+                // `ComposerOptionMenu`.
+                //
+                // Each row carries the project's own mark as well, which an item in an `NSMenu`
+                // has room for: a title, an image and a state marker are three separate slots and
+                // they coexist. What the image slot will not take is a SwiftUI view, so the mark
+                // arrives as a bitmap of the same `RepoIcon` the chip and the sidebar draw. See
+                // `RepoIconImage`.
+                //
+                // No heading over them. The rows are project names wearing their own badges and
+                // the control that opened the menu is showing one of them, so "Project" written
+                // above would be a word to read past. `labelsHidden` takes the heading off the
+                // picker without taking its name away from VoiceOver.
                 Picker("Project", selection: Binding(
                     get: { repoID ?? "" },
                     set: { repoID = $0.isEmpty ? nil : $0 }
                 )) {
                     ForEach(app.repos) { candidate in
-                        Text(candidate.name).tag(candidate.id)
+                        Label {
+                            Text(candidate.name)
+                        } icon: {
+                            if let mark = RepoIconImage.of(candidate) {
+                                // `.original`, because the tile is the project's colour and a
+                                // template image in a menu is painted flat in the label colour.
+                                Image(nsImage: mark).renderingMode(.original)
+                            }
+                        }
+                        .tag(candidate.id)
                     }
                 }
                 .pickerStyle(.inline)
+                .labelsHidden()
             } label: {
                 label
             }
