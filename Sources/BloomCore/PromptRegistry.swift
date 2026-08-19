@@ -111,11 +111,12 @@ public enum PromptRegistry {
         id: .createPullRequest,
         title: "Create pull request",
         summary: """
-        Sent to the workspace's agent when you press Create pull request, with \
-        `.bloom/pr-instructions.md` attached. The agent does the pushing and the `gh` call itself, \
-        so it can follow the project's own commit and PR conventions. How it does that lives in \
-        that file rather than here, because it belongs to the project and not to Bloom. This is \
-        only the sentence that carries it.
+        Sent to the workspace's agent when you press Create pull request, with the project's \
+        `.bloom/pr-instructions.md` attached, or Bloom's own copy of it when the project has \
+        none. The agent does the pushing and the `gh` call itself, so it can follow the project's \
+        own commit and PR conventions. How it does that lives in that file rather than here, \
+        because it belongs to the project and not to Bloom. This is only the sentence that \
+        carries it.
         """,
         variables: [
             PromptVariable(name: CreatePullRequest.workspace, summary: "The workspace's name."),

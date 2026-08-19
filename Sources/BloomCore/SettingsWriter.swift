@@ -109,17 +109,24 @@ public enum SettingsWriter {
     /// spellings and is written beside them once, rather than left for somebody to discover after
     /// committing a password.
     ///
-    /// Only ever written when the folder is being created. A `.gitignore` a user has since edited
-    /// is theirs, and nothing here rewrites it.
+    /// Written when there is no ignore file yet, rather than only when the folder is new. A
+    /// `.gitignore` that is already there is somebody's, and nothing here rewrites it.
+    ///
+    /// The distinction matters because `.bloom` is routinely brought into existence by something
+    /// that has no business writing the team's ignore rules: `WorktreeScratch` makes
+    /// `.bloom/attachments` and `.bloom/scratch` inside it, and those folders must add nothing to
+    /// the user's repository. Keying off the folder meant the first attachment in a repository
+    /// permanently stopped the ignore rules from ever being laid down, and the password
+    /// `settings.local.toml` exists to protect was one commit away.
     static func prepareFolder(for path: String, repo: String) {
         let manager = FileManager.default
         let folder = (path as NSString).deletingLastPathComponent
-        guard folder == (repo as NSString).appendingPathComponent(".bloom"),
-              !manager.fileExists(atPath: folder)
-        else { return }
+        guard folder == (repo as NSString).appendingPathComponent(".bloom") else { return }
+
+        let ignore = (folder as NSString).appendingPathComponent(".gitignore")
+        guard !manager.fileExists(atPath: ignore) else { return }
 
         try? manager.createDirectory(atPath: folder, withIntermediateDirectories: true)
-        let ignore = (folder as NSString).appendingPathComponent(".gitignore")
         try? "settings.local.toml\n*.local.sh\n".write(
             toFile: ignore, atomically: true, encoding: .utf8
         )

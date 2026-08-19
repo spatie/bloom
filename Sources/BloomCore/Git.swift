@@ -926,6 +926,19 @@ public enum Git {
         !(try await check(["status", "--porcelain"], in: worktree).trimmed.isEmpty)
     }
 
+    /// Whether git is holding this path in the index, meaning the project committed it.
+    ///
+    /// False when git cannot be asked at all, which is the safe answer everywhere this is used:
+    /// every caller is deciding whether a file belongs to the project or to Bloom, and treating
+    /// an unanswerable question as "the project's" leaves the file alone.
+    public static func isTracked(_ path: String, in worktree: String) async -> Bool {
+        guard !path.isEmpty, !path.hasPrefix("-"), !path.contains("\0") else { return false }
+        let result = try? await run(
+            ["ls-files", "--error-unmatch", "-z", "--", path], in: worktree
+        )
+        return result?.ok ?? false
+    }
+
     /// Commits on HEAD that `base` does not have. Throws rather than answering 0 when git cannot
     /// resolve the base, because 0 reads as "this branch is in sync".
     public static func commitsAhead(worktree: String, base: String) async throws -> Int {

@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import BloomCore
 
 /// Everything an attachment does to the disk: deciding whether a copy is needed, making it, and
 /// keeping git blind to the ones Bloom made.
@@ -182,23 +183,11 @@ enum AttachmentFiles {
     /// would show up in the changed file list, in the sidebar's counts, in anything the agent runs
     /// `git status` in, and eventually in a commit.
     ///
-    /// A `.gitignore` containing `*` inside the folder itself, rather than a line appended to
-    /// `.git/info/exclude`. The exclude file of a linked worktree is shared with the repository it
-    /// was forked from, so writing there would edit the user's main checkout to make Bloom's
-    /// scratch directory disappear. This file ignores every path beside it, itself included, so
-    /// git reports nothing at all: `status` is clean, `add -A` adds nothing, and
-    /// `ls-files --others --exclude-standard`, which is where Bloom's own changed file list comes
-    /// from, does not list it. It is also entirely local to the folder, so deleting the folder
-    /// deletes every trace of the arrangement, and `git worktree remove` still takes the worktree
-    /// away without needing `--force`.
+    /// The arrangement itself is `WorktreeScratch`, in BloomCore, because attachments are not the
+    /// only thing Bloom writes into somebody else's checkout and the rule has to be one rule. See
+    /// that type for why it is a `.gitignore` inside the folder rather than `.git/info/exclude`.
     static func shield(workspace: String) {
-        let folder = (workspace as NSString).appendingPathComponent(PromptAttachments.folder)
-        let ignore = (folder as NSString).appendingPathComponent(".gitignore")
-        guard !FileManager.default.fileExists(atPath: ignore) else { return }
-        try? FileManager.default.createDirectory(
-            atPath: folder, withIntermediateDirectories: true
-        )
-        try? "*\n".write(toFile: ignore, atomically: true, encoding: .utf8)
+        WorktreeScratch.shield(WorktreeScratch.attachments, in: workspace)
     }
 
     // MARK: - Paths

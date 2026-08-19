@@ -550,7 +550,7 @@ final class WorkspaceModel {
         // Bring the session forward first: the turn is about to start streaming, and a user who
         // pressed a button in the inspector should be looking at the answer to it.
         activeSessionID = session.id
-        await transcript(for: session).send(pullRequestTurn(text: render.text))
+        await transcript(for: session).send(await pullRequestTurn(text: render.text))
         return nil
     }
 
@@ -591,8 +591,8 @@ final class WorkspaceModel {
         ])
 
         activeSessionID = session.id
-        // No attachment. `.bloom/pr-instructions.md` is about opening a pull request, and there is
-        // already one open by the time this button exists.
+        // No attachment. The pull request instructions are about opening a pull request, and
+        // there is already one open by the time this button exists.
         await transcript(for: session).send(render.text)
         return nil
     }
@@ -605,8 +605,8 @@ final class WorkspaceModel {
     ///
     /// When the file cannot be written, the instructions go into the message itself. A read-only
     /// checkout is a reason to say it differently, not a reason for the button to stop working.
-    private func pullRequestTurn(text: String) -> String {
-        if let path = PullRequestInstructions.ensure(in: workspace.path) {
+    private func pullRequestTurn(text: String) async -> String {
+        if let path = await PullRequestInstructions.ensure(in: workspace.path) {
             return AttachmentTrailer.compose(text: text, paths: [path])
         }
         return text + "\n\n" + PullRequestInstructions.defaultMarkdown

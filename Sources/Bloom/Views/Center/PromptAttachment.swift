@@ -73,9 +73,9 @@ enum PromptAttachments {
     /// read is ordinary.
     ///
     /// Under `.bloom`, which is already Bloom's corner of a repository, and made invisible to git
-    /// by `AttachmentFiles.shield`. See that function for why an untracked folder here would be a
-    /// bug rather than a detail.
-    static let folder = ".bloom/attachments"
+    /// by `WorktreeScratch`. See that type for why an untracked folder here would be a bug rather
+    /// than a detail.
+    static let folder = WorktreeScratch.attachments
 
     /// The trailer the agent actually receives.
     ///

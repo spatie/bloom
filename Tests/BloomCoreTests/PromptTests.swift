@@ -165,39 +165,123 @@ struct PromptRegistryTests {
     }
 }
 
-@Suite("Pull request instructions", .scratchDirectory)
+@Suite("Pull request instructions", .tags(.git), .scratchDirectory)
 struct PullRequestInstructionsTests {
-    @Test("the file is written on demand, inside the worktree, and answers with a relative path")
-    func writesOnDemand() throws {
+    @Test("Bloom's own copy is written into the shielded scratch folder, not next to the user's work")
+    func writesOnDemand() async throws {
         let worktree = TestScratch.unique("worktree")
         try FileManager.default.createDirectory(atPath: worktree, withIntermediateDirectories: true)
 
-        let path = PullRequestInstructions.ensure(in: worktree)
+        let path = await PullRequestInstructions.ensure(in: worktree)
 
-        #expect(path == PullRequestInstructions.path)
-        let full = (worktree as NSString).appendingPathComponent(PullRequestInstructions.path)
+        #expect(path == PullRequestInstructions.scratchPath)
+        #expect(WorktreeScratch.isShielded(path ?? ""))
+        let full = (worktree as NSString).appendingPathComponent(PullRequestInstructions.scratchPath)
         let written = try String(contentsOfFile: full, encoding: .utf8)
         #expect(written == PullRequestInstructions.defaultMarkdown)
+        #expect(FileManager.default.fileExists(
+            atPath: (worktree as NSString).appendingPathComponent(PullRequestInstructions.projectPath)
+        ) == false)
+    }
+
+    /// The bug this whole arrangement exists for, asserted the only way that proves anything:
+    /// against the real git binary, doing what the file itself tells the agent to do.
+    ///
+    /// The default instructions say "Run `git status`. If anything is uncommitted, review it and
+    /// commit it". An agent obeying that reaches for `git add -A`, and Bloom's scratch file went
+    /// out in a user's pull request and was merged. A unit test on a path string would not have
+    /// caught it. This does: after `add -A` there must be nothing of Bloom's staged.
+    @Test("an agent told to commit everything cannot commit Bloom's copy")
+    func surviveAddEverything() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+
+        let path = await PullRequestInstructions.ensure(in: repo.path)
+        #expect(path != nil)
+
+        try await Shell.check("git", ["add", "-A"], cwd: repo.path)
+        let staged = try await Shell.check(
+            "git", ["diff", "--cached", "--name-only"], cwd: repo.path
+        )
+        #expect(staged.trimmed.isEmpty, "git staged \(staged.trimmed)")
+
+        let status = try await Shell.check("git", ["status", "--porcelain"], cwd: repo.path)
+        #expect(status.trimmed.isEmpty, "git reported \(status.trimmed)")
     }
 
     /// Once it exists it belongs to the project. Rewriting it would silently undo somebody's
     /// edit every time the button was pressed.
-    @Test("a file that is already there is never rewritten")
-    func neverOverwrites() throws {
-        let worktree = TestScratch.unique("worktree")
-        let full = (worktree as NSString).appendingPathComponent(PullRequestInstructions.path)
-        try FileManager.default.createDirectory(
-            atPath: (full as NSString).deletingLastPathComponent, withIntermediateDirectories: true
-        )
-        try "Ours, not yours.".write(toFile: full, atomically: true, encoding: .utf8)
+    @Test("the project's own file wins and is never rewritten")
+    func projectsFileWins() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
 
-        #expect(PullRequestInstructions.ensure(in: worktree) == PullRequestInstructions.path)
-        #expect(try String(contentsOfFile: full, encoding: .utf8) == "Ours, not yours.")
+        try repo.write(PullRequestInstructions.projectPath, "Ours, not yours.")
+
+        let path = await PullRequestInstructions.ensure(in: repo.path)
+        #expect(path == PullRequestInstructions.projectPath)
+        #expect(repo.read(PullRequestInstructions.projectPath) == "Ours, not yours.")
+        #expect(repo.exists(PullRequestInstructions.scratchPath) == false)
+    }
+
+    /// A repository that committed Bloom's default before the bug was found, which is exactly
+    /// what happened. Deleting it would show up as a deletion in every workspace cut from that
+    /// repository and would be committed by the next agent told to commit what it finds. Bloom
+    /// does not undo what is already in somebody's history.
+    @Test("a committed copy of the default is left exactly where it is")
+    func committedDefaultIsLeftAlone() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+
+        try repo.write(PullRequestInstructions.projectPath, PullRequestInstructions.defaultMarkdown)
+        try await repo.commit("adopt the pull request instructions")
+
+        let path = await PullRequestInstructions.ensure(in: repo.path)
+        #expect(path == PullRequestInstructions.projectPath)
+        #expect(repo.exists(PullRequestInstructions.projectPath))
+
+        let status = try await Shell.check("git", ["status", "--porcelain"], cwd: repo.path)
+        #expect(status.trimmed.isEmpty, "git reported \(status.trimmed)")
+    }
+
+    /// An untracked copy an older Bloom left behind is the one thing that may be moved, because
+    /// nothing but Bloom could have written it and moving it is not a deletion in anybody's diff.
+    @Test("an untracked copy of a default Bloom shipped is reclaimed into the scratch folder")
+    func strayDefaultIsReclaimed() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+
+        let retired = try #require(PullRequestInstructions.retiredDefaults.first)
+        try repo.write(PullRequestInstructions.projectPath, retired)
+
+        let path = await PullRequestInstructions.ensure(in: repo.path)
+        #expect(path == PullRequestInstructions.scratchPath)
+        #expect(repo.exists(PullRequestInstructions.projectPath) == false)
+        #expect(repo.read(PullRequestInstructions.scratchPath) == retired)
+
+        let status = try await Shell.check("git", ["status", "--porcelain"], cwd: repo.path)
+        #expect(status.trimmed.isEmpty, "git reported \(status.trimmed)")
+    }
+
+    /// One edited character makes it theirs. Guessing wrong here moves somebody's work out from
+    /// under them.
+    @Test("an edited copy is somebody's work and stays where they put it")
+    func editedCopyStays() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+
+        let edited = PullRequestInstructions.defaultMarkdown + "\n- Always tag @freek.\n"
+        try repo.write(PullRequestInstructions.projectPath, edited)
+
+        let path = await PullRequestInstructions.ensure(in: repo.path)
+        #expect(path == PullRequestInstructions.projectPath)
+        #expect(repo.read(PullRequestInstructions.projectPath) == edited)
+        #expect(PullRequestInstructions.isUnedited(edited) == false)
     }
 
     @Test("a worktree that cannot be written to answers nil rather than throwing")
-    func failsSoftly() {
-        #expect(PullRequestInstructions.ensure(in: "/dev/null/nowhere") == nil)
+    func failsSoftly() async {
+        #expect(await PullRequestInstructions.ensure(in: "/dev/null/nowhere") == nil)
     }
 
     /// The instructions are shared by every workspace in the repository, so a branch name in them
@@ -208,16 +292,23 @@ struct PullRequestInstructionsTests {
         #expect(PullRequestInstructions.defaultMarkdown.contains("<target branch>"))
     }
 
+    /// A file git will not report is a file nobody finds by accident, so the file has to say
+    /// where it is and how to adopt it.
+    @Test("the default says how to make it the project's own")
+    func saysHowToAdoptIt() {
+        #expect(PullRequestInstructions.defaultMarkdown.contains(PullRequestInstructions.projectPath))
+    }
+
     @Test("the turn the agent receives is the sentence plus a normal attachment trailer")
     func composesAsAnAttachment() {
         let text = AttachmentTrailer.compose(
             text: "Create a pull request for this workspace against main.",
-            paths: [PullRequestInstructions.path]
+            paths: [PullRequestInstructions.scratchPath]
         )
 
         let (body, paths) = AttachmentTrailer.split(text)
         #expect(body == "Create a pull request for this workspace against main.")
-        #expect(paths == [PullRequestInstructions.path])
+        #expect(paths == [PullRequestInstructions.scratchPath])
     }
 }
 

@@ -140,7 +140,9 @@ struct PullRequestCreator: View {
         if isAgentBusy {
             return "The agent is working. The request is sent as a turn, so it has to wait for this one."
         }
+        // No path named. There are two, the project's own and Bloom's copy of the default, and
+        // which one is in play is not something a tooltip should be teaching anybody.
         return "Ask this workspace's agent to push the branch and open a pull request against "
-            + "\(baseBranch), following the instructions in \(PullRequestInstructions.path)."
+            + "\(baseBranch), following this project's pull request instructions."
     }
 }
