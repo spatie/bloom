@@ -119,6 +119,15 @@ echo "==> stamping $VERSION ($BUILD)"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$APP/Contents/Info.plist"
 
+# Stamped here rather than anywhere else because this is the moment the version
+# stops being the placeholder in Resources/Info.plist and starts meaning
+# something. The updater refuses to run on a bundle that was never stamped, since
+# comparing an appcast against a working copy's fixed version is meaningless in
+# both directions. See SoftwareUpdate.availability. Without this line the app
+# ships, installs and never offers an update.
+/usr/libexec/PlistBuddy -c "Set :BloomBuildChannel release" "$APP/Contents/Info.plist" 2>/dev/null \
+  || /usr/libexec/PlistBuddy -c "Add :BloomBuildChannel string release" "$APP/Contents/Info.plist"
+
 ENTITLEMENTS=${BLOOM_ENTITLEMENTS:-}
 if [ -z "$ENTITLEMENTS" ] && [ -f "Resources/Bloom.entitlements" ]; then
   ENTITLEMENTS="Resources/Bloom.entitlements"
