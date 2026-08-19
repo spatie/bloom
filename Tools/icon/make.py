@@ -11,10 +11,14 @@ Writes two things into Resources/, and they are not the same picture:
                       system supplies the material, the shadow and the specular
                       and generates the dark and tinted variants itself
 
-The design is `flush`: a dark ground, two lanes arriving from the left and
-right, and a pale bar leaving to the right. It reads as a B without being one,
-which is why it was chosen out of nine rounds, so nothing here should change its
-geometry.
+The design is `corner`: a dark ground, two lanes arriving from the left, and a
+pale bar leaving through the lower right corner. It reads as a B without being
+one, which is why it was chosen out of nine rounds, so nothing here should
+change its geometry.
+
+The bar is tipped so that it exits where the tile is already turning. A shape
+cut by a straight edge looks cut off; a shape cut by a curve looks like it went
+round something, which is the whole reason this one is not `flush`.
 
 Three rules worth knowing before editing this file.
 
@@ -32,7 +36,7 @@ nothing draws a tile for us, so there the figure keeps the Big Sur template.
 THE 16 AND 32 POINT BITMAPS COME FROM SEPARATE ARTWORK with the lanes opened
 up. At that size the three bands are a few pixels each and they close into a
 texture, so the small version trades fidelity for still being three things.
-`gen9.flush(small=True)` is that version.
+`gen9.corner(small=True)` is that version.
 
 THE LAYERED DOCUMENT GETS LESS BAKED DEPTH THAN THE FLAT ONE. The system draws
 its own shadow and specular over the layers, so the contact shadows that make
@@ -82,8 +86,8 @@ def icns():
     # The app runs on macOS 15 as well, where nothing draws a tile for us, so
     # the flat icon has to carry its own. Only the layered document goes full
     # bleed.
-    _, _, full = gen9.render(gen9.flush)
-    _, _, small = gen9.render(gen9.flush, small=True)
+    _, _, full = gen9.render(gen9.corner)
+    _, _, small = gen9.render(gen9.corner, small=True)
 
     iconset = os.path.join(HERE, ".build", "AppIcon.iconset")
     shutil.rmtree(iconset, ignore_errors=True)
@@ -114,7 +118,7 @@ def layered():
     """The three pieces the system composites, back to front: the ground, the
     two arriving lanes, the leaving bar. Written with the app's own contact
     shadows left out, because the system seats the layers itself."""
-    layers, _, _ = gen9.render(gen9.flush)
+    layers, _, _ = gen9.render(gen9.corner)
     bundle = os.path.join(RESOURCES, "Bloom.icon")
     assets = os.path.join(bundle, "Assets")
     os.makedirs(assets, exist_ok=True)
