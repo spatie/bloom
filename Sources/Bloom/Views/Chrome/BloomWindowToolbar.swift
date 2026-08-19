@@ -47,18 +47,30 @@ struct BloomWindowToolbar: ToolbarContent {
         // of the toolbar, and that is also where it lines up with the inspector below it: the
         // project the changes belong to, directly above the changes.
         //
+        // Only on a workspace. On Home and on Search the item used to spell out the name of the
+        // screen, which named nothing: there is one Home and one Search, the sidebar row that
+        // took you there is still selected in front of you, and the screen's own heading says the
+        // same word a few points below. On a workspace it earns its place, because there are many
+        // of those and the mark says which project this one cuts from.
+        //
+        // Leaving the item out is safe now that it is trailing. It was kept on Home while it sat
+        // in principal placement, where an empty item collapsed the flexible space that pinned
+        // the trailing controls to the right edge. Trailing items are packed against that edge by
+        // the toolbar itself, and this is the only one, so its absence moves nothing.
+        //
         // On macOS 26 every toolbar item is handed its own Liquid Glass background. This one
-        // draws its whole content itself, so the system capsule is a second background on top of
-        // it: a circle around the single word on Home, and a rim with no clearance around the
-        // project swatch and the overflow menu on a workspace.
-        if #available(macOS 26.0, *) {
-            ToolbarItem(placement: .primaryAction) {
-                WindowTitleLabel()
-            }
-            .sharedBackgroundVisibility(.hidden)
-        } else {
-            ToolbarItem(placement: .primaryAction) {
-                WindowTitleLabel()
+        // draws its whole content itself, so the system capsule would be a second background on
+        // top of it: a rim with no clearance around the project swatch and the overflow menu.
+        if let workspace = app.selectedWorkspace {
+            if #available(macOS 26.0, *) {
+                ToolbarItem(placement: .primaryAction) {
+                    WindowTitleLabel(workspace: workspace)
+                }
+                .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .primaryAction) {
+                    WindowTitleLabel(workspace: workspace)
+                }
             }
         }
     }

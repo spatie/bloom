@@ -5,15 +5,13 @@ import BloomCore
 /// What the toolbar says you are looking at: the project, followed by the actions that apply to
 /// the whole worktree.
 ///
+/// It belongs to a workspace and to nothing else. `BloomWindowToolbar` leaves the item out
+/// entirely on Home and on Search, so this view is never asked to describe them.
+///
 /// The workspace's own name is not here. It is the window's title, one row up and a few
 /// millimetres to the left, where it comes with the proxy icon that lets the worktree be dragged
 /// out of the title bar and the path above it be reached with a Command-click. Repeating the name
 /// here would have been the same word twice on one row.
-///
-/// It is always present, even on Home, where it is one word. That began as a workaround, because
-/// an empty principal item collapsed the flexible space that pins the trailing toggles to the
-/// right, which `ToolbarSpacer(.flexible)` would now express directly on macOS 26. It stays
-/// because controls that move as you navigate are worse than a redundant word.
 ///
 /// The branch used to sit here as a chip, and the inspector's pull request strip repeats it a
 /// centimetre lower, so the window showed the same branch name twice above itself. The inspector
@@ -25,29 +23,25 @@ import BloomCore
 struct WindowTitleLabel: View {
     @Environment(AppModel.self) private var app
 
-    var body: some View {
-        if let workspace = app.selectedWorkspace {
-            HStack(spacing: Metrics.spacing) {
-                if let repo = app.repo(for: workspace) {
-                    // The same mark as the one in front of the project in the sidebar and in a
-                    // search result. It was a circle here and a rounded square there, which read
-                    // as two different things. The inline size, because the label beside it is a
-                    // toolbar label rather than a heading.
-                    RepoIcon(repo: repo, size: Metrics.repoIconSmall)
-                    Text(repo.name)
-                        .font(Typo.labelEmphasis)
-                        .foregroundStyle(Palette.textPrimary)
-                        .lineLimit(1)
-                }
+    let workspace: Workspace
 
-                menu(for: workspace)
+    var body: some View {
+        HStack(spacing: Metrics.spacing) {
+            if let repo = app.repo(for: workspace) {
+                // The same mark as the one in front of the project in the sidebar and in a
+                // search result. It was a circle here and a rounded square there, which read
+                // as two different things. The inline size, because the label beside it is a
+                // toolbar label rather than a heading.
+                RepoIcon(repo: repo, size: Metrics.repoIconSmall)
+                Text(repo.name)
+                    .font(Typo.labelEmphasis)
+                    .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
             }
-            .fixedSize()
-        } else {
-            Text(app.selection == .search ? "Search" : "Home")
-                .font(Typo.labelEmphasis)
-                .foregroundStyle(Palette.textSecondary)
+
+            menu(for: workspace)
         }
+        .fixedSize()
     }
 
     /// The sidebar's row menu, minus the two entries that cannot travel: renaming is the sidebar
