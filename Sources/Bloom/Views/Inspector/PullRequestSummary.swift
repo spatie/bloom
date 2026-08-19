@@ -183,7 +183,7 @@ struct PullRequestSummary: View {
         .accessibilityLabel(accessibilityText)
     }
 
-    /// The one prominent control, whichever it is, and the merge methods beside it.
+    /// The one prominent control, whichever it is, and whatever stands beside it.
     ///
     /// The primary slot belongs to whatever the state is actually asking for. With local work in
     /// the worktree that is not Merge: merging now would land the pull request WITHOUT what the
@@ -191,6 +191,22 @@ struct PullRequestSummary: View {
     /// push, and merging stays exactly one click away in the menu beside it, which already listed
     /// all three methods and already opens the same confirmation. Nothing is taken away; what
     /// changes is which of the two the strip is pointing at.
+    ///
+    /// **The primary control is last in every one of these, and that is the whole rule.** It used
+    /// to be first, with the merge method chevron or Archive after it, so the button the strip
+    /// exists for landed at a different distance from the pane's edge in every state: measured at
+    /// the pane's default width, Merge ended 21 points short of the inset, Continue 96 points
+    /// short, and Create pull request flush against it. A control that moves half an inch as a
+    /// workspace changes state is a control you have to look for. Now the leading content is the
+    /// only thing that gives way, and the primary's trailing edge is the pane's own inset in
+    /// every state the strip can be in.
+    ///
+    /// Everything that is not the primary sits immediately before it, at the tight spacing, so
+    /// the pair still reads as one cluster rather than as two controls that happen to be near
+    /// each other. The merge method chevron before Merge is the one place this looks unusual: a
+    /// split button normally carries its chevron on the trailing side. That is worth giving up,
+    /// because the alternative is the trailing edge belonging to a 19 point chevron rather than
+    /// to the button, which is exactly the misalignment being fixed.
     @ViewBuilder
     private var trailing: some View {
         if isWorking {
@@ -199,14 +215,14 @@ struct PullRequestSummary: View {
                 .accessibilityLabel("Working")
         } else if pullRequest.isOpen {
             HStack(spacing: Metrics.spacingTight) {
-                if status.remedy == .merge { mergeButton } else { pushButton }
                 mergeMenu
+                if status.remedy == .merge { mergeButton } else { pushButton }
             }
             .fixedSize()
         } else if pullRequest.isMerged {
             HStack(spacing: Metrics.spacingTight) {
-                continueButton
                 archiveButton
+                continueButton
             }
             .fixedSize()
         }
@@ -227,7 +243,8 @@ struct PullRequestSummary: View {
     /// None of that is in git and all of it is thrown away by an archive. Continuing keeps every
     /// bit of it and replaces only the part that is genuinely over, which is the branch.
     ///
-    /// Filled, and first in the pair. It used to be the outlined one, on the reasoning that most
+    /// Filled, and last in the pair, which is where the trailing edge is. It used to be the
+    /// outlined one, on the reasoning that most
     /// merged workspaces really are finished so the filled control belonged on Archive. That put
     /// the app's visual default on the button that deletes a worktree, which is the same mistake
     /// as making a destructive answer the default button in a confirmation, and this app has now
