@@ -14,6 +14,13 @@ struct SearchView: View {
     /// Matching runs when the query or the workspace list changes, not on every redraw. A search
     /// stays on screen while agents run, and each of them updates its diff stat every few seconds.
     @State private var hits: [AppModel.SearchHit] = []
+    /// Archived workspaces, read once, for the same reason Home reads them: `AppModel` holds only
+    /// active ones and this is a database read rather than a property.
+    ///
+    /// Search used to exclude them entirely, which is exactly backwards. Somebody who archived
+    /// something and wants it back types its name in here first, and got "No Results" about a
+    /// workspace whose branch was still on disk.
+    @State private var archived: [Workspace] = []
 
     var body: some View {
         @Bindable var app = app
@@ -52,6 +59,10 @@ struct SearchView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Palette.windowBackground)
         .task { fieldFocused = true }
+        .task(id: app.archivedRevision) {
+            archived = await app.archivedWorkspaces()
+            match()
+        }
         .onChange(of: app.searchQuery, initial: true) { _, _ in match() }
         .onChange(of: app.workspaces) { _, _ in match() }
     }
@@ -101,7 +112,7 @@ struct SearchView: View {
     // MARK: - Actions
 
     private func match() {
-        hits = app.search(app.searchQuery)
+        hits = app.search(app.searchQuery, alsoSearching: archived)
     }
 
     private func clear() {
@@ -109,8 +120,14 @@ struct SearchView: View {
         fieldFocused = true
     }
 
+    /// An archived hit opens the reader rather than the centre column, which is the same split
+    /// Home's rows make. See `ArchivedWorkspaceView`.
     private func select(_ hit: AppModel.SearchHit) {
-        app.selection = .workspace(hit.workspace.id)
+        if hit.isArchived {
+            app.openArchived(hit.workspace)
+        } else {
+            app.selection = .workspace(hit.workspace.id)
+        }
     }
 }
 

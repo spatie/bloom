@@ -73,7 +73,10 @@ struct RootView: View {
         // in the Window menu and its label in Mission Control, and neither of those can be
         // animated: what they would show is one arbitrary frame of a scramble, which is a window
         // called `xqbn hgue` in a menu the user is reading to find it by name.
-        .navigationTitle(app.selectedWorkspace?.name ?? "Bloom")
+        // `menuWorkspace` rather than `selectedWorkspace`, so an archived workspace being read
+        // names the window as well. It is still not what the inspector keys on, below: naming a
+        // window costs nothing, and showing a diff for a worktree that is gone does not.
+        .navigationTitle(app.menuWorkspace?.name ?? "Bloom")
 
         // Marks this scene as the main window, so the menu items that act on a workspace grey out
         // while Settings or a project settings window is key. See `MainWindowFocusKey`.
@@ -170,7 +173,10 @@ struct RootView: View {
             Text(alert.message)
         }
         .onReceive(NotificationCenter.default.publisher(for: .bloomOpenWorkspace)) { note in
-            if let id = note.object as? String { app.selection = .workspace(id) }
+            // Through `open(workspaceID:)` rather than straight into the selection, so an id that
+            // has since been archived opens its transcript instead of landing on Home with no
+            // explanation. See `AppModel.open(workspaceID:)`.
+            if let id = note.object as? String { Task { await app.open(workspaceID: id) } }
         }
         .onReceive(NotificationCenter.default.publisher(for: .bloomToggleSidebar)) { _ in
             columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly

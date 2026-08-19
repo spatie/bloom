@@ -7,9 +7,24 @@ enum SidebarSelection: Hashable {
     case home
     case search
     case workspace(String)
+    /// An archived workspace, open for reading.
+    ///
+    /// Its own case rather than a flag on `workspace`, because an archived workspace is not a
+    /// workspace the window can do anything to. Its worktree is gone, so the inspector has no
+    /// diff to show, the toolbar has nothing to act on, the composer has nowhere to send a prompt
+    /// and every item in the Workspace menu but one points at a directory that is not there.
+    /// Keeping it out of `workspaceID` is what makes all of that fall out for free: the inspector
+    /// hides itself, the menu items grey, the background refresh skips it and nothing tries to
+    /// reopen it on the next launch.
+    case archived(String)
 
     var workspaceID: String? {
         if case .workspace(let id) = self { return id }
+        return nil
+    }
+
+    var archivedWorkspaceID: String? {
+        if case .archived(let id) = self { return id }
         return nil
     }
 }
@@ -108,6 +123,8 @@ final class AppModel {
             guard let id = newValue.workspaceID, workspaceModels[id] == nil,
                   let workspace = workspaces.first(where: { $0.id == id }) else { return }
             _ = model(for: workspace)
+            // An archived selection is not prepared here. Its workspace is not in `workspaces` by
+            // definition, so the value has to come from the caller: see `openArchived`.
         }
     }
 
@@ -426,6 +443,24 @@ final class AppModel {
     var selectedWorkspace: Workspace? {
         guard let id = selection.workspaceID else { return nil }
         return workspaces.first { $0.id == id }
+    }
+
+    /// The archived workspace being read, if that is what the window is on.
+    ///
+    /// Read out of its live model rather than out of a list, because the archived list is loaded
+    /// asynchronously and `openArchived` is what put the value there in the first place.
+    var selectedArchivedWorkspace: Workspace? {
+        guard let id = storedSelection.archivedWorkspaceID else { return nil }
+        return workspaceModels[id]?.workspace
+    }
+
+    /// The workspace a menu item should act on, archived or not.
+    ///
+    /// Only for the items that still mean something once the worktree is gone, which is Copy
+    /// Branch Name and nothing else. Opening an editor or a Finder window on a path that no
+    /// longer exists is not one of them.
+    var menuWorkspace: Workspace? {
+        selectedWorkspace ?? selectedArchivedWorkspace
     }
 
     /// The live model for a workspace, created on first use.
@@ -1127,22 +1162,97 @@ final class AppModel {
     }
 
     private func beginRestore(of workspace: Workspace, repo: Repo) {
-        Task { await restoreArchived(workspace, repo: repo) }
+        Task { await restore(workspace) }
     }
 
-    /// Puts the worktree back and selects it again.
+    // MARK: - Reading an archived workspace, and bringing it back
+
+    /// Workspaces whose restore is in flight, so the button that started it can say so and cannot
+    /// be pressed twice.
+    private(set) var restoring: Set<String> = []
+
+    /// Opens an archived workspace for reading.
     ///
-    /// No redo is registered. Redo of an archive would delete a worktree from a menu item, with no
-    /// safety report in front of it, which is the one thing this app is careful never to do.
-    private func restoreArchived(_ workspace: Workspace, repo: Repo) async {
+    /// Reading and resuming are two different things and this is the first of them. Everything an
+    /// archived workspace ever said is still in the database: the transcript, the sessions, what
+    /// each turn cost. Only the worktree is gone. Before this there was no way to reach any of it
+    /// once the undo had expired, so a workspace archived yesterday took its whole history out of
+    /// the app while its branch sat on disk.
+    ///
+    /// The model is prepared here rather than in the selection setter, because an archived
+    /// workspace is not in `workspaces` and the setter has nowhere to look it up.
+    func openArchived(_ workspace: Workspace) {
+        model(for: workspace)
+        selection = .archived(workspace.id)
+    }
+
+    /// Opens whatever a workspace id points at, live or archived.
+    ///
+    /// The one entry point for "show me this workspace" from outside the window: the menu bar
+    /// item, the Services item, a deep link and the capture harness all arrive here through
+    /// `.bloomOpenWorkspace`. It used to set `.workspace(id)` whatever the id was, and an id that
+    /// had since been archived resolved to no workspace at all, so the window quietly fell back
+    /// to Home. Now an archived id opens the reader instead of nothing.
+    func open(workspaceID id: String) async {
+        if workspaces.contains(where: { $0.id == id }) {
+            selection = .workspace(id)
+            return
+        }
+        guard let archived = await archivedWorkspaces().first(where: { $0.id == id }) else { return }
+        openArchived(archived)
+    }
+
+    /// Where this workspace's branch still is. See `RestoreSource`.
+    ///
+    /// Asks the network, so it is called once by the screen that offers Restore rather than per
+    /// redraw, and never from a body.
+    func restoreSource(for workspace: Workspace) async -> RestoreSource? {
+        guard let manager, let repo = repo(for: workspace) else { return nil }
+        return await manager.restoreSource(workspace: workspace, repo: repo)
+    }
+
+    /// Rebuilds the worktree and puts the workspace back in the sidebar.
+    ///
+    /// This is the second of the two things Restore could mean, and the one that can fail: a
+    /// branch that is gone from this Mac and from the remote leaves nothing to build from. The
+    /// refusal says so and the workspace stays where it is, still readable.
+    ///
+    /// No redo is registered when this arrives from Edit > Undo. Redo of an archive would delete
+    /// a worktree from a menu item, with no safety report in front of it, which is the one thing
+    /// this app is careful never to do.
+    func restore(_ workspace: Workspace) async {
         guard let manager else { return }
+        guard let repo = repo(for: workspace) else {
+            alert = BloomAlert(
+                title: "Could not bring \(workspace.name) back",
+                message: "Its project is no longer in Bloom, so there is no repository to cut a "
+                    + "worktree from. Add the project again and try once more."
+            )
+            return
+        }
+        guard !restoring.contains(workspace.id) else { return }
+
+        restoring.insert(workspace.id)
+        defer { restoring.remove(workspace.id) }
+
         do {
-            let restored = try await manager.restore(workspace: workspace, repo: repo)
+            let outcome = try await manager.restore(workspace: workspace, repo: repo)
             // The other half of the pair: this workspace has left the archived list.
             invalidateArchived()
             await reload()
-            selection = .workspace(restored.id)
+            selection = .workspace(outcome.workspace.id)
+            Log.archive.info("restored \(workspace.name, privacy: .public)")
+
+            if let from = outcome.relocatedFrom {
+                notice = BloomNotice(
+                    message: "Something else is at \(from), so the worktree was rebuilt at "
+                        + "\(outcome.workspace.path)."
+                )
+            }
         } catch {
+            Log.archive.error(
+                "could not restore \(workspace.name, privacy: .public): \(error.readableMessage, privacy: .public)"
+            )
             alert = BloomAlert(
                 title: "Could not bring \(workspace.name) back",
                 message: error.readableMessage
@@ -1242,19 +1352,36 @@ final class AppModel {
         var workspace: Workspace
         var repo: Repo?
         var reason: String
+        var isArchived = false
     }
 
     /// The rule lives in `WorkspaceSearch`, in the core, because Home's filter field and the
     /// Shortcuts entity query ask the same question and used to answer it differently.
-    func search(_ query: String) -> [SearchHit] {
+    ///
+    /// Archived workspaces are searched too, and are passed in rather than read, because the
+    /// archived list is a database read and this is called from a view on every keystroke. They
+    /// come last: a live workspace is nearly always the one being looked for, and an archived hit
+    /// that pushed one down the list would be the search answering a question nobody asked.
+    ///
+    /// Leaving them out was its own bug. Somebody who archives something and then wants it back
+    /// types its name into search first, and search said "No Results" about a workspace whose
+    /// branch was sitting on disk.
+    func search(_ query: String, alsoSearching archived: [Workspace] = []) -> [SearchHit] {
         let needle = WorkspaceSearch.needle(query)
         guard !needle.isEmpty else { return [] }
-        return workspaces.compactMap { workspace in
-            let repo = repo(for: workspace)
-            guard let reason = WorkspaceSearch.match(
-                workspace: workspace, repo: repo, needle: needle
-            ) else { return nil }
-            return SearchHit(workspace: workspace, repo: repo, reason: reason)
+
+        func hits(in list: [Workspace], isArchived: Bool) -> [SearchHit] {
+            list.compactMap { workspace in
+                let repo = repo(for: workspace)
+                guard let reason = WorkspaceSearch.match(
+                    workspace: workspace, repo: repo, needle: needle
+                ) else { return nil }
+                return SearchHit(
+                    workspace: workspace, repo: repo, reason: reason, isArchived: isArchived
+                )
+            }
         }
+
+        return hits(in: workspaces, isArchived: false) + hits(in: archived, isArchived: true)
     }
 }

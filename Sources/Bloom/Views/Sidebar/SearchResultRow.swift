@@ -25,6 +25,17 @@ struct SearchResultRow: View {
                         .lineLimit(1)
 
                     HStack(spacing: Metrics.spacingSmall) {
+                        // First, because it changes what the row will do when it is clicked: an
+                        // archived hit opens a reader rather than the workspace.
+                        if hit.isArchived {
+                            Label("Archived", systemImage: "archivebox")
+                                .labelStyle(.titleAndIcon)
+                                .foregroundStyle(Palette.textTertiary)
+
+                            Text(verbatim: "\u{00B7}")
+                                .accessibilityHidden(true)
+                        }
+
                         Text(hit.repo?.name ?? "Unknown project")
                             .lineLimit(1)
 
@@ -60,5 +71,6 @@ struct SearchResultRow: View {
         .buttonStyle(.plain)
         .rowBackground(isSelected: false, isHovered: isHovered)
         .accessibilityInputLabels([hit.workspace.name])
+        .accessibilityHint(hit.isArchived ? "Archived. Opens the transcript." : "")
     }
 }

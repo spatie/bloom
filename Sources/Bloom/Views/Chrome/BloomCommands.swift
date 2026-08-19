@@ -64,7 +64,10 @@ struct BloomCommands: Commands {
                 model.selection = .search
             }
             .keyboardShortcut("f", modifiers: .command)
-            .disabled(model.workspaces.isEmpty)
+            // Keyed on projects rather than on live workspaces, because search now also finds
+            // archived ones and a machine whose every workspace is archived still has something
+            // to find. See `AppModel.search`.
+            .disabled(model.repos.isEmpty)
         }
 
         // Splitting the centre column. Cmd+D is deliberately not used: a terminal pane already
@@ -168,6 +171,19 @@ struct BloomCommands: Commands {
             .keyboardShortcut(.delete, modifiers: .command)
             .disabled(model.selectedWorkspace == nil)
 
+            // The way back, which the menu bar had no item for at all. Before this the only path
+            // to `restoreArchived` in the whole app was the undo registered by the archive that
+            // had just happened, so a workspace archived yesterday could not be brought back from
+            // anywhere. See `ArchivedWorkspaceView` for why reading it and restoring it are two
+            // different things.
+            Button("Restore Workspace") {
+                restoreArchivedWorkspace()
+            }
+            .disabled(
+                model.selectedArchivedWorkspace == nil
+                    || model.restoring.contains(model.selectedArchivedWorkspace?.id ?? "")
+            )
+
             Divider()
 
             Button("Open in Editor") {
@@ -184,12 +200,15 @@ struct BloomCommands: Commands {
             .keyboardShortcut("r", modifiers: [.command, .shift])
             .disabled(model.selectedWorkspace == nil)
 
+            // `menuWorkspace`, not `selectedWorkspace`: a branch name is the one thing on this
+            // menu that still means something once the worktree has been removed, and it is what
+            // somebody reading an archived workspace reaches for.
             Button("Copy Branch Name") {
-                guard let workspace = model.selectedWorkspace else { return }
+                guard let workspace = model.menuWorkspace else { return }
                 Clipboard.copy(workspace.branch)
             }
             .keyboardShortcut("c", modifiers: [.command, .shift])
-            .disabled(model.selectedWorkspace == nil)
+            .disabled(model.menuWorkspace == nil)
 
             Divider()
 
@@ -248,5 +267,10 @@ struct BloomCommands: Commands {
     private func archiveSelectedWorkspace() {
         guard let workspace = model.selectedWorkspace else { return }
         Task { await model.archive(workspace) }
+    }
+
+    private func restoreArchivedWorkspace() {
+        guard let workspace = model.selectedArchivedWorkspace else { return }
+        Task { await model.restore(workspace) }
     }
 }

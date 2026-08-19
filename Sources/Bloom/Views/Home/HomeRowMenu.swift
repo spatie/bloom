@@ -19,8 +19,13 @@ import BloomCore
 /// become `.contextMenu { WorkspaceMenuItems(workspace: workspace) { renaming = $0 } }`, and the
 /// archive confirmation stays where it already is, in `AppModel.archive`.
 ///
-/// An archived workspace gets a different, shorter menu. Its worktree has been removed, so Open in
-/// Editor, Reveal in Finder and Archive would all be pointing at a directory that is not there.
+/// An archived workspace gets a different menu. Its worktree has been removed, so Open in Editor,
+/// Reveal in Finder and Archive would all be pointing at a directory that is not there. What it
+/// does get is the two things that are still possible, and they are deliberately two rather than
+/// one: Open reads the transcript, which always works because the transcript is in the database,
+/// and Restore rebuilds the worktree, which needs a branch that may have been deleted. See
+/// `ArchivedWorkspaceView` for why conflating them would produce a menu item that fails on exactly
+/// the rows somebody most wants.
 struct HomeRowMenu: View {
     var row: HomeRow
     /// Raised to the list, which owns the one field that can be open at a time.
@@ -32,6 +37,12 @@ struct HomeRowMenu: View {
 
     var body: some View {
         if row.isArchived {
+            Button("Open") { app.openArchived(workspace) }
+            Button("Restore workspace") {
+                Task { await app.restore(workspace) }
+            }
+            .disabled(app.restoring.contains(workspace.id))
+            Divider()
             Button("Copy branch name") { Clipboard.copy(workspace.branch) }
         } else {
             Button("Open in Editor") { Reveal.inEditor(workspace.path) }

@@ -91,12 +91,12 @@ public struct WorkspaceManager: Sendable {
 
         let directoryName = finalBranch.replacingOccurrences(of: "/", with: "-")
         let root = Self.workspacesRoot.appendingPathComponent(repo.name, isDirectory: true)
-        var worktreePath = root.appendingPathComponent(directoryName).path
-        var suffix = 2
-        while FileManager.default.fileExists(atPath: worktreePath) {
-            worktreePath = root.appendingPathComponent("\(directoryName)-\(suffix)").path
-            suffix += 1
-        }
+        // The suffix rule lives in `WorktreePath` because restoring an archived workspace needs
+        // the same one: two places that each invent a free directory name are two places that can
+        // disagree about which names are free.
+        let worktreePath = WorktreePath.free(
+            preferred: root.appendingPathComponent(directoryName).path
+        ) { FileManager.default.fileExists(atPath: $0) }
 
         try await Git.addWorktree(repo: repo.path, path: worktreePath, branch: finalBranch, base: base)
 

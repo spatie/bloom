@@ -139,10 +139,6 @@ struct HomeView: View {
                         .contextMenu {
                             HomeRowMenu(row: row) { renaming = $0 }
                         }
-                        // An archived workspace has no worktree to open, so the keyboard skips
-                        // it rather than landing on a row where Return does nothing. It is still
-                        // drawn, still readable and still says what it is.
-                        .selectionDisabled(row.isArchived)
                     }
                 } header: {
                     HomeGroupHeading(title: group.title, count: group.rows.count)
@@ -368,12 +364,17 @@ struct HomeView: View {
 
     // MARK: - Actions
 
+    /// An archived row opens too, into the reader rather than into the centre column.
+    ///
+    /// It used to open into nothing at all: the row was `selectionDisabled`, a click returned
+    /// early and a double click and a right click did no more, so an archived workspace listed by
+    /// "Showing archived" was a line of text with no way into it. See `ArchivedWorkspaceView`.
     private func open(_ row: HomeRow) {
-        // An archived workspace has no worktree left to open, so the row is a record rather than
-        // a destination. Selecting it would put the detail column on a workspace `AppModel` does
-        // not hold and leave the window on a blank pane.
-        guard !row.isArchived else { return }
-        app.selection = .workspace(row.id)
+        if row.isArchived {
+            app.openArchived(row.workspace)
+        } else {
+            app.selection = .workspace(row.id)
+        }
     }
 
     /// Handed to `RootView`, which owns the only create sheet in the app.

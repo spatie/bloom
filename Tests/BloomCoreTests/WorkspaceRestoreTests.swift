@@ -2,9 +2,11 @@ import Testing
 import Foundation
 @testable import BloomCore
 
-/// `WorkspaceManager.restore` is what stands behind Edit > Undo after an archive, so the question
-/// every test here asks is whether it really puts the workspace back, and whether it refuses in
-/// every case where it could only pretend to.
+/// `WorkspaceManager.restore` is what stands behind Restore, in Home's menu, in the Workspace
+/// menu and on the archived workspace's own screen, as well as behind Edit > Undo. The question
+/// every test here asks is whether it really puts the workspace back, in each of the three fates
+/// a branch can have met since, and whether it refuses only in the one case where it could do
+/// nothing but pretend.
 @Suite("Restoring an archived workspace", .tags(.git, .destructive), .scratchDirectory)
 struct WorkspaceRestoreTests {
     private func makeWorkspace(
@@ -50,15 +52,17 @@ struct WorkspaceRestoreTests {
         )
         #expect(FileManager.default.fileExists(atPath: workspace.path) == false)
 
-        let restored = try await manager.restore(workspace: workspace, repo: registered)
+        let outcome = try await manager.restore(workspace: workspace, repo: registered)
 
         #expect(FileManager.default.fileExists(atPath: workspace.path))
         #expect(try await Git.currentBranch(of: workspace.path) == workspace.branch)
         #expect(try await Git.headSHA(of: workspace.path) == sha)
         #expect(TempRepo(existing: workspace.path).read("feature.txt") == "committed work\n")
-        #expect(restored.state == .active)
-        #expect(restored.archivedAt == nil)
-        #expect(restored.path == workspace.path)
+        #expect(outcome.source == .localBranch)
+        #expect(outcome.relocatedFrom == nil)
+        #expect(outcome.workspace.state == .active)
+        #expect(outcome.workspace.archivedAt == nil)
+        #expect(outcome.workspace.path == workspace.path)
     }
 
     @Test("the stored workspace is active again, so the sidebar lists it")
@@ -92,24 +96,49 @@ struct WorkspaceRestoreTests {
         #expect(TempRepo(existing: workspace.path).read(".env") == "TOKEN=from-the-checkout\n")
     }
 
-    // MARK: - Refusals
+    // MARK: - A branch only the remote still has
 
-    @Test("a workspace whose branch was deleted cannot be restored")
-    func refusesWhenTheBranchIsGone() async throws {
+    @Test("a branch deleted here but still on the remote is cut again from the remote")
+    func restoresFromTheRemote() async throws {
         let (repo, registered, manager, workspace) = try await makeWorkspace()
         defer { repo.cleanUp() }
 
-        try await manager.archive(workspace: workspace, repo: registered, deleteBranch: true)
-        #expect(await manager.canRestore(workspace: workspace, repo: registered) == false)
+        try TempRepo(existing: workspace.path).write("feature.txt", "work that was pushed\n")
+        try await commit(in: workspace.path, message: "work that was pushed")
+        let sha = try await Git.headSHA(of: workspace.path)
 
-        await #expect(throws: WorkspaceRestoreRefusal.self) {
-            try await manager.restore(workspace: workspace, repo: registered)
-        }
-        #expect(FileManager.default.fileExists(atPath: workspace.path) == false)
+        // A bare clone standing in for the server, exactly as somebody's origin would.
+        let origin = TestScratch.unique("origin") + ".git"
+        try await Shell.check("git", ["init", "--bare", "-q", origin])
+        try await Shell.check("git", ["remote", "add", "origin", origin], cwd: repo.path)
+        try await Shell.check("git", ["push", "-q", "origin", workspace.branch], cwd: workspace.path)
+
+        // Archived with the branch deleted, which is what leaves the local side with nothing.
+        try await manager.archive(
+            workspace: workspace, repo: registered, deleteBranch: true, force: true
+        )
+        #expect(await Git.branchExists(workspace.branch, in: registered.path) == false)
+
+        let source = await manager.restoreSource(workspace: workspace, repo: registered)
+        #expect(source == .remoteBranch(ref: "refs/remotes/origin/\(workspace.branch)"))
+        #expect(source.canRebuild)
+
+        let outcome = try await manager.restore(workspace: workspace, repo: registered)
+
+        #expect(outcome.source == source)
+        #expect(FileManager.default.fileExists(atPath: outcome.workspace.path))
+        #expect(try await Git.currentBranch(of: outcome.workspace.path) == workspace.branch)
+        #expect(try await Git.headSHA(of: outcome.workspace.path) == sha)
+        #expect(TempRepo(existing: outcome.workspace.path).read("feature.txt")
+            == "work that was pushed\n")
+        // And the local branch is back, so the next restore is an ordinary one.
+        #expect(await Git.branchExists(workspace.branch, in: registered.path))
     }
 
-    @Test("a path that is occupied again is left alone")
-    func refusesWhenSomethingIsAtThePath() async throws {
+    // MARK: - A path somebody else has taken
+
+    @Test("a worktree whose path is taken is rebuilt beside it, and the squatter is untouched")
+    func relocatesWhenSomethingIsAtThePath() async throws {
         let (repo, registered, manager, workspace) = try await makeWorkspace()
         defer { repo.cleanUp() }
 
@@ -119,11 +148,33 @@ struct WorkspaceRestoreTests {
         )
         try TempRepo(existing: workspace.path).write("someone-elses.txt", "not ours\n")
 
+        let outcome = try await manager.restore(workspace: workspace, repo: registered)
+
+        #expect(outcome.relocatedFrom == workspace.path)
+        #expect(outcome.workspace.path == workspace.path + "-2")
+        #expect(try await Git.currentBranch(of: outcome.workspace.path) == workspace.branch)
+        // Nothing was written over. That directory belongs to somebody.
+        #expect(TempRepo(existing: workspace.path).read("someone-elses.txt") == "not ours\n")
+    }
+
+    // MARK: - Refusals
+
+    @Test("a workspace whose branch is gone everywhere cannot be restored")
+    func refusesWhenTheBranchIsGone() async throws {
+        let (repo, registered, manager, workspace) = try await makeWorkspace()
+        defer { repo.cleanUp() }
+
+        try await manager.archive(workspace: workspace, repo: registered, deleteBranch: true)
         #expect(await manager.canRestore(workspace: workspace, repo: registered) == false)
+        #expect(await manager.restoreSource(workspace: workspace, repo: registered) == .gone)
+
         await #expect(throws: WorkspaceRestoreRefusal.self) {
             try await manager.restore(workspace: workspace, repo: registered)
         }
-        #expect(TempRepo(existing: workspace.path).read("someone-elses.txt") == "not ours\n")
+        #expect(FileManager.default.fileExists(atPath: workspace.path) == false)
+        // The record survives the refusal, which is the whole point: the transcript is still
+        // readable even though no worktree can ever be built for it again.
+        #expect(try await manager.store.workspace(id: workspace.id)?.state == .archived)
     }
 
     @Test("a live workspace is not restorable, because nothing was removed")
@@ -141,6 +192,62 @@ struct WorkspaceRestoreTests {
 
         try await manager.archive(workspace: workspace, repo: registered, deleteBranch: false)
         #expect(await manager.canRestore(workspace: workspace, repo: registered))
+        #expect(await manager.restoreSource(workspace: workspace, repo: registered) == .localBranch)
+    }
+
+    // MARK: - The three fates, decided on their own
+
+    @Test("a surviving local branch wins over anything the remote has")
+    func theLocalBranchWins() {
+        #expect(RestoreSource.of(hasLocalBranch: true, remoteRef: nil) == .localBranch)
+        #expect(RestoreSource.of(hasLocalBranch: true, remoteRef: "refs/remotes/origin/x")
+            == .localBranch)
+    }
+
+    @Test("with no local branch the remote is the next best thing")
+    func theRemoteIsNext() {
+        #expect(RestoreSource.of(hasLocalBranch: false, remoteRef: "refs/remotes/origin/x")
+            == .remoteBranch(ref: "refs/remotes/origin/x"))
+    }
+
+    @Test("with neither, the branch is gone and nothing can be rebuilt")
+    func neitherMeansGone() {
+        #expect(RestoreSource.of(hasLocalBranch: false, remoteRef: nil) == .gone)
+        #expect(RestoreSource.of(hasLocalBranch: false, remoteRef: "") == .gone)
+        #expect(RestoreSource.gone.canRebuild == false)
+        #expect(RestoreSource.localBranch.canRebuild)
+        #expect(RestoreSource.remoteBranch(ref: "refs/remotes/origin/x").canRebuild)
+    }
+
+    @Test("each fate says something different, and only the last one says work cannot resume")
+    func explanations() {
+        let sources: [RestoreSource] = [
+            .localBranch, .remoteBranch(ref: "refs/remotes/origin/x"), .gone,
+        ]
+        let sentences = sources.map { $0.explanation(branch: "feature/x") }
+        #expect(Set(sentences).count == 3)
+        #expect(sentences.allSatisfy { $0.contains("feature/x") })
+        // Read and resume are separated in words as well as in code.
+        #expect(sentences[2].contains("cannot be worked in again"))
+        #expect(sentences[2].contains("still here to read"))
+    }
+
+    // MARK: - Where a rebuilt worktree goes
+
+    @Test("a free path is used as it is")
+    func freePathIsLeftAlone() {
+        #expect(WorktreePath.free(preferred: "/w/x") { _ in false } == "/w/x")
+    }
+
+    @Test("an occupied path counts up until it finds one that is free")
+    func occupiedPathCountsUp() {
+        let taken: Set<String> = ["/w/x", "/w/x-2", "/w/x-3"]
+        #expect(WorktreePath.free(preferred: "/w/x") { taken.contains($0) } == "/w/x-4")
+    }
+
+    @Test("the suffix is the one new worktrees already use, so the two cannot drift apart")
+    func theSuffixIsTheExistingOne() {
+        #expect(WorktreePath.free(preferred: "/w/x") { $0 == "/w/x" } == "/w/x-2")
     }
 
     // MARK: - What restoring does not claim

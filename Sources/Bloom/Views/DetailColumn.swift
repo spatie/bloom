@@ -21,7 +21,22 @@ struct DetailColumn: View {
                 SearchView()
             case .workspace:
                 workspace
+            case .archived(let id):
+                archived(id)
             }
+        }
+    }
+
+    /// An archived workspace is a record rather than a destination, so it gets a reader rather
+    /// than the centre column. See `ArchivedWorkspaceView`.
+    @ViewBuilder
+    private func archived(_ id: String) -> some View {
+        if let model = app.existingModel(for: id) {
+            ArchivedWorkspaceView(model: model)
+        } else {
+            // Only reachable if the model went away under the selection, which nothing does on
+            // purpose. Home is where an unresolvable selection lands everywhere else in this file.
+            HomeView()
         }
     }
 
