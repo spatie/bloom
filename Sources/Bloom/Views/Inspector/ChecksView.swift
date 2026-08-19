@@ -16,6 +16,9 @@ struct ChecksView: View {
     @State private var hasLoaded = false
     @State private var hovered: String?
     @State private var github: GitHubAvailability.State = .unknown
+    /// Bumped to restart the poll at once, rather than waiting out the twenty seconds, when
+    /// something has happened that would change the answer.
+    @State private var reload = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,7 +35,7 @@ struct ChecksView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .task(id: model.workspace.id) { await poll() }
+        .task(id: "\(model.workspace.id)|\(reload)") { await poll() }
     }
 
     private var list: some View {
@@ -114,7 +117,9 @@ struct ChecksView: View {
                 )
                 // A deliberate press, which is the only thing that may raise the sheet.
                 Button(github == .notInstalled ? "Install the GitHub CLI" : "Connect GitHub") {
-                    GitHubSignIn.shared.present(directory: model.workspace.path)
+                    // Through the gate rather than straight to the sheet, so a signed in machine
+                    // simply reloads and a signed out one signs in and then reloads.
+                    GitHubSignIn.shared.run(directory: model.workspace.path) { reload += 1 }
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Palette.accentFill)

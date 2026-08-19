@@ -59,15 +59,11 @@ final class GitHubSignIn {
         }
     }
 
-    /// Raises the sheet without an action behind it, for a button whose whole purpose is to
-    /// connect GitHub.
+    /// For a button whose whole purpose is to connect GitHub. Nothing happens if it turns out
+    /// GitHub is already connected, which is the honest outcome: the state everything reads is
+    /// updated by the probe, so whatever offered this button goes away on its own.
     func present(directory: String) {
-        Task {
-            let state = await GitHubAvailability.shared.check(force: true)
-            guard state != .ready else { return }
-            pending = nil
-            request = Request(access: state, directory: directory)
-        }
+        run(directory: directory) {}
     }
 
     /// Closes the sheet. On success the remembered action runs, on the same turn of the run loop

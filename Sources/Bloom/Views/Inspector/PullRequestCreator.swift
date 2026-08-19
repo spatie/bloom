@@ -34,7 +34,11 @@ struct PullRequestCreator: View {
     /// Whether Bloom itself can talk to GitHub. It has no bearing on the button, which goes to the
     /// agent, and every bearing on whether this strip can be trusted when it says there is no pull
     /// request: signed out, Bloom simply never found out.
-    @State private var github: GitHubAvailability.State = .unknown
+    ///
+    /// Read straight off the shared observable rather than copied into state, so signing in
+    /// through the sheet takes the line below away at once instead of at the next redraw that
+    /// happens to rebuild this view.
+    private var github: GitHubAvailability.State { GitHubAvailability.shared.state }
 
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {
@@ -94,7 +98,7 @@ struct PullRequestCreator: View {
         // Optimistic while the probe runs, and silent about the answer either way. Learning that
         // gh is signed out is worth one quiet line here; it is never worth a dialog nobody asked
         // for.
-        .task { github = await GitHubAvailability.shared.check() }
+        .task { await GitHubAvailability.shared.check() }
     }
 
     /// What the branch is for, in the one line under it: where it is headed, or why the button is
