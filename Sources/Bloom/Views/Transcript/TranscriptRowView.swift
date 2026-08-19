@@ -25,9 +25,9 @@ struct TranscriptRowView: View, Equatable {
     }
 
     var row: TranscriptRow
-    /// Which worktree the row's paths are relative to. Only a user turn's attachment chips read
-    /// it, but it is constant for a whole transcript, so it is handed down rather than looked up
-    /// per row.
+    /// Which worktree the row's paths are relative to, and where a file chip opens. Read by a user
+    /// turn's attachment chips and by the file chips in a tool row, and constant for a whole
+    /// transcript, so it is handed down rather than looked up per row.
     var workspace: Workspace
     var isExpanded = false
     var isNested = false
@@ -74,6 +74,7 @@ struct TranscriptRowView: View, Equatable {
             if let use = toolUse {
                 ToolRowView(
                     use: use,
+                    workspace: workspace,
                     result: toolResult,
                     isError: row.isError,
                     durationMS: row.durationMS,

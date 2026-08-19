@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 /// One attached file: the icon Finder would draw for it, then its name.
 ///
@@ -19,6 +20,12 @@ import AppKit
 /// chip that kept its raised white plate and its primary ink would be the one thing in the bubble
 /// still coloured for a white page, and it is the piece a reader looks straight at.
 ///
+/// Drawn in a transcript's tool rows as well, which is where the cost of anything it does per
+/// chip stops being theoretical: a turn is hundreds of rows in a lazy list, and every one of them
+/// that names a file draws one of these. So the icon comes from `FileTypeIcon`, which answers per
+/// file *type* rather than per file and never touches the disk, and the probe that marks a missing
+/// file is behind `verifiesOnDisk` and is off for those rows. See both for why.
+///
 /// Hovering swaps the icon for the close control rather than adding one beside it, which is what
 /// Conductor does and is worth copying: the chip keeps exactly the width it had, so a row of them
 /// does not reflow under the pointer and the thing you were aiming at stays where it was. The slot
@@ -26,7 +33,11 @@ import AppKit
 struct AttachmentChip: View {
     var attachment: PromptAttachment
     var worktree: String
-    var onOpen: @MainActor () -> Void
+    /// Nil where the chip has nowhere to go, which is a file outside the worktree: the review
+    /// resolves a path against the worktree and cannot show one from another checkout. The chip is
+    /// still drawn, because it is still a file and the icon is still the honest thing to say about
+    /// it. It simply does not answer to the pointer.
+    var onOpen: (@MainActor () -> Void)?
     /// Nil where there is nothing to take the chip off, which is a turn that has already been
     /// sent: the prompt the agent read named that file, so the transcript cannot un-name it. The
     /// icon then stays an icon rather than swapping under the pointer.
@@ -34,6 +45,16 @@ struct AttachmentChip: View {
     /// Raised once the pointer has settled, and lowered the moment it leaves. Nil where nobody is
     /// listening, which costs the chip its hover timer rather than running one for no reader.
     var onHover: (@MainActor (Bool) -> Void)?
+    /// Whether to ask the file system if this file is still there, which paints the warning
+    /// triangle when it is not.
+    ///
+    /// True for an attachment, where the reader picked that file a moment ago and a copy that has
+    /// gone missing under `.bloom/attachments` is news. False in a transcript, for two reasons and
+    /// the second is the real one: a stat per row on the main actor is a stat per row scrolled
+    /// past, and the answer would be wrong anyway. A file the agent wrote at step three and
+    /// deleted at step nine was a file when the row was written, and the row is a record of what
+    /// happened rather than a picker.
+    var verifiesOnDisk = true
 
     @State private var isHovered = false
     @State private var isMissing = false
@@ -89,15 +110,13 @@ struct AttachmentChip: View {
                 .strokeBorder(stroke, lineWidth: Metrics.hairline)
         }
         .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
-        .onTapGesture(perform: onOpen)
+        .modifier(TapWhenOffered(action: onOpen))
         .onHover(perform: hover(_:))
         .help(attachment.path)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(attachment.filename)
-        .accessibilityHint("Opens \(attachment.path) in a tab")
-        .task(id: attachment.path) {
-            isMissing = !FileManager.default.fileExists(atPath: url.path)
-        }
+        .accessibilityHint(onOpen == nil ? "" : "Opens \(attachment.path) in a tab")
+        .modifier(PresenceProbe(path: verifiesOnDisk ? url.path : nil, isMissing: $isMissing))
         .onDisappear { hoverTask?.cancel() }
     }
 
@@ -144,7 +163,7 @@ struct AttachmentChip: View {
             .help("Remove \(attachment.filename)")
             .accessibilityLabel("Remove \(attachment.filename)")
         } else {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+            Image(nsImage: FileTypeIcon.icon(for: attachment.filename))
                 .resizable()
                 .frame(width: Self.slot, height: Self.slot)
                 .accessibilityHidden(true)
@@ -166,6 +185,74 @@ struct AttachmentChip: View {
             try? await Task.sleep(for: Self.hoverDelay)
             guard !Task.isCancelled else { return }
             onHover(true)
+        }
+    }
+}
+
+/// The icon a file gets, worked out once per file type rather than once per file.
+///
+/// `NSWorkspace.icon(forFile:)` is the obvious call and it is the wrong one here. It reads the
+/// file: it goes to disk for the custom icon a file may carry, and for something that is not there
+/// it hands back a generic page. In a transcript that is one file system round trip per row per
+/// appearance, on the main actor, in a list that is built and thrown away as it scrolls.
+///
+/// Asking about the *type* instead is a LaunchServices lookup with no path in it at all, and every
+/// `.php` in the turn shares one answer, so the cache below is one entry per extension and the
+/// hundredth Swift file costs a dictionary hit. What it gives up is the custom icon on an
+/// individual file and the artwork of an app bundle, neither of which a chip fourteen points across
+/// was ever going to show usefully.
+@MainActor
+enum FileTypeIcon {
+    /// Keyed by lowercased extension. Small by construction: a repository has a handful of file
+    /// types in it, and the empty key is the one every extensionless name shares.
+    private static var cache: [String: NSImage] = [:]
+
+    static func icon(for filename: String) -> NSImage {
+        let ext = (filename as NSString).pathExtension.lowercased()
+        if let cached = cache[ext] { return cached }
+
+        // `.data` rather than `.item` for a name with no extension: a generic document, which is
+        // what an extensionless file almost always is, rather than the blank sheet the system uses
+        // for something it has no opinion about at all.
+        let type = ext.isEmpty ? UTType.data : (UTType(filenameExtension: ext) ?? .data)
+        let icon = NSWorkspace.shared.icon(for: type)
+        cache[ext] = icon
+        return icon
+    }
+}
+
+/// A tap gesture, only where there is somewhere to tap to.
+///
+/// A gesture with an empty closure is not the same as no gesture: it swallows the click, which
+/// inside a transcript row means the row stops expanding when you click its chip.
+private struct TapWhenOffered: ViewModifier {
+    var action: (@MainActor () -> Void)?
+
+    func body(content: Content) -> some View {
+        if let action {
+            content.onTapGesture(perform: action)
+        } else {
+            content
+        }
+    }
+}
+
+/// Asks the file system whether the file is still there, where anybody wants to know.
+///
+/// A modifier rather than a `guard` inside the task, so a chip that does not want the answer never
+/// starts a task at all. That is the whole point in a transcript: the rows scroll, and a task per
+/// row per appearance is work whether or not its body returns immediately.
+private struct PresenceProbe: ViewModifier {
+    var path: String?
+    @Binding var isMissing: Bool
+
+    func body(content: Content) -> some View {
+        if let path {
+            content.task(id: path) {
+                isMissing = !FileManager.default.fileExists(atPath: path)
+            }
+        } else {
+            content
         }
     }
 }

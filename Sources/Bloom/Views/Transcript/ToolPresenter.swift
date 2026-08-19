@@ -57,21 +57,22 @@ enum ToolPresenter {
         var label = "Read"
         if let limit = input["limit"]?.intValue, limit > 0 { label = "Read \(limit) lines" }
 
-        var chips: [String] = []
-        if !file.isEmpty { chips.append(file) }
-        if let offset = input["offset"]?.intValue, offset > 0 { chips.append("from \(offset)") }
-        if let pages = input["pages"]?.stringValue { chips.append("p\(pages)") }
+        var chips: [ToolChip] = []
+        if let named = declaredFile(path) { chips.append(named) }
+        if let offset = input["offset"]?.intValue, offset > 0 { chips.append(.code("from \(offset)")) }
+        if let pages = input["pages"]?.stringValue { chips.append(.code("p\(pages)")) }
 
         return ToolPresentation(glyph: "doc.text", label: label, detail: file, tint: Palette.accent, chips: chips)
     }
 
     private static func write(_ input: JSONValue) -> ToolPresentation {
-        let file = basename(input["file_path"]?.stringValue ?? "")
+        let path = input["file_path"]?.stringValue ?? ""
+        let file = basename(path)
         let lines = lineCount(input["content"]?.stringValue ?? "")
 
-        var chips: [String] = []
-        if !file.isEmpty { chips.append(file) }
-        if lines > 0 { chips.append("\(lines) lines") }
+        var chips: [ToolChip] = []
+        if let named = declaredFile(path) { chips.append(named) }
+        if lines > 0 { chips.append(.code("\(lines) lines")) }
 
         return ToolPresentation(
             glyph: "square.and.pencil",
@@ -83,11 +84,12 @@ enum ToolPresenter {
     }
 
     private static func edit(_ input: JSONValue) -> ToolPresentation {
-        let file = basename(input["file_path"]?.stringValue ?? "")
+        let path = input["file_path"]?.stringValue ?? ""
+        let file = basename(path)
 
-        var chips: [String] = []
-        if !file.isEmpty { chips.append(file) }
-        if input["replace_all"]?.boolValue == true { chips.append("all") }
+        var chips: [ToolChip] = []
+        if let named = declaredFile(path) { chips.append(named) }
+        if input["replace_all"]?.boolValue == true { chips.append(.code("all")) }
 
         return ToolPresentation(
             glyph: "pencil.line",
@@ -99,12 +101,13 @@ enum ToolPresenter {
     }
 
     private static func multiEdit(_ input: JSONValue) -> ToolPresentation {
-        let file = basename(input["file_path"]?.stringValue ?? "")
+        let path = input["file_path"]?.stringValue ?? ""
+        let file = basename(path)
         let count = input["edits"]?.arrayValue?.count ?? 0
 
-        var chips: [String] = []
-        if !file.isEmpty { chips.append(file) }
-        if count > 0 { chips.append("\(count) edits") }
+        var chips: [ToolChip] = []
+        if let named = declaredFile(path) { chips.append(named) }
+        if count > 0 { chips.append(.code("\(count) edits")) }
 
         return ToolPresentation(
             glyph: "pencil.line",
@@ -116,11 +119,12 @@ enum ToolPresenter {
     }
 
     private static func notebookEdit(_ input: JSONValue) -> ToolPresentation {
-        let file = basename(input["notebook_path"]?.stringValue ?? "")
+        let path = input["notebook_path"]?.stringValue ?? ""
+        let file = basename(path)
 
-        var chips: [String] = []
-        if !file.isEmpty { chips.append(file) }
-        if let mode = input["edit_mode"]?.stringValue { chips.append(mode) }
+        var chips: [ToolChip] = []
+        if let named = declaredFile(path) { chips.append(named) }
+        if let mode = input["edit_mode"]?.stringValue { chips.append(.code(mode)) }
 
         return ToolPresentation(
             glyph: "book.closed",
@@ -139,8 +143,11 @@ enum ToolPresenter {
         // as the label than the word "Bash" repeated forty times down the transcript.
         let label = input["description"]?.stringValue.map { oneLine($0) } ?? "Bash"
 
-        var chips: [String] = []
-        if input["run_in_background"]?.boolValue == true { chips.append("background") }
+        // Never a file chip, whatever the command happens to contain. A command is code, it is
+        // already drawn as the detail, and the argument most likely to look like a path here is
+        // the one word of a command that is not one.
+        var chips: [ToolChip] = []
+        if input["run_in_background"]?.boolValue == true { chips.append(.code("background")) }
 
         return ToolPresentation(
             glyph: "terminal",
@@ -154,8 +161,8 @@ enum ToolPresenter {
     private static func bashOutput(_ input: JSONValue) -> ToolPresentation {
         let shell = input["bash_id"]?.stringValue ?? input["shell_id"]?.stringValue ?? ""
 
-        var chips: [String] = []
-        if let filter = input["filter"]?.stringValue, !filter.isEmpty { chips.append(filter) }
+        var chips: [ToolChip] = []
+        if let filter = input["filter"]?.stringValue, !filter.isEmpty { chips.append(.code(filter)) }
 
         return ToolPresentation(
             glyph: "terminal.fill",
@@ -179,8 +186,10 @@ enum ToolPresenter {
     // MARK: Search
 
     private static func glob(_ input: JSONValue) -> ToolPresentation {
-        var chips: [String] = []
-        if let path = input["path"]?.stringValue, !path.isEmpty { chips.append(basename(path)) }
+        // The pattern is the detail and stays a pattern; `path` is the directory the search was
+        // rooted at, which is a folder rather than a file and so keeps its plain chip.
+        var chips: [ToolChip] = []
+        if let path = input["path"]?.stringValue, !path.isEmpty { chips.append(.code(basename(path))) }
 
         return ToolPresentation(
             glyph: "magnifyingglass",
@@ -192,9 +201,12 @@ enum ToolPresenter {
     }
 
     private static func grep(_ input: JSONValue) -> ToolPresentation {
-        var chips: [String] = []
-        if let glob = input["glob"]?.stringValue, !glob.isEmpty { chips.append(glob) }
-        if let path = input["path"]?.stringValue, !path.isEmpty { chips.append(basename(path)) }
+        var chips: [ToolChip] = []
+        if let glob = input["glob"]?.stringValue, !glob.isEmpty { chips.append(.code(glob)) }
+        // The one declared field in the whole presenter that is genuinely either: `path` is a file
+        // or a directory depending on how the search was written. So it is the one that goes
+        // through the guess rather than being believed.
+        if let path = input["path"]?.stringValue, !path.isEmpty { chips.append(guessedFile(path)) }
 
         return ToolPresentation(
             glyph: "text.magnifyingglass",
@@ -218,9 +230,9 @@ enum ToolPresenter {
 
     private static func task(_ input: JSONValue) -> ToolPresentation {
         let type = input["subagent_type"]?.stringValue ?? "agent"
-        var chips: [String] = []
-        if let model = input["model"]?.stringValue { chips.append(model) }
-        if let isolation = input["isolation"]?.stringValue { chips.append(isolation) }
+        var chips: [ToolChip] = []
+        if let model = input["model"]?.stringValue { chips.append(.code(model)) }
+        if let isolation = input["isolation"]?.stringValue { chips.append(.code(isolation)) }
 
         return ToolPresentation(
             glyph: "person.2",
@@ -255,7 +267,7 @@ enum ToolPresenter {
             label: "Message agent",
             detail: oneLine(input["prompt"]?.stringValue ?? input["message"]?.stringValue ?? ""),
             tint: Palette.warning,
-            chips: (input["agent_id"]?.stringValue).map { [$0] } ?? []
+            chips: (input["agent_id"]?.stringValue).map { [ToolChip.code($0)] } ?? []
         )
     }
 
@@ -267,8 +279,8 @@ enum ToolPresenter {
         let active = items.first { $0["status"]?.stringValue == "in_progress" }
         let running = active?["activeForm"]?.stringValue ?? active?["content"]?.stringValue
 
-        var chips: [String] = []
-        if let running, !running.isEmpty { chips.append(oneLine(running, limit: 60)) }
+        var chips: [ToolChip] = []
+        if let running, !running.isEmpty { chips.append(.code(oneLine(running, limit: 60))) }
 
         return ToolPresentation(
             glyph: "checklist",
@@ -302,8 +314,8 @@ enum ToolPresenter {
         let first = questions.first
         let text = first?["question"]?.stringValue ?? input["question"]?.stringValue ?? ""
 
-        var chips: [String] = []
-        if questions.count > 1 { chips.append("\(questions.count) questions") }
+        var chips: [ToolChip] = []
+        if questions.count > 1 { chips.append(.code("\(questions.count) questions")) }
 
         return ToolPresentation(
             glyph: "questionmark.bubble",
@@ -331,7 +343,7 @@ enum ToolPresenter {
             label: "Skill",
             detail: oneLine(input["args"]?.stringValue ?? ""),
             tint: Palette.accent,
-            chips: name.isEmpty ? [] : [name]
+            chips: name.isEmpty ? [] : [.code(name)]
         )
     }
 
@@ -366,6 +378,19 @@ enum ToolPresenter {
         let tool = parts.dropFirst().joined(separator: " ").replacing("_", with: " ")
         let label = tool.isEmpty ? server : "\(server): \(tool)"
 
+        // An MCP server can name a file as plainly as a built in tool does, and one that does gets
+        // the same chip. Nothing here knows the server's schema, so the value has to survive the
+        // guess before it is believed.
+        if let path = namedFile(in: input) {
+            return ToolPresentation(
+                glyph: "puzzlepiece.extension",
+                label: label,
+                detail: basename(path),
+                tint: Palette.textSecondary,
+                chips: [.file(path: path)]
+            )
+        }
+
         return ToolPresentation(
             glyph: "puzzlepiece.extension",
             label: label,
@@ -377,12 +402,60 @@ enum ToolPresenter {
     /// A tool Bloom has never heard of still has to read as a sentence, so the name goes in the
     /// label and the most likely looking argument goes in the detail. Never the JSON itself.
     private static func fallback(name: String, input: JSONValue) -> ToolPresentation {
-        ToolPresentation(
+        if let path = namedFile(in: input) {
+            return ToolPresentation(
+                glyph: "wrench.and.screwdriver",
+                label: name,
+                detail: basename(path),
+                tint: Palette.textSecondary,
+                chips: [.file(path: path)]
+            )
+        }
+
+        return ToolPresentation(
             glyph: "wrench.and.screwdriver",
             label: name,
             detail: firstScalar(input),
             tint: Palette.textSecondary
         )
+    }
+
+    // MARK: Which arguments are files
+
+    /// A field the tool's own contract says is a file: `Read`, `Write`, `Edit`, `MultiEdit` and
+    /// `NotebookEdit` all take one and take nothing else in that parameter.
+    ///
+    /// Believed, rather than guessed at. That is what lets `FilePathGuess` be as strict as it is:
+    /// a screenshot called `CleanShot 2026-08-19 at 09.29.05@2x.png` has four spaces in it and no
+    /// string rule could accept it without also accepting `npm run dev`, but `Read` already said it
+    /// was a file, so nothing has to be inferred. The only thing checked is that the value is
+    /// shaped like a path at all, which catches an empty argument and a CLI that has changed under
+    /// us rather than a wrong guess.
+    private static func declaredFile(_ path: String) -> ToolChip? {
+        guard !path.isEmpty else { return nil }
+        guard FilePathGuess.isWellFormed(path) else { return .code(oneLine(path, limit: 60)) }
+        return .file(path: path)
+    }
+
+    /// A field that could be a file and could be something else, which in the built in tools is
+    /// `Grep`'s `path` and nothing else. Guessed at, and the guess says no unless it is sure.
+    private static func guessedFile(_ path: String) -> ToolChip {
+        FilePathGuess.looksLikeAFile(path) ? .file(path: path) : .code(basename(path))
+    }
+
+    /// The file an unknown tool is about, if it names one plainly enough to be sure.
+    ///
+    /// Keys in a fixed order rather than the input's own, so a tool that carries two of them always
+    /// shows the same one, and only keys whose name says "file". Every value still has to pass the
+    /// guess: an MCP server is free to put a glob in something called `path`, and this is exactly
+    /// the case where nothing but the string is known.
+    private static func namedFile(in input: JSONValue) -> String? {
+        for key in ["file_path", "notebook_path", "filename", "path", "file"] {
+            guard let value = input[key]?.stringValue else { continue }
+            guard FilePathGuess.looksLikeAFile(value) else { continue }
+            return value
+        }
+        return nil
     }
 
     // MARK: Text helpers

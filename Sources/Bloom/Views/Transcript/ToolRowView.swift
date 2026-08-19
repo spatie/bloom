@@ -4,6 +4,9 @@ import BloomCore
 /// One tool call: a line that says what happened, and everything behind it when opened.
 struct ToolRowView: View {
     var use: AgentToolUse
+    /// Which worktree the call's paths are relative to, so a file chip in the header knows where
+    /// it opens.
+    var workspace: Workspace
     var result: AgentToolResult?
     var isError: Bool
     var durationMS: Int?
@@ -17,6 +20,7 @@ struct ToolRowView: View {
             ExpandableRowHeader(isExpanded: isExpanded, onToggle: onToggle) {
                 ToolRowHeader(
                     presentation: ToolPresenter.present(use),
+                    workspace: workspace,
                     isError: isError,
                     durationMS: durationMS,
                     isExpanded: isExpanded,
