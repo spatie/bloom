@@ -28,6 +28,18 @@ struct DiffLineView: View {
             content
         }
         .frame(width: width, height: CodeMetrics.rowHeight, alignment: .leading)
+        // Painted here, on the row, rather than on the gutter and the code separately, which is
+        // what left a band of pane colour between a removed line and the added line under it.
+        // `CodeMetrics.rowHeight` is a line of type plus three points of air, and an `HStack`
+        // takes the height of its tallest child, so the two washes were drawn at TYPE height and
+        // centred in the row: a point and a half of unpainted ground above and below every one of
+        // them, and three points between any two. A replacement read as two separate events.
+        //
+        // Nothing about the rhythm of the file changes. The row is the height it always was and
+        // an unchanged line still paints nothing, so only the lines that were already coloured
+        // are affected, and they now meet. Behind the content rather than over it, so the word
+        // level emphasis inside `CodeText` still sits on top and is neither moved nor clipped.
+        .background(background)
         // One element per line, said as a sentence. Left as it was drawn, VoiceOver read a row as
         // four unrelated fragments, "128", "129", "+", and then the code, and whether a line was
         // added or removed reached the reader only as a background wash and a one-character
@@ -69,12 +81,11 @@ struct DiffLineView: View {
                 number(line?.newNumber)
             }
         }
-        // The row's own tint, not a gutter colour of its own. A grey column against the white the
-        // code sits on put a hard vertical edge down the left of every diff, and a hard edge is
-        // read as a boundary between two things rather than as the margin of one. Sharing the
-        // ground leaves the numbers to be told apart by being dimmed and monospaced, which is what
-        // separates a ruler from content anyway.
-        .background(background)
+        // No tint of its own. A grey column against the white the code sits on put a hard vertical
+        // edge down the left of every diff, and a hard edge is read as a boundary between two
+        // things rather than as the margin of one. The row's wash runs under this and under the
+        // code alike, which leaves the numbers to be told apart by being dimmed and monospaced,
+        // and that is what separates a ruler from content anyway.
     }
 
     /// Right aligned, dimmed and monospaced, so a column of numbers reads as a ruler rather than
@@ -115,7 +126,6 @@ struct DiffLineView: View {
                     Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(background)
             }
         } else {
             // Padding opposite a longer run on the other side. Sunken rather than empty, so the
