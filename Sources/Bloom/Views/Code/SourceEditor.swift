@@ -20,11 +20,30 @@ struct SourceEditor: NSViewRepresentable {
     /// Read only to notice that the appearance flipped, which is when the token colours have
     /// to be resolved again.
     var colorScheme: ColorScheme
+    /// Off for a value that is being shown rather than edited, such as the resolved settings the
+    /// preferences window mirrors. The caret and the find bar go with it.
+    var isEditable = true
+    /// The ground the code and the gutter are drawn on.
+    ///
+    /// `nil` keeps `NSColor.textBackgroundColor`, which is what a full pane editor wants. A field
+    /// inside a form passes the form's own sunken surface instead, because the app's dark
+    /// appearance is a deep blue and the system's text background is very nearly black next to it.
+    var ground: Color?
+    /// Drawn in place of the text while the buffer is empty. A script nobody has written yet is
+    /// otherwise an unexplained empty box.
+    var placeholder = ""
 
     /// Past this the colour pass costs more than it is worth on every keystroke, and a file this
     /// long is not one anybody is hand editing in a review pane. It still opens, in plain
     /// monospace.
     private static let highlightLimit = 400_000
+
+    /// The ground as an `NSColor`, resolved on the main actor where the SwiftUI environment is
+    /// available, so no draw pass ever has to do the conversion.
+    private var resolvedGround: NSColor {
+        guard let ground else { return .textBackgroundColor }
+        return NSColor(ground)
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
 
@@ -41,8 +60,8 @@ struct SourceEditor: NSViewRepresentable {
         container.widthTracksTextView = false
         layoutManager.addTextContainer(container)
 
-        let textView = NSTextView(frame: .zero, textContainer: container)
-        textView.isEditable = true
+        let textView = CodeTextView(frame: .zero, textContainer: container)
+        textView.isEditable = isEditable
         textView.isRichText = false
         textView.allowsUndo = true
         textView.isHorizontallyResizable = true
@@ -53,10 +72,11 @@ struct SourceEditor: NSViewRepresentable {
         textView.minSize = NSSize(width: 0, height: 0)
         textView.textContainerInset = NSSize(width: CodeMetrics.textInset, height: 6)
         textView.font = CodeMetrics.font
-        textView.backgroundColor = .textBackgroundColor
+        textView.backgroundColor = resolvedGround
         textView.drawsBackground = true
-        textView.usesFindBar = true
-        textView.isIncrementalSearchingEnabled = true
+        textView.placeholder = placeholder
+        textView.usesFindBar = isEditable
+        textView.isIncrementalSearchingEnabled = isEditable
         // Every one of these turns a helpful editing feature into a source code corruption:
         // smart quotes in a string literal, an en dash in an operator, a "corrected" identifier.
         textView.isAutomaticQuoteSubstitutionEnabled = false
@@ -73,12 +93,14 @@ struct SourceEditor: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = true
-        scrollView.backgroundColor = .textBackgroundColor
+        scrollView.backgroundColor = resolvedGround
 
         // The ruler has to be in place before the document view is, and the scroll view has to be
         // re-tiled afterwards. Without both, the clip view keeps the full width it was laid out
         // with and the gutter is drawn on top of the first few characters of every line.
         let ruler = LineNumberRuler(scrollView: scrollView, textView: textView)
+        ruler.fill = resolvedGround
+        ruler.rule = NSColor(Palette.border)
         scrollView.verticalRulerView = ruler
         scrollView.hasVerticalRuler = true
         scrollView.rulersVisible = true
@@ -92,7 +114,20 @@ struct SourceEditor: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.text = $text
-        guard let textView = scrollView.documentView as? NSTextView else { return }
+        guard let textView = scrollView.documentView as? CodeTextView else { return }
+
+        // Resolved here rather than inside a draw pass, and re-resolved on every update because
+        // an appearance flip is exactly what this view is handed `colorScheme` to notice.
+        let ground = resolvedGround
+        textView.backgroundColor = ground
+        textView.isEditable = isEditable
+        textView.placeholder = placeholder
+        scrollView.backgroundColor = ground
+        if let ruler = scrollView.verticalRulerView as? LineNumberRuler {
+            ruler.fill = ground
+            ruler.rule = NSColor(Palette.border)
+            ruler.needsDisplay = true
+        }
 
         // Only when the buffer genuinely differs, because assigning `string` throws away the
         // selection and the undo stack, and SwiftUI re-runs this on every unrelated update.
@@ -253,5 +288,31 @@ struct SourceEditor: NSViewRepresentable {
             offset += line.utf16.count + 1
         }
         return result
+    }
+}
+
+/// An `NSTextView` that says so when it is empty.
+///
+/// A placeholder is drawn rather than inserted, so an empty script stays genuinely empty: the
+/// binding never sees the prompt text, and saving a field nobody touched cannot write it to a
+/// settings file. It is drawn from the text container's own inset, which is where the gutter has
+/// already pushed the first character to, so the prompt starts exactly where typing would.
+final class CodeTextView: NSTextView {
+    var placeholder = "" {
+        didSet { if placeholder != oldValue { needsDisplay = true } }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        guard string.isEmpty, !placeholder.isEmpty else { return }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: CodeMetrics.font,
+            .foregroundColor: NSColor.tertiaryLabelColor,
+        ]
+        (placeholder as NSString).draw(
+            at: NSPoint(x: textContainerInset.width, y: textContainerInset.height),
+            withAttributes: attributes
+        )
     }
 }

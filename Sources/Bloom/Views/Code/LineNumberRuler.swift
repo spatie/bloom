@@ -17,7 +17,19 @@ final class LineNumberRuler: NSRulerView {
     private var lineStarts: [Int] = [0]
     private var isStale = true
 
-    private lazy var attributes: [NSAttributedString.Key: Any] = [
+    /// What the gutter is painted with.
+    ///
+    /// Resolved by the caller and stored, never converted inside `draw`: turning a SwiftUI `Color`
+    /// into an `NSColor` during a draw pass drags the SwiftUI graph into it, which is what broke
+    /// the window capture the first time this ruler was written. The defaults are the AppKit
+    /// colours the diff has always used, so a caller that says nothing gets exactly what it had.
+    var fill: NSColor = .underPageBackgroundColor
+    var rule: NSColor = .separatorColor
+    var numberColor: NSColor = .tertiaryLabelColor {
+        didSet { attributes[.foregroundColor] = numberColor }
+    }
+
+    private var attributes: [NSAttributedString.Key: Any] = [
         .font: NSFont.monospacedDigitSystemFont(
             ofSize: max(9, CodeMetrics.font.pointSize - 1), weight: .regular
         ),
@@ -29,7 +41,6 @@ final class LineNumberRuler: NSRulerView {
         clientView = textView
         ruleThickness = 40
         clipsToBounds = true
-        moveTextClear(of: 40)
 
         // A ruler is a sibling of the clip view, not a subview of it, so scrolling does not
         // invalidate it on its own. Selector based rather than a block, because the block form
@@ -41,9 +52,27 @@ final class LineNumberRuler: NSRulerView {
             name: NSView.boundsDidChangeNotification,
             object: scrollView.contentView
         )
+
+        // How much room the scroll view has left for the ruler is only knowable once it has laid
+        // itself out, which is after this editor is built. A one line run script never changes
+        // afterwards, so without watching for that first layout its code stayed indented by the
+        // width of the gutter on top of the gutter. Resizing the window arrives here too, which
+        // is what keeps the numbers from being left behind by a shrinking box.
+        scrollView.contentView.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(clipViewDidResize),
+            name: NSView.frameDidChangeNotification,
+            object: scrollView.contentView
+        )
     }
 
     @objc private func clipViewDidScroll() {
+        needsDisplay = true
+    }
+
+    @objc private func clipViewDidResize() {
+        alignTextToGutter()
         needsDisplay = true
     }
 
@@ -78,14 +107,14 @@ final class LineNumberRuler: NSRulerView {
         // and the rect a ruler is handed during an offscreen render of the whole window is the
         // whole window, so filling it painted over every other view in the app.
         //
-        // AppKit colours rather than `Palette.diffGutter` and `Palette.border`, which are the same
-        // two colours: converting a SwiftUI `Color` inside a draw pass drags the SwiftUI graph
-        // into it, and that broke the window capture in a different way again.
-        let gutter = rect.intersection(bounds)
-        NSColor.underPageBackgroundColor.setFill()
+        // Already-resolved `NSColor`s, never a `Palette` value converted here: converting a
+        // SwiftUI `Color` inside a draw pass drags the SwiftUI graph into it, and that broke the
+        // window capture in a different way again. See `fill` and `rule`.
+        let gutter = bounds
+        fill.setFill()
         gutter.fill()
 
-        NSColor.separatorColor.setFill()
+        rule.setFill()
         let hairline = 1 / (window?.backingScaleFactor ?? 2)
         NSRect(
             x: bounds.maxX - hairline, y: gutter.minY, width: hairline, height: gutter.height
@@ -152,18 +181,30 @@ final class LineNumberRuler: NSRulerView {
         return low
     }
 
-    /// Keep the text out from under the gutter.
+    /// Keep the text out from under the gutter, and out from under it exactly once.
     ///
-    /// `NSScrollView` is documented to shrink its clip view to make room for a ruler, and here it
-    /// does not: the clip view keeps the full width and the gutter is painted over the first few
-    /// characters of every line. Setting `contentInsets` instead only moves the ruler. What does
-    /// work is insetting the text container itself, which also means scrolling sideways slides the
-    /// code under an opaque gutter, the way a code editor should behave anyway.
-    private func moveTextClear(of width: CGFloat) {
+    /// `NSScrollView` is documented to shrink its clip view to make room for a ruler and cannot be
+    /// relied on to: in a full pane editor it kept the full width and the gutter was painted over
+    /// the first few characters of every line, which is what insetting the text container was
+    /// added to fix. Inside a form it does shrink the clip view, and the two together indented
+    /// every line of a setup script by the width of the gutter twice over: a visible channel of
+    /// dead space between the numbers and the code.
+    ///
+    /// So the room the scroll view has already made is measured rather than assumed, and only the
+    /// remainder is taken out of the text container. `CodeMetrics.textInset` is added either way,
+    /// because that is the air between the gutter and the first character rather than clearance.
+    private func alignTextToGutter() {
         guard let textView = clientView as? NSTextView else { return }
-        textView.textContainerInset = NSSize(
-            width: width + CodeMetrics.textInset, height: textView.textContainerInset.height
+        // Where the clip view actually begins, in the scroll view's own coordinates. Its `frame`
+        // does not answer this: it reads (0, 0) whether or not the scroll view moved it, and
+        // trusting it left the code indented by the gutter twice.
+        let reserved = scrollView.map { $0.contentView.convert(NSPoint.zero, to: $0).x } ?? 0
+        let remaining = max(0, ruleThickness - reserved)
+        let inset = NSSize(
+            width: remaining + CodeMetrics.textInset, height: textView.textContainerInset.height
         )
+        guard textView.textContainerInset != inset else { return }
+        textView.textContainerInset = inset
     }
 
     /// Wide enough for the largest number the file can show, so the gutter does not twitch as the
@@ -172,8 +213,14 @@ final class LineNumberRuler: NSRulerView {
         let digits = max(2, String(lineStarts.count).count)
         let sample = String(repeating: "0", count: digits) as NSString
         let width = ceil(sample.size(withAttributes: attributes).width) + Self.padding * 2
-        guard abs(width - ruleThickness) > 0.5 else { return }
-        ruleThickness = width
-        moveTextClear(of: width)
+        if abs(width - ruleThickness) > 0.5 {
+            ruleThickness = width
+            // The room the scroll view leaves is only correct once it has re-tiled around the
+            // new thickness. Safe here because this is never reached from a draw pass.
+            scrollView?.tile()
+        }
+        // Every time, not only when the thickness moved: the room the scroll view makes for the
+        // ruler is not settled when the first one of these runs.
+        alignTextToGutter()
     }
 }

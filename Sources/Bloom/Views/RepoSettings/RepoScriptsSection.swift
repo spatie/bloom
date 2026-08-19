@@ -21,15 +21,17 @@ struct RepoScriptsSection: View {
     private var scriptSection: some View {
         Section {
             RepoScriptField(
-                title: "Setup",
+                title: "Setup script",
                 summary: "Runs once, in the new worktree, before the first message is sent. A workspace whose setup fails is created but marked failed.",
+                placeholder: "#!/bin/zsh",
                 text: $model.draft.setupScript,
                 destination: SettingsDestinationLabel(model: model, key: .setupScript)
             )
 
             RepoScriptField(
-                title: "Archive",
+                title: "Archive script",
                 summary: "Runs in the worktree just before it is removed. Undo whatever setup did outside the folder here: a Valet site, a database, a container.",
+                placeholder: "#!/bin/zsh",
                 text: $model.draft.archiveScript,
                 destination: SettingsDestinationLabel(model: model, key: .archiveScript)
             )
@@ -90,53 +92,52 @@ struct RepoScriptsSection: View {
     }
 }
 
-/// One script: a label, a monospaced box, and the file it will be written to.
+/// One script: what it is called, where it is going, the code, and what it does.
+///
+/// The order is deliberate and it is the order Conductor uses, because it is the order the
+/// questions arrive in. The name and the destination sit on one line above the box, so the file
+/// this will be written to is known before a character is typed. The code comes next, in a real
+/// editor with a gutter and syntax colours, because it is code. The sentence describing when it
+/// runs goes underneath, where it can be read once and then ignored.
 struct RepoScriptField<Destination: View>: View {
     let title: String
     let summary: String
+    var placeholder = ""
     @Binding var text: String
     let destination: Destination
 
-    /// Tall enough for a handful of lines. The maximum matters more than the minimum: a real
-    /// setup script runs to eighty lines, and without a ceiling the box grows to all of them and
-    /// pushes every other section of the window off the bottom of the form.
-    private static var editorHeight: CGFloat { 92 }
-    private static var editorMaximumHeight: CGFloat { 240 }
-
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.spacing) {
-            Text(title)
-                .font(Typo.labelEmphasis)
-                .foregroundStyle(Palette.textPrimary)
+            HStack(alignment: .firstTextBaseline, spacing: Metrics.gutter) {
+                Text(title)
+                    .font(Typo.labelEmphasis)
+                    .foregroundStyle(Palette.textPrimary)
+
+                Spacer(minLength: Metrics.spacingSmall)
+
+                destination
+            }
+
+            ScriptEditor(text: $text, placeholder: placeholder)
+                .accessibilityLabel(title)
 
             Text(summary)
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-
-            TextEditor(text: $text)
-                .font(Typo.codeSmall)
-                .scrollContentBackground(.hidden)
-                .padding(Metrics.spacingSmall)
-                .frame(minHeight: Self.editorHeight, maxHeight: Self.editorMaximumHeight)
-                .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
-                .overlay {
-                    RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                        .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
-                }
-                .accessibilityLabel("\(title) script")
-
-            destination
         }
+        .multilineTextAlignment(.leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, Metrics.spacingSmall)
     }
 }
 
 /// One run script. The name is what the tab is called; the command is what runs.
 ///
-/// The fields carry no title of their own. A `TextField` with one, inside a `Form`, is split into
-/// a label column and a value column by the form itself, which put the name and the command on two
-/// separate rows of a table and right-aligned a shell command against the far edge of the window.
+/// The name field carries no title of its own. A `TextField` with one, inside a `Form`, is split
+/// into a label column and a value column by the form itself, which put the name and the command
+/// on two separate rows of a table and right-aligned a shell command against the far edge of the
+/// window.
 struct RepoRunScriptRow: View {
     @Binding var script: DraftRunScript
     let onRemove: () -> Void
@@ -173,11 +174,16 @@ struct RepoRunScriptRow: View {
                     .help("Remove this run script")
             }
 
-            TextField("", text: $script.command, prompt: Text("Command"), axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .labelsHidden()
-                .font(Typo.codeSmall)
-                .lineLimit(1...4)
+            // The same editor the setup script gets. A run script is one or two lines rather than
+            // forty, so it starts at one and grows, but it is the same shell and it is read the
+            // same way: the gutter and the colours are not a reward for length.
+            ScriptEditor(
+                text: $script.command,
+                placeholder: "Command",
+                minimumHeight: 40,
+                maximumHeight: 160
+            )
+            .accessibilityLabel("Command for \(script.name)")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, Metrics.spacingTight)
