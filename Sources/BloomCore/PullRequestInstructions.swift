@@ -44,18 +44,31 @@ public enum PullRequestInstructions {
     /// Nil when nothing could be written, which is the caller's signal to put the instructions in
     /// the message itself rather than to fail. A read-only checkout is a reason to fall back, not
     /// a reason for a button to stop working.
+    ///
+    /// The path that comes back is a file that was on disk and readable at the moment of
+    /// answering. That is the whole contract: the caller turns this into an attachment trailer,
+    /// and a trailer is a promise to the agent that it can read what it names. `ComposerView`
+    /// takes the same last look before it sends a prompt somebody typed, and this is the same
+    /// look taken for the one attachment Bloom makes for itself.
     public static func ensure(in worktree: String, contents: String = defaultMarkdown) async -> String? {
-        let manager = FileManager.default
+        guard let path = await choose(in: worktree, contents: contents) else { return nil }
+        // Deliberately after every branch below rather than inside them, so a case added later
+        // cannot answer with a path nobody looked at.
+        return isFile(path, in: worktree) ? path : nil
+    }
+
+    /// Which of the two files this worktree is going to use, writing Bloom's own if it has to.
+    private static func choose(in worktree: String, contents: String) async -> String? {
         let project = (worktree as NSString).appendingPathComponent(projectPath)
 
-        if manager.isReadableFile(atPath: project) {
+        if isFile(projectPath, in: worktree) {
             if let moved = await reclaimStrayDefault(at: project, in: worktree) { return moved }
             return projectPath
         }
 
         WorktreeScratch.shield(WorktreeScratch.generated, in: worktree)
         let scratch = (worktree as NSString).appendingPathComponent(scratchPath)
-        if manager.isReadableFile(atPath: scratch) { return scratchPath }
+        if isFile(scratchPath, in: worktree) { return scratchPath }
 
         do {
             try contents.write(toFile: scratch, atomically: true, encoding: .utf8)
@@ -63,6 +76,21 @@ public enum PullRequestInstructions {
             return nil
         }
         return scratchPath
+    }
+
+    /// Whether a path relative to the worktree is a readable regular file right now.
+    ///
+    /// A directory answers yes to `isReadableFile` on its own, and `.bloom/pr-instructions.md`
+    /// happening to be a folder would otherwise be attached to the prompt as a file the agent is
+    /// then told to read and cannot. Anything that is not a plain file is treated as no file at
+    /// all, which sends the project down the same road as a project that ships nothing.
+    private static func isFile(_ relative: String, in worktree: String) -> Bool {
+        let full = (worktree as NSString).appendingPathComponent(relative)
+        var isDirectory: ObjCBool = false
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: full, isDirectory: &isDirectory), !isDirectory.boolValue
+        else { return false }
+        return manager.isReadableFile(atPath: full)
     }
 
     /// Moves a copy an older Bloom left lying in `.bloom/pr-instructions.md` into the scratch

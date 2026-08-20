@@ -310,6 +310,112 @@ struct PullRequestInstructionsTests {
         #expect(body == "Create a pull request for this workspace against main.")
         #expect(paths == [PullRequestInstructions.scratchPath])
     }
+
+    /// The one thing every case has to have in common, asserted in all four of them at once.
+    ///
+    /// An attachment trailer is a promise to the agent that it can read what the trailer names,
+    /// and this is the only attachment Bloom makes for itself: nobody picked the file, so nothing
+    /// upstream ever looked at it. `ComposerView.send` takes exactly this look before it sends a
+    /// prompt somebody typed, and until now the pull request turn took none.
+    ///
+    /// Four states rather than one, because they reach four different `return` statements and the
+    /// two that hand back the project's own path never wrote anything at all.
+    @Test(
+        "whatever the repository was holding, the prompt names a file the agent can read",
+        arguments: InstructionsSetup.allCases
+    )
+    func namesAFileThatIsThere(setup: InstructionsSetup) async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        try await setup.lay(out: repo)
+
+        let path = try #require(
+            await PullRequestInstructions.ensure(in: repo.path), "\(setup) got no instructions"
+        )
+
+        let full = (repo.path as NSString).appendingPathComponent(path)
+        var isDirectory: ObjCBool = false
+        #expect(
+            FileManager.default.fileExists(atPath: full, isDirectory: &isDirectory),
+            "\(setup) attached \(path), which is not on disk"
+        )
+        #expect(isDirectory.boolValue == false, "\(setup) attached a folder")
+        let text = try #require(try? String(contentsOfFile: full, encoding: .utf8))
+        #expect(text.isEmpty == false, "\(setup) attached an empty file")
+
+        // Through the format the transcript reads back, because the chip the reader sees is drawn
+        // from what `split` finds rather than from what `ensure` answered.
+        let prompt = AttachmentTrailer.compose(
+            text: "Create a pull request for this workspace against main.", paths: [path]
+        )
+        #expect(AttachmentTrailer.split(prompt).paths == [path])
+
+        // And the guarantee that must survive all of this: nothing of Bloom's reaches the commit,
+        // in every one of the four states rather than in the two the original fix was written
+        // against.
+        try await Shell.check("git", ["add", "-A"], cwd: repo.path)
+        let staged = try await Shell.check(
+            "git", ["diff", "--cached", "--name-only"], cwd: repo.path
+        )
+        #expect(staged.trimmed.isEmpty, "\(setup) let git stage \(staged.trimmed)")
+    }
+
+    /// `isReadableFile` says yes to a directory, so without a check for what the thing actually is
+    /// a `.bloom/pr-instructions.md` folder would be attached to the prompt and the agent told to
+    /// read it. Nothing that is not a plain file is the project's copy.
+    @Test("a project path that is not a file at all is not attached as one")
+    func aFolderIsNotTheProjectsCopy() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        try FileManager.default.createDirectory(
+            atPath: (repo.path as NSString).appendingPathComponent(
+                PullRequestInstructions.projectPath
+            ),
+            withIntermediateDirectories: true
+        )
+
+        #expect(await PullRequestInstructions.ensure(in: repo.path) == PullRequestInstructions.scratchPath)
+    }
+}
+
+/// What a repository is holding when somebody presses Create pull request.
+///
+/// The four states the pull request instructions have to tell apart, named so a failure says
+/// which one broke rather than which line did.
+enum InstructionsSetup: String, Sendable, CaseIterable, CustomStringConvertible {
+    /// A project that has never heard of any of this.
+    case nothing
+    /// A project that wrote and committed its own instructions.
+    case projectOwn
+    /// An untracked copy of a default an older Bloom left behind, which is the one file that may
+    /// be moved into the scratch folder.
+    case strayDefault
+    /// A repository that committed Bloom's default back when the bug put it there. It stays
+    /// exactly where it is.
+    case committedDefault
+
+    var description: String { rawValue }
+
+    func lay(out repo: TempRepo) async throws {
+        switch self {
+        case .nothing:
+            break
+        case .projectOwn:
+            try repo.write(PullRequestInstructions.projectPath, "How we open one here.\n")
+            try await repo.commit("say how this project opens a pull request")
+        case .strayDefault:
+            // A retired default by preference, because recognising what an older Bloom wrote is
+            // the harder half of this. The current one is reclaimable on the same terms.
+            let stray = PullRequestInstructions.retiredDefaults.first
+                ?? PullRequestInstructions.defaultMarkdown
+            try repo.write(PullRequestInstructions.projectPath, stray)
+        case .committedDefault:
+            try repo.write(
+                PullRequestInstructions.projectPath, PullRequestInstructions.defaultMarkdown
+            )
+            try await repo.commit("adopt the default pull request instructions")
+        }
+    }
 }
 
 @Suite("Pull request prompt context")

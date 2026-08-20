@@ -59,12 +59,17 @@ struct AttachmentChip: View {
     /// Whether to ask the file system if this file is still there, which paints the warning
     /// triangle when it is not.
     ///
-    /// True for an attachment, where the reader picked that file a moment ago and a copy that has
-    /// gone missing under `.bloom/attachments` is news. False in a transcript, for two reasons and
-    /// the second is the real one: a stat per row on the main actor is a stat per row scrolled
-    /// past, and the answer would be wrong anyway. A file the agent wrote at step three and
-    /// deleted at step nine was a file when the row was written, and the row is a record of what
-    /// happened rather than a picker.
+    /// True in the composer alone, where the reader picked that file a moment ago, has not sent
+    /// anything yet, and a copy that has gone missing under `.bloom/attachments` is news they can
+    /// still act on.
+    ///
+    /// False everywhere in a transcript, tool rows and sent prompts alike, for two reasons and the
+    /// second is the real one: a stat per row on the main actor is a stat per row scrolled past,
+    /// and the answer would be wrong anyway. A file the agent wrote at step three and deleted at
+    /// step nine was a file when the row was written, and the row is a record of what happened
+    /// rather than a picker. The same goes for a prompt: every path in a sent one was a readable
+    /// file at the moment it was sent, and a triangle appearing on it hours later says the turn
+    /// was broken when what actually happened is that the worktree moved on.
     var verifiesOnDisk = true
 
     @State private var isHovered = false

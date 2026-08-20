@@ -125,7 +125,20 @@ struct UserTurnRowView: View {
                             attachment: .sent(path: path),
                             worktree: workspace.path,
                             onOpen: { open(path) },
-                            onPreview: { frame in preview(path, frame) }
+                            onPreview: { frame in preview(path, frame) },
+                            // No warning triangle on a turn that has already gone. The composer
+                            // drops an attachment whose file has vanished in the moment before it
+                            // sends, and `PullRequestInstructions.ensure` looks at its own file
+                            // before naming it, so every path in a sent prompt was a readable file
+                            // when the agent was handed it. What the probe can still find out
+                            // afterwards is that the file has since been deleted, moved, reclaimed
+                            // into the scratch folder or taken away with the worktree when the
+                            // workspace was archived, and none of that is a fault in the turn. The
+                            // row is a record of what was asked, not a picker. See
+                            // `AttachmentChip.verifiesOnDisk`, and `ToolRowHeader`, which draws the
+                            // agent's own file chips the same way a few lines further down the
+                            // same transcript.
+                            verifiesOnDisk: false
                         )
                     }
                 }
