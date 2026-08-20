@@ -59,7 +59,7 @@ struct LinkScanTests {
     // MARK: What is refused
 
     @Test("a file path is not a link", arguments: [
-        "/Users/freek/dev/code/Baton/Sources/BloomCore/LinkScan.swift",
+        "/Users/freek/dev/code/Bloom/Sources/BloomCore/LinkScan.swift",
         "Sources/Bloom/Views/Transcript/UserTurnRowView.swift",
         "./build.sh",
         "~/Library/Application Support/Bloom/bloom.sqlite",
