@@ -44,8 +44,6 @@ struct RepoScriptsSection: View {
                 placeholder: "#!/bin/zsh",
                 text: $model.draft.archiveScript
             )
-        } header: {
-            Text("Scripts")
         } footer: {
             VStack(alignment: .leading, spacing: Metrics.spacingTight) {
                 Text("Run with the workspace folder as the working directory, not in an interactive shell, so anything a login shell would set up has to be set up in the script. A script saved as a file is run as itself, so the shebang on its first line picks the interpreter; one kept as a line of settings is run by zsh.")

@@ -6,11 +6,16 @@ import BloomCore
 /// looks like in the sidebar, which ignored files a new workspace needs, what runs when one is
 /// created, and how to stop tracking it.
 ///
+/// Three panes rather than one long scroll, because the three are different kinds of thing and
+/// nobody arrives here wanting all of them: what the project IS, what a new workspace STARTS with,
+/// and what Bloom RUNS in it. The tab bar is the one macOS draws for a `TabView`, and it is the
+/// same control the app's own Settings window is built from, so the two windows read as one app.
+///
 /// Two kinds of setting live here and they are stored in two different places, which the screen is
-/// explicit about. The name, colour and mark are Bloom's own record of a folder and live in its
-/// database. Everything below that is stated in the repository's settings files, is shared with
-/// whoever else works on it, and is written back to the file it came from. Every field that writes
-/// a file names the file underneath it, so the destination is known before Save is pressed. See
+/// explicit about. The name, mark and colour are Bloom's own record of a folder and live in its
+/// database. Everything else is stated in the repository's settings files, is shared with whoever
+/// else works on it, and is written back to the file it came from. Every field that writes a file
+/// names the file underneath it, so the destination is known before Save is pressed. See
 /// `SettingsWriter` for why there is no third, invisible copy in the database.
 struct RepoSettingsView: View {
     let repo: Repo
@@ -21,8 +26,18 @@ struct RepoSettingsView: View {
     @State private var model: RepoSettingsModel
     @State private var name = ""
     @State private var mark = ""
+    /// Which pane a window opens on. `BLOOM_PANE=workspaces|scripts` for a capture run, because
+    /// `--repo-settings` can open this window but cannot press a tab, and a tab nobody can
+    /// photograph is a tab that changes unverified. Anything else, including nothing, is Project.
+    @State private var pane: Pane = {
+        switch ProcessInfo.processInfo.environment["BLOOM_PANE"] {
+        case "workspaces": return .workspaces
+        case "scripts": return .scripts
+        default: return .project
+        }
+    }()
     @State private var isConfirmingRemove = false
-    /// What the last thing the Icon row did came to, when it came to nothing. Cleared as soon as
+    /// What the last thing the Mark row did came to, when it came to nothing. Cleared as soon as
     /// something else is pressed, because it is about that press and not about the project.
     @State private var iconNotice: String?
     /// The name and the mark are written to the database on commit rather than on every keystroke,
@@ -35,22 +50,47 @@ struct RepoSettingsView: View {
         _model = State(initialValue: RepoSettingsModel(repo: repo))
     }
 
+    /// Which pane is showing. An enum rather than an index, so the value says what it selects.
+    ///
+    /// Named `Pane` because `Tab` is SwiftUI's own type, and the tabs below are declared with it.
+    private enum Pane: Hashable {
+        case project
+        case workspaces
+        case scripts
+    }
+
     /// Long enough that the scripts are readable, narrow enough that the form's label column does
     /// not drift away from its fields.
-    static let idealSize = CGSize(width: 640, height: 760)
+    static let idealSize = CGSize(width: 640, height: 700)
     static let minimumSize = CGSize(width: 560, height: 460)
 
     var body: some View {
         VStack(spacing: 0) {
-            Form {
-                projectSection
-                RepoFilesToCopySection(model: model)
-                RepoScriptsSection(model: model)
-                branchSection
-                filesSection
-                removeSection
+            TabView(selection: $pane) {
+                Tab("Project", systemImage: "folder", value: Pane.project) {
+                    Form {
+                        projectSection
+                        filesSection
+                        removeSection
+                    }
+                    .formStyle(.grouped)
+                }
+
+                Tab("Workspaces", systemImage: "square.stack.3d.up", value: Pane.workspaces) {
+                    Form {
+                        RepoFilesToCopySection(model: model)
+                        branchSection
+                    }
+                    .formStyle(.grouped)
+                }
+
+                Tab("Scripts", systemImage: "terminal", value: Pane.scripts) {
+                    Form {
+                        RepoScriptsSection(model: model)
+                    }
+                    .formStyle(.grouped)
+                }
             }
-            .formStyle(.grouped)
 
             Hairline()
             RepoSettingsSaveBar(model: model)
@@ -58,6 +98,28 @@ struct RepoSettingsView: View {
         .background(Palette.windowBackground)
         .frame(minWidth: Self.minimumSize.width, minHeight: Self.minimumSize.height)
         .navigationTitle("\(repo.name) Settings")
+        // The tab bar sits where the title would be, and there is one of these windows per
+        // project, so without this a window would not say which project it belongs to. The mark
+        // comes along, which also puts a preview of it on the two tabs that cannot show one.
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                // A button rather than a label, because macOS draws a toolbar item as something
+                // pressable whatever is put in it. It does what the proxy icon on a document
+                // window does: it takes you to the folder.
+                Button {
+                    Reveal.inFinder(repo.path)
+                } label: {
+                    HStack(spacing: Metrics.spacingWide) {
+                        markTile(size: Metrics.repoIcon)
+
+                        Text(repo.name)
+                            .font(Typo.labelEmphasis)
+                            .lineLimit(1)
+                    }
+                }
+                .help("Reveal \(repo.name) in Finder")
+            }
+        }
         .task {
             name = Self.nameWithoutMark(repo.name)
             mark = Self.mark(in: repo.name)
@@ -84,19 +146,79 @@ struct RepoSettingsView: View {
 
     private var projectSection: some View {
         Section {
-            TextField("Name", text: $name)
-                .textFieldStyle(.roundedBorder)
-                .focused($isEditingName)
-                .onSubmit(saveName)
-                .onChange(of: isEditingName) { wasEditing, editing in
-                    if wasEditing, !editing { saveName() }
-                }
+            LabeledContent("Name") {
+                TextField("Name", text: $name)
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.leading)
+                    .focused($isEditingName)
+                    .onSubmit(saveName)
+                    .onChange(of: isEditingName) { wasEditing, editing in
+                        if wasEditing, !editing { saveName() }
+                    }
+            }
 
-            LabeledContent("Mark") {
+            markRow
+
+            LabeledContent("Colour") {
+                AccentSwatches(selection: accentBinding)
+            }
+
+            LabeledContent("Folder") {
                 HStack(spacing: Metrics.gutter) {
-                    RepoIcon(name: previewName, accent: repo.accent, size: Metrics.repoIcon * 1.75)
+                    Text(shortPath(repo.path))
+                        .font(Typo.codeSmall)
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                        // For the reason the mark's summary has one: without it a long path
+                        // takes the row out of the value column and puts the label above it.
+                        .frame(idealWidth: Self.summaryWidth, maxWidth: .infinity, alignment: .leading)
+                        .help(repo.path)
 
-                    TextField("", text: $mark, prompt: Text("None"))
+                    Button("Reveal") { Reveal.inFinder(repo.path) }
+
+                    Spacer(minLength: 0)
+                }
+            }
+        } footer: {
+            Text("Bloom's own record of this folder. Everything on the other two tabs is saved in the repository.")
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textSecondary)
+        }
+    }
+
+    // MARK: - Mark
+
+    /// The one row that answers "what is drawn beside this project", in the order the app draws it.
+    ///
+    /// It used to be two rows. One held an emoji field and a preview tile, the other held a second
+    /// preview tile and the icon buttons, and between them they showed the same project twice and
+    /// offered two different ways to say "letters, please". They are one row now: the tile as the
+    /// sidebar will draw it, one line saying where that came from, and the three things that can
+    /// change it.
+    ///
+    /// Bloom looks for artwork once, when a project is added, at the places a favicon and an
+    /// application icon conventionally live. Everything about that is a guess, however good, so all
+    /// the ways out are here: look again, say which file it is, type an emoji, or have the letters
+    /// back. A project added before Bloom knew how to look has never been searched, and its button
+    /// says `Find icon` rather than pretending a search already happened and found nothing.
+    ///
+    /// Two lines: the mark, the emoji that can be it, and where the picture came from, then the
+    /// buttons under them. The emoji field is on the first line rather than beside the buttons
+    /// because a `Form` moves a row out of the value column as soon as the row's ideal width
+    /// exceeds it, and a fourth control on the second line is what tips it over at this width.
+    /// That is the whole reason the rows here did not line up before.
+    private static let summaryWidth: CGFloat = 110
+
+    private var markRow: some View {
+        LabeledContent("Mark") {
+            VStack(alignment: .leading, spacing: Metrics.spacing) {
+                HStack(spacing: Metrics.gutter) {
+                    markTile(size: Metrics.repoIcon * 1.75)
+
+                    TextField("", text: $mark, prompt: Text("Emoji"))
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 56)
                         .multilineTextAlignment(.center)
@@ -105,88 +227,71 @@ struct RepoSettingsView: View {
                         .onChange(of: isEditingMark) { wasEditing, editing in
                             if wasEditing, !editing { saveName() }
                         }
+                        .help("An emoji here goes in front of the name, and becomes the mark.")
 
-                    Button("Use initials") {
-                        mark = ""
-                        saveName()
-                    }
-                    .disabled(mark.isEmpty)
-                }
-            }
-
-            iconRow
-
-            ColorPicker("Colour", selection: accentBinding, supportsOpacity: false)
-
-            LabeledContent("Folder") {
-                HStack(spacing: Metrics.gutter) {
-                    Text(repo.path)
-                        .font(Typo.codeSmall)
-                        .foregroundStyle(Palette.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-
-                    Button("Reveal") { Reveal.inFinder(repo.path) }
-                }
-            }
-        } header: {
-            Text("Project")
-        } footer: {
-            // What the mark field actually does, said plainly, because it edits the name rather
-            // than a field of its own. See the note on `mark(in:)` for why that is the design.
-            Text("An emoji at the start of the name becomes the mark. Without one, Bloom draws the initials of the name on the project's colour, which needs no configuration and stays as distinct as the names are. An icon found in the project's own folder, or chosen here, is drawn instead of either.")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textSecondary)
-        }
-    }
-
-    // MARK: - Icon
-
-    /// The project's own artwork, if it turned out to have any.
-    ///
-    /// Bloom looks once, when a project is added, at the places a favicon and an application icon
-    /// conventionally live. Everything about that is a guess, however good, so all three ways out
-    /// are on this row: look again, say which file it is, or have the monogram back. A project
-    /// added before Bloom knew how to look has never been searched, and its button says so rather
-    /// than pretending a search already happened and found nothing.
-    private var iconRow: some View {
-        LabeledContent("Icon") {
-            HStack(alignment: .top, spacing: Metrics.gutter) {
-                RepoIcon(repo: repo, size: Metrics.repoIcon * 1.75)
-
-                VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                    Text(iconSummary)
+                    Text(markSummary)
                         .font(Typo.caption)
                         .foregroundStyle(iconNotice == nil ? Palette.textSecondary : Palette.warning)
-                        .lineLimit(1)
+                        .lineLimit(2)
                         .truncationMode(.middle)
+                        .fixedSize(horizontal: false, vertical: true)
+                        // A sentence asks for as much width as it has letters, and a row that
+                        // asks for more than the value column holds is moved out of the column
+                        // by the form, which is what made these rows start at four different
+                        // places. An ideal width keeps the row where the others are.
+                        .frame(idealWidth: Self.summaryWidth, maxWidth: .infinity, alignment: .leading)
                         .help(repo.iconPath ?? "")
 
-                    HStack(spacing: Metrics.gutter) {
-                        Button(repo.iconSource == .undetected ? "Find icon" : "Look again", action: findIcon)
-                        Button("Choose…", action: chooseIcon)
-                        Button("Use monogram", action: useMonogram)
-                            .disabled(!repo.hasIcon)
-                    }
-                    .controlSize(.small)
+                    Spacer(minLength: 0)
                 }
+
+                HStack(spacing: Metrics.gutter) {
+                    Button(repo.iconSource == .undetected ? "Find icon" : "Look again", action: findIcon)
+                    Button("Choose…", action: chooseIcon)
+                    // One button for "draw the letters", where there were two. It clears both the
+                    // picture and the emoji, because clearing only one of them leaves the other
+                    // standing and the button would be lying about what it did.
+                    Button("Use initials", action: useInitials)
+                        .disabled(!repo.hasIcon && mark.isEmpty)
+
+                    Spacer(minLength: 0)
+                }
+                .controlSize(.small)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    /// Where the badge beside it comes from, in one line.
-    private var iconSummary: String {
-        if let iconNotice { return iconNotice }
-        guard repo.hasIcon, let path = repo.iconPath else {
-            switch repo.iconSource {
-            case .undetected: return "Initials. This project was added before Bloom looked for icons."
-            case .monogram, .detected, .chosen: return "Initials on the project's colour."
-            }
+    /// The tile as the sidebar will draw it: the project's own artwork when it has some, and
+    /// otherwise the name being typed, so the preview is the real thing and not an impression.
+    @ViewBuilder
+    private func markTile(size: CGFloat) -> some View {
+        if repo.hasIcon {
+            RepoIcon(repo: repo, size: size)
+        } else {
+            RepoIcon(name: previewName, accent: repo.accent, size: size)
         }
-        let location = shortPath(path)
-        return repo.iconSource == .chosen ? "Chosen: \(location)" : "Found in the project: \(location)"
     }
+
+    /// Where the tile beside it comes from, in one line.
+    private var markSummary: String {
+        if let iconNotice { return iconNotice }
+        if repo.hasIcon, let path = repo.iconPath {
+            let location = shortPath(path)
+            return repo.iconSource == .chosen ? "Chosen: \(location)" : "Found: \(location)"
+        }
+        if !mark.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "The emoji in the name."
+        }
+        switch repo.iconSource {
+        // Never searched, rather than searched and empty handed. The button beside it says
+        // `Find icon` for the same reason.
+        case .undetected: return "Bloom has not looked for an icon here."
+        case .monogram, .detected, .chosen: return "Initials on the project's colour."
+        }
+    }
+
+    // MARK: - Changing the mark
 
     /// Runs the same search that runs when a project is added. Off the main actor, because it
     /// reads directories and this window has a text field in it.
@@ -196,7 +301,7 @@ struct RepoSettingsView: View {
         Task {
             guard let found = await Task.detached(operation: { RepoIconDetector.detect(in: path) }).value
             else {
-                iconNotice = "Nothing found. Bloom looks for a favicon, a web manifest icon and an app icon."
+                iconNotice = "Nothing found. Bloom looks for a favicon, a manifest icon and an app icon."
                 return
             }
             await apply(icon: found.path, source: .detected)
@@ -227,8 +332,14 @@ struct RepoSettingsView: View {
         }
     }
 
-    private func useMonogram() {
+    /// Back to the letters, whichever of the two things was covering them.
+    private func useInitials() {
         iconNotice = nil
+        if !mark.isEmpty {
+            mark = ""
+            saveName()
+        }
+        guard repo.hasIcon else { return }
         Task { await apply(icon: nil, source: .monogram) }
     }
 
@@ -313,6 +424,7 @@ struct RepoSettingsView: View {
                 VStack(alignment: .leading, spacing: Metrics.spacingTight) {
                     TextField("", text: $model.draft.branchPrefix, prompt: Text("None"))
                         .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.leading)
                     SettingsDestinationLabel(model: model, key: .branchPrefix)
                 }
             }
@@ -376,7 +488,7 @@ struct RepoSettingsView: View {
                     .foregroundStyle(Palette.negative)
             }
         } footer: {
-            Text(removalConsequences)
+            Text("Bloom forgets the project. Nothing on disk is deleted.")
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textSecondary)
         }
@@ -465,5 +577,70 @@ struct SettingsDestinationLabel: View {
         path.hasPrefix(model.repo.path + "/")
             ? String(path.dropFirst(model.repo.path.count + 1))
             : (path as NSString).abbreviatingWithTildeInPath
+    }
+}
+
+/// The ten colours Bloom hands out, and a picker for any other.
+///
+/// A `ColorPicker` alone is one small filled pill sitting at the end of a row, and a pill that
+/// never changes shape does not read as something you can press: the row announced "green" rather
+/// than offering a choice. These are the same ten `Accent.next` assigns from, so the colour a
+/// project was given is one of the swatches and changing it is one click, with the system picker
+/// still on the end for a colour that is not in the list.
+struct AccentSwatches: View {
+    @Binding var selection: Color
+
+    private static let size: CGFloat = 14
+    /// Room around each swatch, so a 14 point circle is still something a pointer can hit.
+    private static let padding: CGFloat = 3
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Accent.all, id: \.self) { hex in
+                swatch(hex)
+            }
+
+            // The escape hatch, held off from the ten so it reads as another kind of thing rather
+            // than as an eleventh colour.
+            ColorPicker("Another colour", selection: $selection, supportsOpacity: false)
+                .labelsHidden()
+                .help("Another colour")
+                .padding(.leading, Metrics.spacingWide)
+
+            Spacer(minLength: 0)
+        }
+        // The swatches carry their own padding, for the hit area. Taking it back on this edge is
+        // what puts the first circle on the same line as the field above it.
+        .padding(.leading, -Self.padding)
+    }
+
+    private func swatch(_ hex: String) -> some View {
+        let isSelected = selection.hexString?.caseInsensitiveCompare(hex) == .orderedSame
+
+        return Button {
+            selection = Color(hexString: hex)
+        } label: {
+            Circle()
+                .fill(Color(hexString: hex))
+                .frame(width: Self.size, height: Self.size)
+                .overlay {
+                    Circle().strokeBorder(Palette.textPrimary.opacity(0.12), lineWidth: Metrics.hairline)
+                }
+                // A ring cut out of the swatch, which is what macOS itself marks a chosen colour
+                // with, and which needs no room between the swatches to be drawn in.
+                .overlay {
+                    if isSelected {
+                        Circle()
+                            .strokeBorder(Palette.surface, lineWidth: 2)
+                            .padding(2)
+                    }
+                }
+                .padding(Self.padding)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help("#\(hex)")
+        .accessibilityLabel("Colour #\(hex)")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }

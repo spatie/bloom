@@ -36,7 +36,7 @@ struct RepoFilesToCopySection: View {
             Text("Files to copy")
         } footer: {
             VStack(alignment: .leading, spacing: Metrics.spacingTight) {
-                Text("One pattern per line, relative to the project folder. Copied into every new workspace, and into a restored one, because these are the ignored files git will not bring back on its own.")
+                Text("One pattern per line, relative to the project folder. Copied into every new workspace, and into a restored one, because git does not bring ignored files back.")
                 SettingsDestinationLabel(model: model, key: .filesToCopy)
             }
             .font(Typo.caption)

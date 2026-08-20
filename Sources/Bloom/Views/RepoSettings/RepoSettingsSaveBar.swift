@@ -56,11 +56,9 @@ struct RepoSettingsSaveBar: View {
             Label("Saved to \(saved).", systemImage: "checkmark.circle.fill")
                 .font(Typo.caption)
                 .foregroundStyle(Palette.positive)
-        } else {
-            Text("Every setting below the project's own name and colour is stored in the repository.")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textSecondary)
         }
+        // Nothing when there is nothing to report. Where a setting is stored is said beside the
+        // setting, on the row that writes it, which is where it can be read while it matters.
     }
 
     private var destinations: String {
