@@ -269,8 +269,8 @@ private func eventually(
         let box = scriptedBox()
         let runner = makeRunner(store: store, session: session, box: box)
 
-        // The path the recorded patch touches.
-        let path = try bloomFixtureLines("codex-approval.ndjson")
+        // The paths the recorded patch touches.
+        let paths = try bloomFixtureLines("codex-approval.ndjson")
             .compactMap { line -> String? in
                 guard let json = JSONValue.parse(line),
                       json["method"]?.stringValue == "item/started",
@@ -278,11 +278,15 @@ private func eventually(
                 else { return nil }
                 return json["params"]?["item"]?["changes"]?[0]?["path"]?.stringValue
             }
-            .first
+        // Required here rather than in the call below: `ruleContent` is itself optional, so a
+        // `#require` written in that position resolves to the overload that hands the optional
+        // straight through and asserts nothing. A fixture that stopped naming a path would then
+        // have granted the whole tool, and this test would have passed for the wrong reason.
+        let path = try #require(paths.first)
         try await store.upsert(PermissionGrant(
             repoID: repoID,
             toolName: "ApplyPatch",
-            ruleContent: try #require(path)
+            ruleContent: path
         ))
 
         let watching = Task { () -> PermissionResolution? in
