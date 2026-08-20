@@ -178,6 +178,33 @@ enum Palette {
     /// selected row reads exactly as firmly as it did. Bloom itself cannot do this job: white on
     /// `#4FD8C4` is 1.6 to 1, an unreadable row.
     static let accentFill = dynamic(light: 0x197593, dark: 0x197593)
+
+    /// An address in running text: underlined, and this colour.
+    ///
+    /// The accent, deliberately and not a blue of its own. A link is the app pointing at
+    /// somewhere else, which is the same thing every tinted glyph in the window is doing, and a
+    /// system blue here would be the one colour in Bloom that came from somewhere else. It is
+    /// named rather than spelled `accent` at the call site so that the day a link needs to stop
+    /// looking like a chip's tick, there is one line to change. Measured 5.2 to 1 on the light
+    /// page and 10.1 to 1 on the dark one, both AA for body text.
+    ///
+    /// The underline is not decoration and is not optional: it is what makes the link findable
+    /// without colour vision, and `linkInverted` below leans on it almost entirely.
+    static let link = accent
+
+    /// An address inside a filled bubble, which in practice means the user's own turn.
+    ///
+    /// `accent` cannot do this job. Bloom `#4FD8C4` on Spatie Blue measures 3.0 to 1, under AA for
+    /// body text, and the bubble sets `colorScheme` to dark so that is the value it would resolve
+    /// to. This is the same hue taken up the ramp until it clears the fill: `#CCF9F2` measures
+    /// 4.6 to 1 on `#197593`, against 5.2 for the white text around it.
+    ///
+    /// That closeness to white is the honest cost of a fill this saturated. There is no colour
+    /// that both clears AA on Spatie Blue and reads as obviously not-white beside it, so the
+    /// underline carries the affordance here and the tint only confirms it. One value rather than
+    /// a pair, because `accentFill` is one value in both appearances and this sits on that fill,
+    /// not on the page.
+    static let linkInverted = Color(nsColor: NSColor(rgb: 0xCCF9F2))
     /// Healthy, done, passed, merged. The accent, not a green of its own.
     ///
     /// The ramp says so in as many words, and the reference render of this window agrees: its

@@ -94,6 +94,8 @@ struct UserTurnRowView: View {
         }
         .padding(.horizontal, TranscriptLayout.inset)
         .padding(.vertical, TranscriptLayout.inset)
+        // A pressed address goes to the browser and nothing else does. See `TranscriptLink.opens`.
+        .opensTranscriptLinks()
     }
 
     /// The words and then the files, which is the order they were written in and the order the
@@ -105,7 +107,11 @@ struct UserTurnRowView: View {
             // A prompt of nothing but attachments is a turn in its own right, and an empty `Text`
             // above the chips would put a blank line inside the bubble.
             if !text.isEmpty {
-                Text(text)
+                // Written text, not markdown. A question with a `*` in it is a question with a
+                // `*` in it, and the one thing lifted out of it is an address: those are found by
+                // `LinkScan`, which is the same detection the agent's own prose goes through.
+                let links = LinkScan.links(in: text)
+                Text(TranscriptLink.attributed(text, links: links, tint: Palette.linkInverted))
                     .font(Typo.body)
                     // White, the same ink a selected row uses on the same fill. Measured 5.2 to 1
                     // on Spatie Blue, which passes AA for body text in both appearances.
@@ -114,6 +120,8 @@ struct UserTurnRowView: View {
                     .textSelection(.enabled)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
+                    .transcriptLinkMenu(TranscriptLink.addresses(of: links))
+                    .transcriptLinkActions(TranscriptLink.addresses(of: links))
             }
 
             if !attachments.isEmpty {

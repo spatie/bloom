@@ -58,23 +58,19 @@ public struct MarkdownView: View {
     }
 
     public var body: some View {
-        MarkdownBlocksView(blocks: isStreaming
+        let blocks = isStreaming
             ? MarkdownParseCache.streamingBlocks(for: text)
-            : MarkdownParseCache.blocks(for: text))
-            .environment(\.openURL, OpenURLAction { url in
-                // Only a web address or a mail address is handed to the system. Everything drawn
-                // here was written by an agent, and `[text](url)` puts whatever it likes in the
-                // target: `file:///Applications/...` or a private scheme registered by some other
-                // app would otherwise launch that thing on a click in a transcript. The bare and
-                // angle bracketed forms the parser recognises are already http(s) only; this is
-                // the one that is not.
-                guard let scheme = url.scheme?.lowercased(),
-                      scheme == "https" || scheme == "http" || scheme == "mailto" else {
-                    return .discarded
-                }
-                NSWorkspace.shared.open(url)
-                return .handled
-            })
+            : MarkdownParseCache.blocks(for: text)
+        // Which addresses may be opened, and which may not, is `TranscriptLink.opens`. It is not
+        // a rule about this view: the user's own bubble is drawn by a different one and goes
+        // through the same door.
+        MarkdownBlocksView(blocks: blocks)
+            .opensTranscriptLinks()
+            // Not while it is still being written. A menu rebuilt on every token would be work
+            // done for a reader who is not there yet, and there is nothing to copy until the
+            // sentence carrying the address has finished arriving.
+            .transcriptLinkMenu(isStreaming ? [] : TranscriptLink.addresses(in: blocks))
+            .transcriptLinkActions(isStreaming ? [] : TranscriptLink.addresses(in: blocks))
     }
 }
 
@@ -373,8 +369,8 @@ private enum InlineAttributes {
                 if !intents.isEmpty { child.inlinePresentationIntent = intents }
                 output += child
             case let .link(text, url):
-                var child = render(text, font: font, code: code, color: Palette.accent, intents: intents)
-                child.foregroundColor = Palette.accent
+                var child = render(text, font: font, code: code, color: Palette.link, intents: intents)
+                child.foregroundColor = Palette.link
                 child.underlineStyle = .single
                 if let target = URL(string: url) { child.link = target }
                 output += child
