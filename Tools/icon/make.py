@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds the app icon from the artwork in gen10.py.
+"""Builds the app icon from the artwork in design.py.
 
     python3 Tools/icon/make.py
 
@@ -22,6 +22,14 @@ white Foam ground fills the canvas, a Deep panel is inset within it, two lanes
 arrive and a pale Shallow bar crosses. The white is a margin we draw, not a gap
 where the artwork stopped short, and the bar lies across it so that the margin
 reads as a surface something sits on rather than as a frame.
+
+THE DRAWING IS design.py's, NOT gen10.tongue. gen10 holds round ten's ten
+directions and `tongue` is the one that was chosen, but three things have been
+decided about it since: every piece is graded across its own height, the lanes
+are cut at the plain panel rather than at the panel plus its spur, and the spur
+is concentric with the bar and 17 units proud of it rather than 26. design.py's
+docstring says why each. Read this file for what the outputs are and that one
+for what is in them.
 
 THE PANEL GROWS A SPUR ALONG THE BAR'S OWN PATH, AND THAT IS THE WHOLE DESIGN.
 Shallow #9BE9DC against Foam #E9F7F4 measures 1.26, well under the 1.60 two
@@ -88,10 +96,9 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 RESOURCES = os.path.join(ROOT, "Resources")
 
 sys.path.insert(0, HERE)
+import design  # noqa: E402
 import gen10  # noqa: E402
 import menubar  # noqa: E402
-
-DESIGN = gen10.tongue
 
 # Where the frame stops being affordable. Below this the `.icns` draws the
 # unframed figure instead, which is round nine's `corner` with the lanes opened
@@ -127,7 +134,7 @@ def icns():
     # The app runs on macOS 15 as well, where nothing draws a tile for us, so
     # the flat icon has to carry its own. Only the layered document goes full
     # bleed.
-    _, _, full = gen10.render(DESIGN)
+    _, _, full = design.render()
     # `unframed` returns two, not three: the full bleed composite and the
     # legacy one. The legacy one again.
     _, small = gen10.unframed(small=True)
@@ -158,25 +165,41 @@ def icns():
 
 
 def layered():
-    """The four pieces the system composites, back to front: the Foam ground,
-    the Deep panel with its spur, the two arriving lanes clipped to it, and the
-    bar. Written with the app's own contact shadows left out, because the
-    system seats the layers itself.
+    """The four groups the system composites, back to front: the Foam ground,
+    the Deep panel with its spur, the two arriving lanes cut at the plain
+    panel, and the bar. Written with the app's own contact shadows left out,
+    because the system seats the layers itself.
+
+    A GROUP IS NOT A LAYER. Bleed holds two, one per lane, because each carries
+    its own gradient and one fill key cannot say Spatie and Current at once.
+    Anything that walks this list has to walk the layers inside a group rather
+    than assume one each.
 
     The Assets directory is emptied first. A layer that stops being drawn would
     otherwise stay on disk and go on being compiled into the catalogue.
     """
-    layers, _, _ = gen10.render(DESIGN)
+    built, _, _ = design.render()
     bundle = os.path.join(RESOURCES, "Bloom.icon")
     assets = os.path.join(bundle, "Assets")
     shutil.rmtree(assets, ignore_errors=True)
     os.makedirs(assets)
 
     groups = []
-    for name, body, keys in layers:
-        with open(os.path.join(assets, name.lower() + ".svg"), "w") as f:
-            f.write(body)
-        group = {"layers": [{"image-name": name.lower() + ".svg", "name": name}]}
+    for _, layers, keys in built:
+        group = {"layers": []}
+        for layer in layers:
+            asset = layer["name"].lower() + ".svg"
+            with open(os.path.join(assets, asset), "w") as f:
+                f.write(layer["body"])
+            item = {"image-name": asset, "name": layer["name"]}
+            # A layer's fill REPLACES the artwork's own colours, so the SVG
+            # under it is a silhouette. Anything the document cannot parse
+            # compiles to a nil CGColor and actool dies inside CoreFoundation
+            # without saying which layer it was.
+            for k in ("fill", "opacity", "blend-mode", "specular"):
+                if k in layer:
+                    item[k] = layer[k]
+            group["layers"].append(item)
         group.update(keys)
         groups.append(group)
 

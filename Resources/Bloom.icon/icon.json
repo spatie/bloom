@@ -5,7 +5,23 @@
    "layers": [
     {
      "image-name": "mark.svg",
-     "name": "Mark"
+     "name": "Mark",
+     "fill": {
+      "linear-gradient": [
+       "srgb:0.6627,0.9255,0.8824,1.000",
+       "srgb:0.5412,0.8118,0.7686,1.000"
+      ],
+      "orientation": {
+       "start": {
+        "x": 0.5,
+        "y": 0.4054538763842537
+       },
+       "stop": {
+        "x": 0.5,
+        "y": 0.7022579156079338
+       }
+      }
+     }
     }
    ],
    "shadow": {
@@ -21,8 +37,44 @@
   {
    "layers": [
     {
-     "image-name": "bleed.svg",
-     "name": "Bleed"
+     "image-name": "current.svg",
+     "name": "Current",
+     "fill": {
+      "linear-gradient": [
+       "srgb:0.2824,0.6902,0.7451,1.000",
+       "srgb:0.1451,0.5686,0.6275,1.000"
+      ],
+      "orientation": {
+       "start": {
+        "x": 0.5,
+        "y": 0.7074062014089048
+       },
+       "stop": {
+        "x": 0.5,
+        "y": 0.853515625
+       }
+      }
+     }
+    },
+    {
+     "image-name": "spatie.svg",
+     "name": "Spatie",
+     "fill": {
+      "linear-gradient": [
+       "srgb:0.2235,0.5333,0.6353,1.000",
+       "srgb:0.0863,0.4078,0.5137,1.000"
+      ],
+      "orientation": {
+       "start": {
+        "x": 0.5,
+        "y": 0.146484375
+       },
+       "stop": {
+        "x": 0.5,
+        "y": 0.5632541989817204
+       }
+      }
+     }
     }
    ],
    "translucency": {
@@ -34,7 +86,23 @@
    "layers": [
     {
      "image-name": "panel.svg",
-     "name": "Panel"
+     "name": "Panel",
+     "fill": {
+      "linear-gradient": [
+       "srgb:0.1765,0.2627,0.3294,1.000",
+       "srgb:0.0392,0.1255,0.1961,1.000"
+      ],
+      "orientation": {
+       "start": {
+        "x": 0.5,
+        "y": 0.146484375
+       },
+       "stop": {
+        "x": 0.5,
+        "y": 0.853515625
+       }
+      }
+     }
     }
    ],
    "shadow": {
@@ -50,7 +118,23 @@
    "layers": [
     {
      "image-name": "ground.svg",
-     "name": "Ground"
+     "name": "Ground",
+     "fill": {
+      "linear-gradient": [
+       "srgb:0.9255,0.9725,0.9647,1.000",
+       "srgb:0.8118,0.8627,0.8510,1.000"
+      ],
+      "orientation": {
+       "start": {
+        "x": 0.5,
+        "y": 0.0
+       },
+       "stop": {
+        "x": 0.5,
+        "y": 1.0
+       }
+      }
+     }
     }
    ]
   }

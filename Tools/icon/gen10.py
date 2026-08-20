@@ -324,7 +324,13 @@ def tongue(small=False):
     out with it. The panel grows a spur along the bar's own path, 26 units
     proud of it on each side, so what crosses the margin is Deep at 14.4
     against Foam with the Shallow bar inside it. No exception is needed and
-    nothing is recoloured."""
+    nothing is recoloured.
+
+    THIS IS THE ROUND TEN DRAWING AND IT IS NOT WHAT SHIPS. design.py is, and
+    it differs in three ways decided after this round closed: the grade, the
+    lanes cut at the plain panel, and a spur that ends where the bar ends and
+    is 17 units proud rather than 26. Do not read a difference between this and
+    Resources/ as a bug in either."""
     return figure(M, small, tongue=True)
 
 
