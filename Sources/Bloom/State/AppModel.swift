@@ -1342,14 +1342,47 @@ final class AppModel {
         await reload()
     }
 
-    func reorder(_ workspace: Workspace, to index: Int) async {
-        guard let store, let repo = repo(for: workspace) else { return }
-        var siblings = workspaces(in: repo)
-        guard let from = siblings.firstIndex(where: { $0.id == workspace.id }) else { return }
-        let moved = siblings.remove(at: from)
-        siblings.insert(moved, at: min(max(index, 0), siblings.count))
-        for (order, sibling) in siblings.enumerated() where sibling.sortOrder != order {
-            _ = try? await store.update(workspaceID: sibling.id) { $0.sortOrder = order }
+    /// What the sidebar's drag ends in.
+    ///
+    /// The two numbers are `onMove`'s, which index the rows as they are DRAWN, so `visible` has to
+    /// be the very list the drag happened in: filtered, pinned first, and in that order.
+    /// `SidebarReorder` is what turns them into the store's own order, and it lives in `BloomCore`
+    /// because that translation is worth testing and a view is not where a test can reach it.
+    ///
+    /// The new order is put on screen before it is written. A drop is the end of a movement the
+    /// table has already animated, and waiting for four writes and a reload to come back through
+    /// an actor before the rows agree with where they were let go puts a frame of the OLD order
+    /// between the settle and the answer.
+    ///
+    /// That assignment is also what makes the background refresh harmless. `refreshDiffStats`
+    /// takes its snapshot before its git calls and reconciles against it several seconds later, so
+    /// a reorder landing inside that window is a row that changed since the snapshot, and
+    /// `WorkspaceListReconciliation` leaves a changed row alone: membership and order come from
+    /// the list as it stands, which is this one.
+    ///
+    /// Each write names the two columns it changes, so nothing here can put back a diff stat or an
+    /// archive that landed while the drag was happening. See 34b840b.
+    func reorderWorkspaces(in repo: Repo, visible: [Workspace], from: IndexSet, to: Int) async {
+        guard let store else { return }
+        let changes = SidebarReorder.move(
+            visible: visible, all: workspaces(in: repo), from: from, to: to
+        )
+        guard !changes.isEmpty else { return }
+
+        let byID = Dictionary(changes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        workspaces = workspaces.map { workspace in
+            guard let change = byID[workspace.id] else { return workspace }
+            var moved = workspace
+            moved.sortOrder = change.sortOrder
+            moved.pinned = change.pinned
+            return moved
+        }
+
+        for change in changes {
+            _ = try? await store.update(workspaceID: change.id) {
+                $0.sortOrder = change.sortOrder
+                $0.pinned = change.pinned
+            }
         }
         await reload()
     }

@@ -75,6 +75,17 @@ struct RepoSection: View {
                 ForEach(rows) { workspace in
                     row(workspace)
                 }
+                // The list's own row reordering, which is `NSOutlineView`'s: the drag image, the
+                // autoscroll at the pane's edges, the snap back on a cancel and the settle on
+                // drop are all AppKit's, and none of it is drawn here.
+                //
+                // It is on the `ForEach` rather than on any row, because what is being reordered
+                // is the run of rows and the offsets it hands back index into that run. That is
+                // also what confines the drag to this project, by construction rather than by
+                // refusing anything: one `onMove` can move exactly its own `ForEach`, so a row
+                // dragged over another project finds nowhere to land there and a release leaves
+                // every row where it was. Measured on a build, both ways round.
+                .onMove(perform: move)
                 if rows.isEmpty {
                     emptyNotice
                 }
@@ -329,10 +340,6 @@ struct RepoSection: View {
         .arrivingRow(arrival.isArriving(workspace.id))
         .padding(.leading, SidebarMetrics.rowIndent)
         .tag(SidebarSelection.workspace(workspace.id))
-        .draggable(workspace.id)
-        .dropDestination(for: String.self) { items, _ in
-            move(items.first, above: workspace)
-        }
         .contextMenu {
             Button("Open in Editor") { Reveal.inEditor(workspace.path) }
             Button("Reveal in Finder") { Reveal.inFinder(workspace.path) }
@@ -361,19 +368,13 @@ struct RepoSection: View {
 
     // MARK: - Actions
 
-    /// The visible list can be filtered, so the drop target's position has to be translated back
-    /// into the unfiltered order the store actually stores.
-    private func move(_ draggedID: String?, above workspace: Workspace) -> Bool {
-        guard let draggedID, draggedID != workspace.id else { return false }
-        guard let moved = app.workspaces.first(where: { $0.id == draggedID }),
-              moved.repoID == repo.id else { return false }
-
-        let unfiltered = app.workspaces(in: repo)
-        guard let index = unfiltered.firstIndex(where: { $0.id == workspace.id }) else {
-            return false
-        }
-        Task { await app.reorder(moved, to: index) }
-        return true
+    /// Where the drag ended, in the order these rows are drawn in.
+    ///
+    /// `rows` is what the filter is letting through, so these offsets are not offsets into
+    /// anything the store holds. `SidebarReorder` is what translates them and `AppModel` is what
+    /// writes the result, so nothing here knows about `sort_order`.
+    private func move(from: IndexSet, to: Int) {
+        Task { await app.reorderWorkspaces(in: repo, visible: rows, from: from, to: to) }
     }
 
     private func archive(_ workspace: Workspace) {
