@@ -221,8 +221,8 @@ struct PullRequestSummary: View {
             .fixedSize()
         } else if pullRequest.isMerged {
             HStack(spacing: Metrics.spacingTight) {
-                archiveButton
                 continueButton
+                archiveButton
             }
             .fixedSize()
         }
@@ -243,14 +243,21 @@ struct PullRequestSummary: View {
     /// None of that is in git and all of it is thrown away by an archive. Continuing keeps every
     /// bit of it and replaces only the part that is genuinely over, which is the branch.
     ///
-    /// Filled, and last in the pair, which is where the trailing edge is. It used to be the
-    /// outlined one, on the reasoning that most
-    /// merged workspaces really are finished so the filled control belonged on Archive. That put
-    /// the app's visual default on the button that deletes a worktree, which is the same mistake
-    /// as making a destructive answer the default button in a confirmation, and this app has now
-    /// stopped doing that in both places. The filled control marks what is recommended, not what
-    /// is likely, and nothing is recommended less than the irreversible one. Archive is still
-    /// right beside it, at full size, one click away.
+    /// Outlined, and first in the pair. `b0cdf0f` had it the other way round and filled this one,
+    /// on the argument that the filled control marks what is RECOMMENDED rather than what is
+    /// likely, and that nothing is recommended less than the irreversible button beside it. That
+    /// argument is sound about confirmations and wrong about this strip, and the owner has
+    /// overruled it: a merged pull request is a finished workspace, archiving is what almost every
+    /// one of them is for, and a strip whose prominent control is the rare answer points the
+    /// reader away from the thing they came to do. The guard against pressing Archive by accident
+    /// is not its emphasis, it is `AppModel.archive`, which still builds the full safety report and
+    /// still stops to ask whenever there is genuinely something to lose. See `archiveButton`.
+    ///
+    /// So the pair keeps both buttons at full size, one click apart, and swaps which of them is
+    /// filled. It also swaps their order, because the rule from `e9ef824` is that the primary
+    /// control's trailing edge is the pane's own inset in EVERY state: a primary that moves half
+    /// an inch as a workspace changes state is a primary you have to look for. Archive is primary
+    /// here, so Archive is last.
     ///
     /// The two forms are the same trick `pushButton` uses. "Continue" beside "Archive" and a
     /// headline is more than the pane's default width carries, and the headline is the part that
@@ -265,8 +272,8 @@ struct PullRequestSummary: View {
 
     private var continueControl: some View {
         Button("Continue", systemImage: "chevron.forward.2", action: onContinue)
-            .buttonStyle(.borderedProminent)
-            .tint(tint ?? Palette.accentFill)
+            .buttonStyle(.bordered)
+            .tint(tint ?? Palette.accent)
             .controlSize(.regular)
             .help(
                 "Cut a new branch from \(baseBranch) in this worktree and carry on, keeping this "
@@ -274,7 +281,12 @@ struct PullRequestSummary: View {
             )
     }
 
-    /// Archive, without a confirmation of its own.
+    /// Archive, filled, and without a confirmation of its own.
+    ///
+    /// The prominent control on a landed pull request, which is a reversal of `b0cdf0f` and is
+    /// argued out on `continueButton`. It is last in the pair for the same reason every other
+    /// state's primary is last: `e9ef824` pinned the primary's trailing edge to the pane's inset,
+    /// and that rule does not get an exception for the one state whose primary is a removal.
     ///
     /// **This deliberately differs from the sidebar row's hover archive button, which asks every
     /// single time.** They are not in disagreement; they are different presses. The row's button
@@ -301,8 +313,8 @@ struct PullRequestSummary: View {
 
     private var archiveControl: some View {
         Button("Archive", systemImage: "archivebox", action: onArchive)
-            .buttonStyle(.bordered)
-            .tint(tint ?? Palette.accent)
+            .buttonStyle(.borderedProminent)
+            .tint(status.tone.fill)
             .controlSize(.regular)
             .help(
                 "Remove this workspace's worktree. #\(pullRequest.number) is merged, so this asks "
@@ -336,7 +348,7 @@ struct PullRequestSummary: View {
     private var pushControl: some View {
         Button(pushLabel, systemImage: "arrow.up.circle", action: onPush)
             .buttonStyle(.borderedProminent)
-            .tint(tint ?? Palette.accentFill)
+            .tint(status.tone.fill)
             .controlSize(.regular)
             .help(
                 "Ask this workspace's agent to \(pushLabel.lowercased()) branch "
@@ -396,7 +408,7 @@ struct PullRequestSummary: View {
     private var mergeButton: some View {
         Button("Merge", systemImage: "arrow.triangle.merge") { propose(.squash) }
             .buttonStyle(.borderedProminent)
-            .tint(tint ?? Palette.accentFill)
+            .tint(status.tone.fill)
             .controlSize(.regular)
             .disabled(!status.canMerge)
             // Disabled controls do not explain themselves, and "why is this greyed out" is the

@@ -13,8 +13,14 @@ public struct PullRequestStatus: Sendable, Hashable {
         case positive
         case negative
         case warning
-        /// Done, rather than good: the accent colour, the way the app marks a finished thing.
-        case accent
+        /// Landed. The one outcome in this app that is neither good news nor bad, and the one
+        /// meaning with a colour of its own rather than a share of the accent.
+        ///
+        /// It was `accent` until the palette grew `Palette.merged`, and the rename is the point
+        /// rather than a tidy up: a tone is a MEANING, and a case named after a colour is the one
+        /// kind of name this enum is not allowed to carry. `Palette.merged` says why purple and
+        /// why GitHub's violet rather than Tailwind's.
+        case merged
     }
 
     public var tone: Tone
@@ -182,7 +188,7 @@ public extension PullRequest {
     var status: PullRequestStatus {
         if isMerged {
             return PullRequestStatus(
-                tone: .accent,
+                tone: .merged,
                 text: "Merged",
                 canMerge: false,
                 blockedReason: "This pull request is already merged."

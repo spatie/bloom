@@ -205,14 +205,17 @@ enum Palette {
     /// a pair, because `accentFill` is one value in both appearances and this sits on that fill,
     /// not on the page.
     static let linkInverted = Color(nsColor: NSColor(rgb: 0xCCF9F2))
-    /// Healthy, done, passed, merged. The accent, not a green of its own.
+    /// Healthy, done, passed. The accent, not a green of its own.
     ///
     /// The ramp says so in as many words, and the reference render of this window agrees: its
-    /// "checks passed" tick, its "merged" arrow and its `+214` are all the same value as its
-    /// accent, in both appearances. Sampled from it: `#0C7A6E` light, `#4FD8C4` dark, which is
-    /// exactly `accent`.
+    /// "checks passed" tick and its `+214` are both the same value as its accent, in both
+    /// appearances. Sampled from it: `#0C7A6E` light, `#4FD8C4` dark, which is exactly `accent`.
     ///
-    /// This means passing checks and an unread turn now differ in shape rather than in colour.
+    /// Merged used to be on this list and is not any more: it has `merged` below, because a merge
+    /// is the one outcome that is neither good news nor bad and the app now says so in a colour
+    /// rather than in a shape alone.
+    ///
+    /// This means passing checks and an unread turn still differ in shape rather than in colour.
     /// That is fine and deliberate: `WorkspaceStatusGlyph` already draws every state as a
     /// different shape, so the column can be read by someone who cannot tell the red one from the
     /// green one, and the reference collapses the same two the same way.
@@ -238,9 +241,27 @@ enum Palette {
     static let stop = dynamic(light: 0x994842, dark: 0xCC7B76)
 
     /// Something needs attention but nothing is broken: setup that failed and can be run again,
-    /// checks still going, a rate limit. Measured off the same render as `negative`, and quieter
-    /// than `systemOrange` for the same reason. `#9A6410` measures 5.0 to 1 on white.
-    static let warning = dynamic(light: 0x9A6410, dark: 0xE8A33D)
+    /// checks still going, a rate limit. Quieter than `systemOrange`, for the reason written on
+    /// `negative`.
+    ///
+    /// The light member is amber rather than brown, and that took a hue rather than a step up the
+    /// ramp. It was `#9A6410`, hue 37 at 81 percent saturation, and at that lightness an orange
+    /// reads as brown: the strip's wash came out `#EDE3D4`, a tan, with a tan headline and a tan
+    /// badge sitting in it, and "Checks running" looked like a stain rather than a state. Simply
+    /// lifting it does not fix that and cannot be afforded either, because the same value carries
+    /// white text on the strip's filled button and every step up the ramp is spent there: white on
+    /// `#9A6410` measures 5.0 to 1 and the AA floor for a 13 point label is 4.5, so there is about
+    /// one step of headroom in the whole colour.
+    ///
+    /// `#9C6C00` spends it on the hue instead. Hue 42 at full saturation, which is where amber
+    /// stops being brown, and it lands slightly brighter as well. Sampled off the rendered strip:
+    /// the wash is `#EDE4D1`, white on the fill measures 4.61 to 1, still AA for a label, and the
+    /// headline measures 3.65 to 1 on its own wash against 3.93 before, which is AA for the 15
+    /// point bold that headline is set in.
+    ///
+    /// The dark member is unchanged and is the reference the light one was aimed at: `#E8A33D` is
+    /// what this state is supposed to feel like, and light is the appearance that was failing to.
+    static let warning = dynamic(light: 0x9C6C00, dark: 0xE8A33D)
     /// An agent mid turn. The ramp is explicit that this is the accent rather than a green of its
     /// own: "Running, healthy, done. Reuse the accent, do not invent a green."
     static let running = accent
@@ -264,18 +285,31 @@ enum Palette {
     /// surface and `#A371F7` measures 5.3 to 1 on the dark one, and neither of them works on the
     /// other's ground.
     ///
-    /// Ink, strokes and a wash of itself, which is everything it is asked for today: the merge
-    /// confirmation's button label is this colour and its plate is this colour at thirteen
-    /// percent. Anything that ever fills a control with it and puts white text on top wants the
-    /// LIGHT member in both appearances, the way `accentFill` holds one value for both: white on
-    /// `#8250DF` measures 5.0 to 1, and on `#A371F7` only 3.4, which is under the floor for a 13
-    /// point label.
+    /// This is for ink, strokes and a wash of itself: the merge confirmation's button label, the
+    /// strip's headline and badge on a landed pull request, the sidebar's merge mark, and the
+    /// eight percent band behind all of it. A filled control that has to carry white text uses
+    /// `mergedFill`, for the reason written there.
     ///
-    /// The strip still draws a merged pull request in `accent`, so this is at present the colour
-    /// of merging rather than the colour of merged. Moving the strip on to it is `PullRequestTint`
-    /// and one case in `PullRequestStatus.Tone`, and it is left alone here only because the strip
-    /// is being moved to another part of the window by other work.
+    /// It is now the colour of merged as well as the colour of merging. `PullRequestStatus.Tone`
+    /// has a `merged` case, `PullRequestTint` resolves it here, and `WorkspaceStatusGlyph` draws
+    /// the merge mark in it, so one landed pull request is one colour in every pane that reports
+    /// it. Nothing else moved: passing checks, an open pull request and a closed one keep the
+    /// tones they had.
     static let merged = dynamic(light: 0x8250DF, dark: 0xA371F7)
+
+    /// A merge as a fill with light text on it: the Archive button on a landed pull request.
+    ///
+    /// One value in both appearances, exactly as `accentFill` is, and it is the LIGHT member of
+    /// the pair above rather than a third colour. That is forced by the arithmetic: white on
+    /// `#8250DF` measures 5.05 to 1, and white on `#A371F7` only 3.35, which is under the AA floor
+    /// for the 13 point label a `.regular` button draws. A pair that is right for ink is wrong for
+    /// a fill, and this is the same trap `accent` and `accentFill` document.
+    ///
+    /// It also has to separate from the band it stands in, which is the pair above at eight
+    /// percent over the surface. Measured: 4.5 to 1 against the light band `#F5F1FC` and 3.2 to 1
+    /// against the dark one `#162136`, both clear of the 3 to 1 a control has to hold to be
+    /// findable at all.
+    static let mergedFill = dynamic(light: 0x8250DF, dark: 0x8250DF)
 
     // MARK: Diffs
     //

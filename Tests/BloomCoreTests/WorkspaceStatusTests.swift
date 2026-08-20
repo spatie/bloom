@@ -196,7 +196,7 @@ struct WorkspaceStatusTests {
         (
             name: "a merged pull request is done, not mergeable",
             json: #"{"number":1,"title":"t","url":"u","state":"MERGED","statusCheckRollup":[]}"#,
-            tone: .accent, text: "Merged", detail: nil, canMerge: false
+            tone: .merged, text: "Merged", detail: nil, canMerge: false
         ),
         (
             name: "a closed one is quiet",

@@ -74,9 +74,13 @@ struct WorkspaceStatusGlyph: View {
         case .setupFailed, .checksRunning: AnyShapeStyle(Palette.warning)
         case .checksFailing: AnyShapeStyle(Palette.negative)
         // The accent is the palette's "this went well": it has no green of its own, and
-        // `Palette.positive` says why. A merge landing is the best outcome a workspace has, so it
-        // shares that colour with passing checks and differs from them in shape.
-        case .checksPassed, .merged: AnyShapeStyle(Palette.positive)
+        // `Palette.positive` says why.
+        case .checksPassed: AnyShapeStyle(Palette.positive)
+        // Merged used to share that colour and differ from it only in shape. It has its own now:
+        // `Palette.merged` is what a landed pull request is drawn in throughout the app, and this
+        // column is the other place it is reported. A merge is not the same news as a green check
+        // and no longer says it in the same colour.
+        case .merged: AnyShapeStyle(Palette.merged)
         // The accent is what the app uses for "this is waiting for you" rather than for a machine,
         // which is exactly what an unread turn and an open pull request are.
         case .unread, .pullRequestOpen: AnyShapeStyle(Palette.accent)
