@@ -13,9 +13,9 @@ import BloomCore
 /// says nothing about which of them it moves, and on macOS 26 a `.button` toggle's on state is a
 /// saturated accent fill, which made two permanently-on panes read as two alarms. Both controls
 /// now live on the boundary they open: the inspector's on the end of the centre tab strip, the
-/// terminal panel's on the panel's own strip. The project mark went the same way and for the same
-/// reason: it is in the title bar over the column it describes, in `TitleBarStrip`. What is left
-/// is starting work, on the leading edge.
+/// terminal panel's on the panel's own strip. The worktree's own menu went the same way and for
+/// the same reason: it is in the title bar over the column it describes, in `TitleBarStrip`. What
+/// is left is starting work, on the leading edge.
 ///
 /// There is no Refresh Changes either. The changed file list polls every six seconds and redraws
 /// itself, so the command could only ever do what had already happened, and a control that does
@@ -39,14 +39,13 @@ struct BloomWindowToolbar: ToolbarContent {
             .help("Start a workspace")
         }
 
-        // The project mark and its menu are not here any more. They were a trailing toolbar item,
-        // pinned to the window's own edge, which put them directly above the inspector's pull
-        // request strip: two stacked rows in the top right corner, both describing the same
-        // workspace. The strip has taken the top row, since it is the one with a state in it, and
-        // the mark moved one place left to where the centre column ends. Both now live in
-        // `TitleBarStrip`, which is a title bar accessory rather than a toolbar item, because a
-        // toolbar item is sized by its content and this band has to be as wide as the pane under
-        // it.
+        // The worktree's menu is not here any more. It was a trailing toolbar item, pinned to the
+        // window's own edge, which put it directly above the inspector's pull request strip: two
+        // stacked rows in the top right corner, both describing the same workspace. The strip has
+        // taken the top row, since it is the one with a state in it, and the menu moved one place
+        // left to where the centre column ends. Both now live in `TitleBarStrip`, which is a title
+        // bar accessory rather than a toolbar item, because a toolbar item is sized by its content
+        // and this band has to be as wide as the pane under it.
     }
 
     // MARK: - Actions

@@ -83,7 +83,8 @@ struct BloomApp: App {
         // document window on the Mac can do: drag the folder out of the title bar, and
         // Command-click the title for the path above it. Bloom's workspaces are folders, so that
         // is worth more than a second copy of the name. `WindowTitleLabel` gave the name up in
-        // return, and now shows only the project the workspace belongs to.
+        // return, and has since given up the project as well: it is the worktree's menu and
+        // nothing else.
         .windowToolbarStyle(.unified(showsTitle: true))
         .defaultSize(width: 1_440, height: 900)
         .commands {

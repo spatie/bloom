@@ -10,8 +10,8 @@ import BloomCore
 /// to and hands the inspector a different number on every window size, so the only honest source
 /// is the pane itself. `DetailSplitViewController` publishes it here on every layout pass.
 ///
-/// The project chip's width is published from the other direction, by the view that draws it,
-/// because it is a project name and only SwiftUI knows how wide one is.
+/// The chip's width is published from the other direction, by the view that draws it, because it
+/// is a control laid out by SwiftUI and only SwiftUI knows how wide one comes out.
 ///
 /// A collapsed inspector is the same fact said with a zero, rather than a second flag that can
 /// disagree with the first: a hidden inspector has no width, and the strip above it has nothing to
@@ -29,7 +29,7 @@ final class InspectorGeometry {
     /// The inspector pane's width in points, zero while it is collapsed.
     private(set) var width: CGFloat = 0
 
-    /// What the project chip measures, so the band beside it can be placed at the pane's edge.
+    /// What the worktree chip measures, so the band beside it can be placed at the pane's edge.
     private(set) var chipWidth: CGFloat = 0
 
     /// Called when either of them moves. Not observation: the reader is an `NSView` frame.
@@ -56,18 +56,19 @@ final class InspectorGeometry {
     }
 }
 
-/// The trailing half of the title bar: the project this workspace cuts from, and the pull request
-/// its branch is heading for.
+/// The trailing half of the title bar: what can be done to this worktree, and the pull request its
+/// branch is heading for.
 ///
-/// Both of these used to sit lower. The project chip was a toolbar item pinned to the window's
-/// trailing edge, and the pull request strip was the first row inside the inspector, so the top
-/// right of the window carried two stacked rows saying two things about the same workspace. The
-/// strip is the one with a state in it, so it takes the top row and the window's edge, and the
-/// chip moves one place left, to where the centre column ends.
+/// Both of these used to sit lower. The chip was a toolbar item pinned to the window's trailing
+/// edge, and the pull request strip was the first row inside the inspector, so the top right of
+/// the window carried two stacked rows saying two things about the same workspace. The strip is
+/// the one with a state in it, so it takes the top row and the window's edge, and the chip moves
+/// one place left, to where the centre column ends.
 ///
-/// Neither view is changed by the move. The chip is `WindowTitleLabel` exactly as the toolbar drew
-/// it, and the strip is `PullRequestBar` exactly as the inspector drew it, given the width of the
-/// pane it is now the heading for.
+/// Neither view was changed by the move. The chip is `WindowTitleLabel`, which has since given up
+/// the project's name and then the project's mark and is now the menu alone, and the strip is
+/// `PullRequestBar` exactly as the inspector drew it, given the width of the pane it is now the
+/// heading for.
 struct TitleBarStrip: View {
     let app: AppModel
 
@@ -81,8 +82,8 @@ struct TitleBarStrip: View {
             if let workspace = app.selectedWorkspace {
                 WindowTitleLabel(workspace: workspace)
                     .padding(.horizontal, Metrics.inset)
-                    // Measured rather than assumed: it is a project name, and the accessory's own
-                    // width is set in AppKit points. See `InspectorGeometry`.
+                    // Measured rather than assumed: it is a control SwiftUI sizes, and the
+                    // accessory's own width is set in AppKit points. See `InspectorGeometry`.
                     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: {
                         inspector.setChipWidth($0)
                     }
