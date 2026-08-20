@@ -11,11 +11,11 @@ enum TranscriptLinkTarget {
 }
 
 /// What the transcript can do with an address, handed in rather than decided here.
-struct TranscriptLinkActions {
-    var open: (URL, TranscriptLinkTarget) -> Void = { _, _ in }
+struct TranscriptLinkActions: Sendable {
+    var open: @MainActor @Sendable (URL, TranscriptLinkTarget) -> Void = { _, _ in }
     /// Whether Bloom's own browser could show this address at all. A menu item that opens a blank
     /// tab is worse than a menu item that is not there.
-    var canOpenInTab: (URL) -> Bool = { _ in false }
+    var canOpenInTab: @MainActor @Sendable (URL) -> Bool = { _ in false }
 }
 
 /// Prose in the transcript, drawn by AppKit so that a link in it behaves like a link.
