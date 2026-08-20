@@ -336,10 +336,13 @@ struct CreateWorkspaceSheet: View {
     /// What the sheet is allowed to promise about the name and the branch.
     ///
     /// It used to say "named from your prompt", which stopped being true when workspaces started
-    /// naming themselves: a chat workspace now opens under a plant codename and a model rewrites
-    /// both the name and the branch a few seconds later. The mechanical slug is still the answer
-    /// when nothing is going to be asked, so both cases are stated rather than one being told for
-    /// both.
+    /// naming themselves: a chat workspace opens under a plant codename and a model rewrites both
+    /// the name and the branch a few seconds later. The mechanical slug is still the answer when
+    /// nothing is going to be asked, and it is the only one worth printing: when a model is going
+    /// to answer, this says nothing at all. Naming is something to watch happen in the sidebar,
+    /// where it happens, rather than a sentence to read about beforehand, and the slug cannot be
+    /// shown in its place because a preview that is about to be replaced is a lie with a
+    /// monospaced font.
     @ViewBuilder
     private var hint: some View {
         if let lastCreated {
@@ -348,13 +351,8 @@ struct CreateWorkspaceSheet: View {
                 .foregroundStyle(Palette.accent)
                 .lineLimit(1)
         } else if willBeNamedByModel {
-            Label(
-                "Opens under a codename, then takes its name and branch from your task",
-                systemImage: "sparkle"
-            )
-            .font(Typo.caption)
-            .foregroundStyle(Palette.textTertiary)
-            .lineLimit(1)
+            // Deliberately nothing. See above.
+            EmptyView()
         } else if trimmedPrompt.isEmpty {
             Text("The branch is named from what you write")
                 .font(Typo.caption)
