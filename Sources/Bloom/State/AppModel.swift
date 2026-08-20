@@ -313,12 +313,20 @@ final class AppModel {
             // Assigning both at once turns the whole reload into a single row diff.
             let loadedRepos = try await store.repos()
             let loadedWorkspaces = try await store.workspaces()
-            repos = loadedRepos
             // Minus whatever is being archived right now, which the store has not heard about
             // yet: see `archivingWorkspaceIDs`.
-            workspaces = WorkspaceListReconciliation.afterStoreReload(
+            let reconciled = WorkspaceListReconciliation.afterStoreReload(
                 fresh: loadedWorkspaces, archiving: archivingWorkspaceIDs
             )
+            // Each only when it moved. An identical value assigned back is still a mutation as far
+            // as the Observation runtime is concerned, so an unconditional pair of writes here
+            // invalidates every view in the window that reads either list. This runs on arriving at
+            // a workspace with unread work, after every finished turn and after every write
+            // anything makes, and the projects in particular almost never change.
+            // `refreshDiffStats` has compared before assigning all along; this is the same rule in
+            // the other place that publishes.
+            if repos != loadedRepos { repos = loadedRepos }
+            if workspaces != reconciled { workspaces = reconciled }
             // The models hold a copy of their `Workspace`, and this is where those copies go
             // stale. Refreshing here keeps `model(for:)` out of every view body.
             for workspace in workspaces {
