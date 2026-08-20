@@ -6,24 +6,33 @@ import BloomCore
 /// The bar along the bottom is not decoration. It is the only place the user finds out that a
 /// save was refused because the agent had already rewritten the file, and the only way back from
 /// that: reload, look at what the agent did, and redo the edit on top of it.
+///
+/// A path rather than a `ChangedFile`, because the two ways into a file are the diff of one the
+/// agent touched and the worktree tree, and the tree opens files git has never heard of. Editing
+/// is a question about bytes on disk either way, so the pane only ever needed the path.
 struct FileEditPane: View {
     let model: WorkspaceModel
-    let file: ChangedFile
+    /// Relative to the workspace's worktree, the way every path in the inspector is.
+    let path: String
     let session: FileEditSession
+    /// Called after a save lands, for a pane whose other half is now showing stale text.
+    var onSaved: () -> Void = {}
 
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var isConfirmingReload = false
 
-    private var path: String {
-        (model.workspace.path as NSString).appendingPathComponent(file.path)
+    private var absolutePath: String {
+        (model.workspace.path as NSString).appendingPathComponent(path)
     }
 
-    private var isDirty: Bool { session.isDirty(path) }
+    private var filename: String { (path as NSString).lastPathComponent }
+
+    private var isDirty: Bool { session.isDirty(absolutePath) }
 
     var body: some View {
         Group {
-            switch session.status(for: path) {
+            switch session.status(for: absolutePath) {
             case .loading:
                 LoadingView("Reading the file")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -38,16 +47,16 @@ struct FileEditPane: View {
             }
         }
         .background(Palette.surface)
-        .task(id: path) { await session.load(path: path) }
+        .task(id: absolutePath) { await session.load(path: absolutePath) }
     }
 
     @ViewBuilder
     private var editor: some View {
-        if session.draft(for: path) != nil {
+        if session.draft(for: absolutePath) != nil {
             VStack(spacing: 0) {
                 SourceEditor(
-                    text: session.binding(for: path),
-                    language: Language.detect(path: file.path),
+                    text: session.binding(for: absolutePath),
+                    language: Language.detect(path: path),
                     colorScheme: colorScheme
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -83,12 +92,12 @@ struct FileEditPane: View {
         .frame(height: InspectorLayout.barHeight)
         .background(Palette.surfaceSunken)
         .confirmationDialog(
-            "Discard your edits to \(file.filename)?",
+            "Discard your edits to \(filename)?",
             isPresented: $isConfirmingReload,
             titleVisibility: .visible
         ) {
             Button("Discard and reload", role: .destructive) {
-                Task { await session.reload(path: path) }
+                Task { await session.reload(path: absolutePath) }
             }
             // Escape keeps the edits. See the archive confirmation in `RootView` for why no
             // cancel button in this app carries `.keyboardShortcut(.defaultAction)`.
@@ -102,15 +111,16 @@ struct FileEditPane: View {
     /// both stale the moment it lands.
     private func save() {
         Task {
-            await session.save(path: path)
-            guard case .saved = session.status(for: path) else { return }
+            await session.save(path: absolutePath)
+            guard case .saved = session.status(for: absolutePath) else { return }
             await model.refreshChanges()
+            onSaved()
         }
     }
 
     @ViewBuilder
     private var statusLabel: some View {
-        switch session.status(for: path) {
+        switch session.status(for: absolutePath) {
         case let .failed(reason):
             Label(reason, systemImage: "exclamationmark.triangle.fill")
                 .font(Typo.caption)

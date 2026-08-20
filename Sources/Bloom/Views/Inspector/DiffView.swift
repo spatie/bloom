@@ -32,12 +32,24 @@ struct DiffView: View {
     /// The patch as git wrote it, kept so the whitespace toggle can refold it without going back
     /// to git for a diff it has already been given.
     @State private var source: FileDiff?
-    @State private var mode: FileViewMode = .diff
+    @State private var mode: FileViewMode
     @State private var isEditable = false
     @State private var revertProblem: String?
     /// Editing buffers outlive this view, so flipping back to the diff, walking to the next file
     /// or switching workspace cannot discard what the user typed.
     private let session = FileEditSession.shared
+
+    /// Opens on the diff, unless there is unsaved text for this file, in which case it opens on
+    /// the text. That case is not hypothetical: saving an untracked file, or the agent touching one
+    /// while it is being read, turns it into a changed file, and the centre column answers by
+    /// swapping `FilePreview` out for this view. Landing on a diff would leave the typing on screen
+    /// nowhere, which reads exactly like losing it.
+    init(model: WorkspaceModel, file: ChangedFile) {
+        self.model = model
+        self.file = file
+        let absolute = (model.workspace.path as NSString).appendingPathComponent(file.path)
+        _mode = State(initialValue: FileEditSession.shared.isDirty(absolute) ? .edit : .diff)
+    }
 
     private enum Phase {
         case loading
@@ -73,7 +85,7 @@ struct DiffView: View {
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             case .edit:
-                FileEditPane(model: model, file: file, session: session)
+                FileEditPane(model: model, path: file.path, session: session)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -83,8 +95,11 @@ struct DiffView: View {
         .onChange(of: isSideBySide) { _, _ in rebuild() }
         .onChange(of: ignoresWhitespace) { _, _ in refold() }
         // Only the path, not the whole file: a refresh that changes nothing but the line counts
-        // must not throw the user out of the editor they are typing in.
-        .onChange(of: file.path) { _, _ in mode = .diff }
+        // must not throw the user out of the editor they are typing in. A path with unsaved text
+        // behind it stays in Edit for the reason the initialiser gives.
+        .onChange(of: file.path) { _, _ in
+            mode = session.isDirty(absolutePath) ? .edit : .diff
+        }
         .onChange(of: isEditable) { _, editable in
             if !editable { mode = .diff }
         }
