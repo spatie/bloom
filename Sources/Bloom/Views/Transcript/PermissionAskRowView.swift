@@ -264,6 +264,12 @@ struct PermissionAskRowView: View {
         if !unanswered.isEmpty { return unanswered }
 
         switch decision {
+        // A reloaded transcript has no note: the sentence was on the live event and the event is
+        // long gone. It has to be rebuilt rather than dropped, because "Answered." beside a call
+        // that ran is exactly the thing this row exists to prevent. The rule is on the ask itself,
+        // which is why it can be said again a week later.
+        case PermissionAskOutcome.auto:
+            return "Allowed by \(ask.ruleText), which you approved for \(projectName)."
         case "allow-project": return "Always allowed. \(ask.ruleText) is granted for \(projectName)."
         case "allow-session": return "Allowed for this session."
         case "allow-once": return "Allowed once."
