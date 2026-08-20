@@ -40,7 +40,7 @@ curve, and what was a bundle on the tile is a junction here.
 
 MEASURED OFF THE OWNER'S OWN MENU BAR, at 2x, the icons occupying rows 16..50:
 
-  Dropbox        16.0 points tall, 18.0 wide, solid shapes
+  Dropbox        16.5 points tall at the ink edge, 18.0 wide, solid shapes
   the database   17.5 tall, 17.0 wide, 1.5 point strokes
   1Password      16.0 tall, 16.0 wide
   Saturn         14.5 tall, 21.0 wide
@@ -997,16 +997,20 @@ PRESETS = {
 #
 # AND THE WEIGHT SURVIVES IT, which was the thing worth checking, because the
 # complaint this whole round answers is that the mark reads thin and a shorter
-# mark is a lighter one. A lane is 19.60 box units, so at 16.00 points of art it
-# is 3.14 points and the trunk is 3.67. `gather`, the mark he called thin, has
+# mark is a lighter one. A lane is 19.60 box units, so at 16.50 points of art it
+# is 3.23 points and the trunk is 3.78. `gather`, the mark he called thin, has
 # 1.95 of each, and `two`, the heaviest of the five he was offered after that,
 # has 2.76. So this is still above everything he rejected, and height and weight
 # are not in tension here.
 #
-# 16.0 rather than the 16.5 measured at the ink edge: it is the figure two
-# earlier passes over his bar arrived at independently, it is within a third of
-# a point of the subpixel measurement, and a round number is easier to move.
-DROPBOX_HEIGHT = 16.0
+# 16.5 AND NOT 16.0. It shipped at 16.0 first, on the grounds that two earlier
+# passes over his bar had arrived at that number independently and a round
+# number is easier to move. 16.5 is what the ink edge of Dropbox actually
+# measures at 2x, and he asked for Dropbox's height rather than for a tidy
+# figure, so the measurement wins. Half a point on a sixteen point mark is three
+# percent; it is a full pixel at 2x on the tallest row of the drawing, which is
+# why it is worth taking rather than rounding away.
+DROPBOX_HEIGHT = 16.5
 PRESETS["level"] = dict(PRESETS["mine"], fill=DROPBOX_HEIGHT / ART_HEIGHT)
 
 
