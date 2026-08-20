@@ -568,7 +568,7 @@ public actor AgentRunner {
         // already answered.
         if case .allow(.project) = decision, let repoID = await repoID() {
             for rule in ask.rules {
-                try? await store.upsert(PermissionGrant.granting(rule, repoID: repoID, for: ask.subject))
+                _ = try? await store.upsert(PermissionGrant.granting(rule, repoID: repoID, for: ask.subject))
             }
         }
     }

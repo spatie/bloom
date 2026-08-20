@@ -137,7 +137,7 @@ public actor CodexRunner: SessionRunner {
         // already answered.
         if case .allow(.project) = decision, let repoID = await repoID() {
             for rule in ask.rules {
-                try? await store.upsert(PermissionGrant.granting(rule, repoID: repoID, for: ask.subject))
+                _ = try? await store.upsert(PermissionGrant.granting(rule, repoID: repoID, for: ask.subject))
             }
         }
     }
@@ -386,7 +386,7 @@ public actor CodexRunner: SessionRunner {
         guard case .deny(let message, let endsTurn) = decision, !endsTurn else { return }
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let client, let threadID, let turnID = handle.turnID else { return }
-        try? await client.steerTurn(threadID: threadID, turnID: turnID, input: [.text(text)])
+        _ = try? await client.steerTurn(threadID: threadID, turnID: turnID, input: [.text(text)])
     }
 
     private func write(answerTo ask: PermissionAsk, decision: CodexApprovalDecision) async {
