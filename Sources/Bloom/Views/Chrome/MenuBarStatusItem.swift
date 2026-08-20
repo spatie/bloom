@@ -51,11 +51,7 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         guard item == nil else { return }
 
         let created = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        created.button?.image = NSImage(
-            systemSymbolName: "point.3.connected.trianglepath.dotted",
-            accessibilityDescription: "Bloom"
-        )
-        created.button?.image?.isTemplate = true
+        created.button?.image = Self.mark()
         created.button?.imagePosition = .imageLeading
         let menu = NSMenu()
         menu.delegate = self
@@ -63,6 +59,44 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         item = created
         refreshButton()
         claimPlaceInMenuBar(created)
+    }
+
+    // MARK: - The mark
+
+    /// Bloom's own mark, out of the bundle, as a template image.
+    ///
+    /// `Resources/BloomMenuBar.pdf`, drawn by `Tools/icon/menubar.py` from the same eased lane the
+    /// app icon is built from. It is a reduction rather than a scaling: at fifteen points the
+    /// icon's ground, panel and three bands close into a texture, so what survives is the one
+    /// gesture, three lanes arriving and one leaving. The generator's docstring has the rest.
+    ///
+    /// A PDF because AppKit redraws a PDF at whatever scale the display asks for, so one file is
+    /// right on the built-in display and on an external 1x monitor, where a bitmap tuned for
+    /// Retina loses its gaps.
+    ///
+    /// A TEMPLATE, not a white picture. The status bar tints a template with the menu bar's own
+    /// label colour, which makes it white on a dark bar, near black on a light one, and inverted
+    /// again while the menu is open and the item is pressed. A white image would be right in
+    /// exactly one of those four cases, and the white the owner asked for is what a template
+    /// renders as anyway.
+    ///
+    /// The SF Symbol this replaced is kept as the fallback, for the one case that produces
+    /// nothing to draw: a bundle assembled without the resource.
+    private static func mark() -> NSImage? {
+        guard let url = Bundle.main.url(forResource: "BloomMenuBar", withExtension: "pdf"),
+              let image = NSImage(contentsOf: url) else {
+            let fallback = NSImage(
+                systemSymbolName: "point.3.connected.trianglepath.dotted",
+                accessibilityDescription: "Bloom"
+            )
+            fallback?.isTemplate = true
+            return fallback
+        }
+        image.isTemplate = true
+        // The item is labelled as a sentence in `refreshButton`, which can name both counts. This
+        // is what VoiceOver falls back to before there is anything to count.
+        image.accessibilityDescription = "Bloom"
+        return image
     }
 
     // MARK: - Placement

@@ -174,11 +174,13 @@ compile_layered_icon() {
 
 compile_layered_icon
 
-# The About pane reads these out of the bundle by name. PDFs rather than bitmaps, because AppKit
-# redraws a PDF as vector art at whatever scale the display asks for. The .svg beside each one is
-# the source it was generated from and is not needed at runtime.
-for logo in Resources/Spatie*.pdf(N); do
-  cp "$logo" "$APP/Contents/Resources/"
+# What the app looks up in its own bundle by name: the Spatie logos the About pane draws, and the
+# menu bar mark. PDFs rather than bitmaps, because AppKit redraws a PDF as vector art at whatever
+# scale the display asks for, so one file is right on a Retina display and on a 1x monitor. The
+# .svg beside each logo is the source it was generated from and is not needed at runtime; the menu
+# bar mark's source is Tools/icon/menubar.py.
+for art in Resources/Spatie*.pdf(N) Resources/BloomMenuBar.pdf(N); do
+  cp "$art" "$APP/Contents/Resources/"
 done
 
 # SwiftTerm and friends ship as dylibs in a debug build; carry them along.

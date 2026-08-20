@@ -3,13 +3,19 @@
 
     python3 Tools/icon/make.py
 
-Writes two things into Resources/, and they are not the same picture:
+Writes three things into Resources/, and they are not the same picture:
 
   AppIcon.icns        the flat bitmap, every size macOS asks for, used on any
                       system that does not draw a layered icon
   Bloom.icon/         the layered document macOS 26 draws instead, where the
                       system supplies the material, the shadow and the specular
                       and generates the dark and tinted variants itself
+  BloomMenuBar.pdf    the menu bar mark, drawn by menubar.py from the same lane
+                      this icon is built from. Fifteen points is too small for
+                      any of the above, so it is a reduction rather than a
+                      scaling, and menubar.py's docstring says what it keeps and
+                      what it gives up. It is built here so that one command
+                      leaves nothing in the tree older than the design
 
 The design is `tongue`, round ten's fifth direction, at a margin of 150. A near
 white Foam ground fills the canvas, a Deep panel is inset within it, two lanes
@@ -83,6 +89,7 @@ RESOURCES = os.path.join(ROOT, "Resources")
 
 sys.path.insert(0, HERE)
 import gen10  # noqa: E402
+import menubar  # noqa: E402
 
 DESIGN = gen10.tongue
 
@@ -181,3 +188,4 @@ def layered():
 if __name__ == "__main__":
     print("==>", icns())
     print("==>", layered())
+    print("==>", menubar.asset())
