@@ -65,7 +65,20 @@ struct RootView: View {
                 isInspectorPresented: isInspectorPresented,
                 animated: !reduceMotion
             )
-                .toolbar { BloomWindowToolbar(app: app) }
+                // The toolbar's `+` is there only while the sidebar is not, so the column that
+                // owns starting work owns it alone whenever it is on screen. The flag is this
+                // binding rather than anything read off the window, because this is what actually
+                // decides whether the first column is drawn: the menu item below writes it, and
+                // AppKit's own sidebar toggle writes it back through the binding. That second
+                // half is the one worth measuring, and it was: driving that button through the
+                // running app's accessibility tree, which is the channel a real click ends up in,
+                // folds the pane away and the `+` arrives, and driving it again takes both back.
+                // See `BloomWindowToolbar.isSidebarCollapsed`.
+                .toolbar {
+                    BloomWindowToolbar(
+                        app: app, isSidebarCollapsed: columnVisibility == .detailOnly
+                    )
+                }
         }
         // The window title is hidden in the toolbar (see BloomApp), but it still names the window
         // in the Window menu and in Mission Control, so it is worth setting.
