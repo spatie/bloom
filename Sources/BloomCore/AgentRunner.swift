@@ -389,9 +389,6 @@ public actor AgentRunner {
             guard block.parentToolUseID == nil, block.usage.contextUsedTokens > 0 else { break }
             lastContextUsed = block.usage.contextUsedTokens
 
-        case .permissionAsk(let ask):
-            await handle(ask)
-
         case .result(let result):
             session = session.with {
                 $0.inputTokens += result.usage.inputTokens
@@ -415,6 +412,15 @@ public actor AgentRunner {
         }
 
         sink.yield(event)
+
+        // After the yield, deliberately. A question a stored rule answers is decided in the same
+        // breath it arrives, and `.permissionDecided` reaching a view before the `.permissionAsk`
+        // it decides means the view has no row to settle: it drops the decision on the floor and
+        // then draws an answered question with four live buttons under it. Measured against the
+        // real CLI, which is how it was found.
+        if case .permissionAsk(let ask) = event {
+            await handle(ask)
+        }
     }
 
     /// Write one row.
@@ -496,10 +502,22 @@ public actor AgentRunner {
             report("Could not store a permission question", error)
         }
 
-        if let grants = await matchingGrants(for: ask) {
-            await autoAllow(ask, using: grants)
+        // Both awaits below are suspension points on this actor, and the question is already on
+        // screen by the time they run, so a person can answer it while the grant lookup is still
+        // in flight. `claim` is what stops the two of them both reaching the pipe: whoever gets
+        // there first takes the ask out of the pile, and the loser does nothing. Without it the
+        // CLI receives two `control_response` lines for one request id and logs the second as a
+        // mismatch. Found by running the real thing.
+        let grants = await matchingGrants(for: ask)
+
+        if let grants, let claimed = pending.take(ask.requestID) {
+            await autoAllow(claimed, using: grants)
             return
         }
+
+        // Answered by a person while the lookup was running. Nothing left to do, and in particular
+        // the session must not now be marked as waiting for a question that is already settled.
+        guard grants == nil, pending.contains(ask.requestID) else { return }
 
         // Nothing answers it, so somebody has to. This is the state that has to be visible from
         // outside the workspace: a process that is alive, costing nothing, and doing nothing.
@@ -522,6 +540,7 @@ public actor AgentRunner {
     }
 
     /// Answer without troubling anybody, and say in the transcript that that is what happened.
+    /// The ask must already have been claimed out of `pending` by the caller.
     private func autoAllow(_ ask: PermissionAsk, using grants: [PermissionGrant]) async {
         // The wire form of project scope: the CLI is told to stop asking for the rest of this
         // session, and nothing is written to any settings file.
@@ -980,6 +999,11 @@ private final class PendingAsks: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard let index = asks.firstIndex(where: { $0.requestID == requestID }) else { return nil }
         return asks.remove(at: index)
+    }
+
+    func contains(_ requestID: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return asks.contains { $0.requestID == requestID }
     }
 
     func remove(_ requestID: String) {

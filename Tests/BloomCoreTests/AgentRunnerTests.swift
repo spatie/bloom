@@ -865,6 +865,69 @@ struct AgentRunnerPermissionTests {
             == PermissionAskOutcome.auto)
     }
 
+    /// Order matters and it is not obvious. A stored rule answers a question in the same breath
+    /// it arrives, so `.permissionDecided` can overtake the `.permissionAsk` it decides. A view
+    /// that gets them that way round has no row to settle, drops the decision, and draws an
+    /// answered question with four live buttons under it. This was found by running the real CLI,
+    /// not by reading the code.
+    @Test("the question always reaches a view before the answer to it does")
+    func askArrivesBeforeItsDecision() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        try await store.upsert(PermissionGrant.granting(
+            PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"),
+            repoID: try await repoID(of: session, in: store)
+        ))
+        let recorder = ProcessRecorder()
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session, store: store, makeProcess: recorder.factory
+        )
+        try await runner.send("go")
+
+        let events = runner.events
+        let watching = Task<[String], Never> {
+            var seen: [String] = []
+            for await event in events {
+                switch event {
+                case .permissionAsk: seen.append("ask")
+                case .permissionDecided:
+                    seen.append("decided")
+                    return seen
+                default: break
+                }
+            }
+            return seen
+        }
+        await runner.ingest(.permissionAsk(ask()))
+
+        #expect(await watching.value == ["ask", "decided"])
+    }
+
+    /// A person can answer while the grant lookup is still in flight, because the question is on
+    /// screen before the lookup finishes. Whoever gets there first wins and the other does
+    /// nothing: two `control_response` lines for one request id makes the CLI log a mismatch and
+    /// discard one of them.
+    @Test("a person answering during the rule lookup is not overtaken by it")
+    func answerRacesTheLookup() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        try await store.upsert(PermissionGrant.granting(
+            PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"),
+            repoID: try await repoID(of: session, in: store)
+        ))
+        let (runner, process) = try await running(store, session: session)
+
+        // Both routes, started together. Exactly one of them may reach the pipe.
+        async let arriving: Void = runner.ingest(.permissionAsk(ask()))
+        async let answering: Void = runner.answer(requestID: "req-1", decision: .deny(message: "no", endsTurn: false))
+        _ = await (arriving, answering)
+
+        #expect(answers(on: process).count == 1)
+        #expect(await runner.pendingAsks.isEmpty)
+        // And the session is not left claiming to be waiting for a settled question.
+        #expect(await runner.currentSession.state != .waiting)
+    }
+
     @Test("using a rule is counted, so the list can say whether it earns its place")
     func countsUses() async throws {
         let store = try makeTestStore("perm")
