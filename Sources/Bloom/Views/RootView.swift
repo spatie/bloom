@@ -20,6 +20,8 @@ struct RootView: View {
 
     @Bindable private var projectSetup = ProjectSetup.shared
     @Bindable private var closeSession = CloseSessionAlert.shared
+    /// The two Help menu sheets, and the drafts typed into them. See `FeedbackPresenter`.
+    @Bindable private var feedback = FeedbackPresenter.shared
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isCreateSheetPresented = false
@@ -120,6 +122,16 @@ struct RootView: View {
         }
         .sheet(isPresented: $isCreateSheetPresented) {
             CreateWorkspaceSheet(initialRepo: createTargetRepo)
+        }
+        // Send Feedback and Submit a Prompt, raised from the Help menu. Here rather than at the
+        // menu item, because a `Commands` body is not a view and cannot present anything, and
+        // because what was typed into either of them belongs to the app rather than to the sheet:
+        // see `FeedbackPresenter` for why a draft that dies with its sheet is the wrong shape.
+        .sheet(item: $feedback.sheet) { sheet in
+            switch sheet {
+            case .report: FeedbackSheet()
+            case .prompt: PromptSubmissionSheet()
+            }
         }
         // The offer to turn a folder into a repository. Presented here rather than at each of the
         // controls that can raise it, because there are five of them across two windows and they

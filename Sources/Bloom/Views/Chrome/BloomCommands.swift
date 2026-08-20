@@ -244,6 +244,26 @@ struct BloomCommands: Commands {
                 NSWorkspace.shared.open(url)
             }
             .keyboardShortcut("?", modifiers: .command)
+
+            Divider()
+
+            // The two ways to say something back. In the Help menu because that is where a Mac
+            // app keeps "how do I reach these people", and next to each other because they are
+            // the same gesture aimed at two different answers: one asks for something to be
+            // fixed, the other asks for something to be built.
+            //
+            // Option+Command+F rather than Command+F, which is Find Workspace and stays that way.
+            // The sheets themselves are raised from `RootView`, through `FeedbackPresenter`, for
+            // the reason the create sheet is: a menu item cannot present anything, and the draft
+            // has to outlive the sheet it was typed into.
+            Button("Send Feedback…") {
+                FeedbackPresenter.shared.open(.report)
+            }
+            .keyboardShortcut("f", modifiers: [.command, .option])
+
+            Button("Submit a Prompt…") {
+                FeedbackPresenter.shared.open(.prompt)
+            }
         }
     }
 

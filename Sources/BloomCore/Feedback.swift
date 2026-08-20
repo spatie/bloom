@@ -1,13 +1,14 @@
 import Foundation
 
-/// The two things somebody can deliberately send from Bloom: a feedback report, and a prompt for
-/// the agent that builds Bloom.
+/// The two things somebody can deliberately send from Bloom: a feedback submission, and a prompt
+/// for the agent that builds Bloom.
 ///
-/// Both go to the same place the install ping goes, and everything about them that is a judgement
-/// rather than a passthrough is here, in the core, where it is under test: what may be in a body,
-/// what may never be, how big any of it is allowed to get, and what each answer from the server
-/// means. The app target is left with the three things that need a running app: reading this
-/// bundle's version, asking the machine what it is, and putting the request on the wire.
+/// Both go to the application that already receives the install ping, and everything about them
+/// that is a judgement rather than a passthrough is here, in the core, where it is under test:
+/// what may be in a body, what may never be, how big any of it is allowed to get, and what each
+/// answer from the server means. The app target is left with the three things that need a running
+/// app: reading this bundle's version, asking the machine what it is, and putting the request on
+/// the wire.
 ///
 /// **The difference from `InstallPing`.** The ping is automatic, so it carries the least it can
 /// get away with. These are typed by a person who pressed a menu item and then pressed Send, so
@@ -24,19 +25,22 @@ import Foundation
 /// resolves on `PATH`. The log excerpt is the one field that could carry any of this by accident,
 /// and `AppLogExcerpt` exists to make sure it does not.
 ///
-/// **The token.** The same anonymous install token the ping uses, so two reports from the same
-/// copy of Bloom can be recognised as such and a fix can be told to the person who asked for it.
-/// It is a random UUID generated on this Mac, derived from nothing, and joinable against nothing
-/// but another thing this copy of Bloom sent. See `InstallPing.installToken(in:)`.
+/// **The endpoint's own shapes are narrow on purpose**, and they are restated here and checked
+/// against before anything is sent. None of the environment fields admits a slash, a space or an
+/// `@`, which is what makes it impossible for a path, a hostname or an address to fit in one of
+/// them even by accident. A field that does not match is dropped rather than coerced into
+/// something plausible.
+///
+/// **The install token.** The same anonymous token the ping uses, sent so that a submission can be
+/// read beside the install it came from. Optional to the endpoint, which falls back to a hashed
+/// address for its throttle when it is missing. It is a random UUID generated on this Mac, derived
+/// from nothing, and joinable against nothing but another thing this copy of Bloom sent. See
+/// `InstallPing.installToken(in:)`.
 public enum Feedback {
     // MARK: - Where it goes
 
     /// The endpoints, as agreed with the application that serves them.
-    ///
-    /// **The exact field names below are the contract with that application** and must not drift.
-    /// They are stated once, in `CodingKeys`, and pinned by a test that asserts the whole set of
-    /// keys rather than the presence of any one of them.
-    public static let reportEndpoint = "https://runbloom.app/api/feedback-reports"
+    public static let reportEndpoint = "https://runbloom.app/api/feedback-submissions"
     public static let promptEndpoint = "https://runbloom.app/api/prompt-submissions"
 
     /// Points a build at a different endpoint, for developing against a local server. The same
@@ -71,7 +75,7 @@ public enum Feedback {
     /// themselves has found a bug, and refusing to carry their report because their copy has no
     /// version stamped on it would be refusing the most useful reports there are. The environment
     /// block says which kind of build it came from, so a report from a working copy is readable as
-    /// one. See `BuildChannel`.
+    /// one. See `InstallSource`.
     public static func endpoint(_ kind: Kind, environment: [String: String]) -> URL? {
         let override = environment[kind.variable]?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let override, !override.isEmpty { return validEndpoint(override) }
@@ -92,30 +96,32 @@ public enum Feedback {
 
     // MARK: - How big anything may be
 
-    /// The most somebody may write, and the most that will be sent if they write more.
-    ///
-    /// Generous rather than tight: a good bug report is a paragraph and a bad one is a page, and
-    /// neither is worth refusing over. Text past this is cut rather than the send being refused,
-    /// because a Send button that goes grey when a report gets long is a report nobody finishes.
+    /// What the endpoint accepts, restated. Text past this is cut here rather than the send being
+    /// refused there: a 422 for length is a report somebody wrote and lost.
     public static let maxMessageCharacters = 5_000
     public static let maxPromptCharacters = 5_000
 
+    /// The endpoint's own ceiling on the log field. Bloom's excerpt is capped at a third of it by
+    /// `AppLogExcerpt`, which is the cap that actually bites.
+    public static let maxLogCharacters = 60_000
+
     /// The name on a prompt submission, which is a credit line rather than an identity.
-    public static let maxNameCharacters = 80
+    public static let maxNameCharacters = 60
 
-    /// How many pictures may go with one report, and how big each one and all of them may be.
+    /// How many pictures may go with one submission, and how big each may be. The endpoint's
+    /// numbers.
+    public static let maxImages = 5
+    public static let maxImageBytes = 4 * 1024 * 1024
+
+    /// How much picture Bloom will put in one request.
     ///
-    /// Four is enough for a before, an after, and the two other places it goes wrong. Two
-    /// megabytes takes any screenshot on any Mac, and six is the ceiling on the whole request,
-    /// because a body larger than that stops being a feedback report and starts being an upload
-    /// somebody's phone tether has to pay for.
-    public static let maxImages = 4
-    public static let maxImageBytes = 2 * 1024 * 1024
-    public static let maxTotalImageBytes = 6 * 1024 * 1024
+    /// Below five times the per-image cap on purpose. Twenty megabytes of screenshots is not a bug
+    /// report, it is an upload, and the honest place to refuse it is here, with a sentence, rather
+    /// than at the far end with a 413.
+    public static let maxTotalImageBytes = 12 * 1024 * 1024
 
-    /// What the endpoint refuses outright. Well clear of the caps above and their base64 overhead,
-    /// so a body that is inside every cap here is never a body the server drops.
-    public static let maximumBodyBytes = 12 * 1024 * 1024
+    /// What a request may weigh in total, after multipart framing.
+    public static let maximumBodyBytes = 16 * 1024 * 1024
 
     /// What is said when a picture is too big, in the same voice `AttachmentFiles` uses for the
     /// same refusal in the composer.
@@ -134,7 +140,17 @@ public enum Feedback {
     }
 
     public static func notAnImageMessage(name: String) -> String {
-        "\(name) is not an image. Feedback carries pictures only."
+        "\(name) is not an image Bloom can send. PNG, JPEG, GIF, WebP and HEIC go; PDFs and SVGs "
+            + "do not."
+    }
+
+    /// How much room is left, said only when it is nearly gone. See `FeedbackSheet`.
+    public static func remainingMessage(count: Int, limit: Int) -> String? {
+        guard count > limit - 500 else { return nil }
+        guard count <= limit else {
+            return "\(count) characters. Only the first \(limit) will be sent."
+        }
+        return "\(limit - count) characters left"
     }
 
     static func size(_ bytes: Int) -> String {
@@ -143,192 +159,279 @@ public enum Feedback {
 
     // MARK: - What the machine is
 
-    /// Whether this copy was built as a release, installed from a commit by `master.sh`, or built
-    /// on the machine it is running on.
+    /// Whether this copy is a release somebody installed or a build somebody made.
     ///
-    /// Worth a field of its own because it changes how a report should be read: a crash in a
-    /// release is everybody's crash, and the same crash in somebody's own build of a branch may be
-    /// the branch. Read off the same two Info.plist keys `SoftwareUpdate.availability` and
+    /// Two values, because that is what the endpoint stores, and the line falls exactly where it
+    /// matters: a crash in a release is everybody's crash, and the same crash in a working copy of
+    /// the source tree may be the working copy. A build `master.sh` installed is a build of a
+    /// commit somebody made on their own machine, so it is `local` too.
+    ///
+    /// Read off the same two Info.plist keys `SoftwareUpdate.availability` and
     /// `InstallPing.endpoint(buildChannel:masterCommit:environment:)` read, so the three cannot
     /// disagree about what kind of build this is.
-    public enum BuildChannel: String, Sendable, Equatable, CaseIterable, Codable {
+    public enum InstallSource: String, Sendable, Equatable, CaseIterable, Codable {
         case release
-        case master
         case local
 
         public init(buildChannel: String?, masterCommit: String?) {
-            if let masterCommit, !masterCommit.isEmpty {
-                self = .master
-            } else if buildChannel == InstallPing.releaseChannel {
-                self = .release
-            } else {
-                self = .local
-            }
+            let isMasterBuild = !(masterCommit ?? "").isEmpty
+            self = (!isMasterBuild && buildChannel == InstallPing.releaseChannel) ? .release : .local
         }
     }
 
-    /// Which processor this is running on.
+    /// Which slice this process is actually running as.
     ///
-    /// The single most useful fact after the version, because "only on Intel" is often the whole
-    /// answer, and because Rosetta is its own category: an Apple silicon Mac running a translated
-    /// build behaves like neither of the other two.
-    public enum Architecture: String, Sendable, Equatable, CaseIterable, Codable {
-        case appleSilicon = "apple_silicon"
-        case intel
-        case rosetta
+    /// The endpoint takes `arm64` or `x86_64`, which are the two things a process can be, so
+    /// Rosetta is reported as what it is from the inside: an `x86_64` process. That is the answer
+    /// a bug report needs, because a translated Bloom behaves like an Intel Bloom. The hardware
+    /// underneath it is not sent, and `unknown` sends nothing at all rather than guessing.
+    public enum Architecture: Sendable, Equatable, CaseIterable {
+        case arm64
+        case x86_64
         case unknown
 
         /// Decided from the two facts the app can ask the kernel for: what the hardware is, and
         /// whether this process is being translated.
         public init(isARM: Bool, isTranslated: Bool) {
             if isTranslated {
-                self = .rosetta
+                self = .x86_64
             } else if isARM {
-                self = .appleSilicon
+                self = .arm64
             } else {
-                self = .intel
+                self = .x86_64
+            }
+        }
+
+        /// Nil when there is nothing worth saying, which drops the field from the body.
+        public var wireName: String? {
+            switch self {
+            case .arm64: "arm64"
+            case .x86_64: "x86_64"
+            case .unknown: nil
             }
         }
     }
 
-    /// The permission mode, as a wire name.
+    /// The permission mode, as the slug the endpoint stores.
     ///
-    /// `PermissionMode`'s own raw values are camelCase, which the endpoint's name pattern does not
+    /// `PermissionMode`'s own raw values are camelCase, which the endpoint's slug pattern does not
     /// accept, so the mapping is stated here rather than left to a `rawValue` that would quietly
     /// start failing validation. Stable, because these are stored and grouped by: renaming one
     /// splits a column on somebody's chart in two.
     public static func wireName(_ mode: PermissionMode) -> String {
         switch mode {
         case .auto: "ask"
-        case .acceptEdits: "accept_edits"
-        case .bypassPermissions: "full_access"
+        case .acceptEdits: "accept-edits"
+        case .bypassPermissions: "full-access"
         case .plan: "plan"
+        }
+    }
+
+    // MARK: - The environment block
+
+    /// One field of the environment block, as it goes out.
+    ///
+    /// A small closed set of shapes rather than `Any`, because both bodies are built from the same
+    /// list: JSON writes a string, a number or an array, and multipart writes `environment[name]`
+    /// or a repeated `environment[name][]`. Two representations of one list, and no way for them
+    /// to disagree about what is in it.
+    public enum FieldValue: Sendable, Equatable {
+        case text(String)
+        case number(Double)
+        case list([String])
+    }
+
+    public struct Field: Sendable, Equatable {
+        public let name: String
+        public let value: FieldValue
+
+        public init(name: String, value: FieldValue) {
+            self.name = name
+            self.value = value
         }
     }
 
     /// Everything Bloom is allowed to say about where it is running, and nothing else.
     ///
-    /// Thirteen stored properties and no dictionary, so there is no shape of this type that
-    /// carries a fourteenth fact. Every string is checked against the pattern the endpoint
-    /// validates it with, using the same checks and the same patterns the install ping uses, so
-    /// the two can never disagree about what a version string looks like. Anything that does not
-    /// match is replaced by a value that does and that obviously means "we could not tell".
+    /// Twelve stored properties and no dictionary, so there is no shape of this type that carries
+    /// a thirteenth fact. Every string is checked against the pattern the endpoint validates it
+    /// with, by the same two functions the install ping is checked with, so the two can never
+    /// disagree about what a version string looks like. A field that does not match is left out of
+    /// the body: the endpoint takes an environment block with any subset of its keys, so a fact
+    /// Bloom could not establish is better missing than guessed.
     ///
-    /// Adding a field here is the only way to change what leaves the machine with a report, which
-    /// is the property this whole design is arranged around.
+    /// Adding a field here is the only way to change what leaves the machine with a submission,
+    /// which is the property this whole design is arranged around.
     public struct Environment: Sendable, Equatable, Encodable {
-        /// The anonymous install token. See `InstallPing.installToken(in:)`.
-        public let token: String
         /// `CFBundleShortVersionString`, e.g. `0.4.0`.
         public let appVersion: String
-        /// `CFBundleVersion`, which is the build number inside that version.
+        /// `CFBundleVersion`, the build number inside that version.
         public let appBuild: String
         /// `26.1.0`.
         public let macOSVersion: String
         public let architecture: Architecture
-        public let buildChannel: BuildChannel
+        public let installSource: InstallSource
         /// Which coding agent Bloom runs here, as `InstallPing.agentName(installed:)` answers it.
         public let agent: String
-        /// The version that agent's CLI reports, e.g. `2.1.234`. Empty when the CLI is not
-        /// installed or did not answer.
+        /// What that agent's CLI reports, e.g. `2.1.234`. Empty when it is not installed or did
+        /// not answer, and then the field is left out.
         public let agentVersion: String
-        /// Every backend whose CLI resolves on this machine, sorted, as wire names. The fact that
-        /// a binary exists, and nothing about the account it is signed in with.
-        public let agentsInstalled: [String]
+        /// Every backend whose CLI resolves on this machine, sorted, as slugs. The fact that a
+        /// binary exists, and nothing about the account it is signed in with.
+        public let availableAgents: [String]
         /// The permission mode new sessions start in. See `wireName(_:)`.
         public let permissionMode: String
         /// The appearance setting.
         public let theme: InstallPing.Theme
-        /// `2.0` on every Mac made this decade, `1.0` on an external display that is not Retina.
-        public let displayScale: String
-        /// The language Bloom is being read in, as a bare code: `en`, `nl`. Not the region, not
-        /// the locale, and not the keyboard layout.
-        public let language: String
+        /// `2` on every Retina display. A number, between 1 and 4.
+        public let displayScale: Double
+        /// The language and region Bloom is being read in, as a language tag: `nl-BE`. Built from
+        /// two codes rather than from a locale identifier, so nothing a user typed can reach it.
+        public let locale: String
 
         public init(
-            token: String,
             appVersion: String,
             appBuild: String,
             macOSVersion: String,
             architecture: Architecture,
-            buildChannel: BuildChannel,
+            installSource: InstallSource,
             agent: String,
             agentVersion: String = "",
-            agentsInstalled: [String] = [],
+            availableAgents: [String] = [],
             permissionMode: String,
             theme: InstallPing.Theme,
-            displayScale: String,
-            language: String
+            displayScale: Double,
+            locale: String
         ) {
-            self.token = InstallPing.matches(token, InstallPing.tokenPattern) ? token : InstallPing.newToken()
-            self.appVersion = InstallPing.checked(
-                appVersion, InstallPing.appVersionPattern, or: InstallPing.unknownVersion
-            )
-            self.appBuild = InstallPing.checked(
-                appBuild, InstallPing.appVersionPattern, or: InstallPing.unknownVersion
-            )
-            self.macOSVersion = InstallPing.checked(
-                macOSVersion, InstallPing.systemVersionPattern, or: InstallPing.unknownVersion
-            )
+            self.appVersion = InstallPing.checked(appVersion, InstallPing.appVersionPattern, or: "")
+            self.appBuild = InstallPing.checked(appBuild, InstallPing.appVersionPattern, or: "")
+            self.macOSVersion = InstallPing.checked(macOSVersion, InstallPing.systemVersionPattern, or: "")
             self.architecture = architecture
-            self.buildChannel = buildChannel
-            self.agent = InstallPing.checked(agent, InstallPing.namePattern, or: InstallPing.unknownName)
-            // Empty rather than `0.0.0` when there is nothing to say: a CLI that did not answer is
-            // not the same as one reporting a version nobody released.
-            self.agentVersion = agentVersion.isEmpty
-                ? ""
-                : InstallPing.checked(agentVersion, Feedback.agentVersionPattern, or: "")
-            self.agentsInstalled = agentsInstalled
-                .map { InstallPing.checked($0, InstallPing.namePattern, or: InstallPing.unknownName) }
-                .sorted()
-            self.permissionMode = InstallPing.checked(
-                permissionMode, InstallPing.namePattern, or: InstallPing.unknownName
+            self.installSource = installSource
+            self.agent = InstallPing.checked(agent, Feedback.slugPattern, or: "")
+            self.agentVersion = InstallPing.checked(agentVersion, Feedback.agentVersionPattern, or: "")
+            self.availableAgents = Array(
+                availableAgents
+                    .map { InstallPing.checked($0, Feedback.slugPattern, or: "") }
+                    .filter { !$0.isEmpty }
+                    .sorted()
+                    .prefix(Feedback.maxAgentSlugs)
             )
+            self.permissionMode = InstallPing.checked(permissionMode, Feedback.slugPattern, or: "")
             self.theme = theme
-            self.displayScale = InstallPing.checked(
-                displayScale, Feedback.scalePattern, or: InstallPing.unknownVersion
-            )
-            self.language = InstallPing.checked(language, Feedback.languagePattern, or: InstallPing.unknownName)
+            // Clamped rather than dropped: a scale outside this range is a screen nobody has, and
+            // the nearest end of the range is a truer answer than silence.
+            self.displayScale = min(max(displayScale, 1), 4)
+            self.locale = InstallPing.checked(locale, Feedback.localePattern, or: "")
         }
 
-        /// snake_case, because the application receiving this is a Laravel app and this is the
-        /// shape it validates. These names are the contract with it and must not drift.
-        enum CodingKeys: String, CodingKey {
-            case token
-            case appVersion = "app_version"
-            case appBuild = "app_build"
-            case macOSVersion = "macos_version"
-            case architecture
-            case buildChannel = "build_channel"
-            case agent
-            case agentVersion = "agent_version"
-            case agentsInstalled = "agents_installed"
-            case permissionMode = "permission_mode"
-            case theme
-            case displayScale = "display_scale"
-            case language
+        /// The block as it goes out, in a fixed order, with everything Bloom could not establish
+        /// left out.
+        ///
+        /// **This is the only description of the block.** The JSON encoding below and the
+        /// multipart writer both read it, so a field cannot exist in one body and be missing from
+        /// the other, and a test that counts these counts what actually leaves the machine.
+        public var fields: [Field] {
+            var found: [Field] = []
+
+            func text(_ name: String, _ value: String) {
+                guard !value.isEmpty else { return }
+                found.append(Field(name: name, value: .text(value)))
+            }
+
+            text("app_version", appVersion)
+            text("app_build", appBuild)
+            text("macos_version", macOSVersion)
+            text("architecture", architecture.wireName ?? "")
+            text("install_source", installSource.rawValue)
+            text("agent", agent)
+            text("agent_version", agentVersion)
+            if !availableAgents.isEmpty {
+                found.append(Field(name: "available_agents", value: .list(availableAgents)))
+            }
+            text("permission_mode", permissionMode)
+            text("theme", theme.rawValue)
+            found.append(Field(name: "display_scale", value: .number(displayScale)))
+            text("locale", locale)
+
+            return found
+        }
+
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: WireKey.self)
+            for field in fields {
+                let key = WireKey(field.name)
+                switch field.value {
+                case .text(let value): try container.encode(value, forKey: key)
+                case .number(let value): try container.encode(value, forKey: key)
+                case .list(let value): try container.encode(value, forKey: key)
+                }
+            }
         }
     }
+
+    /// The most agent slugs the endpoint will read.
+    public static let maxAgentSlugs = 12
+
+    /// A key whose name is decided at runtime, so the environment block can be written from
+    /// `fields` rather than from a second list of coding keys that would drift from it.
+    struct WireKey: CodingKey {
+        var stringValue: String
+        var intValue: Int? { nil }
+
+        init(_ stringValue: String) { self.stringValue = stringValue }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
+    // MARK: - The endpoint's own rules, restated
+
+    /// A slug: lowercase, and no slash, space or `@`, which is what makes it impossible for a
+    /// path, a host or an address to be sent as one.
+    public static let slugPattern = #"^[a-z][a-z0-9_-]{0,31}$"#
 
     /// A CLI version is whatever the CLI chose to print, so this is looser than the app's own
     /// pattern and still refuses anything that is not a version: no spaces, no paths, no prose.
     public static let agentVersionPattern = #"^[0-9][A-Za-z0-9.+-]{0,31}$"#
 
-    /// `1`, `2`, `1.5`, and nothing else.
-    public static let scalePattern = #"^\d(\.\d{1,2})?$"#
+    /// `nl-BE`, `en`. A language tag built from codes, never a locale identifier.
+    public static let localePattern = #"^[a-z]{2,8}(-[A-Za-z0-9]{2,8})?$"#
 
-    /// A bare language code. Not a locale: `en_BE` says where somebody is.
-    public static let languagePattern = #"^[a-z]{2,8}$"#
+    /// What a name on a prompt submission may be, as the endpoint validates it: letters, numbers,
+    /// spaces and a few marks. No `@`, which means an email address is refused, which is why the
+    /// field says so before anybody types one.
+    public static let namePattern = #"^[\p{L}\p{N} ._'-]+$"#
+
+    /// The name as it is sent: trimmed, capped, and with a leading `@` taken off, because a handle
+    /// written the way people write handles is the commonest thing anybody will type here and the
+    /// endpoint strips it too.
+    public static func normalisedName(_ raw: String) -> String {
+        var name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.hasPrefix("@") { name.removeFirst() }
+        return String(name.prefix(maxNameCharacters)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Whether a name would be accepted. Empty is fine: the field is optional, and a prompt is
+    /// worth having anonymously.
+    public static func isAcceptableName(_ raw: String) -> Bool {
+        let name = normalisedName(raw)
+        return name.isEmpty || InstallPing.matches(name, namePattern)
+    }
+
+    /// What the sheet says under a name it cannot send.
+    public static let nameProblem =
+        "A name or a handle, please: letters, numbers, spaces, and . _ ' -. An email address will "
+            + "not be accepted."
 
     // MARK: - What is sent
 
-    /// One picture attached to a report.
+    /// One picture attached to a submission.
     ///
-    /// The bytes travel inside the JSON as base64, which is what `JSONEncoder` does with `Data` on
-    /// its own. Nothing about the file it came from travels with it except a name, and the name is
-    /// cleaned first: a picture is attached to say what the screen looked like, not to say where
-    /// on this Mac it was saved.
-    public struct Image: Sendable, Equatable, Encodable {
+    /// The filename travels as part of the multipart framing because that is how a file part is
+    /// written, and the endpoint deliberately does not store it: a filename is free text and free
+    /// text is where a path leaks. It is cleaned here anyway, on the way out, so nothing is sent
+    /// that was not meant to be sent even for the moment it takes to be dropped.
+    public struct Image: Sendable, Equatable {
         public let filename: String
         public let contentType: String
         public let data: Data
@@ -338,16 +441,12 @@ public enum Feedback {
             self.contentType = Feedback.checkedContentType(contentType)
             self.data = data
         }
-
-        enum CodingKeys: String, CodingKey {
-            case filename
-            case contentType = "content_type"
-            case data
-        }
     }
 
-    /// The image content types Bloom will send, and the only ones.
-    public static let imageContentTypes = ["image/png", "image/jpeg", "image/gif", "image/heic"]
+    /// The image content types the endpoint accepts, sniffed and by extension both.
+    public static let imageContentTypes = [
+        "image/png", "image/jpeg", "image/gif", "image/webp", "image/heic", "image/heif",
+    ]
 
     static func checkedContentType(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -357,39 +456,52 @@ public enum Feedback {
     /// The last component of a name, with anything that could change what it means taken out.
     ///
     /// A path never travels with a picture, so a name that is a path is reduced to its last
-    /// component before anything else happens: `/Users/someone/Desktop/bug.png` is sent as
+    /// component before anything else happens: `/Users/someone/Desktop/bug.png` is written as
     /// `bug.png`, and a name that is nothing but slashes and dots becomes `image`.
     public static func safeFilename(_ raw: String) -> String {
         var name = (raw as NSString).lastPathComponent
         name = name.replacingOccurrences(of: ":", with: "-")
+        name = name.replacingOccurrences(of: "\"", with: "-")
+        name = name.replacingOccurrences(of: "\\", with: "-")
+        name = name.replacingOccurrences(of: "\r", with: " ")
+        name = name.replacingOccurrences(of: "\n", with: " ")
         name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         while name.hasPrefix(".") { name.removeFirst() }
         guard !name.isEmpty else { return "image" }
         return String(name.prefix(120))
     }
 
-    /// A feedback report: what somebody wrote, what they chose to attach, and where they are
-    /// running.
+    /// A feedback submission: what somebody wrote, what they chose to attach, which install it is
+    /// from, and where it is running.
     public struct Report: Sendable, Equatable, Encodable {
         public let message: String
         /// The log excerpt, or nil when the box was left unticked, which is how it starts. Nil
         /// means the key is absent from the body rather than present and empty.
         public let logs: String?
         public let images: [Image]
+        public let token: String?
         public let environment: Environment
 
-        public init(message: String, logs: String?, images: [Image], environment: Environment) {
+        public init(
+            message: String,
+            logs: String?,
+            images: [Image],
+            token: String?,
+            environment: Environment
+        ) {
             self.message = Feedback.trimmed(message, to: Feedback.maxMessageCharacters)
-            self.logs = logs.map { Feedback.trimmed($0, to: AppLogExcerpt.maxCharacters) }
+            self.logs = logs.map { Feedback.trimmed($0, to: Feedback.maxLogCharacters) }
             self.images = Array(images.prefix(Feedback.maxImages))
+            self.token = token.flatMap { InstallPing.matches($0, InstallPing.tokenPattern) ? $0 : nil }
             self.environment = environment
         }
 
-        enum CodingKeys: String, CodingKey {
-            case message
-            case logs
-            case images
-            case environment
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: WireKey.self)
+            try container.encode(message, forKey: WireKey("message"))
+            try container.encodeIfPresent(logs, forKey: WireKey("logs"))
+            try container.encodeIfPresent(token, forKey: WireKey("token"))
+            try container.encode(environment, forKey: WireKey("environment"))
         }
     }
 
@@ -398,19 +510,26 @@ public enum Feedback {
         public let prompt: String
         /// Nil when nobody typed one, which is allowed: a prompt is worth having anonymously.
         public let name: String?
+        public let token: String?
         public let environment: Environment
 
-        public init(prompt: String, name: String?, environment: Environment) {
+        public init(prompt: String, name: String?, token: String?, environment: Environment) {
             self.prompt = Feedback.trimmed(prompt, to: Feedback.maxPromptCharacters)
-            let cleaned = name.map { Feedback.trimmed($0, to: Feedback.maxNameCharacters) } ?? ""
-            self.name = cleaned.isEmpty ? nil : cleaned
+            let cleaned = name.map(Feedback.normalisedName) ?? ""
+            // A name the endpoint would refuse is left out rather than sent to be rejected: the
+            // sheet has already said what is wrong with it, and losing the credit line is better
+            // than losing the prompt.
+            self.name = cleaned.isEmpty || !InstallPing.matches(cleaned, Feedback.namePattern) ? nil : cleaned
+            self.token = token.flatMap { InstallPing.matches($0, InstallPing.tokenPattern) ? $0 : nil }
             self.environment = environment
         }
 
-        enum CodingKeys: String, CodingKey {
-            case prompt
-            case name
-            case environment
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: WireKey.self)
+            try container.encode(prompt, forKey: WireKey("prompt"))
+            try container.encodeIfPresent(name, forKey: WireKey("name"))
+            try container.encodeIfPresent(token, forKey: WireKey("token"))
+            try container.encode(environment, forKey: WireKey("environment"))
         }
     }
 
@@ -419,37 +538,136 @@ public enum Feedback {
         return trimmed.count <= limit ? trimmed : String(trimmed.prefix(limit))
     }
 
-    /// Whether there is anything worth sending. The Send button is keyed on this: a report with no
-    /// words in it says nothing that its attachments could not say better with one line.
+    /// Whether there is anything worth sending. The Send button is keyed on this: a submission with
+    /// no words in it says nothing that its attachments could not say better with one line.
     public static func canSend(message: String) -> Bool {
         !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     // MARK: - The request
 
-    /// The JSON body. Sorted keys so the same facts always produce the same bytes, which is what
-    /// makes a body assertable in a test.
-    public static func body(_ value: some Encodable) throws -> Data {
+    /// Bytes, and what they are.
+    public struct Body: Sendable, Equatable {
+        public let contentType: String
+        public let data: Data
+
+        public init(contentType: String, data: Data) {
+            self.contentType = contentType
+            self.data = data
+        }
+    }
+
+    /// A submission's body: JSON on its own, multipart when there are pictures.
+    ///
+    /// Two encodings rather than base64 inside the JSON, because that is what the endpoint reads:
+    /// it validates the attachments as uploaded files, sniffing their type rather than trusting
+    /// what they are called.
+    public static func body(for report: Report, boundary: String = newBoundary()) throws -> Body {
+        guard !report.images.isEmpty else {
+            return Body(contentType: "application/json", data: try json(report))
+        }
+
+        var parts: [MultipartPart] = [.text(name: "message", value: report.message)]
+        if let logs = report.logs { parts.append(.text(name: "logs", value: logs)) }
+        if let token = report.token { parts.append(.text(name: "token", value: token)) }
+        parts += environmentParts(report.environment)
+        parts += report.images.map {
+            .file(name: "attachments[]", filename: $0.filename, contentType: $0.contentType, data: $0.data)
+        }
+
+        return Body(
+            contentType: "multipart/form-data; boundary=\(boundary)",
+            data: multipart(parts, boundary: boundary)
+        )
+    }
+
+    public static func body(for submission: PromptSubmission) throws -> Body {
+        Body(contentType: "application/json", data: try json(submission))
+    }
+
+    /// Sorted keys so the same facts always produce the same bytes, which is what makes a body
+    /// assertable in a test.
+    static func json(_ value: some Encodable) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         return try encoder.encode(value)
     }
 
+    /// The environment block as form fields, nested the way the endpoint reads them.
+    static func environmentParts(_ environment: Environment) -> [MultipartPart] {
+        environment.fields.flatMap { field -> [MultipartPart] in
+            switch field.value {
+            case .text(let value):
+                [.text(name: "environment[\(field.name)]", value: value)]
+            case .number(let value):
+                [.text(name: "environment[\(field.name)]", value: number(value))]
+            case .list(let values):
+                values.map { .text(name: "environment[\(field.name)][]", value: $0) }
+            }
+        }
+    }
+
+    /// `2` rather than `2.0`, so a whole number reads as one on the other side.
+    static func number(_ value: Double) -> String {
+        value == value.rounded() ? String(Int(value)) : String(format: "%g", value)
+    }
+
+    public enum MultipartPart: Sendable, Equatable {
+        case text(name: String, value: String)
+        case file(name: String, filename: String, contentType: String, data: Data)
+    }
+
+    /// A boundary nothing in a body could contain: fixed text and a UUID.
+    public static func newBoundary() -> String {
+        "BloomFormBoundary\(UUID().uuidString)"
+    }
+
+    static func multipart(_ parts: [MultipartPart], boundary: String) -> Data {
+        var body = Data()
+
+        func append(_ string: String) {
+            body.append(Data(string.utf8))
+        }
+
+        for part in parts {
+            append("--\(boundary)\r\n")
+            switch part {
+            case .text(let name, let value):
+                append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n")
+                append(value)
+                append("\r\n")
+            case .file(let name, let filename, let contentType, let data):
+                append(
+                    "Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n"
+                )
+                append("Content-Type: \(contentType)\r\n\r\n")
+                body.append(data)
+                append("\r\n")
+            }
+        }
+        append("--\(boundary)--\r\n")
+
+        return body
+    }
+
     /// The whole request, built here so the headers are pinned by the same tests as the body.
     ///
-    /// A longer timeout than the ping's, because this one can carry six megabytes of screenshots
-    /// over whatever connection somebody happens to be on, and unlike the ping it is not going to
-    /// be tried again in an hour by itself: a person is watching it, and a failure costs them the
-    /// press of a button.
-    public static func request(to endpoint: URL, body: Data, appVersion: String) -> URLRequest {
+    /// A longer timeout than the ping's, because this one can carry twelve megabytes of
+    /// screenshots over whatever connection somebody happens to be on, and unlike the ping it is
+    /// not going to be tried again in an hour by itself: a person is watching it, and a failure
+    /// costs them the press of a button.
+    public static func request(to endpoint: URL, body: Body, appVersion: String) -> URLRequest {
         var request = URLRequest(url: endpoint, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 60)
         request.httpMethod = "POST"
-        request.httpBody = body
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body.data
+        request.setValue(body.contentType, forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         // Stated rather than left to the system, whose default carries the CFNetwork and Darwin
         // build numbers along with it.
-        request.setValue("Bloom/\(appVersion)", forHTTPHeaderField: "User-Agent")
+        request.setValue(
+            "Bloom/\(appVersion.isEmpty ? InstallPing.unknownVersion : appVersion)",
+            forHTTPHeaderField: "User-Agent"
+        )
         request.httpShouldHandleCookies = false
         return request
     }
@@ -488,8 +706,8 @@ public enum Feedback {
         case .sent:
             nil
         case .refused:
-            "The server would not take that report. Nothing has been lost, and mailing "
-                + "\(supportEmail) will reach the same person."
+            "The server would not take that. Nothing has been lost, and mailing \(supportEmail) "
+                + "will reach the same person."
         case .throttled(let retryAfter):
             "That is a lot of reports at once. Try again \(waitPhrase(retryAfter)). Your text is still here."
         case .unreachable:
@@ -538,6 +756,7 @@ public enum Feedback {
                 + "we will run it and merge the result."
         public static let promptPlaceholder = "Describe what you would like to see built…"
         public static let promptName = "Your name (if we use your prompt, we will credit you in the changelog)"
+        public static let promptNamePlaceholder = "A name or a handle, not an email address"
         public static let promptSend = "Submit prompt"
         public static let promptSent = "Thank you. Your prompt is in."
 
