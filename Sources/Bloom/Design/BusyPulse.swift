@@ -1,31 +1,50 @@
 import SwiftUI
+import QuartzCore
 import BloomCore
 
 /// The window's one heartbeat, while an agent is working.
 ///
 /// Two things move while agents are running: the light that travels the shared rule under the
 /// title bar (`RuleSweep`) and the figure at the head of every working row in the sidebar
-/// (`WorkspaceRunningGlyph`). They read their phase from here rather than each starting a
-/// `repeatForever` animation of their own, and that is the whole reason this type exists.
+/// (`WorkspaceRunningGlyph`). They read their phase from here rather than each starting an
+/// animation of its own, and that is the whole reason this type exists.
 ///
-/// A `repeatForever` animation begins when the view that carries it is committed. Five agents
-/// started at five different moments therefore give five row figures at five different phases,
-/// which is not a rhythm, it is five things blinking at a column of names. Worse, they never
-/// converge: nothing in Core Animation pulls two free running loops back together. One counter
-/// that every mark reads means an agent started ten seconds after the last one is in step with it
-/// on its first frame, and it means the rule and the rows are in step with each other as well, so
-/// the window has one heartbeat rather than two that drift past each other.
+/// An animation begins when the view that carries it is committed. Five agents started at five
+/// different moments therefore give five row figures at five different phases, which is not a
+/// rhythm, it is five things blinking at a column of names. Worse, they never converge: nothing
+/// pulls two free running loops back together. One instant that every mark measures its phase
+/// from means an agent started ten seconds after the last one is in step with it on its first
+/// frame, and it means the rule and the rows are in step with each other as well, so the window
+/// has one heartbeat rather than two that drift past each other.
 ///
-/// What is shared is only the moment each animation begins. Neither mark is stepped: the light is
-/// one interpolated travel and each dot in the figure is one interpolated ramp, so both are drawn
-/// at whatever the display refreshes at rather than at this tick's rate. A clock that stepped the
-/// pictures themselves would give the figure exactly as many frames as it had pictures, which is
-/// the mistake `WorkspaceRunningGlyph` records.
+/// # What this used to be, and why it is not that any more
 ///
-/// The tick is the unit both marks are built from, so both are exact multiples of it: the figure
-/// runs one half of its wave per tick, the light takes `passTicks` to cross the rule and
-/// `sweepTicks` to go out and come back. They meet at the top of every sweep rather than every
-/// forty seconds.
+/// It used to be a counter. A `Task` woke every 750 milliseconds, advanced a tick, and published
+/// two booleans; each mark carried a SwiftUI `.animation(_:value:)` keyed on one of them, so every
+/// beat restarted an interpolation that SwiftUI then ran itself.
+///
+/// That is what made the two marks expensive, and it was measured rather than argued. Instruments'
+/// SwiftUI template, 12.3 seconds of a window with five agents running: 320,971 view graph
+/// updates, of which **12** were view body evaluations. The bodies were not the cost. The cost was
+/// `RootGeometry`, `LayoutChildGeometries` and the display list items under them, recomputed 239.6
+/// times a second, which on a 120Hz panel is twice a frame, every frame. SwiftUI does not hand an
+/// `.animation(_:value:)` to the render server: it interpolates on the main thread and re-renders
+/// the display list of the whole hosting view each time it does. The bill is therefore set by how
+/// big the window is, not by how big the mark is, which is exactly what the numbers said: a 160
+/// point gradient crossing 1394 points cost the same as three 3 point dots fading, and five lit
+/// rows cost barely more than one.
+///
+/// So nothing is stepped and nothing is interpolated here any more. What this publishes is one
+/// number, `epoch`: the `CACurrentMediaTime()` at which the current run of the heartbeat began.
+/// Both marks build a repeating `CAAnimation` whose `beginTime` is derived from it, hand it to a
+/// layer, and never hear from it again. Core Animation runs the interpolation out of process, the
+/// app is not woken per frame, and the phase lock is stronger than it was: two animations that
+/// share an absolute `beginTime` and have periods in a whole number ratio cannot drift, where two
+/// restarted from a timer could only be as accurate as the timer.
+///
+/// The periods below are unchanged and stay in that ratio: the figure's wave is 1.5 seconds, a
+/// crossing of the rule is 3, and out and back is 6, so a turn of the light lands on a trough of
+/// the dots exactly as it did. See `10bef55` for the measurement that established it.
 ///
 /// It runs only while something is running, and only while the window is the front one. See
 /// `BusyPulseDriver`, which is the single place that decides.
@@ -37,32 +56,23 @@ final class BusyPulse {
     /// The unit. Everything else here is a count of these.
     ///
     /// It is the half period of the sidebar's figure: the light runs down the three dots on one
-    /// tick and back up them on the next, so a whole wave is a second and a half.
-    static let tickInterval: Duration = .milliseconds(750)
+    /// beat and back up them on the next, so a whole wave is a second and a half.
+    static let beat: CFTimeInterval = 0.75
 
-    /// How many ticks the light takes to cross the rule once, in either direction.
+    /// One wave of the sidebar's figure: down the three dots and back up.
+    static let wave: CFTimeInterval = beat * 2
+
+    /// How long the light takes to cross the rule once, in either direction.
     ///
-    /// Four, which is three seconds, and it is the same three seconds a crossing has always
-    /// taken. What changed is the end of it. The light used to spend the two ticks after a
-    /// crossing parked off the far edge and then jump back to the leading one; now it turns round
-    /// and crosses back. So the speed of a crossing is untouched, the dead beat is gone, and a
-    /// crossing begins every three seconds where one used to begin every four and a half.
-    static let passTicks = 4
+    /// Three seconds, and it is the same three seconds a crossing has always taken. It is four
+    /// beats, so it is a whole number of the figure's waves, which is what keeps the two marks
+    /// locked to each other.
+    static let pass: CFTimeInterval = beat * 4
 
-    /// How many ticks the whole figure takes: out, and back.
-    ///
-    /// Six seconds, which is four of the sidebar figure's waves, so the two marks still meet at
-    /// the top of every cycle. `4815630` locked them to each other and this keeps them locked:
-    /// the count changed, the fact that it is a whole number of waves did not.
-    static let sweepTicks = passTicks * 2
+    /// The whole of the light's figure: out, and back. Six seconds, which is four waves.
+    static let sweep: CFTimeInterval = pass * 2
 
-    /// Where the clock is in its cycle, `0 ..< sweepTicks`.
-    ///
-    /// Wrapped rather than counted up, so a window left open for a week is on the same numbers as
-    /// one just launched and nothing has to think about an overflow.
-    private(set) var tick = sweepTicks - 1
-
-    /// Whether the clock is running at all.
+    /// Whether the heartbeat is running at all.
     ///
     /// False is not the same as idle. An agent can be working with this false, because the window
     /// is behind somebody's browser or because Reduce Motion is on, and both marks have a resting
@@ -71,74 +81,31 @@ final class BusyPulse {
     /// anything is running.
     private(set) var isTicking = false
 
-    /// Which way the light is travelling: towards the far end of the rule, or back to the near
-    /// one.
+    /// The instant the current run of the heartbeat began, on Core Animation's clock.
     ///
-    /// A direction rather than a position, because the two ends are all Core Animation needs. It
-    /// is handed the end the light is going to and interpolates the whole crossing itself, and
-    /// flipping this is the whole of what turns the light round. The same curve runs on both
-    /// legs, so the light reaches an end with its speed already at zero and leaves it the same
-    /// way: the turn is two halves of one movement rather than two passes stitched together.
+    /// Every mark's animation is phased off this and nothing else, which is what puts them on one
+    /// heartbeat. A row that appears ten seconds into a run reads the same number the first row
+    /// read and lands mid stride beside it, because a repeating `CAAnimation` whose `beginTime` is
+    /// already in the past is not late, it is simply further through its cycle.
     ///
-    /// Published rather than derived from `tick` at the call site so that `RuleSweep`'s body runs
-    /// twice in a cycle instead of eight times. The rows have no equivalent because their figure
-    /// changes on every tick anyway.
-    private(set) var isSweepingOut = false
-
-    /// Which half of its wave the sidebar's figure is in.
-    ///
-    /// A boolean rather than a position, because the dots interpolate between its two values
-    /// rather than being placed by it. See `WorkspaceRunningGlyph`.
-    private(set) var isWaveHigh = false
-
-    @ObservationIgnored private var clock: Task<Void, Never>?
+    /// `CACurrentMediaTime()` rather than a `Date`, because that is the clock `CAAnimation`
+    /// measures `beginTime` on. It does not advance while the machine is asleep, which is the
+    /// behaviour wanted: a window that comes back from a lid close finds both marks where it left
+    /// them rather than somewhere a wall clock would have carried them.
+    private(set) var epoch: CFTimeInterval = 0
 
     private init() {}
 
-    /// Starts or stops the clock. Idempotent, so the driver can call it on every change without
-    /// checking whether anything moved.
+    /// Starts or stops the heartbeat. Idempotent, so the driver can call it on every change
+    /// without checking whether anything moved.
+    ///
+    /// Starting it is one assignment. There is no timer to arm and nothing wakes up afterwards:
+    /// the marks read `epoch` once each, build their animations from it, and the render server
+    /// does the rest.
     func setTicking(_ wanted: Bool) {
         guard wanted != isTicking else { return }
+        if wanted { epoch = CACurrentMediaTime() }
         isTicking = wanted
-        clock?.cancel()
-        clock = nil
-
-        guard wanted else {
-            // Left where the resting states expect to find it: the light back at the near end,
-            // and the figure at full strength rather than caught halfway down its own ramp.
-            isSweepingOut = false
-            isWaveHigh = false
-            tick = Self.sweepTicks - 1
-            return
-        }
-
-        // One short of the top, so the first tick is the one that starts a crossing. Without it
-        // the clock would begin already inside a travel, and an animation whose value did not
-        // change is an animation that never runs: the first crossing would be skipped and the
-        // light would sit at the near end of the rule for six seconds.
-        set(tick: Self.sweepTicks - 1)
-
-        clock = Task { [weak self] in
-            var next = ContinuousClock.now
-            while !Task.isCancelled {
-                next = next.advanced(by: Self.tickInterval)
-                try? await Task.sleep(until: next, clock: .continuous)
-                guard !Task.isCancelled, let self else { return }
-                self.set(tick: (self.tick + 1) % Self.sweepTicks)
-            }
-        }
-    }
-
-    /// Deadline driven rather than sleeping for the interval each time round, so a tick that is
-    /// served late does not push the next one out with it. The two marks stay in step with each
-    /// other whatever happens, because they read one counter, and this is what keeps that counter
-    /// in step with the clock on the wall.
-    private func set(tick newTick: Int) {
-        tick = newTick
-        let out = newTick < Self.passTicks
-        if out != isSweepingOut { isSweepingOut = out }
-        let high = newTick.isMultiple(of: 2)
-        if high != isWaveHigh { isWaveHigh = high }
     }
 }
 
@@ -173,8 +140,8 @@ struct BusyPulseDriver: ViewModifier {
 
     func body(content: Content) -> some View {
         // Reading the set is what subscribes this body to it, and the write that adds or removes
-        // an id is what brings the clock up and takes it down again. There is no poll here and no
-        // second flag: the last agent finishing is the same event everything else in the window
+        // an id is what brings the heartbeat up and takes it down again. There is no poll here and
+        // no second flag: the last agent finishing is the same event everything else in the window
         // hears.
         let isRunning = !app.runningWorkspaceIDs.isEmpty
         // `Snapshot.forcesBusyPulse` is false in every build anyone ships. See that property for
@@ -192,5 +159,91 @@ extension View {
     /// Runs the window's heartbeat while agents are working. See `BusyPulseDriver`.
     func runsBusyPulse(_ app: AppModel) -> some View {
         modifier(BusyPulseDriver(app: app))
+    }
+}
+
+// MARK: - Layers
+
+/// What both marks are made of: a layer-backed view that is handed a repeating `CAAnimation` once
+/// and then left alone.
+///
+/// This is the whole point of the rewrite, so it is worth being plain about what it buys. A
+/// `CAAnimation` added to a layer is copied into the render server, which interpolates it on the
+/// display's own clock. The application process is not involved in a frame of it. A SwiftUI
+/// `.animation(_:value:)` is the opposite: SwiftUI owns the interpolation, so every frame is a
+/// main thread wake, a view graph update and a display list render whose size is the window's, not
+/// the mark's.
+///
+/// Two rules keep an animation on the cheap side of that line, and both are followed by everything
+/// below:
+///
+/// - It repeats forever, so nothing has to restart it. `repeatCount` is infinite and
+///   `isRemovedOnCompletion` is false.
+/// - Its phase comes from an absolute `beginTime` rather than from the moment it was added, so two
+///   layers that started at different moments are still in step. `BusyPulse.epoch` is that
+///   instant, and a `beginTime` already in the past is exactly what puts a late arrival mid
+///   stride.
+///
+/// The colours are the other half. A `CALayer` holds a `CGColor`, which is one appearance's
+/// answer, where the palette's colours are `NSColor`s that answer per appearance. So every layer
+/// colour is resolved against the view's own `effectiveAppearance` and resolved again when that
+/// changes, which is what `viewDidChangeEffectiveAppearance` is doing in both views below. Without
+/// it the marks keep the colour they were built in and a window switched to dark draws the light
+/// in the light appearance's teal.
+class BusyPulseLayerView: NSView {
+    /// Layer backed from the first moment, because everything here is layer geometry and a view
+    /// that gains its layer later would have to build itself twice.
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.masksToBounds = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    /// Top left origin, so a sublayer's frame is written the way every other measurement in this
+    /// app is written. AppKit mirrors the layer geometry to match, so `y` grows downward for the
+    /// sublayers as well.
+    override var isFlipped: Bool { true }
+
+    /// Nothing here is drawn by AppKit, so nothing is redrawn when the window resizes.
+    override var wantsUpdateLayer: Bool { true }
+
+    /// Not part of any responder chain and not a hit target. The marks are a signal, not a
+    /// control, and the views they sit inside already say so.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
+    /// Overridden by each mark. Called on creation, on any configuration change, and whenever the
+    /// appearance changes under the view.
+    func applyColors() {}
+
+    /// Resolves a palette colour against this view's appearance, which is the only place a
+    /// `CGColor` may be taken from an `NSColor` that answers per appearance.
+    final func resolved(_ color: NSColor) -> CGColor {
+        var answer = color.cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            answer = color.cgColor
+        }
+        return answer
+    }
+
+    /// Adds an animation under a key, replacing whatever was there.
+    ///
+    /// `beginTime` is converted into the layer's own time space rather than used raw. They are the
+    /// same number for a layer nobody has given a speed or an offset to, which is every layer
+    /// here, and converting is what keeps that from being a thing to remember.
+    final func install(_ animation: CAAnimation, on target: CALayer, key: String, beginAt: CFTimeInterval) {
+        animation.beginTime = target.convertTime(beginAt, from: nil)
+        animation.repeatCount = .infinity
+        animation.isRemovedOnCompletion = false
+        animation.fillMode = .both
+        target.removeAnimation(forKey: key)
+        target.add(animation, forKey: key)
     }
 }

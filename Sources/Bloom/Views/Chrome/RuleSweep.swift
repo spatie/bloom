@@ -1,4 +1,5 @@
 import SwiftUI
+import QuartzCore
 import BloomCore
 
 /// How far the window's shared rule runs, so one light can travel the whole of it.
@@ -94,23 +95,31 @@ final class SharedRule {
 /// pass are eased, and the mirror is what turns it round.
 ///
 /// This does the same thing without the mirror, because a mirror would also reverse the gradient
-/// and the light is symmetric anyway. `BusyPulse.isSweepingOut` names the end the light is heading
-/// for and `Motion.sweep` is the ease, run unchanged on both legs. The light therefore arrives at
-/// an end with its speed at zero and leaves it with its speed at zero, which is the whole of why
-/// the turn does not read as a bounce off a wall.
+/// and the light is symmetric anyway. `autoreverses` on one eased crossing is what turns it round,
+/// and because `easeInEaseOut` is symmetric in time its reverse is itself: the return leg is the
+/// same curve, not a curve run backwards into a different shape. The light therefore arrives at an
+/// end with its speed at zero and leaves it with its speed at zero, which is the whole of why the
+/// turn does not read as a bounce off a wall.
 ///
 /// The turn happens *on* the rule. The old pass ran the light off both ends, because the return
 /// was a jump and a jump has to happen where it cannot be seen; there is no jump left to hide, so
-/// the light now travels between the two ends of the rule itself and the turn is something to
-/// look at rather than something that happened offstage.
+/// the light travels between the two ends of the rule itself and the turn is something to look at
+/// rather than something that happened offstage.
 ///
 /// # What it costs
 ///
-/// A `transform` on one 160 by 1 layer per segment, handed to Core Animation when a crossing
-/// starts and interpolated by the render server. This body runs twice in a six second cycle,
-/// because `BusyPulse.isSweepingOut` is published rather than derived from the tick. Nothing is
-/// repainted per frame: the gradient is a fixed one that is moved, not a moving one that is
-/// redrawn, which is the mistake the study named for this variation specifically.
+/// One `CABasicAnimation` on `position.x` of one 160 by 1 gradient layer per segment, added when
+/// the light appears and never touched again. Core Animation interpolates it in the render server,
+/// so the app is not woken for a frame of it, and this body runs when the rule's length changes
+/// and at no other time.
+///
+/// It used to be a SwiftUI `.offset` animated by `.animation(_:value:)`, restarted twice a cycle
+/// off a shared tick, and that is a different thing entirely: SwiftUI interpolates such an
+/// animation itself, on the main thread, re-rendering the display list of the whole hosting view
+/// once per display frame. Measured on a 120Hz panel with five agents running, four interleaved
+/// passes against this version back to back: the two marks between them cost a median of 2.96
+/// seconds of CPU every 15, where the pair now costs 0.13 against a floor of 0.20 with the
+/// heartbeat off entirely. See `BusyPulse` for what Instruments said about where the 2.96 went.
 struct RuleSweep: View {
     /// Which piece of the rule this is. It decides where along the rule the light enters, and
     /// nothing else: both segments run the same animation over the same distance at the same
@@ -130,7 +139,7 @@ struct RuleSweep: View {
 
     /// How long the light is. Wide enough to read as a soft pass rather than as a dot, short
     /// enough that most of the rule is untouched at any moment.
-    private static let length: CGFloat = 160
+    static let length: CGFloat = 160
 
     /// What the rule holds while an agent is working and nothing is moving: Reduce Motion, or the
     /// window behind another app. A tint rather than nothing at all, because the signal has to
@@ -168,7 +177,12 @@ struct RuleSweep: View {
     @ViewBuilder
     private var content: some View {
         if pulse.isTicking {
-            light
+            // A layer rather than a view, and the resting state below is deliberately not one.
+            // Only the moving state has anything to gain from Core Animation, and keeping the
+            // still one in SwiftUI is what lets `ImageRenderer` still draw a rule that is not
+            // sweeping. See `Snapshot`, which cannot draw an `NSViewRepresentable` at all.
+            SweepLight(travel: rule.length, origin: origin, epoch: pulse.epoch)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             Rectangle()
                 .fill(Palette.accent)
@@ -178,24 +192,126 @@ struct RuleSweep: View {
         }
     }
 
-    private var light: some View {
-        let origin = segment == .tabStrip ? 0 : rule.inspectorOrigin
-        let isOut = pulse.isSweepingOut
+    /// Where this segment starts, measured along the whole rule. The light's travel is written in
+    /// the rule's coordinates and each segment subtracts its own start, which is what makes a
+    /// crossing continuous over the divider: the two layers are always at the same place on the
+    /// same line, one of them simply outside its own bounds and clipped away.
+    private var origin: CGFloat {
+        segment == .tabStrip ? 0 : rule.inspectorOrigin
+    }
+}
 
-        return LinearGradient(
-            colors: [.clear, Palette.accent, .clear], startPoint: .leading, endPoint: .trailing
-        )
-        .frame(width: Self.length, height: Metrics.hairline)
-        // What travels between the two ends of the rule is the bright core in the middle of the
-        // gradient, not the gradient's edge, which is why half its width comes off the offset.
-        // At an end the far half of the gradient hangs past the rule and the core sits on its
-        // last point: the light touches the end rather than leaving by it, and it is at its
-        // dimmest exactly where it is slowest.
-        .offset(x: (isOut ? rule.length : 0) - Self.length / 2 - origin)
-        // One curve, on both legs. `Motion.sweep` eases in and out, so the light reaches an end
-        // with its speed already at zero and leaves it the same way, and the turn is the two
-        // halves of one movement rather than two crossings stitched together. Nothing here is
-        // unanimated any more, because there is no longer a jump that had to be.
-        .animation(Motion.sweep, value: isOut)
+// MARK: - The light
+
+/// The moving half of `RuleSweep`: a gradient layer that crosses the rule and comes back.
+private struct SweepLight: NSViewRepresentable {
+    /// How far the light travels, which is the length of the whole rule rather than of this
+    /// segment.
+    var travel: CGFloat
+
+    /// Where this segment begins along that rule.
+    var origin: CGFloat
+
+    /// The heartbeat's start, which is the only thing that decides where in its crossing the light
+    /// is. See `BusyPulse.epoch`.
+    var epoch: CFTimeInterval
+
+    func makeNSView(context: Context) -> SweepLightView {
+        let view = SweepLightView(frame: .zero)
+        view.configure(travel: travel, origin: origin, epoch: epoch)
+        return view
+    }
+
+    func updateNSView(_ view: SweepLightView, context: Context) {
+        view.configure(travel: travel, origin: origin, epoch: epoch)
+    }
+
+    /// Fills whatever it is given. The strip and the inspector's tab row are different widths and
+    /// the light is placed inside by hand, so there is nothing here for SwiftUI to measure.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: SweepLightView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
+    }
+}
+
+/// A 160 by 1 gradient on a layer, crossing the rule under a repeating animation.
+final class SweepLightView: BusyPulseLayerView {
+    private let light = CAGradientLayer()
+
+    private var travel: CGFloat = 0
+    private var origin: CGFloat = 0
+    private var epoch: CFTimeInterval = 0
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+
+        // Horizontal, and symmetric about the middle. What actually travels is the bright core:
+        // the two ends are clear, so at an end of the rule the far half of the gradient hangs past
+        // it and the core sits on its last point. The light touches the end rather than leaving by
+        // it, and it is at its dimmest exactly where it is slowest.
+        light.startPoint = CGPoint(x: 0, y: 0.5)
+        light.endPoint = CGPoint(x: 1, y: 0.5)
+        light.locations = [0, 0.5, 1]
+        light.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        light.bounds = CGRect(x: 0, y: 0, width: RuleSweep.length, height: Metrics.hairline)
+        layer?.addSublayer(light)
+        applyColors()
+    }
+
+    override func applyColors() {
+        let accent = resolved(NSColor(Palette.accent))
+        let clear = accent.copy(alpha: 0) ?? accent
+        light.colors = [clear, accent, clear]
+    }
+
+    /// Places the light and, if anything about its travel changed, hands Core Animation a new
+    /// crossing.
+    ///
+    /// Guarded, because `updateNSView` runs on every pass SwiftUI makes over this view and a
+    /// window being resized makes a great many of them. Reinstalling an animation that is already
+    /// correct would be the per frame cost this whole change exists to remove, only in a different
+    /// place.
+    func configure(travel: CGFloat, origin: CGFloat, epoch: CFTimeInterval) {
+        guard travel != self.travel || origin != self.origin || epoch != self.epoch else { return }
+        self.travel = travel
+        self.origin = origin
+        self.epoch = epoch
+        install()
+    }
+
+    /// The layer sits on the rule, which is the last point of this view rather than the first: the
+    /// strip's own hairline is drawn at the bottom of the same box.
+    override func layout() {
+        super.layout()
+        // Position is set by the animation, so only `y` is answered here. Written straight onto
+        // the layer's model position with actions off, or AppKit's implicit animation would
+        // interpolate a resize into a slide.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        light.position = CGPoint(x: light.position.x, y: bounds.height - Metrics.hairline / 2)
+        CATransaction.commit()
+    }
+
+    private func install() {
+        let start = -origin
+        let end = travel - origin
+
+        // Left where a crossing begins, so removing the animation leaves the light on the rule's
+        // near end rather than wherever the last frame put it.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        light.position = CGPoint(x: start, y: bounds.height - Metrics.hairline / 2)
+        CATransaction.commit()
+
+        // One crossing, played forwards and then backwards forever. `easeInEaseOut` is symmetric,
+        // so the return leg is the same curve rather than its mirror, and the light's speed is
+        // zero on the frame it reaches either end. Three seconds out and three back is the six
+        // second cycle `BusyPulse` locks the sidebar's figure to.
+        let crossing = CABasicAnimation(keyPath: "position.x")
+        crossing.fromValue = start
+        crossing.toValue = end
+        crossing.duration = BusyPulse.pass
+        crossing.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        crossing.autoreverses = true
+        install(crossing, on: light, key: "sweep", beginAt: epoch)
     }
 }
