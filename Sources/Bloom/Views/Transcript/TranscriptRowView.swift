@@ -114,8 +114,7 @@ struct TranscriptRowView: View, Equatable {
 
         case .error:
             AgentErrorRowView(
-                stderr: json?["stderr"]?.stringValue ?? "",
-                status: json?["status"]?.intValue,
+                exit: AgentExit.read(json),
                 isExpanded: isExpanded,
                 onToggle: onToggle
             )

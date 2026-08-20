@@ -12,13 +12,21 @@ enum TextCap {
 
     /// Cuts a string at a line count without splitting it into an array first, because a tool
     /// result can be tens of megabytes and `split` on that allocates the whole thing twice.
-    static func cap(_ text: String, lines: Int) -> (text: String, truncated: Bool) {
+    ///
+    /// A character limit as well as a line one, because a line count is no bound at all on output
+    /// that arrives as a single line. A minified bundle in a crash dump is exactly that: one line,
+    /// twenty five thousand characters, and a line cap lets every one of them through.
+    static func cap(
+        _ text: String,
+        lines: Int,
+        characters characterLimit: Int = characterCap
+    ) -> (text: String, truncated: Bool) {
         var seen = 0
         var index = text.startIndex
         var characters = 0
 
         while index < text.endIndex {
-            if characters >= characterCap {
+            if characters >= min(characterLimit, characterCap) {
                 return (String(text[text.startIndex..<index]), true)
             }
             if text[index] == "\n" {
