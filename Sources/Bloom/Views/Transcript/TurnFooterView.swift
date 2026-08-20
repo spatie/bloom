@@ -26,18 +26,19 @@ struct TurnFooterView: View {
             // A rule that stops six points short of the text under it looks like a mistake, and
             // this one closes a turn, so it has to read as drawn on purpose.
             //
-            // The vertical air is the same rung on both sides, because this rule belongs to
-            // neither: it separates a reply from the reply's own footer, and a rule that sits
-            // nearer one side reads as a heading for that side. Six of its own above and six
-            // below; the paragraph above it already carries the prose row's own six point inset,
-            // and the footer row below adds its six, so both gaps are drawn at twelve. Measured
-            // off a window capture: ten and six before, twelve and twelve now.
+            // Nearer the line under it than the answer above it, and that is the whole point.
+            // The rule and the facts beneath it are one object, the thing that ends a turn, and
+            // drawn with equal air on both sides it read as a divider parked between two turns
+            // with a time floating next to it. Six of its own above and two below: the answer
+            // carries its own eight point rung, so fourteen points sit over the rule and eight
+            // under it, where before it was fourteen and twelve.
             Hairline()
                 .padding(.horizontal, TranscriptLayout.inset)
-                .padding(.vertical, TranscriptLayout.inset)
+                .padding(.top, TranscriptLayout.inset)
+                .padding(.bottom, TranscriptLayout.tight)
 
-            // A turn's cost and duration are the numbers a user goes looking for, so they sit a
-            // rung above the counts and timings that decorate a single row.
+            // A turn's duration is the number a user goes looking for, so it sits a rung above
+            // the counts and timings that decorate a single row.
             HStack(spacing: TranscriptLayout.block) {
                 Image(systemName: outcome.glyph)
                     .font(Typo.caption)
@@ -51,27 +52,17 @@ struct TurnFooterView: View {
                     .monospacedDigit()
                     .fixedSize()
 
-                if let cost = result?.usage.costUSD, cost > 0 {
-                    // Locale pinned to en_US, not merely the currency code, because the two are
-                    // separate decisions and only one of them was being made. Narrow presentation
-                    // fixes the symbol and leaves the separators alone, so on a Belgian region
-                    // this printed a dollar and a European comma together: $1.02 came out as
-                    // "1,020 $", and a session that cost $119 read as "119,000 $". The number is
-                    // dollars from the provider and it is shown as dollars are written.
-                    Text(cost, format: .currency(code: "USD")
-                        .locale(Locale(identifier: "en_US"))
-                        .presentation(.narrow)
-                        .precision(.fractionLength(3)))
-                        .font(Typo.caption)
-                        .foregroundStyle(Palette.textTertiary)
-                        .monospacedDigit()
-                        .fixedSize()
-                }
+                // `ec8400d` removed: what a turn cost is no longer printed here, and there is
+                // nowhere else in the window it appears. Three decimal places of a dollar is not
+                // a number anybody acts on between one turn and the next, and it was the third
+                // thing on a line that exists to say the turn ended and how long it took. The
+                // figure is still parsed and still stored per session, so a readout that answers
+                // a question somebody actually has can be built off it later.
 
                 // How many chips there is room for, rather than a fixed count. The chips are the
                 // only thing in this row that can be dropped, and the alternative was every one of
-                // them being squeezed to an empty rounded rectangle while the duration, the cost
-                // and the two buttons kept their width.
+                // them being squeezed to an empty rounded rectangle while the duration and the
+                // two buttons kept their width.
                 ViewThatFits(in: .horizontal) {
                     fileChips(limit: Self.visibleFileLimit)
                     fileChips(limit: 3)

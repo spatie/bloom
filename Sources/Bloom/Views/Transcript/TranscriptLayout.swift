@@ -23,6 +23,16 @@ enum TranscriptLayout {
     /// Between stacked blocks inside an expanded row.
     static let block = Metrics.spacingWide
 
+    /// The air under a turn's footer, before the next question.
+    ///
+    /// Twice the rung the answer keeps above the footer's rule, and the asymmetry is the only
+    /// thing that says which turn the time belongs to. The footer used to sit in the middle of a
+    /// gap it shared with the turn below, so a column of finished turns read as a time floating
+    /// between two questions rather than as the line that closes the one above it. Twice is as
+    /// far as this goes: at three the gap stops reading as a paragraph break and starts reading
+    /// as a row that failed to draw.
+    static let turnGap: CGFloat = block * 2
+
     /// The pitch of a one line row, and the transcript's own rather than the window's.
     ///
     /// A source list row is 28 points because it holds a name the user chose and clicks on all

@@ -85,9 +85,10 @@ struct TranscriptListView: View {
                         if TranscriptNoise.isHidden(row) {
                             EmptyView()
                         } else if row.kind == .result {
-                            // No top padding: the rule inside the footer carries its own air, and
-                            // a couple of points added out here only ever made the gap above the
-                            // rule differ from the gap below it.
+                            // No top padding: the rule inside the footer carries its own air.
+                            // The bottom is deliberately the wider of the two, so the footer
+                            // reads as belonging to the turn above rather than to the one below.
+                            // See `TranscriptLayout.turnGap`.
                             TurnFooterView(
                                 rows: transcript.rows,
                                 row: row,
@@ -95,7 +96,7 @@ struct TranscriptListView: View {
                                 permissionMode: transcript.session.permissionMode
                             )
                             .padding(.horizontal, TranscriptLayout.inset)
-                            .padding(.bottom, TranscriptLayout.block + TranscriptLayout.tight)
+                            .padding(.bottom, TranscriptLayout.turnGap)
                             .id(row.seq)
                         } else {
                             TranscriptRowView(
