@@ -50,6 +50,38 @@ final class FeedbackPresenter {
         self.sheet = sheet
     }
 
+    /// `--feedback-sheet` and `--prompt-sheet` raise one of these on a capture run.
+    ///
+    /// The same affordance `--create-sheet` is, and it exists for the same reason: a sheet cannot
+    /// be looked at by `ImageRenderer`, so without a way to raise one from the command line the
+    /// only way to see either of these was to ask a human for a screenshot. Both are drawn with a
+    /// draft in them, because an empty box shows the placeholder and nothing else.
+    ///
+    /// Debug builds only. A shipped copy has no business opening a feedback form because of a
+    /// command line flag.
+    func presentIfRequested() {
+        #if DEBUG
+        let arguments = CommandLine.arguments
+        if arguments.contains("--feedback-logs") {
+            // The same sheet with the log box already ticked, which is the state the View link
+            // exists for and the one worth being able to look at.
+            if message.isEmpty { message = "Something went wrong while a workspace was finishing." }
+            includesLogs = true
+            open(.report)
+        } else if arguments.contains("--feedback-sheet") {
+            if message.isEmpty {
+                message = "The composer loses its place when a workspace finishes while I am typing in it."
+            }
+            open(.report)
+        } else if arguments.contains("--prompt-sheet") {
+            if prompt.isEmpty {
+                prompt = "Give the sidebar a way to group workspaces by the project they came from."
+            }
+            open(.prompt)
+        }
+        #endif
+    }
+
     func close() {
         sheet = nil
     }

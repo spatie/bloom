@@ -742,9 +742,10 @@ public enum Feedback {
         /// The sentence under the checkbox, which says what "recent" means. A checkbox about
         /// sending data that cannot say how much data is a checkbox nobody can answer.
         public static let logsDetail =
-            "The last half hour of what Bloom wrote to its own log. Paths, addresses and anything "
-                + "that looks like a credential are taken out, and so are your project, workspace "
-                + "and branch names. View shows exactly what would be sent."
+            "The last half hour of what Bloom wrote to its own log, and nothing else. Paths, "
+                + "addresses and anything that looks like a credential are taken out, and so are "
+                + "your project, workspace and branch names. This is the text itself, not a "
+                + "sample of it."
         public static let logsView = "View"
         public static let logsTitle = "What would be sent"
 

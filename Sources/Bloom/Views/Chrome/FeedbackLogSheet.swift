@@ -33,14 +33,20 @@ struct FeedbackLogSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            ScrollView([.vertical, .horizontal]) {
+            // Vertical only, so a long line wraps instead of running off the side. A horizontal
+            // axis as well would make the box scrollable in two directions, and it would also
+            // undo the alignment below: a scrollable axis is an infinite one, so `maxWidth` and
+            // `maxHeight` stop meaning anything and the excerpt floats in the middle of the box
+            // rather than starting at the top of it.
+            ScrollView(.vertical) {
                 Text(text.isEmpty ? AppLogExcerpt.empty : text)
                     .font(Typo.codeSmall)
                     .foregroundStyle(Palette.textPrimary)
                     .textSelection(.enabled)
                     .padding(Metrics.inset)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .defaultScrollAnchor(.topLeading)
             .frame(height: Self.height)
             .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
             .overlay(

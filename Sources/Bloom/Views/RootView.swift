@@ -114,6 +114,9 @@ struct RootView: View {
         // a minute before it does anything at all, so nothing about it is part of a launch. See
         // `InstallPingService`.
         .task { InstallPingService.shared.start(app: app) }
+        // Debug builds only, and only when asked for on the command line: raises one of the two
+        // Help menu sheets so a capture run can look at it. See `FeedbackPresenter`.
+        .task { FeedbackPresenter.shared.presentIfRequested() }
         // The terminal panel lives at the bottom of the inspector now, so anything that asks for
         // the panel has to bring the inspector with it. Without this, Toggle Bottom Panel from the
         // menu bar while the inspector is closed does nothing at all.

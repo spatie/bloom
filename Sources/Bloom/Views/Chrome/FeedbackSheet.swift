@@ -79,6 +79,14 @@ struct FeedbackSheet: View {
             facts?.cancel()
             phase = .idle
         }
+        // `--feedback-logs` opens the excerpt straight away on a capture run, which is the only
+        // way a sheet on top of a sheet can be looked at without a human at the keyboard.
+        .task {
+            #if DEBUG
+            guard CommandLine.arguments.contains("--feedback-logs") else { return }
+            showLogs()
+            #endif
+        }
         .sheet(isPresented: $isShowingLogs) {
             FeedbackLogSheet(text: presenter.logs) { isShowingLogs = false }
         }

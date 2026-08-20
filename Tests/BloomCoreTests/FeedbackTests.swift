@@ -421,7 +421,8 @@ struct FeedbackTests {
     @Test("the logs checkbox says what it sends, and the sheet says how to reach a person")
     func copyDescribesWhatIsSent() {
         #expect(Feedback.Copy.logsDetail.contains("half hour"))
-        #expect(Feedback.Copy.logsDetail.contains("View"))
+        #expect(Feedback.Copy.logsDetail.contains("credential"))
+        #expect(Feedback.Copy.logsDetail.contains("branch names"))
         #expect(Feedback.Copy.reportBlurb.contains(Feedback.supportEmail))
         #expect(Feedback.Copy.environmentNote.contains("No file"))
         #expect(Feedback.Copy.promptNamePlaceholder.contains("not an email"))
