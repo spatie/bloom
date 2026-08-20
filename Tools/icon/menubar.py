@@ -58,7 +58,34 @@ hardest thing on the bar. `SWEEP` and the ten candidates under it are the
 answer: they turn the four things that make it so, one at a time, so that what
 is being chosen between is one variable rather than ten drawings. The comment
 above `SWEEP` says which four. Nothing under it is shipped until `CHOICE` says
-so, and the mark in the bar today is still `gather`.
+so.
+
+AND THEN THE OWNER DREW IT HIMSELF. Three rounds of candidates ended with him
+opening `designer.html` and turning the knobs, and `mine` at the foot of
+`PRESETS` is what came off that page, pasted unchanged. It answers the thin
+reading with weight rather than with a different gesture: arrivals tapered into
+the trunk so the joins have no needle, and a lane more than twice `gather`'s.
+
+`level` under it is `mine` at Dropbox's height, and that is what ships. At the
+18.00 points he drew it at, the mark measured taller than everything in his bar
+and he asked for it brought down; `level` is the same drawing with one number
+changed, so every proportion he set on the page is kept and only the scale
+moves. The weight survives the reduction with room to spare: a 3.14 point lane
+and a 3.67 point trunk, against 1.95 on `gather` and 2.76 on `two`, which was
+the heaviest thing in the round he called thin.
+
+WHAT THE BAR WILL ACTUALLY DRAW, measured rather than assumed, because the
+worry that decided the height was clipping and it turns out not to bite.
+`NSStatusBar.system.thickness` is 22 points and the button is 22 tall, and
+neither is the limit. The image is centred in the menu bar's own band, which is
+33 points on the notched built-in display and 24 elsewhere, and it is drawn
+whole until it exceeds that. A scratch status item carrying 19, 22, 24, 27, 30
+and 34 points of art gave back every one of them at full height; only the last,
+which needs a 37 point image, came back cut to 33 with its top and bottom gone.
+So the ceiling is the bar's height less the two bleeds: 30 points of art on the
+built-in display, 21 on a 24 point bar. Neither 16.00 nor the 18.00 he drew is
+anywhere near it, and the reason to choose between them is how the mark sits
+beside its neighbours, not what the bar will allow.
 
 THE 1x CASE IS THE ONE THAT DECIDES. On the built-in display a gap of 1.5 points
 is three pixels and everything survives. On an external 1x display it is one and
@@ -81,7 +108,7 @@ import lib9  # noqa: E402
 
 # The candidate that ships. One line, and the other fifteen stay in the file, so
 # swapping the mark is a rerun rather than a redraw.
-CHOICE = "gather"
+CHOICE = "level"
 
 # The mark's optical height in points, and the bleed left around it. The bleed is
 # part of the asset rather than of the layout: `NSStatusItem` centres the image
@@ -933,7 +960,54 @@ PRESETS = {
     "spine":  dict(lane=12.5, fill=0.90, width=120.0, land=0.74, stagger=0.22,
                    trunk=19.0 / 12.5),
     "tall":   dict(lane=14.0, fill=1.06, width=120.0, land=0.72, stagger=0.22),
+
+    # The one the owner built himself on `designer.html`, pasted off the page
+    # unchanged. "mine" is the name that page prints, not a description; every
+    # other name here says what the mark does and this one says who drew it.
+    #
+    # It is the biggest mark this file has ever shipped: 18.00 points of art in
+    # a 21.00 point image, where `gather` was 15.00 in 18.00 and the SF Symbol
+    # it replaced was 11.0. That is taller than Dropbox at 16.0 and 1Password at
+    # 16.0, which the docstring above argues against and he has overruled,
+    # because the complaint the whole round is answering is that the mark reads
+    # thin. The lane is 3.53 points and the trunk 4.13, against 1.95 and 1.95 on
+    # `gather`, so it is more than twice the weight, and the taper thins each
+    # arrival into the trunk so the joins carry no needle.
+    "mine":   dict(lane=19.60, fill=1.20, width=119.00,
+                   spread=1.00, land=0.89, stagger=0.22,
+                   t0=0.000, trunk=1.17, trunk_start=0.00,
+                   cap=1.00, lanes=3, cove_run=0.00,
+                   taper=-0.28),
 }
+
+
+# His mark at the height of the thing next to it.
+#
+# `mine` is 18.00 points of art. Measured in his own bar it came back at exactly
+# that, 18.00 tall and 21.00 wide, and it was the tallest thing there: Dropbox
+# beside it measures 16.5 at the ink edge and about 16.3 once the antialiased
+# rows are weighted, the 1Password ring 16.0, the database 17.5, the battery
+# 13.0. He asked for Dropbox's height instead, and this is it.
+#
+# ONE NUMBER MOVES, WHICH IS THE POINT. `fill` is the only difference from
+# `mine`, so the drawing is not redrawn at a new size: every proportion he set
+# on the page, the landings, the stagger, the taper, the trunk's ratio to a
+# lane, is carried over and the whole thing is scaled. It is the same lever
+# `calm` is `flow` at 87 percent with.
+#
+# AND THE WEIGHT SURVIVES IT, which was the thing worth checking, because the
+# complaint this whole round answers is that the mark reads thin and a shorter
+# mark is a lighter one. A lane is 19.60 box units, so at 16.00 points of art it
+# is 3.14 points and the trunk is 3.67. `gather`, the mark he called thin, has
+# 1.95 of each, and `two`, the heaviest of the five he was offered after that,
+# has 2.76. So this is still above everything he rejected, and height and weight
+# are not in tension here.
+#
+# 16.0 rather than the 16.5 measured at the ink edge: it is the figure two
+# earlier passes over his bar arrived at independently, it is within a third of
+# a point of the subpixel measurement, and a round number is easier to move.
+DROPBOX_HEIGHT = 16.0
+PRESETS["level"] = dict(PRESETS["mine"], fill=DROPBOX_HEIGHT / ART_HEIGHT)
 
 
 # How much of the box each mark fills, as a fraction of the standard art
