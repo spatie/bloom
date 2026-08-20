@@ -97,29 +97,11 @@ struct RepoSettingsView: View {
         }
         .background(Palette.windowBackground)
         .frame(minWidth: Self.minimumSize.width, minHeight: Self.minimumSize.height)
+        // There is one of these windows per project, so the window has to say which project it
+        // belongs to. It says it the way every other Mac window does, in its own title, above the
+        // tab bar rather than instead of it. See `RepoSettingsTitleBar`.
         .navigationTitle("\(repo.name) Settings")
-        // The tab bar sits where the title would be, and there is one of these windows per
-        // project, so without this a window would not say which project it belongs to. The mark
-        // comes along, which also puts a preview of it on the two tabs that cannot show one.
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                // A button rather than a label, because macOS draws a toolbar item as something
-                // pressable whatever is put in it. It does what the proxy icon on a document
-                // window does: it takes you to the folder.
-                Button {
-                    Reveal.inFinder(repo.path)
-                } label: {
-                    HStack(spacing: Metrics.spacingWide) {
-                        markTile(size: Metrics.repoIcon)
-
-                        Text(repo.name)
-                            .font(Typo.labelEmphasis)
-                            .lineLimit(1)
-                    }
-                }
-                .help("Reveal \(repo.name) in Finder")
-            }
-        }
+        .showsProjectInTitleBar(repo)
         .task {
             name = Self.nameWithoutMark(repo.name)
             mark = Self.mark(in: repo.name)
