@@ -91,7 +91,7 @@ public actor CodexClient {
     private var stderrTail: [String] = []
     private static let stderrTailLimit = 40
 
-    private let sink = EventSink()
+    private let sink = EventFanout<CodexEvent>()
 
     public init(
         configuration: Configuration,
@@ -111,12 +111,7 @@ public actor CodexClient {
         )
     }
 
-    /// Decoded events, as a fresh stream per caller.
-    ///
-    /// Nonisolated so a view can start consuming before the handshake has finished, which means it
-    /// reads no actor state: the sink is a reference box built at init. The same shape as
-    /// `AgentRunner.events`, and for the same reason: one shared stream would let the first
-    /// consumer to walk away finish it for everybody.
+    /// Decoded events, as a fresh stream per caller. See `EventFanout`.
     public nonisolated var events: AsyncStream<CodexEvent> { sink.stream() }
 
     public var isRunning: Bool { process?.isRunning ?? false }
@@ -370,51 +365,6 @@ public actor CodexClient {
         sink.finish()
         readTask = nil
         stderrTask = nil
-    }
-
-    // MARK: Event sink
-
-    /// Fans one stream of events out to however many consumers there are, and hands each of them
-    /// its own stream so one going away does not end the session for the rest.
-    private final class EventSink: @unchecked Sendable {
-        private let lock = NSLock()
-        private var continuations: [UUID: AsyncStream<CodexEvent>.Continuation] = [:]
-        private var finished = false
-
-        func stream() -> AsyncStream<CodexEvent> {
-            let id = UUID()
-            return AsyncStream(bufferingPolicy: .unbounded) { continuation in
-                lock.lock()
-                let alreadyFinished = finished
-                if !alreadyFinished { continuations[id] = continuation }
-                lock.unlock()
-
-                if alreadyFinished {
-                    continuation.finish()
-                    return
-                }
-                continuation.onTermination = { [weak self] _ in
-                    guard let self else { return }
-                    lock.lock(); continuations[id] = nil; lock.unlock()
-                }
-            }
-        }
-
-        func yield(_ event: CodexEvent) {
-            lock.lock()
-            let targets = Array(continuations.values)
-            lock.unlock()
-            for target in targets { target.yield(event) }
-        }
-
-        func finish() {
-            lock.lock()
-            finished = true
-            let targets = Array(continuations.values)
-            continuations.removeAll()
-            lock.unlock()
-            for target in targets { target.finish() }
-        }
     }
 }
 
