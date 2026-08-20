@@ -37,7 +37,10 @@ struct CenterPanesView: View {
     /// pane identified by its place in the list would hand a live shell or web view to the view
     /// that used to be its neighbour. Going from one pane to two, or back, rebuilds. That is a
     /// reshape the user asked for and can see, not something that happens on every switch.
-    static let soloPane = "solo"
+    /// Nonisolated because `SplitPaneFrame.soloIdentity` is what reads it, and that lives on a
+    /// value type from BloomCore that is on no actor at all. A `View` puts everything it declares
+    /// on the main actor, and a name that never changes has no business being one of them.
+    nonisolated static let soloPane = "solo"
 
     var body: some View {
         // Read here rather than inside the `GeometryReader`, so the dependency on the store is
