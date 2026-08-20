@@ -295,11 +295,31 @@ struct SourceEditor: NSViewRepresentable {
 ///
 /// A placeholder is drawn rather than inserted, so an empty script stays genuinely empty: the
 /// binding never sees the prompt text, and saving a field nobody touched cannot write it to a
-/// settings file. It is drawn from the text container's own inset, which is where the gutter has
-/// already pushed the first character to, so the prompt starts exactly where typing would.
+/// settings file.
+///
+/// It is drawn where the first character will be, and that point is asked of the text system
+/// rather than assembled from parts. `textContainerOrigin` is what the layout manager lays the
+/// container out at, so it already carries the inset the gutter is holding open, and
+/// `lineFragmentPadding` is the five points the container then takes off the front of every line.
+/// The prompt was drawn from the inset alone and sat five points to the left of the text it was
+/// standing in for, which is small enough to read as a rendering quirk and is not one.
 final class CodeTextView: NSTextView {
     var placeholder = "" {
         didSet { if placeholder != oldValue { needsDisplay = true } }
+    }
+
+    /// The prompt is painted from the inset, so a change to the inset has to repaint it.
+    ///
+    /// Text does not need this: moving the container relays out the glyphs, and a relayout redraws
+    /// itself. An empty view has no glyphs to relay out, so without this the prompt could stay
+    /// where it was last painted while the caret beside it had already moved. See
+    /// `LineNumberRuler.viewWillDraw`, which is what moves it.
+    override var textContainerInset: NSSize {
+        didSet {
+            if textContainerInset != oldValue, string.isEmpty, !placeholder.isEmpty {
+                needsDisplay = true
+            }
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -310,8 +330,10 @@ final class CodeTextView: NSTextView {
             .font: CodeMetrics.font,
             .foregroundColor: NSColor.tertiaryLabelColor,
         ]
+        let origin = textContainerOrigin
+        let padding = textContainer?.lineFragmentPadding ?? 0
         (placeholder as NSString).draw(
-            at: NSPoint(x: textContainerInset.width, y: textContainerInset.height),
+            at: NSPoint(x: origin.x + padding, y: origin.y),
             withAttributes: attributes
         )
     }

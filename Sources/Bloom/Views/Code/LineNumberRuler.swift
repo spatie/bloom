@@ -76,6 +76,27 @@ final class LineNumberRuler: NSRulerView {
         needsDisplay = true
     }
 
+    /// The last word on the inset, taken at the last moment anything can be known about it.
+    ///
+    /// The notification above is not enough on its own, and the case it misses is the one nobody
+    /// looks at: an editor that is still empty. `NSScrollView` reserves the ruler's width by moving
+    /// the clip view, and it does that on a tiling pass that arrives after the frame changes the
+    /// clip view does announce. In an editor with text in it the first text change runs the
+    /// measurement again, late enough, and everything lines up. In an empty one nothing does, so
+    /// the inset kept the value it was given while the clip view still started at zero: the gutter's
+    /// width counted twice, and the caret and the placeholder both sat a gutter's width out from
+    /// the first character's real position. It came back the moment anything was typed, which is
+    /// what made it look like a placeholder bug rather than an inset one.
+    ///
+    /// `viewWillDraw` is where AppKit invites this: it runs before the draw, not inside it, so
+    /// changing the inset here invalidates layout at a moment when that is allowed. The work is a
+    /// coordinate conversion and a comparison, and nothing is assigned unless the answer changed,
+    /// so a ruler that is already right costs a subtraction per draw and cannot loop.
+    override func viewWillDraw() {
+        alignTextToGutter()
+        super.viewWillDraw()
+    }
+
     @available(*, unavailable)
     required init(coder: NSCoder) { fatalError("not used") }
 
