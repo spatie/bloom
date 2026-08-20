@@ -156,7 +156,9 @@ public enum RepoIconDetector {
     /// asked afterwards precisely so that a `logo.svg` full of HTML is refused.
     static func origin(ofFileNamed name: String) -> RepoIconOrigin? {
         let lower = name.lowercased()
-        guard RepoIconFormat.fileFormats.contains(where: { lower.hasSuffix(".\($0.fileExtension)") })
+        guard RepoIconFormat.fileFormats
+            .flatMap(\.fileExtensions)
+            .contains(where: { lower.hasSuffix(".\($0)") })
         else { return nil }
         return origin(ofStem: (lower as NSString).deletingPathExtension)
     }
@@ -171,12 +173,19 @@ public enum RepoIconDetector {
 
         // `mark` and `logomark` are the square marks; `wordmark` deliberately is not one, and a
         // banner or an Open Graph card is a picture of the project rather than a mark for it.
-        let brandStems: Set<String> = [
-            "icon", "logo", "mark", "logomark", "appicon", "app-icon", "brand", "avatar",
-        ]
-        if brandStems.contains(stem) { return .brand }
-        for prefix in ["icon-", "icon_", "logo-", "logo_", "mark-", "app-icon-", "appicon-"]
-        where stem.hasPrefix(prefix) {
+        // `avatar` is here because a personal site's identity is a face rather than a glyph: on
+        // `freek.dev` the only artwork that is the site is `images/avatar-boxed.jpg`.
+        //
+        // Each of these counts on its own and as the start of a longer name, so `avatar-boxed`,
+        // `logo-dark` and `mark_512` are all found. Which of the longer names is the one to draw
+        // is the ranking's problem rather than this one's: see `decoration(ofFileNamed:)` and
+        // `RepoIconCandidate.shape`. Deliberately still absent are `wordmark`, `banner`, `hero`,
+        // `cover`, `og-image` and `screenshot`, every one of which is a picture of the project
+        // rather than a mark for it, and none of which get better by being cropped to a 16 point
+        // square.
+        let brandStems = ["icon", "logo", "mark", "logomark", "appicon", "app-icon", "brand", "avatar"]
+        for brand in brandStems
+        where stem == brand || stem.hasPrefix("\(brand)-") || stem.hasPrefix("\(brand)_") {
             return .brand
         }
         return nil
@@ -357,6 +366,7 @@ public enum RepoIconDetector {
             format: measurement.format,
             origin: origin,
             pixels: measurement.pixels,
+            aspect: measurement.aspect,
             decoration: decoration(ofFileNamed: path)
         )
     }
@@ -433,28 +443,38 @@ public enum RepoIconOrigin: String, Sendable, Hashable, Codable, CaseIterable {
 
 /// The file formats worth drawing a project by.
 ///
-/// Deliberately short. A favicon is never a JPEG and an app icon is never a GIF, so the formats
-/// that are only ever photographs are left out: a `logo.jpg` is a picture of a logo on a white
-/// rectangle, which in a 16 point tile is a white rectangle. `layered` is a macOS 26 Icon Composer
-/// document, which is a directory rather than a file.
+/// Deliberately short. A GIF is an animation and a TIFF is a scan, and neither is anybody's mark.
+/// `layered` is a macOS 26 Icon Composer document, which is a directory rather than a file.
+///
+/// JPEG was left out at first, on the grounds that a `logo.jpg` is a picture of a logo on a white
+/// rectangle and that a white rectangle is what a 16 point tile would show. That is true of a
+/// logo and false of a face: a personal site's mark is a photograph, it is the only artwork such
+/// a site has, and refusing the format meant answering `freek.dev` with initials while a 934
+/// pixel square portrait of its author sat in `public/images`. So it is in, at the bottom of the
+/// order, and the reasoning that kept it out is now carried by the rules that were always doing
+/// the real work: a picture more than twice as wide as it is tall is refused outright, and among
+/// what survives the squarer artwork wins.
 public enum RepoIconFormat: String, Sendable, Hashable, Codable, CaseIterable {
     case svg
     case icns
     case layered
     case png
     case ico
+    case jpeg
 
     /// The formats that are a single file found by extension. `layered` is a bundle and is found
     /// by the walk instead.
-    static var fileFormats: [RepoIconFormat] { [.svg, .png, .ico, .icns] }
+    static var fileFormats: [RepoIconFormat] { [.svg, .png, .ico, .icns, .jpeg] }
 
-    var fileExtension: String {
+    /// What the format is written as, including the second spelling where it has one.
+    var fileExtensions: [String] {
         switch self {
-        case .svg: "svg"
-        case .icns: "icns"
-        case .layered: "icon"
-        case .png: "png"
-        case .ico: "ico"
+        case .svg: ["svg"]
+        case .icns: ["icns"]
+        case .layered: ["icon"]
+        case .png: ["png"]
+        case .ico: ["ico"]
+        case .jpeg: ["jpg", "jpeg"]
         }
     }
 
@@ -462,7 +482,7 @@ public enum RepoIconFormat: String, Sendable, Hashable, Codable, CaseIterable {
     public var isRaster: Bool {
         switch self {
         case .svg, .layered: false
-        case .icns, .png, .ico: true
+        case .icns, .png, .ico, .jpeg: true
         }
     }
 
@@ -473,13 +493,16 @@ public enum RepoIconFormat: String, Sendable, Hashable, Codable, CaseIterable {
     /// them drawn for specific sizes, including the small ones a 16 point badge actually uses: it
     /// is the only raster format here that was authored for this exact problem. A layered document
     /// is vector inside, but Bloom has to compose it itself without the system's glass, shadow and
-    /// specular passes, so it sits below the flattened `.icns` that projects ship beside it.
+    /// specular passes, so it sits below the flattened `.icns` that projects ship beside it. JPEG
+    /// is last, because it cannot hold a transparent corner and because a project that has any of
+    /// the others has said something more deliberate with them.
     var tier: Int {
         switch self {
         case .svg: 5
         case .icns: 4
         case .layered: 3
         case .png, .ico: 2
+        case .jpeg: 1
         }
     }
 }
@@ -493,6 +516,9 @@ public struct RepoIconCandidate: Sendable, Hashable, Codable {
     /// The longest edge of the largest image in the file, in pixels. Zero for vector artwork,
     /// which has no such number and needs none.
     public var pixels: Int
+    /// The longer edge over the shorter one, or nil when the file does not state a size at all.
+    /// See `shape`, which is the only thing that reads it.
+    public var aspect: Double?
     /// How many words the name adds to the plainest name this file could have had, so that a
     /// dressed up name loses to the plain one beside it. See `decoration(ofFileNamed:)`.
     public var decoration: Int
@@ -502,22 +528,48 @@ public struct RepoIconCandidate: Sendable, Hashable, Codable {
         format: RepoIconFormat,
         origin: RepoIconOrigin,
         pixels: Int,
+        aspect: Double? = nil,
         decoration: Int = 0
     ) {
         self.path = path
         self.format = format
         self.origin = origin
         self.pixels = pixels
+        self.aspect = aspect
         self.decoration = decoration
+    }
+
+    /// How well the artwork fits a square tile, in three steps: square, nearly square, and oblong
+    /// but not oblong enough to have been refused outright.
+    ///
+    /// Steps rather than the ratio itself, because the ratio is a measurement and the difference
+    /// between 1.00 and 1.02 is the artist's business rather than a reason to prefer one file over
+    /// another. Comparing it directly would also let a hair of rounding overrule the name, which
+    /// is a real signal, on the strength of one that is not.
+    ///
+    /// A file that states no size at all counts as square. That is the same reading the aspect
+    /// gate already gives it: an SVG which declines to say is taken at its word rather than
+    /// guessed about, and guessing here would demote every hand written mark in the world.
+    var shape: Int {
+        guard let aspect else { return 0 }
+        if aspect <= 1.1 { return 0 }
+        if aspect <= 1.4 { return 1 }
+        return 2
     }
 
     /// A total order, so the best candidate is a fact rather than whichever the file system
     /// happened to list first.
     ///
-    /// In order: what the file is for, then how well the format draws at any size, then the plain
-    /// name over the dressed up one beside it, then how much artwork is in it, and finally the
-    /// path, which decides nothing about quality and exists only so the answer never changes
-    /// between runs.
+    /// In order: what the file is for, then how well the format draws at any size, then how well
+    /// it fits a square tile, then the plain name over the dressed up one beside it, then how much
+    /// artwork is in it, and finally the path, which decides nothing about quality and exists only
+    /// so the answer never changes between runs.
+    ///
+    /// The shape is above the name because it is a fact about how the badge will look and the name
+    /// is a hint about what the author meant. `avatar-boxed.jpg` beside `avatar.jpg` is exactly
+    /// that: the plainer name is the uncropped photograph, which would be letterboxed into a band
+    /// across the tile, and no rule about names could ever know that the word `boxed` is the one
+    /// that means "already cropped square". The picture says it without being asked.
     ///
     /// The name is compared before the size, and the two are arranged so that they cannot argue.
     /// A number in a name is not decoration, so `favicon.png` and `favicon-96x96.png` are equally
@@ -528,6 +580,7 @@ public struct RepoIconCandidate: Sendable, Hashable, Codable {
     public func isBetter(than other: RepoIconCandidate) -> Bool {
         if origin.rank != other.origin.rank { return origin.rank > other.origin.rank }
         if format.tier != other.format.tier { return format.tier > other.format.tier }
+        if shape != other.shape { return shape < other.shape }
         if decoration != other.decoration { return decoration < other.decoration }
         if pixels != other.pixels { return pixels > other.pixels }
         let depth = path.components(separatedBy: "/").count

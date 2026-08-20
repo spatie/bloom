@@ -47,6 +47,7 @@ enum RepoIconFile {
         if lower.hasSuffix(".ico") { return measureICO(handle) }
         if lower.hasSuffix(".icns") { return measureICNS(handle) }
         if lower.hasSuffix(".svg") { return measureSVG(handle) }
+        if lower.hasSuffix(".jpg") || lower.hasSuffix(".jpeg") { return measureJPEG(handle) }
         return nil
     }
 
@@ -95,6 +96,63 @@ enum RepoIconFile {
         guard largest > 0 else { return nil }
         return Measurement(format: .ico, pixels: largest)
     }
+
+    // MARK: - JPEG
+
+    /// `FFD8`, then a chain of segments, each stating its own length, until one of them is a frame
+    /// header and states the dimensions.
+    ///
+    /// Walked by length rather than searched for, because `FFC0` is two bytes that occur inside
+    /// EXIF data, inside a colour profile and inside a thumbnail as often as they occur as a
+    /// marker. A photograph puts a great deal in front of its first frame, so the walk seeks from
+    /// segment to segment and reads four bytes at each: a 4 MB photograph costs a handful of them.
+    ///
+    /// Nothing after the scan states a size, so a file whose frame header is missing measures as
+    /// nothing rather than being guessed at, which is what a truncated download looks like.
+    private static func measureJPEG(_ handle: FileHandle) -> Measurement? {
+        guard let start = read(handle, at: 0, count: 2), start == [0xFF, 0xD8] else { return nil }
+        let end = (try? handle.seekToEnd()) ?? 0
+
+        var offset: UInt64 = 2
+        while offset + 4 <= end {
+            guard let head = read(handle, at: offset, count: 4), head.count == 4 else { return nil }
+            guard head[0] == 0xFF else { return nil }
+            let marker = head[1]
+
+            // Padding between segments is written as a run of 0xFF.
+            if marker == 0xFF { offset += 1; continue }
+            // The markers that carry nothing, so there is no length to skip by.
+            if marker == 0x01 || (0xD0...0xD8).contains(marker) { offset += 2; continue }
+            // The scan is the pixels, and the end is the end.
+            if marker == 0xDA || marker == 0xD9 { return nil }
+
+            if frameMarkers.contains(marker) {
+                guard let frame = read(handle, at: offset + 4, count: 5), frame.count == 5
+                else { return nil }
+                let height = Int(frame[1]) << 8 | Int(frame[2])
+                let width = Int(frame[3]) << 8 | Int(frame[4])
+                guard width > 0, height > 0 else { return nil }
+                return Measurement(
+                    format: .jpeg,
+                    pixels: max(width, height),
+                    aspect: Double(max(width, height)) / Double(min(width, height))
+                )
+            }
+
+            let length = UInt64(Int(head[2]) << 8 | Int(head[3]))
+            guard length >= 2 else { return nil }
+            offset += 2 + length
+        }
+        return nil
+    }
+
+    /// The markers that begin a frame and therefore state its width and height. Baseline,
+    /// progressive, lossless and the arithmetic coded spellings of each. `C4`, `C8` and `CC` sit
+    /// in the same range and are a Huffman table, an extension and an arithmetic table: they carry
+    /// no dimensions and are skipped by length like any other segment.
+    private static let frameMarkers: Set<UInt8> = [
+        0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+    ]
 
     // MARK: - ICNS
 

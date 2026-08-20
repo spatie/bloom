@@ -79,6 +79,22 @@ struct RepoIconDetectorTests {
         return data
     }
 
+    /// A JFIF header and a baseline frame stating the size, with an `APP0` segment in front of it
+    /// so the walk has to skip a segment by its length to get there, which is the part that goes
+    /// wrong when it is written by pattern matching instead.
+    private func jpeg(_ width: Int, _ height: Int) -> Data {
+        var data = Data([0xFF, 0xD8])
+        data.append(contentsOf: [0xFF, 0xE0, 0x00, 0x10])
+        data.append(Data("JFIF".utf8))
+        data.append(contentsOf: [0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00])
+        data.append(contentsOf: [0xFF, 0xC0, 0x00, 0x0B, 0x08])
+        data.append(contentsOf: [UInt8(height >> 8 & 0xFF), UInt8(height & 0xFF)])
+        data.append(contentsOf: [UInt8(width >> 8 & 0xFF), UInt8(width & 0xFF)])
+        data.append(contentsOf: [0x01, 0x01, 0x11, 0x00])
+        data.append(contentsOf: [0xFF, 0xD9])
+        return data
+    }
+
     private func svgData(_ body: String = "<rect/>") -> Data {
         Data("<?xml version=\"1.0\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\">\(body)</svg>".utf8)
     }
@@ -268,6 +284,89 @@ struct RepoIconDetectorTests {
         #expect(name(of: RepoIconDetector.detect(in: touch)) == "apple-touch-icon.png")
     }
 
+    @Test("a site whose identity is a photograph is answered with the square crop of it")
+    func personalSite() throws {
+        // The shape of the owner's `freek.dev`: the only file called `favicon` is the 16 pixel one
+        // browsers have always asked for, which the floor refuses, and what the site actually looks
+        // like is his face. Two copies of it, and the difference between them is not the name or
+        // the size but the crop.
+        let root = try repository([
+            "public/favicon.ico": ico([16]),
+            "public/images/avatar.jpg": jpeg(1400, 934),
+            "public/images/avatar-boxed.jpg": jpeg(934, 934),
+            "public/images/404.png": png(600, 400),
+            "public/images/algolia.svg": svgData(),
+        ])
+
+        let best = RepoIconDetector.detect(in: root)
+        #expect(name(of: best) == "avatar-boxed.jpg")
+        #expect(best?.format == .jpeg)
+
+        // The uncropped one is still found and still second: it is the same artwork, and a project
+        // that only had that one would rather have it than a pair of letters.
+        #expect(
+            RepoIconDetector.candidates(in: root).map { ($0.path as NSString).lastPathComponent }
+                == ["avatar-boxed.jpg", "avatar.jpg"]
+        )
+
+        // And a site that has a real favicon is answered with it rather than with a face. The
+        // favicon is the file the project nominates as its mark; the avatar is what to draw when
+        // it has nominated nothing.
+        let both = try repository([
+            "public/favicon.svg": svgData(),
+            "public/images/avatar-boxed.jpg": jpeg(934, 934),
+        ])
+        #expect(name(of: RepoIconDetector.detect(in: both)) == "favicon.svg")
+    }
+
+    @Test("the squarer of two pieces of the same artwork wins")
+    func squareness() throws {
+        // Above the name, because the shape is a fact about how the tile will look and the name is
+        // a hint about what the author meant. No rule about words could know that `boxed` is the
+        // one that means "already cropped".
+        let root = try repository([
+            "public/logo.png": png(1400, 934),
+            "public/logo-square.png": png(512, 512),
+        ])
+        #expect(name(of: RepoIconDetector.detect(in: root)) == "logo-square.png")
+
+        // Below the format, because a wonky vector still draws cleanly at every size and a square
+        // photograph does not.
+        let formats = try repository([
+            "public/logo.svg": Data("<svg viewBox=\"0 0 300 200\"><rect/></svg>".utf8),
+            "public/logo-square.png": png(512, 512),
+        ])
+        #expect(name(of: RepoIconDetector.detect(in: formats)) == "logo.svg")
+
+        // A hair off square is not a reason to prefer anything: within a step, the plainer name
+        // still decides.
+        let hair = try repository([
+            "public/icon.png": png(500, 496),
+            "public/icon-dark.png": png(500, 500),
+        ])
+        #expect(name(of: RepoIconDetector.detect(in: hair)) == "icon.png")
+    }
+
+    @Test("a photograph is measured from its frame header, however much is in front of it")
+    func jpegHeaders() throws {
+        let root = try repository(["public/avatar.jpg": jpeg(934, 934)])
+        #expect(RepoIconDetector.detect(in: root)?.pixels == 934)
+
+        // Both spellings of the extension.
+        let long = try repository(["public/avatar.jpeg": jpeg(934, 934)])
+        #expect(name(of: RepoIconDetector.detect(in: long)) == "avatar.jpeg")
+
+        // A file that never reaches a frame header is a truncated download, not a 16 point mark.
+        let truncated = try repository(["public/avatar.jpg": Data([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10])])
+        #expect(RepoIconDetector.detect(in: truncated) == nil)
+
+        // And the rules that were always doing the work still hold for it: too small, or a band.
+        let small = try repository(["public/avatar.jpg": jpeg(24, 24)])
+        #expect(RepoIconDetector.detect(in: small) == nil)
+        let banner = try repository(["public/logo.jpg": jpeg(1200, 400)])
+        #expect(RepoIconDetector.detect(in: banner) == nil)
+    }
+
     // MARK: - Nothing worth drawing
 
     @Test("a repository with nothing in it keeps its monogram")
@@ -416,6 +515,15 @@ struct RepoIconDetectorTests {
             ".build/debug/Bloom.app/Contents/Resources/AppIcon.icns": icns(["ic10"]),
             "Pods/Thing/Assets.xcassets/AppIcon.appiconset/icon-1024.png": png(1024, 1024),
             ".git/hooks/logo.svg": svgData(),
+            // What a Laravel site's `public` folder really holds: every package that publishes
+            // assets drops its own artwork, and its own manifest, into `public/vendor`. Horizon's
+            // icon in `freek.dev` is the exact file this must never answer with.
+            "public/vendor/horizon/favicon.png": png(512, 512),
+            "public/vendor/horizon/manifest.json": Data(
+                #"{"icons":[{"src":"/vendor/horizon/img/horizon.svg"}]}"#.utf8
+            ),
+            "public/vendor/horizon/img/horizon.svg": svgData(),
+            "public/storage/uploads/avatar.jpg": jpeg(1024, 1024),
         ])
         #expect(RepoIconDetector.candidates(in: root).isEmpty)
     }
