@@ -66,7 +66,11 @@ final class TranscriptModel {
     private(set) var statusLabel: String?
 
     var draft = ""
-    var scrollTargetSeq: Int?
+
+    /// Bumped whenever something outside the list asks it to go back to the newest row. A counter
+    /// rather than a flag, so two requests in a row are two requests, and the list has nothing to
+    /// clear afterwards. See `jumpToLiveEnd`.
+    private(set) var liveEndRequests = 0
 
     private var runner: AgentRunner?
     private var pumpTask: Task<Void, Never>?
@@ -126,10 +130,6 @@ final class TranscriptModel {
 
     // MARK: - Unread
 
-    var unreadCount: Int {
-        rows.count { $0.seq > session.lastReadSeq }
-    }
-
     var firstUnreadSeq: Int? {
         rows.first { $0.seq > session.lastReadSeq }?.seq
     }
@@ -170,8 +170,14 @@ final class TranscriptModel {
         await refreshSession()
     }
 
-    func jumpToNextUnread() {
-        scrollTargetSeq = firstUnreadSeq
+    /// Asks the list to go back to the newest row.
+    ///
+    /// The live end rather than a row, and that is the whole of what changed here. This used to
+    /// name `firstUnreadSeq` and scroll to it, which asks the list for a position inside its lazy
+    /// stack, and a stack that is drawing the end of a long session does not necessarily hold that
+    /// row yet. An edge needs no identity and is always there.
+    func jumpToLiveEnd() {
+        liveEndRequests += 1
     }
 
     // MARK: - Sending

@@ -194,10 +194,12 @@ struct TranscriptListView: View {
             .onChange(of: transcript.rows.count, initial: true) { _, _ in
                 position(proxy)
             }
-            .onChange(of: transcript.scrollTargetSeq) { _, target in
-                guard let target else { return }
-                withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(target, anchor: .center) }
-                transcript.scrollTargetSeq = nil
+            // Asked for by the jump pill, and an edge rather than a row on purpose: the list is
+            // drawing the end of the session and may not be holding the row a seq names yet. Not
+            // animated, because the distance being covered is usually thousands of points and a
+            // fifth of a second of that is a blur rather than a sense of where you went.
+            .onChange(of: transcript.liveEndRequests) { _, _ in
+                scrollPosition.scrollTo(edge: .bottom)
             }
             .onChange(of: transcript.session.id) { _, _ in
                 didPosition = false
@@ -205,6 +207,10 @@ struct TranscriptListView: View {
                 // A session opens at its live end whatever the one being left was scrolled to,
                 // and the anchor is read before the new rows arrive.
                 geometry.isNearBottom = true
+                // And said out loud, because the report below is only made when the position
+                // CHANGES, and a pane that arrives on the live end and stays there changes
+                // nothing. Without this the composer keeps whatever the last session told it.
+                onScrolledUpChange?(false)
                 // Arriving somewhere means arriving on its tail. Cleared here as well as set in
                 // `task`, because leaving a session before its history had landed and coming
                 // straight back would otherwise find its own id still recorded and put four

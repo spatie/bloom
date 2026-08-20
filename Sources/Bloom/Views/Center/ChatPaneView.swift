@@ -12,9 +12,15 @@ struct ChatPaneView: View {
     var transcript: TranscriptModel
     @Bindable var model: WorkspaceModel
 
-    /// The transcript reports whether the user has scrolled away from the newest row. Until it
-    /// does, the unread pill is offered whenever there is anything unread.
-    @State private var isTranscriptScrolledUp = true
+    /// Whether the user has scrolled away from the newest row, which is the only thing the jump
+    /// pill is an answer to.
+    ///
+    /// False to start with, and that is the fix rather than a default. It used to be true, and the
+    /// transcript only reports a CHANGE of position, so a pane that opened on the live end (which
+    /// every pane does) was never told anything and sat on the initial value for the rest of the
+    /// launch. The pill was therefore drawn over a conversation the user was watching the end of.
+    /// `TranscriptListView` now also says so on arriving at a session, so the two cannot drift.
+    @State private var isTranscriptScrolledUp = false
 
     /// What the transcript and the composer were given between them, which is what caps how far
     /// the divider between the two can be dragged.

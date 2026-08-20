@@ -13,8 +13,10 @@ struct ComposerView: View {
     /// Optional so the composer can be dropped anywhere a transcript exists. When it is passed,
     /// the session list is kept in step with edits made here.
     var model: WorkspaceModel?
-    /// The transcript owns the scroll position, so it decides whether the unread pill is useful.
-    var isScrolledUp: Bool = true
+    /// The transcript owns the scroll position, so it decides whether the pill is useful. False
+    /// until it says otherwise, because every arrival lands on the live end and a pill offering to
+    /// take you where you already are is the state this used to be stuck in. See `ChatPaneView`.
+    var isScrolledUp: Bool = false
     /// How tall the region the transcript and the composer share is, so a drag can be stopped
     /// before the transcript is squeezed out of it. Zero reads as "not laid out yet, no cap".
     var availableHeight: CGFloat = 0
@@ -89,8 +91,8 @@ struct ComposerView: View {
             )
         }
         .overlay(alignment: .top) {
-            if isScrolledUp, transcript.unreadCount > 0 {
-                NextUnreadPill(count: transcript.unreadCount, action: transcript.jumpToNextUnread)
+            if isScrolledUp {
+                JumpToNewestPill(action: transcript.jumpToLiveEnd)
                     .alignmentGuide(.top) { $0[.bottom] + Metrics.spacing }
             }
         }
