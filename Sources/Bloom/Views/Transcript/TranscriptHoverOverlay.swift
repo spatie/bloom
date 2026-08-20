@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The preview card a transcript shows while the pointer rests on a file chip.
+/// The card a transcript shows while the pointer rests on a file chip, or on a tool row whose one
+/// line does not fit in it.
 ///
 /// **AppKit places it, this file does not.** The card is a `popover`, so `NSPopover` owns the
 /// anchoring to the chip, the flip above when there is no room below, the clamp inside the screen,
@@ -22,9 +23,11 @@ import SwiftUI
 /// cost, measured: 83ms between the hover committing and the card being on screen.
 ///
 /// It reads `host.request` and the enclosing list does not, which is what keeps a hover from
-/// re-running a body that holds a `ForEach` over every row in the session.
-struct FilePreviewOverlay: View {
-    var host: FilePreviewHost
+/// re-running a body that holds a `ForEach` over every row in the session. That matters more than
+/// it used to: the list draws the tail of a long session on arrival and the history lands behind
+/// it, and a hover that invalidated the list would be a hover that re-laid out four thousand rows.
+struct TranscriptHoverOverlay: View {
+    var host: TranscriptHoverHost
 
     /// How long the card's size has to stop changing before it is believed.
     ///
@@ -36,16 +39,16 @@ struct FilePreviewOverlay: View {
 
     /// The size the card came out at, and what it was measured FOR.
     ///
-    /// Keyed rather than a bare `CGSize`, because a size left over from the last file is worse
+    /// Keyed rather than a bare `CGSize`, because a size left over from the last card is worse
     /// than no size at all: it is a plausible number, so nothing suppresses the card, and it puts
     /// it somewhere wrong. Keyed on the pane's width too, since that is what caps the card.
     private struct Measurement: Hashable {
-        var file: String
+        var identity: String
         var availableWidth: CGFloat
         var size: CGSize
 
-        func fits(_ request: FilePreviewRequest, availableWidth: CGFloat) -> Bool {
-            file == request.attachment.path && self.availableWidth == availableWidth
+        func fits(_ request: TranscriptHoverRequest, availableWidth: CGFloat) -> Bool {
+            identity == request.card.identity && self.availableWidth == availableWidth
         }
     }
 
@@ -64,15 +67,16 @@ struct FilePreviewOverlay: View {
 
             ZStack(alignment: .topLeading) {
                 // The ruler: the same card, built at zero opacity to be measured and nothing else,
-                // and gone the moment the popover has a size to open at. It asks Quick Look for
-                // the same thumbnail the presented card will ask for, so the second request is a
-                // cache hit rather than a second render.
+                // and gone the moment the popover has a size to open at. A file card asks Quick
+                // Look for the same thumbnail the presented card will ask for, so the second
+                // request is a cache hit rather than a second render; a row card holds two strings
+                // the row already had and costs one text layout.
                 if let request, size == nil {
                     card(for: request, availableWidth: pane.width)
                         .fixedSize()
                         .onGeometryChange(for: CGSize.self) { $0.size } action: { newSize in
                             measured = Measurement(
-                                file: request.attachment.path,
+                                identity: request.card.identity,
                                 availableWidth: pane.width,
                                 size: newSize
                             )
@@ -91,10 +95,10 @@ struct FilePreviewOverlay: View {
                             set: { if !$0 { host.request = nil } }
                         ),
                         // In the pane's own coordinates, which is what this view fills. `.bottom`
-                        // asks for the card below the chip, the position that reads as belonging to
-                        // it; AppKit flips it above when there is no room, which is what a chip in
-                        // the last turn of a transcript always needs.
-                        attachmentAnchor: .rect(.rect(chip(for: request, in: pane))),
+                        // asks for the card below the anchor, the position that reads as belonging
+                        // to it; AppKit flips it above when there is no room, which is what
+                        // anything in the last turn of a transcript always needs.
+                        attachmentAnchor: .rect(.rect(anchor(for: request, in: pane))),
                         arrowEdge: .bottom
                     ) {
                         if let request, let size {
@@ -123,21 +127,25 @@ struct FilePreviewOverlay: View {
         .allowsHitTesting(false)
     }
 
-    private func card(for request: FilePreviewRequest, availableWidth: CGFloat) -> some View {
-        AttachmentCard(
-            attachment: request.attachment,
-            worktree: request.worktree,
-            availableWidth: availableWidth
-        )
+    @ViewBuilder
+    private func card(for request: TranscriptHoverRequest, availableWidth: CGFloat) -> some View {
+        switch request.card {
+        case .file(let attachment, let worktree):
+            AttachmentCard(
+                attachment: attachment, worktree: worktree, availableWidth: availableWidth
+            )
+        case .row(let title, let detail):
+            ToolRowCard(title: title, detail: detail, availableWidth: availableWidth)
+        }
     }
 
-    /// The chip's rectangle in the pane's own coordinates.
+    /// What the card is anchored to, in the pane's own coordinates: a chip, or a whole tool row.
     ///
-    /// `AttachmentChip.onPreview` reports it in window coordinates, which is the one space a row
-    /// twelve levels deep and this view can both name, so the pane's own origin comes off it here.
+    /// The hovered view reports it in window coordinates, which is the one space a row twelve
+    /// levels deep and this view can both name, so the pane's own origin comes off it here.
     /// A zero-sized rect in the middle when there is no request: an anchor is still asked for while
     /// the popover is closing, and the middle is the one place that cannot make it fly off an edge.
-    private func chip(for request: FilePreviewRequest?, in pane: CGRect) -> CGRect {
+    private func anchor(for request: TranscriptHoverRequest?, in pane: CGRect) -> CGRect {
         guard let request else {
             return CGRect(x: pane.width / 2, y: pane.height / 2, width: 0, height: 0)
         }

@@ -31,8 +31,8 @@ struct UserTurnRowView: View {
 
     @Environment(AppModel.self) private var app
     /// Where a hovered chip says it is, so the card is drawn over the scroll view rather than
-    /// inside a bubble that would clip it. See `FilePreviewOverlay`.
-    @Environment(\.filePreviewHost) private var previewHost
+    /// inside a bubble that would clip it. See `TranscriptHoverOverlay`.
+    @Environment(\.transcriptHoverHost) private var hoverHost
 
     /// How much of the pane a user turn always leaves empty on its left, so it reads as one side of
     /// a conversation even when it is short.
@@ -159,9 +159,14 @@ struct UserTurnRowView: View {
     /// points wide inside a lazy stack inside a scroll view, and it would be clipped at the first
     /// edge it met.
     private func preview(_ path: String, _ frame: CGRect?) {
-        previewHost?.request = frame.map {
-            FilePreviewRequest(attachment: .sent(path: path), worktree: workspace.path, frame: $0)
+        let file = TranscriptHoverCard.file(
+            attachment: .sent(path: path), worktree: workspace.path
+        )
+        guard let frame else {
+            if hoverHost?.request?.card == file { hoverHost?.request = nil }
+            return
         }
+        hoverHost?.request = TranscriptHoverRequest(card: file, frame: frame)
     }
 }
 
