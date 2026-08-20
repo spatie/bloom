@@ -140,8 +140,9 @@ final class BusyPulse {
 ///
 /// **Reduce Motion is off.** Dropped rather than slowed, matching `ActivityDot`, `RunningRing`,
 /// `RowArrival` and the pane animations. Both marks keep their meaning without it, which is the
-/// test the mockup applied: the rule holds a quiet accent tint and the row holds the whole six dot
-/// figure. Read here rather than at the marks, so a call site cannot keep half the mechanism.
+/// test the mockup applied: the rule holds a quiet accent tint and the row holds all three dots at
+/// full strength. Read here rather than at the marks, so a call site cannot keep half the
+/// mechanism.
 ///
 /// **The window is the front one.** The same rule `RunningRing` follows, for the same reason and
 /// a stronger one. An animation that never stops is what keeps a window off the idle path, and on
