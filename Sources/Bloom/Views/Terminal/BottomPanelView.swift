@@ -185,11 +185,17 @@ struct BottomPanelView: View {
     /// style for a control in a strip like this, and it sizes and tints the glyph, and draws the
     /// hover and pressed states, the way every other bar on the Mac does. Setting a font and then
     /// an `.imageScale(.small)` on top of it shrank the mark twice over.
+    ///
+    /// The slot it is drawn in is `tabStripControl`, which is also what keeps the plate
+    /// `.accessoryBar` draws off the rule beside it. Handed the whole slot as a frame, the plate
+    /// filled it and both of this strip's controls came to rest hard against a rule: the chevron
+    /// against the one before the first tab, the `+` against the one after the last. See
+    /// `TabStripControlBox`.
     private func iconButton(_ symbol: String, help: String, run: @escaping () -> Void) -> some View {
         Button(help, systemImage: symbol, action: run)
             .labelStyle(.iconOnly)
             .buttonStyle(.accessoryBar)
-            .frame(width: Metrics.barHeight, height: Metrics.barHeight)
+            .tabStripControl()
             .help(help)
     }
 
