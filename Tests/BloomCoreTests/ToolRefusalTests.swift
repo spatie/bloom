@@ -18,10 +18,54 @@ struct ToolRefusalTests {
         #expect(ToolRefusal(protocolKind: "automode-blocked") == .denied)
     }
 
+    /// The case the remedy was written for, and the one it used to miss.
+    ///
+    /// A deny rule in a settings file, and a permission mode that refuses a whole class of call,
+    /// are both stamped `permission-rule` rather than `user-rejected`. That is what the CLI's own
+    /// stamping function does with every decision that was not auto mode's: `user-rejected` when
+    /// the verdict came back `ask`, the three `automode-*` spellings when auto mode answered, and
+    /// `permission-rule` for everything else. It used to fall through to "This call did not run"
+    /// with no way out offered, which is precisely backwards.
+    @Test("a call stopped by a permission rule was denied, and says how to get through")
+    func permissionRule() {
+        #expect(ToolRefusal(protocolKind: "permission-rule") == .denied)
+        #expect(ToolRefusal.denied.remedy != nil)
+    }
+
+    /// `permission-denied` was matched here for a year and is not a value the CLI can produce.
+    /// The whole set is seven strings, read out of the 2.1.238 binary. If a later CLI adds one it
+    /// still lands somewhere sensible, which the unknown-kind test covers; what must not happen
+    /// again is a spelling nobody checked being treated as though it were live.
+    @Test("the invented spelling is not one the CLI can emit")
+    func inventedSpelling() {
+        #expect(!ToolRefusal.protocolKinds.contains("permission-denied"))
+        // It is not special-cased any more, so it reads as any other unrecognised kind.
+        #expect(ToolRefusal(protocolKind: "permission-denied") == .notRun)
+    }
+
     @Test("a call caught by the end of a turn was stopped")
     func stopped() {
         #expect(ToolRefusal(protocolKind: "interrupted") == .stopped)
         #expect(ToolRefusal(protocolKind: "cancelled") == .stopped)
+    }
+
+    /// Auto mode failing to answer is not somebody declining. There is nothing to widen and no
+    /// mode to pick, so these carry no remedy and must never read as a denial.
+    @Test("auto mode failing to reach a verdict is not a denial")
+    func automodeUnavailable() {
+        #expect(ToolRefusal(protocolKind: "automode-unavailable") == .notRun)
+        #expect(ToolRefusal(protocolKind: "automode-parsing-error") == .notRun)
+    }
+
+    /// Every value the field can hold is accounted for, and none of them reads as a crash.
+    @Test("the whole protocol set is classified")
+    func wholeSet() {
+        #expect(ToolRefusal.protocolKinds.count == 7)
+        for kind in ToolRefusal.protocolKinds {
+            #expect(ToolRefusal(protocolKind: kind) != nil, "\(kind) was read as a failure")
+        }
+        let denied = ToolRefusal.protocolKinds.filter { ToolRefusal(protocolKind: $0) == .denied }
+        #expect(denied == ["user-rejected", "permission-rule", "automode-blocked"])
     }
 
     @Test("a kind this version does not know still means the call never ran")

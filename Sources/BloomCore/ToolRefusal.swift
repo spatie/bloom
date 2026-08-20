@@ -13,11 +13,25 @@ import Foundation
 /// Measured over a real session: six denials all carried `user-rejected`, and the two genuine
 /// failures beside them (a failing test suite, a shell exiting 1) carried nothing.
 public enum ToolRefusal: Sendable, Hashable {
+    /// Every value the CLI can stamp on the field, in the CLI's own order. Kept here so the test
+    /// suite can assert that the whole set is accounted for rather than only the ones somebody
+    /// happened to think of.
+    public static let protocolKinds = [
+        "user-rejected",
+        "permission-rule",
+        "automode-blocked",
+        "automode-unavailable",
+        "automode-parsing-error",
+        "interrupted",
+        "cancelled",
+    ]
+
     /// Permission was not given. The permission mode declined it, or a person said no.
     case denied
     /// The call was still in flight when the turn was stopped.
     case stopped
-    /// The CLI says the call did not run, and names a reason this version does not know about.
+    /// The CLI says the call did not run, and the reason was nobody's decision: auto mode could
+    /// not reach a verdict, or the reason is a spelling this version does not know about.
     case notRun
 
     /// The word a collapsed row prints where a failure prints "error".
@@ -49,13 +63,37 @@ public enum ToolRefusal: Sendable, Hashable {
 
     /// The protocol's own spelling, as it appears in `tool_result_meta[].non_execution_kind`.
     ///
+    /// The field is a closed set of seven, read out of the 2.1.238 binary rather than out of
+    /// documentation:
+    ///
+    ///     ["user-rejected", "permission-rule", "automode-blocked",
+    ///      "automode-unavailable", "automode-parsing-error", "interrupted", "cancelled"]
+    ///
+    /// `permission-denied` was matched here and is not one of them, so it never fired. What did
+    /// fire, and fell through to `.notRun` with no remedy, was `permission-rule`: the CLI stamps
+    /// that on every refusal a permission rule or a permission mode produced, which is the exact
+    /// case the remedy was written for. The mapping is now the CLI's own, taken from the function
+    /// that stamps the field:
+    ///
+    /// - `user-rejected` when the decision came back `ask` and nobody was there to answer, or a
+    ///   person answered no.
+    /// - `permission-rule` when a rule or a mode settled it.
+    /// - `automode-blocked` when auto mode's classifier declined.
+    ///
+    /// Those three are decisions, and a decision is `.denied`. The CLI itself separates the other
+    /// four out as transient: `automode-unavailable` and `automode-parsing-error` mean the
+    /// classifier could not answer at all rather than that it said no, and `interrupted` and
+    /// `cancelled` mean the turn ended underneath the call. So the first two are `.notRun` and the
+    /// last two are `.stopped`.
+    ///
     /// An unrecognised kind still means the call did not run, because that is what the field is
     /// for, so it becomes `.notRun` rather than being read as a failure. An empty or missing kind
     /// is not a refusal at all and returns nil, which leaves the existing error rendering alone.
     public init?(protocolKind: String?) {
         switch protocolKind {
-        case "user-rejected", "automode-blocked", "permission-denied": self = .denied
+        case "user-rejected", "permission-rule", "automode-blocked": self = .denied
         case "interrupted", "cancelled", "canceled": self = .stopped
+        case "automode-unavailable", "automode-parsing-error": self = .notRun
         case .some(let kind) where !kind.isEmpty: self = .notRun
         default: return nil
         }
