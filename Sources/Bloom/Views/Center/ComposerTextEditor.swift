@@ -48,6 +48,8 @@ struct ComposerTextEditor: NSViewRepresentable {
     var attachmentPaths: [String] = []
     /// A click on a chip, which is a click on the file it names.
     var onOpenAttachment: @MainActor (String) -> Void = { _ in }
+    /// The chip the pointer has settled on, which is the card that is up.
+    var onHoverAttachment: @MainActor (String?) -> Void = { _ in }
     /// The way in for the one edit the composer makes that the user did not type: a file arriving
     /// after it has been copied. See `ComposerEditorHandle`.
     var handle: ComposerEditorHandle?
@@ -119,6 +121,9 @@ struct ComposerTextEditor: NSViewRepresentable {
         }
         textView.openAttachment = { [weak coordinator = context.coordinator] path in
             coordinator?.parent.onOpenAttachment(path)
+        }
+        textView.hoverAttachment = { [weak coordinator = context.coordinator] path in
+            coordinator?.parent.onHoverAttachment(path)
         }
         // A text view already accepts a file drag, which is exactly the behaviour being replaced:
         // it writes the path into the text. Registering the type explicitly means the drop is
@@ -342,13 +347,18 @@ final class ComposerEditorHandle {
 
     /// Writes files into the draft at `range`, measured in the draft's own units.
     ///
-    /// Returns false when there is no editor to write into, which is the caller's signal to write
-    /// the draft itself instead.
+    /// Returns false when there is no editor to write into, or when the one there is holding a
+    /// different draft from the one the caller measured `range` against. Both are the caller's
+    /// signal to write the draft itself instead, which is the same edit made without the text
+    /// system's undo: copying a file takes long enough that the composer can have been handed a
+    /// new draft in the meantime, and an offset into a sentence that is no longer there would put
+    /// the file in the wrong place or take a word away with it.
     @discardableResult
-    func insert(_ paths: [String], replacing range: NSRange) -> Bool {
+    func insert(_ paths: [String], replacing range: NSRange, into draft: String) -> Bool {
         guard !paths.isEmpty, let textView, let storage = textView.textStorage else { return false }
 
         let held = textView.attributedString()
+        guard ComposerChipText.draft(of: held) == draft else { return false }
         let string = held.string as NSString
         let start = min(
             ComposerChipText.storageOffset(forDraft: range.location, in: held), string.length
@@ -381,12 +391,22 @@ final class ComposerEditorHandle {
         }
         written.append(NSAttributedString(string: trail, attributes: plain))
 
-        // What makes it undoable. Everything below is the edit the text system was just told about.
-        guard textView.shouldChangeText(in: replaced, replacementString: nil) else { return false }
+        // What makes it undoable, and the string matters: `nil` means "only the attributes are
+        // changing", which registers an undo that puts the attributes back and leaves the file in
+        // the sentence. The characters actually going in are what has to be named, which for a
+        // chip is the one character it is made of.
+        // A file arriving is not part of whatever word was being typed a moment ago, so the typing
+        // group is closed on both sides of it: one press of Command+Z takes the file back out and
+        // leaves the sentence, and the next one takes back the word.
+        textView.breakUndoCoalescing()
+        guard textView.shouldChangeText(in: replaced, replacementString: written.string) else {
+            return false
+        }
         storage.beginEditing()
         storage.replaceCharacters(in: replaced, with: written)
         storage.endEditing()
         textView.didChangeText()
+        textView.breakUndoCoalescing()
         textView.undoManager?.setActionName(paths.count == 1 ? "Attach" : "Attach \(paths.count) Files")
         textView.setSelectedRange(NSRange(location: replaced.location + written.length, length: 0))
         return true

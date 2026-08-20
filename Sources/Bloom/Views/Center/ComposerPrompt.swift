@@ -99,6 +99,7 @@ struct ComposerPrompt<Footer: View>: View {
                 onAttach: attach(sources:replacing:),
                 attachmentPaths: attachments.map(\.path),
                 onOpenAttachment: open(path:),
+                onHoverAttachment: { hoveredPath = $0 },
                 handle: editor,
                 placeholder: placeholder
             )
@@ -160,6 +161,7 @@ struct ComposerPrompt<Footer: View>: View {
             PromptAttachmentStore.shared.load(sessionID: attachmentKey)
             adoptAttachmentsKeptBesideTheDraft()
             applyCaptureDraft()
+            applyCaptureAttachments()
         }
         .task(id: mentionRoot) { await slashCatalog.load(workspacePath: mentionRoot) }
         // Opening the menu is the only moment a stale list can be seen, so it is the only moment
@@ -220,6 +222,41 @@ struct ComposerPrompt<Footer: View>: View {
         // `--composer-preview` raises the command chip's card, which otherwise only a pointer
         // resting on the chip can do, and a capture run has no pointer either.
         isCommandPreviewed = arguments.contains("--composer-preview")
+        #endif
+    }
+
+    /// `--composer-attach <file>[,<file>] [--composer-caret <offset>]` attaches real files to the
+    /// draft on first appearance, at that offset, through exactly the door a drop uses.
+    ///
+    /// The only way to look at what a dropped file does to the box without a pointer, and the only
+    /// way to read the sentence that comes out of it without a keyboard. It copies for real, into
+    /// the real shielded folder, and writes the paths into the draft through the same
+    /// `attach(sources:replacing:)` a drag, a paste and the paperclip go through, so what a capture
+    /// shows is what a drop does. The draft it produces is printed, because the picture shows the
+    /// chip and the point of the chip is the sentence underneath it.
+    ///
+    /// Debug builds only, for the same reason `--composer-draft` is: a shipped copy has no
+    /// business writing files into somebody's checkout because of a command line flag.
+    private func applyCaptureAttachments() {
+        #if DEBUG
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: "--composer-attach"),
+              index + 1 < arguments.count else { return }
+
+        let files = arguments[index + 1]
+            .split(separator: ",")
+            .map { AttachmentSource.file(URL(filePath: String($0))) }
+        let at = arguments.firstIndex(of: "--composer-caret")
+            .map { $0 + 1 }
+            .flatMap { $0 < arguments.count ? Int(arguments[$0]) : nil } ?? caret
+
+        Task {
+            // After the draft this session was holding has been read back, or the file would be
+            // dropped into an empty box that is about to be filled from the database.
+            try? await Task.sleep(for: .seconds(2))
+            await add(files, replacing: NSRange(location: at, length: 0))
+            print("[composer-draft] \(text)")
+        }
         #endif
     }
 
@@ -445,7 +482,7 @@ struct ComposerPrompt<Footer: View>: View {
             sessionID: attachmentKey,
             workspace: attachmentRoot
         )
-        write(added.made.map(\.path), replacing: range)
+        write(added.paths, replacing: range)
         isFocused = true
         guard !added.failures.isEmpty else { return }
         app.alert = BloomAlert(
@@ -463,12 +500,13 @@ struct ComposerPrompt<Footer: View>: View {
     /// there now rather than to trap.
     private func write(_ paths: [String], replacing range: NSRange) {
         guard !paths.isEmpty else { return }
-        // Through the editor where there is one, so Command+Z takes the file back out in order
-        // with the words typed around it. The draft below is the same edit made without one,
-        // which is what happens when the copy outlived the box it was dropped into.
-        guard !editor.insert(paths, replacing: range) else { return }
-
+        // Through the editor where there is one holding this draft, so Command+Z takes the file
+        // back out in order with the words typed around it. The write below is the same edit made
+        // without the text system, which is what happens when the copy outlived the box it was
+        // dropped into or the draft moved on while it ran.
         var draft = command
+        guard !editor.insert(paths, replacing: range, into: draft.body) else { return }
+
         let body = draft.body as NSString
         let start = min(max(range.location, 0), body.length)
         let length = min(max(range.length, 0), body.length - start)

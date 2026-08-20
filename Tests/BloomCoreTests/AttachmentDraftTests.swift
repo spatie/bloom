@@ -51,8 +51,14 @@ struct AttachmentDraftTests {
         #expect(AttachmentDraft.parse(draft, paths: [Self.inWorktree]).paths == [Self.inWorktree])
     }
 
-    @Test("A copy of Bloom's own is recognised from the text alone")
+    @Test("A file in Bloom's own folder is recognised from the text alone")
     func copiesNeedNoTelling() {
+        // The pull request instructions, in both of the places they can be.
+        #expect(AttachmentDraft.isAttachment(".bloom/scratch/pr-instructions.md"))
+        #expect(AttachmentDraft.isAttachment(".bloom/pr-instructions.md"))
+        // Somebody else's file, which is only a chip when the composer vouches for it.
+        #expect(!AttachmentDraft.isAttachment("Sources/Bloom/Views/Center/ComposerView.swift"))
+        #expect(!AttachmentDraft.isAttachment(".bloom/"))
         #expect(AttachmentDraft.isAttachment(Self.copy))
         #expect(AttachmentDraft.isAttachment(Self.spaced))
         #expect(!AttachmentDraft.isAttachment(".bloom/attachments/9JVKW4"))

@@ -117,29 +117,31 @@ public struct AttachmentDraft: Equatable, Sendable {
         return AttachmentDraft(segments: segments)
     }
 
+    /// Bloom's own folder in somebody's checkout. A file inside it is a file this app either wrote
+    /// or was pointed at, and never one the user happened to name in a sentence.
+    public static let folder = ".bloom/"
+
     /// Whether a backticked run names a file this draft is carrying.
     ///
-    /// Two ways to be one. Either it is a file in one of Bloom's own scratch folders, which is
-    /// something this app wrote into somebody's checkout for an agent to read and can be
-    /// recognised from the text alone: a copy under `.bloom/attachments`, or the pull request
-    /// instructions under `.bloom/scratch`. Or the caller says so, which is how the composer
-    /// vouches for a file that already lived in the worktree and whose path looks like any other.
+    /// Two ways to be one. Either it is a file in Bloom's own folder, which needs no telling: a
+    /// copy under `.bloom/attachments`, the pull request instructions under `.bloom/scratch`, or
+    /// the project's own `.bloom/pr-instructions.md`. That is what lets a sent turn draw the same
+    /// chips as the composer without being handed a list. Or the caller says so, which is how the
+    /// composer vouches for a file that already lived in the worktree and whose path looks like
+    /// any other path.
     public static func isAttachment(_ content: String, known: Set<String> = []) -> Bool {
         guard !content.isEmpty, !content.contains("\n") else { return false }
         if known.contains(content) { return true }
 
-        if content.hasPrefix(copyPrefix) {
-            // A copy lives in an id folder of its own, so it is always two components deep. That
-            // is what keeps the id folder itself, which names nothing readable, out of it.
-            let rest = content.dropFirst(copyPrefix.count)
-            guard let slash = rest.firstIndex(of: "/") else { return false }
-            return slash != rest.startIndex && rest.index(after: slash) != rest.endIndex
-        }
+        guard content.hasPrefix(folder), !content.hasSuffix("/") else { return false }
 
-        let generated = WorktreeScratch.generated + "/"
-        guard content.hasPrefix(generated) else { return false }
-        let name = content.dropFirst(generated.count)
-        return !name.isEmpty && !name.contains("/")
+        guard content.hasPrefix(copyPrefix) else { return true }
+        // Inside the attachments folder a copy lives in an id folder of its own, so it is always
+        // two components deep. That is what keeps the id folder itself, which names nothing
+        // anybody can read, out of it.
+        let rest = content.dropFirst(copyPrefix.count)
+        guard let slash = rest.firstIndex(of: "/") else { return false }
+        return slash != rest.startIndex && rest.index(after: slash) != rest.endIndex
     }
 
     // MARK: - Writing

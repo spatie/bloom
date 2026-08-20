@@ -23,6 +23,14 @@ final class ComposerTextView: NSTextView {
     var onAttach: (@MainActor ([AttachmentSource], NSRange) -> Bool)?
     /// A click on a chip, which is a click on the file it names.
     var openAttachment: (@MainActor (String) -> Void)?
+    /// The chip the pointer has settled on, or nil when it has left one. What raises the card that
+    /// draws the file above the box.
+    var hoverAttachment: (@MainActor (String?) -> Void)?
+
+    /// Where the pointer is now, and the wait before it counts as settled.
+    fileprivate var hoveredPath: String?
+    fileprivate var hoverTask: Task<Void, Never>?
+    fileprivate var hoverArea: NSTrackingArea?
 
     override func keyDown(with event: NSEvent) {
         if keyHandler?(event, selectedRange()) == true { return }
@@ -220,5 +228,86 @@ private extension NSPasteboardItem {
         guard let string = string(forType: .fileURL),
               let url = URL(string: string), url.isFileURL else { return nil }
         return url.standardizedFileURL
+    }
+}
+
+
+// MARK: - The pointer on a chip
+
+extension ComposerTextView {
+    /// How long the pointer has to rest before the card opens. The same delay the chips above the
+    /// box used, for the same reason: crossing the line on the way to the send button should show
+    /// nothing.
+    private static var hoverDelay: Duration { .milliseconds(350) }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        guard hoverAttachment != nil else { return }
+        // `.inVisibleRect` keeps it right through every resize of a box that grows with its text,
+        // and `.mouseMoved` is what makes the moves arrive at all without the window being asked
+        // to deliver them to everybody.
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        hover(over: attachmentPath(at: convert(event.locationInWindow, from: nil)))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hover(over: nil)
+    }
+
+    /// The file under a point, or nil for anywhere that is not a chip.
+    ///
+    /// The glyph's own rectangle is checked rather than the insertion point the same coordinates
+    /// would give: an insertion index is the nearest gap between characters and exists everywhere
+    /// in the box, including the empty space to the right of the last word, which would raise a
+    /// card for a file the pointer is nowhere near.
+    private func attachmentPath(at point: CGPoint) -> String? {
+        guard let layout = layoutManager, let container = textContainer else { return nil }
+        let origin = textContainerOrigin
+        let inContainer = CGPoint(x: point.x - origin.x, y: point.y - origin.y)
+
+        var fraction: CGFloat = 0
+        let glyph = layout.glyphIndex(
+            for: inContainer, in: container, fractionOfDistanceThroughGlyph: &fraction
+        )
+        guard layout.numberOfGlyphs > glyph else { return nil }
+
+        let rect = layout.boundingRect(
+            forGlyphRange: NSRange(location: glyph, length: 1), in: container
+        )
+        guard rect.contains(inContainer) else { return nil }
+
+        let index = layout.characterIndexForGlyph(at: glyph)
+        guard index < (string as NSString).length else { return nil }
+        return textStorage?.attribute(
+            ComposerChipText.pathKey, at: index, effectiveRange: nil
+        ) as? String
+    }
+
+    private func hover(over path: String?) {
+        guard path != hoveredPath else { return }
+        hoveredPath = path
+        hoverTask?.cancel()
+
+        guard let path else {
+            hoverAttachment?(nil)
+            return
+        }
+        hoverTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.hoverDelay)
+            guard !Task.isCancelled, let self, self.hoveredPath == path else { return }
+            self.hoverAttachment?(path)
+        }
     }
 }

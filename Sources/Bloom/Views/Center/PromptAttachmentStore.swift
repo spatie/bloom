@@ -37,10 +37,16 @@ final class PromptAttachmentStore {
 
     // MARK: - Writing
 
-    /// What one batch of attaching came to: the chips it put up, and the sentences for the ones
-    /// it could not.
+    /// What one batch of attaching came to: the records it made, the paths to write into the
+    /// sentence, and the sentences for the ones it could not.
     struct Added: Sendable {
+        /// New records, for the files that were actually copied in.
         var made: [PromptAttachment] = []
+        /// What the draft should name, in the order it was handed over. Not the same list: a file
+        /// that was already attached is not copied again and makes no second record, but it is
+        /// still written where it was dropped, because dropping a file somewhere is asking for it
+        /// to be named there.
+        var paths: [String] = []
         /// Failures, as sentences to put in front of the user. A file that silently did not
         /// arrive is indistinguishable from a bug.
         var failures: [String] = []
@@ -57,41 +63,77 @@ final class PromptAttachmentStore {
         workspace: String
     ) async -> Added {
         let existing = attachments(for: sessionID)
-        var known = Set(existing.map(\.source).filter { !$0.isEmpty })
+        // Where a file that is already attached lives, so a second drop of it can be written into
+        // the sentence without copying anything.
+        var known: [String: String] = [:]
+        for attachment in existing where !attachment.source.isEmpty {
+            known[attachment.source] = attachment.path
+        }
         // Names already spoken for, so a second screenshot pasted inside the same second is not a
         // second chip reading exactly like the first. They cannot collide on disk, because every
         // attachment is written into its own six character folder, but two chips nobody can tell
         // apart is the same problem one step further on.
         var taken = Set(existing.map(\.filename))
-        var wanted: [AttachmentSource] = []
+        // One slot per thing handed over, in order, so the sentence names them the way they were
+        // dropped whether or not each one had to be copied.
+        enum Slot { case attached(String), fresh(AttachmentSource) }
+        var slots: [Slot] = []
 
         for source in sources {
-            // The same file dropped twice is one attachment. Checked before any copying, so a
-            // second drop of a two hundred megabyte file costs nothing at all.
+            // The same file dropped twice is one copy. Checked before any copying, so a second
+            // drop of a two hundred megabyte file costs nothing at all.
             if case .file(let url) = source {
                 let path = url.standardizedFileURL.path
-                guard known.insert(path).inserted else { continue }
+                if let already = known[path] {
+                    slots.append(.attached(already))
+                    continue
+                }
+                // Claimed now, so the same file named twice in one drop is copied once.
+                known[path] = ""
                 taken.insert(url.lastPathComponent)
-                wanted.append(source)
+                slots.append(.fresh(source))
                 continue
             }
             let name = PastedAttachment.uniqued(source.filename, avoiding: taken)
             taken.insert(name)
-            wanted.append(source.named(name))
+            slots.append(.fresh(source.named(name)))
         }
-        guard !wanted.isEmpty else { return Added() }
 
-        let result = await Task.detached(priority: .userInitiated) {
-            var added = Added()
-            for source in wanted {
+        let wanted = slots.compactMap { slot -> AttachmentSource? in
+            guard case .fresh(let source) = slot else { return nil }
+            return source
+        }
+
+        // Keyed by which of the wanted files it was, so a failure in the middle of a batch cannot
+        // shift the ones after it onto the wrong path.
+        let copied = await Task.detached(priority: .userInitiated) {
+            () -> ([Int: PromptAttachment], [String]) in
+            var made: [Int: PromptAttachment] = [:]
+            var failures: [String] = []
+            for (index, source) in wanted.enumerated() {
                 do {
-                    added.made.append(try AttachmentFiles.attach(source, workspace: workspace))
+                    made[index] = try AttachmentFiles.attach(source, workspace: workspace)
                 } catch {
-                    added.failures.append(error.readableMessage)
+                    failures.append(error.readableMessage)
                 }
             }
-            return added
+            return (made, failures)
         }.value
+
+        var result = Added(failures: copied.1)
+        var fresh = 0
+        for slot in slots {
+            switch slot {
+            case .attached(let path):
+                result.paths.append(path)
+            case .fresh:
+                defer { fresh += 1 }
+                // A file that failed is reported rather than named.
+                guard let made = copied.0[fresh] else { continue }
+                result.made.append(made)
+                result.paths.append(made.path)
+            }
+        }
 
         guard !result.made.isEmpty else { return result }
         apply(attachments(for: sessionID) + result.made, to: sessionID)

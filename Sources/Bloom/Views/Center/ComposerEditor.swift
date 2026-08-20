@@ -24,6 +24,8 @@ struct ComposerEditor: View {
     var attachmentPaths: [String] = []
     /// A click on one of those chips.
     var onOpenAttachment: @MainActor (String) -> Void = { _ in }
+    /// The pointer settling on one, which is what raises its card.
+    var onHoverAttachment: @MainActor (String?) -> Void = { _ in }
     /// How a file that has finished copying gets into the text as an edit the text system can
     /// undo. See `ComposerEditorHandle`.
     var handle: ComposerEditorHandle?
@@ -59,6 +61,7 @@ struct ComposerEditor: View {
                 onAttach: onAttach,
                 attachmentPaths: attachmentPaths,
                 onOpenAttachment: onOpenAttachment,
+                onHoverAttachment: onHoverAttachment,
                 handle: handle
             )
             .frame(height: max(height, ComposerTextEditor.lineHeight))
