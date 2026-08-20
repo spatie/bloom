@@ -52,8 +52,27 @@ struct WorkspaceEventsView: View {
 /// Quiet by default, which is the rule for everything in this list: a finished setup and a merge
 /// are one line each. A run in flight shows a few lines of its tail so that something is moving,
 /// and a failure shows more of it without being asked, because a failure is the case where the log
-/// IS the message. Everything else is behind the same disclosure a tool row uses, and the whole log
-/// is one click further on, in the tab that has a scroller for it.
+/// IS the message. The rest is behind the same disclosure a tool row uses.
+///
+/// **The row is where the log is read, and the link says so.** It used to say "Show the full log"
+/// and open the Setup tab in the panel below. `a98e055` is why it did: the link had been setting a
+/// tab that was already selected, so it did nothing at all, and pointing it at the panel and the
+/// inspector by name was what made it move the window. That fixed the wrong half. A reader looking
+/// at a failure in the transcript wants the rest of THAT, in the place they are already reading,
+/// not their window rearranged around a second copy of it somewhere else. So the link now opens
+/// the row, exactly as the caret beside it does, and its wording says which way it will go.
+///
+/// Both controls stay, and they can only ever say the same thing because they are the same piece
+/// of state. The caret is where a disclosure lives on every other row in this transcript; the link
+/// is what a reader who has just read twelve lines of a failure and wants more actually looks for,
+/// at the bottom of those twelve lines rather than up on the header.
+///
+/// The panel below still holds the whole log and is still selected by `runSetupThenSend` when a
+/// script starts, so nothing has been orphaned for a repository that has a setup script. One case
+/// loses its way in: a repository whose script has since been deleted has no Setup tab in the
+/// strip at all, and for that one the row is now the only route to the output. That is a better
+/// position than before, because the row unfolds to `TextCap.lineCap` lines where it used to stop
+/// at two hundred.
 struct WorkspaceEventRow: View {
     var event: WorkspaceEvent
     var isFirstThing: Bool
@@ -63,11 +82,6 @@ struct WorkspaceEventRow: View {
     @State private var isHovered = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// The panel below is opened from here, so the link that says it will do that can. See
-    /// `showFullLog`. Nothing in `body` reads it, so no row observes it and a setup that is
-    /// flushing output several times a second does not invalidate on anything else the window
-    /// does, exactly as in `ToolRowHeader`.
-    @Environment(AppModel.self) private var app
     /// What the conversation is set at, which is what a line of the tail is set at, and therefore
     /// what the window's fixed height is measured in. See `lineHeight`.
     @Environment(\.fontScale) private var fontScale
@@ -85,8 +99,13 @@ struct WorkspaceEventRow: View {
     private static let runningTail = 5
     /// A failure is read rather than glanced at.
     private static let failedTail = 12
-    /// What the disclosure opens onto. The rest stays in the panel below.
-    private static let expandedTail = 200
+    /// What the disclosure opens onto: the cap the transcript already puts on long output.
+    ///
+    /// Two hundred once, when opening the row was a preview and the whole log lived in the panel
+    /// below. The row is now where a log is read, so it holds what any long tool result holds.
+    /// `WorkspaceModel.setupLogLimit` keeps the log itself under two hundred thousand characters,
+    /// which is inside `TextCap.characterCap`, so the line count is the only cap that binds here.
+    private static let expandedTail = TextCap.lineCap
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -207,8 +226,31 @@ struct WorkspaceEventRow: View {
             .clipped()
             .animation(reduceMotion ? nil : Self.settle, value: lines)
         } else {
-            Text(tail)
+            Text(marked)
         }
+    }
+
+    /// The tail with only the failure in the alarm colour.
+    ///
+    /// A failed run used to be drawn entirely in `Palette.negative`, which told the reader that
+    /// everything the script did had gone wrong. In the run this was written against, three of
+    /// the seven lines are a Valet site being created, secured and served, and they worked. What
+    /// failed is the `psql` line and the question indented underneath it, and `SetupLogLine` is
+    /// what says which is which.
+    ///
+    /// One `AttributedString` rather than a `Text` per line, so a selection still runs across the
+    /// whole block and an expanded log stays one view however long it is.
+    private var marked: AttributedString {
+        guard event.isFailure, !event.failureSummary.isEmpty else { return AttributedString(tail) }
+
+        var output = AttributedString()
+        for line in SetupLogLine.lines(of: tail, failing: event.failureSummary) {
+            if line.id > 0 { output += AttributedString("\n") }
+            var run = AttributedString(line.text)
+            if line.isFailure { run.foregroundColor = Palette.negative }
+            output += run
+        }
+        return output
     }
 
     private var lines: [SetupTailLine] {
@@ -244,7 +286,9 @@ struct WorkspaceEventRow: View {
         VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
             tailText
                 .font(Typo.code)
-                .foregroundStyle(event.isFailure ? Palette.negative : Palette.textSecondary)
+                // Every line starts as ordinary output. The failure colours itself, in `marked`,
+                // and nothing else in the block is entitled to the alarm colour.
+                .foregroundStyle(Palette.textSecondary)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, TranscriptLayout.block)
@@ -257,14 +301,18 @@ struct WorkspaceEventRow: View {
                         .frame(width: TranscriptLayout.rule)
                 }
 
-            if event.kind == .setup, let model {
-                Button("Show the full log") { showFullLog(model) }
+            if event.kind == .setup, canExpand, isExpanded || hasMoreToShow {
+                Button(isExpanded ? "Show less" : "Show more of the log") { isExpanded.toggle() }
                     .buttonStyle(.link)
                     .font(Typo.caption)
                     .padding(.leading, TranscriptLayout.block)
-                    // Not "the Setup tab", which is only in the strip while the repository has
-                    // a setup script configured. The panel shows the log either way.
-                    .help("Opens the whole log in the panel below")
+                    .help(isExpanded ? "Folds the log back to its last lines" : "Unfolds the log in this row")
+                    // The caret above this row is the same control, already announced as one by
+                    // `ExpandableRowHeader` and already carrying the hint that says which way it
+                    // will go. Two buttons that do one thing should be one thing to a reader who
+                    // cannot see that they sit on the same row, so this half is the visible
+                    // affordance and the caret is the spoken one.
+                    .accessibilityHidden(true)
             }
         }
         .padding(.leading, TranscriptLayout.detailIndent)
@@ -272,23 +320,14 @@ struct WorkspaceEventRow: View {
         .padding(.bottom, TranscriptLayout.block)
     }
 
-    /// Opens the panel below onto this workspace's setup log.
+    /// Whether unfolding this row would actually show anything the reader cannot already see.
     ///
-    /// All three of these, and it used to be only the first. Selecting the tab on its own does
-    /// nothing at all in the case the link is actually read in, which is a setup that is still
-    /// running: `WorkspaceModel.runSetupThenSend` selects the Setup tab when it starts the
-    /// script, so the click assigned the tab that was already selected and the window did not
-    /// change by a pixel. That is what "clicking show the full log doesn't do anything" was. The
-    /// chevron beside it worked because it toggles state this row draws itself from.
-    ///
-    /// The panel and the inspector are then asked for by name rather than left to `RootView`,
-    /// which brings the inspector along when the panel's own switch CHANGES. An inspector closed
-    /// over a panel that was already open is a real arrangement, and there the follow-on never
-    /// fires and the link would still have opened nothing.
-    private func showFullLog(_ model: WorkspaceModel) {
-        model.bottomTab = .setup
-        app.isInspectorVisible = true
-        app.isBottomPanelVisible = true
+    /// A link offering more of a log that is four lines long is a link that does nothing, which is
+    /// what this row already learned once: see the note on the button below. The closed row shows
+    /// `failedTail` or `runningTail` lines depending on how the run ended, so the question is
+    /// simply whether the log is longer than that.
+    private var hasMoreToShow: Bool {
+        LogTail.lineCount(event.log) > (event.isFailure ? Self.failedTail : Self.runningTail)
     }
 }
 

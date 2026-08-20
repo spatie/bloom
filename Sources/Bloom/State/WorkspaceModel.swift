@@ -135,7 +135,8 @@ final class WorkspaceModel {
         let setup = WorkspaceEvent.setup(
             state: running ? .running : workspace.setupState,
             log: setupOutput,
-            durationMS: setupDurationMS
+            durationMS: setupDurationMS,
+            status: setupExitStatus
         )
         return [setup].compactMap { $0 } + events
     }
@@ -148,6 +149,14 @@ final class WorkspaceModel {
     /// all when it does not know one, which is a workspace reopened after the fact.
     var setupStartedAt: Date?
     var setupDurationMS: Int?
+
+    /// What the last setup script this launch watched exited with.
+    ///
+    /// Beside `setupDurationMS` and for the same reason: it is about this launch's run. A status
+    /// read back out of the database a week later would be answering a question nobody asked, and
+    /// a workspace reopened after the fact shows a row with no number in it rather than a number
+    /// that might be from a run somebody has since re-run.
+    var setupExitStatus: Int?
 
     // Layout.
 
@@ -378,6 +387,7 @@ final class WorkspaceModel {
             isRunningSetup = true
             setupStartedAt = .now
             setupDurationMS = nil
+            setupExitStatus = nil
             bottomTab = .setup
             setupOutput = ""
             // A machine with no free block left is not a reason to refuse to run setup. The script
@@ -398,7 +408,10 @@ final class WorkspaceModel {
             }
 
             let succeeded = await manager.runSetup(
-                workspace: workspace, repo: repo, port: port
+                workspace: workspace, repo: repo, port: port,
+                onExit: { [weak self] status in
+                    Task { @MainActor in self?.setupExitStatus = status }
+                }
             ) { line in
                 buffer.append(line)
             }

@@ -51,6 +51,11 @@ struct WorkspaceEvent: Identifiable, Equatable {
     var note: String = ""
     /// Output worth showing, if there is any. Only setup has this today.
     var log: String = ""
+    /// The line of `log` that says what failed, when something did. The row marks that line and
+    /// its continuations and leaves the rest of the output in the ordinary ink: a script that
+    /// created a symlink, restarted nginx and issued a certificate before it stopped is mostly
+    /// success, and painting all of it red said the opposite. See `SetupLogLine`.
+    var failureSummary: String = ""
     var durationMS: Int?
 
     var isRunning: Bool { outcome == .running }
@@ -97,7 +102,10 @@ struct WorkspaceEvent: Identifiable, Equatable {
     /// with the log a disclosure away, and that nothing has to be kept in step by hand. It also
     /// means a re-run replaces the line rather than appending a second one, which is right: a
     /// workspace has one setup, however many times it has been run.
-    static func setup(state: SetupState, log: String, durationMS: Int?) -> WorkspaceEvent? {
+    /// - Parameter status: what the script exited with, when this launch watched the run.
+    static func setup(
+        state: SetupState, log: String, durationMS: Int?, status: Int? = nil
+    ) -> WorkspaceEvent? {
         switch state {
         case .pending:
             // It has not started. A line saying so would appear in every workspace whose repo has
@@ -121,11 +129,19 @@ struct WorkspaceEvent: Identifiable, Equatable {
             )
 
         case .failed:
+            // Read rather than guessed at. `LogTail.lastLine` used to answer this, and the last
+            // line of a failed run is the failure only by luck: `psql` prints its error and then
+            // an indented question under it, so the row said "Is the server running on that host
+            // and accepting TCP/IP connections?" and never showed the line that said what had
+            // happened. See `SetupDiagnosis`, which is in the core and tested against that run.
+            let diagnosis = SetupDiagnosis.read(log: log, status: status)
             return WorkspaceEvent(
                 id: "setup", kind: .setup, outcome: .failed,
-                title: "Setup failed", detail: LogTail.lastLine(log),
-                note: SetupFailure.instruction,
-                log: log, durationMS: durationMS
+                title: diagnosis.title, detail: diagnosis.summary,
+                note: [diagnosis.sentence, SetupFailure.instruction]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " "),
+                log: log, failureSummary: diagnosis.summary, durationMS: durationMS
             )
 
         case .skipped:
