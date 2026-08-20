@@ -56,14 +56,15 @@ final class ComposerTextView: NSTextView {
         return super.performDragOperation(sender)
     }
 
+    // Both of these are asked again and again while the pointer moves, so they ask whether there
+    // is anything to take rather than taking it: reading the bytes here would copy a screenshot
+    // out of the drag on every frame of it.
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        Self.attachables(on: sender.draggingPasteboard).isEmpty
-            ? super.draggingEntered(sender) : .copy
+        Self.hasAttachables(on: sender.draggingPasteboard) ? .copy : super.draggingEntered(sender)
     }
 
     override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        Self.attachables(on: sender.draggingPasteboard).isEmpty
-            ? super.draggingUpdated(sender) : .copy
+        Self.hasAttachables(on: sender.draggingPasteboard) ? .copy : super.draggingUpdated(sender)
     }
 
     /// Command+V. A screenshot is the single most common thing anybody attaches, and it arrives on
@@ -100,7 +101,10 @@ final class ComposerTextView: NSTextView {
     override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
         if item.action == #selector(paste(_:)) || item.action == #selector(pasteAsPlainText(_:)) {
             if super.validateUserInterfaceItem(item) { return true }
-            return !Self.attachables(on: .general).isEmpty
+            // Whether there is something, never the something itself. Validation runs every time
+            // the Edit menu opens, and reading a fifty megabyte picture off the clipboard to
+            // decide whether a menu item is grey would be paid for by whoever opened the menu.
+            return Self.hasAttachables(on: .general)
         }
         return super.validateUserInterfaceItem(item)
     }
@@ -112,19 +116,12 @@ final class ComposerTextView: NSTextView {
     /// The rules are `PastedAttachment.plan`, in BloomCore, where they can be asserted on. This is
     /// the part that cannot be: turning an `NSPasteboard` into the two facts that decide, and then
     /// reading the bytes the decision asked for.
+    ///
+    /// Reading the bytes is the expensive half, so it is deliberately the last thing that happens
+    /// and the only caller that pays for it is a paste or a drop that has already landed.
     static func attachables(on pasteboard: NSPasteboard) -> [AttachmentSource] {
         let items = pasteboard.pasteboardItems ?? []
-        let offers = items.map { item in
-            PastedAttachment.Offer(
-                filePath: item.fileURL()?.path,
-                types: item.types.map(\.rawValue)
-            )
-        }
-        // Only whether there is text, never the text itself. A clipboard is the user's own
-        // business and nothing here needs to read what is on it.
-        let hasText = (pasteboard.string(forType: .string)?.isEmpty == false)
-
-        switch PastedAttachment.plan(items: offers, hasText: hasText) {
+        switch plan(for: items, on: pasteboard) {
         case .text:
             return []
         case .files(let paths):
@@ -147,6 +144,27 @@ final class ComposerTextView: NSTextView {
                 return .image(data, format: image.format, named: name)
             }
         }
+    }
+
+    /// Whether this pasteboard holds anything the composer would take, decided without reading a
+    /// single byte of it.
+    static func hasAttachables(on pasteboard: NSPasteboard) -> Bool {
+        plan(for: pasteboard.pasteboardItems ?? [], on: pasteboard) != .text
+    }
+
+    private static func plan(
+        for items: [NSPasteboardItem], on pasteboard: NSPasteboard
+    ) -> PastedAttachment.Plan {
+        let offers = items.map { item in
+            PastedAttachment.Offer(
+                filePath: item.fileURL()?.path,
+                types: item.types.map(\.rawValue)
+            )
+        }
+        // Whether there is text, never the text itself. A clipboard is the user's own business and
+        // nothing here has any reason to read what is on it.
+        let hasText = (pasteboard.string(forType: .string)?.isEmpty == false)
+        return PastedAttachment.plan(items: offers, hasText: hasText)
     }
 }
 

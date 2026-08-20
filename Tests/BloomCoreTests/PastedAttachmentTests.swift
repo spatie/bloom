@@ -169,6 +169,22 @@ struct PastedAttachmentTests {
         #expect(Set(names).count == names.count)
     }
 
+    /// The primitive under the counting, which the composer also uses on a name that arrived with
+    /// the picture rather than one it made up.
+    @Test("a taken name is counted rather than overwritten")
+    func uniquing() {
+        #expect(PastedAttachment.uniqued("shot.png", avoiding: []) == "shot.png")
+        #expect(PastedAttachment.uniqued("shot.png", avoiding: ["shot.png"]) == "shot 2.png")
+        #expect(PastedAttachment.uniqued("shot.png", avoiding: ["shot.png", "shot 2.png"]) == "shot 3.png")
+        // The number goes before the extension, so the file is still a PNG.
+        #expect(PastedAttachment.uniqued("shot.png", avoiding: ["shot.png"]).hasSuffix(".png"))
+        // A name with no extension is still a name.
+        #expect(PastedAttachment.uniqued("notes", avoiding: ["notes"]) == "notes 2")
+        // Dots in the middle belong to the name, not to the extension.
+        #expect(PastedAttachment.uniqued("Pasted 2026-08-20 at 22.29.20.png", avoiding: ["Pasted 2026-08-20 at 22.29.20.png"])
+            == "Pasted 2026-08-20 at 22.29.20 2.png")
+    }
+
     /// It is a filename, so nothing in it may change what a path means, and it has to sort by
     /// when it was taken rather than by how it reads.
     @Test("the name is a filename and sorts by time")
