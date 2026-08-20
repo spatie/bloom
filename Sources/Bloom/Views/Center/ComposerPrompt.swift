@@ -393,16 +393,22 @@ struct ComposerPrompt<Footer: View>: View {
     }
 
     private func add(_ sources: [AttachmentSource]) async {
-        let failures = await PromptAttachmentStore.shared.add(
+        let added = await PromptAttachmentStore.shared.add(
             sources,
             sessionID: attachmentKey,
-            workspace: attachmentRoot
+            workspace: attachmentRoot,
+            // The undo manager of the window this was pasted into, which is the one the text view
+            // is already registering its typing with. Read before the copy rather than after it,
+            // because by then the answer to "which window" is whichever one the user has moved to.
+            undo: NSApp.keyWindow?.undoManager
         )
         isFocused = true
-        guard !failures.isEmpty else { return }
+        guard !added.failures.isEmpty else { return }
         app.alert = BloomAlert(
-            title: failures.count == 1 ? "That file was not attached" : "Some files were not attached",
-            message: failures.joined(separator: "\n\n")
+            title: added.failures.count == 1
+                ? "That file was not attached"
+                : "Some files were not attached",
+            message: added.failures.joined(separator: "\n\n")
         )
     }
 

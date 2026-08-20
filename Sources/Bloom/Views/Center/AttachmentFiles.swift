@@ -14,9 +14,20 @@ enum AttachmentFiles {
     /// it would spend a gigabyte of the user's disk on a chip in a text box.
     static let maxByteCount = 100 * 1024 * 1024
 
+    /// The most Bloom will take off a clipboard before it has looked at it.
+    ///
+    /// The cap above is on what gets written, and a pasted picture is not always what was read:
+    /// TIFF is uncompressed, so a retina screenshot arrives as eighty megabytes and is written as
+    /// five. Rejecting it on the way in would refuse the ordinary case, so the size that counts is
+    /// the size after rewriting. This second, much higher ceiling is only about the rewriting
+    /// itself, which has to decode the whole picture into memory: past it, there is nothing worth
+    /// spending a gigabyte of somebody's RAM to find out.
+    static let maxPastedByteCount = 1024 * 1024 * 1024
+
     enum Failure: LocalizedError {
         case unreadable(String)
         case tooLarge(String, Int)
+        case tooLargeToPaste(String, Int)
         case copyFailed(String, String)
 
         var errorDescription: String? {
@@ -27,6 +38,15 @@ enum AttachmentFiles {
                 """
                 \(name) is \(Self.size(bytes)), and an attachment is copied into the worktree. \
                 Mention it with @ instead, or move it into the worktree yourself.
+                """
+            case .tooLargeToPaste(let name, let bytes):
+                // Deliberately not the sentence above. There is no file to mention with @ and
+                // nothing to move into the worktree: what is on the clipboard is bytes, and the
+                // only way to make them smaller is to save them somewhere first.
+                """
+                That image is \(Self.size(bytes)), which is more than Bloom will write into a \
+                worktree (\(Self.size(maxByteCount))). Save it to a file and attach that, or \
+                paste a smaller one. It would have been written as \(name).
                 """
             case .copyFailed(let name, let reason):
                 "\(name) could not be copied into the worktree. \(reason)"
@@ -50,8 +70,8 @@ enum AttachmentFiles {
         switch source {
         case .file(let url):
             try attach(file: url, workspace: workspace)
-        case .data(let data, let filename):
-            try attach(data: data, filename: filename, workspace: workspace)
+        case .image(let data, let format, let name):
+            try attach(image: data, format: format, named: name, workspace: workspace)
         }
     }
 
@@ -94,15 +114,15 @@ enum AttachmentFiles {
     }
 
     private static func attach(
-        data pasted: Data, filename pastedName: String, workspace: String
+        image pasted: Data, format: PastedImageFormat, named name: String, workspace: String
     ) throws -> PromptAttachment {
-        // TIFF is what the pasteboard offers when nothing better was put on it, and it is the one
-        // image format an agent is unlikely to be able to read. Rewriting it as PNG here is the
-        // difference between a screenshot the agent can look at and one it can only describe as an
-        // unreadable file.
-        let (data, filename) = asReadableImage(pasted, filename: pastedName)
+        guard pasted.count <= maxPastedByteCount else {
+            throw Failure.tooLargeToPaste(name, pasted.count)
+        }
 
-        guard data.count <= maxByteCount else { throw Failure.tooLarge(filename, data.count) }
+        let (data, filename) = readable(pasted, format: format, named: name)
+
+        guard data.count <= maxByteCount else { throw Failure.tooLargeToPaste(filename, data.count) }
 
         let id = PromptAttachments.newShortID()
         let relative = PromptAttachments.destination(filename: filename, id: id)
@@ -118,13 +138,33 @@ enum AttachmentFiles {
         return PromptAttachment(path: relative, isCopy: true, byteCount: data.count)
     }
 
-    private static func asReadableImage(_ data: Data, filename: String) -> (Data, String) {
-        guard (filename as NSString).pathExtension.lowercased() == "tiff",
-              let representation = NSBitmapImageRep(data: data),
+    /// A pasted picture as it is worth putting on disk, and what to call it once it is.
+    ///
+    /// TIFF is what the pasteboard offers when nothing better was put on it, and it is worth
+    /// rewriting twice over. It is uncompressed, so the same screenshot is often ten or twenty
+    /// times the size of the PNG of it, and every one of those megabytes is copied into the user's
+    /// checkout. And it is the one image format an agent is unlikely to be able to open at all, so
+    /// the rewrite is the difference between a screenshot the agent can look at and one it can only
+    /// report as an unreadable file. What it costs is a decode and an encode of one picture, on a
+    /// background task, once.
+    ///
+    /// PNG and JPEG are left exactly as they arrived. Both are already compressed, re-encoding a
+    /// JPEG would throw away detail for nothing, and bytes that are not touched cannot be corrupted.
+    ///
+    /// A rewrite that does not work keeps the original bytes and takes the original extension back,
+    /// because a TIFF written under a `.png` name is worse than a TIFF: everything that opens it
+    /// goes by the name.
+    private static func readable(
+        _ data: Data, format: PastedImageFormat, named name: String
+    ) -> (Data, String) {
+        guard format.isWorthReencoding else { return (data, name) }
+
+        guard let representation = NSBitmapImageRep(data: data),
               let png = representation.representation(using: .png, properties: [:]) else {
-            return (data, filename)
+            let base = (name as NSString).deletingPathExtension
+            return (data, "\(base).\(format.fileExtension)")
         }
-        return (png, (filename as NSString).deletingPathExtension + ".png")
+        return (png, name)
     }
 
     // MARK: - Handing a staged draft over

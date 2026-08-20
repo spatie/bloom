@@ -47,14 +47,31 @@ struct PromptAttachment: Identifiable, Hashable, Codable, Sendable {
 
 /// Where an attachment came from, before it is a file Bloom can point at.
 ///
-/// Three doors lead here and they hand over different things: the panel and a drag give a file
-/// that already exists, the clipboard gives bytes that never did. Naming both means the copying
-/// rules are written once instead of three times.
+/// Three doors lead here and they hand over different things: the paperclip and a drag give a
+/// file that already exists, the clipboard can give bytes that never did. Naming both means the
+/// copying rules are written once instead of three times.
 enum AttachmentSource: Hashable, Sendable {
     case file(URL)
-    /// Raw bytes plus the name they should be written under, which is how a pasted screenshot
-    /// arrives: the clipboard carries TIFF or PNG data and no filename at all.
-    case data(Data, filename: String)
+    /// A picture off a clipboard, which is bytes, a format and nothing else: a screenshot that
+    /// was copied rather than saved has never had a file or a name. The name it earns is decided
+    /// where the rest of the prompt's attachments are known, so two pastes in the same second do
+    /// not arrive reading alike, and the format is carried rather than guessed back out of that
+    /// name, so writing it can tell a picture worth rewriting from one that is already compressed.
+    case image(Data, format: PastedImageFormat, named: String)
+
+    /// The same picture under another name, which is what happens when the first one is taken.
+    func named(_ name: String) -> AttachmentSource {
+        guard case .image(let data, let format, _) = self else { return self }
+        return .image(data, format: format, named: name)
+    }
+
+    /// What this will be called once it is a file in the worktree.
+    var filename: String {
+        switch self {
+        case .file(let url): url.lastPathComponent
+        case .image(_, _, let name): name
+        }
+    }
 }
 
 /// The rules about attachments that are pure: what the agent is told, where a copy goes, and what
@@ -118,14 +135,5 @@ enum PromptAttachments {
     /// Where a copy of `filename` goes, relative to the worktree.
     static func destination(filename: String, id: String) -> String {
         "\(folder)/\(id)/\(safeFilename(filename))"
-    }
-
-    /// The name a pasted image is written under. Modelled on what macOS calls a screenshot, so a
-    /// folder of them sorts by when they were taken.
-    static func pastedFilename(extension ext: String, at date: Date = .now) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
-        return "Pasted \(formatter.string(from: date)).\(ext)"
     }
 }

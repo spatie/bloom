@@ -140,17 +140,25 @@ public enum PastedAttachment {
         avoiding taken: Set<String> = [],
         timeZone: TimeZone = .current
     ) -> String {
-        let stamp = timestamp(date, in: timeZone)
-        let ext = format.fileExtension
-        let first = "Pasted \(stamp).\(ext)"
-        guard taken.contains(first) else { return first }
+        uniqued("Pasted \(timestamp(date, in: timeZone)).\(format.fileExtension)", avoiding: taken)
+    }
 
-        // Two is the first number worth printing: the one before it is the name without a number.
+    /// The same name with a number on it, when the name is already spoken for.
+    ///
+    /// Counted the way the Finder counts, before the extension rather than after it, so the file
+    /// is still a PNG and still sorts beside the one it was pasted a moment after. Two is the
+    /// first number worth printing: the one before it is the name without a number.
+    public static func uniqued(_ name: String, avoiding taken: Set<String>) -> String {
+        guard taken.contains(name) else { return name }
+
+        let base = (name as NSString).deletingPathExtension
+        let ext = (name as NSString).pathExtension
+        let suffix = ext.isEmpty ? "" : ".\(ext)"
         for counter in 2...999 {
-            let candidate = "Pasted \(stamp) \(counter).\(ext)"
+            let candidate = "\(base) \(counter)\(suffix)"
             if !taken.contains(candidate) { return candidate }
         }
-        return "Pasted \(stamp) \(UUID().uuidString.prefix(6)).\(ext)"
+        return "\(base) \(UUID().uuidString.prefix(6))\(suffix)"
     }
 
     private static func timestamp(_ date: Date, in zone: TimeZone) -> String {

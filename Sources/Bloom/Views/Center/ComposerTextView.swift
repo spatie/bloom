@@ -1,4 +1,5 @@
 import AppKit
+import BloomCore
 
 /// An `NSTextView` that offers each key press to the composer before typing it, says when it was
 /// resized or focused so the SwiftUI side can keep up, and hands over anything that arrives as a
@@ -46,20 +47,23 @@ final class ComposerTextView: NSTextView {
 
     // MARK: - Files in
 
-    /// A drag of files becomes attachments. Everything else, a drag of text most of all, is left
-    /// to the text system, which has always handled it well.
+    /// A drag becomes attachments, on the same terms as a paste: files if there are files, a
+    /// picture if that is all there is, and otherwise nothing, so a drag of text is still a drag
+    /// of text and the text system handles it as well as it always has.
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        let files = Self.files(on: sender.draggingPasteboard)
-        if !files.isEmpty, onAttach?(files) == true { return true }
+        let sources = Self.attachables(on: sender.draggingPasteboard)
+        if !sources.isEmpty, onAttach?(sources) == true { return true }
         return super.performDragOperation(sender)
     }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        Self.files(on: sender.draggingPasteboard).isEmpty ? super.draggingEntered(sender) : .copy
+        Self.attachables(on: sender.draggingPasteboard).isEmpty
+            ? super.draggingEntered(sender) : .copy
     }
 
     override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        Self.files(on: sender.draggingPasteboard).isEmpty ? super.draggingUpdated(sender) : .copy
+        Self.attachables(on: sender.draggingPasteboard).isEmpty
+            ? super.draggingUpdated(sender) : .copy
     }
 
     /// Command+V. A screenshot is the single most common thing anybody attaches, and it arrives on
@@ -79,32 +83,83 @@ final class ComposerTextView: NSTextView {
         super.pasteAsPlainText(sender)
     }
 
-    // MARK: - Reading a pasteboard
-
-    static func files(on pasteboard: NSPasteboard) -> [AttachmentSource] {
-        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
-        let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL]
-        return (urls ?? []).map { .file($0) }
+    /// Why pasting a screenshot did nothing at all until now.
+    ///
+    /// Command+V is not a key this view is offered. It is the key equivalent of the Edit menu's
+    /// Paste item, and a menu item that validates as disabled is never dispatched: the override
+    /// above was there, correct, and unreachable. AppKit validates Paste by asking the first
+    /// responder whether the clipboard holds any type it can read, and a plain text view's list is
+    /// strings, RTF, HTML, URLs and colours. A screenshot copied rather than saved puts `public.png`
+    /// and `public.tiff` on the board and nothing else, so the intersection is empty, the item is
+    /// grey, and the key press is swallowed with no beep and no clue.
+    ///
+    /// So the answer is not to claim those types as readable, which would invite the text system to
+    /// insert a picture into a plain text view, but to say that this particular view has something
+    /// to do with the board even when the text system does not. Everything else, Paste included
+    /// when the board does carry text, is left to `super`.
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(paste(_:)) || item.action == #selector(pasteAsPlainText(_:)) {
+            if super.validateUserInterfaceItem(item) { return true }
+            return !Self.attachables(on: .general).isEmpty
+        }
+        return super.validateUserInterfaceItem(item)
     }
 
-    /// What is worth attaching from a clipboard, which is not the same question as what is worth
-    /// attaching from a drag.
+    // MARK: - Reading a pasteboard
+
+    /// What is worth attaching from a pasteboard, and what is better left to the text system.
     ///
-    /// Files win outright. Failing that, image data counts only when the clipboard carries no text
-    /// beside it: copying a paragraph out of a web page brings the pictures along with the words,
-    /// and turning that into an attachment would throw away what the user actually copied.
+    /// The rules are `PastedAttachment.plan`, in BloomCore, where they can be asserted on. This is
+    /// the part that cannot be: turning an `NSPasteboard` into the two facts that decide, and then
+    /// reading the bytes the decision asked for.
     static func attachables(on pasteboard: NSPasteboard) -> [AttachmentSource] {
-        let files = files(on: pasteboard)
-        if !files.isEmpty { return files }
-
-        let text = pasteboard.string(forType: .string) ?? ""
-        guard text.isEmpty else { return [] }
-
-        for type in [NSPasteboard.PasteboardType.png, .tiff] {
-            guard let data = pasteboard.data(forType: type), !data.isEmpty else { continue }
-            let ext = type == .png ? "png" : "tiff"
-            return [.data(data, filename: PromptAttachments.pastedFilename(extension: ext))]
+        let items = pasteboard.pasteboardItems ?? []
+        let offers = items.map { item in
+            PastedAttachment.Offer(
+                filePath: item.fileURL()?.path,
+                types: item.types.map(\.rawValue)
+            )
         }
-        return []
+        // Only whether there is text, never the text itself. A clipboard is the user's own
+        // business and nothing here needs to read what is on it.
+        let hasText = (pasteboard.string(forType: .string)?.isEmpty == false)
+
+        switch PastedAttachment.plan(items: offers, hasText: hasText) {
+        case .text:
+            return []
+        case .files(let paths):
+            return paths.map { .file(URL(filePath: $0)) }
+        case .images(let images):
+            var taken: Set<String> = []
+            return images.compactMap { image in
+                guard items.indices.contains(image.item),
+                      let data = items[image.item].data(
+                          forType: NSPasteboard.PasteboardType(image.format.uti)
+                      ),
+                      !data.isEmpty
+                else { return nil }
+                // The name it earns is the format it will be written as, which is not always the
+                // format it was read as: a TIFF becomes a PNG on the way in.
+                let name = PastedAttachment.filename(
+                    format: image.format.written, avoiding: taken
+                )
+                taken.insert(name)
+                return .image(data, format: image.format, named: name)
+            }
+        }
+    }
+}
+
+private extension NSPasteboardItem {
+    /// The file this item points at, if it points at one.
+    ///
+    /// A file URL is read off the item rather than off the whole board, because a board is a list
+    /// of items and reading it whole loses which picture belonged to which file. Anything that is
+    /// not a file, an `https` link most of all, is not a file: pasting a URL types the URL, which
+    /// is what it has always done.
+    func fileURL() -> URL? {
+        guard let string = string(forType: .fileURL),
+              let url = URL(string: string), url.isFileURL else { return nil }
+        return url.standardizedFileURL
     }
 }
