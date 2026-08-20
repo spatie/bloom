@@ -92,3 +92,12 @@ public final class EventFanout<Element: Sendable>: @unchecked Sendable {
         for target in targets { target.finish() }
     }
 }
+
+// MARK: - Conformances
+
+/// Claude Code's runner already had every member of the seam, with the right shape and the right
+/// isolation, because the seam was taken from what the transcript calls on it. So conforming it is
+/// one property and no edit inside the file itself.
+extension AgentRunner: SessionRunner {
+    public nonisolated var agentKind: AgentKind { .claudeCode }
+}

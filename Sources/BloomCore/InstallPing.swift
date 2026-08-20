@@ -308,17 +308,21 @@ public enum InstallPing {
     /// anything is the most interesting install in the table.
     public static let noAgent = "none"
 
-    /// Which agent this copy of Bloom actually runs, given what is installed.
+    /// Which agents this copy of Bloom can actually run turns with, given what is installed.
     ///
-    /// One value rather than a list, because the endpoint stores one. It is the backend Bloom
-    /// launches, which is `AgentKind.canRunWorkspaces` and today is only Claude Code, and it is
-    /// deliberately not "whatever CLIs happen to be on the machine": having the Codex binary on
-    /// `PATH` is not Bloom using Codex. The day a workspace can choose its own backend, this is
-    /// the field that starts varying, and the endpoint already stores an unfamiliar value verbatim
-    /// rather than dropping it, so that needs no change on either side.
+    /// Still one value, because the endpoint stores one, but no longer one agent: a machine with
+    /// both CLIs sends `claude_codex`. That is the day this comment used to describe, and nothing
+    /// on either side had to change for it, because the endpoint stores an unfamiliar value
+    /// verbatim rather than dropping it and the joined name still matches its `namePattern`.
+    ///
+    /// Deliberately not "whatever CLIs happen to be on the machine". Having `cursor-agent` on
+    /// `PATH` is not Bloom using Cursor, so only backends `AgentKind.canRunWorkspaces` admits to
+    /// are counted. In `AgentKind.allCases` order, so the same machine sends the same name every
+    /// day rather than one that depends on how the array came back.
     public static func agentName(installed: [AgentKind]) -> String {
-        guard let runnable = AgentKind.allCases.first(where: \.canRunWorkspaces) else { return noAgent }
-        return installed.contains(runnable) ? wireName(runnable) : noAgent
+        let runnable = AgentKind.allCases.filter { $0.canRunWorkspaces && installed.contains($0) }
+        guard !runnable.isEmpty else { return noAgent }
+        return runnable.map(wireName).joined(separator: "_")
     }
 
     // MARK: - The body

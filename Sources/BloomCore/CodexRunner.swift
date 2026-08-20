@@ -129,6 +129,7 @@ public actor CodexRunner: SessionRunner {
     public func answer(requestID: String, decision: PermissionDecision) async {
         guard let ask = pending.take(requestID) else { return }
         await write(answerTo: ask, decision: CodexPermission.decision(for: decision))
+        await deliverReason(of: decision)
         await close(ask, as: decision.storedName, note: "")
 
         // Bloom's own bookkeeping, and it happens after the agent has been unblocked, so a
@@ -363,6 +364,29 @@ public actor CodexRunner: SessionRunner {
         guard ask.canWiden, let repoID = await repoID() else { return nil }
         guard let grants = try? await store.permissionGrants(repoID: repoID) else { return nil }
         return PermissionGrantIndex.match(ask: ask, grants: grants)
+    }
+
+    /// Say why, in the only place this protocol has room for it.
+    ///
+    /// An approval is answered with a word: `accept`, `decline`, `cancel`. There is no field for
+    /// the sentence a person typed, and no field for the sentence Bloom sends by default either,
+    /// so on this backend a refusal arrives at the model as a bare no. Measured against the real
+    /// server, that is not enough: after a declined patch the agent tried the same patch again
+    /// immediately, twice.
+    ///
+    /// `turn/steer` is the room. It puts words into the turn that is already running, and the same
+    /// measurement showed the agent reading them and doing the different thing that was asked for.
+    /// So the reason goes out right behind the refusal, and a Codex denial says as much as a
+    /// Claude Code one.
+    ///
+    /// Failure here is deliberately quiet. The refusal has already landed and the turn is already
+    /// unblocked; a steer that misses because the turn moved on must not turn an answered question
+    /// into an error.
+    private func deliverReason(of decision: PermissionDecision) async {
+        guard case .deny(let message, let endsTurn) = decision, !endsTurn else { return }
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let client, let threadID, let turnID = handle.turnID else { return }
+        try? await client.steerTurn(threadID: threadID, turnID: turnID, input: [.text(text)])
     }
 
     private func write(answerTo ask: PermissionAsk, decision: CodexApprovalDecision) async {

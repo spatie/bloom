@@ -143,16 +143,23 @@ struct InstallPingTests {
 
     // MARK: - Which agent is reported
 
-    @Test("names the agent Bloom actually runs")
+    @Test("names the agents Bloom can actually run")
     func agentIsTheOneBloomRuns() {
         #expect(InstallPing.agentName(installed: [.claudeCode]) == "claude")
-        #expect(InstallPing.agentName(installed: [.claudeCode, .codex]) == "claude")
+        #expect(InstallPing.agentName(installed: [.codex]) == "codex")
+        // Both installed is a real and interesting answer, not a choice between them.
+        #expect(InstallPing.agentName(installed: [.claudeCode, .codex]) == "claude_codex")
+        // Always in `allCases` order, so the same machine sends the same name every day.
+        #expect(InstallPing.agentName(installed: [.codex, .claudeCode]) == "claude_codex")
+        // And still a name the endpoint accepts, which is the only reason `_` is the separator.
+        #expect(InstallPing.matches("claude_codex", InstallPing.namePattern))
     }
 
-    /// Having the Codex binary on `PATH` is not Bloom using Codex.
+    /// Having `cursor-agent` on `PATH` is not Bloom using Cursor.
     @Test("does not claim an agent Bloom cannot run a turn with")
     func otherCLIsAreNotTheAgent() {
-        #expect(InstallPing.agentName(installed: [.codex, .cursor, .openCode]) == "none")
+        #expect(InstallPing.agentName(installed: [.cursor, .openCode]) == "none")
+        #expect(InstallPing.agentName(installed: [.codex, .cursor, .openCode]) == "codex")
     }
 
     @Test("says so when nothing is installed to run")

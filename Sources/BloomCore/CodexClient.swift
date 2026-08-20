@@ -281,6 +281,27 @@ public actor CodexClient {
         return CodexTurn.decode(result["turn"] ?? .null, threadID: threadID, raw: Data())
     }
 
+    /// Puts more of the user's words into a turn that is already running.
+    ///
+    /// This is the only way a refusal can carry a sentence. `decline` is a word and nothing else,
+    /// so the reason a person typed has nowhere to go on the approval wire, and measured against
+    /// the real server a bare decline is followed immediately by the same call again. Steering the
+    /// reason in right behind the refusal was measured too: the agent read it and did the
+    /// different thing that was asked for.
+    ///
+    /// `expectedTurnId` is a precondition rather than a hint. The request fails when the turn it
+    /// names is no longer the active one, which is exactly the guard needed for something sent
+    /// from a button a person pressed a moment ago.
+    @discardableResult
+    public func steerTurn(threadID: String, turnID: String, input: [CodexUserInput]) async throws -> String {
+        let result = try await send("turn/steer", params: .object([
+            "threadId": .string(threadID),
+            "expectedTurnId": .string(turnID),
+            "input": .array(input.map(\.json)),
+        ]))
+        return result["turnId"]?.stringValue ?? turnID
+    }
+
     /// Stops a running turn. Both ids are required: `turn/interrupt` with only a thread id is
     /// refused with "missing field `turnId`".
     public func interruptTurn(threadID: String, turnID: String) async throws {

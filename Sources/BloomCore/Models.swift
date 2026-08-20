@@ -388,8 +388,11 @@ public struct PullRequest: Sendable, Hashable, Codable {
 
 /// The coding agent CLIs Bloom knows how to talk about.
 ///
-/// Only Claude Code can actually drive a workspace today, but the others are detected and
-/// configurable so the settings screen can be honest about what is installed and what is not.
+/// Two of the four can drive a chat. The others are detected and configurable so the settings
+/// screen can be honest about what is installed and what is not.
+///
+/// **A chat picks one of these, not a workspace.** One worktree can hold a Claude Code
+/// conversation and a Codex one at the same time. See `Session.agentKind` and CODEX.md.
 public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
     case claudeCode
     case codex
@@ -441,7 +444,16 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// Whether Bloom can actually drive a workspace with it. Only Claude Code today, because
-    /// `AgentRunner` speaks the Claude Code stream-json protocol and nothing else.
-    public var canRunWorkspaces: Bool { self == .claudeCode }
+    /// Whether Bloom can actually drive a chat with it.
+    ///
+    /// Two, now. `AgentRunner` speaks Claude Code's stream-json and `CodexRunner` speaks Codex's
+    /// JSON-RPC, and both answer to `SessionRunner`. Cursor and OpenCode are detected and
+    /// configurable so the settings screen can be honest about what is installed, and neither has
+    /// a runner, so neither is offered anywhere a chat is started.
+    public var canRunWorkspaces: Bool {
+        switch self {
+        case .claudeCode, .codex: true
+        case .cursor, .openCode: false
+        }
+    }
 }
