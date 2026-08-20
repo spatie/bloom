@@ -299,6 +299,42 @@ struct MarkdownParserTests {
         ])
     }
 
+    @Test("an unusual top level domain is still an address")
+    func bareURLLocalDomain() {
+        #expect(MarkdownParser.parse("https://there-there-6.test/settings") == [
+            .paragraph(inline: [
+                .link(
+                    text: [.text("https://there-there-6.test/settings")],
+                    url: "https://there-there-6.test/settings"
+                ),
+            ]),
+        ])
+    }
+
+    @Test("a bare localhost with a port becomes a link addressed over http")
+    func bareLocalhost() {
+        #expect(MarkdownParser.parse("open localhost:3000") == [
+            .paragraph(inline: [
+                .text("open "),
+                .link(text: [.text("localhost:3000")], url: "http://localhost:3000"),
+            ]),
+        ])
+    }
+
+    @Test("an address inside a code span stays code")
+    func addressInCodeSpan() {
+        #expect(MarkdownParser.parse("run `curl https://example.com`") == [
+            .paragraph(inline: [.text("run "), .code("curl https://example.com")]),
+        ])
+    }
+
+    @Test("a path is not an address")
+    func pathIsNotAnAddress() {
+        #expect(MarkdownParser.parse("edited Sources/Bloom/Views/Transcript/UserTurnRowView.swift") == [
+            .paragraph(inline: [.text("edited Sources/Bloom/Views/Transcript/UserTurnRowView.swift")]),
+        ])
+    }
+
     @Test("an angle bracketed address becomes a link")
     func autolink() {
         #expect(MarkdownParser.parse("<https://example.com>") == [

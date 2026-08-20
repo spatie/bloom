@@ -568,17 +568,16 @@ private enum InlineParser {
             return true
         }
 
+        /// An address written as itself, with no brackets of any kind around it.
+        ///
+        /// The rules are `LinkScan`'s rather than this parser's, so a bare address reads the same
+        /// way in an agent's answer and in the user's own bubble, which is drawn as plain text and
+        /// never comes through here. This runs last in the chain, after the code span, so a
+        /// backticked address has already been taken out of the line before it is asked about.
         mutating func consumeBareURL(into result: inout [MarkdownInline]) -> Bool {
-            let remainder = source[cursor...]
-            guard remainder.hasPrefix("https://") || remainder.hasPrefix("http://") else { return false }
-            var end = cursor
-            while end < source.endIndex, !source[end].isWhitespace, source[end] != "<", source[end] != ">" { end = source.index(after: end) }
-            var urlEnd = end
-            while urlEnd > cursor, ".,;:!?".contains(source[source.index(before: urlEnd)]) { urlEnd = source.index(before: urlEnd) }
-            guard urlEnd > cursor else { return false }
-            let value = String(source[cursor..<urlEnd])
-            result.append(.link(text: [.text(value)], url: value))
-            cursor = urlEnd
+            guard let link = LinkScan.link(in: source, at: cursor) else { return false }
+            result.append(.link(text: [.text(link.text)], url: link.url))
+            cursor = link.range.upperBound
             return true
         }
 
