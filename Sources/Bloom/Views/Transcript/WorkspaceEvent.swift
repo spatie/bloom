@@ -138,7 +138,14 @@ struct WorkspaceEvent: Identifiable, Equatable {
             return WorkspaceEvent(
                 id: "setup", kind: .setup, outcome: .failed,
                 title: diagnosis.title, detail: diagnosis.summary,
-                note: [diagnosis.sentence, SetupFailure.instruction]
+                // The generic instruction ends in "run setup again", and so does every remedy
+                // that has one, so saying both put "run setup again" in the sentence twice. When
+                // the diagnosis knows what to do, the only thing left to add is the half a red
+                // row must always carry: whether anything else happened. See `SetupFailure`.
+                note: [
+                    diagnosis.sentence,
+                    diagnosis.advice.isEmpty ? SetupFailure.instruction : SetupFailure.noAgent,
+                ]
                     .filter { !$0.isEmpty }
                     .joined(separator: " "),
                 log: log, failureSummary: diagnosis.summary, durationMS: durationMS
@@ -205,4 +212,12 @@ struct WorkspaceEvent: Identifiable, Equatable {
 /// is the way out.
 enum SetupFailure {
     static let instruction = "No agent was started. Check the setup output and run setup again."
+
+    /// The half of that sentence which is true whatever went wrong, for the rows where
+    /// `SetupDiagnosis` already said what to do and saying it twice would be the only result.
+    ///
+    /// It is the half that must never be dropped. A red row that leaves somebody guessing whether
+    /// their worktree survived, or whether an agent is off working in it anyway, is worse than one
+    /// that explains nothing.
+    static let noAgent = "No agent was started."
 }
