@@ -45,13 +45,14 @@ struct AgentExitTests {
         """
     }()
 
-    static func payload(status: Int, stderr: String) -> Data {
-        let object: [String: Any] = [
+    static func payload(status: Int, stderr: String, command: String = "") -> Data {
+        var object: [String: Any] = [
             "type": "error",
             "subtype": "process_exit",
             "status": status,
             "stderr": stderr,
         ]
+        if !command.isEmpty { object["command"] = command }
         return try! JSONSerialization.data(withJSONObject: object)
     }
 
@@ -84,6 +85,28 @@ struct AgentExitTests {
 
         #expect(exit.advice.contains("still in the worktree"))
         #expect(exit.advice.contains("send the turn again"))
+    }
+
+    @Test("the row names the binary that died, because a name is not a file")
+    func crashNamesTheBinary() {
+        let exit = AgentExit.decode(Self.payload(
+            status: 1,
+            stderr: Self.nodeCrash,
+            command: "/opt/homebrew/bin/claude"
+        ))
+
+        #expect(exit.command == "/opt/homebrew/bin/claude")
+        #expect(exit.advice.hasSuffix("Bloom ran /opt/homebrew/bin/claude."))
+        // Still one line, whatever was appended to the advice under it.
+        #expect(!exit.summary.contains("claude.js"))
+    }
+
+    @Test("a payload from before the command was recorded says nothing about it")
+    func advicePredatingTheCommandField() {
+        let exit = AgentExit.decode(Self.payload(status: 1, stderr: Self.nodeCrash))
+
+        #expect(exit.command.isEmpty)
+        #expect(!exit.advice.contains("Bloom ran"))
     }
 
     // MARK: Real errors, short ones especially

@@ -38,11 +38,18 @@ public struct AgentExit: Sendable, Hashable {
     public let cause: AgentExitCause
     /// Everything the CLI wrote, kept whole.
     public let detail: String
+    /// The resolved path of what Bloom launched, when the payload carried one.
+    ///
+    /// Worth a sentence of its own, because the name of an agent's command is not the same thing
+    /// as the file behind it. A machine can hold several `claude` binaries, and the one a Finder
+    /// launched app resolves need not be the one the same user's terminal resolves.
+    public let command: String
 
-    public init(status: Int?, cause: AgentExitCause, detail: String) {
+    public init(status: Int?, cause: AgentExitCause, detail: String, command: String = "") {
         self.status = status
         self.cause = cause
         self.detail = detail
+        self.command = command
     }
 
     // MARK: What the row says
@@ -79,7 +86,7 @@ public struct AgentExit: Sendable, Hashable {
             conversation was lost, and everything the agent had already changed is still in the \
             worktree. Run the CLI once in a terminal to see whether it starts at all, update it if \
             it does not, then send the turn again.
-            """
+            """ + ranCommand
         case .missing:
             """
             Install the agent's CLI, or put it somewhere Bloom looks, then send the turn again. \
@@ -90,19 +97,27 @@ public struct AgentExit: Sendable, Hashable {
             Nothing in this conversation was lost, and everything the agent had already changed is \
             still in the worktree. Open this row for everything the CLI printed, then send the \
             turn again.
-            """
+            """ + ranCommand
         case .silent:
             """
             Nothing in this conversation was lost, and everything the agent had already changed is \
             still in the worktree. Send the turn again, and if it stops here a second time, run \
             the CLI once in a terminal to see what it says.
-            """
+            """ + ranCommand
         case .storage:
             """
             The agent itself kept running. It is Bloom's copy of the conversation that is missing \
             a row, so check that the disk is not full, then reopen the workspace.
             """
         }
+    }
+
+    /// Which file was launched, said out loud, wherever the answer could be the binary.
+    ///
+    /// Nothing to add for a command that was never found, which has no path to name, or for a
+    /// write of Bloom's own that failed, which is not about the agent's binary at all.
+    private var ranCommand: String {
+        command.isEmpty ? "" : " Bloom ran \(command)."
     }
 
     /// Whether the disclosure has anything to show that the summary does not already say.
@@ -124,6 +139,7 @@ public struct AgentExit: Sendable, Hashable {
     public static func read(_ json: JSONValue?) -> AgentExit {
         let status = json?["status"]?.intValue
         let stderr = json?["stderr"]?.stringValue ?? ""
+        let command = json?["command"]?.stringValue ?? ""
 
         // The subtype is the payload's own answer to "whose failure was this", and it is written
         // by the same code that writes the row. A storage failure carries a message and never a
@@ -134,7 +150,12 @@ public struct AgentExit: Sendable, Hashable {
             return AgentExit(status: status, cause: cause, detail: message)
         }
 
-        return AgentExit(status: status, cause: cause(status: status, stderr: stderr), detail: stderr)
+        return AgentExit(
+            status: status,
+            cause: cause(status: status, stderr: stderr),
+            detail: stderr,
+            command: command
+        )
     }
 
     /// Classify what a dead process left behind.

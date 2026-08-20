@@ -60,6 +60,13 @@ public actor AgentRunner {
     private var stderrTask: Task<Void, Never>?
     private var killTask: Task<Void, Never>?
     private var stderrTail: [String] = []
+    /// Which binary this run actually launched, resolved through the same PATH the child got.
+    ///
+    /// Recorded because "claude" is a name and a machine can hold several. One did: a stale npm
+    /// global on Homebrew's PATH and a current native install in `~/.local/bin`, and Bloom
+    /// launched from Finder resolved the first while the same user's terminal resolved the
+    /// second. The row that reported the crash could not say which one had crashed.
+    private var launchedCommand = ""
     private var alive = false
     private var cancelled = false
     private var persistenceFailures = 0
@@ -223,7 +230,9 @@ public actor AgentRunner {
 
         cancelled = false
         stderrTail = []
-        let process = makeProcess(launch())
+        let spec = launch()
+        launchedCommand = Shell.which(spec.executable) ?? spec.executable
+        let process = makeProcess(spec)
         // Taking the process and bumping the run generation is one step, so a cancel racing this
         // either belongs to the run that just ended (and is dropped) or to this one.
         let generation = handle.beginRun(process)
@@ -422,8 +431,9 @@ public actor AgentRunner {
         if status != 0, !sawResult {
             let tail = stderrTail.joined(separator: "\n")
             let message = "The agent exited with status \(status)."
-            let payload = (try? JSONEncoder().encode(ProcessFailure(status: Int(status), stderr: tail)))
-                ?? Data(#"{"type":"error"}"#.utf8)
+            let payload = (try? JSONEncoder().encode(
+                ProcessFailure(status: Int(status), stderr: tail, command: launchedCommand)
+            )) ?? Data(#"{"type":"error"}"#.utf8)
 
             await ingest(.error(AgentError(
                 message: tail.isEmpty ? message : "\(message)\n\(tail)",
@@ -538,6 +548,9 @@ public actor AgentRunner {
         let subtype = "process_exit"
         let status: Int
         let stderr: String
+        /// The resolved path of what was launched, so a row can name the binary that died rather
+        /// than the name it was asked for.
+        let command: String
     }
 
     /// The payload of the `.error` event a failed write emits. It never reaches the database, for
