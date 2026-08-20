@@ -155,6 +155,21 @@ final class NotificationService {
         ))
     }
 
+    /// The agent is asking for permission and cannot go on until somebody answers.
+    ///
+    /// `needsInput` has been in `NotificationEvent` from the start, saying "An agent needs
+    /// something from me", and until now nothing raised it: there was no moment when an agent
+    /// needed something, because the CLI answered for the user and the answer was no. This is that
+    /// moment, and it is the one notification in the set where the delay is the cost.
+    func agentNeedsPermission(workspace: Workspace, detail: String = "") {
+        submit(NotificationDraft(
+            event: .needsInput,
+            workspaceID: workspace.id,
+            workspaceName: workspace.name,
+            detail: detail
+        ))
+    }
+
     /// The agent died without ever producing a result, so there is no `AgentResult` to classify.
     func agentFailed(workspace: Workspace, message: String) {
         submit(NotificationDraft(

@@ -28,6 +28,16 @@ struct TranscriptRow: Identifiable, Hashable {
     /// Non-nil when the row came from inside a subagent, so it can be indented under its parent.
     var parentToolUseID: String?
 
+    /// For a `permissionAsk` row: how the question was settled, or nil while it is still open.
+    ///
+    /// Held on the row rather than looked up per frame, because the answer decides whether the row
+    /// draws live buttons, and a row that offers buttons for a question already answered would
+    /// write into a pipe nobody is reading.
+    var permissionDecision: String?
+    /// What the transcript should say about how it was settled, when that is not obvious. Only
+    /// ever set for a question a rule answered rather than a person.
+    var permissionNote = ""
+
     init(message: Message) {
         id = message.id
         seq = message.seq
@@ -100,7 +110,10 @@ final class TranscriptModel {
         SwitchTrace.mark("transcript.read.done", workspace: workspace.id)
         rows = []
         indexByRefID = [:]
-        for message in messages { absorb(message) }
+        // Read once for the whole session rather than per row: a transcript can hold thousands of
+        // rows and at most a handful of them are questions.
+        let decisions = (try? await store.permissionAskDecisions(sessionID: session.id)) ?? [:]
+        for message in messages { absorb(message, decisions: decisions) }
         SwitchTrace.mark("transcript.rows.built", workspace: workspace.id)
         SwitchTrace.markOnScreen("transcript.rows.built", workspace: workspace.id)
         draft = (try? await store.draft(sessionID: session.id)) ?? ""
@@ -108,7 +121,7 @@ final class TranscriptModel {
     }
 
     /// Folds a stored message into the row list, pairing tool results onto their tool call.
-    private func absorb(_ message: Message) {
+    private func absorb(_ message: Message, decisions: [String: String] = [:]) {
         if message.kind == .toolResult, let refID = message.refID,
            let index = indexByRefID[refID] {
             rows[index].resultPayload = message.payload
@@ -122,6 +135,10 @@ final class TranscriptModel {
 
         var row = TranscriptRow(message: message)
         row.parentToolUseID = ParentProbe.parentToolUseID(message.payload)
+        if message.kind == .permissionAsk,
+           let ask = PermissionAsk.decode(payload: message.payload) {
+            row.permissionDecision = decisions[ask.requestID]
+        }
         rows.append(row)
         if message.kind == .toolUse, let refID = message.refID {
             indexByRefID[refID] = rows.count - 1
@@ -348,9 +365,56 @@ final class TranscriptModel {
             await refreshSession()
             await notifyFinished(result: result)
 
+        case .permissionAsk:
+            // The row goes in where the call would have been, and the composer stops looking like
+            // an agent that is working: it is alive, and it is not going anywhere.
+            clearStreaming()
+            await appendLatestMessages()
+            statusLabel = "Waiting on you"
+            await refreshSession()
+            NotificationService.shared.agentNeedsPermission(workspace: workspace)
+
+        case .permissionDecided(let resolution):
+            settle(resolution)
+            if pendingPermissionAsks.isEmpty {
+                statusLabel = isRunning ? "Working" : nil
+            }
+            await refreshSession()
+
         case .hook, .rateLimit, .unknown:
             break
         }
+    }
+
+    // MARK: - Permission asks
+
+    /// The questions this session is holding a turn open for, in the order they arrived.
+    var pendingPermissionAsks: [PermissionAsk] {
+        rows.compactMap { row in
+            guard row.kind == .permissionAsk, row.permissionDecision == nil else { return nil }
+            return PermissionAsk.decode(payload: row.payload)
+        }
+    }
+
+    /// Answer one question. The turn resumes on the other side of this.
+    ///
+    /// The row is settled here rather than waiting for the event to come back round, so the
+    /// buttons stop being pressable the moment one of them is, and a slow store cannot leave two
+    /// answers on their way to the same question.
+    func answer(requestID: String, decision: PermissionDecision) async {
+        settle(PermissionResolution(requestID: requestID, decision: decision.storedName))
+        await runner?.answer(requestID: requestID, decision: decision)
+    }
+
+    /// Mark a question answered on the row that asked it.
+    private func settle(_ resolution: PermissionResolution) {
+        guard let index = rows.firstIndex(where: {
+            $0.kind == .permissionAsk
+                && PermissionAsk.decode(payload: $0.payload)?.requestID == resolution.requestID
+        }) else { return }
+
+        rows[index].permissionDecision = resolution.decision
+        if !resolution.note.isEmpty { rows[index].permissionNote = resolution.note }
     }
 
     /// Pulls anything the runner has persisted since the last row we hold. The runner is the

@@ -44,6 +44,11 @@ struct TranscriptRowView: View, Equatable {
             && lhs.maxBubbleWidth == rhs.maxBubbleWidth
             && lhs.workspace.id == rhs.workspace.id
             && lhs.workspace.path == rhs.workspace.path
+            // A question being answered has to redraw the row that asked it, and the decision is
+            // the only thing about it that changes after it is stored.
+            && lhs.row.permissionDecision == rhs.row.permissionDecision
+            && lhs.row.permissionNote == rhs.row.permissionNote
+            && lhs.projectName == rhs.projectName
     }
 
     var row: TranscriptRow
@@ -56,7 +61,13 @@ struct TranscriptRowView: View, Equatable {
     /// The width a user bubble is allowed to fill, handed down because the enclosing scroll view
     /// already measured it and a per row measurement would not size to its content.
     var maxBubbleWidth: CGFloat = 560
+    /// What the project is called, so a permission row can name where a rule would apply. Handed
+    /// down for the same reason `workspace` is: it is constant for a whole transcript.
+    var projectName: String = ""
     var onToggle: () -> Void = {}
+    /// Answering a permission question. Never a user turn: it writes a control response that
+    /// unblocks a turn already in flight.
+    var onAnswer: (String, PermissionDecision) -> Void = { _, _ in }
 
     var body: some View {
         content
@@ -110,6 +121,17 @@ struct TranscriptRowView: View, Equatable {
         case .toolResult:
             if let result = orphanResult {
                 OrphanResultRowView(result: result)
+            }
+
+        case .permissionAsk:
+            if let ask = permissionAsk {
+                PermissionAskRowView(
+                    ask: ask,
+                    decision: row.permissionDecision,
+                    note: row.permissionNote,
+                    projectName: projectName,
+                    onAnswer: { onAnswer(ask.requestID, $0) }
+                )
             }
 
         case .error:
@@ -166,6 +188,13 @@ struct TranscriptRowView: View, Equatable {
     private var orphanResult: AgentToolResult? {
         guard case .toolResult(let result)? = event else { return nil }
         return result
+    }
+
+    /// The question, decoded from the row that recorded it. Goes through the same cache as every
+    /// other payload, so a row rebuilt on every streamed token still parses once.
+    private var permissionAsk: PermissionAsk? {
+        guard case .permissionAsk(let ask)? = event else { return nil }
+        return ask
     }
 
     private var initInfo: AgentInit? {

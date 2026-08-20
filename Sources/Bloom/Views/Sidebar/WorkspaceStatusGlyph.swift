@@ -47,6 +47,10 @@ struct WorkspaceStatusGlyph: View {
     static func symbol(for status: WorkspaceStatus) -> String {
         switch status {
         case .settingUp, .running: ""
+        // A raised hand, which is the same shape the menu bar strip and the opened ask row use, so
+        // the three places this is reported say it with one mark. Filled rather than outlined: it
+        // outranks every other state in the column and has to read at a glance among a dozen rows.
+        case .awaitingPermission: "hand.raised.fill"
         case .setupFailed: "exclamationmark.triangle.fill"
         case .unread: "circle.fill"
         case .merged: "arrow.triangle.merge"
@@ -71,7 +75,9 @@ struct WorkspaceStatusGlyph: View {
     /// belongs, in `Palette`, rather than with a second set of colours here.
     static func tint(for status: WorkspaceStatus) -> AnyShapeStyle {
         switch status {
-        case .setupFailed, .checksRunning: AnyShapeStyle(Palette.warning)
+        // The caution colour, which is what a denied call and a failed setup are already drawn in.
+        // Not the alarm red: nothing has gone wrong here, something is being asked.
+        case .awaitingPermission, .setupFailed, .checksRunning: AnyShapeStyle(Palette.warning)
         case .checksFailing: AnyShapeStyle(Palette.negative)
         // The accent is the palette's "this went well": it has no green of its own, and
         // `Palette.positive` says why.

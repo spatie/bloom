@@ -24,6 +24,9 @@ extension WorkspaceStatus {
     var homeLane: HomeLane {
         switch self {
         case .settingUp, .running, .checksRunning: .working
+        // Not `working`. A blocked agent is the definition of this lane: the one row on Home that
+        // is asking for something rather than getting on with it.
+        case .awaitingPermission: .waiting
         case .setupFailed, .unread, .checksFailing, .checksPassed, .merged, .closed: .waiting
         case .draft, .pullRequestOpen, .changed, .clean: .resting
         }

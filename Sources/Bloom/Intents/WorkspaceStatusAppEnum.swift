@@ -9,6 +9,7 @@ import BloomCore
 /// rather than silently arriving in Shortcuts as something else.
 enum WorkspaceStatusAppEnum: String, AppEnum {
     case settingUp
+    case awaitingPermission
     case running
     case setupFailed
     case unread
@@ -26,6 +27,7 @@ enum WorkspaceStatusAppEnum: String, AppEnum {
 
     static let caseDisplayRepresentations: [WorkspaceStatusAppEnum: DisplayRepresentation] = [
         .settingUp: DisplayRepresentation(title: "Setting up"),
+        .awaitingPermission: DisplayRepresentation(title: "Waiting on you"),
         .running: DisplayRepresentation(title: "Agent running"),
         .setupFailed: DisplayRepresentation(title: "Setup failed"),
         .unread: DisplayRepresentation(title: "Unread"),
@@ -43,6 +45,7 @@ enum WorkspaceStatusAppEnum: String, AppEnum {
     init(_ status: WorkspaceStatus) {
         switch status {
         case .settingUp: self = .settingUp
+        case .awaitingPermission: self = .awaitingPermission
         case .running: self = .running
         case .setupFailed: self = .setupFailed
         case .unread: self = .unread
