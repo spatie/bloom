@@ -67,6 +67,13 @@ public actor AgentRunner {
     /// launched from Finder resolved the first while the same user's terminal resolved the
     /// second. The row that reported the crash could not say which one had crashed.
     private var launchedCommand = ""
+    /// Whether the composer's Fast toggle is on for this session.
+    ///
+    /// Read from the store rather than passed in, because it is the one composer control with no
+    /// column on `Session`: it lives in the key value table under `session.<id>.fastMode`, which
+    /// is where the footer writes it. Re-read at the top of every turn, so toggling it takes
+    /// effect on the next thing sent rather than on the next launch of the app.
+    private var isFastMode = false
     private var alive = false
     private var cancelled = false
     private var persistenceFailures = 0
@@ -124,8 +131,29 @@ public actor AgentRunner {
 
     /// The invocation from PROTOCOL.md. `--verbose` is not optional: the CLI refuses to run
     /// `-p --output-format stream-json` without it. Pure and static so it can be asserted on
-    /// without spawning anything.
-    public static func argv(session: Session, resume: String?) -> [String] {
+    /// without spawning anything, which is what `AgentRunnerArgvTests` does: every flag the
+    /// composer can set has to be visible in this array, or the control that sets it is decoration.
+    ///
+    /// `--effort` was missing from here for as long as the composer has offered the picker, so
+    /// every reasoning level anyone chose was written to the session row and stopped there.
+    /// Verified against the installed CLI rather than assumed: the option is real but hidden from
+    /// `--help`'s own summary, it takes `low, medium, high, xhigh, max`, which is exactly the five
+    /// the composer offers, and it also accepts `med` as an alias for `medium`.
+    ///
+    /// An effort Bloom does not know about is passed through rather than filtered. Effort is an
+    /// open set here for the same reason the model is: a repository's settings file can pin one,
+    /// and `ComposerOption.adding` exists because that has already happened with a model id. The
+    /// CLI's own parser is forgiving in exactly the right way, and this was checked by running it:
+    /// an unrecognised value prints "Warning: Unknown --effort value ... ignoring it and using the
+    /// default effort" on stderr and carries on with exit 0. So a stale or exotic value costs a
+    /// warning, never a failed turn, and filtering here would silently replace a level the
+    /// repository asked for with one it did not.
+    ///
+    /// `--thinking` is what fast mode is. It is hidden from `--help` too, and its three values are
+    /// `enabled`, `adaptive` and `disabled`. Unlike `--effort` this one is strict: an unrecognised
+    /// value exits 1 before the turn starts, which is why only the literal below is ever sent and
+    /// why nothing user-supplied may reach it.
+    public static func argv(session: Session, resume: String?, isFastMode: Bool = false) -> [String] {
         var arguments = [
             "-p",
             "--output-format", "stream-json",
@@ -137,6 +165,16 @@ public actor AgentRunner {
             // CLI does not accept Conductor's names. See `ModelAlias`.
             "--model", ModelAlias.cliValue(for: session.model),
         ]
+        let effort = session.effort.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !effort.isEmpty {
+            arguments += ["--effort", effort]
+        }
+        // "Fast mode trades some reasoning for a quicker reply", which is this and nothing else.
+        // Only sent when it is on: leaving the flag off is what lets the model decide, and
+        // sending `adaptive` explicitly would override a session default somebody else set.
+        if isFastMode {
+            arguments += ["--thinking", "disabled"]
+        }
         if let resume, !resume.isEmpty {
             arguments += ["--resume", resume]
         }
@@ -148,7 +186,7 @@ public actor AgentRunner {
     public func launch() -> AgentLaunch {
         AgentLaunch(
             executable: Self.executable,
-            arguments: Self.argv(session: session, resume: session.agentSessionID),
+            arguments: Self.argv(session: session, resume: session.agentSessionID, isFastMode: isFastMode),
             cwd: workspacePath,
             environment: Shell.environment()
         )
@@ -187,6 +225,7 @@ public actor AgentRunner {
     /// Write one user turn. Starts the process on first use.
     public func send(_ text: String) async throws {
         try await waitForCancelledRunToExit()
+        await refreshFastMode()
         try start()
 
         let line = try Self.encodeTurn(text)
@@ -199,6 +238,24 @@ public actor AgentRunner {
             $0.updatedAt = Date()
         }
         await save(session)
+    }
+
+    /// The key the composer's footer writes. Duplicated as a constant rather than imported,
+    /// because the core cannot see the view layer and a string this load-bearing should be
+    /// findable from both ends: `ComposerControls.fastModeKey` is the other half, and
+    /// `fastModeKeyMatchesTheComposer` in the suite pins the two together.
+    public static func fastModeKey(sessionID: String) -> String {
+        "session.\(sessionID).fastMode"
+    }
+
+    /// A setting that cannot be read is not a reason to refuse a turn, so a failure leaves the
+    /// flag as it was rather than throwing.
+    private func refreshFastMode() async {
+        guard let value = try? await store.setting(Self.fastModeKey(sessionID: session.id)) else {
+            isFastMode = false
+            return
+        }
+        isFastMode = value == "1"
     }
 
     static func encodeTurn(_ text: String) throws -> String {

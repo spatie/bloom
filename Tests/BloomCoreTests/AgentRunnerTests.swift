@@ -130,11 +130,33 @@ private final class ProcessRecorder: @unchecked Sendable {
 
 // MARK: - Tests
 
+/// What the agent is actually launched with.
+///
+/// This suite already existed, and it pinned the invocation with an exact array, which is normally
+/// the strongest shape a test can take. It still missed `--effort` for as long as the composer has
+/// offered a reasoning picker, because the array was written from PROTOCOL.md rather than from
+/// what the app lets somebody choose. Every level anyone picked was written to the session row,
+/// read back into the menu, and went no further.
+///
+/// So the rule the suite now encodes is the other one: **every composer control has to be visible
+/// here**. A control that cannot be found in this array is decoration, and asserting the array is
+/// what the file said before is not the same as asserting it is right.
+///
+/// Both flags below were checked against the installed CLI (2.1.238) by running it, not assumed.
+/// Both are real and both are hidden from `--help`'s summary, and they differ on a bad value in a
+/// way that matters: `--effort` warns on stderr and carries on with exit 0, `--thinking` exits 1.
 @Suite("AgentRunner argv", .tags(.agentProtocol), .scratchDirectory)
 struct AgentRunnerArgvTests {
+    /// Reads the value after a flag, so an assertion says what it means rather than counting
+    /// indexes.
+    private func value(of flag: String, in argv: [String]) -> String? {
+        guard let index = argv.firstIndex(of: flag), argv.indices.contains(index + 1) else { return nil }
+        return argv[index + 1]
+    }
+
     @Test("builds the invocation PROTOCOL.md specifies")
     func buildsArgv() {
-        let session = Session(workspaceID: "w", model: "opus", permissionMode: .acceptEdits)
+        let session = Session(workspaceID: "w", model: "opus", effort: "high", permissionMode: .acceptEdits)
         #expect(AgentRunner.argv(session: session, resume: nil) == [
             "-p",
             "--output-format", "stream-json",
@@ -143,7 +165,99 @@ struct AgentRunnerArgvTests {
             "--verbose",
             "--permission-mode", "acceptEdits",
             "--model", "opus",
+            "--effort", "high",
         ])
+    }
+
+    // MARK: Effort
+
+    @Test("the reasoning effort the user picked reaches the CLI")
+    func passesEffort() {
+        let session = Session(workspaceID: "w", effort: "high")
+
+        #expect(value(of: "--effort", in: AgentRunner.argv(session: session, resume: nil)) == "high")
+    }
+
+    /// All five the composer offers, one by one, because the two lists agreeing today is not the
+    /// same as them being pinned to each other. These five are also exactly what the CLI's own
+    /// parser names in its warning message, read out of the binary and confirmed by running it.
+    @Test(
+        "every level the composer offers is a level the CLI accepts",
+        arguments: ["low", "medium", "high", "xhigh", "max"]
+    )
+    func everyComposerEffort(level: String) {
+        let session = Session(workspaceID: "w", effort: level)
+
+        #expect(value(of: "--effort", in: AgentRunner.argv(session: session, resume: nil)) == level)
+    }
+
+    /// Effort is an open set, exactly like the model: a repository's settings file can pin one
+    /// Bloom has no name for, which is why `ComposerOption.adding` exists. Passing it through is
+    /// deliberate. The CLI warns and falls back to its default with exit 0, so an exotic value
+    /// costs a line on stderr, while filtering here would silently substitute a level the
+    /// repository asked for with one it did not.
+    @Test("an effort Bloom does not recognise is still passed through")
+    func unknownEffort() {
+        let session = Session(workspaceID: "w", effort: "ultracode")
+
+        #expect(value(of: "--effort", in: AgentRunner.argv(session: session, resume: nil)) == "ultracode")
+    }
+
+    /// A session row from before the column meant anything, or one a settings file blanked.
+    /// `--effort` with nothing after it would make the CLI eat whatever came next.
+    @Test("an empty effort sends no flag at all rather than an empty one")
+    func emptyEffort() {
+        for blank in ["", "   "] {
+            let argv = AgentRunner.argv(session: Session(workspaceID: "w", effort: blank), resume: nil)
+
+            #expect(!argv.contains("--effort"), "a blank effort still sent the flag")
+        }
+    }
+
+    // MARK: Fast mode
+
+    /// "Fast mode trades some reasoning for a quicker reply", which on this CLI is
+    /// `--thinking disabled`. Off means the flag is absent rather than set to something else:
+    /// sending `adaptive` explicitly would override whatever the session would otherwise pick.
+    @Test("fast mode is off unless it is on, and off sends nothing")
+    func fastModeOff() {
+        let argv = AgentRunner.argv(session: Session(workspaceID: "w"), resume: nil, isFastMode: false)
+
+        #expect(!argv.contains("--thinking"))
+    }
+
+    @Test("fast mode turns thinking off")
+    func fastModeOn() {
+        let argv = AgentRunner.argv(session: Session(workspaceID: "w"), resume: nil, isFastMode: true)
+
+        #expect(value(of: "--thinking", in: argv) == "disabled")
+        // Strict where --effort is forgiving: a value outside these three exits 1 before the turn
+        // starts, so the only thing Bloom may ever send here is a literal.
+        #expect(["enabled", "adaptive", "disabled"].contains(value(of: "--thinking", in: argv) ?? ""))
+    }
+
+    /// The core writes this key and the composer's footer writes the same key, from two modules
+    /// that cannot see each other. Drift puts the toggle back to reaching nothing, which is the
+    /// bug this suite is about.
+    @Test("the fast mode key is the one the composer writes")
+    func fastModeKeyMatchesTheComposer() {
+        #expect(AgentRunner.fastModeKey(sessionID: "abc") == "session.abc.fastMode")
+    }
+
+    /// A flag left dangling at the end silently eats whatever the CLI reads next, or nothing.
+    @Test("no flag is left without its value")
+    func noDanglingFlags() {
+        let argv = AgentRunner.argv(
+            session: Session(workspaceID: "w", effort: "max"),
+            resume: "abc",
+            isFastMode: true
+        )
+        let valueless: Set<String> = ["--verbose", "--include-partial-messages"]
+
+        for (index, item) in argv.enumerated() where item.hasPrefix("--") && !valueless.contains(item) {
+            #expect(argv.indices.contains(index + 1), "\(item) has nothing after it")
+            #expect(!argv[index + 1].hasPrefix("--"), "\(item) is followed by another flag")
+        }
     }
 
     @Test("appends resume when there is an agent session to resume")
