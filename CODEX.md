@@ -57,6 +57,35 @@ reading a transcript and guessing. Do not commit the dump; it is 1.1 MB and it i
 | stderr | The server logs tracing there. Never merge it into the frame stream |
 | Cost | Tokens only. There is no price anywhere on this protocol |
 
+### Measured behaviour, not inferred
+
+Three questions that could only be answered by running the thing.
+
+**Does `on-request` plus `read-only` ask about everything?** No. One turn told to run `ls`, read a
+file and then write one: **two commands ran with zero questions**, and the only questions were the
+three write attempts. Reading and running are what the sandbox allows, so they never reach an
+approval; writing is what it refuses, so every write becomes a question. That is a usable Ask mode
+and it is what shipped. It is also worth knowing the shape of it: a Codex chat in Ask never
+interrupts you about a `grep`, and always interrupts you about a `sed -i`.
+
+**Can a refusal carry a reason?** Not on the approval wire, which takes a word. But `turn/steer`
+puts text into a turn that is already running, and it was measured both ways: after a bare
+`decline` the agent tried the same patch again immediately, twice; after `decline` plus a steered
+sentence saying the file should be named differently, it wrote the different name. So Bloom sends
+the reason as a steer right behind the refusal, and a Codex denial says as much as a Claude Code
+one.
+
+**What is in `FileUpdateChange.diff`?** Not always a diff, which is the trap in the name:
+
+| Kind | What the field holds | Recorded |
+| --- | --- | --- |
+| `update` | A unified **hunk**: `@@ -1,3 +1,3 @@` and its lines. No `---`/`+++` headers | `fixtures/codex-edit-patch.ndjson` |
+| `add` | The **whole new file**, verbatim, no diff markers at all (`"hi\n"`) | `fixtures/codex-approval.ndjson` |
+| `delete` | Presumed symmetrical. **Not observed**, and treated as content rather than as a diff | |
+
+Anything counting `+` lines to size a new file counts zero, which is what the turn footer would
+have reported for every file a Codex chat created. `CodexFileUpdate.addedLines` counts by kind.
+
 ### `model/list`, verified unauthenticated
 
 It answers in full against a scratch `CODEX_HOME` with no credentials, so a picker can be filled
@@ -117,10 +146,18 @@ found.
   presenter by reading the row's payload.
 - **`Session.agentKind`** and its migration, defaulting every existing row to `claudeCode`.
 
-Tests: 76 across five suites, all on recorded payloads.
+Tests: 87 across twelve suites, all on recorded payloads.
 
-**Not built yet:** nothing chooses `CodexRunner` (see step 2 and step 8), the model picker is still
-Claude's three hardcoded ids, and `AgentKind.canRunWorkspaces` is still `self == .claudeCode`.
+### The third pass, since
+
+The wiring, and the three things only a live server could answer (see "Measured behaviour"):
+`AgentRunner` conforms to the seam through an extension rather than an edit, `TranscriptModel`
+picks a runner by `session.agentKind`, `canRunWorkspaces` admits two, the composer's model menu has
+a section per backend with Codex's models fetched and its efforts per model, choosing another
+backend on a chat that has spoken forks, the tab strip marks a workspace that holds both, the
+turn footer counts a Codex patch by its kind, and a refusal carries its reason as a steer.
+
+**A Codex chat runs end to end.** What is left is listed under §11.
 
 ---
 
@@ -297,18 +334,25 @@ Proposal, and it should be argued with:
 
 | Bloom mode | Codex `approvalPolicy` | Codex `sandbox` |
 | --- | --- | --- |
-| Ask (`auto`) | `on-request` | `workspace-write` |
+| Ask (`auto`) | `on-request` | `read-only` |
 | Accept edits | `on-request` | `workspace-write` |
 | Full access | `never` | `danger-full-access` |
 | Plan | **not offered** | |
 
-Ask and Accept edits landing on the same pair is the honest answer: Codex asks about writes as a
-property of the sandbox, not of a mode. If they must differ, `untrusted` for Ask is the stricter
-reading, and it is worth measuring how often it actually asks before shipping it, because a mode
-that asks about `ls` is a mode nobody leaves on.
+**Shipped, and measured.** Ask means "do not write without telling me", and read-only is the
+sandbox that means it: reads and commands run untouched, writes arrive as questions. The measured
+run is above, and the number that matters is zero questions for two shell commands. `untrusted`
+was the stricter alternative and was rejected on that same evidence: it asks about reads too, which
+would make Ask a mode nobody leaves on rather than a strict one.
 
-`plan` must be **absent from the picker for a Codex chat**, not present and ignored. A mode that
-silently does nothing is worse than one that is not offered.
+Accept edits differs by exactly one thing, which is the one thing its name promises: the sandbox
+lets the worktree be written, so an edit inside it is not a question. `workspaceWrite` names the
+worktree as its only writable root, so a Codex chat can write where its own workspace is and
+nowhere else.
+
+`plan` is **absent from the picker for a Codex chat and the picker says why**: "Plan is a Claude
+Code mode. Codex has no equivalent." Absent and silent would leave somebody who knows Bloom has a
+Plan mode hunting for it.
 
 ### The five questions
 
@@ -332,9 +376,11 @@ Three things that differ, and cannot be papered over:
   So the `permission_grants` table, which exists because a worktree can be deleted, has nothing to
   store for Codex. A Codex chat's grants live for the life of the app-server process. Say that in
   the UI rather than showing a "remembered" list that is empty.
-- **A refusal carries no sentence.** `decline` is a word, so `PermissionDecision.deny(message:)`'s
-  text has nowhere to go. The agent is told no without being told why. Claude Code hands the
-  sentence back as the tool result; there is no equivalent here.
+- **A refusal carries no sentence on the approval wire**, so the reason goes out as a `turn/steer`
+  immediately behind the `decline`. Measured both ways: a bare decline was followed by the same
+  patch again, twice; a decline plus a steered reason produced the different thing that was asked
+  for. `CodexRunner.deliverReason` is that, and a steer that misses because the turn moved on is
+  deliberately silent, since the refusal has already landed.
 - **Codex offers no rule of its own.** Claude Code's CLI sends `permission_suggestions`, its own
   judgement about which rule would let calls like this through. Codex sends nothing, so Bloom
   offers the narrowest rule there is: the command verbatim, or the path verbatim. It cannot grant
@@ -350,8 +396,8 @@ The mapping that shipped:
 | Allow once | `accept` |
 | Allow for this session | `acceptForSession` |
 | Always allow (project) | `acceptForSession`, plus a row in Bloom's own `permission_grants` |
-| Deny | `decline`, and the turn carries on |
-| Deny and stop | `cancel` |
+| Deny | `decline`, and the turn carries on. The reason follows as a `turn/steer` |
+| Deny and stop | `cancel`. No steer: there is no turn left to put words into |
 
 `thread/status/changed` carries an `active` state with `activeFlags: ["waitingOnApproval"]`, which
 is the signal a sidebar needs to tell "working" from "waiting for you". Claude Code has no such
@@ -454,23 +500,32 @@ stays zero for a Codex chat, forever.
 Each step should land on its own and leave the app working.
 
 1. **Done.** `Session.agentKind` plus the migration, defaulting to `claudeCode`.
-2. **Done, on the Codex side.** The `SessionRunner` seam. Conforming `AgentRunner` to it is one
-   line and no behaviour change, and is the small edit that makes step 8 possible.
+2. **Done.** The `SessionRunner` seam, adopted by both runners. `AgentRunner` conforms through an
+   extension in `SessionRunner.swift`, so its own file was never edited.
 3. **Done.** `CodexRunner`, driving `CodexClient`, writing the same store rows.
-4. **Done, bar one call site.** `CodexItemPresenter` and `TranscriptPresenter`. The transcript
-   views still call `ToolPresenter.present(` directly; that is the edit, in files held today.
-5. **Done.** Permission mapping and the asks, joined to their items by id. The prompt itself is the
-   Claude one, unchanged, because a Codex question is a `PermissionAsk`.
-6. The model picker: sections, fetched Codex models, per-model efforts, and the fork-on-switch rule.
-7. Usage and context reading. Already lands in the right place (§10); what is left is saying tokens
-   rather than "$0.00" where a Codex chat has no price.
-8. **The wiring.** `TranscriptModel.ensureRunner` picks a runner by `session.agentKind`,
-   `AgentRunner` conforms to `SessionRunner`, `canRunWorkspaces` opens up, the create sheet offers
-   a backend for the first chat, and the tab strip marks it (§8a).
-9. `SlashCommandIndex`'s Codex sibling, from `skills/list`.
+4. **Done.** `CodexItemPresenter`, `TranscriptPresenter`, and the one call site in `ToolRowView`.
+5. **Done.** Permission mapping, the asks, the grant matching, and the steered reason.
+6. **Done.** The model picker: backend sections, fetched Codex models, per-model efforts, the
+   fork-on-switch rule, and Plan absent with a line saying why.
+7. **Done for the numbers.** Tokens and the context window land where the existing readers look.
+   What is left is wording: a Codex chat has no price, and anywhere the UI would print "$0.00" it
+   should print the token count instead. A zero that means "we do not know" reads as "free".
+8. **Done.** `TranscriptModel.makeRunner` picks by `session.agentKind`, `canRunWorkspaces` admits
+   two, the create sheet carries a backend into the first chat, and the tab strip marks a workspace
+   whose chats are not all on one backend.
 
-Step 8 is the one that makes any of this reachable, and it is the only step that edits files
-`AgentRunner.swift`, `Models.swift` and the transcript views already own.
+### What is actually left
+
+- **The expanded file-change row.** The collapsed row is right. Opening one hands `DiffParser` a
+  bare hunk (or, for a new file, raw content), and it expects a whole unified patch with headers.
+  A small shim that synthesises the `--- a/x` and `+++ b/x` lines from the path, and that draws an
+  `add` as content rather than as a diff, is the fix.
+- **Cost wording**, as in step 7.
+- **`SlashCommandIndex`'s Codex sibling**, from the `skills/list` RPC. Codex's slash vocabulary is
+  a call rather than a directory walk, so it is a different index, not a flag on that one.
+- **`WorkspaceNamer` stays on Claude Code**, deliberately. A workspace name is not a chat, so it
+  does not follow the chat's backend, and it already degrades to the mechanical name when `claude`
+  is absent. Revisit only if a Codex-only machine turns out to be common.
 
 ---
 
@@ -479,5 +534,5 @@ Step 8 is the one that makes any of this reachable, and it is the only step that
 - Run with `CODEX_HOME` pointed at a scratch directory of your own, never the user's.
 - Never read, print or log `~/.codex/auth.json`, and never write into `~/.codex/`.
 - Turns cost the owner's plan. Keep them few and short. The whole verification behind this document
-  was five turns of a handful of words each.
+  is seven turns of a handful of words each.
 - `model/list` and the schema dump need no account and cost nothing. Prefer them.
