@@ -85,14 +85,3 @@ final class WorkspacePullRequests {
         await lookup.value
     }
 }
-
-/// The age-limited form of the lookup, kept beside its only caller. The bridge's own version
-/// re-checks gh's authentication on every call, which is a second subprocess per row per poll,
-/// and the sidebar has already established that gh works before it gets here.
-extension GitHubBridge {
-    static func pullRequest(
-        branch: String, worktree: String, maxAge: Duration
-    ) async -> PullRequest? {
-        try? await GitHub.pullRequest(forBranch: branch, worktree: worktree, maxAge: maxAge)
-    }
-}

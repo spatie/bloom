@@ -122,8 +122,15 @@ struct PullRequestBar: View {
     // MARK: - Actions
 
     private func poll() async {
+        // The first pass is an arrival rather than a poll, and it is allowed a recent answer.
+        // This runs on `.task(id:)`, so it used to send two gh calls to GitHub every time the
+        // window landed on a workspace, including landing back on one it had left four seconds
+        // earlier. Every pass after this one asks GitHub properly: twenty seconds is exactly long
+        // enough that an answer from the last one is not worth having.
+        var maxAge = WorkspaceModel.pullRequestArrivalMaxAge
         while !Task.isCancelled {
-            await model.refreshPullRequest()
+            await model.refreshPullRequest(maxAge: maxAge)
+            maxAge = .zero
             try? await Task.sleep(for: Self.pollInterval)
         }
     }

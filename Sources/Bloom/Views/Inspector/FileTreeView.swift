@@ -9,11 +9,11 @@ import BloomCore
 struct FileTreeView: View {
     let model: WorkspaceModel
 
-    @State private var children: [String: [FileTreeNode]] = [:]
+    /// Which folders this reader has opened. The listing itself is the model's: see
+    /// `WorkspaceModel.fileTree`, and the note there for why it cannot live in this view.
     @State private var expanded: Set<String> = []
     @State private var selection: String?
     @State private var hovered: String?
-    @State private var isLoading = true
 
     /// The flattened row list, rebuilt when the listing loads or a folder opens rather than on
     /// every redraw. Walking the index inside `body` meant re-walking it for every layout pass.
@@ -38,8 +38,12 @@ struct FileTreeView: View {
         // Space bar Quick Look, the way Finder does it. Behind the rows, so it takes no clicks.
         .background(QuickLookHost(url: previewURL, armToken: quickLookArm))
         .task(id: LoadID(workspaceID: model.workspace.id, workspacePath: model.workspace.path)) {
-            await load()
+            // Nothing is thrown away first. A workspace whose listing has already been read draws
+            // it on the frame it arrives on, and this returns without a subprocess.
+            expanded = []
+            await model.refreshFileTree()
         }
+        .onChange(of: model.fileTree, initial: true) { _, _ in rebuildRows() }
         .onChange(of: selection) { _, path in
             previewURL = path.flatMap { QuickLookTarget.url(for: fullPath($0)) }
         }
@@ -52,10 +56,10 @@ struct FileTreeView: View {
 
     @ViewBuilder
     private var tree: some View {
-        if isLoading {
+        if !model.hasReadFileTree {
             LoadingView("Listing the worktree")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if children.isEmpty {
+        } else if model.fileTree.isEmpty {
             EmptyStateView(
                 glyph: "folder",
                 title: "Nothing tracked",
@@ -117,32 +121,11 @@ struct FileTreeView: View {
     }
 
     private func rebuildRows() {
-        rows = FileTreeRowItem.flatten(children: children, expanded: expanded)
+        rows = FileTreeRowItem.flatten(children: model.fileTree, expanded: expanded)
     }
 
     private func fullPath(_ relative: String) -> String {
         (model.workspace.path as NSString).appendingPathComponent(relative)
     }
 
-    // MARK: - Loading
-
-    private func load() async {
-        isLoading = true
-        let worktree = model.workspace.path
-
-        let paths = await Task.detached(priority: .userInitiated) { () -> [String] in
-            let result = try? await Shell.run(
-                "git",
-                ["ls-files", "--cached", "--others", "--exclude-standard"],
-                cwd: worktree,
-                timeout: .seconds(30)
-            )
-            return result?.lines ?? []
-        }.value
-
-        guard !Task.isCancelled else { return }
-        children = FileTreeNode.index(paths)
-        rebuildRows()
-        isLoading = false
-    }
 }

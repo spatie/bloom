@@ -44,7 +44,9 @@ final class WorkspaceModel {
     var activeSessionID: String? {
         get { storedActiveSessionID }
         set {
-            storedActiveSessionID = newValue
+            // Only when it moved, for the reason `reloadSessions` spells out: an identical value
+            // written back is still an invalidation, and this one reaches every pane.
+            if storedActiveSessionID != newValue { storedActiveSessionID = newValue }
             prepareActiveTranscript()
         }
     }
@@ -59,6 +61,16 @@ final class WorkspaceModel {
     var changedFiles: [ChangedFile] = []
     var selectedFilePath: String?
     var isLoadingChanges = false
+    /// Whether git has answered about this worktree at all, this launch.
+    ///
+    /// Separate from `isLoadingChanges`, and the difference is what a pane with nothing in it is
+    /// allowed to say. An empty `changedFiles` means two completely different things: "git looked
+    /// and there is nothing" and "nobody has looked yet". The inspector used to tell them apart by
+    /// the loading flag, which is raised by the refresh rather than by the arrival, so a workspace
+    /// being opened for the first time drew "No changes yet. Nothing in this worktree differs from
+    /// main" for as long as it took the refresh to start. That is a claim, it was made before
+    /// anything had been read, and on a large worktree it was on screen for most of a second.
+    private(set) var hasReadChanges = false
     /// Why the last refresh could not answer. Non-nil means `changedFiles` is the last list git was
     /// able to produce, not what the worktree looks like now.
     var changesError: String?
@@ -144,6 +156,11 @@ final class WorkspaceModel {
     /// The in-flight refreshes, so a newer one can cancel the one it replaces. Two overlapping
     /// refreshes both claim `isLoadingChanges`, and the slower one finishing last would otherwise
     /// write its stale answer over the fresh one.
+    /// Everything an arrival kicks off that the first frame does not wait for. Cancelled by the
+    /// next arrival, so a workspace left mid refresh stops rather than finishing into a model
+    /// nobody is looking at. See `onAppear`.
+    private var arrivalTask: Task<Void, Never>?
+
     private var changesTask: Task<Result<ChangesAnswer, GitFailure>, Never>?
     private var pullRequestTask: Task<PullRequest?, Never>?
     /// A setup script can run for minutes (`composer install`, `npm ci`). Without a handle,
@@ -166,13 +183,29 @@ final class WorkspaceModel {
         return sessions.first { $0.id == activeSessionID } ?? sessions.first
     }
 
+    /// Reads the session list back from the store.
+    ///
+    /// Every write here is conditional, and that is the point rather than a tidiness. Assigning an
+    /// identical value is still a mutation as far as Observation is concerned, so an unconditional
+    /// `sessions = fresh` invalidated the tab strip, both panes and the transcript on every single
+    /// arrival at a workspace whose sessions had not moved since the last one. That is a second
+    /// full layout of the centre column, on the main thread, for a list that is the same list.
     func reloadSessions() async {
         guard let store else { return }
-        sessions = (try? await store.sessions(workspaceID: workspace.id)) ?? []
+        SwitchTrace.mark("sessions.query.start", workspace: workspace.id)
+        let fresh = (try? await store.sessions(workspaceID: workspace.id)) ?? []
+        SwitchTrace.mark("sessions.query.done", workspace: workspace.id)
+        if sessions != fresh { sessions = fresh }
+        SwitchTrace.mark("sessions.assigned", workspace: workspace.id)
         if activeSessionID == nil || !sessions.contains(where: { $0.id == activeSessionID }) {
             activeSessionID = sessions.first?.id
+        } else {
+            // The setter above prepares the transcript for us. This is the other branch, where the
+            // active session has not moved and the transcript may still be the one this launch has
+            // never built.
+            prepareActiveTranscript()
         }
-        prepareActiveTranscript()
+        SwitchTrace.mark("sessions.prepared", workspace: workspace.id)
     }
 
     @discardableResult
@@ -274,6 +307,10 @@ final class WorkspaceModel {
         for transcript in transcripts.values { transcript.stop() }
         setupTask?.cancel()
         setupTask = nil
+        arrivalTask?.cancel()
+        arrivalTask = nil
+        fileTreeTask?.cancel()
+        fileTreeTask = nil
         changesTask?.cancel()
         pullRequestTask?.cancel()
         // A cancelled refresh returns before it clears its own flag, so the spinner would spin
@@ -455,9 +492,16 @@ final class WorkspaceModel {
             }
         }
         changesTask = task
-        if reason == .requested { isLoadingChanges = true }
+        // Only when there is nothing to show. A workspace this launch has already opened still
+        // holds the list git gave it last time, and that list is right until git says otherwise:
+        // replacing it with a spinner on every arrival is a flash of nothing between one correct
+        // answer and the same correct answer. The spinner is for a workspace being opened for the
+        // first time, where there genuinely is nothing yet.
+        if reason == .requested, changedFiles.isEmpty { isLoadingChanges = true }
+        if reason == .requested { SwitchTrace.mark("changes.git.start", workspace: workspace.id) }
 
         let outcome = await task.value
+        if reason == .requested { SwitchTrace.mark("changes.git.done", workspace: workspace.id) }
 
         // A newer refresh started while this one was in git, or the workspace is going away. Either
         // way this answer is the stale one, and writing it would undo the fresh one.
@@ -469,12 +513,14 @@ final class WorkspaceModel {
 
         switch outcome {
         case .failure(let failure):
+            hasReadChanges = true
             // Git failing says nothing about the worktree. Replacing the list with an empty one
             // would show the user a clean workspace, which is the one answer that is certainly
             // wrong, so the last known list stays and the failure is reported instead.
             changesError = failure.message
 
         case .success(let answer):
+            hasReadChanges = true
             // Only when it actually moved. `AppModel`'s poll lands here every six seconds, and a
             // write of an identical list is still a write as far as Observation is concerned,
             // which would rerun the inspector's body and rebuild the tree for nothing.
@@ -508,6 +554,53 @@ final class WorkspaceModel {
         }
     }
 
+    // MARK: - The worktree listing
+
+    /// Every directory's children, for the All files tab, built once per workspace per launch.
+    ///
+    /// It lives here rather than in the view for two reasons, and the second one is a bug rather
+    /// than a cost. The cost: `git ls-files` on a large worktree is a subprocess and tens of
+    /// thousands of lines, and the tab re-ran it on every single arrival. The bug: the view's own
+    /// `@State` outlives a workspace switch, because the tab is the same view in the same place
+    /// with different contents, so between arriving at a workspace and git answering about it the
+    /// tree on screen was the PREVIOUS workspace's files, listed under the new workspace's name.
+    private(set) var fileTree: [String: [FileTreeNode]] = [:]
+    /// Whether the listing has been read at all, so the tab can tell "nothing tracked" apart from
+    /// "nobody has looked yet".
+    private(set) var hasReadFileTree = false
+    private var fileTreeTask: Task<Void, Never>?
+
+    /// - Parameter force: read it again even though it has been read. For a refresh the user asked
+    ///   for; an arrival never forces, which is the whole point.
+    func refreshFileTree(force: Bool = false) async {
+        if hasReadFileTree, !force { return }
+        if let fileTreeTask, !force { return await fileTreeTask.value }
+
+        fileTreeTask?.cancel()
+        let worktree = workspace.path
+        let task = Task { [weak self] in
+            let index = await Task.detached(priority: .userInitiated) {
+                () -> [String: [FileTreeNode]] in
+                let result = try? await Shell.run(
+                    "git",
+                    ["ls-files", "--cached", "--others", "--exclude-standard"],
+                    cwd: worktree,
+                    timeout: .seconds(30)
+                )
+                // Indexed off the main thread as well as read there. Forty thousand paths turned
+                // into a dictionary is not a subprocess, but it is not free either, and the main
+                // thread is what the switch is waiting on.
+                return FileTreeNode.index(result?.lines ?? [])
+            }.value
+            guard let self, !Task.isCancelled else { return }
+            if fileTree != index { fileTree = index }
+            hasReadFileTree = true
+            fileTreeTask = nil
+        }
+        fileTreeTask = task
+        await task.value
+    }
+
     func patch(for file: ChangedFile) async -> String {
         let path = workspace.path
         let base = workspace.baseBranch
@@ -524,23 +617,40 @@ final class WorkspaceModel {
 
     // MARK: - Pull request
 
-    func refreshPullRequest() async {
+    /// How stale an answer about the pull request an arrival will settle for.
+    ///
+    /// Arriving at a workspace used to run `gh auth status` and `gh pr view` every single time,
+    /// which is two subprocesses and two round trips to GitHub for a fact that changes when
+    /// somebody pushes, reviews or merges. Measured on this machine: 640ms to 1.1s per arrival,
+    /// all of it after the window had finished drawing, and all of it repeated by flicking between
+    /// two workspaces.
+    ///
+    /// Only an arrival accepts a cached answer. Everything that has a reason to believe the answer
+    /// changed asks again with no age at all: a finished turn, the bar's own poll, and the button
+    /// that creates one.
+    static let pullRequestArrivalMaxAge = Duration.seconds(30)
+
+    /// - Parameter maxAge: how old a cached answer may be. Zero always asks GitHub.
+    func refreshPullRequest(maxAge: Duration = .zero) async {
         pullRequestTask?.cancel()
         let branch = workspace.branch
         let path = workspace.path
 
         let task = Task.detached(priority: .utility) {
-            await GitHubBridge.pullRequest(branch: branch, worktree: path)
+            await GitHubBridge.pullRequest(branch: branch, worktree: path, maxAge: maxAge)
         }
         pullRequestTask = task
-        isLoadingPullRequest = true
+        // Only when there is nothing to show, for the same reason the changed file list only
+        // spins when it is empty.
+        if pullRequest == nil { isLoadingPullRequest = true }
 
         let fresh = await task.value
 
         guard pullRequestTask == task, !task.isCancelled else { return }
         pullRequestTask = nil
-        pullRequest = fresh
+        if pullRequest != fresh { pullRequest = fresh }
         isLoadingPullRequest = false
+        SwitchTrace.mark("pullRequest.loaded", workspace: workspace.id)
     }
 
     /// Asks the workspace's agent to open the pull request, instead of running `gh` from here.
@@ -680,11 +790,51 @@ final class WorkspaceModel {
 
     // MARK: - Housekeeping
 
+    /// The window has arrived on this workspace.
+    ///
+    /// Two halves, and which half a piece of work is in is the whole of what makes a switch feel
+    /// immediate. Before this returns: nothing that is already in hand. After it, in a task of its
+    /// own: everything that needs SQLite, a subprocess or the network.
+    ///
+    /// The first visit of a launch is the one exception, and it is honest about itself. There are
+    /// no sessions yet, so there is no transcript to draw and nothing to be quick about; the read
+    /// is waited for because the alternative is an empty pane that fills in a beat later, which is
+    /// the flash this whole arrangement exists to avoid. Every arrival after that draws from the
+    /// sessions, the rows and the file list this model is already holding, and the refreshes
+    /// below only ever correct what is already on screen.
+    ///
+    /// This used to be four `await`s in a row, so a return to a workspace waited on a session
+    /// query, then on `git diff` against the worktree, then on a write to the workspace row,
+    /// before the last of them started asking GitHub. Measured on a forty thousand file worktree:
+    /// the file list landed 970ms after the click, and the row that says the workspace has been
+    /// read was written after that.
     func onAppear() async {
-        await reloadSessions()
-        await refreshChanges()
-        await app.markRead(workspace)
-        Task { await refreshPullRequest() }
+        SwitchTrace.mark("onAppear.start", workspace: workspace.id)
+        let isFirstVisit = sessions.isEmpty
+        if isFirstVisit { await reloadSessions() }
+        SwitchTrace.mark("sessions.loaded", workspace: workspace.id)
+
+        // One task per arrival, and the previous one is cancelled. Leaving a workspace while its
+        // git call is in flight is the ordinary case, not the exception: it is what switching
+        // quickly between two workspaces IS.
+        arrivalTask?.cancel()
+        arrivalTask = Task { [weak self] in
+            guard let self else { return }
+            if !isFirstVisit { await reloadSessions() }
+            guard !Task.isCancelled else { return }
+            // Concurrently, because neither is waiting for anything the other knows. The read
+            // mark used to be written after `git` had finished walking the worktree.
+            async let changes: Void = refreshChanges()
+            async let read: Void = app.markRead(workspace)
+            _ = await (changes, read)
+            SwitchTrace.mark("changes.loaded", workspace: self.workspace.id)
+            SwitchTrace.markOnScreen("changes.loaded", workspace: self.workspace.id)
+            guard !Task.isCancelled else { return }
+            // Last, and allowed to answer from the cache. This is the only part of an arrival that
+            // goes to the network, so it is the only part that must never be waited on by
+            // anything else. See `refreshPullRequest`.
+            await refreshPullRequest(maxAge: Self.pullRequestArrivalMaxAge)
+        }
     }
 
     /// Called when an agent turn finishes, to refresh everything derived from the filesystem.

@@ -5,9 +5,22 @@ import BloomCore
 /// The one place the app layer touches `GitHub`. Keeping it behind a single adapter means a
 /// change to the gh wrapper's signature is a one-file fix rather than a sweep through views.
 enum GitHubBridge {
-    static func pullRequest(branch: String, worktree: String) async -> PullRequest? {
-        guard await GitHub.isAvailable() else { return nil }
-        return try? await GitHub.pullRequest(forBranch: branch, worktree: worktree)
+    /// - Parameter maxAge: how old an answer from the last `gh pr view` may be and still be used.
+    ///   Zero always asks GitHub.
+    ///
+    /// Availability goes through `GitHubAvailability` rather than straight to `GitHub`, and that
+    /// is the difference between one gh call and two. `GitHub.isAvailable()` runs `gh auth
+    /// status`, which is a process launch and a round trip to GitHub, and this was calling it
+    /// before every single `gh pr view`: arriving at a workspace cost two network calls to answer
+    /// one question. `GitHubAvailability` already asks that question once and remembers the
+    /// answer, expiring only the negative one, because signing in happens outside this app.
+    static func pullRequest(
+        branch: String, worktree: String, maxAge: Duration = .zero
+    ) async -> PullRequest? {
+        guard await GitHubAvailability.shared.isReady() else { return nil }
+        return try? await GitHub.pullRequest(
+            forBranch: branch, worktree: worktree, maxAge: maxAge
+        )
     }
 
     static func checks(branch: String, worktree: String) async -> [CheckRun] {

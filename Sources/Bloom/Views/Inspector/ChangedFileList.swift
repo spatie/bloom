@@ -121,7 +121,9 @@ struct ChangedFileList: View {
     /// and the second one quietly convinces the user their agent did nothing.
     @ViewBuilder
     private var empty: some View {
-        if model.isLoadingChanges {
+        // "Nobody has looked yet" first, because an empty list before git has answered is not an
+        // answer. See `WorkspaceModel.hasReadChanges`.
+        if model.isLoadingChanges || !model.hasReadChanges {
             LoadingView("Reading the worktree")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let problem = model.changesError {
