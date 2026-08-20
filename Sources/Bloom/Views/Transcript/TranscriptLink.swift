@@ -54,6 +54,69 @@ enum TranscriptLink {
         return output
     }
 
+    /// The same text as an `NSAttributedString`, for `TranscriptTextView`.
+    ///
+    /// Only the `.link` attribute is set on an address here. Its colour and its underline are the
+    /// text view's business, because they are not properties of the text: the colour comes from
+    /// `linkTextAttributes` and the underline appears only while the pointer is on it. Putting
+    /// either in the string would make a link underlined at rest again, and would put an
+    /// underline into anything that copied it out.
+    static func attributedString(
+        _ text: String,
+        links: [DetectedLink],
+        font: NSFont,
+        color: NSColor,
+        lineSpacing: CGFloat
+    ) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = lineSpacing
+        paragraph.alignment = .left
+        // A long address has no spaces to break at, so without this it lays out as one line and
+        // takes the bubble off the pane. Character wrapping is only reached when a word cannot
+        // fit, which for prose is never.
+        paragraph.lineBreakMode = .byWordWrapping
+
+        let output = NSMutableAttributedString(
+            string: text,
+            attributes: [
+                .font: font,
+                .foregroundColor: color,
+                .paragraphStyle: paragraph,
+            ]
+        )
+
+        for found in links {
+            guard let url = URL(string: found.url), opens(url) else { continue }
+            let range = NSRange(found.range, in: text)
+            output.addAttribute(.link, value: url, range: range)
+        }
+        return output
+    }
+
+    /// What a transcript row does with an address, in one place so every row does the same.
+    ///
+    /// A plain click goes to the system's browser. The in-app tab is only ever reached by
+    /// choosing it from the menu, which is the difference the owner asked for: opening a page is
+    /// an action, and the quieter of the two destinations is the one that has to be asked for.
+    @MainActor
+    static func actions(for model: WorkspaceModel?) -> TranscriptLinkActions {
+        TranscriptLinkActions(
+            open: { url, target in
+                switch target {
+                case .externalBrowser:
+                    guard opens(url) else { return }
+                    NSWorkspace.shared.open(url)
+                case .browserTab:
+                    guard let model else { return }
+                    BrowserTab.open(url, in: model)
+                }
+            },
+            canOpenInTab: { url in
+                model != nil && BrowserTab.canOpen(url)
+            }
+        )
+    }
+
     // MARK: Opening
 
     /// Whether Bloom will hand this address to the browser at all.

@@ -53,6 +53,24 @@ struct ScaledFont: Hashable, Sendable {
         return face.font(size: size, weight: resolvedWeight)
     }
 
+    /// The same rung as an `NSFont`, for the transcript's text views.
+    ///
+    /// A twin of `resolved` rather than a conversion of it, because a SwiftUI `Font` cannot be
+    /// turned back into a face: it is a description that only the renderer resolves. The two have
+    /// to agree, so they are written next to each other and take the same steps in the same
+    /// order, rounding included. See `ChatFont.nsFont`, which the composer already uses.
+    func resolvedNSFont(scale: CGFloat, face: ChatFont = .system) -> NSFont {
+        let base = NSFont.preferredFont(forTextStyle: style.appKitStyle)
+        let size = (base.pointSize * scale).rounded()
+        guard design != .monospaced else {
+            return .monospacedSystemFont(ofSize: size, weight: (weight ?? base.systemWeight).appKitWeight)
+        }
+        guard face != .system else {
+            return .systemFont(ofSize: size, weight: (weight ?? base.systemWeight).appKitWeight)
+        }
+        return face.nsFont(size: size)
+    }
+
     /// The monospaced companion for a span of code sitting inside a run of this rung.
     ///
     /// Its own method rather than `resolved(...).monospaced()`, because that expression only means
@@ -65,6 +83,23 @@ struct ScaledFont: Hashable, Sendable {
         let base = NSFont.preferredFont(forTextStyle: style.appKitStyle)
         let size = (base.pointSize * scale * face.inlineCodeScale).rounded()
         return Font.system(size: size, weight: weight ?? base.systemWeight, design: .monospaced)
+    }
+}
+
+extension Font.Weight {
+    /// The AppKit weight that matches, for the rungs an `NSFont` has to resolve.
+    var appKitWeight: NSFont.Weight {
+        switch self {
+        case .ultraLight: .ultraLight
+        case .thin: .thin
+        case .light: .light
+        case .medium: .medium
+        case .semibold: .semibold
+        case .bold: .bold
+        case .heavy: .heavy
+        case .black: .black
+        default: .regular
+        }
     }
 }
 

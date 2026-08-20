@@ -30,6 +30,10 @@ struct UserTurnRowView: View {
     var maxWidth: CGFloat
 
     @Environment(AppModel.self) private var app
+    /// What the conversation is set at and which face it is in, because the bubble now resolves a
+    /// real `NSFont` rather than handing SwiftUI a rung to resolve for itself.
+    @Environment(\.fontScale) private var fontScale
+    @Environment(\.chatFont) private var chatFont
     /// Where a hovered chip says it is, so the card is drawn over the scroll view rather than
     /// inside a bubble that would clip it. See `TranscriptHoverOverlay`.
     @Environment(\.transcriptHoverHost) private var hoverHost
@@ -94,8 +98,6 @@ struct UserTurnRowView: View {
         }
         .padding(.horizontal, TranscriptLayout.inset)
         .padding(.vertical, TranscriptLayout.inset)
-        // A pressed address goes to the browser and nothing else does. See `TranscriptLink.opens`.
-        .opensTranscriptLinks()
     }
 
     /// The words and then the files, which is the order they were written in and the order the
@@ -110,18 +112,28 @@ struct UserTurnRowView: View {
                 // Written text, not markdown. A question with a `*` in it is a question with a
                 // `*` in it, and the one thing lifted out of it is an address: those are found by
                 // `LinkScan`, which is the same detection the agent's own prose goes through.
-                let links = LinkScan.links(in: text)
-                Text(TranscriptLink.attributed(text, links: links, tint: Palette.linkInverted))
-                    .font(Typo.body)
-                    // White, the same ink a selected row uses on the same fill. Measured 5.2 to 1
-                    // on Spatie Blue, which passes AA for body text in both appearances.
-                    .foregroundStyle(Palette.textInverted)
-                    .lineSpacing(TranscriptLayout.proseLeading)
-                    .textSelection(.enabled)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .transcriptLinkMenu(TranscriptLink.addresses(of: links))
-                    .transcriptLinkActions(TranscriptLink.addresses(of: links))
+                //
+                // Drawn by AppKit rather than by `Text`, and that is the whole of why
+                // `TranscriptTextView` exists: a link inside a selectable `Text` is decoration.
+                // Measured on a real window, the cursor over one was an I-beam and a press routed
+                // nothing at all. See the note on that type.
+                TranscriptTextView(
+                    text: TranscriptLink.attributedString(
+                        text,
+                        links: LinkScan.links(in: text),
+                        font: Typo.body.resolvedNSFont(scale: fontScale, face: chatFont),
+                        // White, the same ink a selected row uses on the same fill. Measured 5.2
+                        // to 1 on Spatie Blue, which passes AA for body text in both appearances.
+                        color: .alternateSelectedControlTextColor,
+                        lineSpacing: TranscriptLayout.proseLeading
+                    ),
+                    linkColor: NSColor(Palette.linkInverted),
+                    // The measured value from the note above: on the dark ramp the selection is a
+                    // muted slate that sits clearly on Spatie Blue and leaves white text alone.
+                    // AppKit cannot read the `colorScheme` this bubble sets, so it is named.
+                    selectionColor: NSColor(rgb: 0x466288),
+                    actions: TranscriptLink.actions(for: app.existingModel(for: workspace.id))
+                )
             }
 
             if !attachments.isEmpty {
