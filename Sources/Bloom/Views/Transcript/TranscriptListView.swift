@@ -162,7 +162,11 @@ struct TranscriptListView: View {
                                 isExpanded: expanded.contains(row.seq),
                                 isNested: row.parentToolUseID != nil,
                                 maxBubbleWidth: maxBubbleWidth,
-                                onToggle: { toggle(row.seq) }
+                                projectName: transcript.projectName,
+                                onToggle: { toggle(row.seq) },
+                                onAnswer: { requestID, decision in
+                                    Task { await transcript.answer(requestID: requestID, decision: decision) }
+                                }
                             )
                             // Every pass over this list rebuilds every row the stack has already
                             // realised, and opening a long session realises all of them. Comparing

@@ -388,6 +388,12 @@ final class TranscriptModel {
 
     // MARK: - Permission asks
 
+    /// What the project is called, for a permission row that has to say where a rule would apply.
+    /// "Always allow ... in Bloom" is a promise about a place, and the place has to be named.
+    var projectName: String {
+        app.repo(for: workspace)?.name ?? workspace.name
+    }
+
     /// The questions this session is holding a turn open for, in the order they arrived.
     var pendingPermissionAsks: [PermissionAsk] {
         rows.compactMap { row in

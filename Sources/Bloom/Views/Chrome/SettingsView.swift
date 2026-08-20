@@ -58,6 +58,12 @@ struct SettingsView: View {
                 PromptSettingsView()
             }
 
+            // Beside Tools rather than inside General: it holds state the user created, one row
+            // per decision, and it is the thing that makes granting a rule forever safe to offer.
+            Tab("Approvals", systemImage: "hand.raised", value: SettingsTab.approvals) {
+                ApprovalSettingsView()
+            }
+
             Tab("Tools", systemImage: "wrench.and.screwdriver", value: SettingsTab.tools) {
                 ToolSettingsView()
             }

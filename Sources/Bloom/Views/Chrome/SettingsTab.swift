@@ -10,6 +10,7 @@ enum SettingsTab: Hashable {
     case models
     case agents
     case prompts
+    case approvals
     case tools
     case about
 }
