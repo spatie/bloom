@@ -583,6 +583,55 @@ def outputs(fn):
     return layered, wrap_legacy(body)
 
 
+
+# ------------------------------------------------- the small size comparison
+#
+# The per variation cards answer `what does this one do`. They cannot answer
+# `which of these is still doing it at 32`, because two cards are a thousand
+# pixels apart and the eye cannot carry a two pixel difference that far. This
+# grid puts every variation at ONE size in one row, so the claims in the
+# verdict can be checked rather than taken on trust.
+#
+# Each picture is shown twice: once at actual size, which is the truth, and
+# once scaled up with image-rendering: pixelated, which is the same pixels
+# magnified rather than a bigger render. The magnified one is a reading aid and
+# says so on the page; nothing is judged on it that the actual size pair does
+# not also show.
+GRID_SIZES = [128, 64, 32, 16]
+GRID_ZOOM = {128: 2, 64: 4, 32: 8, 16: 16}
+
+
+def grids(seen):
+    out = []
+    for key, label in (("L", "layered document"), ("F", "flat .icns")):
+        rows = []
+        for size in GRID_SIZES:
+            z = GRID_ZOOM[size] * size
+            cells = []
+            for name, _, _, _ in VARIANTS:
+                c = seen[(name, key, size)]
+                cells.append(
+                    '<div class="gc"><i class="%s" style="width:%dpx;'
+                    'height:%dpx"></i>'
+                    '<i class="%s px" style="width:%dpx;height:%dpx"></i>'
+                    '<span>%s</span></div>'
+                    % (c, size, size, c, z, z, name.split("-", 1)[1]))
+            rows.append(
+                '<div class="grow"><h4>%d point, actual size above, the same '
+                'pixels at %dx below</h4><div class="gr">%s</div></div>'
+                % (size, GRID_ZOOM[size], "".join(cells)))
+        out.append('<div class="gblock"><h3>%s</h3>%s</div>'
+                   % (label, "".join(rows)))
+    return ('<section class="card grid"><div class="hd">'
+            '<h2>All eleven at the sizes that decide it</h2></div>'
+            '<p class="note">Depth is the first thing to go when an icon '
+            'shrinks, so this is where the set is actually judged. Each row is '
+            'one size, every variation in the same order as above, actual size '
+            'on top and the same pixels magnified underneath. If two cells in a '
+            'row look the same, that variation is not buying anything at that '
+            'size.</p>%s</section>') % "".join(out)
+
+
 # ------------------------------------------------------------------- sheet
 SIZES = [1024, 512, 256, 128, 64, 32, 16]
 
@@ -662,15 +711,18 @@ code { font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: #9BE9DC;
 .tag.baked { border-color: #3E7A8C; color: #8FC7D4; }
 .tag.shipped { border-color: #4A5560; color: #8E9AA3; }
 .note { color: #9AA7B0; max-width: 92ch; margin: 6px 0 22px; }
-.cols { display: flex; gap: 34px; flex-wrap: wrap; }
-.col { flex: 1 1 740px; min-width: 720px; }
+.cols { display: flex; flex-direction: column; gap: 30px; }
+.col { min-width: 0; }
 .col h3 { font-size: 12px; letter-spacing: 0.09em; text-transform: uppercase;
   color: #6E7C86; margin: 0 0 12px; font-weight: 600; }
+.card { max-width: 1240px; }
 .bigs { display: flex; gap: 16px; margin-bottom: 18px; }
 .big { padding: 20px; border-radius: 16px; }
-.big i { display: block; width: 320px; height: 320px; }
-.strip { display: flex; align-items: flex-end; gap: 14px; padding: 14px 16px;
-  border-radius: 12px; margin-bottom: 10px; overflow-x: auto; }
+.big i { display: block; width: 400px; height: 400px; }
+.strip { display: flex; align-items: flex-end; gap: 14px; padding: 16px;
+  border-radius: 12px; margin-bottom: 10px; overflow-x: auto; width: max-content;
+  max-width: 100%; }
+.strips { display: flex; gap: 16px; flex-wrap: wrap; }
 i { display: inline-block; background-size: 100% 100%;
   background-repeat: no-repeat; }
 .light { background: #EDEDED; }
@@ -680,6 +732,20 @@ i { display: inline-block; background-size: 100% 100%;
   margin-top: 5px; }
 .light .sz span { color: #8A8A8A; }
 .dark .sz span { color: #7A8088; }
+.grid { max-width: 1240px; }
+.gblock { margin-bottom: 34px; }
+.gblock h3 { font-size: 12px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: #6E7C86; margin: 0 0 14px; font-weight: 600; }
+.grow { margin-bottom: 22px; }
+.grow h4 { font-size: 11px; letter-spacing: 0.06em; color: #5C6872;
+  margin: 0 0 8px; font-weight: 500; text-transform: uppercase; }
+.gr { display: flex; gap: 10px; flex-wrap: wrap; }
+.gc { background: #EDEDED; border-radius: 8px; padding: 10px 10px 6px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.gc span { font: 10px ui-monospace, Menlo, monospace; color: #8A8A8A;
+  max-width: 100%; }
+.px { image-rendering: pixelated; image-rendering: crisp-edges; }
+
 .verdict { border-top: 1px solid #262B31; padding: 40px; }
 .verdict h2 { font-size: 22px; margin: 0 0 14px; }
 .verdict p { color: #C2CBD2; max-width: 82ch; }
@@ -698,6 +764,11 @@ def sheet(outdir):
     os.makedirs(pngs, exist_ok=True)
 
     rules, cards = [], []
+    # (name, key, size) -> class, kept so that grids() can lay every
+    # variation out at ONE size next to every other one. The cards can
+    # only be read one at a time, and a claim like `05 is a smudge at 32`
+    # cannot be checked that way.
+    seen = {}
     for name, blurb, where, fn in VARIANTS:
         layered, flatsvg = outputs(fn)
         cols = []
@@ -712,10 +783,11 @@ def sheet(outdir):
                 rules.append(".%s{background-image:url(%s)}"
                              % (c, png(svg, size, p)))
                 cls[size] = c
+                seen[(name, key, size)] = c
             small = "".join(
                 '<div class="sz"><i class="%s" style="width:%dpx;height:%dpx">'
                 '</i><span>%d</span></div>' % (cls[s], s, s, s)
-                for s in SIZES[1:])
+                for s in sorted(SIZES[1:]))
             cols.append(
                 '<div class="col"><h3>%s</h3>'
                 '<div class="bigs">'
@@ -731,6 +803,8 @@ def sheet(outdir):
             '<p class="note">%s</p><div class="cols">%s</div></section>'
             % (name.split("-")[0], name.split("-", 1)[1], where, where, blurb,
                NOTE[name], "".join(cols)))
+
+    grid = grids(seen)
 
     html = ("<!doctype html><meta charset=utf-8><title>Bloom icon, ten depth "
             "studies</title><style>%s\n%s</style>"
@@ -754,7 +828,8 @@ def sheet(outdir):
             "<code>.icns</code> swaps in the unframed drawing below 64; that "
             "swap is deliberately left out here, so each row shows what its "
             "depth alone is worth as it shrinks.</p>"
-            "</header>%s%s") % (CSS, "".join(rules), "".join(cards), VERDICT)
+            "</header>%s%s%s") % (CSS, "".join(rules), "".join(cards),
+                                 grid, VERDICT)
 
     out = os.path.join(outdir, "depth.html")
     with open(out, "w") as f:
