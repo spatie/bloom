@@ -28,8 +28,9 @@ import BloomCore
 /// `RepoIconRefresh` is the whole of that rule and is in the core with its tests. Short version:
 /// a project nobody has looked at is searched, an icon the user chose and initials the user asked
 /// for are never touched, and artwork Bloom found is looked at again only when the file it found
-/// has gone. A search that finds nothing is stored, so it happens once rather than on every
-/// launch, and `Look again` in the project's settings window is unaffected by any of it.
+/// has gone or when the guess is one the ranking would no longer make. A search that finds nothing
+/// is stored, so it happens once rather than on every launch, and `Find icon` in the project's
+/// settings window is unaffected by any of it.
 extension AppModel {
     func startProjectIconSearch() {
         iconSearchTask?.cancel()

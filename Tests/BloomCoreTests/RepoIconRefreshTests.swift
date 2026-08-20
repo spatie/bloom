@@ -41,6 +41,48 @@ struct RepoIconRefreshTests {
         #expect(RepoIconRefresh.reasonToSearch(stale, exists: everything) == .neverLooked)
     }
 
+    @Test("a guess the ranking would no longer make is looked at again, once")
+    func plainerArtwork() {
+        // The owner's own case: `favicon-unread-1.svg` stored against a folder that has had
+        // `favicon.svg` in it all along. Fixing the ranking leaves the badge where it is, so the
+        // stored guess has to be one the sweep is allowed to look past.
+        let badged = project(.detected, icon: "/projects/bloom/public/favicon-unread-1.svg")
+        let publicFolder = [
+            "favicon.svg", "favicon.ico", "favicon-unread-1.svg", "favicon-unread-1.ico",
+            "site.webmanifest", "index.php",
+        ]
+        #expect(
+            RepoIconRefresh.reasonToSearch(badged, exists: everything, contents: { _ in publicFolder })
+                == .plainerArtwork
+        )
+
+        // And it settles by itself. Once the search has stored the plain one, there is nothing
+        // plainer beside it, so the next launch leaves the project alone.
+        let plain = project(.detected, icon: "/projects/bloom/public/favicon.svg")
+        #expect(
+            RepoIconRefresh.reasonToSearch(plain, exists: everything, contents: { _ in publicFolder })
+                == nil
+        )
+
+        // A project whose only artwork is the dressed up file is not in this case at all, so it is
+        // not walked on every launch to be told the same thing.
+        let onlyDark = project(.detected, icon: "/projects/bloom/assets/logo-dark.svg")
+        #expect(
+            RepoIconRefresh.reasonToSearch(onlyDark, exists: everything, contents: { _ in ["logo-dark.svg"] })
+                == nil
+        )
+
+        // Nor is a plain sibling in a better format a reason. That is artwork that has appeared
+        // since, which is the thing this rule exists to not react to.
+        #expect(
+            RepoIconRefresh.reasonToSearch(
+                project(.detected, icon: "/projects/bloom/public/favicon-unread.png"),
+                exists: everything,
+                contents: { _ in ["favicon-unread.png", "favicon.svg"] }
+            ) == nil
+        )
+    }
+
     // MARK: - What must survive a launch untouched
 
     @Test("a file the user chose is never looked past")

@@ -32,6 +32,27 @@ import Foundation
 /// answers nil for a file it cannot read, so looking again cannot startle anybody. It can only
 /// find the artwork where the project moved it to.
 ///
+/// ## The other thing that clears it: a guess the ranking no longer stands behind
+///
+/// A stored guess is only as good as the ranking that made it, and a ranking that has since been
+/// corrected leaves the wrong file on screen for ever. That is not hypothetical: the owner's own
+/// `there-there` had `favicon-unread-1.svg` stored against it, which is the artwork the site
+/// swaps into the browser tab to show an unread count, so the sidebar drew a green tile with a
+/// red 1 on it. Fixing the ranking alone leaves the badge exactly where it was.
+///
+/// So one more case is looked at again: a stored file whose name has a word added to it, with the
+/// plain one sitting beside it in the same folder under the same extension. That is a directory
+/// listing and no file is read, `RepoIconDetector.hasPlainerName(than:among:)` is the whole of the
+/// question, and it is deliberately not "the folder has something better in it now". A plainer
+/// sibling of the same kind and format is one this project's own ranking would have preferred at
+/// the time, so finding one means the pick was wrong when it was made rather than that the folder
+/// moved on. Artwork simply appearing next to a mark is still not a reason to change it.
+///
+/// It is not a one time migration, and it does not need to be, because it settles by itself: the
+/// search replaces the dressed up name with the plain one, and a plain name has no plainer sibling
+/// to find. A project whose only artwork is `logo-dark.svg` is never in this case at all, since
+/// there is nothing plainer beside it, so it is not walked on every launch either.
+///
 /// ## Why a missing folder is not a missing icon
 ///
 /// Everything here is skipped for a project whose own directory is not there. An unmounted volume,
@@ -41,21 +62,27 @@ import Foundation
 /// anything for the same reason.
 public enum RepoIconRefresh {
     /// Why a project is being looked at. Carried out of the rule rather than recomputed, so the
-    /// caller can log which of the two cases it acted on without asking a second time.
+    /// caller can log which case it acted on without asking a second time.
     public enum Reason: String, Sendable, Hashable, CaseIterable {
         /// `.undetected`: nobody has ever looked in this folder. The case this feature is for.
         case neverLooked
         /// `.detected`, and the file that was found is not there any more.
         case artworkGone
+        /// `.detected`, and what was found is the dressed up name with the plain one beside it.
+        case plainerArtwork
     }
 
     /// Whether this project is one the sweep may look at, and why.
     ///
-    /// `exists` is a parameter so the rule is testable without a directory tree behind every
-    /// case. Nothing here reads a file's contents: that is the detector's half.
+    /// `exists` and `contents` are parameters so the rule is testable without a directory tree
+    /// behind every case. Nothing here reads a file's contents: that is the detector's half. The
+    /// listing is only ever asked for the one directory a stored icon is already in.
     public static func reasonToSearch(
         _ repo: Repo,
-        exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+        exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+        contents: (String) -> [String] = {
+            (try? FileManager.default.contentsOfDirectory(atPath: $0)) ?? []
+        }
     ) -> Reason? {
         // The folder first, so a project on a volume that is not mounted is skipped whatever its
         // stored state says. See the note above.
@@ -68,16 +95,25 @@ public enum RepoIconRefresh {
             return nil
         case .detected:
             guard let path = repo.iconPath else { return .artworkGone }
-            return exists(path) ? nil : .artworkGone
+            guard exists(path) else { return .artworkGone }
+            let directory = (path as NSString).deletingLastPathComponent
+            let plainer = RepoIconDetector.hasPlainerName(
+                than: (path as NSString).lastPathComponent,
+                among: contents(directory)
+            )
+            return plainer ? .plainerArtwork : nil
         }
     }
 
     /// Every project the sweep should look at, in the order they were handed over.
     public static func toSearch(
         _ repos: [Repo],
-        exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+        exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+        contents: (String) -> [String] = {
+            (try? FileManager.default.contentsOfDirectory(atPath: $0)) ?? []
+        }
     ) -> [Repo] {
-        repos.filter { reasonToSearch($0, exists: exists) != nil }
+        repos.filter { reasonToSearch($0, exists: exists, contents: contents) != nil }
     }
 }
 
