@@ -87,11 +87,15 @@ enum Palette {
     /// Measured off the mockup: four percent ink in light, five and a half in dark. It was six in
     /// both, and six percent black on white is a visibly grey slab under the pointer where the
     /// same figure in dark is barely a lift.
-    static let hover = Color(nsColor: NSColor(name: nil) { appearance in
+    static let hover = Color(nsColor: hoverNSColor)
+
+    /// The same wash as an `NSColor`, for the transcript's text views. One definition, read two
+    /// ways, so a span of inline code sits on the same ground whichever renderer drew it.
+    static let hoverNSColor = NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             ? NSColor(white: 1, alpha: 0.055)
             : NSColor(white: 0, alpha: 0.04)
-    })
+    }
 
     /// A selected row in a list that is not the key window's focus.
     ///
@@ -191,6 +195,11 @@ enum Palette {
     /// The underline is not decoration and is not optional: it is what makes the link findable
     /// without colour vision, and `linkInverted` below leans on it almost entirely.
     static let link = accent
+
+    /// The same ink as an `NSFont`-side colour, for the transcript's text views. Built from the
+    /// same pair rather than converted from `link`, so the two can never drift apart and the
+    /// dynamic pair survives: an `NSTextView` resolves it against the window it is in.
+    static let linkNSColor = dynamicNSColor(light: 0x0C7A6E, dark: 0x4FD8C4)
 
     /// An address inside a filled bubble, which in practice means the user's own turn.
     ///

@@ -65,12 +65,48 @@ public struct MarkdownView: View {
         // a rule about this view: the user's own bubble is drawn by a different one and goes
         // through the same door.
         MarkdownBlocksView(blocks: blocks)
+            .environment(\.markdownIsStreaming, isStreaming)
             .opensTranscriptLinks()
             // Not while it is still being written. A menu rebuilt on every token would be work
             // done for a reader who is not there yet, and there is nothing to copy until the
             // sentence carrying the address has finished arriving.
             .transcriptLinkMenu(isStreaming ? [] : TranscriptLink.addresses(in: blocks))
             .transcriptLinkActions(isStreaming ? [] : TranscriptLink.addresses(in: blocks))
+    }
+}
+
+/// Whether the answer these blocks belong to is still arriving, and what to do with a link in
+/// them. Both are the enclosing `MarkdownView`'s to know, and both are needed several levels down
+/// inside a quote, a list or a table cell, so they travel as environment rather than as arguments
+/// threaded through every recursion.
+private struct MarkdownStreamingKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+private struct MarkdownLinkActionsKey: EnvironmentKey {
+    static let defaultValue = TranscriptLinkActions()
+}
+
+extension View {
+    /// What every markdown row below this point does with a link.
+    ///
+    /// Set once, by the view that knows which workspace the transcript belongs to, rather than
+    /// per row: a closure rebuilt per row would be a new value on every pass and would invalidate
+    /// every row that read it.
+    func markdownLinkActions(_ actions: TranscriptLinkActions) -> some View {
+        environment(\.markdownLinkActions, actions)
+    }
+}
+
+extension EnvironmentValues {
+    fileprivate var markdownIsStreaming: Bool {
+        get { self[MarkdownStreamingKey.self] }
+        set { self[MarkdownStreamingKey.self] = newValue }
+    }
+
+    var markdownLinkActions: TranscriptLinkActions {
+        get { self[MarkdownLinkActionsKey.self] }
+        set { self[MarkdownLinkActionsKey.self] = newValue }
     }
 }
 
@@ -99,6 +135,8 @@ private struct MarkdownBlockView: View {
     @Environment(\.fontScale) private var fontScale
     /// The conversation's face, for the same reason: prose set in it, inline code paired to it.
     @Environment(\.chatFont) private var chatFont
+    @Environment(\.markdownIsStreaming) private var isStreaming
+    @Environment(\.markdownLinkActions) private var linkActions
 
     private var markerWidth: CGFloat { MarkdownMetrics.markerWidth * fontScale }
 
@@ -147,18 +185,47 @@ private struct MarkdownBlockView: View {
     /// the `.font(ScaledFont)` modifier the rest of the app leans on. The rung is carried this far
     /// rather than a `Font`, because the code face has to be derived from the same rung: a span of
     /// code takes its size from the run it sits in, not from a rung of its own.
+    /// One run of inline markdown, drawn by whichever of the two renderers this run needs.
+    ///
+    /// **`Text` unless there is a link in it.** An `NSTextView` is what makes a link behave like
+    /// one, and it is also the more expensive of the two: it holds a layout manager and a text
+    /// storage, and handing it a new string relays the whole run out. Most paragraphs in most
+    /// answers hold no address at all, and those keep the renderer they have always had, with the
+    /// attributed string cache in front of it.
+    ///
+    /// **And never while the answer is still arriving.** `4088ecd` established that a streamed
+    /// answer is re-rendered on every delta, and rebuilding an attributed string and relaying out
+    /// a text view per token is quadratic over the length of the answer. A link is not pressable
+    /// for the second or two its sentence is being written, and it becomes pressable the moment
+    /// the turn settles, which nobody will ever notice.
+    @ViewBuilder
     private func inlineText(_ inline: [MarkdownInline], rung: ScaledFont, color: Color) -> some View {
         let font = rung.resolved(scale: fontScale, face: chatFont)
-        return Text(InlineAttributes.make(
-            inline,
-            font: font,
-            code: rung.monospacedCompanion(scale: fontScale, face: chatFont),
-            color: color
-        ))
-        .font(font)
-        .foregroundStyle(color)
-        .textSelection(.enabled)
-        .fixedSize(horizontal: false, vertical: true)
+        if !isStreaming, InlineNSAttributes.hasLink(inline) {
+            TranscriptTextView(
+                text: InlineNSAttributes.make(
+                    inline,
+                    font: rung.resolvedNSFont(scale: fontScale, face: chatFont),
+                    code: rung.monospacedCompanionNSFont(scale: fontScale, face: chatFont),
+                    color: NSColor(color),
+                    lineSpacing: TranscriptLayout.proseLeading
+                ),
+                linkColor: Palette.linkNSColor,
+                selectionColor: .selectedTextBackgroundColor,
+                actions: linkActions
+            )
+        } else {
+            Text(InlineAttributes.make(
+                inline,
+                font: font,
+                code: rung.monospacedCompanion(scale: fontScale, face: chatFont),
+                color: color
+            ))
+            .font(font)
+            .foregroundStyle(color)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func marker(_ text: String) -> some View {
@@ -268,6 +335,106 @@ private struct MarkdownBlockView: View {
         case .leading: .leading
         case .center: .center
         case .trailing: .trailing
+        }
+    }
+}
+
+/// The same inline tree as an `NSAttributedString`, for the rows that hold a link.
+///
+/// A twin of `InlineAttributes` rather than a conversion of it. A SwiftUI `AttributedString`
+/// carries `Font` and `Color`, which are descriptions the renderer resolves and cannot be read
+/// back out, so the AppKit side has to be built from the tree with real faces and real colours.
+/// The two walk the same cases in the same order for that reason.
+///
+/// Links get the `.link` attribute and nothing else: their colour comes from the text view's
+/// `linkTextAttributes` and their underline appears only under the pointer. See
+/// `TranscriptTextView`.
+@MainActor
+enum InlineNSAttributes {
+    static func make(
+        _ inline: [MarkdownInline],
+        font: NSFont,
+        code: NSFont,
+        color: NSColor,
+        lineSpacing: CGFloat
+    ) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = lineSpacing
+        paragraph.lineBreakMode = .byWordWrapping
+
+        let output = NSMutableAttributedString()
+        render(inline, font: font, code: code, color: color, traits: [], into: output)
+        output.addAttribute(
+            .paragraphStyle, value: paragraph, range: NSRange(location: 0, length: output.length)
+        )
+        return output
+    }
+
+    private static func render(
+        _ values: [MarkdownInline],
+        font: NSFont,
+        code: NSFont,
+        color: NSColor,
+        traits: NSFontTraitMask,
+        into output: NSMutableAttributedString
+    ) {
+        for value in values {
+            switch value {
+            case let .text(text):
+                output.append(run(text, font: faced(font, traits), color: color))
+            case let .emphasis(children):
+                render(children, font: font, code: code, color: color, traits: traits.union(.italicFontMask), into: output)
+            case let .strong(children):
+                render(children, font: font, code: code, color: color, traits: traits.union(.boldFontMask), into: output)
+            case let .strikethrough(children):
+                let start = output.length
+                render(children, font: font, code: code, color: color, traits: traits, into: output)
+                output.addAttribute(
+                    .strikethroughStyle, value: NSUnderlineStyle.single.rawValue,
+                    range: NSRange(location: start, length: output.length - start)
+                )
+            case let .code(text):
+                let child = run(text, font: faced(code, traits), color: color)
+                child.addAttribute(
+                    .backgroundColor, value: Palette.hoverNSColor,
+                    range: NSRange(location: 0, length: child.length)
+                )
+                output.append(child)
+            case let .link(text, url):
+                let start = output.length
+                render(text, font: font, code: code, color: color, traits: traits, into: output)
+                if let target = URL(string: url), TranscriptLink.opens(target) {
+                    output.addAttribute(
+                        .link, value: target,
+                        range: NSRange(location: start, length: output.length - start)
+                    )
+                }
+            case .lineBreak:
+                output.append(run("\n", font: faced(font, traits), color: color))
+            }
+        }
+    }
+
+    private static func run(_ text: String, font: NSFont, color: NSColor) -> NSMutableAttributedString {
+        NSMutableAttributedString(string: text, attributes: [.font: font, .foregroundColor: color])
+    }
+
+    /// Bold and italic asked of the font manager rather than of a descriptor, because a face that
+    /// has no italic gets an oblique this way instead of silently staying upright.
+    private static func faced(_ font: NSFont, _ traits: NSFontTraitMask) -> NSFont {
+        guard !traits.isEmpty else { return font }
+        return NSFontManager.shared.convert(font, toHaveTrait: traits)
+    }
+
+    /// Whether this run holds anything worth an `NSTextView`.
+    static func hasLink(_ values: [MarkdownInline]) -> Bool {
+        values.contains { value in
+            switch value {
+            case .link: true
+            case let .emphasis(children), let .strong(children), let .strikethrough(children):
+                hasLink(children)
+            case .text, .code, .lineBreak: false
+            }
         }
     }
 }

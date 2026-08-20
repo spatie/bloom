@@ -71,6 +71,13 @@ struct ScaledFont: Hashable, Sendable {
         return face.nsFont(size: size)
     }
 
+    /// The monospaced companion as an `NSFont`, for the same reason as `resolvedNSFont`.
+    func monospacedCompanionNSFont(scale: CGFloat, face: ChatFont = .system) -> NSFont {
+        let base = NSFont.preferredFont(forTextStyle: style.appKitStyle)
+        let size = (base.pointSize * scale * face.inlineCodeScale).rounded()
+        return .monospacedSystemFont(ofSize: size, weight: (weight ?? base.systemWeight).appKitWeight)
+    }
+
     /// The monospaced companion for a span of code sitting inside a run of this rung.
     ///
     /// Its own method rather than `resolved(...).monospaced()`, because that expression only means

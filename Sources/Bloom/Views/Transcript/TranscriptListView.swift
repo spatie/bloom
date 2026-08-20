@@ -26,6 +26,10 @@ struct TranscriptListView: View {
     /// re-runs this body. See `TranscriptHoverHost`.
     @State private var hoverHost = TranscriptHoverHost()
 
+    /// Only to reach the workspace's model, which is what a link opened in a browser tab needs.
+    /// Nothing in `body` reads anything else off it.
+    @Environment(AppModel.self) private var app
+
     /// Only used to open a session on its end. An edge needs no identity, so this does not need
     /// the sentinel row the `ScrollViewReader` used to be pointed at.
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
@@ -114,6 +118,13 @@ struct TranscriptListView: View {
         // the right place matters more than arriving quickly.
         if let unread = transcript.firstUnreadSeq, unread < rows[start].seq { return rows[...] }
         return rows[start...]
+    }
+
+    /// What a link in any row of this transcript does. Its own property rather than an expression
+    /// in the chain below, which is long enough that one more inline call tips the type checker
+    /// off the `ForEach` two hundred lines above it.
+    private var linkActions: TranscriptLinkActions {
+        TranscriptLink.actions(for: app.existingModel(for: transcript.workspace.id))
     }
 
     /// Already rounded, by `TranscriptGeometry.cap`, and rounded before it reaches this view's
@@ -306,6 +317,10 @@ struct TranscriptListView: View {
             // rather than passed as a closure through five layers of view. A closure would be a
             // new closure on every pass over the list and would invalidate every row that read it.
             .environment(\.transcriptHoverHost, hoverHost)
+            // What a link in any row of this transcript does when it is pressed or chosen from a
+            // menu. Said once for the whole list rather than per row, so it is one value the rows
+            // can compare rather than a new closure on every pass.
+            .markdownLinkActions(linkActions)
             .overlay {
                 TranscriptHoverOverlay(host: hoverHost)
             }
