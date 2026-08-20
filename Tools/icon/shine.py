@@ -841,6 +841,9 @@ CSS = depth.CSS + """
 .apple dt { color: #9BE9DC; font: 12px ui-monospace, Menlo, monospace;
   margin-top: 12px; }
 .apple dd { margin: 3px 0 0; }
+.meas { background: #101317; border: 1px solid #262B31; border-radius: 10px;
+  padding: 14px 16px; overflow-x: auto; color: #9BE9DC;
+  font: 12px/1.7 ui-monospace, "SF Mono", Menlo, monospace; max-width: 82ch; }
 """
 
 HEAD = """<header><h1>Bloom, ten shine studies</h1>
@@ -1098,10 +1101,11 @@ NOTE = {
         "alpha of 0.86 with a solid lip, which is a picture of the effect "
         "rather than the effect."),
     "06-wash": (
-        "Photos' whole construction: the Bleed group translucent, so where a "
-        "lane runs under the bar it is tinted by the Deep panel and darkens "
-        "through the crossing instead of stopping at it. Layered asks for the "
-        "material, flat bakes the nearest alpha."),
+        "Photos' whole construction, aimed at the Bleed group: the lanes go "
+        "translucent so the Deep panel tints them. It measures 1.77 at 32 "
+        "against the baseline and that is close to nothing, because the panel "
+        "under them is nearly black and because the overlap that matters here, "
+        "the bar lying across a lane, belongs to the Mark group and is row 05."),
     "07-seat": (
         "03 upside down. The ramp sits in the bottom fifth of each piece and "
         "everything above it clamps to the palette colour, so a piece is its "
@@ -1112,7 +1116,10 @@ NOTE = {
         "No paint whatsoever. Every group lit, and the shadow ladder made "
         "real: Ground 0, Panel 0.42, Bleed 0.30, Mark 0.85, against the "
         "shipped 0.55 and 0.50 that tell the system the bar is no higher than "
-        "the panel it lies on."),
+        "the panel it lies on. It measures 0.47 against the baseline, which is "
+        "nothing: the Foam ground is opaque and covers the canvas, so a group "
+        "shadow has almost nothing to fall on. Take it as a correction rather "
+        "than as a look."),
     "09-liquid": (
         "One ramp placed so the panel\u2019s top tenth is above its start and clamps "
         "light, its bottom third is below its stop and clamps deep, and the "
@@ -1129,55 +1136,100 @@ NOTE = {
 
 VERDICT = """
 <section class="verdict"><h2>What I would ship</h2>
-<p><strong>03-crest</strong>, and if the taste for it runs further,
-<strong>10-shine</strong>. 03 is the closest thing here to what the reference
-icons actually do and it is almost free: four <code>linear-gradient</code> keys
-with their ramps stopped near the top, no paint at all in the layered document,
-and the same two canvas coordinates baked as an SVG gradient in the flat one.
-Because the body of each piece keeps its palette value and only the upper
-eighth is lifted, it costs no contrast anywhere, which is why it is still doing
-something at 32 where the full height grades have gone quietly pale.</p>
-<p><strong>Runners up.</strong> 05-glass is the most interesting single key in
-the set and the one thing here that the system does better than paint ever
-could: the bar frosts, the panel reads through it, and the crossing stops being
-an occlusion. It survives the dark and the tinted variants for free, which no
-baked alpha does. 08-lit costs nothing and fixes a real bug in the shipped
-document, which currently tells the system the bar is no higher than the panel.
-02-piece is the honest Numbers reading and the best of the three gradient rows
-at 512 and above.</p>
-<p><strong>Honest about the small sizes.</strong> Judge these on the 64, 32 and
-16 strips and on the grid, not on the 1024s.</p>
+<p><strong>03-crest</strong>, with <strong>05-glass</strong> on top of it, and
+<strong>10-shine</strong> if the taste runs the whole way. 03 is the closest
+thing here to what the reference icons actually do and it is almost free: four
+<code>linear-gradient</code> keys with their ramps stopped near the top, no
+paint at all in the layered document, and the same two canvas coordinates baked
+as an SVG gradient in the flat one. Because the body of each piece keeps its
+palette value and only the upper seventh is lifted, it costs no contrast
+anywhere. 05 is one key on top of that and is the one thing in the set the
+system does better than paint ever could.</p>
+<p><strong>The measurement that decided it, and it was a surprise.</strong>
+Mean absolute difference from the baseline, per size, on the layered render,
+composited on the light ground:</p>
+<pre class="meas">row            512     128      64      32      16
+01-sheet      3.79    3.86    4.11    4.13    4.17
+02-piece      6.87    6.96    7.10    6.80    7.32
+03-crest      6.41    6.53    6.72    6.63    6.77
+04-rim        5.76    5.85    6.10    6.35    6.67
+05-glass      2.56    2.54    2.42    2.18    2.77
+06-wash       2.17    2.12    1.98    1.77    1.97
+07-seat       2.42    2.48    2.83    2.87    2.70
+08-lit        0.47    0.47    0.42    0.47    0.55
+09-liquid     4.97    5.07    5.40    5.55    6.07
+10-shine      8.49    8.59    8.77    8.51    8.99</pre>
+<p>Read along a row, not down a column. <strong>Every row is flat.</strong>
+Nothing here decays as the icon shrinks, and several rows are worth slightly
+MORE at 16 than at 512. That is the opposite of the depth sheet, where the best
+effects were the ones that survived furthest down, and it has one cause: an
+effect expressed as a fill key is not a picture of a gradient that gets
+resampled, it is an instruction the system rasterises fresh at whatever size it
+is drawing. A baked highlight three pixels wide is gone at 32. A ramp across
+the top seventh of a shape is still the top seventh of that shape at 16.
+<strong>That is the whole argument for doing this in keys.</strong></p>
+<p><strong>Two rows buy almost nothing, and the numbers say so before the eye
+does.</strong></p>
 <ul>
-<li><strong>02-piece goes pale.</strong> Grading a piece across its own height
-means half of it is darker than the palette and half is lighter, and at 32 the
-eye reads the average rather than the ramp. The bar in particular loses the
-punch it needs against the Deep panel. Beautiful at 512, merely washed at
-32.</li>
-<li><strong>04-rim only works large.</strong> The bright hairline is five units
-wide; at 64 that is under a third of a pixel and it is gone, and what remains
-is the dark band at the bottom, which reads as a slightly thinner piece rather
-than a rounder one. It is also the row that fights the system hardest, because
-the system is already drawing a specular on precisely that edge.</li>
-<li><strong>06-wash costs the crossing.</strong> The idea is right and it is
-what Photos is built on, but our overlap is a pale bar over a dark lane rather
-than two mid tones, so the blend darkens the bar instead of enriching it and by
-64 the bar looks dirty rather than deep. Photos gets away with it because none
-of its petals is near white.</li>
-<li><strong>07-seat survives further than expected</strong> and is the only
-baked row that does. At 32 the shading inside the panel's lower edge still
-separates the panel from the margin. Keep it at the reduced dose 10 uses.</li>
+<li><strong>08-lit is 0.47, which is nothing.</strong> Turning the specular on
+for every group and making the shadow ladder real changes under half a level of
+one channel. The ground is opaque Foam covering the whole canvas, so a group
+shadow has almost nothing to fall on that is not already dark, and the panel's
+own shadow was doing the work already. It is still worth taking, because it is
+free and because the shipped keys really do tell the system the bar is no
+higher than the panel, but it is not a look. It is a correction.</li>
+<li><strong>06-wash is 1.77 at 32 and it is aimed at the wrong group.</strong>
+Photos' construction does not transfer. Making the Bleed group translucent
+tints the lanes against the Deep panel, which is nearly black, so almost
+nothing shows; and the overlap that actually matters in this mark, the bar
+lying across a lane, is owned by the Mark group and is untouched by it. The row
+that gets Photos' effect on this design is 05, not this one.</li>
+</ul>
+<p><strong>Honest about the rest.</strong></p>
+<ul>
+<li><strong>02-piece is the biggest single move and the riskiest.</strong> At
+6.8 it is doing as much as 03, but it spends it differently: half of every
+piece ends up darker than its palette value and half lighter, so at 32 the eye
+reads the average and the bar loses some of the punch it needs against the
+panel. It is the honest reading of Numbers and it looks best at 512 and above.
+Prefer 03, which spends the same budget only on the top edge.</li>
+<li><strong>01-sheet is the least interesting and the most correct.</strong>
+One ramp over the whole tile is exactly what the system does to a ground it
+owns, so it never looks wrong; at 3.8 it also never looks like much. Worth
+having underneath one of the others rather than instead of one.</li>
+<li><strong>04-rim is two different variations wearing one name.</strong> The
+flat file gets a real blurred hairline and it is the best looking tile on that
+side of the page. The layered document cannot have it at all, so it gets a ramp
+across the top twentieth instead, which is 03 with a tighter number. If the
+flat <code>.icns</code> mattered as much as the layered document this would be
+the pick; it does not, so it is not.</li>
+<li><strong>07-seat is quiet and it is real.</strong> 2.9 at 32, and unlike 06
+that difference is in the right place: the panel's lower edge deepens and stops
+sitting on the Foam margin like a sticker. It is the cheapest thing on this
+page after 08 and I would take it under anything else.</li>
 <li><strong>09-liquid is the safe half of 10.</strong> Everything it does is on
 the biggest shape on the tile, so nothing it does can damage the bar at 16.
-If 10 turns out to be too much, this is what to fall back to.</li>
-<li><strong>01-sheet is the least interesting and the most correct.</strong> It
-is exactly what the system would have done to a ground it owned, so it never
-looks wrong; it also never looks like much. Worth having under any of the
-others rather than instead of them.</li>
+If 10 reads as too much, fall back to this.</li>
+<li><strong>10-shine is all keys and no paint on the layered side</strong>,
+which is the only version of a stack that cannot go muddy under the system's
+own pass. At 8.5 it is comfortably the largest change here, and whether that is
+right is a matter of taste rather than of measurement.</li>
 </ul>
+<p><strong>Two things that killed a variation before they were understood, and
+that anyone editing this file needs to know.</strong> The layered document's
+renderer silently ignores <code>feGaussianBlur</code>, so every soft edge in
+<code>lib.py</code> and <code>depth.py</code> dies there, and an inner shadow
+with its softness removed is a hard slab: the first cut of 04 and 07 came back
+with the panel flooded pale. And a piece gets ONE gradient, because a second
+layer of the same silhouette is lit separately by the system and comes back
+lifted rather than shaded. Both were found by building the bundles and looking,
+which is why the left hand column of this page is a render and not a
+simulation.</p>
 <p><strong>Nothing here changes the shipped icon.</strong> Every variation is a
 function in <code>Tools/icon/shine.py</code>. Shipping one is pointing
 <code>make.py</code> at it and taking the groups it asks for, which is one line
-and one dictionary.</p>
+and one dictionary. The leaving edge correction is separate and smaller still:
+one window, in <code>gen10.figure</code>.</p>
 </section>
 """
 
