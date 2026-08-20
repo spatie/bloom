@@ -11,10 +11,18 @@ final class ComposerTextView: NSTextView {
     var keyHandler: (@MainActor (NSEvent, NSRange) -> Bool)?
     var onWidthChange: (@MainActor () -> Void)?
     var onFocusChange: (@MainActor (Bool) -> Void)?
-    /// Offered everything dropped or pasted into the editor that is not text. Returns true when
-    /// the composer took it, which is what stops AppKit from doing what it does by default: typing
-    /// the file's path into the draft as a sentence about the file, instead of attaching the file.
-    var onAttach: (@MainActor ([AttachmentSource]) -> Bool)?
+    /// Offered everything dropped or pasted into the editor that is not text, together with the
+    /// stretch of text it should take the place of. Returns true when the composer took it, which
+    /// is what stops AppKit from doing what it does by default: typing the file's path into the
+    /// draft as a sentence about the file, instead of attaching the file.
+    ///
+    /// The range is the whole of "where does this go". A drop carries the character the pointer
+    /// was over, so the file lands on the word it was dropped on rather than wherever the caret
+    /// happened to be left; a paste carries the selection, so it replaces what was selected
+    /// exactly as pasting anything else does.
+    var onAttach: (@MainActor ([AttachmentSource], NSRange) -> Bool)?
+    /// A click on a chip, which is a click on the file it names.
+    var openAttachment: (@MainActor (String) -> Void)?
 
     override func keyDown(with event: NSEvent) {
         if keyHandler?(event, selectedRange()) == true { return }
@@ -52,8 +60,19 @@ final class ComposerTextView: NSTextView {
     /// of text and the text system handles it as well as it always has.
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
         let sources = Self.attachables(on: sender.draggingPasteboard)
-        if !sources.isEmpty, onAttach?(sources) == true { return true }
+        if !sources.isEmpty, onAttach?(sources, dropRange(for: sender)) == true { return true }
         return super.performDragOperation(sender)
+    }
+
+    /// Where a drop landed, as a place in the text.
+    ///
+    /// A file goes where it was dropped, which is the whole point of dropping it on a word rather
+    /// than on the box: `characterIndexForInsertion` is the same answer AppKit gives itself when
+    /// it decides where dragged text would go, so a file and a sentence land in the same place for
+    /// the same gesture. Length zero, because a drop displaces nothing.
+    private func dropRange(for sender: any NSDraggingInfo) -> NSRange {
+        let point = convert(sender.draggingLocation, from: nil)
+        return NSRange(location: characterIndexForInsertion(at: point), length: 0)
     }
 
     // Both of these are asked again and again while the pointer moves, so they ask whether there
@@ -72,7 +91,9 @@ final class ComposerTextView: NSTextView {
     /// attachment has to be written from nothing.
     override func paste(_ sender: Any?) {
         let sources = Self.attachables(on: .general)
-        if !sources.isEmpty, onAttach?(sources) == true { return }
+        // At the caret, over the selection if there is one, which is what pasting means
+        // everywhere else in the system.
+        if !sources.isEmpty, onAttach?(sources, selectedRange()) == true { return }
         super.paste(sender)
     }
 
@@ -80,8 +101,28 @@ final class ComposerTextView: NSTextView {
     /// two mean exactly the same thing.
     override func pasteAsPlainText(_ sender: Any?) {
         let sources = Self.attachables(on: .general)
-        if !sources.isEmpty, onAttach?(sources) == true { return }
+        if !sources.isEmpty, onAttach?(sources, selectedRange()) == true { return }
         super.pasteAsPlainText(sender)
+    }
+
+    // MARK: - Files out
+
+    /// Copying a selection that contains a chip puts the path on the clipboard.
+    ///
+    /// Without this it would put `NSTextAttachment`'s object replacement character there, which is
+    /// an invisible box in every other app. What the reader selected reads as a path in the box,
+    /// so a path is what they get: the same text the agent is going to be handed.
+    override func writeSelection(
+        to pasteboard: NSPasteboard, type: NSPasteboard.PasteboardType
+    ) -> Bool {
+        guard type == .string, let storage = textStorage else {
+            return super.writeSelection(to: pasteboard, type: type)
+        }
+        let text = selectedRanges
+            .map { ComposerChipText.draft(of: storage, in: $0.rangeValue) }
+            .joined(separator: "\n")
+        pasteboard.setString(text, forType: .string)
+        return true
     }
 
     /// Why pasting a screenshot did nothing at all until now.

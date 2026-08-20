@@ -46,8 +46,8 @@ public enum PullRequestInstructions {
     /// a reason for a button to stop working.
     ///
     /// The path that comes back is a file that was on disk and readable at the moment of
-    /// answering. That is the whole contract: the caller turns this into an attachment trailer,
-    /// and a trailer is a promise to the agent that it can read what it names. `ComposerView`
+    /// answering. That is the whole contract: the caller writes this path into the turn, and a
+    /// path in a turn is a promise to the agent that it can read what it names. `ComposerView`
     /// takes the same last look before it sends a prompt somebody typed, and this is the same
     /// look taken for the one attachment Bloom makes for itself.
     public static func ensure(in worktree: String, contents: String = defaultMarkdown) async -> String? {
@@ -55,6 +55,22 @@ public enum PullRequestInstructions {
         // Deliberately after every branch below rather than inside them, so a case added later
         // cannot answer with a path nobody looked at.
         return isFile(path, in: worktree) ? path : nil
+    }
+
+    /// The turn that carries the file, with the path in the sentence that asks for it.
+    ///
+    /// Bloom writes this message rather than the user, so there is no caret to put the file at and
+    /// no words of somebody else's to interrupt. It goes at the end, in the one sentence that says
+    /// what to do with it: an agent reading "follow the instructions in this file" knows to open
+    /// it, where a path listed under a heading is a fact with no verb attached.
+    ///
+    /// A code span, which is how `AttachmentDraft` writes every path in a prompt: the same form in
+    /// a turn Bloom composed and in one somebody typed, so a transcript can draw both the same way.
+    public static func asking(_ text: String, toFollow path: String) -> String {
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sentence = "Follow the instructions in \(AttachmentDraft.token(for: path))."
+        guard !body.isEmpty else { return sentence }
+        return "\(body)\n\n\(sentence)"
     }
 
     /// Which of the two files this worktree is going to use, writing Bloom's own if it has to.

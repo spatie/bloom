@@ -299,16 +299,27 @@ struct PullRequestInstructionsTests {
         #expect(PullRequestInstructions.defaultMarkdown.contains(PullRequestInstructions.projectPath))
     }
 
-    @Test("the turn the agent receives is the sentence plus a normal attachment trailer")
-    func composesAsAnAttachment() {
-        let text = AttachmentTrailer.compose(
-            text: "Create a pull request for this workspace against main.",
-            paths: [PullRequestInstructions.scratchPath]
+    @Test("the turn the agent receives names the file in the sentence that asks for it")
+    func namesTheFileInTheSentence() {
+        let text = PullRequestInstructions.asking(
+            "Create a pull request for this workspace against main.",
+            toFollow: PullRequestInstructions.scratchPath
         )
 
-        let (body, paths) = AttachmentTrailer.split(text)
-        #expect(body == "Create a pull request for this workspace against main.")
-        #expect(paths == [PullRequestInstructions.scratchPath])
+        #expect(text == """
+        Create a pull request for this workspace against main.
+
+        Follow the instructions in `\(PullRequestInstructions.scratchPath)`.
+        """)
+        // And it reads back as one attachment, in the same form as a file somebody dropped into
+        // the composer, so a transcript draws both the same way.
+        #expect(AttachmentDraft.parse(text).paths == [PullRequestInstructions.scratchPath])
+    }
+
+    @Test("a template that renders to nothing still asks for the file")
+    func asksEvenWithNothingSaid() {
+        let text = PullRequestInstructions.asking("  \n ", toFollow: PullRequestInstructions.scratchPath)
+        #expect(text == "Follow the instructions in `\(PullRequestInstructions.scratchPath)`.")
     }
 
     /// The one thing every case has to have in common, asserted in all four of them at once.
@@ -343,12 +354,12 @@ struct PullRequestInstructionsTests {
         let text = try #require(try? String(contentsOfFile: full, encoding: .utf8))
         #expect(text.isEmpty == false, "\(setup) attached an empty file")
 
-        // Through the format the transcript reads back, because the chip the reader sees is drawn
-        // from what `split` finds rather than from what `ensure` answered.
-        let prompt = AttachmentTrailer.compose(
-            text: "Create a pull request for this workspace against main.", paths: [path]
+        // Through the form the transcript reads back, because the chip the reader sees is drawn
+        // from what the sentence names rather than from what `ensure` answered.
+        let prompt = PullRequestInstructions.asking(
+            "Create a pull request for this workspace against main.", toFollow: path
         )
-        #expect(AttachmentTrailer.split(prompt).paths == [path])
+        #expect(AttachmentDraft.parse(prompt).paths == [path])
 
         // And the guarantee that must survive all of this: nothing of Bloom's reaches the commit,
         // in every one of the four states rather than in the two the original fix was written

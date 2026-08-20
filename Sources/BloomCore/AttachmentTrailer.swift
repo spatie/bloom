@@ -1,24 +1,34 @@
 import Foundation
 
-/// The plain words a prompt carries its attachments in, written and read back in one place.
+/// The plain words a prompt used to carry its attachments in, and the reader that still takes them
+/// back off.
 ///
-/// When a turn is sent, the files attached to it are named in the prompt text as a short trailer:
+/// Nothing writes one any more. A file is a word in the sentence now, at the position it was
+/// dropped or pasted, so what the agent is handed names the file where the reference is rather
+/// than in a list underneath: see `AttachmentDraft`. What is kept here is the reader, because
+/// every turn sent before that change is in the user's database wearing a trailer, and a
+/// transcript that stopped recognising one would print the list as prose and lose the chips on
+/// every prompt they ever sent. `compose` is kept beside it because it is the definition of what
+/// `split` reads: a parser with no generator drifts from the format at the first edit, and the
+/// pair is what the round trip is asserted against.
+///
+/// The shape, for as long as anything can still be holding one:
 ///
 ///     look at this
 ///
 ///     Attached file:
 ///     - .bloom/attachments/9JVKW4/IMG_4395.jpeg
 ///
-/// That is what the agent receives and it is not going to change. Every agent Bloom can run reads
-/// files by path, so a path in the text works for Claude Code and for Codex with nothing
-/// conditional anywhere, and encoding images as content blocks would be Claude Code's own protocol
-/// and leave every other agent looking at an empty message.
+/// The part that has not changed is the path. Every agent Bloom can run reads files by path, so a
+/// path in the text works for Claude Code and for Codex with nothing conditional anywhere, and
+/// encoding images as content blocks would be Claude Code's own protocol and leave every other
+/// agent looking at an empty message. What changed is only where in the message the path is.
 ///
-/// Bloom does not have to *draw* it that way, though, and a list of paths in a speech bubble is a
-/// worse answer than the chips the composer showed a second earlier. So the transcript takes the
-/// trailer back off before it renders, which is why `split` exists and why it lives in the same
-/// file as `compose`: the two are one format, and a parser kept anywhere else drifts from the
-/// generator the first time either is touched.
+/// Bloom does not draw it as a list either, and a list of paths in a speech bubble was a worse
+/// answer than the chips the composer showed a second earlier. So the transcript takes the trailer
+/// back off before it renders, which is why `split` exists and why it lives in the same file as
+/// `compose`: the two are one format, and a parser kept anywhere else drifts from the generator
+/// the first time either is touched.
 ///
 /// `split` is deliberately strict. It only recognises the exact shape `compose` writes, down to
 /// the blank line, the singular against the plural, and the body having no trailing whitespace of
@@ -28,15 +38,14 @@ import Foundation
 ///
 /// It is still parsing. Someone who ends a message with a correctly pluralised "Attached files:"
 /// and a well formed list of paths gets chips, and if those paths are not files the chips will say
-/// so. That is the residual risk of reading the text rather than storing the attachments beside
-/// it, and it is the reason a structured column is the better answer the day the sending path is
-/// free to be changed.
+/// so. That risk shrinks with every turn sent from here on, because nothing writes the shape any
+/// more.
 public enum AttachmentTrailer {
     /// The header, which says how many there are so a reader is not left counting bullets.
     public static let singular = "Attached file:"
     public static let plural = "Attached files:"
 
-    /// The prompt the agent actually receives.
+    /// The prompt an agent used to receive. Kept as the definition of what `split` reads.
     public static func compose(text: String, paths: [String]) -> String {
         guard !paths.isEmpty else { return text }
 

@@ -1,12 +1,16 @@
 import Foundation
 import BloomCore
 
-/// A file the next prompt carries.
+/// What is known about a file the next prompt carries.
 ///
-/// It is deliberately not a piece of text in the draft. What the user dropped is a file, so the
-/// composer keeps a file: the chip can name it, the hover card can draw it and the centre column
-/// can open it, none of which is possible once the same thing has been flattened into a path
-/// inside a sentence.
+/// The draft is what says the prompt carries it. A path written into the text at the caret is the
+/// whole record of that, because it is the only record that survives being edited: see
+/// `AttachmentDraft`. This is what the composer knows *besides* the path, and every field is
+/// either something the path cannot say or something it would cost a trip to the disk to ask.
+///
+/// Nothing here is required to draw a chip, open a file or send a turn. A draft restored after a
+/// relaunch whose records were lost still names its files, still draws them and still sends them,
+/// on the strength of the paths alone.
 ///
 /// The path is relative to the worktree because that is where the agent is standing. Every agent
 /// Bloom runs is spawned with the worktree as its working directory, so a relative path inside it
@@ -93,15 +97,6 @@ enum PromptAttachments {
     /// by `WorktreeScratch`. See that type for why an untracked folder here would be a bug rather
     /// than a detail.
     static let folder = WorktreeScratch.attachments
-
-    /// The trailer the agent actually receives.
-    ///
-    /// The shape itself lives in `AttachmentTrailer`, in BloomCore, next to the reader that takes
-    /// it back off again for the transcript. Two halves of one format, so neither can be changed
-    /// without the other being in view, and so both can be asserted on.
-    static func compose(text: String, attachments: [PromptAttachment]) -> String {
-        AttachmentTrailer.compose(text: text, paths: attachments.map(\.path))
-    }
 
     /// Six characters, in the alphabet a URL would accept.
     ///

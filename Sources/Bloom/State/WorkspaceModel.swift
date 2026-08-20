@@ -758,17 +758,18 @@ final class WorkspaceModel {
         return nil
     }
 
-    /// The turn that goes down the wire, with the instructions attached to it.
+    /// The turn that goes down the wire, with the instructions named in it.
     ///
-    /// The attachment goes through the same trailer the composer writes, so a pull request request
-    /// is a user turn like any other: the transcript reads the trailer back off, draws the chip and
-    /// can open the file, and the agent is handed a path inside its own working directory.
+    /// The path goes in the sentence that asks for it, which is where every other file Bloom sends
+    /// now goes: a pull request request is a user turn like any other, so it says what it wants in
+    /// words and names the file inside them, and the agent is handed a path inside its own working
+    /// directory. See `PullRequestInstructions.asking`.
     ///
     /// When the file cannot be written, the instructions go into the message itself. A read-only
     /// checkout is a reason to say it differently, not a reason for the button to stop working.
     private func pullRequestTurn(text: String) async -> String {
         if let path = await PullRequestInstructions.ensure(in: workspace.path) {
-            return AttachmentTrailer.compose(text: text, paths: [path])
+            return PullRequestInstructions.asking(text, toFollow: path)
         }
         return text + "\n\n" + PullRequestInstructions.defaultMarkdown
     }
@@ -786,17 +787,20 @@ final class WorkspaceModel {
     /// turn. Sessions come back in sort order, so the first one that has a user turn is the one
     /// the workspace opened with.
     ///
-    /// Without the attachment trailer. This becomes the `task:` line of the prompt that writes the
+    /// Without the files named in it. This becomes the `task:` line of the prompt that writes the
     /// pull request, and a scratch path under `.bloom/attachments` is invisible to git, means
     /// nothing to a reviewer, and is exactly the sort of thing that ends up quoted in a
     /// description. What the workspace was for is the sentence, not the screenshot.
+    ///
+    /// Both forms are taken off: turns sent before attachments moved into the sentence carry a
+    /// trailer at the end, and those are still in the database.
     private func openingPrompt() async -> String {
         guard let store else { return "" }
         for session in sessions {
             let messages = (try? await store.messages(sessionID: session.id, limit: 200)) ?? []
             guard let first = messages.first(where: { $0.kind == .user }),
                   let text = UserTurnPayload.text(from: first.payload) else { continue }
-            return AttachmentTrailer.split(text).body
+            return AttachmentDraft.withoutAttachments(AttachmentTrailer.split(text).body)
         }
         return ""
     }

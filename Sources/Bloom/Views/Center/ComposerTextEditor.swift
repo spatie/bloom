@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import BloomCore
 
 /// The composer's editor, as an `NSTextView` rather than `TextField(axis: .vertical)`.
 ///
@@ -37,9 +38,19 @@ struct ComposerTextEditor: NSViewRepresentable {
     /// a key the callers of the composer have any claim on: it is the editor asking the composer
     /// about the one position where the two disagree about what is there.
     var onBackspaceAtStart: @MainActor () -> Bool = { false }
-    /// Files dropped or pasted into the editor. Returns true when the composer attached them,
-    /// which is what keeps AppKit from typing their paths into the draft instead.
-    var onAttach: @MainActor ([AttachmentSource]) -> Bool
+    /// Files dropped or pasted into the editor, with the stretch of the draft they should take
+    /// the place of: where the pointer let go for a drop, the selection for a paste. Returns true
+    /// when the composer attached them, which is what keeps AppKit from typing their paths into
+    /// the draft instead.
+    var onAttach: @MainActor ([AttachmentSource], NSRange) -> Bool
+    /// The files the composer knows it has copied for this prompt, so a path that is not one of
+    /// Bloom's own copies can still be drawn as a chip. See `AttachmentDraft`.
+    var attachmentPaths: [String] = []
+    /// A click on a chip, which is a click on the file it names.
+    var onOpenAttachment: @MainActor (String) -> Void = { _ in }
+    /// The way in for the one edit the composer makes that the user did not type: a file arriving
+    /// after it has been copied. See `ComposerEditorHandle`.
+    var handle: ComposerEditorHandle?
 
     /// The conversation's text size, so what you type is set at the size you read. Without it the
     /// SwiftUI placeholder behind this view would grow and the typed text would not.
@@ -102,8 +113,12 @@ struct ComposerTextEditor: NSViewRepresentable {
         textView.onFocusChange = { [weak coordinator = context.coordinator] focused in
             coordinator?.focusChanged(to: focused)
         }
-        textView.onAttach = { [weak coordinator = context.coordinator] sources in
-            coordinator?.parent.onAttach(sources) ?? false
+        textView.onAttach = { [weak coordinator = context.coordinator] sources, range in
+            guard let coordinator else { return false }
+            return coordinator.parent.onAttach(sources, coordinator.draftRange(range, in: textView))
+        }
+        textView.openAttachment = { [weak coordinator = context.coordinator] path in
+            coordinator?.parent.onOpenAttachment(path)
         }
         // A text view already accepts a file drag, which is exactly the behaviour being replaced:
         // it writes the path into the text. Registering the type explicitly means the drop is
@@ -142,8 +157,10 @@ struct ComposerTextEditor: NSViewRepresentable {
             width: CGFloat.greatestFiniteMagnitude,
             height: CGFloat.greatestFiniteMagnitude
         )
-        textView.string = text
+        context.coordinator.write(text, into: textView, font: textView.font ?? Self.font)
         textView.setAccessibilityLabel("Message")
+
+        handle?.textView = textView
 
         let scrollView = NSScrollView()
         scrollView.documentView = textView
@@ -157,19 +174,27 @@ struct ComposerTextEditor: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? ComposerTextView else { return }
         context.coordinator.parent = self
+        handle?.textView = textView
 
-        // Ahead of the text, because setting the string re-reads the typing attributes.
+        // Ahead of the text, because setting the string re-reads the typing attributes, and
+        // because a chip is drawn at the size of the line it sits on.
         let font = Self.font(scale: fontScale, face: chatFont)
-        if textView.font != font {
+        let refaced = textView.font != font
+        if refaced {
             textView.font = font
         }
 
-        if textView.string != text {
-            textView.string = text
-            textView.font = font
-            textView.textColor = .labelColor
+        // Compared as the draft rather than as the string the view is holding: a chip is one
+        // character there and a whole path here, and it is the draft the two have to agree about.
+        if refaced || ComposerChipText.draft(of: textView.attributedString()) != text {
+            context.coordinator.write(text, into: textView, font: font)
             let location = min(max(caret, 0), (text as NSString).length)
-            textView.setSelectedRange(NSRange(location: location, length: 0))
+            textView.setSelectedRange(NSRange(
+                location: ComposerChipText.storageOffset(
+                    forDraft: location, in: textView.attributedString()
+                ),
+                length: 0
+            ))
         }
 
         if isFocused, textView.window?.firstResponder !== textView {
@@ -192,15 +217,45 @@ struct ComposerTextEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? ComposerTextView else { return }
-            parent.text = textView.string
-            parent.caret = textView.selectedRange().location
+            // Typing next to a chip must not inherit the chip: an attachment carried in the
+            // typing attributes would draw the next character as a second copy of the same file.
+            textView.typingAttributes = [
+                .font: textView.font ?? ComposerTextEditor.font,
+                .foregroundColor: NSColor.labelColor,
+            ]
+            parent.text = ComposerChipText.draft(of: textView.attributedString())
+            parent.caret = draftOffset(textView.selectedRange().location, in: textView)
             reportHeight(of: textView)
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? ComposerTextView else { return }
-            let location = textView.selectedRange().location
+            let location = draftOffset(textView.selectedRange().location, in: textView)
             if parent.caret != location { parent.caret = location }
+        }
+
+        /// Puts a draft into the view: words as words, files as the chips that stand for them.
+        func write(_ text: String, into textView: ComposerTextView, font: NSFont) {
+            let storage = ComposerChipText.storage(
+                for: text, paths: parent.attachmentPaths, font: font, color: .labelColor
+            )
+            textView.textStorage?.setAttributedString(storage)
+            textView.typingAttributes = [.font: font, .foregroundColor: NSColor.labelColor]
+        }
+
+        /// A position in the view, in the units the composer counts the draft in.
+        func draftOffset(_ offset: Int, in textView: ComposerTextView) -> Int {
+            ComposerChipText.draftOffset(forStorage: offset, in: textView.attributedString())
+        }
+
+        /// The stretch of the draft a drop or a paste is aimed at.
+        func draftRange(_ range: NSRange, in textView: ComposerTextView) -> NSRange {
+            let storage = textView.attributedString()
+            let start = ComposerChipText.draftOffset(forStorage: range.location, in: storage)
+            let end = ComposerChipText.draftOffset(
+                forStorage: range.location + range.length, in: storage
+            )
+            return NSRange(location: start, length: max(end - start, 0))
         }
 
         /// Deferred by one turn of the main actor: the responder change can land in the middle of a
@@ -264,5 +319,76 @@ struct ComposerTextEditor: NSViewRepresentable {
             let report = parent.onHeightChange
             Task { report(height) }
         }
+    }
+}
+
+
+/// The one edit the composer makes that nobody typed: a file arriving in the text after it has
+/// been copied into the worktree.
+///
+/// It goes through the text view rather than through the binding, and that is the whole reason
+/// this exists. An edit made here is an edit the text system knows about, so Command+Z takes the
+/// file back out and Command+Shift+Z puts it back, in order with the words typed either side of
+/// it, without anything having to remember what a draft looked like a moment ago. Replacing the
+/// string from the SwiftUI side would leave the text right and the undo stack describing a
+/// document that no longer exists.
+///
+/// Held by the view that owns the draft and handed down, so nothing here outlives the box it
+/// belongs to: the reference is weak, and a file that finishes copying after the composer has gone
+/// falls back to the plain write, which is still the correct draft.
+@MainActor
+final class ComposerEditorHandle {
+    fileprivate weak var textView: ComposerTextView?
+
+    /// Writes files into the draft at `range`, measured in the draft's own units.
+    ///
+    /// Returns false when there is no editor to write into, which is the caller's signal to write
+    /// the draft itself instead.
+    @discardableResult
+    func insert(_ paths: [String], replacing range: NSRange) -> Bool {
+        guard !paths.isEmpty, let textView, let storage = textView.textStorage else { return false }
+
+        let held = textView.attributedString()
+        let string = held.string as NSString
+        let start = min(
+            ComposerChipText.storageOffset(forDraft: range.location, in: held), string.length
+        )
+        let end = min(
+            ComposerChipText.storageOffset(
+                forDraft: range.location + range.length, in: held
+            ),
+            string.length
+        )
+        let replaced = NSRange(location: start, length: max(end - start, 0))
+
+        let before = start > 0 ? string.substring(with: NSRange(location: start - 1, length: 1)) : ""
+        let after = replaced.upperBound < string.length
+            ? string.substring(with: NSRange(location: replaced.upperBound, length: 1))
+            : ""
+        // The same answer `AttachmentDraft` gives when it writes a path into a draft, asked of the
+        // same two characters. A chip is not a space, so a file dropped against another one is
+        // spaced off it exactly as it would be against a word.
+        let (lead, trail) = AttachmentDraft.padding(before: before, after: after)
+
+        let font = textView.font ?? ComposerTextEditor.font
+        let plain: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.labelColor]
+        let written = NSMutableAttributedString(string: lead, attributes: plain)
+        for (index, path) in paths.enumerated() {
+            if index > 0 {
+                written.append(NSAttributedString(string: " ", attributes: plain))
+            }
+            written.append(ComposerChipText.chip(for: path, font: font))
+        }
+        written.append(NSAttributedString(string: trail, attributes: plain))
+
+        // What makes it undoable. Everything below is the edit the text system was just told about.
+        guard textView.shouldChangeText(in: replaced, replacementString: nil) else { return false }
+        storage.beginEditing()
+        storage.replaceCharacters(in: replaced, with: written)
+        storage.endEditing()
+        textView.didChangeText()
+        textView.undoManager?.setActionName(paths.count == 1 ? "Attach" : "Attach \(paths.count) Files")
+        textView.setSelectedRange(NSRange(location: replaced.location + written.length, length: 0))
+        return true
     }
 }

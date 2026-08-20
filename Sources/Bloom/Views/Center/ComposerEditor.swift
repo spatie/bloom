@@ -17,9 +17,16 @@ struct ComposerEditor: View {
     /// Backspace at the very start of the text, where what is to the left of the caret is the
     /// command chip rather than a character. Returns true when the composer took it.
     var onBackspaceAtStart: @MainActor () -> Bool = { false }
-    /// Files dropped or pasted onto the text. Handed straight through to the composer, which owns
-    /// what an attachment is.
-    var onAttach: @MainActor ([AttachmentSource]) -> Bool
+    /// Files dropped or pasted onto the text, with the stretch of the draft they should take the
+    /// place of. Handed straight through to the composer, which owns what an attachment is.
+    var onAttach: @MainActor ([AttachmentSource], NSRange) -> Bool
+    /// The files this prompt is carrying, so the paths in the draft can be drawn as chips.
+    var attachmentPaths: [String] = []
+    /// A click on one of those chips.
+    var onOpenAttachment: @MainActor (String) -> Void = { _ in }
+    /// How a file that has finished copying gets into the text as an edit the text system can
+    /// undo. See `ComposerEditorHandle`.
+    var handle: ComposerEditorHandle?
     /// What an empty box says. A parameter rather than a constant because the create sheet asks a
     /// different question of the same box: there is no conversation yet to ask for changes to.
     var placeholder: String = ComposerEditor.chatPlaceholder
@@ -49,7 +56,10 @@ struct ComposerEditor: View {
                 onHeightChange: onContentHeightChange,
                 onKey: onKey,
                 onBackspaceAtStart: onBackspaceAtStart,
-                onAttach: onAttach
+                onAttach: onAttach,
+                attachmentPaths: attachmentPaths,
+                onOpenAttachment: onOpenAttachment,
+                handle: handle
             )
             .frame(height: max(height, ComposerTextEditor.lineHeight))
         }

@@ -76,12 +76,25 @@ struct CreateWorkspaceSheet: View {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Text is required, where in a conversation an attachment alone is enough to send. The
+    /// What the task says without the files named in it.
+    ///
+    /// An attachment is a word in the sentence now, so the whole draft is what the agent gets and
+    /// this is what everything else reads: the name, the branch, the model that writes the name,
+    /// and the question of whether anything has been written at all.
+    private var spokenPrompt: String {
+        AttachmentDraft.withoutAttachments(prompt, paths: attachedPaths)
+    }
+
+    private var attachedPaths: [String] {
+        PromptAttachmentStore.shared.attachments(for: draftID).map(\.path)
+    }
+
+    /// Words are required, where in a conversation an attachment alone is enough to send. The
     /// difference is deliberate: a turn with nothing but a screenshot is a sentence, but a
     /// workspace with nothing but a screenshot has no name, no branch and nothing for the namer to
     /// read, and `Git.slug` would call it `workspace`.
     private var canCreate: Bool {
-        repo != nil && !trimmedPrompt.isEmpty && !app.isCreatingWorkspace
+        repo != nil && !spokenPrompt.isEmpty && !app.isCreatingWorkspace
     }
 
     var body: some View {
@@ -353,7 +366,7 @@ struct CreateWorkspaceSheet: View {
         } else if willBeNamedByModel {
             // Deliberately nothing. See above.
             EmptyView()
-        } else if trimmedPrompt.isEmpty {
+        } else if spokenPrompt.isEmpty {
             Text("The branch is named from what you write")
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textTertiary)
@@ -398,7 +411,7 @@ struct CreateWorkspaceSheet: View {
     private var willBeNamedByModel: Bool {
         WorkspaceNaming.shouldName(
             userSuppliedName: nil,
-            prompt: trimmedPrompt.isEmpty ? "a task" : trimmedPrompt,
+            prompt: spokenPrompt.isEmpty ? "a task" : spokenPrompt,
             isChatWorkspace: mode == .chat,
             isEnabled: WorkspaceNamingPreferences().isEnabled,
             isAgentAvailable: isNamingAvailable
@@ -409,7 +422,7 @@ struct CreateWorkspaceSheet: View {
     /// branches that could appear between now and Create. Only shown when no model is going to
     /// rewrite it, because a preview that is about to be replaced is a lie with a monospaced font.
     private var branchPreview: String {
-        let slug = Git.slug(from: trimmedPrompt)
+        let slug = Git.slug(from: spokenPrompt)
         guard let prefix = branchPrefix, !prefix.isEmpty else { return slug }
         return "\(prefix)/\(slug)"
     }

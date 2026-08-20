@@ -745,18 +745,26 @@ final class AppModel {
         isCreatingWorkspace = true
         defer { isCreatingWorkspace = false }
 
+        // What the task says without the files named in it. The prompt carries its attachments as
+        // paths in the sentence now, and every reader below this line is naming something after
+        // what was asked for: a workspace called `9JVKW4` after the folder a screenshot was copied
+        // into would be a name nobody could recognise.
+        let spoken = AttachmentDraft.withoutAttachments(
+            prompt, paths: staged?.attachments.map(\.path) ?? []
+        )
+
         // The codename the workspace wears until a model answers. Decided before the worktree
         // exists so the row never appears under one name and changes to another in the same
         // breath, and nil whenever nothing is going to be asked, in which case `createWorkspace`
         // falls back to `Git.title` exactly as it always has.
-        let placeholder = shouldNameAutomatically(name: nil, prompt: prompt, opensWith: opensWith)
+        let placeholder = shouldNameAutomatically(name: nil, prompt: spoken, opensWith: opensWith)
             ? await placeholderName()
             : nil
 
         do {
             let workspace = try await manager.createWorkspace(
                 repo: repo,
-                prompt: prompt,
+                prompt: spoken,
                 name: opensWith == .terminal ? branch : placeholder,
                 branch: branch,
                 baseBranch: baseBranch
@@ -767,7 +775,7 @@ final class AppModel {
                 beginAutomaticNaming(
                     workspace: workspace,
                     repo: repo,
-                    prompt: prompt,
+                    prompt: spoken,
                     placeholder: placeholder
                 )
             }
@@ -784,7 +792,7 @@ final class AppModel {
 
             let session = try await store.upsert(Session(
                 workspaceID: workspace.id,
-                title: Git.title(from: prompt, maxLength: 40),
+                title: Git.title(from: spoken, maxLength: 40),
                 model: controls?.model ?? AppDefaults.fallbackModel,
                 effort: controls?.effort ?? AppDefaults.fallbackEffort,
                 permissionMode: controls?.permissionMode ?? AppDefaults.fallbackPermissionMode
@@ -795,15 +803,21 @@ final class AppModel {
             await model.reloadSessions()
             model.activeSessionID = session.id
 
-            // The trailer is composed last and only for the agent. The branch, the workspace name
-            // and the session title all come from what the user typed, and a list of attachment
-            // paths appended to that would name a workspace after a screenshot.
+            // The agent gets the sentence as it was written, files and all, because the paths in
+            // it are already the paths those files have in the worktree: staging lays a draft out
+            // under exactly the layout it will have here, so this is a move and nothing has to be
+            // rewritten. What is taken out is anything that failed to arrive, which is a path to
+            // nothing and worse than one file fewer.
             var opening = prompt
             if let staged, !staged.attachments.isEmpty {
-                let moved = AttachmentFiles.adopt(
-                    staged.attachments, from: staged.directory, into: workspace.path
+                let moved = Set(
+                    AttachmentFiles
+                        .adopt(staged.attachments, from: staged.directory, into: workspace.path)
+                        .map(\.path)
                 )
-                opening = PromptAttachments.compose(text: prompt, attachments: moved)
+                opening = AttachmentDraft
+                    .parse(prompt, paths: staged.attachments.map(\.path))
+                    .keeping { moved.contains($0) }
             }
 
             model.startSetupThenSend(prompt: opening, repo: repo)

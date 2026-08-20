@@ -54,8 +54,7 @@ final class PromptAttachmentStore {
     func add(
         _ sources: [AttachmentSource],
         sessionID: String,
-        workspace: String,
-        undo: UndoManager? = nil
+        workspace: String
     ) async -> Added {
         let existing = attachments(for: sessionID)
         var known = Set(existing.map(\.source).filter { !$0.isEmpty })
@@ -96,72 +95,27 @@ final class PromptAttachmentStore {
 
         guard !result.made.isEmpty else { return result }
         apply(attachments(for: sessionID) + result.made, to: sessionID)
-        register(result.made, from: wanted, sessionID: sessionID, workspace: workspace, undo: undo)
         return result
     }
 
-    /// Command+Z after a paste, because pasting is an edit and an edit that cannot be undone is
-    /// the one kind users learn to be careful around.
+    /// Why there is no undo registered here any more.
     ///
-    /// Registered with the window's undo manager, which is the same object the composer's text
-    /// view is already registering its typing with, so one stack holds both in the order they
-    /// happened: undo after pasting a screenshot takes the chip back off, and undo again takes
-    /// back the word typed before it.
-    ///
-    /// Undoing removes the chip and the copy exactly as the chip's own remove control does, and
-    /// registering from inside an undo is what makes the next step the redo. Redo attaches the
-    /// same clipboard bytes and the same files again, under fresh ids, which is why the sources
-    /// are carried rather than the paths: the bytes a screenshot arrived as no longer exist
-    /// anywhere else by then, and the clipboard has usually moved on.
-    private func register(
-        _ made: [PromptAttachment],
-        from sources: [AttachmentSource],
-        sessionID: String,
-        workspace: String,
-        undo: UndoManager?
-    ) {
-        guard let undo, !made.isEmpty else { return }
+    /// A file is a word in the draft now, so attaching one is an edit to the text and the text
+    /// system's own undo is what takes it back: `ComposerEditorHandle` makes the insertion through
+    /// the text view, which puts it on the same stack as the words typed either side of it, in
+    /// order. What is left here is the copy on disk, and that deliberately outlives an undo. It
+    /// stays until the turn is sent, when whatever the sentence no longer names is discarded, so
+    /// undoing an attachment and redoing it finds the same file under the same path rather than a
+    /// second copy under a new one.
 
-        undo.registerUndo(withTarget: self) { [weak undo] store in
-            MainActor.assumeIsolated {
-                store.remove(made, sessionID: sessionID, workspace: workspace)
-                guard let undo else { return }
-                undo.registerUndo(withTarget: store) { [weak undo] store in
-                    MainActor.assumeIsolated {
-                        store.reattach(
-                            sources, sessionID: sessionID, workspace: workspace, undo: undo
-                        )
-                    }
-                }
-            }
-        }
-        undo.setActionName(actionName(for: made))
-    }
-
-    /// Redo, which is an undo of an undo: the same bytes and the same files attached again, which
-    /// registers its own undo on the way and puts the pair back on the stack.
-    private func reattach(
-        _ sources: [AttachmentSource], sessionID: String, workspace: String, undo: UndoManager?
-    ) {
-        Task {
-            _ = await add(sources, sessionID: sessionID, workspace: workspace, undo: undo)
-        }
-    }
-
-    private func actionName(for made: [PromptAttachment]) -> String {
-        // What the Edit menu says after "Undo". Deliberately the same word for every door: the
-        // paperclip, a drag and the clipboard all end in a chip, and the chip is what goes away.
-        return made.count == 1 ? "Attach" : "Attach \(made.count) Files"
-    }
-
-    /// Takes one chip off. A copy Bloom made goes with it, because nothing has been sent yet and
+    /// Takes one file off. A copy Bloom made goes with it, because nothing has been sent yet and
     /// leaving it behind would put a file in the worktree that nothing on screen mentions.
     func remove(_ attachment: PromptAttachment, sessionID: String, workspace: String) {
         remove([attachment], sessionID: sessionID, workspace: workspace)
     }
 
-    /// The same, for the whole of one batch at once, which is what undoing a paste of three
-    /// screenshots has to take back.
+    /// The same, for a batch of them at once, which is what a turn going out has to do with the
+    /// copies its sentence stopped naming.
     func remove(_ attachments: [PromptAttachment], sessionID: String, workspace: String) {
         let ids = Set(attachments.map(\.id))
         guard !ids.isEmpty else { return }
@@ -173,11 +127,25 @@ final class PromptAttachmentStore {
         }
     }
 
-    /// Called once the turn has gone. The chips go, the files stay: the prompt the agent is
+    /// Called once the turn has gone. The records go, the files stay: the prompt the agent is
     /// reading names those paths, and deleting them out from under it would break the one thing
     /// the attachment was for.
     func clear(sessionID: String) {
         apply([], to: sessionID)
+    }
+
+    /// What a sent turn leaves behind, given the sentence that went with it.
+    ///
+    /// Every copy the message still names stays where it is, because the agent is about to read
+    /// it. Every copy it does not is a file nothing refers to any more, which is what a paste that
+    /// was undone, or a chip that was typed back out of the sentence, leaves in the worktree.
+    /// Deleted here rather than at the moment of editing, so undo and redo of an attachment find
+    /// the same file under the same path.
+    func settle(sent text: String, sessionID: String, workspace: String) {
+        let held = attachments(for: sessionID)
+        let named = Set(AttachmentDraft.parse(text, paths: held.map(\.path)).paths)
+        remove(held.filter { !named.contains($0.path) }, sessionID: sessionID, workspace: workspace)
+        clear(sessionID: sessionID)
     }
 
     // MARK: - Persistence

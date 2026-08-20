@@ -170,8 +170,9 @@ struct ComposerView: View {
 
     /// Attachments alone are a turn. Dropping a screenshot in and pressing send is a sentence, and
     /// making the user type a word to unlock the button would be asking them to talk to the guard
-    /// rather than to the agent.
-    private var canSend: Bool { hasBody || !attachments.isEmpty }
+    /// rather than to the agent. It needs no clause of its own any more: a file is a word in the
+    /// draft, so a prompt of nothing but one is a draft that is not empty.
+    private var canSend: Bool { hasBody }
 
     // MARK: - Keys
 
@@ -222,16 +223,24 @@ struct ComposerView: View {
 
         // A file can be moved or deleted between being attached and the prompt going, and naming a
         // path that is not there any more only teaches the agent that Bloom lies about paths. The
-        // chip carries a warning while it is on screen; this is the last check before it matters.
+        // chip carries a warning while it is on screen; this is the last check before it matters,
+        // and a file that fails it is taken out of the sentence rather than sent as a path to
+        // nothing.
         let worktree = transcript.workspace.path
-        let ready = attachments.filter {
-            FileManager.default.fileExists(atPath: $0.url(in: worktree).path)
-        }
+        let text = AttachmentDraft
+            .parse(transcript.draft, paths: attachments.map(\.path))
+            .keeping { path in
+                FileManager.default.fileExists(
+                    atPath: PromptAttachment.sent(path: path).url(in: worktree).path
+                )
+            }
 
-        let text = PromptAttachments.compose(text: transcript.draft, attachments: ready)
-        // The chips go and the files stay. The prompt the agent is now reading names those paths,
-        // and deleting them out from under it would break the one thing they were for.
-        PromptAttachmentStore.shared.clear(sessionID: transcript.session.id)
+        // The records go and the files the message names stay. The prompt the agent is now reading
+        // names those paths, and deleting them out from under it would break the one thing they
+        // were for.
+        PromptAttachmentStore.shared.settle(
+            sent: text, sessionID: transcript.session.id, workspace: worktree
+        )
         caret = 0
         let transcript = transcript
         Task { await transcript.send(text) }

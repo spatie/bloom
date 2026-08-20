@@ -66,10 +66,8 @@ public struct AttachmentDraft: Equatable, Sendable {
     /// How a path is written into a draft.
     public static func token(for path: String) -> String { "`\(path)`" }
 
-    /// The prefix that makes a path recognisable as Bloom's own copy without being told.
-    ///
-    /// The same folder `WorktreeScratch` shields, because that is the folder every attachment
-    /// Bloom copies in is written to. A path under it is one this app put there.
+    /// The folder every attachment Bloom copies into a worktree is written to. A path under it is
+    /// a file this app put there for an agent to read.
     public static let copyPrefix = WorktreeScratch.attachments + "/"
 
     // MARK: - Reading
@@ -120,15 +118,28 @@ public struct AttachmentDraft: Equatable, Sendable {
     }
 
     /// Whether a backticked run names a file this draft is carrying.
+    ///
+    /// Two ways to be one. Either it is a file in one of Bloom's own scratch folders, which is
+    /// something this app wrote into somebody's checkout for an agent to read and can be
+    /// recognised from the text alone: a copy under `.bloom/attachments`, or the pull request
+    /// instructions under `.bloom/scratch`. Or the caller says so, which is how the composer
+    /// vouches for a file that already lived in the worktree and whose path looks like any other.
     public static func isAttachment(_ content: String, known: Set<String> = []) -> Bool {
         guard !content.isEmpty, !content.contains("\n") else { return false }
         if known.contains(content) { return true }
-        // A copy of Bloom's own, which has to name a file inside its id folder rather than being
-        // the folder itself.
-        guard content.hasPrefix(copyPrefix) else { return false }
-        let rest = content.dropFirst(copyPrefix.count)
-        guard let slash = rest.firstIndex(of: "/") else { return false }
-        return slash != rest.startIndex && rest.index(after: slash) != rest.endIndex
+
+        if content.hasPrefix(copyPrefix) {
+            // A copy lives in an id folder of its own, so it is always two components deep. That
+            // is what keeps the id folder itself, which names nothing readable, out of it.
+            let rest = content.dropFirst(copyPrefix.count)
+            guard let slash = rest.firstIndex(of: "/") else { return false }
+            return slash != rest.startIndex && rest.index(after: slash) != rest.endIndex
+        }
+
+        let generated = WorktreeScratch.generated + "/"
+        guard content.hasPrefix(generated) else { return false }
+        let name = content.dropFirst(generated.count)
+        return !name.isEmpty && !name.contains("/")
     }
 
     // MARK: - Writing
@@ -159,11 +170,7 @@ public struct AttachmentDraft: Equatable, Sendable {
             ? string.substring(with: NSRange(location: at, length: 1))
             : ""
 
-        let lead = before.isEmpty || isBreak(before) ? "" : " "
-        // A space after it even at the very end of the draft, which is what picking a file from
-        // the `@` menu already writes: the next word is typed clear of the chip rather than
-        // against it, and a second file dropped after this one is spaced without asking.
-        let trail = isBreak(after) && !after.isEmpty ? "" : " "
+        let (lead, trail) = padding(before: before, after: after)
         let written = lead + token(for: path) + trail
 
         let text = string.replacingCharacters(in: NSRange(location: at, length: 0), with: written)
@@ -180,6 +187,24 @@ public struct AttachmentDraft: Equatable, Sendable {
             result = inserting(path, into: result.text, at: result.caret)
         }
         return result
+    }
+
+    /// The spaces a file needs on either side of it, given what it is being written between.
+    ///
+    /// Public because it is asked twice about the same insertion and has to answer the same way
+    /// both times: once here, on the draft, and once by the editor, which does the same insertion
+    /// as an edit the text system can undo and sees a chip where this sees a path. Neither is
+    /// looking at anything but whether the character beside it is a space.
+    ///
+    /// A space is added on a side that has none. There is one after it even at the very end of
+    /// the draft, which is what picking a file from the `@` menu already writes: the next word is
+    /// typed clear of the chip rather than against it, and a second file dropped after this one is
+    /// spaced without asking.
+    public static func padding(before: String, after: String) -> (lead: String, trail: String) {
+        (
+            before.isEmpty || isBreak(before) ? "" : " ",
+            isBreak(after) && !after.isEmpty ? "" : " "
+        )
     }
 
     /// Whether a character reads as a break between words, which is what decides whether a file

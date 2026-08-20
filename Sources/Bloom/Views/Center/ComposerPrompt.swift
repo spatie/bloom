@@ -52,8 +52,8 @@ struct ComposerPrompt<Footer: View>: View {
     @Environment(AppModel.self) private var app
 
     /// The chip the pointer has settled on, which is the card that is up. Nil is the resting
-    /// state, and so is a chip that has since been removed or sent.
-    @State private var previewed: PromptAttachment?
+    /// state, and so is a chip that has since been edited out of the draft.
+    @State private var hoveredPath: String?
     /// Whether a drag is currently over the box, so the border can say it will be taken.
     @State private var isDropTarget = false
     /// How wide the box is, which is all the hover card is allowed to be.
@@ -61,6 +61,10 @@ struct ComposerPrompt<Footer: View>: View {
     /// How far the box is from the top of the window it is in, which is all the room a card that
     /// floats above it has. A sheet is its own window, so this is the sheet's own top edge there.
     @State private var boxTop: CGFloat = 0
+
+    /// The way into the text view for a file that has finished copying, so it arrives as an edit
+    /// the text system can undo rather than as a draft replaced behind its back.
+    @State private var editor = ComposerEditorHandle()
 
     @State private var slashCatalog = SlashCommandCatalog()
     /// Whether the pointer has settled on the command chip, which is what puts its card up.
@@ -84,16 +88,6 @@ struct ComposerPrompt<Footer: View>: View {
                 )
             }
 
-            if !attachments.isEmpty {
-                AttachmentBar(
-                    attachments: attachments,
-                    worktree: attachmentRoot,
-                    onOpen: open(attachment:),
-                    onRemove: remove(attachment:),
-                    onHover: { previewed = $0 }
-                )
-            }
-
             ComposerEditor(
                 text: promptBody,
                 caret: $caret,
@@ -102,7 +96,10 @@ struct ComposerPrompt<Footer: View>: View {
                 onContentHeightChange: onContentHeightChange,
                 onKey: handle(key:),
                 onBackspaceAtStart: backspaceCommand,
-                onAttach: attach(sources:),
+                onAttach: attach(sources:replacing:),
+                attachmentPaths: attachments.map(\.path),
+                onOpenAttachment: open(path:),
+                handle: editor,
                 placeholder: placeholder
             )
 
@@ -115,8 +112,13 @@ struct ComposerPrompt<Footer: View>: View {
         }
         // The editor takes the drops that land on the text itself; this takes the ones that land
         // on the chips, the footer and the padding, which is most of the box.
+        // A drop on the chrome has no character under it, so it goes to the end of the draft,
+        // which is where the next word would have been typed.
         .dropDestination(for: URL.self) { urls, _ in
-            attach(sources: urls.filter(\.isFileURL).map { .file($0) })
+            attach(
+                sources: urls.filter(\.isFileURL).map { .file($0) },
+                replacing: NSRange(location: (command.body as NSString).length, length: 0)
+            )
         } isTargeted: { isDropTarget = $0 }
         .overlay(alignment: .topLeading) {
             // Above the composer, in the same place and the same card as the two completion
@@ -124,7 +126,7 @@ struct ComposerPrompt<Footer: View>: View {
             // other, and a menu the user is typing into outranks a preview they are only looking
             // at.
             AttachmentCardOverlay(
-                attachment: activeMenu == .none ? livePreview : nil,
+                attachment: activeMenu == .none ? hoveredAttachment : nil,
                 worktree: attachmentRoot,
                 availableWidth: boxWidth
             )
@@ -156,6 +158,7 @@ struct ComposerPrompt<Footer: View>: View {
         }
         .onAppear {
             PromptAttachmentStore.shared.load(sessionID: attachmentKey)
+            adoptAttachmentsKeptBesideTheDraft()
             applyCaptureDraft()
         }
         .task(id: mentionRoot) { await slashCatalog.load(workspacePath: mentionRoot) }
@@ -174,6 +177,29 @@ struct ComposerPrompt<Footer: View>: View {
             // the token entirely, makes the menu available again.
             if old.kind != new.kind { isMenuDismissed = false }
         }
+    }
+
+    /// Files that were attached before a file was a word in the draft.
+    ///
+    /// A draft saved by an earlier build has its attachments in a list beside it and no mention of
+    /// them in the text, which would now read as a prompt carrying nothing: the chips would be
+    /// gone and the paths would never reach the agent. Any of them the draft does not already name
+    /// is written onto the end of it, once, which is where they were drawn before.
+    private func adoptAttachmentsKeptBesideTheDraft() {
+        let held = attachments.map(\.path)
+        guard !held.isEmpty else { return }
+
+        var draft = command
+        let named = Set(AttachmentDraft.parse(draft.body, paths: held).paths)
+        let missing = held.filter { !named.contains($0) }
+        guard !missing.isEmpty else { return }
+
+        let written = AttachmentDraft.inserting(
+            missing, into: draft.body, at: (draft.body as NSString).length
+        )
+        draft.body = written.text
+        text = draft.text
+        caret = written.caret
     }
 
     /// `--composer-draft "/revi"` fills the box on first appearance, and `--composer-preview`
@@ -199,12 +225,28 @@ struct ComposerPrompt<Footer: View>: View {
 
     // MARK: - Derived state
 
-    /// The hover card, once it has been checked against what is still attached. A chip that was
-    /// removed, or that went with the turn, takes its card with it without anything having to
-    /// remember to put it away.
-    private var livePreview: PromptAttachment? {
-        guard let previewed, attachments.contains(previewed) else { return nil }
-        return previewed
+    /// The hover card, once it has been checked against what the draft still says. A file that was
+    /// typed out of the sentence, or that went with the turn, takes its card with it without
+    /// anything having to remember to put it away.
+    private var hoveredAttachment: PromptAttachment? {
+        guard let hoveredPath, files.paths.contains(hoveredPath) else { return nil }
+        return attachment(for: hoveredPath)
+    }
+
+    /// The draft, split into what was typed and the files named in it.
+    ///
+    /// Derived rather than stored, for the same reason `command` is: the text is the only record
+    /// that a file is attached, so nothing can disagree with it about whether one is. See
+    /// `AttachmentDraft`.
+    private var files: AttachmentDraft {
+        AttachmentDraft.parse(command.body, paths: attachments.map(\.path))
+    }
+
+    /// What is known about one of the paths in the draft. A path with no record beside it is
+    /// still a file: it is drawn, opened and sent from the path alone, which is what makes a
+    /// restored draft work when nothing else survived the relaunch.
+    private func attachment(for path: String) -> PromptAttachment {
+        attachments.first { $0.path == path } ?? .sent(path: path)
     }
 
     /// The draft, split into the command it leads with and the prompt written after it.
@@ -382,26 +424,28 @@ struct ComposerPrompt<Footer: View>: View {
     /// The one way a file becomes an attachment, whichever door it came through: the paperclip, a
     /// drag onto the box, a drag onto the text, or the clipboard.
     ///
+    /// `replacing` is where it goes. A drop carries the character the pointer let go over, so the
+    /// file lands on the word it was dropped on; a paste carries the selection, so it replaces
+    /// what was selected exactly as pasting anything else does. Both are measured in the draft the
+    /// editor is editing, which is the prompt written after any `/command`.
+    ///
     /// Returns true because two of those callers are AppKit asking "did you take this", and an
     /// answer of no is what makes a drop fall through to the text system and write a path into the
-    /// draft again.
+    /// draft as a sentence about the file instead of attaching it.
     @discardableResult
-    private func attach(sources: [AttachmentSource]) -> Bool {
+    private func attach(sources: [AttachmentSource], replacing range: NSRange) -> Bool {
         guard !sources.isEmpty else { return false }
-        Task { await add(sources) }
+        Task { await add(sources, replacing: range) }
         return true
     }
 
-    private func add(_ sources: [AttachmentSource]) async {
+    private func add(_ sources: [AttachmentSource], replacing range: NSRange) async {
         let added = await PromptAttachmentStore.shared.add(
             sources,
             sessionID: attachmentKey,
-            workspace: attachmentRoot,
-            // The undo manager of the window this was pasted into, which is the one the text view
-            // is already registering its typing with. Read before the copy rather than after it,
-            // because by then the answer to "which window" is whichever one the user has moved to.
-            undo: NSApp.keyWindow?.undoManager
+            workspace: attachmentRoot
         )
+        write(added.made.map(\.path), replacing: range)
         isFocused = true
         guard !added.failures.isEmpty else { return }
         app.alert = BloomAlert(
@@ -412,18 +456,33 @@ struct ComposerPrompt<Footer: View>: View {
         )
     }
 
-    private func open(attachment: PromptAttachment) {
-        previewed = nil
-        onOpenAttachment(attachment)
+    /// Writes the files into the draft where they were put, and leaves the caret after them.
+    ///
+    /// Clamped rather than trusted: copying a large file takes long enough that the sentence can
+    /// have moved on underneath it, and a stale offset is a reason to land at the end of what is
+    /// there now rather than to trap.
+    private func write(_ paths: [String], replacing range: NSRange) {
+        guard !paths.isEmpty else { return }
+        // Through the editor where there is one, so Command+Z takes the file back out in order
+        // with the words typed around it. The draft below is the same edit made without one,
+        // which is what happens when the copy outlived the box it was dropped into.
+        guard !editor.insert(paths, replacing: range) else { return }
+
+        var draft = command
+        let body = draft.body as NSString
+        let start = min(max(range.location, 0), body.length)
+        let length = min(max(range.length, 0), body.length - start)
+        let cleared = body.replacingCharacters(in: NSRange(location: start, length: length), with: "")
+
+        let written = AttachmentDraft.inserting(paths, into: cleared, at: start)
+        draft.body = written.text
+        text = draft.text
+        caret = written.caret
     }
 
-    private func remove(attachment: PromptAttachment) {
-        previewed = nil
-        PromptAttachmentStore.shared.remove(
-            attachment,
-            sessionID: attachmentKey,
-            workspace: attachmentRoot
-        )
+    private func open(path: String) {
+        hoveredPath = nil
+        onOpenAttachment(attachment(for: path))
     }
 
     private func attachFiles() {
@@ -444,6 +503,8 @@ struct ComposerPrompt<Footer: View>: View {
 
         guard await panel.present() == .OK else { return }
 
-        await add(panel.urls.map { .file($0) })
+        // The paperclip has no pointer and no drop point, so the file goes where the writing is:
+        // at the caret, over the selection if there is one.
+        await add(panel.urls.map { .file($0) }, replacing: NSRange(location: caret, length: 0))
     }
 }
