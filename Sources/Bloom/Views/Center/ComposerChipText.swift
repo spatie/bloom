@@ -199,6 +199,25 @@ final class AttachmentChipCell: NSTextAttachmentCell {
     /// `NSCell` already has one of those and it means something else.
     private let lineFont: NSFont
 
+    /// Everything about the chip that is a number: how big it is, where it sits against the
+    /// baseline, and the two pieces `draw` places inside it.
+    ///
+    /// Measured once at init rather than answered on demand, because TextKit asks for the first
+    /// two through `NSTextAttachmentCellProtocol`, which declares `cellSize()` and
+    /// `cellBaselineOffset()` nonisolated, while the `NSCell` this inherits from puts the rest of
+    /// the class on the main actor. So neither override may read `lineFont`, and no marking
+    /// rescues it: `NSFont` is not `Sendable`, so it cannot be held nonisolated either. The
+    /// numbers it yields are, and nothing they are measured from can move: a cell is built for one
+    /// path at one font, and a font change rewrites the storage and builds new cells rather than
+    /// resizing these.
+    ///
+    /// It is the cheaper shape as well. `cellSize()` is asked on every layout pass of the
+    /// composer, and it used to build an `NSLayoutManager` and measure the filename each time.
+    private nonisolated let chipSize: NSSize
+    private nonisolated let baselineOffset: NSPoint
+    private nonisolated let iconSize: CGFloat
+    private nonisolated let nameWidth: CGFloat
+
     /// Room either side of the contents, and between the icon and the name.
     private static let padding: CGFloat = 5
     private static let gap: CGFloat = 4
@@ -208,8 +227,31 @@ final class AttachmentChipCell: NSTextAttachmentCell {
     private static let cornerRadius: CGFloat = 4
 
     init(path: String, font: NSFont) {
+        let nameFont = Self.nameFont(for: font)
+        let name = (path as NSString).lastPathComponent
+        let iconSize = ceil(nameFont.pointSize) + 2
+        let nameWidth = min(
+            ceil((name as NSString).size(withAttributes: [.font: nameFont]).width),
+            Self.maxNameWidth
+        )
+        // Unrounded, because the plate is rounded up off it and the difference between the two is
+        // what centres the plate below.
+        let lineHeight = NSLayoutManager().defaultLineHeight(for: font)
+        let height = ceil(lineHeight) + 2
+
         self.path = path
         self.lineFont = font
+        self.iconSize = iconSize
+        self.nameWidth = nameWidth
+        self.chipSize = NSSize(
+            width: ceil(Self.padding * 2 + iconSize + Self.gap + nameWidth),
+            height: height
+        )
+        // Where the plate sits against the baseline of the line it is on. The cell is drawn from
+        // its bottom edge, so this is what centres it on the line rather than hanging it from the
+        // baseline, which would push every line a chip is on further apart than the ones around it.
+        self.baselineOffset = NSPoint(x: 0, y: font.descender - (height - lineHeight) / 2)
+
         super.init(imageCell: nil)
     }
 
@@ -220,8 +262,9 @@ final class AttachmentChipCell: NSTextAttachmentCell {
     var filename: String { (path as NSString).lastPathComponent }
 
     /// The name, at the size the rest of the line is set at but a little smaller, which is what
-    /// keeps a chip from being the tallest thing on its line.
-    private var nameFont: NSFont {
+    /// keeps a chip from being the tallest thing on its line. Static, because init has to ask it
+    /// before there is a `self` to ask.
+    private static func nameFont(for lineFont: NSFont) -> NSFont {
         NSFont.systemFont(ofSize: max(lineFont.pointSize - 1, 9))
     }
 
@@ -229,36 +272,15 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingMiddle
         return [
-            .font: nameFont,
+            .font: Self.nameFont(for: lineFont),
             .foregroundColor: NSColor.labelColor,
             .paragraphStyle: paragraph,
         ]
     }
 
-    private var iconSize: CGFloat { ceil(nameFont.pointSize) + 2 }
+    override func cellSize() -> NSSize { chipSize }
 
-    private var nameWidth: CGFloat {
-        let width = (filename as NSString)
-            .size(withAttributes: [.font: nameFont]).width
-        return min(ceil(width), Self.maxNameWidth)
-    }
-
-    override func cellSize() -> NSSize {
-        let height = ceil(NSLayoutManager().defaultLineHeight(for: lineFont)) + 2
-        let width = Self.padding * 2 + iconSize + Self.gap + nameWidth
-        return NSSize(width: ceil(width), height: height)
-    }
-
-    /// Where the plate sits against the baseline of the line it is on.
-    ///
-    /// The cell is drawn from its bottom edge, so this is what centres it on the line rather than
-    /// hanging it from the baseline, which would push every line a chip is on further apart than
-    /// the ones around it.
-    override func cellBaselineOffset() -> NSPoint {
-        let height = cellSize().height
-        let line = NSLayoutManager().defaultLineHeight(for: lineFont)
-        return NSPoint(x: 0, y: lineFont.descender - (height - line) / 2)
-    }
+    override func cellBaselineOffset() -> NSPoint { baselineOffset }
 
     override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {
         draw(withFrame: cellFrame, in: controlView, characterIndex: 0)
