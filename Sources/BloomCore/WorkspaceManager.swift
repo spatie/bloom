@@ -207,11 +207,17 @@ public struct WorkspaceManager: Sendable {
     }
 
     /// Runs the setup script, streaming output line by line. Returns whether it succeeded.
+    ///
+    /// - Parameter onExit: the status the script ended on, reported once and only when one
+    ///   exists. A run that never started a process has no status, and reporting a made up zero
+    ///   for it would be worse than saying nothing: the transcript prints this number, and a
+    ///   number a person can look up has to be the one the shell gave.
     @discardableResult
     public func runSetup(
         workspace: Workspace,
         repo: Repo,
         port: Int,
+        onExit: (@Sendable (Int) -> Void)? = nil,
         onOutput: @escaping @Sendable (String) -> Void
     ) async -> Bool {
         let settings = SettingsLoader.load(repo: repo.path)
@@ -260,6 +266,7 @@ public struct WorkspaceManager: Sendable {
         }
 
         let status = await runner.exitStatus
+        onExit?(Int(status))
         let succeeded = status == 0
         let capped = String(log.suffix(200_000))
         // The whole `workspace` value here is as old as the run, and a run can take minutes, so
