@@ -102,8 +102,25 @@ reading four recorded fixtures in `fixtures/` (`codex-turn.ndjson`, `codex-appro
 than invented, which is how the missing `jsonrpc` member and the server's request numbering were
 found.
 
-**Not built yet:** nothing draws a Codex row, nothing stores one, and no session can choose Codex.
-`AgentKind.canRunWorkspaces` is still `self == .claudeCode`.
+### The second pass, since
+
+- **`SessionRunner.swift`**, the seam: the four members `TranscriptModel` calls plus the one the
+  permission prompt calls, and `EventFanout`, which is why every consumer gets its own stream.
+  Adopted on the Codex side only; conforming `AgentRunner` is one line, no redesign.
+- **`CodexTranslation.swift`**, Codex items into `AgentEvent`, **and into Claude Code's stream-json
+  shape on the way to the database**. See §6, which is the most load-bearing decision in this work.
+- **`CodexPermission.swift`**, the five request shapes as `PermissionAsk`s, with a stored
+  `control_request` envelope so a reopened workspace can redraw a question it is still holding.
+- **`CodexRunner.swift`**, an actor conforming to `SessionRunner`: connects, starts or resumes the
+  thread, persists the thread id, writes the same rows, matches stored grants, answers.
+- **`Views/Transcript/CodexItemPresenter.swift`**, plus a `TranscriptPresenter` router that picks a
+  presenter by reading the row's payload.
+- **`Session.agentKind`** and its migration, defaulting every existing row to `claudeCode`.
+
+Tests: 76 across five suites, all on recorded payloads.
+
+**Not built yet:** nothing chooses `CodexRunner` (see step 2 and step 8), the model picker is still
+Claude's three hardcoded ids, and `AgentKind.canRunWorkspaces` is still `self == .claudeCode`.
 
 ---
 
@@ -125,9 +142,7 @@ Consequences, worth stating rather than discovering:
 
 ## 4. The `Session` column and its migration
 
-`Store.swift` is held by the permission-prompt work. **Do not edit it in the same pass as this.**
-
-Add to `Models.swift`:
+**Done.** What landed, for the record:
 
 ```swift
 public struct Session {
@@ -138,9 +153,10 @@ public struct Session {
 }
 ```
 
-Add a migration step to the array in `Store.migrate`. It has to be the real-code form, not `sql(_:)`,
-because `ADD COLUMN` has no `IF NOT EXISTS` and every step in that list must be replayable over a
-database that already has it (the store's own tests rewind `user_version`):
+The migration step is the real-code form, not `sql(_:)`, because `ADD COLUMN` has no
+`IF NOT EXISTS` and every step in that list has to be replayable over a database that already has
+it applied. Rewinding `user_version` is how an old schema is reproduced, and a step that threw
+would take the whole transaction with it. `theMigrationSurvivesBeingReplayed` pins that:
 
 ```swift
 { db in
@@ -151,9 +167,12 @@ database that already has it (the store's own tests rewind `user_version`):
 }
 ```
 
-Every existing row is a Claude Code chat, and the default says so. Then thread it through the three
-places in `Store.swift` that name session columns: the `INSERT … ON CONFLICT` list around line 605,
-the `COALESCE` update around line 682, and the row reader around line 1234.
+Every existing row is a Claude Code chat and the default says so. It is threaded through the three
+places in `Store.swift` that name session columns: the `INSERT … ON CONFLICT` list, the row reader,
+and `updateSessionPreferences`, which gained this column and none of the runner's. That last part
+is not decoration: `upsert` writes every column from the value it is handed, which is why `34b840b`,
+`e47a3b7` and `de3f173` exist. `upsert` creates a row, `update` modifies one, and a new column
+changes nothing about that.
 
 `agent_session_id` needs no change. A Codex thread id is a string like
 `01a02144-3b7e-7233-97f2-73ebd5105085` and it is stable across resumes, so it goes in the same
@@ -199,7 +218,17 @@ Turn shape for a Codex chat:
 
 ## 6. Storing and drawing Codex items
 
-### Storage
+### Storage: rows go in the vocabulary their reader speaks
+
+**A Codex chat writes Claude Code's stream-json shape into `messages.payload`.** That sounds like a
+compromise and is the opposite of one. A stored row is read back by `AgentEvent.decode(line:)`,
+which knows one vocabulary, so a row written as a JSON-RPC notification draws perfectly while it is
+live and comes back after a restart as a column of unknown rows. Live drawing hides the failure
+completely, which is why `everyStoredRowDecodesBackIntoTheSameEvent` exists.
+
+The Codex item travels inside the tool input under `CodexTranslation.itemKey`, so nothing is lost
+and a presenter reading a row out of the database still knows which vocabulary it is in without a
+join and without a column that did not exist when the row was written.
 
 `messages.payload` is already an opaque blob and `MessageKind` is already coarse. Codex items map
 onto the existing kinds without a schema change:
@@ -237,9 +266,13 @@ Split it:
   Roughly: `commandExecution` reads like `Bash`, `fileChange` like `Edit` or `Write` per change
   kind, `mcpToolCall` like the existing `mcp__` branch, `webSearch` like `WebSearch`, `reasoning`
   is a thinking row, `plan` is a plan row.
-- The transcript row picks a presenter by the session's `agentKind`.
+- The transcript row picks a presenter by reading the row's payload, **not** by the session's
+  `agentKind`: a row knows what it is, and a transcript drawn from the database has the row before
+  it has the session.
 
-Estimate: `CodexItemPresenter` is 150 to 200 lines. The rows that draw it are mostly reusable:
+Done, in `Views/Transcript/CodexItemPresenter.swift` and `TranscriptPresenter`. The remaining edit
+is one call site in `ToolRowView` and friends, held today: `ToolPresenter.present(` becomes
+`TranscriptPresenter.present(`. The rows that draw it are mostly reusable:
 `ToolRowView`, `ExpandableRow`, `DetailCodeBlock` and `ToolResultView` do not care where the text
 came from. `fileChange` is the nicest case, because its `changes[].diff` is already a unified diff
 and Bloom's `DiffParser` reads that shape.
@@ -283,7 +316,14 @@ silently does nothing is worse than one that is not offered.
 `item/permissions/requestApproval`, `mcpServer/elicitation/request`, `item/tool/requestUserInput`.
 Each has its own response schema; `CodexApprovalDecision.result(for:)` already spells all five.
 
-Two things a permission prompt needs to know:
+The Claude Code side landed while this was being written, and the Codex mapping follows its shape
+deliberately, so the two feel like one app: the question becomes a transcript row where the call
+would have been, it is stored in `permission_asks` so a reopened workspace can still draw it, rules
+live in Bloom's own `permission_grants` keyed by repository and matched on **exact equality**, a
+matching grant is answered by Bloom itself with a note in the transcript saying so, and **no
+settings file is written by anybody**.
+
+Three things that differ, and cannot be papered over:
 
 - **The question carries no detail, only an item id.** A `fileChange` approval has `itemId`,
   `threadId`, `turnId` and an optional reason. The diff is on the `item/started` that arrived a
@@ -292,8 +332,26 @@ Two things a permission prompt needs to know:
   So the `permission_grants` table, which exists because a worktree can be deleted, has nothing to
   store for Codex. A Codex chat's grants live for the life of the app-server process. Say that in
   the UI rather than showing a "remembered" list that is empty.
+- **A refusal carries no sentence.** `decline` is a word, so `PermissionDecision.deny(message:)`'s
+  text has nowhere to go. The agent is told no without being told why. Claude Code hands the
+  sentence back as the tool result; there is no equivalent here.
+- **Codex offers no rule of its own.** Claude Code's CLI sends `permission_suggestions`, its own
+  judgement about which rule would let calls like this through. Codex sends nothing, so Bloom
+  offers the narrowest rule there is: the command verbatim, or the path verbatim. It cannot grant
+  more than the thing on screen, and it will often not match again. Inventing a pattern would be
+  Bloom granting something nobody agreed to.
 - `item/permissions/requestApproval` answers with a granted permission profile rather than a word,
   so approving one properly is real work. Refusing is already expressible.
+
+The mapping that shipped:
+
+| Bloom | On the wire |
+| --- | --- |
+| Allow once | `accept` |
+| Allow for this session | `acceptForSession` |
+| Always allow (project) | `acceptForSession`, plus a row in Bloom's own `permission_grants` |
+| Deny | `decline`, and the turn carries on |
+| Deny and stop | `cancel` |
 
 `thread/status/changed` carries an `active` state with `activeFlags: ["waitingOnApproval"]`, which
 is the signal a sidebar needs to tell "working" from "waiting for you". Claude Code has no such
@@ -315,6 +373,24 @@ flag and Bloom infers it; here it is handed over.
 | `AgentRunner`, `AgentEvent` | Claude Code's stream-json, end to end | Stay Claude Code's. A `CodexRunner` beside them |
 | Sidebar status glyph, `WorkspaceRunningGlyph` | Workspace-level busy state | A workspace is busy when **any** of its chats is. Already per workspace, so no change, but check it is aggregating chats and not reading one |
 | `CenterTab` / the tab strip | Chat tabs deliberately carry no glyph, so a row of conversations does not read as a toolbar | A backend mark on a chat tab is needed and must not undo that. A small tinted dot or a wordmark-sized glyph, only where the workspace holds more than one backend, and reconciled with the running glyph that is already there |
+
+---
+
+## 8a. The tab strip has to say which backend a chat is
+
+Today a chat tab carries no glyph at all, deliberately: a strip of conversations must not read as a
+toolbar of icons. But with two backends, **you would have to open a chat to find out what is
+running it**, and the answer changes what the composer offers, what the permission prompt says and
+what the numbers in the inspector mean.
+
+So the mark is needed, and it has to cost almost nothing:
+
+- Only when the workspace actually holds more than one backend. A workspace of five Claude chats
+  gets no marks, because there is nothing to tell apart.
+- A small tinted dot or a wordmark-sized glyph, not a full icon, and reconciled with the running
+  glyph already in that row rather than placed beside it.
+- The same mark wherever a chat is named outside its own window: the sidebar row, the window title,
+  the menu bar summary.
 
 ---
 
@@ -377,19 +453,24 @@ stays zero for a Codex chat, forever.
 
 Each step should land on its own and leave the app working.
 
-1. `Session.agentKind` plus the migration, defaulting to `claudeCode`. Nothing reads it yet. **Needs
-   `Models.swift` and `Store.swift`, both held today.**
-2. Extract the `SessionRunner` seam from what `WorkspaceModel` calls, with `AgentRunner` as its only
-   conformer. No behaviour change.
-3. `CodexRunner`, driving `CodexClient`, writing the same store rows. Reachable only from a test.
-4. `CodexItemPresenter`, and the transcript picking a presenter by `agentKind`.
-5. Permission mapping and the approval prompts, joined to their items by id. Coordinate with the
-   permission-prompt work, which owns that vocabulary.
+1. **Done.** `Session.agentKind` plus the migration, defaulting to `claudeCode`.
+2. **Done, on the Codex side.** The `SessionRunner` seam. Conforming `AgentRunner` to it is one
+   line and no behaviour change, and is the small edit that makes step 8 possible.
+3. **Done.** `CodexRunner`, driving `CodexClient`, writing the same store rows.
+4. **Done, bar one call site.** `CodexItemPresenter` and `TranscriptPresenter`. The transcript
+   views still call `ToolPresenter.present(` directly; that is the edit, in files held today.
+5. **Done.** Permission mapping and the asks, joined to their items by id. The prompt itself is the
+   Claude one, unchanged, because a Codex question is a `PermissionAsk`.
 6. The model picker: sections, fetched Codex models, per-model efforts, and the fork-on-switch rule.
-7. Usage and context reading from `thread/tokenUsage/updated`.
-8. `canRunWorkspaces` opens up, the create-workspace sheet offers a backend for the first chat, and
-   the tab strip marks which backend a chat is.
+7. Usage and context reading. Already lands in the right place (§10); what is left is saying tokens
+   rather than "$0.00" where a Codex chat has no price.
+8. **The wiring.** `TranscriptModel.ensureRunner` picks a runner by `session.agentKind`,
+   `AgentRunner` conforms to `SessionRunner`, `canRunWorkspaces` opens up, the create sheet offers
+   a backend for the first chat, and the tab strip marks it (§8a).
 9. `SlashCommandIndex`'s Codex sibling, from `skills/list`.
+
+Step 8 is the one that makes any of this reachable, and it is the only step that edits files
+`AgentRunner.swift`, `Models.swift` and the transcript views already own.
 
 ---
 
