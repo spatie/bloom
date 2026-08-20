@@ -301,6 +301,8 @@ code { font: 12.5px ui-monospace, "SF Mono", Menlo, monospace; color: #9BE9DC; }
 .note h2 { font-size: 19px; margin: 0 0 10px; }
 .note p, .note li { color: #9AA7B0; max-width: 86ch; }
 .note li { margin-bottom: 8px; }
+.shipped { border: 1px solid #2C6E63; background: #10201E; border-radius: 10px;
+  padding: 12px 16px; color: #BFD6D1; max-width: 86ch; }
 .zoom { margin: 18px 0; overflow-x: auto; }
 .zoom img { display: block; image-rendering: pixelated; max-width: none; }
 pre.meas { background: #101317; border: 1px solid #262B31; border-radius: 10px;
@@ -308,6 +310,8 @@ pre.meas { background: #101317; border: 1px solid #262B31; border-radius: 10px;
   font: 12px/1.7 ui-monospace, "SF Mono", Menlo, monospace; max-width: 88ch; }
 </style></head><body>
 <header><h1>02-piece, trimming the dark above the bar</h1>
+<p class="shipped"><b>02-match is what shipped.</b> Aligned, and 17 units proud
+on both sides. This page is the record of the choice, not a live question.</p>
 <p>Every row below is <code>02-piece</code>. The palette does not change, the
 grades do not change, the lanes do not change, and the correction that stops a
 lane riding out over the margin is in all of them. The only thing that moves is
