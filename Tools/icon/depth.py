@@ -601,14 +601,28 @@ GRID_SIZES = [128, 64, 32, 16]
 GRID_ZOOM = {128: 2, 64: 4, 32: 8, 16: 16}
 
 
-def grids(seen):
+def grids(seen, variants=None, title="All eleven at the sizes that decide it",
+          note=None, labels=(("L", "layered document"), ("F", "flat .icns"))):
+    """The grid, and the one piece of this file another sheet wants whole.
+
+    `variants` and the three labels are parameters rather than module globals
+    so that shine.py can lay its own eleven out with this exact machinery
+    instead of growing a third copy of it. Left out, every default is what this
+    file's own page has always passed."""
+    variants = variants if variants is not None else VARIANTS
+    note = note if note is not None else (
+        "Depth is the first thing to go when an icon shrinks, so this is where "
+        "the set is actually judged. Each row is one size, every variation in "
+        "the same order as above, actual size on top and the same pixels "
+        "magnified underneath. If two cells in a row look the same, that "
+        "variation is not buying anything at that size.")
     out = []
-    for key, label in (("L", "layered document"), ("F", "flat .icns")):
+    for key, label in labels:
         rows = []
         for size in GRID_SIZES:
             z = GRID_ZOOM[size] * size
             cells = []
-            for name, _, _, _ in VARIANTS:
+            for name, _, _, _ in variants:
                 c = seen[(name, key, size)]
                 cells.append(
                     '<div class="gc"><i class="%s" style="width:%dpx;'
@@ -622,14 +636,9 @@ def grids(seen):
                 % (size, GRID_ZOOM[size], "".join(cells)))
         out.append('<div class="gblock"><h3>%s</h3>%s</div>'
                    % (label, "".join(rows)))
-    return ('<section class="card grid"><div class="hd">'
-            '<h2>All eleven at the sizes that decide it</h2></div>'
-            '<p class="note">Depth is the first thing to go when an icon '
-            'shrinks, so this is where the set is actually judged. Each row is '
-            'one size, every variation in the same order as above, actual size '
-            'on top and the same pixels magnified underneath. If two cells in a '
-            'row look the same, that variation is not buying anything at that '
-            'size.</p>%s</section>') % "".join(out)
+    return ('<section class="card grid"><div class="hd"><h2>%s</h2></div>'
+            '<p class="note">%s</p>%s</section>'
+            % (title, note, "".join(out)))
 
 
 # ------------------------------------------------------------------- sheet
