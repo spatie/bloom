@@ -30,6 +30,19 @@ struct TranscriptListView: View {
     /// the sentinel row the `ScrollViewReader` used to be pointed at.
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
 
+    /// Which rows have only just turned up, so they fade in rather than appear at full opacity in
+    /// a single frame. The rules for what counts as "just turned up" are `RowArrival`'s, which is
+    /// the same mechanism and the same 180ms the sidebar and Home settle their rows on.
+    @State private var arrival = RowArrival()
+
+    /// The session the tracker above is following.
+    ///
+    /// Nothing fades until a session has finished arriving. Switching workspaces hands this list
+    /// eighty rows in one frame and the rest of the history a beat later, and neither is work
+    /// turning up in front of the reader: it is the pane being pointed somewhere else. See
+    /// `trackArrivals` and the `task` below, which is where a session stops arriving.
+    @State private var arrivalSession = ""
+
     /// The session whose history has been put back, if any. See `visibleRows`.
     ///
     /// A session id rather than a flag, because this view is the same view in the same place for
@@ -45,6 +58,14 @@ struct TranscriptListView: View {
     /// long prompt wraps sensibly and a short one still reads as one side of a conversation.
     private static let bubbleShare: CGFloat = 0.7
     private static let bubbleFloor: CGFloat = 240
+
+    /// How many rows at the live end the arrival tracker is shown.
+    ///
+    /// The set difference only ever has to see the end of the list: rows are appended and never
+    /// reordered, so an id that falls out of this window cannot come back and be mistaken for
+    /// something new. Handing it a four thousand row session instead would build four thousand
+    /// strings every time one row lands.
+    private static let arrivalWindow = 200
 
     /// Whether the workspace event rows are drawing anything, reported by them because only they
     /// can see the log. See `showsPlaceholder`.
@@ -130,6 +151,7 @@ struct TranscriptListView: View {
                                 worktree: transcript.workspace.path,
                                 permissionMode: transcript.session.permissionMode
                             )
+                            .arrivingRow(isArriving(row))
                             .padding(.horizontal, TranscriptLayout.inset)
                             .padding(.bottom, TranscriptLayout.turnGap)
                             .id(row.seq)
@@ -146,6 +168,10 @@ struct TranscriptListView: View {
                             // realised, and opening a long session realises all of them. Comparing
                             // the row's own values first is what keeps a second pass free.
                             .equatable()
+                            // Innermost, on the drawing alone. What fades is what is inside the
+                            // row: it is inserted at its full height exactly as it always was, so
+                            // nothing moves, nothing reflows, and nothing below it shifts.
+                            .arrivingRow(isArriving(row))
                             .padding(.horizontal, TranscriptLayout.inset)
                             .id(row.seq)
                         }
@@ -191,8 +217,10 @@ struct TranscriptListView: View {
                     onScrolledUpChange?(!new.isNearBottom)
                 }
             }
+            .settlesArrivals($arrival)
             .onChange(of: transcript.rows.count, initial: true) { _, _ in
                 position(proxy)
+                trackArrivals()
             }
             // Asked for by the jump pill, and an edge rather than a row on purpose: the list is
             // drawing the end of the session and may not be holding the row a seq names yet. Not
@@ -216,9 +244,19 @@ struct TranscriptListView: View {
                 // straight back would otherwise find its own id still recorded and put four
                 // thousand rows on the frame that is trying to arrive.
                 drawnInFull = ""
+                // And nothing in the session being arrived at counts as having arrived. Cleared
+                // here as well as set in `task` for the same reason `drawnInFull` is: leaving a
+                // session before it had settled and coming straight back must not find its own
+                // id still recorded and fade its whole tail up.
+                arrivalSession = ""
             }
             .task(id: transcript.session.id) {
                 await transcript.load()
+                // Whatever the session arrived with, taken in without a fade. This runs whether
+                // or not the row count changed, which matters: two sessions can hold the same
+                // number of rows, and then nothing else would have told the tracker it is
+                // looking at a different list.
+                arrival.adopt(arrivalIDs)
 
                 // The rest of the session, once the frame carrying the tail has been drawn.
                 //
@@ -252,6 +290,11 @@ struct TranscriptListView: View {
                 // the rows either: the anchor has already moved the viewport, and this only names
                 // the edge it is already on.
                 scrollPosition.scrollTo(edge: .bottom)
+                // The session has finished arriving, so from here on a row that turns up is a row
+                // the reader is watching turn up. The history that just landed is not one of them:
+                // it was never absorbed, so every one of those rows latches at full opacity on the
+                // frame it is built. See `ArrivingRow`.
+                arrivalSession = transcript.session.id
                 SwitchTrace.mark("transcript.history", workspace: transcript.workspace.id)
                 SwitchTrace.markOnScreen("transcript.history", workspace: transcript.workspace.id)
             }
@@ -316,6 +359,52 @@ struct TranscriptListView: View {
             scrollPosition.scrollTo(edge: .bottom)
         }
         Task { await transcript.markAllRead() }
+    }
+
+    // MARK: Arrivals
+
+    /// The ids the tracker is shown: the live end of the session, and no more of it than that.
+    ///
+    /// Plain sequence numbers rather than anything session scoped, because `adopt` replaces the
+    /// tracker's whole idea of the list every time a session loads. A seq that means one row in
+    /// one session and a different row in the next can never be compared against the wrong one.
+    private var arrivalIDs: [String] {
+        transcript.rows.suffix(Self.arrivalWindow).map { String($0.seq) }
+    }
+
+    /// Takes the list in and works out what is new about it, unless the session is still arriving.
+    private func trackArrivals() {
+        guard arrivalSession == transcript.session.id else {
+            arrival.adopt(arrivalIDs)
+            return
+        }
+        arrival.absorb(arrivalIDs)
+    }
+
+    /// Whether this row should fade rather than appear.
+    ///
+    /// The set is almost always empty, and it is checked first so that a pass over a long session
+    /// does not build a string per realised row to ask a question whose answer is already no.
+    private func isArriving(_ row: TranscriptRow) -> Bool {
+        guard !arrival.arriving.isEmpty, Self.fades(row.kind) else { return false }
+        return arrival.isArriving(String(row.seq))
+    }
+
+    /// Whether a row of this kind is new on the frame it lands.
+    ///
+    /// Prose and thinking are not. Both are streamed live first and stored afterwards, and
+    /// `StreamingRowView` is lined up column for column with their stored twins precisely so that
+    /// nothing moves when one replaces the other. Fading the stored row in would undo exactly
+    /// that: the answer the reader is halfway through would go out and come back over a fifth of
+    /// a second, which is the jump those columns exist to avoid.
+    ///
+    /// Everything else genuinely arrives. A tool row lands where a "Running Bash" line was, a
+    /// turn footer lands where the status was, and a user turn was not on screen at all.
+    private static func fades(_ kind: MessageKind) -> Bool {
+        switch kind {
+        case .assistantText, .thinking: false
+        default: true
+        }
     }
 
     private func toggle(_ seq: Int) {
