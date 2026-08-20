@@ -86,11 +86,19 @@ final class TranscriptModel {
     // MARK: - Loading
 
     func load() async {
-        guard let store, !isLoaded else { return }
+        guard let store, !isLoaded else {
+            SwitchTrace.mark("transcript.reused", workspace: workspace.id)
+            SwitchTrace.markOnScreen("transcript.reused", workspace: workspace.id)
+            return
+        }
+        SwitchTrace.mark("transcript.read.start", workspace: workspace.id)
         let messages = (try? await store.messages(sessionID: session.id)) ?? []
+        SwitchTrace.mark("transcript.read.done", workspace: workspace.id)
         rows = []
         indexByRefID = [:]
         for message in messages { absorb(message) }
+        SwitchTrace.mark("transcript.rows.built", workspace: workspace.id)
+        SwitchTrace.markOnScreen("transcript.rows.built", workspace: workspace.id)
         draft = (try? await store.draft(sessionID: session.id)) ?? ""
         isLoaded = true
     }

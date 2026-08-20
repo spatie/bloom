@@ -24,6 +24,10 @@ struct BloomApp: App {
         // A development affordance too: `Bloom --frame-probe <out.json>` drags the sidebar divider
         // and records how long each frame actually took. See `FrameProbe`.
         if FrameProbe.isRequested { FrameProbe.schedule() }
+
+        // And another: `Bloom --switch-probe <out.json>` times the path from clicking a workspace
+        // to seeing it. See `SwitchProbe`.
+        if SwitchProbe.isRequested { SwitchProbe.schedule() }
     }
 
     /// The narrowest the window may be dragged.

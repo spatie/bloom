@@ -46,6 +46,10 @@ struct DetailColumn: View {
             // `existingModel` rather than `model(for:)`: creating one here would mutate observable
             // state during the render pass. The selection setter has already made it.
             if let model = app.existingModel(for: workspace.id) {
+                // Stamps when SwiftUI got round to asking for this column. Reads and writes
+                // nothing the app can see, and compiles to one `if` against a `false` unless a
+                // probe run turned it on. See `SwitchTrace`.
+                let _ = SwitchTrace.mark("column.body", workspace: workspace.id)
                 CenterColumnView(model: model)
             } else {
                 LoadingView()

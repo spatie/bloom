@@ -13,15 +13,29 @@ enum PaneLayoutTiming {
     private static var counts: [String: Int] = [:]
     private static var seconds: [String: Double] = [:]
 
+    /// When each pass started, measured from `reset`, and how long it took. A total says a switch
+    /// is expensive; the passes say it is expensive four times over, which is a different problem
+    /// with a different fix.
+    private static var passes: [String: [[Double]]] = [:]
+    private static var origin: Double = 0
+
     static func reset() {
         counts.removeAll()
         seconds.removeAll()
+        passes.removeAll()
+        origin = CACurrentMediaTime()
     }
 
     static func record(_ pane: String, _ elapsed: Double) {
         counts[pane, default: 0] += 1
         seconds[pane, default: 0] += elapsed
+        passes[pane, default: []].append([
+            (CACurrentMediaTime() - elapsed - origin) * 1000, elapsed * 1000,
+        ])
     }
+
+    /// Every pass, as `[startedMs, tookMs]`, for a report that has to say when as well as how long.
+    static func timeline() -> [String: [[Double]]] { passes }
 
     static func summary() -> [String: [String: Double]] {
         var result: [String: [String: Double]] = [:]

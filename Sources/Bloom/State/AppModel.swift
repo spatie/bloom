@@ -118,11 +118,19 @@ final class AppModel {
     var selection: SidebarSelection {
         get { storedSelection }
         set {
+            if let id = newValue.workspaceID, id != storedSelection.workspaceID {
+                SwitchTrace.begin(workspaceID: id)
+            }
             storedSelection = newValue
             Self.rememberSelection(newValue)
+            SwitchTrace.mark("selection.set")
             guard let id = newValue.workspaceID, workspaceModels[id] == nil,
-                  let workspace = workspaces.first(where: { $0.id == id }) else { return }
+                  let workspace = workspaces.first(where: { $0.id == id }) else {
+                SwitchTrace.mark("model.reused")
+                return
+            }
             _ = model(for: workspace)
+            SwitchTrace.mark("model.created")
             // An archived selection is not prepared here. Its workspace is not in `workspaces` by
             // definition, so the value has to come from the caller: see `openArchived`.
         }

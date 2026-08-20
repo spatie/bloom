@@ -32,6 +32,10 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
 
     func attach(_ model: AppModel) {
         appModel = model
+        // The switch probe drives a selection and reads back what the window settled on, so it
+        // needs the state too, and this is the same one moment everything else is handed it. It
+        // keeps a weak reference and only ever looks when `--switch-probe` asked it to.
+        SwitchProbe.attach(model)
         servicesProvider.attach(model)
         // The suppression rule needs to know which workspace the window is showing, and this is
         // the first moment there is a window to ask.
