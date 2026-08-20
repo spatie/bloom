@@ -52,6 +52,14 @@ being five points shorter than everything beside it is why it read as faint.
 17.5 the database fills, because a mark that fills its box looks bigger than
 everything next to it.
 
+AND THEN THE OWNER SAID IT WAS HARSH. What ships reads as three straight-ish
+lines converging to a point, and beside Dropbox and 1Password that is the
+hardest thing on the bar. `SWEEP` and the ten candidates under it are the
+answer: they turn the four things that make it so, one at a time, so that what
+is being chosen between is one variable rather than ten drawings. The comment
+above `SWEEP` says which four. Nothing under it is shipped until `CHOICE` says
+so, and the mark in the bar today is still `gather`.
+
 THE 1x CASE IS THE ONE THAT DECIDES. On the built-in display a gap of 1.5 points
 is three pixels and everything survives. On an external 1x display it is one and
 a half, and a design tuned on the laptop turns to mud there. The sheet renders
@@ -71,7 +79,7 @@ BUILD = os.path.join(HERE, ".build", "menubar")
 sys.path.insert(0, HERE)
 import lib9  # noqa: E402
 
-# The candidate that ships. One line, and the other five stay in the file, so
+# The candidate that ships. One line, and the other fifteen stay in the file, so
 # swapping the mark is a rerun rather than a redraw.
 CHOICE = "gather"
 
@@ -198,6 +206,25 @@ def _cap(p, tangent, normal, r, at_end):
             for k in range(1, 12)]
 
 
+def _radii(pts, width):
+    """Half the weight at every vertex. A number is a lane of one thickness; a
+    function of the fraction along the lane is a lane that is drawn rather than
+    plotted, thicker where the hand pressed and thinner where it lifted."""
+    n = len(pts) - 1
+    if callable(width):
+        return [width(i / n) / 2.0 for i in range(len(pts))]
+    return [width / 2.0] * len(pts)
+
+
+def edge(pts, width, side=1):
+    """One side of the ribbon a centre line would paint. `side` is +1 for the
+    normal's side and -1 for the other, and the two of them are what a fillet
+    needs: the crotch of a junction is where two of these cross."""
+    rs = _radii(pts, width)
+    return [(p[0] + n[0] * r * side, p[1] + n[1] * r * side)
+            for p, (_, n), r in zip(pts, _frames(pts), rs)]
+
+
 def ribbon(pts, width, caps=(True, True)):
     """A centre line given a width: the shape a stroke would paint, as a polygon.
 
@@ -205,18 +232,72 @@ def ribbon(pts, width, caps=(True, True)):
     and a slot is either a subpath with the opposite winding or a piece that is
     simply not painted. A stroked path can be neither, so everything here is a
     filled polygon and there is one mechanism instead of two.
+
+    `width` is a number or a function of the fraction along the line, which is
+    how the modulated candidates get their weight to swell through a bend. The
+    caps are half circles at whatever the weight is where they sit, so a lane
+    that thins to nothing ends in a point without anybody special casing it.
     """
-    r = width / 2.0
     fr = _frames(pts)
-    left = [(p[0] + n[0] * r, p[1] + n[1] * r) for p, (_, n) in zip(pts, fr)]
-    right = [(p[0] - n[0] * r, p[1] - n[1] * r) for p, (_, n) in zip(pts, fr)]
+    rs = _radii(pts, width)
+    left = [(p[0] + n[0] * r, p[1] + n[1] * r) for p, (_, n), r in zip(pts, fr, rs)]
+    right = [(p[0] - n[0] * r, p[1] - n[1] * r) for p, (_, n), r in zip(pts, fr, rs)]
     out = list(left)
     if caps[1]:
-        out += _cap(pts[-1], fr[-1][0], fr[-1][1], r, True)
+        out += _cap(pts[-1], fr[-1][0], fr[-1][1], rs[-1], True)
     out += list(reversed(right))
     if caps[0]:
-        out += _cap(pts[0], fr[0][0], fr[0][1], r, False)
+        out += _cap(pts[0], fr[0][0], fr[0][1], rs[0], False)
     return out
+
+
+def cove(arm, y, run, n=24):
+    """The curve that rounds the corner where a lane lands on a level trunk.
+
+    A circle inscribed in that corner is worth nothing here. The corner measures
+    thirty odd degrees, and an arc small enough to stay local in thirty degrees
+    is a third of a point across, which is under one device pixel: the arithmetic
+    is right and the eye cannot see it. What softens a junction at this size is a
+    cove, the same thing a typeface puts where an arm meets a stem, and it is
+    drawn large on purpose.
+
+    So it is built as a quadratic, which is tangent to both sides by
+    construction: it leaves the lane's edge a run before the corner, its control
+    point is where that edge's own tangent crosses the trunk, and it lands on the
+    trunk an equal run past it. What comes back is the counter's point filled in,
+    bounded above by that curve, so the outline runs along the lane, turns once,
+    and carries on along the trunk with no corner in it anywhere.
+    """
+    apex = None
+    for i, ((ax, ay), (bx, by)) in enumerate(zip(arm, arm[1:])):
+        if (ay - y) * (by - y) <= 0 and ay != by:
+            apex, at = ax + (bx - ax) * (y - ay) / (by - ay), i
+            break
+    if apex is None:
+        return None
+    x0 = apex - run
+    if x0 <= arm[0][0]:
+        return None
+    j = max(i for i, q in enumerate(arm) if q[0] <= x0)
+    (ax, ay), (bx, by) = arm[j], arm[j + 1]
+    k = (x0 - ax) / (bx - ax) if bx != ax else 0.0
+    p0 = (x0, ay + (by - ay) * k)
+    dx, dy = _unit(bx - ax, by - ay)
+    if abs(dy) < 1e-9:
+        return None
+    t = (y - p0[1]) / dy
+    if t <= 0:
+        return None
+    c = (p0[0] + dx * t, y)
+    p2 = (c[0] + math.hypot(c[0] - p0[0], c[1] - p0[1]), y)
+    curve = []
+    for m in range(n + 1):
+        u = m / n
+        v = 1 - u
+        curve.append((v * v * p0[0] + 2 * v * u * c[0] + u * u * p2[0],
+                      v * v * p0[1] + 2 * v * u * c[1] + u * u * p2[1]))
+    tail = [q for q in reversed(arm[:at + 1]) if q[0] >= x0]
+    return curve + [(apex, y)] + tail + [p0]
 
 
 def area(poly):
@@ -298,9 +379,11 @@ def clip(poly, curve, keep):
 # ------------------------------------------------------------ the candidates
 #
 # Each returns (width, [polygon, ...]) in a box 100 units tall with y running
-# down, filled as one nonzero path. Six of them, because the only honest way to
-# pick a mark for a fifteen point box is to look at all of them at fifteen points
-# rather than to reason about them at 512.
+# down, filled as one nonzero path. Sixteen of them now: the first six were the
+# reductions the mark was chosen from, and the ten below them are the answer to
+# the owner's next note, that the chosen one reads as harsh. They all stay,
+# because the only honest way to pick a mark for a fifteen point box is to look
+# at all of them at fifteen points rather than to reason about them at 512.
 #
 # THE WEIGHT IS THE NEIGHBOURS', NOT THE ICON'S. On the tile a lane is a fifth of
 # the height, a ribbon with a lit face and a side. Two of those and their gap do
@@ -401,7 +484,7 @@ def bar():
     """The crossing bar on its own.
 
     The negative, drawn so it can be looked at rather than argued about. It is
-    the crispest of the six at 1x by a distance and it says nothing: one eased
+    the crispest of the first six at 1x by a distance and it says nothing: one eased
     stroke is a swoosh, and a swoosh is not the mark for an app whose whole
     subject is several things running at once.
     """
@@ -439,9 +522,222 @@ def panel():
     ]
 
 
+
+# ------------------------------------------------- the fluid ten
+#
+# The shipped mark reads as three straight-ish lines converging to a point, and
+# beside Dropbox and 1Password that is the hardest thing on the bar. Four things
+# make it so and each of them can be turned separately, which is what these ten
+# are for:
+#
+#   THE WINDOW. `WINDOW` above cuts the mark from the band's settled end, where
+#   the ease has already spent itself, so a lane is nearly straight and then
+#   flattens. `SWEEP` takes the whole band instead: flat, one bend, flat, which
+#   is an S rather than a bent line. Same curve, more of it.
+#
+#   THE JOIN. A lane landing on the trunk at four degrees leaves a needle of
+#   empty wedge. At fifteen points that needle is one pixel that flickers with
+#   the rounding, and it is the single sharpest thing in the mark. It can be
+#   filled (`fillet`), dissolved by thinning the lane into the trunk (`stem`),
+#   or refused by not landing at all (`near`, `wake`).
+#
+#   THE WEIGHT. One thickness end to end is a plot. Weight that swells through
+#   the bend is a stroke.
+#
+#   THE FILL. The mark is 15.0 where Dropbox is 16.0, and it is the only mark on
+#   the bar made of lines rather than a body, so it carries further than its
+#   height says. `calm` gives some of that height back.
+SWEEP = (0.0, 1.0)
+
+
+def _ease(s):
+    return s * s * (3 - 2 * s)
+
+
+def flow():
+    """The shipped composition cut from the whole band, so the lanes are S
+    curves. Nothing else changes: same three lanes, same stagger, same weight.
+    This is the curvature on its own, so the rest can be judged against it."""
+    w = 120.0
+    r = LANE / 2
+    out = [solid(ribbon(centreline(50.0, 50.0, r, w - r, window=SWEEP), LANE))]
+    for y0, xm in ((r, 0.72), (100 - r, 0.50)):
+        out.append(solid(ribbon(
+            centreline(y0, 50.0, r, xm * w, window=SWEEP), LANE)))
+    return w, out
+
+
+def swell():
+    """flow with the weight modulated the way a nib would lay it: each arriving
+    lane starts light at its open end and reaches full weight through its bend,
+    and the trunk thickens as the lanes feed into it. A lane that is one
+    thickness end to end is plotted; one that changes has a direction."""
+    w = 120.0
+    r = LANE / 2
+    trunk = lambda s: LANE * (0.80 + 0.20 * _ease(s))
+    arm = lambda s: LANE * (0.62 + 0.38 * _ease(s))
+    out = [solid(ribbon(centreline(50.0, 50.0, r, w - r, window=SWEEP), trunk))]
+    for y0, xm in ((r, 0.72), (100 - r, 0.50)):
+        out.append(solid(ribbon(
+            centreline(y0, 50.0, r, xm * w, window=SWEEP), arm)))
+    return w, out
+
+
+def stem():
+    """The lanes thin into the trunk instead of butting against it.
+
+    A lane at full weight landing at a shallow angle leaves the needle of empty
+    wedge described above. A lane that has narrowed to a fifth of its weight by
+    the time it arrives leaves none: its edges dive across the trunk's edge
+    steeply and the outline turns a broad corner instead of a sharp one. It is
+    how a vein meets a midrib, and it costs nothing at the open end, where the
+    lane is at full weight and doing the reading."""
+    w = 120.0
+    r = LANE / 2
+    taper = lambda s: LANE * (1.0 - 0.82 * _ease(s))
+    out = [solid(ribbon(centreline(50.0, 50.0, r, w - r, window=SWEEP), LANE))]
+    for y0, xm in ((r, 0.78), (100 - r, 0.56)):
+        out.append(solid(ribbon(
+            centreline(y0, 50.0, r, xm * w, window=SWEEP), taper)))
+    return w, out
+
+
+def fillet_():
+    """The shipped mark with a gusset in each crotch, and nothing else touched.
+
+    The smallest change that answers the complaint, and worth seeing on its own
+    before anything else is spent: if what reads as harsh is the corner where a
+    lane lands rather than the straightness of the lanes themselves, then this is
+    the whole of the fix and the mark the owner already approved otherwise stays
+    exactly as it is.
+    """
+    w = 118.0
+    r = LANE / 2
+    trunk = centreline(50.0, 50.0, r, w - r)
+    out = [solid(ribbon(trunk, LANE))]
+    for y0, xm, above in ((r, TOP_LANDS, True), (100 - r, BOTTOM_LANDS, False)):
+        arm = centreline(y0, 50.0, r, xm * w)
+        out.append(solid(ribbon(arm, LANE)))
+        # +n is the lower side of a rightward line, so the edge facing the
+        # counter is the arm's lower one under the trunk's upper one.
+        g = cove(edge(arm, LANE, 1 if above else -1),
+                 50 - LANE / 2 if above else 50 + LANE / 2, LANE * 1.7)
+        if g:
+            out.append(solid(g))
+    return w, out
+
+
+def near():
+    """Three lanes that never touch. The two arrivals run out of width just
+    short of the trunk, a lane's width of air between cap and edge, so the
+    convergence is read rather than drawn. There is no junction to be sharp, and
+    at fifteen points the eye closes a gap that small anyway. The gamble is 1x,
+    where that air is one pixel and may close on its own."""
+    w = 122.0
+    r = LANE / 2
+    air = 4.0
+    trunk = centreline(50.0, 50.0, r, w - r, window=SWEEP)
+    out = [solid(ribbon(trunk, LANE))]
+    for y0, sign, xm in ((r, -1, 0.74), (100 - r, 1, 0.54)):
+        yend = 50 + sign * (LANE + air)
+        out.append(solid(ribbon(
+            centreline(y0, yend, r, xm * w, window=SWEEP), LANE)))
+    return w, out
+
+
+def duet():
+    """Two lanes and no third, so each of them can be twice as far from the
+    other and twice as curved before they crowd. One runs the width, the other
+    sweeps up out of the lower left and joins it late. Half the information of
+    the shipped mark and, at fifteen points, most of the meaning."""
+    w = 116.0
+    lane = LANE * 1.14
+    r = lane / 2
+    # Both lanes flatten onto y=52 as they run out, so the last fifth of the
+    # width is one lane and there is no junction anywhere: the trunk IS the two
+    # of them arrived. Staggered starts, because two mirrored curves meeting at
+    # a point is an arrowhead.
+    out = [solid(ribbon(centreline(28.0, 58.0, r, w - r, window=SWEEP), lane)),
+           solid(ribbon(centreline(94.0, 58.0, 0.34 * w, w - r, window=SWEEP),
+                        lane))]
+    return w, out
+
+
+def wake():
+    """Two S curves running the whole width, out of phase, never meeting.
+
+    The pure case: no junction, no convergence, nothing to be sharp anywhere.
+    What it says is current rather than gathering, which may be the wrong thing
+    to say, and it is here so the wrong thing can be looked at."""
+    w = 124.0
+    r = LANE / 2
+    out = []
+    # Staggered in x as well as offset in y, because two strokes of the same
+    # length stacked one above the other is a list, whatever shape they are.
+    for y0, y1, xa, xb in ((16.0, 46.0, r, 0.84 * w),
+                           (58.0, 88.0, 0.16 * w, w - r)):
+        out.append(solid(ribbon(centreline(y0, y1, xa, xb, window=SWEEP), LANE)))
+    return w, out
+
+
+def brush():
+    """Two lanes with no ends: the weight rises out of nothing and falls back
+    into it, so there are no caps to cut flat and no tips to catch the light.
+    The convergence is a crossing rather than a landing, and where they overlap
+    they are simply thicker."""
+    w = 122.0
+    heavy = lambda s: LANE * 1.20 * math.sin(math.pi * s) ** 0.40
+    light = lambda s: LANE * 1.02 * math.sin(math.pi * s) ** 0.40
+    main = centreline(54.0, 42.0, 1.0, w - 1.0, window=SWEEP)
+    xj = 0.72 * w
+    # The second stroke ends ON the first one's centre line rather than crossing
+    # it, so the two lie down together instead of piling up where they meet.
+    yj = next(y for x, y in main if x >= xj)
+    return w, [
+        solid(ribbon(main, heavy)),
+        solid(ribbon(centreline(93.0, yj, 0.10 * w, xj, window=SWEEP), light)),
+    ]
+
+
+def calm():
+    """flow, given back some of its height.
+
+    The mark measures 15.0 where Dropbox is 16.0, and it is the only thing on
+    the bar drawn in lines rather than as a body, so it reads bigger than it
+    measures. This is the same drawing at 87 percent, which puts the art at 13.1
+    points inside the same 18 point box, with the weight kept up so the lanes do
+    not go thin as well as short. FILL below is what does it."""
+    return flow()
+
+
+def crest():
+    """One lane and a shorter one riding above it, and no junction at all.
+
+    The most reduced of the ten: two round capped strokes, both S curves, the
+    upper one about two thirds the length and slightly lighter. Nothing meets,
+    nothing crosses, and the pair reads as one gesture because they are two
+    stretches of the same curve."""
+    w = 118.0
+    lane = LANE * 1.16
+    r = lane / 2
+    out = [solid(ribbon(centreline(88.0, 58.0, r, 0.80 * w, window=SWEEP), lane))]
+    out.append(solid(ribbon(centreline(42.0, 12.0, 0.20 * w, w - r,
+                                       window=SWEEP), lane * 0.9)))
+    return w, out
+
+
+# How much of the box each mark fills, as a fraction of the standard art
+# height. One number, applied at render time, so a candidate can be tried
+# smaller without its geometry being redrawn.
+FILL = {"calm": 0.87}
+
+
 CANDIDATES = [
     ("gather", gather), ("trio", trio), ("pair", pair),
     ("meet", meet), ("bar", bar), ("panel", panel),
+    ("flow", flow), ("swell", swell), ("stem", stem), ("fillet", fillet_),
+    ("near", near), ("duet", duet), ("wake", wake), ("brush", brush),
+    ("calm", calm), ("crest", crest),
 ]
 
 BLURB = {
@@ -451,7 +747,21 @@ BLURB = {
     "meet": "two lanes arrive level, one leaves",
     "bar": "the crossing bar alone. The negative",
     "panel": "the panel, the bar cut through it, a tongue out",
+    "flow": "the same three lanes cut from the whole band, so they are S curves",
+    "swell": "flow, with the weight swelling through each bend",
+    "stem": "the lanes thin into the trunk, so the joins have no needle in them",
+    "fillet": "the shipped mark with an arc inscribed in each crotch, nothing else",
+    "near": "the arrivals stop short: convergence read, never drawn",
+    "duet": "two lanes only, twice the air, joining late",
+    "wake": "two S curves out of phase that never meet",
+    "brush": "no caps at all: the weight rises out of nothing and falls back",
+    "calm": "flow at 87 percent, so it sits under Dropbox rather than level",
+    "crest": "one lane and a shorter one above it, nothing meeting",
 }
+
+# The ten the owner is choosing between, in the order they are shown.
+FLUID = ["flow", "swell", "stem", "fillet", "near",
+         "duet", "wake", "brush", "calm", "crest"]
 
 
 # --------------------------------------------------------------- the backends
@@ -537,7 +847,12 @@ def png(name, points, scale, path, colour="#000"):
     render at any other size cannot answer it.
     """
     w, polys = dict(CANDIDATES)[name]()
-    polys, size = fit(polys, w, points - 2 * BLEED)
+    # The image stays the height AppKit was asked for and the art inside it
+    # shrinks, because that is what a shorter mark in the bar actually is: the
+    # status item centres whatever it is given, so height given back to the
+    # bleed is height the mark does not occupy.
+    art = (points - 2 * BLEED) * FILL.get(name, 1.0)
+    polys, size = fit(polys, w, art, (points - art) / 2.0)
     src = os.path.join(BUILD, "tmp.svg")
     with open(src, "w") as f:
         f.write(svg(polys, size, colour))
@@ -596,8 +911,8 @@ def sheet():
     sheet = Image.new("RGBA", (width, height), (255, 255, 255, 255))
     draw = ImageDraw.Draw(sheet)
 
-    draw.text((pad, 16), "Bloom in the menu bar: six reductions of the app icon, "
-                         "each drawn at the size it is used at",
+    draw.text((pad, 16), "Bloom in the menu bar: every candidate, each drawn at "
+                         "the size it is used at",
               fill=(20, 20, 24), font=font(21))
     draw.text((pad, 44), "One template image per row. The top strip in each cell "
                          "is a dark menu bar, the bottom strip a light one, and "
