@@ -193,17 +193,25 @@ def _frames(pts):
     return out
 
 
-def _cap(p, tangent, normal, r, at_end):
-    """Half a circle at one end of a ribbon, swept through the tangent so it
-    bulges past the end rather than doubling back over the ribbon."""
-    a0 = (math.atan2(normal[1], normal[0]) if at_end
-          else math.atan2(-normal[1], -normal[0]))
-    at = (math.atan2(tangent[1], tangent[0]) if at_end
-          else math.atan2(-tangent[1], -tangent[0]))
-    turn = math.atan2(math.sin(at - a0), math.cos(at - a0))
-    step = math.copysign(math.pi / 12, turn)
-    return [(p[0] + r * math.cos(a0 + step * k), p[1] + r * math.sin(a0 + step * k))
-            for k in range(1, 12)]
+def _cap(p, tangent, normal, r, at_end, cap=1.0):
+    """The terminal at one end of a ribbon, swept from one edge to the other so
+    it bulges past the end rather than doubling back over the ribbon.
+
+    Half an ellipse, r across the ribbon and r * cap along it, which is a half
+    circle at cap = 1 and the flat chord at cap = 0. The two are one formula
+    because the terminal is the single loudest thing about a mark this small and
+    the owner has to be able to move it without the shape changing under him:
+    a cut end and a round end are the same drawing at two settings.
+    """
+    n = normal if at_end else (-normal[0], -normal[1])
+    t = tangent if at_end else (-tangent[0], -tangent[1])
+    out = []
+    for k in range(1, 12):
+        a = math.pi * k / 12.0
+        c, sn = math.cos(a), math.sin(a) * cap
+        out.append((p[0] + r * (n[0] * c + t[0] * sn),
+                    p[1] + r * (n[1] * c + t[1] * sn)))
+    return out
 
 
 def _radii(pts, width):
@@ -225,7 +233,7 @@ def edge(pts, width, side=1):
             for p, (_, n), r in zip(pts, _frames(pts), rs)]
 
 
-def ribbon(pts, width, caps=(True, True)):
+def ribbon(pts, width, caps=(True, True), cap=1.0):
     """A centre line given a width: the shape a stroke would paint, as a polygon.
 
     Drawn rather than stroked because two candidates cut a slot in themselves,
@@ -244,10 +252,10 @@ def ribbon(pts, width, caps=(True, True)):
     right = [(p[0] - n[0] * r, p[1] - n[1] * r) for p, (_, n), r in zip(pts, fr, rs)]
     out = list(left)
     if caps[1]:
-        out += _cap(pts[-1], fr[-1][0], fr[-1][1], rs[-1], True)
+        out += _cap(pts[-1], fr[-1][0], fr[-1][1], rs[-1], True, cap)
     out += list(reversed(right))
     if caps[0]:
-        out += _cap(pts[0], fr[0][0], fr[0][1], rs[0], False)
+        out += _cap(pts[0], fr[0][0], fr[0][1], rs[0], False, cap)
     return out
 
 
@@ -828,6 +836,106 @@ def tall():
     return _fan(120.0, lane, ((lane / 2, 0.72), (100 - lane / 2, 0.50)))
 
 
+# ------------------------------------------------- one drawing, thirteen knobs
+#
+# The owner has now rejected three rounds of fixed candidates, and the reason is
+# in the record: every round he asked for one thing to move and got a fresh set
+# of drawings to choose between, which is a slower way of saying no. `design`
+# below is every candidate in this file that is a trunk with lanes arriving on
+# it, written once with its choices as arguments, so the question stops being
+# "which of these five" and becomes "where do these thirteen numbers go".
+#
+# It is the thing `Tools/icon/designer.html` draws, and that page's whole claim
+# is that its geometry IS this function: the same curve, the same ribbon, the
+# same terminals, ported and then checked pixel against pixel. If this signature
+# changes, that port changes with it or the page starts lying.
+#
+# WHAT IS NOT A KNOB, and why.
+#
+#   The band. XS and the window's far end at t = 1 are lib9's, shared with the
+#   app icon, and they are what lets this mark claim to be the icon's own
+#   gesture rather than something that resembles it. A knob on the band is a
+#   knob on the icon.
+#
+#   The window's far end. At t = 1 the cubic's tangent is flat, which is what
+#   makes the lanes arrive parallel. Move it and they arrive at an angle, which
+#   is `trio`'s failure: three tilted bars.
+#
+#   The bleed. The image AppKit lays out is 18 points and the art sits centred
+#   in it. That is a render size, not a drawing decision, and the page shows the
+#   two sizes it is used at rather than offering a slider for them.
+DEFAULTS = dict(
+    lane=13.0,          # a lane's weight in box units, so 13 is 13 percent of art
+    fill=0.87,          # art height as a fraction of the standard 15.0 points
+    width=120.0,        # the box's width in the same units the height is 100 of
+    spread=1.0,         # how far up and down the box the arrivals start
+    land=0.72,          # where the upper lane lands, as a fraction of the width
+    stagger=0.22,       # how much earlier the lower one lands. Zero is an arrow
+    t0=0.0,             # where on the band the mark is cut from. 0 is the full S
+    trunk=1.0,          # the trunk's weight as a multiple of a lane's
+    trunk_start=0.0,    # where the trunk begins, as a fraction of the width
+    cap=1.0,            # terminals: 1 is a half circle, 0 is a flat cut
+    lanes=3,            # three arriving, or two
+    cove_run=0.0,       # how far back a junction is coved, in lane widths
+    taper=0.0,          # -1 thins into the trunk, +1 thins at the open end
+)
+
+
+def design(**kw):
+    """Every trunk and lanes candidate in this file, as one drawing."""
+    p = dict(DEFAULTS)
+    p.update(kw)
+    w, lane, win = float(p["width"]), float(p["lane"]), (float(p["t0"]), 1.0)
+    t = lane * p["trunk"]
+    cap = p["cap"]
+    out = [solid(ribbon(centreline(50.0, 50.0, p["trunk_start"] * w + t / 2,
+                                   w - t / 2, window=win), t, cap=cap))]
+
+    taper = p["taper"]
+    if taper > 0:
+        arm_w = lambda s: lane * (1 - taper * 0.38 * (1 - _ease(s)))
+    elif taper < 0:
+        arm_w = lambda s: lane * (1 + taper * 0.82 * _ease(s))
+    else:
+        arm_w = lane
+
+    reach = p["spread"] * (50.0 - lane / 2)
+    arms = [(50.0 - reach, p["land"])]
+    if int(p["lanes"]) > 2:
+        arms.append((50.0 + reach, p["land"] - p["stagger"]))
+    for y0, xm in arms:
+        pts = centreline(y0, 50.0, lane / 2, xm * w, window=win)
+        out.append(solid(ribbon(pts, arm_w, cap=cap)))
+        if p["cove_run"] > 0:
+            above = y0 < 50.0
+            g = cove(edge(pts, arm_w, 1 if above else -1),
+                     50.0 - t / 2 if above else 50.0 + t / 2, lane * p["cove_run"])
+            if g:
+                out.append(solid(g))
+    return w, out
+
+
+# Every named candidate above that `design` can say, as the numbers that say it.
+# Checked against the functions themselves by Tools/icon/check_designer.py, so a
+# preset cannot quietly stop being the mark it is named after.
+PRESETS = {
+    "gather": dict(lane=13.0, fill=1.00, width=118.0, land=0.70, stagger=0.22,
+                   t0=0.20),
+    "flow":   dict(lane=13.0, fill=1.00, width=120.0, land=0.72, stagger=0.22),
+    "calm":   dict(lane=13.0, fill=0.87, width=120.0, land=0.72, stagger=0.22),
+    "stem":   dict(lane=13.0, fill=1.00, width=120.0, land=0.78, stagger=0.22,
+                   taper=-1.0),
+    "fillet": dict(lane=13.0, fill=1.00, width=118.0, land=0.70, stagger=0.22,
+                   t0=0.20, cove_run=1.7),
+    "stout":  dict(lane=15.5, fill=1.00, width=122.0, land=0.72, stagger=0.22),
+    "wide":   dict(lane=17.0, fill=0.87, width=140.0, land=0.82, stagger=0.24),
+    "two":    dict(lane=20.0, fill=0.92, width=116.0, land=0.70, lanes=2),
+    "spine":  dict(lane=12.5, fill=0.90, width=120.0, land=0.74, stagger=0.22,
+                   trunk=19.0 / 12.5),
+    "tall":   dict(lane=14.0, fill=1.06, width=120.0, land=0.72, stagger=0.22),
+}
+
+
 # How much of the box each mark fills, as a fraction of the standard art
 # height. One number, applied at render time, so a candidate can be tried
 # smaller without its geometry being redrawn.
@@ -876,6 +984,24 @@ FLUID = ["flow", "swell", "stem", "fillet", "near",
 # He picked calm and asked for it heavier. These are the five, and they differ in
 # what each gives back for the weight rather than in how thick they are.
 HEAVIER = ["stout", "wide", "two", "spine", "tall"]
+
+
+# A candidate by name, whether somebody wrote it as a function above or the
+# designer page handed over a row of numbers. `CHOICE` can therefore be set to a
+# preset that has no function at all, which is what makes shipping something the
+# owner built himself a paste and a constant rather than a translation.
+def draw(name):
+    if name in dict(CANDIDATES):
+        return dict(CANDIDATES)[name]()
+    return design(**PRESETS[name])
+
+
+def fill_of(name):
+    if name in FILL:
+        return FILL[name]
+    if name in PRESETS:
+        return PRESETS[name].get("fill", 1.0)
+    return 1.0
 
 
 # --------------------------------------------------------------- the backends
@@ -943,8 +1069,8 @@ def pdf(polys, size):
 # -------------------------------------------------------------------- outputs
 def asset(name=CHOICE):
     """The shipped template image."""
-    w, polys = dict(CANDIDATES)[name]()
-    polys, size = fit(polys, w, ART_HEIGHT)
+    w, polys = draw(name)
+    polys, size = fit(polys, w, ART_HEIGHT * fill_of(name))
     out = os.path.join(RESOURCES, "BloomMenuBar.pdf")
     with open(out, "wb") as f:
         f.write(pdf(polys, size))
@@ -960,12 +1086,12 @@ def png(name, points, scale, path, colour="#000"):
     sheet answers is what the rasteriser does with a 2 point lane at 1x, and a
     render at any other size cannot answer it.
     """
-    w, polys = dict(CANDIDATES)[name]()
+    w, polys = draw(name)
     # The image stays the height AppKit was asked for and the art inside it
     # shrinks, because that is what a shorter mark in the bar actually is: the
     # status item centres whatever it is given, so height given back to the
     # bleed is height the mark does not occupy.
-    art = (points - 2 * BLEED) * FILL.get(name, 1.0)
+    art = (points - 2 * BLEED) * fill_of(name)
     polys, size = fit(polys, w, art, (points - art) / 2.0)
     src = os.path.join(BUILD, "tmp.svg")
     with open(src, "w") as f:
