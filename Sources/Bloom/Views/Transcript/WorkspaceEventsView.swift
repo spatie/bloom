@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import BloomCore
 
 /// What Bloom did to this workspace, at the top of its transcript.
@@ -62,10 +63,26 @@ struct WorkspaceEventRow: View {
     @State private var isHovered = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The panel below is opened from here, so the link that says it will do that can. See
+    /// `showFullLog`. Nothing in `body` reads it, so no row observes it and a setup that is
+    /// flushing output several times a second does not invalidate on anything else the window
+    /// does, exactly as in `ToolRowHeader`.
+    @Environment(AppModel.self) private var app
+    /// What the conversation is set at, which is what a line of the tail is set at, and therefore
+    /// what the window's fixed height is measured in. See `lineHeight`.
+    @Environment(\.fontScale) private var fontScale
 
     /// Enough to see that something is happening, and not so much that a build log pushes the
     /// conversation off the screen.
-    private static let runningTail = 3
+    ///
+    /// Five rather than the three it was. Three lines of a script that prints a line a second is
+    /// three seconds of a window: a line is gone before it has been read. Five is also exactly
+    /// the height this block already drew itself at whenever one of those three lines was long
+    /// enough to wrap, which in a measured run of an ordinary setup script it was in two frames
+    /// out of five: seventy nine points either way. So nothing that fitted in the pane before
+    /// stops fitting, and what changes is that it is that height ALWAYS instead of sometimes. At
+    /// the smallest window Bloom opens, the whole row is about a quarter of the transcript.
+    private static let runningTail = 5
     /// A failure is read rather than glanced at.
     private static let failedTail = 12
     /// What the disclosure opens onto. The rest stays in the panel below.
@@ -137,25 +154,38 @@ struct WorkspaceEventRow: View {
     /// The tail's own lines, drawn one `Text` each while the script is running so that the window
     /// moves instead of jumping.
     ///
-    /// A running tail is three lines wide and never changes height, so nothing here is a scroll:
-    /// the block stayed exactly where it was and its contents were replaced between one frame and
-    /// the next, which is what "it just immediately shows next lines" was. Given each line an
-    /// identity of its own, a line that is still in the window when the next one arrives is the
-    /// same view moved to a new place, and SwiftUI slides it there.
+    /// A running tail is a fixed number of lines and never changes height, so nothing here is a
+    /// scroll: the block stayed exactly where it was and its contents were replaced between one
+    /// frame and the next, which is what "it just immediately shows next lines" was. Given each
+    /// line an identity of its own, a line that is still in the window when the next one arrives
+    /// is the same view moved to a new place, and SwiftUI slides it there.
     ///
     /// Only while it is running, and only while it is closed. A finished, failed or expanded tail
     /// is a fixed piece of text that is read rather than watched, and it stays one `Text`: that
     /// keeps a selection able to run across its lines, and keeps an expanded two hundred line log
-    /// from becoming two hundred views.
+    /// from becoming two hundred views. Those are also the three cases that may wrap: they are
+    /// read, so nothing in them may be cut off, and none of them is moving while it is read.
     @ViewBuilder
     private var tailText: some View {
         if event.isRunning, !isExpanded {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(lines) { line in
                     Text(line.text)
+                        // One line on screen for one line of the log, whatever is in it. A line
+                        // long enough to wrap counts as one line to `LogTail` and as two or three
+                        // here, and that is what made this block change height as output went
+                        // past it: measured at the pane's ordinary width, the window of three was
+                        // forty eight points tall, then seventy nine, then forty eight again, and
+                        // the sentence under it moved thirty one points every time. The rest of a
+                        // cut line is a click away, in the panel the link below opens.
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        // And a line is the same height whatever glyphs are in it, so a blank
+                        // line or a line of dots takes the same room as a sentence.
+                        .frame(height: lineHeight)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         // In at the bottom, out at the top, one line of travel each, which is the
-                        // same line of travel the two survivors between them are making. Every
+                        // same line of travel the survivors between them are making. Every
                         // line in the block moves together and stays a line apart, so none of
                         // them is ever drawn across another. Fading an arrival into place instead
                         // put the new line under the one still sliding through it.
@@ -165,7 +195,15 @@ struct WorkspaceEventRow: View {
                         ))
                 }
             }
-            // So the departing line leaves the block rather than being drawn over the row above.
+            // The window, stated rather than left to the lines inside it. Two things move it
+            // otherwise: a run that has printed fewer lines than the window holds, which used to
+            // grow a line at a time through the first seconds of every setup, and the moment of
+            // travel itself, where the departing line is still laid out and the stack is briefly
+            // a line taller than it will end up. Top aligned, so a script's first lines start at
+            // the top of the block and fill down, the way output does everywhere else.
+            .frame(height: lineHeight * CGFloat(Self.runningTail), alignment: .top)
+            // So the departing line leaves the block rather than being drawn over the row above,
+            // or over the link below, which is where it used to land.
             .clipped()
             .animation(reduceMotion ? nil : Self.settle, value: lines)
         } else {
@@ -175,6 +213,20 @@ struct WorkspaceEventRow: View {
 
     private var lines: [SetupTailLine] {
         SetupTailLine.lines(of: tail, endingAt: event.log)
+    }
+
+    /// How tall one line of the tail is.
+    ///
+    /// Asked of AppKit rather than written down, because it has to be the height SwiftUI actually
+    /// lays a line of this face out on: a number a point out is a window that clips its last line
+    /// or leaves a gap under it, and the conversation can be set at any size. `Typo.code` is the
+    /// callout rung in monospace, and `ScaledFont` rounds the scaled size to a whole point before
+    /// asking for a face, so both steps are repeated here. The same question `ComposerTextEditor`
+    /// asks to size its own rows.
+    private var lineHeight: CGFloat {
+        let size = (NSFont.preferredFont(forTextStyle: .callout).pointSize * fontScale).rounded()
+        let font = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        return NSLayoutManager().defaultLineHeight(for: font)
     }
 
     /// One line of travel, and it is over before the next line is due.
@@ -206,7 +258,7 @@ struct WorkspaceEventRow: View {
                 }
 
             if event.kind == .setup, let model {
-                Button("Show the full log") { model.bottomTab = .setup }
+                Button("Show the full log") { showFullLog(model) }
                     .buttonStyle(.link)
                     .font(Typo.caption)
                     .padding(.leading, TranscriptLayout.block)
@@ -218,6 +270,25 @@ struct WorkspaceEventRow: View {
         .padding(.leading, TranscriptLayout.detailIndent)
         .padding(.trailing, TranscriptLayout.inset)
         .padding(.bottom, TranscriptLayout.block)
+    }
+
+    /// Opens the panel below onto this workspace's setup log.
+    ///
+    /// All three of these, and it used to be only the first. Selecting the tab on its own does
+    /// nothing at all in the case the link is actually read in, which is a setup that is still
+    /// running: `WorkspaceModel.runSetupThenSend` selects the Setup tab when it starts the
+    /// script, so the click assigned the tab that was already selected and the window did not
+    /// change by a pixel. That is what "clicking show the full log doesn't do anything" was. The
+    /// chevron beside it worked because it toggles state this row draws itself from.
+    ///
+    /// The panel and the inspector are then asked for by name rather than left to `RootView`,
+    /// which brings the inspector along when the panel's own switch CHANGES. An inspector closed
+    /// over a panel that was already open is a real arrangement, and there the follow-on never
+    /// fires and the link would still have opened nothing.
+    private func showFullLog(_ model: WorkspaceModel) {
+        model.bottomTab = .setup
+        app.isInspectorVisible = true
+        app.isBottomPanelVisible = true
     }
 }
 
