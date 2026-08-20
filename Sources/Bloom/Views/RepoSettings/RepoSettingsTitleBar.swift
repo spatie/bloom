@@ -17,10 +17,20 @@ import BloomCore
 /// and Command-clicking the title drops down the path from the project up to the volume, each
 /// level of which opens in Finder.
 ///
-/// AppKit rather than SwiftUI because SwiftUI models neither of the two things this needs.
-/// `windowToolbarStyle` has no case for the preferences style, and nothing in SwiftUI un-hides a
-/// title the framework decided to hide. `WindowProxyIcon` reaches for the main window's title bar
-/// the same way and for the same reason.
+/// It also refuses the system's window tabbing, which is the one thing on this window that nobody
+/// asked for. macOS groups windows of the same class into one tabbed window by default, so opening
+/// settings for a second project merged it into the first as a tab, and a `+` beside it offered a
+/// third. This window is one project's, and it already has a tab bar of its own directly above:
+/// two rows of tabs, one meaning "which part of this project" and the other "which project", read
+/// as one row meaning neither. There is nothing to gain here from the system's row either, since
+/// the app's own tab bar is what a settings window is for. `.disallowed` is per window rather than
+/// `NSWindow.allowsAutomaticWindowTabbing = false`, which would be the app speaking for windows
+/// this file knows nothing about.
+///
+/// AppKit rather than SwiftUI because SwiftUI models none of the three things this needs.
+/// `windowToolbarStyle` has no case for the preferences style, nothing in SwiftUI un-hides a title
+/// the framework decided to hide, and there is no scene modifier for tabbing at all.
+/// `WindowProxyIcon` reaches for the main window's title bar the same way and for the same reason.
 struct RepoSettingsTitleBar: ViewModifier {
     let repo: Repo
 
@@ -42,6 +52,15 @@ struct RepoSettingsTitleBar: ViewModifier {
         window.titleVisibility = .visible
         window.toolbarStyle = .preference
         window.representedURL = URL(filePath: repo.path)
+        window.tabbingMode = .disallowed
+        // Refusing tabbing decides what may happen to this window next, not what has already
+        // happened to it: a window that is in a group when the mode is set stays in it, measured.
+        // Nothing merges a window before this runs in practice, because the mode is set as the
+        // window is attached and the second window is what merges. A pair restored from saved
+        // state is the case that could, and it would look exactly like the fix having failed.
+        if let group = window.tabGroup, group.windows.count > 1 {
+            group.removeWindow(window)
+        }
     }
 }
 
