@@ -73,6 +73,73 @@ enum Snapshot {
         }
     }
 
+    /// Opens a workspace and tells the window that agents are working in some of them, then gets
+    /// out of the way and lets the app go on running.
+    ///
+    ///     Bloom --select w1 --running w1,w2,w3
+    ///     Bloom --select w1 --running w1,w2,w3/w1/
+    ///
+    /// Everything else in this file takes one picture and exits, which is enough for a layout and
+    /// is nothing at all for the two busy signals: a single still cannot show motion, so those
+    /// have to be watched on a window that stays up while frames are taken from outside it. This
+    /// is what puts such a window into the state worth watching.
+    ///
+    /// `--running` is a debug build only affordance, and deliberately: it makes the window claim
+    /// something about the user's agents that is not true, and a shipped copy has no business
+    /// being able to say that. `--select` is honoured here as well as by the window capture, so
+    /// the two flags can be given together to a run that is not capturing anything itself.
+    ///
+    /// It also lifts the busy signals' frontmost gate, which `forcesBusyPulse` is. Anything that
+    /// films this window is another process, so this window is not the front one while it is being
+    /// filmed, and the signals would stop on the frame the recorder started. The alternative is a
+    /// capture run that repeatedly takes focus off whatever the user is doing, which is worse than
+    /// a debug flag.
+    static var forcesBusyPulse: Bool {
+        #if DEBUG
+        return CommandLine.arguments.contains("--running")
+        #else
+        return false
+        #endif
+    }
+
+    static func scheduleRunningStateIfRequested() {
+        #if DEBUG
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: "--running"), index + 1 < arguments.count
+        else { return }
+
+        // Stages, separated by `/`, six seconds apart. One stage is the ordinary case; several
+        // are how a transition is filmed, and the last agent finishing is the transition that
+        // matters most: `--running w1,w2,w3/w1/` runs three, then one, then none.
+        let stages = arguments[index + 1]
+            .split(separator: "/", omittingEmptySubsequences: false)
+            .map { Set($0.split(separator: ",").map(String.init)) }
+        let selected = arguments.firstIndex(of: "--select").map { $0 + 1 }
+            .flatMap { $0 < arguments.count ? arguments[$0] : nil }
+
+        Task { @MainActor in
+            // After `bootstrap`, the same beat `--open-url` waits for and for the same reason.
+            try? await Task.sleep(for: .seconds(3))
+            applyRequestedAppearance()
+            if !isWindowCaptureRequested, let selected {
+                NotificationCenter.default.post(name: .bloomOpenWorkspace, object: selected)
+                try? await Task.sleep(for: .seconds(2))
+            }
+            // `--collapse-sidebar` folds the first column away, which is the case the row signal
+            // cannot cover and the rule has to. It goes through the same notification the menu
+            // item posts, so nothing about the window is being reached into.
+            if arguments.contains("--collapse-sidebar") {
+                NotificationCenter.default.post(name: .bloomToggleSidebar, object: nil)
+                try? await Task.sleep(for: .seconds(1))
+            }
+            for (index, ids) in stages.enumerated() {
+                if index > 0 { try? await Task.sleep(for: .seconds(6)) }
+                NotificationCenter.default.post(name: .bloomCaptureRunning, object: ids)
+            }
+        }
+        #endif
+    }
+
     /// `WIDTHxHEIGHT` in points, or nil when the flag is absent or malformed.
     private static var requestedWindowSize: CGSize? {
         let arguments = CommandLine.arguments
@@ -115,11 +182,21 @@ enum Snapshot {
         }
     }
 
+    /// Forces the appearance `--appearance` named, if it named one.
+    ///
+    /// Shared by the window capture and by `scheduleRunningStateIfRequested`, because a run that
+    /// is watched from outside has exactly the same problem as one that photographs itself: on a
+    /// machine set to light, half of every colour decision goes unverified.
+    static func applyRequestedAppearance() {
+        guard let appearance = requestedAppearance else { return }
+        NSApp.appearance = appearance
+    }
+
     /// Waits for the window to exist and settle, captures it, then exits.
     static func scheduleWindowCapture() {
         Task { @MainActor in
             let path = windowCapturePath
-            if let appearance = requestedAppearance { NSApp.appearance = appearance }
+            applyRequestedAppearance()
             // Long enough for the first layout pass and any `.task` that populates the sidebar.
             try? await Task.sleep(for: .seconds(3))
 
@@ -496,5 +573,34 @@ private struct ComponentGallery: View {
                 .foregroundStyle(Palette.textTertiary)
             content()
         }
+    }
+}
+
+extension Notification.Name {
+    /// Carries a `Set<String>` of workspace ids that a capture run wants the window to believe are
+    /// mid turn. Posted only by `Snapshot.scheduleRunningStateIfRequested`, and only in a debug
+    /// build. See `View.acceptsCaptureRunningState`.
+    static let bloomCaptureRunning = Notification.Name("bloom.captureRunning")
+}
+
+extension View {
+    /// Lets a debug build be told which agents to pretend are running.
+    ///
+    /// This is the only way the two busy signals can be looked at without starting real agents,
+    /// and they are motion, so looking at them is the only way to judge them. It writes through
+    /// `AppModel`'s own set rather than adding a flag beside it, so what a capture run sees is
+    /// what a real turn produces, down to the same invalidations reaching the same readers.
+    ///
+    /// Compiled out of a release build entirely. `AppModel.setRunningWorkspaceIDsForCapture` does
+    /// not exist there.
+    func acceptsCaptureRunningState(_ app: AppModel) -> some View {
+        #if DEBUG
+        return onReceive(NotificationCenter.default.publisher(for: .bloomCaptureRunning)) { note in
+            guard let ids = note.object as? Set<String> else { return }
+            app.setRunningWorkspaceIDsForCapture(ids)
+        }
+        #else
+        return self
+        #endif
     }
 }

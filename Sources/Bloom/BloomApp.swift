@@ -19,6 +19,7 @@ struct BloomApp: App {
         if Snapshot.isRequested { Snapshot.runAndExit() }
         if Snapshot.isWindowCaptureRequested { Snapshot.scheduleWindowCapture() }
         Snapshot.scheduleURLIfRequested()
+        Snapshot.scheduleRunningStateIfRequested()
 
         // A development affordance too: `Bloom --frame-probe <out.json>` drags the sidebar divider
         // and records how long each frame actually took. See `FrameProbe`.
@@ -54,6 +55,10 @@ struct BloomApp: App {
                 // the worktree behind the title bar, and the optional menu bar item. All three
                 // follow the same state, and none of it is any feature view's business.
                 .reportsAgentActivity(model)
+                // The window's one heartbeat, for as long as an agent is working and the window
+                // is the front one. Here rather than in either of the views that move, because
+                // there are two of them and they have to be on the same clock. See `BusyPulse`.
+                .runsBusyPulse(model)
                 .showsWorktreeInTitleBar(model)
                 .showsAgentsInMenuBar(model)
                 // The title bar is painted in Bloom's chrome rather than in the system's window

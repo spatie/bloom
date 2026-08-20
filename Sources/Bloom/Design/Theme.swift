@@ -520,6 +520,21 @@ enum Motion {
     /// short length carry, because it puts most of the opacity in the first third and spends the
     /// rest arriving.
     static let arrival: Animation = .easeOut(duration: 0.18)
+
+    /// One pass of the light along the window's shared rule. See `RuleSweep`.
+    ///
+    /// Deliberately nothing like `pane`, and this is the one place in the file where that is the
+    /// right answer. Everything else here is a response: something was pressed and the window
+    /// answers in a fifth of a second. This is a background signal that runs for as long as an
+    /// agent works, which can be hours, and at a pane's speed a light crossing the whole window
+    /// would be a flick rather than a pass. Three seconds is slow enough to read as texture from
+    /// the far edge of vision and never fast enough to pull the eye off the transcript.
+    ///
+    /// `easeInOut` rather than `linear` because both ends of the travel are off the rule, so the
+    /// slow part of the curve is spent where the light cannot be seen and what is on screen is
+    /// close to constant speed.
+    static let sweep: Animation = .easeInOut(duration: 3)
+
 }
 
 // MARK: - Materials
@@ -573,11 +588,17 @@ extension View {
     /// top it crosses the selected tab as well, which boxes that tab in and leaves the strip
     /// reading as a row of buttons; drawn behind, the selected tab's own opaque fill breaks it, and
     /// that break is what joins the tab to the content below.
-    func tabStripMaterial() -> some View {
+    ///
+    /// `sweeping` puts the busy signal on that rule, and it goes in this background rather than in
+    /// an overlay for exactly the reason the rule does. The light has to be broken by the selected
+    /// tab on the same pixels the rule is broken on, or it reads as a stutter instead of as
+    /// something passing behind the tab. See `RuleSweep`.
+    func tabStripMaterial(sweeping: Bool = false) -> some View {
         background {
             ZStack(alignment: .bottom) {
                 Palette.sidebar
                 Hairline()
+                if sweeping { RuleSweep(segment: .tabStrip) }
             }
         }
     }

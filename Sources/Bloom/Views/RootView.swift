@@ -201,6 +201,9 @@ struct RootView: View {
             guard let repo else { return }
             openWindow(id: RepoSettingsWindow.id, value: repo.id)
         }
+        // Debug builds only, and it draws nothing on its own: it is how a capture run gets the
+        // window into the state the two busy signals are for. See `Snapshot`.
+        .acceptsCaptureRunningState(app)
         .onReceive(NotificationCenter.default.publisher(for: .bloomNewWorkspace)) { note in
             createTargetRepo = note.object as? Repo ?? app.selectedWorkspace.flatMap(app.repo(for:))
             isCreateSheetPresented = true

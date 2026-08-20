@@ -30,7 +30,10 @@ struct WorkspaceStatusGlyph: View {
                 .progressViewStyle(.circular)
                 .controlSize(.mini)
         case .running:
-            ActivityDot(isActive: true, tint: isOnSelection ? Palette.textInverted : Palette.running)
+            // The figure that builds itself, not the pulsing dot that used to be here. See
+            // `WorkspaceRunningGlyph` for why the row has one moving part rather than two, and
+            // `BusyPulse` for why every lit row in the column moves together.
+            WorkspaceRunningGlyph(isOnSelection: isOnSelection)
         default:
             Image(systemName: Self.symbol(for: status))
                 // The unread mark is a dot rather than a symbol, so it is drawn a size down.

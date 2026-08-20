@@ -43,8 +43,12 @@ struct InspectorView: View {
             // rule ran from y=83 and this one from y=85, two points of step across the join, which
             // is exactly the point this row used to spend on the top edge plus the point the rule
             // used to add underneath.
+            // The busy signal travels this half of the same rule. An overlay rather than a
+            // background, because unlike the strip beside it nothing in this row is opaque and
+            // there is nothing here for the light to pass behind. See `RuleSweep`.
             InspectorToolbar(model: model)
                 .overlay(alignment: .bottom) { Hairline() }
+                .overlay { RuleSweep(segment: .inspector) }
 
             content
         }

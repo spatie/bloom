@@ -549,6 +549,19 @@ final class AppModel {
         }
     }
 
+    #if DEBUG
+    /// Puts the running set where a capture run needs it. See `View.acceptsCaptureRunningState`.
+    ///
+    /// Debug builds only. The busy signals are motion, and motion cannot be judged from a still or
+    /// from the source, so there has to be a way to put the window into that state without paying
+    /// for five real agents. It writes the same set every other reader is watching rather than
+    /// adding a second flag beside it, which is the whole point: what is photographed is what a
+    /// real turn produces.
+    func setRunningWorkspaceIDsForCapture(_ ids: Set<String>) {
+        runningWorkspaceIDs = ids
+    }
+    #endif
+
     /// Workspaces with an agent currently running, for the sidebar's status bar and Home's
     /// summary line.
     ///
