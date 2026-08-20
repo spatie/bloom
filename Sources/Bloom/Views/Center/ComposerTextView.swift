@@ -3,7 +3,7 @@ import BloomCore
 
 /// An `NSTextView` that offers each key press to the composer before typing it, says when it was
 /// resized or focused so the SwiftUI side can keep up, and hands over anything that arrives as a
-/// file rather than as text.
+/// file or a picture rather than as text.
 final class ComposerTextView: NSTextView {
     /// Offered every key press, together with what is selected when it arrives: the composer's
     /// answer to backspace depends on whether the caret is a bare insertion point at the start,
@@ -11,9 +11,9 @@ final class ComposerTextView: NSTextView {
     var keyHandler: (@MainActor (NSEvent, NSRange) -> Bool)?
     var onWidthChange: (@MainActor () -> Void)?
     var onFocusChange: (@MainActor (Bool) -> Void)?
-    /// Offered every file dropped or pasted into the editor. Returns true when the composer took
-    /// it, which is what stops AppKit from doing what it does by default: typing the file's path
-    /// into the draft as a sentence about the file, instead of attaching the file.
+    /// Offered everything dropped or pasted into the editor that is not text. Returns true when
+    /// the composer took it, which is what stops AppKit from doing what it does by default: typing
+    /// the file's path into the draft as a sentence about the file, instead of attaching the file.
     var onAttach: (@MainActor ([AttachmentSource]) -> Bool)?
 
     override func keyDown(with event: NSEvent) {
