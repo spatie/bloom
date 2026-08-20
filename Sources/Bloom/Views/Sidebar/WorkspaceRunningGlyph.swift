@@ -59,11 +59,15 @@ struct WorkspaceRunningGlyph: View {
 
     private var pulse: BusyPulse { .shared }
 
-    /// The figure: three dots, 2.5 points across and two points apart, which comes to eleven and a
-    /// half points in the thirteen point glyph box and leaves the same air around it as the branch
-    /// mark it stands in for.
-    private static let dot: CGFloat = 2.5
-    private static let gap: CGFloat = 2
+    /// The figure: three dots, three points across and one point apart.
+    ///
+    /// Whole points, and that is the only reason these are not 2.5 and 2. Eleven points centred in
+    /// the thirteen point glyph box puts every dot on a whole point, so the figure is drawn on
+    /// pixel boundaries at one times as well as at two. The half point version measured 11.5 in a
+    /// 13 box, which lands the first dot on 0.75 and softens all three on a display that has no
+    /// half pixels to soften them into.
+    private static let dot: CGFloat = 3
+    private static let gap: CGFloat = 1
     private static let count = 3
 
     /// How far each dot's ramp trails the one above it. Long enough that the eye reads a direction
