@@ -258,6 +258,10 @@ public enum MessageKind: String, Sendable, Codable {
     case thinking
     case toolUse
     case toolResult
+    /// A permission question, drawn where the call would have been. The live state of it, whether
+    /// it is still waiting and what was said, lives in `permission_asks`; this row is the record
+    /// that it was asked at all, and its position in the turn.
+    case permissionAsk
     case result
     case error
     case system

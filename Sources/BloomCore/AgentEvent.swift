@@ -495,6 +495,9 @@ public enum AgentEvent: Sendable {
     case status(String)
     case thinkingTokens(Int)
     case hook(AgentHook)
+    /// The agent asking to run something, with its turn held open until Bloom answers. Only ever
+    /// emitted when the CLI was launched with `--permission-prompt-tool stdio`.
+    case permissionAsk(PermissionAsk)
     case result(AgentResult)
     case rateLimit(Data)
     case error(AgentError)
@@ -509,6 +512,7 @@ public enum AgentEvent: Sendable {
         case .toolUse(let value): value.raw
         case .toolResult(let value): value.raw
         case .hook(let value): value.raw
+        case .permissionAsk(let value): value.raw
         case .result(let value): value.raw
         case .error(let value): value.raw
         case .rateLimit(let raw), .unknown(let raw): raw
@@ -558,6 +562,7 @@ public enum AgentEvent: Sendable {
         case .thinking: .thinking
         case .toolUse: .toolUse
         case .toolResult: .toolResult
+        case .permissionAsk: .permissionAsk
         case .result: .result
         case .error: .error
         case .rateLimit: .notice
@@ -580,6 +585,8 @@ public enum AgentEvent: Sendable {
         switch self {
         case .toolUse(let value): value.id
         case .toolResult(let value): value.toolUseID
+        // Filed under the call it is about, so the row lands where the call would have been.
+        case .permissionAsk(let value): value.toolUseID
         default: nil
         }
     }
@@ -605,6 +612,14 @@ public enum AgentEvent: Sendable {
         case "stream_event": return decodeStreamEvent(json, raw: raw)
         case "result": return decodeResult(json, raw: raw)
         case "rate_limit_event": return .rateLimit(raw)
+        // The sixth type. It used to fall to `.unknown` and be dropped on the floor, which is
+        // exactly what "Bloom never asks" looked like from the inside: the CLI was willing to ask
+        // and nobody was reading the line. Only `can_use_tool` is lifted out; the other control
+        // subtypes are the CLI answering Bloom, or asking something Bloom has no business
+        // answering, and they stay `.unknown` rather than being half understood.
+        case "control_request":
+            guard let ask = PermissionAsk.decode(json, raw: raw) else { return .unknown(raw) }
+            return .permissionAsk(ask)
         default: return .unknown(raw)
         }
     }
