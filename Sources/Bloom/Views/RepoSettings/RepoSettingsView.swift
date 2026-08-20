@@ -142,8 +142,10 @@ struct RepoSettingsView: View {
 
             markRow
 
-            LabeledContent("Colour") {
-                AccentSwatches(selection: accentBinding)
+            if drawsColour {
+                LabeledContent("Colour") {
+                    AccentSwatches(selection: accentBinding)
+                }
             }
 
             LabeledContent("Folder") {
@@ -187,11 +189,12 @@ struct RepoSettingsView: View {
     /// back. A project added before Bloom knew how to look has never been searched, and its button
     /// says `Find icon` rather than pretending a search already happened and found nothing.
     ///
-    /// Two lines: the mark, the emoji that can be it, and where the picture came from, then the
-    /// buttons under them. The emoji field is on the first line rather than beside the buttons
-    /// because a `Form` moves a row out of the value column as soon as the row's ideal width
-    /// exceeds it, and a fourth control on the second line is what tips it over at this width.
-    /// That is the whole reason the rows here did not line up before.
+    /// Three lines: the mark and the emoji that can be it, the buttons that change it, and then
+    /// the line saying where the mark came from. The emoji field is on the first line rather than
+    /// beside the buttons because a `Form` moves a row out of the value column as soon as the
+    /// row's ideal width exceeds it, and a fourth control on the second line is what tips it over
+    /// at this width. That is the whole reason the rows here did not line up before, and it is
+    /// also why the sentence has a line to itself. See `summaryLine`.
     private static let summaryWidth: CGFloat = 110
 
     private var markRow: some View {
@@ -211,19 +214,6 @@ struct RepoSettingsView: View {
                         }
                         .help("An emoji here goes in front of the name, and becomes the mark.")
 
-                    Text(markSummary)
-                        .font(Typo.caption)
-                        .foregroundStyle(iconNotice == nil ? Palette.textSecondary : Palette.warning)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                        .fixedSize(horizontal: false, vertical: true)
-                        // A sentence asks for as much width as it has letters, and a row that
-                        // asks for more than the value column holds is moved out of the column
-                        // by the form, which is what made these rows start at four different
-                        // places. An ideal width keeps the row where the others are.
-                        .frame(idealWidth: Self.summaryWidth, maxWidth: .infinity, alignment: .leading)
-                        .help(repo.iconPath ?? "")
-
                     Spacer(minLength: 0)
                 }
 
@@ -239,9 +229,68 @@ struct RepoSettingsView: View {
                     Spacer(minLength: 0)
                 }
                 .controlSize(.small)
+
+                summaryLine
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// Where the mark came from, on a line of its own at the full width of the row.
+    ///
+    /// It used to sit beside the tile and the emoji field, sharing the value column with both,
+    /// and four of its five answers are short enough that nobody noticed. The fifth is the one
+    /// that matters most: pressing Look again and finding nothing answers with the three places
+    /// Bloom searched, and that sentence arrived middle-truncated, so the one message a user
+    /// reads word for word was the one they could not read. On its own line it has three times
+    /// the width and needs no truncation at either end of the window.
+    ///
+    /// Under the buttons rather than above them, so a message that runs to two lines pushes
+    /// nothing that can be pressed. `Look again` is a button people press twice, and a button
+    /// that steps away from the pointer between the two presses is worse than a long sentence.
+    ///
+    /// Two lines are held whether or not two are used, because the row sits above Colour and
+    /// Folder and the height of a sentence is not a reason for either of them to move. The
+    /// reservation is for the longest of the five answers, and that is the only one that needs a
+    /// second line.
+    private var summaryLine: some View {
+        Text(markSummary)
+            .font(Typo.caption)
+            .foregroundStyle(iconNotice == nil ? Palette.textSecondary : Palette.warning)
+            .lineLimit(2, reservesSpace: true)
+            .truncationMode(.middle)
+            .fixedSize(horizontal: false, vertical: true)
+            // A `Form` hands its value column a trailing alignment, which nothing here noticed
+            // while the sentence was one line: it is the second line that swings to the far edge
+            // and leaves a ragged left margin under a mark that starts at the leading one.
+            .multilineTextAlignment(.leading)
+            // A sentence asks for as much width as it has letters, and a row that asks for more
+            // than the value column holds is moved out of the column by the form, which is what
+            // made these rows start at four different places. An ideal width keeps the row where
+            // the others are.
+            .frame(idealWidth: Self.summaryWidth, maxWidth: .infinity, alignment: .leading)
+            .help(repo.iconPath ?? "")
+    }
+
+    /// Whether the project's colour is on screen at all, and therefore whether the Colour row is.
+    ///
+    /// A project's colour is drawn in exactly one place in the whole app: it is the ground the
+    /// mark's letters, or its emoji, sit on. `RepoIcon` is the only view that draws `Repo.accent`
+    /// at all, and it draws it only on that branch: the rest of the app reads the colour to offer
+    /// it back in a picker or to bake the same tile into a menu item's image, and everything that
+    /// merely looks accent coloured is `Palette.accent`, which belongs to Bloom and not to any
+    /// project. So a project whose mark is a picture has a colour that changes nothing anywhere,
+    /// and ten swatches offering to change it are ten swatches that do nothing. Hidden rather than
+    /// disabled: a dimmed row still has to be read and still has to be explained, and the
+    /// explanation would be longer than the control.
+    ///
+    /// It comes back the moment the colour is drawn again, which is what makes hiding it safe.
+    /// Pressing `Use initials` is the obvious way, and the row arrives directly under the button
+    /// that was just pressed. The other way is the file going: a project on an unmounted volume
+    /// falls back to its letters, and this is asked of the artwork as it actually loaded rather
+    /// than of `hasIcon`, so the row is back exactly when the tile beside it is back to letters.
+    private var drawsColour: Bool {
+        RepoIconArt.artwork(for: repo) == nil
     }
 
     /// The tile as the sidebar will draw it: the project's own artwork when it has some, and
