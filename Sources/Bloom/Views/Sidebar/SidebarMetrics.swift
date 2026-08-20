@@ -22,6 +22,20 @@ import SwiftUI
 /// and is centred there, which is why `Metrics.headerButton` is 15 tall rather than 18. Anything
 /// taller than 19 does not overflow, it pushes the whole row taller and breaks the pitch.
 enum SidebarMetrics {
+    /// The space above a project's row that a `Section` header used to be given for nothing.
+    ///
+    /// Measured off a window capture of the sections: one header's 32 point pitch was 13 points of
+    /// section spacing above a drawing band of 19. The pane draws one flat run of rows now (see
+    /// `SidebarView`), so a project header is handed the full 32 points and centres its content in
+    /// them, and without this the gap that says a new project starts here would be gone.
+    ///
+    /// It is a padding INSIDE the row rather than extra height on top of it, and the number is
+    /// what makes that true. Measured on the flat run through the accessibility tree, which
+    /// reports every row's real height: a project header draws 24 points of content, so 8 above it
+    /// is exactly the 32 the row already had. Thirteen made the row 37 and put every project five
+    /// points out of step with the rows above it.
+    static let headerLead: CGFloat = 8
+
     /// The gutter the project's disclosure chevron sits in, at the leading edge of a header.
     ///
     /// Wide enough for the chevron and nothing else. It is what pushes the project's tile clear of

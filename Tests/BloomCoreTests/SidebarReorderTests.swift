@@ -223,6 +223,147 @@ struct SidebarReorderTests {
         #expect(pin(of: "d", in: after) == true)
     }
 
+    // MARK: - The flattened pane
+
+    /// Two projects with two rows each, as the pane draws them.
+    ///
+    ///     0  Alpha
+    ///     1    a1
+    ///     2    a2
+    ///     3  Beta
+    ///     4    b1
+    ///     5    b2
+    private var pane: [SidebarReorder.Row] {
+        [
+            .project("alpha"),
+            .workspace(id: "a1", projectID: "alpha"),
+            .workspace(id: "a2", projectID: "alpha"),
+            .project("beta"),
+            .workspace(id: "b1", projectID: "beta"),
+            .workspace(id: "b2", projectID: "beta"),
+        ]
+    }
+
+    @Test("A workspace dragged inside its project keeps the offsets it was dropped with")
+    func flatWorkspaceInsideItsProject() {
+        let destination = SidebarReorder.destination(rows: pane, from: [1], to: 3)
+        #expect(destination == .workspace(
+            projectID: "alpha", from: IndexSet(integer: 0), to: 2, landedOutside: false
+        ))
+    }
+
+    @Test("The offsets a workspace drag comes out with are its project's own, not the pane's")
+    func flatWorkspaceOffsetsAreLocal() {
+        let destination = SidebarReorder.destination(rows: pane, from: [5], to: 4)
+        #expect(destination == .workspace(
+            projectID: "beta", from: IndexSet(integer: 1), to: 0, landedOutside: false
+        ))
+    }
+
+    @Test("A workspace dropped in another project is brought back to the end it was dragged towards")
+    func flatWorkspaceLandingOutside() {
+        // Dropped between Beta's two rows, which is nowhere this workspace can go.
+        let down = SidebarReorder.destination(rows: pane, from: [1], to: 5)
+        #expect(down == .workspace(
+            projectID: "alpha", from: IndexSet(integer: 0), to: 2, landedOutside: true
+        ))
+
+        // And the same read from the other end: dragged up over the project above it.
+        let up = SidebarReorder.destination(rows: pane, from: [5], to: 1)
+        #expect(up == .workspace(
+            projectID: "beta", from: IndexSet(integer: 1), to: 0, landedOutside: true
+        ))
+    }
+
+    @Test("A project dragged over another lands on the near side of it")
+    func flatProjectMove() {
+        // Dropped on Beta's own row, which is the boundary between the two projects.
+        #expect(SidebarReorder.destination(rows: pane, from: [0], to: 3) == .project(id: "alpha", to: 1))
+        // Dropped past Beta's last row, which is the end of the list.
+        #expect(SidebarReorder.destination(rows: pane, from: [0], to: 6) == .project(id: "alpha", to: 2))
+        // Dropped at the very top.
+        #expect(SidebarReorder.destination(rows: pane, from: [3], to: 0) == .project(id: "beta", to: 0))
+    }
+
+    @Test("A project dropped inside another lands on the boundary it was let go nearest")
+    func flatProjectRoundsToTheNearestBoundary() {
+        // Just under Beta's header is nearer the top of Beta than the bottom of it.
+        #expect(SidebarReorder.destination(rows: pane, from: [0], to: 4) == .project(id: "alpha", to: 1))
+        // One row further down is nearer the end.
+        #expect(SidebarReorder.destination(rows: pane, from: [0], to: 5) == .project(id: "alpha", to: 2))
+    }
+
+    @Test("A collapsed project is one row that carries everything under it")
+    func flatCollapsedProject() {
+        let rows: [SidebarReorder.Row] = [
+            .project("alpha"),
+            .project("beta"),
+            .workspace(id: "b1", projectID: "beta"),
+        ]
+        #expect(SidebarReorder.destination(rows: rows, from: [0], to: 3) == .project(id: "alpha", to: 2))
+    }
+
+    @Test("The sentence an empty project draws is not something to move")
+    func flatNoticeIsNotDragged() {
+        let rows: [SidebarReorder.Row] = [
+            .project("alpha"),
+            .notice(projectID: "alpha"),
+            .project("beta"),
+            .workspace(id: "b1", projectID: "beta"),
+        ]
+        #expect(SidebarReorder.destination(rows: rows, from: [1], to: 3) == .nothing)
+        // And it counts as a row for everything else: Beta's header is the second boundary.
+        #expect(SidebarReorder.destination(rows: rows, from: [2], to: 0) == .project(id: "beta", to: 0))
+    }
+
+    @Test("Offsets that are not in the pane are refused")
+    func flatOffsetsOutOfRange() {
+        #expect(SidebarReorder.destination(rows: pane, from: [9], to: 0) == .nothing)
+        #expect(SidebarReorder.destination(rows: pane, from: [1], to: 99) == .nothing)
+        #expect(SidebarReorder.destination(rows: [], from: [0], to: 0) == .nothing)
+    }
+
+    // MARK: - The projects' own order
+
+    private func repo(_ id: String, order: Int) -> Repo {
+        Repo(id: id, name: id, path: "/tmp/\(id)", sortOrder: order)
+    }
+
+    @Test("Moving a project writes every project it passed and nothing else")
+    func projectMoveWritesWhatChanged() {
+        let repos = [repo("a", order: 0), repo("b", order: 1), repo("c", order: 2)]
+        #expect(SidebarReorder.move(projects: repos, id: "a", to: 3) == [
+            SidebarReorder.ProjectChange(id: "b", sortOrder: 0),
+            SidebarReorder.ProjectChange(id: "c", sortOrder: 1),
+            SidebarReorder.ProjectChange(id: "a", sortOrder: 2),
+        ])
+    }
+
+    @Test("A project dropped where it already was writes nothing")
+    func projectMoveThatChangesNothing() {
+        let repos = [repo("a", order: 0), repo("b", order: 1), repo("c", order: 2)]
+        #expect(SidebarReorder.move(projects: repos, id: "b", to: 1).isEmpty)
+        #expect(SidebarReorder.move(projects: repos, id: "b", to: 2).isEmpty)
+    }
+
+    /// Every project added before the sidebar could be reordered carries the column's default, so
+    /// the first drag in a project list is a drag over a list of zeroes. What comes out of it has
+    /// to be an order, not a tie.
+    @Test("A first drag over projects that all share one number still produces an order")
+    func projectMoveFromEqualNumbers() {
+        let repos = [repo("a", order: 0), repo("b", order: 0), repo("c", order: 0)]
+        let changes = SidebarReorder.move(projects: repos, id: "a", to: 3)
+        let byID = Dictionary(changes.map { ($0.id, $0.sortOrder) }, uniquingKeysWith: { first, _ in first })
+        let after = repos.map { ($0.id, byID[$0.id] ?? $0.sortOrder) }.sorted { $0.1 < $1.1 }
+        #expect(after.map(\.0) == ["b", "c", "a"])
+        #expect(Set(after.map(\.1)).count == 3)
+    }
+
+    @Test("A project that is not in the list moves nothing")
+    func projectMoveOfSomethingGone() {
+        #expect(SidebarReorder.move(projects: [repo("a", order: 0)], id: "gone", to: 0).isEmpty)
+    }
+
     // MARK: - Helpers
 
     private func pin(of id: String, in rows: [Workspace]) -> Bool? {

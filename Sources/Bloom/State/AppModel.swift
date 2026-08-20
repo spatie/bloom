@@ -1387,6 +1387,42 @@ final class AppModel {
         await reload()
     }
 
+    /// What a drag on a project header ends in.
+    ///
+    /// The projects are a flat list with one number ordering them, so there is none of the
+    /// translation a workspace drag needs: no filter hides a project and nothing sorts ahead of
+    /// anything. `to` is already an offset into this list, worked out by `SidebarReorder` from the
+    /// flattened rows the pane actually draws.
+    ///
+    /// The new order is put on screen before it is written, for the reason `reorderWorkspaces`
+    /// gives: a drop is the end of a movement the table has already animated, and waiting for the
+    /// writes and a reload to come back through an actor would put a frame of the old order
+    /// between the settle and the answer. The list is re-sorted here rather than moved, because
+    /// every project it holds ends up carrying its own index either way.
+    ///
+    /// Each write names the one column it changes, so a reorder cannot put back a name, a colour
+    /// or an icon that landed while the drag was happening. See e47a3b7.
+    func reorderProjects(id: String, to: Int) async {
+        guard let store else { return }
+        let changes = SidebarReorder.move(projects: repos, id: id, to: to)
+        guard !changes.isEmpty else { return }
+
+        let byID = Dictionary(changes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        repos = repos
+            .map { repo in
+                guard let change = byID[repo.id] else { return repo }
+                var moved = repo
+                moved.sortOrder = change.sortOrder
+                return moved
+            }
+            .sorted { $0.sortOrder < $1.sortOrder }
+
+        for change in changes {
+            _ = try? await store.update(repoID: change.id) { $0.sortOrder = change.sortOrder }
+        }
+        await reload()
+    }
+
     // MARK: - Navigation
 
     func selectNextWorkspace(offset: Int) {

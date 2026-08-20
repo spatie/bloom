@@ -9,6 +9,9 @@ struct SidebarStatusBar: View {
     @Environment(AppModel.self) private var app
 
     @Binding var filter: SidebarFilter
+    /// Something the pane has to say about itself, for a moment, in place of the running count.
+    /// The sidebar owns both the sentence and how long it lasts. See `SidebarView.move(from:to:)`.
+    var note: String?
 
     @State private var isShowingLegend = false
 
@@ -80,13 +83,29 @@ struct SidebarStatusBar: View {
     /// controls that really are clickable.
     private var status: some View {
         let running = app.runningCount
+        // A drag that could not land where it was let go borrows this line rather than raising
+        // anything of its own. It is the one place in the pane that already talks about the pane,
+        // a workspace being kept in its project is exactly that kind of fact, and an alert or a
+        // toast for a drop that went one row further than it could would be an answer several
+        // sizes too big for the question.
         return Label(
-            running == 0 ? "Idle" : "\(running) running",
-            systemImage: running == 0 ? "moon.zzz" : "bolt.fill"
+            note ?? (running == 0 ? "Idle" : "\(running) running"),
+            systemImage: note != nil
+                ? "arrow.uturn.backward"
+                : (running == 0 ? "moon.zzz" : "bolt.fill")
         )
         .font(Typo.caption)
-        .foregroundStyle(running == 0 ? Palette.textTertiary : Palette.running)
+        .foregroundStyle(noteInk ?? (running == 0 ? Palette.textTertiary : Palette.running))
         .padding(.leading, Metrics.spacing)
-        .accessibilityLabel(running == 0 ? "No agents running" : "\(running) agents running")
+        .lineLimit(1)
+        .accessibilityLabel(
+            note ?? (running == 0 ? "No agents running" : "\(running) agents running")
+        )
+    }
+
+    /// Secondary ink, one step up from the idle readout it stands in for and well short of a
+    /// warning colour. Nothing went wrong: a row was put where it was allowed to go.
+    private var noteInk: Color? {
+        note == nil ? nil : Palette.textSecondary
     }
 }

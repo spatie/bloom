@@ -279,11 +279,11 @@ struct PullRequestSummary: View {
     /// **This deliberately differs from the sidebar row's hover archive button, which asks every
     /// single time.** They are not in disagreement; they are different presses. The row's button
     /// appears under the pointer unbidden, a few points from the row you meant to click, so the
-    /// asking is a property of that entry point rather than of archiving (the reasoning is written
-    /// out in full at `RepoSection.confirmRowArchive`). This one is a deliberate press on a strip
-    /// whose headline says Merged, in a pane the reader opened to look at the work that landed. A
-    /// confirmation here would be asking "are you sure?" about a branch GitHub has already merged,
-    /// which is how confirmations stop being read.
+    /// asking is a property of that entry point rather than of archiving (the reasoning is
+    /// written out in full at `SidebarWorkspaceRow.confirmRowArchive`). This one is a deliberate
+    /// press on a strip whose headline says Merged, in a pane the reader opened to look at the
+    /// work that landed. A confirmation here would be asking "are you sure?" about a branch
+    /// GitHub has already merged, which is how confirmations stop being read.
     ///
     /// Quiet is not the same as unguarded. This goes through `AppModel.archive` exactly as every
     /// other entry point does, and that method still builds the full `WorkspaceSafetyReport` and

@@ -152,3 +152,150 @@ public enum SidebarReorder {
         return answer
     }
 }
+
+// MARK: - The flattened pane
+
+extension SidebarReorder {
+    /// One row of the sidebar, as the drag mechanism counts them.
+    ///
+    /// The pane is drawn as a single `ForEach` over every project header and every workspace row
+    /// under it, rather than as a `Section` per project. That is not a preference. `onMove` on a
+    /// `ForEach` of `Section`s does not crash and does not work either: a section header is not a
+    /// row the outline will pick up, so the projects could not be dragged at all while each one
+    /// was a section of its own, and there is no second `onMove` that reaches them. One flat run
+    /// of rows is the shape the mechanism can move.
+    ///
+    /// The price is that `onMove`'s two numbers stop saying which project they are about. Working
+    /// that out is what this is for, and it is the same job the rest of this file already does for
+    /// the filter and for the pinned rows: the numbers index the rows as they are DRAWN, and the
+    /// thing that has to change is a stored order that is not that list.
+    public enum Row: Equatable, Hashable, Sendable {
+        case project(String)
+        case workspace(id: String, projectID: String)
+        /// The sentence a project draws where its rows would be when it has none. It takes an
+        /// offset in the run like anything else, and it is never something to move.
+        case notice(projectID: String)
+    }
+
+    /// What a drag over the flattened pane turns out to have been.
+    public enum Destination: Equatable, Sendable {
+        /// A drag with nothing to write: a row dropped where it already was, an offset that is not
+        /// in the list, or a grab of something that does not move.
+        case nothing
+
+        /// A project header was dragged, and every workspace under it goes with it. `to` is an
+        /// offset into the project list in `move(fromOffsets:toOffset:)`'s own semantics, which is
+        /// to say it counts the dragged project as still being where it was.
+        case project(id: String, to: Int)
+
+        /// A workspace was dragged inside its own project. `from` and `to` are offsets into that
+        /// project's own drawn rows, which is exactly what `move(visible:all:from:to:)` takes, so
+        /// the flattening changes nothing about the ordering rules underneath it.
+        ///
+        /// `landedOutside` is a drop the pane could not refuse. One `ForEach` means one insertion
+        /// line, drawn wherever the pointer is, including in a project the row cannot belong to,
+        /// and a drop there arrives here like any other. The row is brought back to the nearest
+        /// place inside its own project, which is the end it was dragged towards, so a drag that
+        /// aimed past the project's last row lands on its last row rather than nowhere.
+        case workspace(projectID: String, from: IndexSet, to: Int, landedOutside: Bool)
+    }
+
+    /// One project's new place. Never a whole `Repo`: see `Store.update(repoID:)`.
+    public struct ProjectChange: Equatable, Sendable {
+        public var id: String
+        public var sortOrder: Int
+
+        public init(id: String, sortOrder: Int) {
+            self.id = id
+            self.sortOrder = sortOrder
+        }
+    }
+
+    /// Which of the two things a flat drag was, and what it means in the terms that thing is
+    /// stored in.
+    ///
+    /// - Parameters:
+    ///   - rows: the pane's rows in the order they are drawn, which is the order `onMove`'s
+    ///     offsets index into. Only the rows of the one `ForEach` that carries the `onMove`: the
+    ///     Home and Search rows and the Projects heading are outside it and are not counted.
+    ///   - from: the offsets that moved.
+    ///   - to: the offset they were dropped at, before the moved rows are taken out.
+    public static func destination(rows: [Row], from: IndexSet, to: Int) -> Destination {
+        guard from.allSatisfy({ rows.indices.contains($0) }), (0...rows.count).contains(to) else {
+            return .nothing
+        }
+        guard let grabbed = from.min() else { return .nothing }
+
+        switch rows[grabbed] {
+        case .notice:
+            return .nothing
+
+        case .project(let id):
+            // A header refuses selection, so the outline drags the single row that was grabbed and
+            // nothing travels with it. Anything else arriving here is not a project drag.
+            guard from.count == 1 else { return .nothing }
+            return .project(id: id, to: projectOffset(rows: rows, at: to))
+
+        case .workspace(_, let projectID):
+            guard let run = workspaceRun(rows: rows, projectID: projectID),
+                  from.allSatisfy({ run.contains($0) }) else { return .nothing }
+            let landing = min(max(to, run.lowerBound), run.upperBound)
+            return .workspace(
+                projectID: projectID,
+                from: IndexSet(from.map { $0 - run.lowerBound }),
+                to: landing - run.lowerBound,
+                landedOutside: landing != to
+            )
+        }
+    }
+
+    /// The smallest set of writes that puts the projects in the order a header drag asked for.
+    ///
+    /// Ordered by `sort_order` and read back by the same, so a project whose number is already
+    /// right is not written. Every remaining project ends up holding its own index, which is what
+    /// keeps the numbers from drifting into ties over a long series of drags.
+    public static func move(projects: [Repo], id: String, to: Int) -> [ProjectChange] {
+        guard let index = projects.firstIndex(where: { $0.id == id }) else { return [] }
+        let ordered = moving(projects, from: IndexSet(integer: index), to: to)
+        return ordered.enumerated().compactMap { offset, repo in
+            guard repo.sortOrder != offset else { return nil }
+            return ProjectChange(id: repo.id, sortOrder: offset)
+        }
+    }
+
+    /// Which project boundary a flat offset is nearest to.
+    ///
+    /// A project is a run of rows and the insertion line can be drawn anywhere inside one, so a
+    /// header dropped in the middle of another project has to be read as landing on one side of it
+    /// or the other. The nearest boundary is that reading, and it is the one that agrees with the
+    /// line the user was looking at: a line just under a header is closer to the top of that
+    /// project than to the bottom of it, and lands the dragged project above rather than below.
+    ///
+    /// Ties go to the earlier boundary, which only happens on a project with a single row.
+    private static func projectOffset(rows: [Row], at flat: Int) -> Int {
+        var boundaries: [Int] = []
+        for (offset, row) in rows.enumerated() {
+            if case .project = row { boundaries.append(offset) }
+        }
+        boundaries.append(rows.count)
+
+        var best = 0
+        var distance = Int.max
+        for (index, boundary) in boundaries.enumerated() where abs(boundary - flat) < distance {
+            distance = abs(boundary - flat)
+            best = index
+        }
+        return best
+    }
+
+    /// The flat offsets one project's workspace rows occupy, as a range whose bounds are the first
+    /// and last places a row of that project can be dropped at.
+    private static func workspaceRun(rows: [Row], projectID: String) -> Range<Int>? {
+        let offsets = rows.indices.filter { offset in
+            if case .workspace(_, let owner) = rows[offset] { return owner == projectID }
+            return false
+        }
+        guard let first = offsets.first, let last = offsets.last else { return nil }
+        return first..<(last + 1)
+    }
+}

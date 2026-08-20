@@ -19,8 +19,9 @@ import BloomCore
 /// project line up with each other and with the notice that stands in for them when a project is
 /// empty, instead of the three columns the hand-built stack produced.
 ///
-/// The whole row is then indented one chevron gutter by `RepoSection`, which is what puts it under
-/// the project it belongs to rather than under Home and Search. See `SidebarMetrics.rowIndent`.
+/// The whole row is then indented one chevron gutter by `SidebarWorkspaceRow`, which is what
+/// puts it under the project it belongs to rather than under Home and Search. See
+/// `SidebarMetrics.rowIndent`.
 ///
 /// The row draws no background of its own. It lives in a `List` with `.listStyle(.sidebar)`, and
 /// that list already draws AppKit selection: the accent colour while the list has the keyboard, a
@@ -38,8 +39,8 @@ struct WorkspaceRow: View {
     /// The id of the row being renamed in place, shared across the whole list so only one field
     /// can ever be open.
     @Binding var renaming: String?
-    /// Raised to `RepoSection`, which owns both the confirmation and the call into the model, so
-    /// this button and the row's context menu cannot end up on different paths.
+    /// Raised to `SidebarWorkspaceRow`, which owns both the confirmation and the call into the
+    /// model, so this button and the row's context menu cannot end up on different paths.
     var onArchive: (Workspace) -> Void
 
     @Environment(AppModel.self) private var app

@@ -9,11 +9,13 @@ import BloomCore
 /// AppKit selection (accent when the window is key, grey when it is not), the standard row
 /// insets, and keyboard navigation between rows.
 ///
-/// It does bring a disclosure control on a section header, and that is why `RepoSection` uses a
-/// plain `Section`. Hand the list an `isExpanded` binding and it draws a chevron of its own at the
-/// trailing end of the header, under the pointer only, which on a project header landed past the
-/// gear and the `+` and said what the header's own leading chevron already said. A comment here
-/// used to claim the opposite, from a capture taken with the pointer nowhere near the window.
+/// The projects are NOT sections of it. They were, and a section is what a source list normally
+/// wants, but `onMove` on a `ForEach` of `Section`s moves nothing: a section header is not a row
+/// the outline will pick up, so a project could not be dragged at all. The pane is one flat run of
+/// rows instead, with a single `onMove` over it, and what a project header used to get from being
+/// a section (its spacing, and its place in the outline as something that CONTAINS the rows below
+/// it) `RepoHeaderRow` now says for itself, in a padding and in words. See `move(from:to:)`, and
+/// `RepoHeaderRow.name` for what an outline row can and cannot be told by hand.
 ///
 /// There is no account row. Bloom is local and single user, so a row naming the logged-in Mac
 /// user said nothing, and on macOS `Menu { } label: { }` with `.borderlessButton` throws the
@@ -38,6 +40,25 @@ struct SidebarView: View {
     /// Derived state held in `@State` rather than recomputed in `body`, with the three inputs it
     /// depends on invalidating it explicitly below. See `SidebarRepoGroup` for why.
     @State private var groups: [SidebarRepoGroup] = []
+
+    /// The same groups flattened into the run of rows the list draws, held rather than derived in
+    /// `body` for the same reason `groups` is, and because the drag reads it back to work out what
+    /// was moved. It is written in the same breath as `groups`, so the two can never disagree
+    /// about what is on screen.
+    @State private var paneRows: [SidebarPaneRow] = []
+
+    /// What the status bar says instead of the running count, briefly, after a drag that could not
+    /// land where it was let go. See `move(from:to:)`.
+    ///
+    /// Stamped rather than held as the sentence alone, so that saying the same thing twice is two
+    /// sayings: two drops refused in the same project produce the same words, and a note keyed to
+    /// the words would have the second one taken away on the first one's clock.
+    @State private var reorderNote: ReorderNote?
+
+    private struct ReorderNote: Equatable {
+        var id = UUID()
+        var sentence: String
+    }
 
     /// Whether the pane has finished arriving, so the first fill is not animated.
     ///
@@ -67,17 +88,47 @@ struct SidebarView: View {
                 .selectionDisabled()
                 .listRowSeparator(.hidden)
 
-            ForEach(groups) { group in
-                RepoSection(
-                    repo: group.repo,
-                    rows: group.workspaces,
-                    isFiltered: filter != .all,
-                    hasUnreadWork: group.hasUnreadWork,
-                    arrival: arrival,
-                    renaming: $renaming,
-                    onCreateWorkspace: presentCreate
-                )
+            // One `ForEach` over every project and every workspace, rather than a `Section` per
+            // project, and the reason is the `onMove` at the foot of it. `onMove` on a `ForEach`
+            // of `Section`s moves nothing at all: a section header is not a row the outline will
+            // pick up, so the projects could not be dragged while each was a section of its own,
+            // and there is no second `onMove` that reaches them. One flat run is the shape the
+            // mechanism can move, and it moves both things: the source offset is what says
+            // whether a project or a workspace was picked up. See `SidebarReorder.destination`.
+            ForEach(paneRows) { row in
+                switch row {
+                case .project(let group):
+                    RepoHeaderRow(
+                        repo: group.repo,
+                        hasUnreadWork: group.hasUnreadWork,
+                        workspaceCount: group.workspaces.count,
+                        onCreateWorkspace: presentCreate
+                    )
+                    // A project is never the selection. The pane selects work, not the folder the
+                    // work is in, and this row carries no tag. Refusing selection does NOT refuse
+                    // the drag, which is the whole reason the projects can be reordered at all.
+                    .selectionDisabled()
+                case .workspace(let workspace, let projectName):
+                    SidebarWorkspaceRow(
+                        workspace: workspace,
+                        arrival: arrival,
+                        projectName: projectName,
+                        renaming: $renaming
+                    )
+                    .tag(SidebarSelection.workspace(workspace.id))
+                case .notice:
+                    // A sentence about a project, so it is neither selectable nor something to
+                    // pick up. `SidebarReorder` refuses it a second time, in case the outline
+                    // offers it anyway.
+                    SidebarEmptyNoticeRow(isFiltered: filter != .all)
+                        .selectionDisabled()
+                        .moveDisabled(true)
+                }
             }
+            // The list's own row reordering, which is `NSOutlineView`'s: the insertion line, the
+            // drag image, the autoscroll at the pane's edges, the snap back on a cancel and the
+            // settle on drop are all AppKit's, and none of it is drawn here.
+            .onMove(perform: move)
         }
         // The list draws its own selection and its own row height, and both are left to it.
         //
@@ -95,8 +146,8 @@ struct SidebarView: View {
         // all four left the pitch at exactly 32; `listRowInsets(leading:)` did not even move the
         // rows sideways. Reaching 28 means giving up `.listStyle(.sidebar)`, and with it the
         // selection above, keyboard navigation and the standard insets. Four points is not worth
-        // that. What was in reach was making the rhythm EVEN, which is what `RepoSection` spends
-        // its header padding on.
+        // that. What was in reach was making the rhythm EVEN, which is what a project header's
+        // own top padding is spent on. See `SidebarMetrics.headerLead`.
         .listStyle(.sidebar)
         // What puts the fold back.
         //
@@ -115,13 +166,20 @@ struct SidebarView: View {
         // every few seconds, which would otherwise animate the whole column once a second.
         .animation(foldMotion, value: foldedProjects)
         .settlesArrivals($arrival)
+        // The note takes itself back, and each one is on its own clock.
+        .task(id: reorderNote) {
+            guard reorderNote != nil else { return }
+            try? await Task.sleep(for: .seconds(2.4))
+            guard !Task.isCancelled else { return }
+            reorderNote = nil
+        }
         .overlay {
             if app.repos.isEmpty, app.isLoaded {
                 noProjects
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            SidebarStatusBar(filter: $filter)
+            SidebarStatusBar(filter: $filter, note: reorderNote?.sentence)
         }
         // Keyed to `isLoaded` rather than run once, because the projects arrive from the store
         // after the first draw. Timing the settle from an empty pane would let the whole restored
@@ -175,6 +233,7 @@ struct SidebarView: View {
         groups = SidebarRepoGroup.build(
             repos: app.repos, workspaces: app.workspaces, filter: filter
         )
+        paneRows = SidebarPaneRow.rows(groups)
         // Every workspace the groups hold, a folded project's included. A fold hides rows rather
         // than removing them from the list, and unfolding one already has a movement of its own:
         // counting them out here would make every project the user reopens fade its contents in
@@ -189,6 +248,52 @@ struct SidebarView: View {
         } else {
             arrival.absorb(ids)
         }
+    }
+
+    // MARK: - Reordering
+
+    /// Where a drag ended, in the order the rows are DRAWN in.
+    ///
+    /// The two numbers are the outline's, and they count every row in the run: project headers,
+    /// the workspaces under them, and the sentence an empty project draws. They index nothing the
+    /// store holds, and they do not even say which of the two things was dragged.
+    /// `SidebarReorder.destination` answers that, `AppModel` writes the result, and nothing here
+    /// knows about `sort_order`.
+    ///
+    /// The one case worth reading twice is a workspace let go over ANOTHER project. That drop
+    /// cannot be refused: one `ForEach` means one insertion line and it is drawn wherever the
+    /// pointer is, so the line appears in a project the row cannot join and the drop arrives here
+    /// like any other. Two things then make it deliberate rather than broken. The row is clamped
+    /// to the nearest place inside its OWN project, which is the end it was dragged towards, so a
+    /// drag aimed past the last row lands on the last row and the movement goes the way the hand
+    /// went. And the status bar says why, in the readout it already uses to talk about the pane,
+    /// for as long as it takes to read and no longer.
+    private func move(from: IndexSet, to: Int) {
+        switch SidebarReorder.destination(rows: paneRows.map(\.identity), from: from, to: to) {
+        case .nothing:
+            break
+
+        case .project(let id, let offset):
+            Task { await app.reorderProjects(id: id, to: offset) }
+
+        case .workspace(let projectID, let offsets, let offset, let landedOutside):
+            guard let group = groups.first(where: { $0.id == projectID }) else { return }
+            if landedOutside { note("Kept in \(group.repo.name)") }
+            Task {
+                await app.reorderWorkspaces(
+                    in: group.repo, visible: group.workspaces, from: offsets, to: offset
+                )
+            }
+        }
+    }
+
+    /// Says one thing in the status bar and then takes it back.
+    ///
+    /// Held in the sidebar rather than in the bar itself, because the bar is a readout and the
+    /// thing worth saying happened up here. Written before the reorder is applied, so the sentence
+    /// and the settle land in the same moment.
+    private func note(_ sentence: String) {
+        reorderNote = ReorderNote(sentence: sentence)
     }
 
     // MARK: - Selection

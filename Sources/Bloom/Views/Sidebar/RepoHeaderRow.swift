@@ -2,37 +2,36 @@ import SwiftUI
 import AppKit
 import BloomCore
 
-/// One project and its workspaces, as a collapsible section of the source list.
+/// One project, as a row of the source list that its workspaces hang under.
 ///
-/// The section owns the interaction that surrounds a row (context menus, drag to reorder, the
-/// archive confirmation) while `WorkspaceRow` stays a pure drawing of a workspace. Splitting it
-/// this way keeps the row cheap to redraw, which matters because a running agent updates its diff
-/// stat every few seconds.
+/// It used to be a `Section` with those workspaces as its content, which is the obvious shape for
+/// a source list and is the one shape that cannot be reordered: `onMove` on a `ForEach` of
+/// `Section`s does not crash and does not work either, because a section header is not a row the
+/// outline will pick up, and there is no second `onMove` that reaches one. The pane is now a
+/// single flat run of rows with one `onMove` over it (see `SidebarView`), so this draws a row like
+/// any other and a project is reordered by dragging it.
 ///
-/// The rows are handed in already filtered and sorted (see `SidebarRepoGroup`), so nothing here
-/// walks the workspace list.
+/// This row owns everything that surrounds a project: its menu, its rename, the confirmation that
+/// removes it. `SidebarWorkspaceRow` owns the same for a workspace, and `WorkspaceRow` stays a
+/// pure drawing of one. Splitting it this way keeps the row cheap to redraw, which matters because
+/// a running agent updates its diff stat every few seconds.
 ///
-/// Collapsing reads the repo's stored `collapsed` flag directly: when it is set the section hands
-/// the list no rows at all. The control that drives it is the header's own leading mark. See
-/// `body` for why it is not `Section(isExpanded:)`, which the list answers with a second
-/// disclosure control of its own.
-struct RepoSection: View {
+/// Collapsing reads the repo's stored `collapsed` flag directly: while it is set the workspace
+/// rows are simply not in the run. The control that drives it is this row's own leading mark, and
+/// it is the only disclosure control here. Handing a list an `isExpanded` binding is what makes it
+/// draw a second one, and on macOS 26 that one is a chevron pinned to the trailing end of the
+/// header under the pointer, which landed past the gear and the `+` and said what the leading
+/// chevron already said.
+struct RepoHeaderRow: View {
     var repo: Repo
-    var rows: [Workspace]
-    /// Only used to say why the section is empty, which is a different sentence when a filter is
-    /// hiding rows than when the project has none.
-    var isFiltered: Bool
     /// Whether any of this project's workspaces has a finished turn nobody has read.
     ///
-    /// Passed in rather than derived from `rows`, because `rows` is what the filter is letting
-    /// through. See `SidebarRepoGroup.hasUnreadWork`.
+    /// Passed in rather than derived from the rows, because the rows are what the filter is
+    /// letting through. See `SidebarRepoGroup.hasUnreadWork`.
     var hasUnreadWork: Bool
-    /// Which of this project's rows have only just been added to the list, so they fade in
-    /// rather than appear. Handed down from `SidebarView`, which owns the one tracker the whole
-    /// pane shares: a workspace can move between projects, and two trackers would each read that
-    /// as an arrival and a departure of their own.
-    var arrival: RowArrival
-    @Binding var renaming: String?
+    /// How many workspace rows are drawn under this project, which is what the filter is letting
+    /// through. Said out loud rather than drawn: see `name`.
+    var workspaceCount: Int
     /// Raised to the sidebar, which owns the create sheet.
     var onCreateWorkspace: (Repo) -> Void
 
@@ -46,53 +45,31 @@ struct RepoSection: View {
     @FocusState private var repoFieldFocused: Bool
 
     @State private var isConfirmingRemove = false
-    /// Lights the `+`. It belongs to this header rather than to a hover id shared across the whole
+    /// Lights the `+`. It belongs to this row rather than to a hover id shared across the whole
     /// list, so crossing the pane lights one project at a time.
     @State private var isHeaderHovered = false
 
-    /// A plain `Section`, and the rows themselves are what comes and goes.
+    /// A row, not a section, and one that keeps a section's rhythm.
     ///
-    /// It was a `Section(isExpanded:)`, which is the obvious way to fold a source list section and
-    /// is the wrong one here. Handing the list a binding is what makes it offer a collapse control
-    /// of its own, and on macOS 26 that control is a chevron pinned to the trailing end of the
-    /// header, drawn only while the pointer is over the header. So a hovered project header carried
-    /// two disclosure controls: this section's own chevron in its gutter at the leading edge, and
-    /// the list's, past the gear and the `+`, saying the same thing a second time.
+    /// A section header was given 13 points of spacing above a drawing band of 19, which together
+    /// are the 32 point pitch every row in this list is drawn on. A plain row is handed the whole
+    /// 32 and centres its content in it, so without the lead a project would sit hard against the
+    /// last workspace of the project before it and the pane would lose the one gap that says a new
+    /// project starts here. The padding puts that gap back INSIDE the row's own 32 points rather
+    /// than on top of them, so the pitch is unchanged and nothing below moves.
+    /// There is no trailing padding here any more, and that is the other half of the same change.
     ///
-    /// Two things went with the binding, both measured rather than guessed. The list's own fold
-    /// animation: rows now appear and disappear rather than sliding. And the left arrow key on the
-    /// header row, which the outline used to answer by folding the project. Neither is worth the
-    /// duplicate control. The arrow in particular was only ever reachable by clicking the header
-    /// first, and a click on the header is a click one gutter away from the chevron that does the
-    /// same thing; arrowing through the rows never reached it, because the header carries no tag
-    /// and so is never in the selection. Everything else survived: `repo.collapsed` in the database
-    /// was always the source of truth rather than the list's, so the state still restores across a
-    /// relaunch, and the header row is still an `AXOutlineRow` reporting `AXDisclosing` with the
-    /// workspace rows as its disclosed rows.
+    /// A section header was given more room at its trailing edge than a plain row is, so the `+`
+    /// used to be drawn about eight points right of everything below it and eight points of
+    /// padding was what pulled it back. A plain row is handed the same insets as the rows under
+    /// it, so that padding had nothing left to correct and simply moved the `+` fourteen points
+    /// the other way. Measured on captures of both, at the pixel: the same glyph's trailing ink
+    /// stood at 482 as a section header with the padding, at 454 as a plain row with it, and at
+    /// 470 as a plain row without it, where the Projects heading's own button, which is a plain
+    /// row and carries the same frame, stands at 479. What is left is the difference between two
+    /// glyphs inside one frame, not a difference in the column.
     var body: some View {
-        Section {
-            if !repo.collapsed {
-                ForEach(rows) { workspace in
-                    row(workspace)
-                }
-                // The list's own row reordering, which is `NSOutlineView`'s: the drag image, the
-                // autoscroll at the pane's edges, the snap back on a cancel and the settle on
-                // drop are all AppKit's, and none of it is drawn here.
-                //
-                // It is on the `ForEach` rather than on any row, because what is being reordered
-                // is the run of rows and the offsets it hands back index into that run. That is
-                // also what confines the drag to this project, by construction rather than by
-                // refusing anything: one `onMove` can move exactly its own `ForEach`, so a row
-                // dragged over another project finds nowhere to land there and a release leaves
-                // every row where it was. Measured on a build, both ways round.
-                .onMove(perform: move)
-                if rows.isEmpty {
-                    emptyNotice
-                }
-            }
-        } header: {
-            header
-        }
+        header.padding(.top, SidebarMetrics.headerLead)
     }
 
     // MARK: - Header
@@ -174,12 +151,6 @@ struct RepoSection: View {
             .foregroundStyle(isHeaderHovered ? Palette.textPrimary : Palette.textSecondary)
             .help("New workspace in \(repo.name)")
         }
-        // A section header is given more room at its trailing edge than a plain row is, so the
-        // `+` was drawn about eight points further right than the diff counts on the rows under
-        // it and than the add button on the Projects heading, which left the pane's trailing edge
-        // ragged. Eight points of padding puts all three in one column. Nothing here changes the
-        // row's height: the header's own drawing band is 19 points and this is horizontal.
-        .padding(.trailing, Metrics.spacingWide)
         .contentShape(Rectangle())
         .onHoverChange { isHeaderHovered = $0 }
         .contextMenu {
@@ -229,6 +200,13 @@ struct RepoSection: View {
     /// the scale, because it is not a size: it is the same rung saying one more thing.
     private static let unreadTitle = ScaledFont(.headline, weight: .heavy)
 
+    /// The project's name with what is under it, for VoiceOver only.
+    private var countedName: String {
+        workspaceCount == 1
+            ? "\(repo.name), 1 workspace"
+            : "\(repo.name), \(workspaceCount) workspaces"
+    }
+
     @ViewBuilder
     private var name: some View {
         // A source list section header is usually set below its rows, which is right when the
@@ -249,12 +227,38 @@ struct RepoSection: View {
             .foregroundStyle(Palette.textPrimary)
             .lineLimit(1)
 
+        // The heading says what the outline no longer does.
+        //
+        // A `Section` header was an `AXOutlineRow` reporting `AXDisclosing`, with the rows under
+        // it as its disclosed rows and those rows one disclosure level below it, and that is the
+        // whole of how a screen reader hears a project CONTAINING its workspaces. The flat run has
+        // no such relationship to report: every row in the pane is at level zero.
+        //
+        // It cannot be put back by hand, and that was measured rather than assumed. SwiftUI has no
+        // modifier for it: `AccessibilityTraits` on macOS 26 is seventeen traits and not one of
+        // them is an outline row or a disclosure. Neither is it reachable through AppKit. A zero
+        // sized `NSViewRepresentable` in a row's own content does find the `NSTableRowView` the
+        // list drew that row into, and setting the subrole, the disclosure level, the disclosed
+        // flag, a label and even a role description on it changes NOTHING in the tree the app
+        // vends: dumped through `AXUIElementCreateApplication` before and after, every row still
+        // answered exactly what SwiftUI decided. Those `AXRow` elements are SwiftUI's own, and the
+        // row view is not what a screen reader is talking to.
+        //
+        // So the fact is carried in words, which is the one channel SwiftUI does hand over. This
+        // heading says how many rows the project has, its chevron says whether they are showing,
+        // and each row says which project it is in as accessibility custom content. The count is
+        // what the filter is letting through, because that is what is actually under the heading.
+        //
+        // Whether the project is open is on the chevron beside this, as that button's own value,
+        // and the rows themselves each name the project they are in.
+        let counted = label.accessibilityLabel(Text(countedName))
+
         if hasUnreadWork {
-            label
+            counted
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityValue("Has unread work")
         } else {
-            label.accessibilityAddTraits(.isHeader)
+            counted.accessibilityAddTraits(.isHeader)
         }
     }
 
@@ -306,101 +310,7 @@ struct RepoSection: View {
         .help(repo.collapsed ? "Show workspaces" : "Hide workspaces")
     }
 
-    // MARK: - Rows
-
-    /// What stands where the workspaces would be when there are none to draw.
-    ///
-    /// A `Label` with nothing in its icon, so the sentence starts on the same column a workspace's
-    /// name starts on rather than on a column of its own. It is a sentence about the project, not
-    /// an item in the list, so it takes the name's column and not the mark's.
-    private var emptyNotice: some View {
-        Label {
-            Text(isFiltered ? "Nothing matches the filter" : "No workspaces yet")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-        } icon: {
-            Color.clear
-        }
-        // The same layout the rows it stands in for use, so the sentence starts on the name's
-        // column rather than on a column of its own.
-        .labelStyle(SidebarRowLabelStyle())
-        .padding(.leading, SidebarMetrics.rowIndent)
-    }
-
-    private func row(_ workspace: Workspace) -> some View {
-        WorkspaceRow(
-            workspace: workspace,
-            isRunning: app.isRunning(workspace),
-            renaming: $renaming,
-            onArchive: confirmRowArchive
-        )
-        // Innermost, on the drawing alone. Everything below this line is what the list is told
-        // about the row, and a workspace that is fading in is still selectable, draggable and
-        // right clickable throughout: it is a row that is fully there and briefly not drawn.
-        .arrivingRow(arrival.isArriving(workspace.id))
-        .padding(.leading, SidebarMetrics.rowIndent)
-        .tag(SidebarSelection.workspace(workspace.id))
-        .contextMenu {
-            Button("Open in Editor") { Reveal.inEditor(workspace.path) }
-            Button("Reveal in Finder") { Reveal.inFinder(workspace.path) }
-            Button("Copy branch name") { copy(workspace.branch) }
-            Divider()
-            Button(workspace.pinned ? "Unpin" : "Pin") {
-                Task { await app.togglePinned(workspace) }
-            }
-            Button("Rename") { renaming = workspace.id }
-            Divider()
-            // Straight through, with no dialog of its own. Whether this needs confirming is not
-            // something this menu can know: it depends on what is uncommitted, what is running and
-            // what GitHub says about the branch, and `AppModel.archive` is where all three come
-            // together. Asking here as well meant a sheet on every archive, including the routine
-            // one, which is exactly how a confirmation stops being read.
-            //
-            // Whether the branch goes too is the repository's setting, rather than a question
-            // asked every time about a workspace that is usually finished with.
-            //
-            // The row's own archive button does ask every time, and that is not a disagreement
-            // with this. See `confirmRowArchive` for why an entry point that appears under the
-            // pointer is the one that should.
-            Button("Archive", role: .destructive) { archive(workspace) }
-        }
-    }
-
     // MARK: - Actions
-
-    /// Where the drag ended, in the order these rows are drawn in.
-    ///
-    /// `rows` is what the filter is letting through, so these offsets are not offsets into
-    /// anything the store holds. `SidebarReorder` is what translates them and `AppModel` is what
-    /// writes the result, so nothing here knows about `sort_order`.
-    private func move(from: IndexSet, to: Int) {
-        Task { await app.reorderWorkspaces(in: repo, visible: rows, from: from, to: to) }
-    }
-
-    private func archive(_ workspace: Workspace) {
-        Task { await app.archive(workspace) }
-    }
-
-    /// What the row's archive button does instead of archiving.
-    ///
-    /// This entry point asks EVERY time, including when nothing is at stake and `AppModel.archive`
-    /// would have archived silently. That looks like it contradicts the conditional path, and it
-    /// does not: the conditional path is right about the context menu and the keyboard, where you
-    /// have already said what you mean by opening a menu or pressing a shortcut, and a
-    /// confirmation with nothing to warn about is exactly how a confirmation stops being read.
-    /// A hover button is a different thing. It appears under the pointer, unbidden, a few points
-    /// from the row you meant to click, which makes it the easiest way in the app to archive
-    /// something by accident. So the asking is a property of THIS ENTRY POINT rather than of the
-    /// archive: everything else still archives silently when there is nothing to lose.
-    ///
-    /// It used to ask with a compact dialog of its own, and answering yes could then raise the
-    /// model's larger one, so a workspace with real work in it produced two dialogs of different
-    /// shapes for a single decision. The asking is still a property of THIS ENTRY POINT, but it
-    /// is now said as an argument, and the one dialog that appears is the one that knows what is
-    /// at stake. See `AppModel.archive(_:deleteBranch:alwaysConfirm:)`.
-    private func confirmRowArchive(_ workspace: Workspace) {
-        Task { await app.archive(workspace, alwaysConfirm: true) }
-    }
 
     private func removeRepo() {
         Task { await app.removeRepository(repo) }
@@ -420,9 +330,5 @@ struct RepoSection: View {
         isRenamingRepo = false
         guard !name.isEmpty, name != repo.name else { return }
         Task { await app.rename(repo, to: name) }
-    }
-
-    private func copy(_ text: String) {
-        Clipboard.copy(text)
     }
 }

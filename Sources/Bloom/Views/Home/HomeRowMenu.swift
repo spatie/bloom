@@ -4,11 +4,11 @@ import BloomCore
 /// The right click menu on a workspace, as Home offers it.
 ///
 /// **This is a second copy, deliberately, and it should not stay one.** The sidebar builds the
-/// same menu inside `RepoSection.row(_:)`, and the two are now the same six items in the same
-/// order because they are the same six things you can do to a workspace: it cannot be right that
-/// the answer depends on which list you happened to right click in. They were split because the
-/// sidebar's copy is inside a file another pair of hands was in at the time, and copying a menu is
-/// cheaper to undo than a bad merge.
+/// same menu in `SidebarWorkspaceRow`, and the two are now the same six items in the same order
+/// because they are the same six things you can do to a workspace: it cannot be right that the
+/// answer depends on which list you happened to right click in. They were split because the
+/// sidebar's copy is inside a file another pair of hands was in at the time, and copying a menu
+/// is cheaper to undo than a bad merge.
 ///
 /// What to extract when the two are put back together: a `WorkspaceMenuItems` view taking
 /// `workspace: Workspace` and one closure, `onRename: (String) -> Void`, and reading `AppModel`
