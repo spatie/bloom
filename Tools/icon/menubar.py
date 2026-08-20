@@ -726,10 +726,113 @@ def crest():
     return w, out
 
 
+# ------------------------------------------------- calm, heavier
+#
+# The owner picked `calm` and then said it looks thin in the bar. It does: at 87
+# percent of the standard art a lane of 13 units is 1.70 points, against 1.95 for
+# the mark that ships and against a Dropbox drawn as a solid body. His complaint
+# is relative weight beside his other icons, not absolute thickness.
+#
+# THE ONE LINE VERSION OF THIS IS WRONG. Winding LANE up and changing nothing
+# else spends points the box has already given away. `calm` is 13.1 points of art
+# in an 18 point image, and what holds its three lanes apart is not air between
+# parallel lanes, which it does not have, but the two counters left between each
+# arriving lane and the trunk it lands on. Those counters are what closes first,
+# and at 1x they are two pixels. Close them and the mark is a blob, which is the
+# failure `trio` and `panel` were rejected for.
+#
+# So each of the five below pays for its weight with something, and they differ
+# in WHAT they give back rather than in how thick they are:
+#
+#   stout   the height calm gave up: back to the full 15 points of art
+#   open    horizontal room: a wider box, so the lanes arrive shallower and the
+#           counters are longer at the same outer height
+#   two     a lane: two heavier lanes instead of three
+#   spine   nothing. The weight goes only on the trunk, which is what carries at
+#           a glance, and the arrivals stay at calm's weight
+#   tall    vertical extent: 15.9 points of art, level with Dropbox at 16.0
+#
+# Everything else is calm's: the S curves off the whole band, the round
+# terminals, the staggered landings, and no two arrivals level with each other.
+def _fan(w, lane, arms, trunk=None):
+    """calm's composition at any weight. A level trunk with one or two lanes
+    arriving on it, each one an S off the whole band and each landing at its own
+    x, because two landing at the same one is an arrowhead."""
+    t = lane if trunk is None else trunk
+    out = [solid(ribbon(centreline(50.0, 50.0, t / 2, w - t / 2, window=SWEEP), t))]
+    for y0, xm in arms:
+        out.append(solid(ribbon(
+            centreline(y0, 50.0, lane / 2, xm * w, window=SWEEP), lane)))
+    return w, out
+
+
+def stout():
+    """Heavier, and given back the height calm gave up.
+
+    calm is flow at 87 percent, so the simplest way to pay for a thicker lane is
+    to stop being short: 15.0 points of art, which is what the mark in the bar
+    measures today, with the lane wound from 13 units to 15.5. That is 2.33
+    points of lane against 1.95 today, and the counters are wider than calm's
+    rather than narrower, because they grew with the box."""
+    lane = 15.5
+    return _fan(122.0, lane, ((lane / 2, 0.72), (100 - lane / 2, 0.50)))
+
+
+def wide():
+    """Heavier, and given back horizontal room instead of height.
+
+    Stays at calm's 13.1 points, so it sits no taller beside Dropbox than the one
+    he picked, and buys the room for an 18 unit lane by being wider: the box goes
+    from 120 to 134 and both landings move right, so each lane arrives shallower
+    and its counter is longer at the same outer height. The cost is bar width,
+    which is the one dimension the menu bar is not short of."""
+    lane = 17.0
+    return _fan(140.0, lane, ((lane / 2, 0.82), (100 - lane / 2, 0.58)))
+
+
+def two():
+    """Heavier, and given back a lane.
+
+    Three lanes at 13.1 points is what makes calm thin: the box is divided three
+    ways before anything is drawn. Two lanes divide it twice and can be half
+    again as heavy, 2.76 points, which is the weight of a real menu bar glyph.
+    What it gives up is the third lane, and with it the reading that several
+    things are running rather than two. The remaining arrival still lands off
+    centre, so it is a branch joining a road and not an arrow."""
+    lane = 20.0
+    return _fan(116.0, lane, ((lane / 2, 0.70),))
+
+
+def spine():
+    """Heavier where it reads, and nowhere else.
+
+    The trunk is the part that carries at a glance, so it takes the weight, 2.57
+    points, and the two arrivals stay at calm's 1.69. Nothing is given back
+    because nothing has to be: the counters are set by where the ARRIVALS run,
+    and they have not moved. The risk is the opposite of the one he reported,
+    that a heavy bar with light feathers on it reads as a bar."""
+    lane, trunk = 12.5, 19.0
+    return _fan(120.0, lane, ((lane / 2, 0.74), (100 - lane / 2, 0.52)),
+                trunk=trunk)
+
+
+def tall():
+    """Heavier, and allowed to fill more of the box than the mark ever has.
+
+    calm measures 13.1 points where Dropbox measures 16.0 and 1Password 16.0.
+    This is 15.9, level with both of them, which is taller than the mark that
+    ships as well as the one he picked. A 14 unit lane on that height is 2.23
+    points. The old worry was that a mark filling its box looks bigger than
+    everything next to it; the reply is that his complaint is that it does not."""
+    lane = 14.0
+    return _fan(120.0, lane, ((lane / 2, 0.72), (100 - lane / 2, 0.50)))
+
+
 # How much of the box each mark fills, as a fraction of the standard art
 # height. One number, applied at render time, so a candidate can be tried
 # smaller without its geometry being redrawn.
-FILL = {"calm": 0.87}
+FILL = {"calm": 0.87, "stout": 1.00, "wide": 0.87, "two": 0.92,
+        "spine": 0.90, "tall": 1.06}
 
 
 CANDIDATES = [
@@ -738,6 +841,8 @@ CANDIDATES = [
     ("flow", flow), ("swell", swell), ("stem", stem), ("fillet", fillet_),
     ("near", near), ("duet", duet), ("wake", wake), ("brush", brush),
     ("calm", calm), ("crest", crest),
+    ("stout", stout), ("wide", wide), ("two", two), ("spine", spine),
+    ("tall", tall),
 ]
 
 BLURB = {
@@ -757,11 +862,20 @@ BLURB = {
     "brush": "no caps at all: the weight rises out of nothing and falls back",
     "calm": "flow at 87 percent, so it sits under Dropbox rather than level",
     "crest": "one lane and a shorter one above it, nothing meeting",
+    "stout": "calm heavier, paid for with the height calm gave up",
+    "wide": "calm heavier, paid for with width: shallower arrivals, longer counters",
+    "two": "calm heavier, paid for with a lane: two at 2.76 points instead of three",
+    "spine": "the trunk heavier and the arrivals left at calm's weight",
+    "tall": "calm heavier and 15.9 points tall, level with Dropbox",
 }
 
-# The ten the owner is choosing between, in the order they are shown.
+# The ten the owner was first choosing between, in the order they were shown.
 FLUID = ["flow", "swell", "stem", "fillet", "near",
          "duet", "wake", "brush", "calm", "crest"]
+
+# He picked calm and asked for it heavier. These are the five, and they differ in
+# what each gives back for the weight rather than in how thick they are.
+HEAVIER = ["stout", "wide", "two", "spine", "tall"]
 
 
 # --------------------------------------------------------------- the backends
