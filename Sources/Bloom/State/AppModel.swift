@@ -851,6 +851,10 @@ final class AppModel {
                 title: Git.title(from: spoken, maxLength: 40),
                 model: controls?.model ?? AppDefaults.fallbackModel,
                 effort: controls?.effort ?? AppDefaults.fallbackEffort,
+                // The sheet chooses a backend for the first chat and for no other. Every chat
+                // opened afterwards picks its own, and two chats in one worktree can be on
+                // different ones.
+                agentKind: controls?.agentKind ?? .claudeCode,
                 permissionMode: controls?.permissionMode ?? AppDefaults.fallbackPermissionMode
             ))
             // Fast mode has no column, and the marker stops the composer's first-open defaults

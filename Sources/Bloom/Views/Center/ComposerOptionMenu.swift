@@ -6,6 +6,14 @@ import SwiftUI
 /// is a setting nobody changes per task, and per task is exactly the granularity these need.
 struct ComposerOptionMenu: View {
     var options: [ComposerOption]
+    /// When set, the rows are grouped under headings instead of run together. The model menu is
+    /// the one that needs it: with two backends a flat list of five names says nothing about which
+    /// agent each name belongs to, and picking a name is picking an agent.
+    var sections: [ComposerModelSection]?
+    /// A disabled line under the rows, for something the menu has to explain rather than offer.
+    /// Codex has no Plan mode, and a picker that simply dropped it would leave somebody who knows
+    /// Bloom has one wondering where it went.
+    var footnote: String?
     var selection: String
     /// What the list is a list of, drawn as the menu's own heading, or nil when the items name
     /// their own category and a heading over them would only be a word to read past.
@@ -62,8 +70,20 @@ struct ComposerOptionMenu: View {
     @ViewBuilder
     private var items: some View {
         let picker = Picker(heading ?? help, selection: binding) {
-            ForEach(options) { option in
-                Text(option.label).tag(option.id)
+            if let sections {
+                // One `Picker` with sections inside it rather than a picker per section: the tick
+                // belongs to the selection, and two pickers would each draw one.
+                ForEach(sections) { section in
+                    Section(section.title) {
+                        ForEach(section.options) { option in
+                            Text(option.label).tag(option.id)
+                        }
+                    }
+                }
+            } else {
+                ForEach(options) { option in
+                    Text(option.label).tag(option.id)
+                }
             }
         }
         .pickerStyle(.inline)
@@ -72,6 +92,13 @@ struct ComposerOptionMenu: View {
             picker.labelsHidden()
         } else {
             picker
+        }
+
+        if let footnote {
+            Divider()
+            // Plain text in a menu draws as a disabled row, which is what this is: something to
+            // read, not something to press.
+            Text(footnote)
         }
     }
 
@@ -83,6 +110,6 @@ struct ComposerOptionMenu: View {
     }
 
     private var label: String {
-        ComposerOption.label(for: selection, in: options)
+        ComposerOption.label(for: selection, in: sections?.flatMap(\.options) ?? options)
     }
 }

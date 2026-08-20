@@ -92,7 +92,7 @@ final class TranscriptModel {
     /// clear afterwards. See `jumpToLiveEnd`.
     private(set) var liveEndRequests = 0
 
-    private var runner: AgentRunner?
+    private var runner: (any SessionRunner)?
     private var pumpTask: Task<Void, Never>?
     private var indexByRefID: [String: Int] = [:]
     /// When the current turn was handed to the runner, so a session row written before that can be
@@ -324,10 +324,16 @@ final class TranscriptModel {
 
     /// Starts the runner and the event pump on first use. The pump is rebuilt whenever it is
     /// missing, so no path can leave a live runner with nothing reading its events.
-    private func ensureRunner() -> AgentRunner {
-        let runner = self.runner ?? AgentRunner(
-            workspacePath: workspace.path,
+    ///
+    /// Which runner is the chat's own answer, read off `session.agentKind`, and it is read once:
+    /// a chat that has started is on the backend it started on for as long as it lives. Changing
+    /// the picker on a chat that has already spoken forks a new chat rather than turning this one
+    /// into something else, because its rows, its thread and its context all belong to the backend
+    /// that made them. See `ComposerBackendChange` and CODEX.md.
+    private func ensureRunner() -> any SessionRunner {
+        let runner = self.runner ?? Self.makeRunner(
             session: session,
+            workspacePath: workspace.path,
             store: app.store!
         )
         self.runner = runner
@@ -335,7 +341,26 @@ final class TranscriptModel {
         return runner
     }
 
-    private func startPump(on runner: AgentRunner) {
+    /// The one place a backend becomes a process. Static and taking only values, so which runner a
+    /// session gets can be asserted on without a workspace, a store or a view.
+    static func makeRunner(
+        session: Session,
+        workspacePath: String,
+        store: Store
+    ) -> any SessionRunner {
+        switch session.agentKind {
+        case .codex:
+            return CodexRunner(workspacePath: workspacePath, session: session, store: store)
+        // Cursor and OpenCode have no runner, and `AgentKind.canRunWorkspaces` is what stops a
+        // chat ever being on one. A chat that somehow is falls back to Claude Code rather than
+        // refusing to start, because a transcript that cannot be typed into is a worse answer
+        // than one running the backend every existing chat already runs.
+        case .claudeCode, .cursor, .openCode:
+            return AgentRunner(workspacePath: workspacePath, session: session, store: store)
+        }
+    }
+
+    private func startPump(on runner: any SessionRunner) {
         pumpTask = Task { [weak self] in
             for await event in runner.events {
                 guard let self else { return }

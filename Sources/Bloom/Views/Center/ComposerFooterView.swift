@@ -37,6 +37,10 @@ struct ComposerFooterView: View {
     @State private var extraModels: [String] = []
     @State private var extraEfforts: [String] = []
 
+    /// Shared, because `ViewThatFits` below builds this row three times and three copies would be
+    /// three fetches of the Codex model list.
+    private var catalog: ComposerModelCatalog { ComposerModelCatalog.shared }
+
     var body: some View {
         // The footer is a fixed row of controls in a pane whose width the user owns: the centre
         // column can be dragged to 420 points and then split in two, and at that width the full
@@ -51,11 +55,14 @@ struct ComposerFooterView: View {
             row(isCompact: true, showsContext: false)
         }
         .onChange(of: controls.model, initial: true) { _, id in
-            remember(id, known: ComposerOption.models, in: &extraModels)
+            remember(id, known: catalog.options(for: controls.agentKind), in: &extraModels)
         }
         .onChange(of: controls.effort, initial: true) { _, id in
-            remember(id, known: ComposerOption.efforts, in: &extraEfforts)
+            remember(id, known: efforts, in: &extraEfforts)
         }
+        // On appearance rather than on first use of the menu, so the Codex section is there when
+        // the menu is opened rather than a moment after. It fetches once.
+        .task { if showsAgentControls { catalog.load() } }
     }
 
     /// Files an id the built-in list has no entry for, once.
@@ -68,7 +75,11 @@ struct ComposerFooterView: View {
         HStack(spacing: Metrics.spacingTight) {
             if showsAgentControls {
                 ComposerOptionMenu(
-                    options: ComposerOption.adding(extraModels, to: ComposerOption.models),
+                    options: [],
+                    // One section per backend that can run a chat. A flat list of five names says
+                    // nothing about which agent each one belongs to, and picking a name here is
+                    // picking an agent.
+                    sections: catalog.sections(includingCurrent: controls.model, on: controls.agentKind),
                     selection: controls.model,
                     // No heading. Opus 5 and Sonnet 5 are names, and the chip this opened from is
                     // showing one of them.
@@ -76,11 +87,11 @@ struct ComposerFooterView: View {
                     systemImage: "sparkle",
                     isCompact: isCompact,
                     help: "Choose the model",
-                    onSelect: { id in edit { $0.model = id } }
+                    onSelect: selectModel
                 )
 
                 ComposerOptionMenu(
-                    options: ComposerOption.adding(extraEfforts, to: ComposerOption.efforts),
+                    options: ComposerOption.adding(extraEfforts, to: efforts),
                     selection: controls.effort,
                     heading: "Reasoning effort",
                     systemImage: "chart.bar.fill",
@@ -90,7 +101,10 @@ struct ComposerFooterView: View {
                 )
 
                 ComposerOptionMenu(
-                    options: ComposerOption.permissionModes,
+                    options: controls.availablePermissionModes.map {
+                        ComposerOption(id: $0.rawValue, label: $0.label)
+                    },
+                    footnote: controls.missingPermissionModeNote,
                     selection: controls.permissionMode.rawValue,
                     heading: "Permission mode",
                     systemImage: Self.permissionGlyph(controls.permissionMode),
@@ -166,6 +180,35 @@ struct ComposerFooterView: View {
     private func selectPermissionMode(_ id: String) {
         guard let mode = PermissionMode(rawValue: id) else { return }
         edit { $0.permissionMode = mode }
+    }
+
+    /// The efforts the chosen model actually takes.
+    ///
+    /// Claude Code's five are the same for every model. Codex's differ per model, measured against
+    /// the real `model/list`: `gpt-5.6-sol` takes six levels up to `ultra`, `gpt-5.5` stops at
+    /// `xhigh`. Offering a level the model does not take is offering something the server refuses.
+    private var efforts: [ComposerOption] {
+        catalog.efforts(for: controls.agentKind, model: controls.model)
+    }
+
+    /// Choosing a model out of another backend's section is choosing that backend.
+    ///
+    /// Three things move together, which is why this is not three separate edits: the model, the
+    /// backend it belongs to, and the effort, which has to land on something the new model takes.
+    /// The caller decides what changing the backend means, because a chat that has already spoken
+    /// forks rather than changing. See `BackendChange`.
+    private func selectModel(_ id: String) {
+        let backend = catalog.backend(ofModel: id, current: controls.agentKind)
+        edit {
+            $0.model = id
+            $0.agentKind = backend
+            $0.effort = catalog.resolvedEffort($0.effort, for: backend, model: id)
+            // A mode the new backend does not have cannot survive the move. Codex has no Plan, and
+            // a chat left holding it would be in a mode nothing implements.
+            if !$0.availablePermissionModes.contains($0.permissionMode) {
+                $0.permissionMode = .acceptEdits
+            }
+        }
     }
 
     private static func permissionGlyph(_ mode: PermissionMode) -> String {

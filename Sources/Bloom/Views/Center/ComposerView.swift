@@ -205,15 +205,66 @@ struct ComposerView: View {
         }
 
         let session = transcript.session
+
+        // Picking a model out of the other backend's section is picking that backend, and what
+        // that means depends on whether this chat has said anything yet.
+        switch BackendChange.decide(
+            from: session.agentKind,
+            to: new.agentKind,
+            hasSpoken: !transcript.rows.isEmpty
+        ) {
+        case .fork(let kind):
+            fork(onto: kind, with: new)
+            return
+        case .changeInPlace, .unchanged:
+            break
+        }
+
         guard new.model != session.model
             || new.effort != session.effort
+            || new.agentKind != session.agentKind
             || new.permissionMode != session.permissionMode
         else { return }
 
         sessionEditor.apply {
             $0.model = new.model
             $0.effort = new.effort
+            $0.agentKind = new.agentKind
             $0.permissionMode = new.permissionMode
+        }
+    }
+
+    /// A chat that has already spoken gets a new chat beside it rather than being turned into
+    /// something else.
+    ///
+    /// Its rows are written in its backend's vocabulary, its thread id names a thread on that
+    /// backend's server and its context lives there, so changing it in place would leave a
+    /// transcript half in one vocabulary and half in the other, and a resume that resumes nothing.
+    /// Same workspace, same worktree, same branch: a fork is cheap, and it is far less surprising
+    /// than losing the conversation that is on screen.
+    private func fork(onto kind: AgentKind, with controls: ComposerControls) {
+        guard let model, let store = app.store else { return }
+        let title = BackendChange.forkedTitle(transcript.session.title, to: kind)
+        let draft = transcript.draft
+
+        Task { @MainActor in
+            guard let session = await model.createSession(title: title) else { return }
+            // Narrow, as every write from this side has to be: `upsert` would put back the state
+            // and the counters a runner owns, and this row already exists by the time we get here.
+            try? await store.updateSessionPreferences(
+                id: session.id,
+                model: controls.model,
+                effort: controls.effort,
+                permissionMode: controls.permissionMode,
+                agentKind: kind
+            )
+            await controls.store(sessionID: session.id, in: store)
+            // The words that were typed go with it. A picker press must never be a way to lose a
+            // prompt somebody is halfway through writing.
+            if !draft.isEmpty {
+                try? await store.saveDraft(sessionID: session.id, body: draft)
+            }
+            await model.reloadSessions()
         }
     }
 

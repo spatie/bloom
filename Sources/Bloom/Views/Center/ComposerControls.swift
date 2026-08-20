@@ -16,17 +16,23 @@ import BloomCore
 struct ComposerControls: Equatable, Sendable {
     var model: String
     var effort: String
+    /// Which CLI runs the chat. Not a picker of its own: choosing a model out of the Codex section
+    /// is choosing Codex, because a model already names its backend and a second menu saying the
+    /// same thing would be a second thing to keep in step.
+    var agentKind: AgentKind
     var permissionMode: PermissionMode
     var isFastMode: Bool
 
     init(
         model: String = AppDefaults.fallbackModel,
         effort: String = AppDefaults.fallbackEffort,
+        agentKind: AgentKind = .claudeCode,
         permissionMode: PermissionMode = AppDefaults.fallbackPermissionMode,
         isFastMode: Bool = false
     ) {
         self.model = model
         self.effort = effort
+        self.agentKind = agentKind
         self.permissionMode = permissionMode
         self.isFastMode = isFastMode
     }
@@ -35,9 +41,28 @@ struct ComposerControls: Equatable, Sendable {
         self.init(
             model: session.model,
             effort: session.effort,
+            agentKind: session.agentKind,
             permissionMode: session.permissionMode,
             isFastMode: isFastMode
         )
+    }
+
+    /// The modes this backend actually has.
+    ///
+    /// Codex has no Plan. Its permission story is an approval policy crossed with a sandbox, and
+    /// there is nothing in that grid that means "work it out and do not touch anything". Offering
+    /// the mode anyway would be a control that silently does nothing.
+    var availablePermissionModes: [PermissionMode] {
+        switch agentKind {
+        case .codex: PermissionMode.allCases.filter { $0 != .plan }
+        case .claudeCode, .cursor, .openCode: PermissionMode.allCases
+        }
+    }
+
+    /// What a menu says about the mode that is missing, so somebody who knows Bloom has a Plan
+    /// mode is not left wondering where it went.
+    var missingPermissionModeNote: String? {
+        agentKind == .codex ? "Plan is a Claude Code mode. Codex has no equivalent." : nil
     }
 
     /// What a session that does not exist yet should start out as, by the rules in
