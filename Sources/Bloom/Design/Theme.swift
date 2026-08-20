@@ -521,7 +521,7 @@ enum Motion {
     /// rest arriving.
     static let arrival: Animation = .easeOut(duration: 0.18)
 
-    /// One pass of the light along the window's shared rule. See `RuleSweep`.
+    /// One crossing of the window's shared rule by the light, out or back. See `RuleSweep`.
     ///
     /// Deliberately nothing like `pane`, and this is the one place in the file where that is the
     /// right answer. Everything else here is a response: something was pressed and the window
@@ -530,9 +530,17 @@ enum Motion {
     /// would be a flick rather than a pass. Three seconds is slow enough to read as texture from
     /// the far edge of vision and never fast enough to pull the eye off the transcript.
     ///
-    /// `easeInOut` rather than `linear` because both ends of the travel are off the rule, so the
-    /// slow part of the curve is spent where the light cannot be seen and what is on screen is
-    /// close to constant speed.
+    /// `easeInOut` rather than `linear` because the light does not leave the rule at the end of a
+    /// crossing any more, it turns round on it, and this curve is what the turn is made of: it
+    /// puts the light's speed at zero on the frame it reaches an end and takes it back up from
+    /// there, so the two legs are the halves of one movement rather than two crossings stitched
+    /// together. The same shape macOS gives its own indeterminate bar, measured off one rather
+    /// than assumed. See `RuleSweep`.
+    ///
+    /// Three seconds is a crossing, and out and back is six. Nothing waits any more: the light
+    /// used to travel for three seconds of every four and a half and be parked off the far edge
+    /// for the rest, so a crossing now begins every three seconds where one began every four and
+    /// a half.
     static let sweep: Animation = .easeInOut(duration: 3)
 
 }

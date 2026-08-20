@@ -80,17 +80,41 @@ final class SharedRule {
 /// A light that stutters is one drawn over the tab and clipped by something else; this one is
 /// under it. Verified at 1x and 2x, in both appearances, with a tab selected and with none.
 ///
+/// # Out, and back
+///
+/// The light crosses the rule, turns round on the far end and crosses back, rather than crossing
+/// once and jumping to the leading edge to start again. That is the shape of the one indeterminate
+/// bar every Mac already has, and it was read off that bar rather than guessed at: an indeterminate
+/// `NSProgressIndicator` carries a repeating group on the layer that holds its pill, and inside it
+/// a keyframed `transform` whose two values are the identity and a horizontal mirror of the track,
+/// held for half the cycle each. One pass of the pill, played twice, seen the second time in a
+/// mirror. Sampled off the presentation layer at fifty milliseconds, the pill's travel inside a
+/// pass runs 8, 16, 22, 31, 38, 43, 47, 45, 44, 39, 32, 25, 17, 10, 3 points: an ease in and out
+/// whose peak is 1.68 times its mean, where a cubic ease in and out is 1.66. So both ends of every
+/// pass are eased, and the mirror is what turns it round.
+///
+/// This does the same thing without the mirror, because a mirror would also reverse the gradient
+/// and the light is symmetric anyway. `BusyPulse.isSweepingOut` names the end the light is heading
+/// for and `Motion.sweep` is the ease, run unchanged on both legs. The light therefore arrives at
+/// an end with its speed at zero and leaves it with its speed at zero, which is the whole of why
+/// the turn does not read as a bounce off a wall.
+///
+/// The turn happens *on* the rule. The old pass ran the light off both ends, because the return
+/// was a jump and a jump has to happen where it cannot be seen; there is no jump left to hide, so
+/// the light now travels between the two ends of the rule itself and the turn is something to
+/// look at rather than something that happened offstage.
+///
 /// # What it costs
 ///
-/// A `transform` on one 160 by 1 layer per segment, handed to Core Animation when the pass starts
-/// and interpolated by the render server. This body runs twice in a four and a half second cycle,
-/// because `BusyPulse.isSweeping` is published rather than derived from the tick. Nothing is
+/// A `transform` on one 160 by 1 layer per segment, handed to Core Animation when a crossing
+/// starts and interpolated by the render server. This body runs twice in a six second cycle,
+/// because `BusyPulse.isSweepingOut` is published rather than derived from the tick. Nothing is
 /// repainted per frame: the gradient is a fixed one that is moved, not a moving one that is
 /// redrawn, which is the mistake the study named for this variation specifically.
 struct RuleSweep: View {
     /// Which piece of the rule this is. It decides where along the rule the light enters, and
     /// nothing else: both segments run the same animation over the same distance at the same
-    /// moment, which is what makes the crossing continuous.
+    /// moment, which is what makes the crossing continuous, in either direction.
     enum Segment {
         case tabStrip
         case inspector
@@ -122,7 +146,7 @@ struct RuleSweep: View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
             .clipped()
-            // The signal goes out rather than being cut off. A turn can finish at any moment,
+            // The signal goes out rather than being cut off. An agent's turn can finish at any moment,
             // including with the light halfway along the rule, and a full strength segment
             // vanishing between two frames in the middle of the window is a pop. Measured on a
             // capture of three agents finishing one after another: the pass in flight when the
@@ -156,20 +180,22 @@ struct RuleSweep: View {
 
     private var light: some View {
         let origin = segment == .tabStrip ? 0 : rule.inspectorOrigin
-        let isSweeping = pulse.isSweeping
+        let isOut = pulse.isSweepingOut
 
         return LinearGradient(
             colors: [.clear, Palette.accent, .clear], startPoint: .leading, endPoint: .trailing
         )
         .frame(width: Self.length, height: Metrics.hairline)
-        // Both ends are off the rule, which is what lets the return leg be a jump rather than a
-        // second animation: at the start of a pass the light is entirely past the window's leading
-        // edge and at the end of one it is entirely past the trailing edge, so the frame it snaps
-        // back on is a frame in which it is not on screen.
-        .offset(x: isSweeping ? rule.length - origin : -Self.length - origin)
-        // The pass is animated and the return is not. `.animation(_:value:)` reads the animation
-        // at the moment the value changes, so the same expression gives the travel its curve on
-        // the way out and gives the reset none on the way back.
-        .animation(isSweeping ? Motion.sweep : nil, value: isSweeping)
+        // What travels between the two ends of the rule is the bright core in the middle of the
+        // gradient, not the gradient's edge, which is why half its width comes off the offset.
+        // At an end the far half of the gradient hangs past the rule and the core sits on its
+        // last point: the light touches the end rather than leaving by it, and it is at its
+        // dimmest exactly where it is slowest.
+        .offset(x: (isOut ? rule.length : 0) - Self.length / 2 - origin)
+        // One curve, on both legs. `Motion.sweep` eases in and out, so the light reaches an end
+        // with its speed already at zero and leaves it the same way, and the turn is the two
+        // halves of one movement rather than two crossings stitched together. Nothing here is
+        // unanimated any more, because there is no longer a jump that had to be.
+        .animation(Motion.sweep, value: isOut)
     }
 }

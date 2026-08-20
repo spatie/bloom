@@ -23,8 +23,9 @@ import BloomCore
 /// the mistake `WorkspaceRunningGlyph` records.
 ///
 /// The tick is the unit both marks are built from, so both are exact multiples of it: the figure
-/// runs one half of its wave per tick and the light takes `sweepTicks` to cross. They meet at the
-/// top of every sweep rather than every forty seconds.
+/// runs one half of its wave per tick, the light takes `passTicks` to cross the rule and
+/// `sweepTicks` to go out and come back. They meet at the top of every sweep rather than every
+/// forty seconds.
 ///
 /// It runs only while something is running, and only while the window is the front one. See
 /// `BusyPulseDriver`, which is the single place that decides.
@@ -39,14 +40,21 @@ final class BusyPulse {
     /// tick and back up them on the next, so a whole wave is a second and a half.
     static let tickInterval: Duration = .milliseconds(750)
 
-    /// How many ticks one pass of the light along the rule takes, counting the beats it spends
-    /// parked off the far end. Three of the figure's waves to the sweep, exactly.
-    static let sweepTicks = 6
+    /// How many ticks the light takes to cross the rule once, in either direction.
+    ///
+    /// Four, which is three seconds, and it is the same three seconds a crossing has always
+    /// taken. What changed is the end of it. The light used to spend the two ticks after a
+    /// crossing parked off the far edge and then jump back to the leading one; now it turns round
+    /// and crosses back. So the speed of a crossing is untouched, the dead beat is gone, and a
+    /// crossing begins every three seconds where one used to begin every four and a half.
+    static let passTicks = 4
 
-    /// How much of that pass is travel. The rest is the pause the mockup's V1 has at the end of
-    /// its keyframes, and it is what keeps this reading as one deliberate pass rather than as
-    /// something being scrolled.
-    static let sweepTravelTicks = 4
+    /// How many ticks the whole figure takes: out, and back.
+    ///
+    /// Six seconds, which is four of the sidebar figure's waves, so the two marks still meet at
+    /// the top of every cycle. `4815630` locked them to each other and this keeps them locked:
+    /// the count changed, the fact that it is a whole number of waves did not.
+    static let sweepTicks = passTicks * 2
 
     /// Where the clock is in its cycle, `0 ..< sweepTicks`.
     ///
@@ -63,12 +71,19 @@ final class BusyPulse {
     /// anything is running.
     private(set) var isTicking = false
 
-    /// Whether the light is crossing the rule, as opposed to parked off the end of it.
+    /// Which way the light is travelling: towards the far end of the rule, or back to the near
+    /// one.
+    ///
+    /// A direction rather than a position, because the two ends are all Core Animation needs. It
+    /// is handed the end the light is going to and interpolates the whole crossing itself, and
+    /// flipping this is the whole of what turns the light round. The same curve runs on both
+    /// legs, so the light reaches an end with its speed already at zero and leaves it the same
+    /// way: the turn is two halves of one movement rather than two passes stitched together.
     ///
     /// Published rather than derived from `tick` at the call site so that `RuleSweep`'s body runs
-    /// twice in a cycle instead of nine times. The rows have no equivalent because their figure
+    /// twice in a cycle instead of eight times. The rows have no equivalent because their figure
     /// changes on every tick anyway.
-    private(set) var isSweeping = false
+    private(set) var isSweepingOut = false
 
     /// Which half of its wave the sidebar's figure is in.
     ///
@@ -89,18 +104,18 @@ final class BusyPulse {
         clock = nil
 
         guard wanted else {
-            // Left where the resting states expect to find it: nothing sweeping, and the figure
-            // at full strength rather than caught halfway down its own ramp.
-            isSweeping = false
+            // Left where the resting states expect to find it: the light back at the near end,
+            // and the figure at full strength rather than caught halfway down its own ramp.
+            isSweepingOut = false
             isWaveHigh = false
             tick = Self.sweepTicks - 1
             return
         }
 
-        // One short of the top, so the first tick is the one that starts a sweep. Without it the
-        // clock would begin already inside a travel, and an animation whose value did not change
-        // is an animation that never runs: the first pass would be skipped and the light would
-        // sit off the leading edge for four and a half seconds.
+        // One short of the top, so the first tick is the one that starts a crossing. Without it
+        // the clock would begin already inside a travel, and an animation whose value did not
+        // change is an animation that never runs: the first crossing would be skipped and the
+        // light would sit at the near end of the rule for six seconds.
         set(tick: Self.sweepTicks - 1)
 
         clock = Task { [weak self] in
@@ -120,8 +135,8 @@ final class BusyPulse {
     /// in step with the clock on the wall.
     private func set(tick newTick: Int) {
         tick = newTick
-        let sweeping = newTick < Self.sweepTravelTicks
-        if sweeping != isSweeping { isSweeping = sweeping }
+        let out = newTick < Self.passTicks
+        if out != isSweepingOut { isSweepingOut = out }
         let high = newTick.isMultiple(of: 2)
         if high != isWaveHigh { isWaveHigh = high }
     }
