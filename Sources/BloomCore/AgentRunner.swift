@@ -776,8 +776,20 @@ public actor AgentRunner {
     public nonisolated func cancelNow() {
         let generation = handle.generation
         let request = handle.requestCancel(generation)
+        // Answer before the signal, not after. `requestCancel` has already marked the run
+        // cancelled, so the deny inside `cancel(generation:)` is now unreachable, and `terminate`
+        // below closes the stream a blocked turn is waiting on. Doing it in the other order is
+        // what the model actually receives: measured against the real CLI, Stop used to hand it
+        // "AbortError: Tool permission stream closed" where it now gets a sentence saying the turn
+        // was stopped before the question could be answered.
+        let denied = denyPendingAsks(PermissionDecision.stoppedMessage)
         if request.accepted { request.process?.terminate() }
-        Task { await self.cancel(generation: generation) }
+        Task { [weak self] in
+            if !denied.isEmpty {
+                await self?.recordDenied(denied, as: PermissionAskOutcome.stopped)
+            }
+            await self?.cancel(generation: generation)
+        }
     }
 
     // MARK: Wire formats

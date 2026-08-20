@@ -1007,6 +1007,28 @@ struct AgentRunnerPermissionTests {
         }
     }
 
+    /// Stop from a button, which is the path a person actually takes. `cancelNow` signals the
+    /// process synchronously so a busy actor cannot delay it, which means the deny has to be
+    /// written before the signal rather than inside the actor work behind it. Against the real CLI
+    /// the wrong order hands the model "AbortError: Tool permission stream closed" instead of a
+    /// sentence.
+    @Test("Stop from a button answers the question before it signals the process")
+    func cancelNowDeniesFirst() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        let (runner, process) = try await running(store, session: session)
+        await runner.ingest(.permissionAsk(ask()))
+
+        runner.cancelNow()
+
+        let answer = try #require(answers(on: process).first)
+        #expect(answer["response"]?["response"]?["behavior"]?.stringValue == "deny")
+        #expect(answer["response"]?["response"]?["message"]?.stringValue
+            == PermissionDecision.stoppedMessage)
+        // Written while the pipe was still open, which is the whole point.
+        #expect(process.wasTerminated)
+    }
+
     @Test("quitting denies in words too, and says it was Bloom that did it")
     func quitDenies() async throws {
         let store = try makeTestStore("perm")
