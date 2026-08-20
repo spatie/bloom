@@ -216,6 +216,9 @@ final class AppModel {
 
     private var refreshTask: Task<Void, Never>?
     private var identityTask: Task<Void, Never>?
+    /// The launch sweep for project icons. Not private, because the work it does is in
+    /// `AppModel+ProjectIcons.swift`, and outside observation because nothing draws from it.
+    @ObservationIgnored var iconSearchTask: Task<Void, Never>?
 
     // MARK: - Lifecycle
 
@@ -251,6 +254,10 @@ final class AppModel {
         // and `Shell.run` terminates the child when its task is cancelled.
         identityTask = Task { await GitHubIdentity.resolve() }
         startBackgroundRefresh()
+        // Last, and nothing waits for it: the window is already drawn by the time this runs, and
+        // every project it has anything to do is one that is drawing its initials meanwhile. See
+        // `searchForMissingProjectIcons`.
+        startProjectIconSearch()
     }
 
     /// The app is fully usable when the copy out of the old directory fails: it just ran the
@@ -277,6 +284,8 @@ final class AppModel {
         refreshTask = nil
         identityTask?.cancel()
         identityTask = nil
+        iconSearchTask?.cancel()
+        iconSearchTask = nil
 
         let models = Array(workspaceModels.values)
         // Signal every agent first, so the SIGTERM escalations all run at the same time rather than
@@ -320,6 +329,18 @@ final class AppModel {
         } catch {
             alert = BloomAlert(title: "Could not read workspaces", message: error.readableMessage)
         }
+    }
+
+    /// One project's two icon columns, in memory, after they have been written to the store.
+    ///
+    /// Here because `repos` is `private(set)` and the sweep that calls this lives in
+    /// `AppModel+ProjectIcons.swift`. Named columns rather than a whole `Repo`, for the same
+    /// reason `Store.update(repoID:)` exists: the value the sweep is holding was read before a
+    /// walk of the project's folder, and anything else about the project may have moved since.
+    func adoptProjectIcon(_ path: String?, source: RepoIconSource, forRepoID id: String) {
+        guard let index = repos.firstIndex(where: { $0.id == id }) else { return }
+        repos[index].iconPath = path
+        repos[index].iconSource = source
     }
 
     /// Refreshes diff stats for every active workspace so the sidebar counts stay honest even

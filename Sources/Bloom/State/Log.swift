@@ -32,6 +32,11 @@ enum Log {
     /// did not send.
     static let ping = Logger(subsystem: subsystem, category: "ping")
 
+    /// The launch sweep for project artwork, which is the only work the app does that nobody
+    /// asked for and that changes something on screen. When a badge is suddenly a picture, this
+    /// is where it says which projects it looked at and how long it spent.
+    static let icons = Logger(subsystem: subsystem, category: "icons")
+
     /// The app's own bundle id, so an instance running against `BLOOM_DB_PATH` for a test can be
     /// told apart from the one somebody is using.
     private static let subsystem = Bundle.main.bundleIdentifier ?? "be.spatie.bloom"

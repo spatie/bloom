@@ -34,6 +34,10 @@ struct RepoIcon: View {
     /// invisible (a blue project on the blue bar) or a clash.
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
 
+    /// The crossfade below is dropped rather than slowed when it is off, matching every other
+    /// call site in the app.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     init(name: String, accent: String?, size: CGFloat = Metrics.repoIcon) {
         self.name = name
         self.accent = accent
@@ -43,14 +47,30 @@ struct RepoIcon: View {
     init(repo: Repo?, size: CGFloat = Metrics.repoIcon) {
         self.init(name: repo?.name ?? "", accent: repo?.accent, size: size)
         artwork = repo.flatMap(RepoIconArt.artwork(for:))
+        artworkKey = repo?.hasIcon == true ? repo?.iconPath : nil
     }
 
+    /// Which file is being drawn, or nil for the initials. What the crossfade below watches, and
+    /// nothing else: `RepoArtwork` holds an `NSImage`, which is not a value and cannot be compared.
+    private var artworkKey: String?
+
+    /// Both marks are in the stack at once, so what changes is an opacity rather than a layout.
+    /// The tile is a fixed square either way and neither branch has ever affected the row's
+    /// height, but a mark that swapped by insertion could still flicker its clip shape.
     var body: some View {
-        if let artwork {
-            picture(artwork)
-        } else {
-            monogram
+        ZStack {
+            monogram.opacity(artwork == nil ? 1 : 0)
+            if let artwork { picture(artwork) }
         }
+        // Only when the file behind the badge changes while this view is on screen, which is the
+        // launch sweep answering (`AppModel+ProjectIcons`) and the settings window's three
+        // buttons. A mark that is already artwork when it is first drawn has no change to
+        // animate, so a launch fills the sidebar in one frame exactly as it always did.
+        //
+        // `Motion.arrival` rather than a curve of its own: a project's mark quietly becoming its
+        // real icon is the same size of event as a row settling into a list, and the window has
+        // one speed.
+        .animation(reduceMotion ? nil : Motion.arrival, value: artworkKey)
     }
 
     /// The rounded tile every mark is cut to, so a found icon is the same shape as the letters it
