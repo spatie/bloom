@@ -18,10 +18,12 @@ struct FeedbackImage: Identifiable, Equatable, Sendable {
 
     var byteCount: Int { data.count }
 
-    /// What actually goes in the body. The name is cleaned again on the way through, in the core,
-    /// where the rule is under test.
+    /// What actually goes in the body, which is the bytes and their type. The name above is for
+    /// the chip on the sheet and goes no further: what travels is `attachment.png`, because the
+    /// endpoint does not store a client filename and does check its extension against the bytes.
+    /// See `Feedback.Image`.
     var wire: Feedback.Image {
-        Feedback.Image(filename: filename, contentType: contentType, data: data)
+        Feedback.Image(contentType: contentType, data: data)
     }
 }
 
@@ -31,7 +33,7 @@ struct FeedbackImage: Identifiable, Equatable, Sendable {
 /// decides what a clipboard is offering and `PastedAttachment` owns the rules behind it, so both
 /// doors into this file hand over the same `AttachmentSource` values the composer works in. What
 /// is added is the part a feedback report needs and a worktree attachment does not: pictures only,
-/// a size that fits in a request, and a type the endpoint has heard of.
+/// in a format the endpoint has heard of, inside three separate limits.
 enum FeedbackImages {
     enum Failure: LocalizedError, Equatable {
         case notAnImage(String)
@@ -40,6 +42,8 @@ enum FeedbackImages {
         case tooMany
         case tooMuch
 
+        /// Three limits, three sentences. Which one was hit is the only useful thing this can say,
+        /// because each has a different answer: take one off, crop this one, or both.
         var errorDescription: String? {
             switch self {
             case .notAnImage(let name): Feedback.notAnImageMessage(name: name)
@@ -51,11 +55,15 @@ enum FeedbackImages {
         }
     }
 
-    /// Everything in `sources` that can go with a report, given what is already attached.
+    /// Everything in `sources` that can go with a report, given what is already attached, in the
+    /// order they were handed over.
     ///
-    /// Throws on the first one that cannot, and keeps none of them, which is deliberate: a drop of
-    /// five screenshots where the third is a hundred megabytes should say so once rather than
-    /// silently attaching two of them and leaving somebody to work out which.
+    /// Order is kept deliberately: the far end lists attachments as "Screenshot 1", "Screenshot 2"
+    /// in the order they arrive, so the order somebody put them in is the order they are read in.
+    ///
+    /// Throws on the first one that cannot go, and keeps none of them, which is also deliberate: a
+    /// drop of five screenshots where the third is a hundred megabytes should say so once rather
+    /// than silently attaching two and leaving somebody to work out which.
     ///
     /// `nonisolated`, and every caller runs it off the main actor: this reads files and can
     /// re-encode a picture, neither of which belongs on the actor drawing the sheet.
@@ -83,62 +91,46 @@ enum FeedbackImages {
         switch source {
         case .file(let url):
             return try read(file: url)
-        case .image(let data, let format, let name):
-            // A pasted picture is bytes that never had a file. TIFF is what the pasteboard falls
-            // back to when nothing better was put on it, and `PastedImageFormat` is where the
-            // decision to rewrite it lives, so it is asked rather than second-guessed here.
-            let (bytes, type) = format.isWorthReencoding ? rewritten(data, name: name) : (data, format)
-            return FeedbackImage(filename: name, contentType: mimeType(of: type), data: bytes)
+        case .image(let data, _, let name):
+            // A pasted picture is bytes that never had a file. What those bytes are is read from
+            // the bytes rather than from the format the pasteboard advertised, and a TIFF, which
+            // is what a board falls back to when nothing better was put on it, becomes a PNG here
+            // because the endpoint does not take TIFF at all.
+            guard let (bytes, type) = readable(data) else { throw Failure.notAnImage(name) }
+            return FeedbackImage(filename: name, contentType: type, data: bytes)
         }
     }
 
     private nonisolated static func read(file url: URL) throws -> FeedbackImage {
         let name = url.lastPathComponent
 
-        guard let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .image) else {
-            throw Failure.notAnImage(name)
-        }
-
         // The size is asked of the file system before the bytes are read, so a two gigabyte
-        // picture is refused rather than loaded into memory to be refused.
-        let bytes = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? Int ?? 0
-        guard bytes <= Feedback.maxImageBytes else { throw Failure.tooLarge(name, bytes) }
+        // picture is refused rather than loaded into memory to be refused. The cap is checked
+        // again on what comes out of `readable`, because a re-encode changes the size.
+        let onDisk = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? Int ?? 0
+        guard onDisk <= Feedback.maxImageBytes else { throw Failure.tooLarge(name, onDisk) }
 
         guard let data = try? Data(contentsOf: url), !data.isEmpty else { throw Failure.unreadable(name) }
+        guard let (bytes, type) = readable(data) else { throw Failure.notAnImage(name) }
 
-        let mime = type.preferredMIMEType ?? ""
-        guard Feedback.imageContentTypes.contains(mime) else {
-            // A picture in a format the endpoint has never heard of becomes a PNG, rather than
-            // being refused or sent under a type nobody can open.
-            let (rewrittenData, _) = rewritten(data, name: name)
-            guard rewrittenData != data else { throw Failure.notAnImage(name) }
-            return FeedbackImage(
-                filename: (name as NSString).deletingPathExtension + ".png",
-                contentType: "image/png",
-                data: rewrittenData
-            )
-        }
-
-        return FeedbackImage(filename: name, contentType: mime, data: data)
+        return FeedbackImage(filename: name, contentType: type, data: bytes)
     }
 
-    /// The same picture as a PNG, or the original bytes when it cannot be read as a picture at
-    /// all. Never a lie: bytes that could not be rewritten keep the type they arrived with.
-    private nonisolated static func rewritten(
-        _ data: Data, name: String
-    ) -> (Data, PastedImageFormat) {
+    /// The bytes as they can be sent, and what they are.
+    ///
+    /// Sniffed first, because the endpoint sniffs too and the two have to agree. Anything that is
+    /// a picture in a format nobody here accepts (a TIFF off the clipboard, a BMP somebody saved
+    /// in 2004) is re-encoded as a PNG rather than refused, and anything that is not a picture at
+    /// all comes back nil. Nothing is ever sent under a type it is not.
+    private nonisolated static func readable(_ data: Data) -> (Data, String)? {
+        if let sniffed = Feedback.sniffedContentType(data) { return (data, sniffed) }
+
         guard let representation = NSBitmapImageRep(data: data),
-              let png = representation.representation(using: .png, properties: [:])
-        else { return (data, .tiff) }
-        return (png, .png)
-    }
+              let png = representation.representation(using: .png, properties: [:]),
+              Feedback.sniffedContentType(png) == "image/png"
+        else { return nil }
 
-    private nonisolated static func mimeType(of format: PastedImageFormat) -> String {
-        switch format {
-        case .png: "image/png"
-        case .jpeg: "image/jpeg"
-        case .tiff: "image/png"
-        }
+        return (png, "image/png")
     }
 }
 
@@ -164,36 +156,46 @@ enum FeedbackClient {
         return URLSession(configuration: configuration)
     }()
 
-    static func send(_ report: Feedback.Report) async -> Feedback.Outcome {
+    static func send(_ report: Feedback.Report) async -> Feedback.Result {
         // JSON on its own, multipart the moment there is a picture. Which of the two it is, and
         // how either is written, is `Feedback.body(for:boundary:)` in the core.
-        guard let body = try? Feedback.body(for: report) else { return .refused }
+        guard let body = try? Feedback.body(for: report) else { return Feedback.Result(outcome: .refused) }
         return await post(body, kind: .report, appVersion: report.environment.appVersion)
     }
 
-    static func send(_ submission: Feedback.PromptSubmission) async -> Feedback.Outcome {
-        guard let body = try? Feedback.body(for: submission) else { return .refused }
+    static func send(_ submission: Feedback.PromptSubmission) async -> Feedback.Result {
+        guard let body = try? Feedback.body(for: submission) else { return Feedback.Result(outcome: .refused) }
         return await post(body, kind: .prompt, appVersion: submission.environment.appVersion)
     }
 
     private static func post(
         _ body: Feedback.Body, kind: Feedback.Kind, appVersion: String
-    ) async -> Feedback.Outcome {
+    ) async -> Feedback.Result {
         guard let endpoint = Feedback.endpoint(kind, environment: ProcessInfo.processInfo.environment),
               body.data.count <= Feedback.maximumBodyBytes
-        else { return .refused }
+        else { return Feedback.Result(outcome: .refused) }
 
         let request = Feedback.request(to: endpoint, body: body, appVersion: appVersion)
 
         do {
-            let (_, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return .unreachable }
-            return Feedback.outcome(
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                return Feedback.Result(outcome: .unreachable)
+            }
+
+            let outcome = Feedback.outcome(
                 statusCode: http.statusCode,
                 retryAfter: http.value(forHTTPHeaderField: "Retry-After")
             )
+            // Only off a reply that was actually taken, and only when it looks like a reference.
+            // See `Feedback.reference(in:)` for why a server's string is checked before it is
+            // printed into Bloom's own interface.
+            return Feedback.Result(
+                outcome: outcome,
+                reference: outcome == .sent ? Feedback.reference(in: data) : nil
+            )
         } catch {
-            return .unreachable
+            return Feedback.Result(outcome: .unreachable)
         }
     }
 }

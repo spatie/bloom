@@ -28,6 +28,9 @@ struct FeedbackSheet: View {
     @State private var isFocused = false
     @State private var contentHeight = ComposerTextEditor.lineHeight
     @State private var phase: FeedbackPhase = .idle
+    /// The handle the far end filed this under, once it has. Nil until then, and again on the next
+    /// attempt. See `Feedback.reference(in:)`.
+    @State private var reference: String?
     @State private var isShowingLogs = false
     @State private var attachmentProblem: String?
     /// Started when the sheet appears and awaited when Send is pressed, so the slowest fact about
@@ -170,7 +173,7 @@ struct FeedbackSheet: View {
 
             Spacer(minLength: Metrics.gutter)
 
-            FeedbackStatus(phase: phase, sentMessage: Feedback.Copy.reportSent)
+            FeedbackStatus(phase: phase, sentMessage: Feedback.Copy.sent(Feedback.Copy.reportSent, reference: reference))
 
             Button("Cancel", role: .cancel) { presenter.close() }
                 .keyboardShortcut(.cancelAction)
@@ -303,6 +306,7 @@ struct FeedbackSheet: View {
 
     private func send() {
         guard !phase.isSending, Feedback.canSend(message: presenter.message) else { return }
+        reference = nil
         phase = .sending
 
         Task {
@@ -321,17 +325,20 @@ struct FeedbackSheet: View {
                 environment: environment
             )
 
-            let outcome = await FeedbackClient.send(report)
+            let result = await FeedbackClient.send(report)
 
-            guard outcome == .sent else {
-                phase = .failed(Feedback.failureMessage(outcome) ?? "That did not send.")
+            guard result.isSent else {
+                phase = .failed(Feedback.failureMessage(result.outcome) ?? "That did not send.")
                 return
             }
 
+            reference = result.reference
             phase = .sent
             // Cleared only here, on the one outcome that means the words have arrived somewhere.
             presenter.clearReport()
-            try? await Task.sleep(for: feedbackSuccessPause)
+            // Longer when there is a reference on the line, because it is only worth putting
+            // there if somebody has time to read it.
+            try? await Task.sleep(for: reference == nil ? feedbackSuccessPause : feedbackReferencePause)
             presenter.close()
         }
     }

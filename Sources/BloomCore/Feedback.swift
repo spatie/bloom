@@ -110,33 +110,41 @@ public enum Feedback {
 
     /// How many pictures may go with one submission, and how big each may be. The endpoint's
     /// numbers.
+    ///
+    /// Eight megabytes a file rather than four, because a Retina window screenshot really can be
+    /// six: a cap that refuses the commonest thing anybody would attach is not a safety limit, it
+    /// is a bug with a sentence attached.
     public static let maxImages = 5
-    public static let maxImageBytes = 4 * 1024 * 1024
+    public static let maxImageBytes = 8 * 1024 * 1024
 
     /// How much picture Bloom will put in one request.
     ///
-    /// Below five times the per-image cap on purpose. Twenty megabytes of screenshots is not a bug
+    /// Below five times the per-file cap on purpose. Forty megabytes of screenshots is not a bug
     /// report, it is an upload, and the honest place to refuse it is here, with a sentence, rather
     /// than at the far end with a 413.
     public static let maxTotalImageBytes = 12 * 1024 * 1024
 
-    /// What a request may weigh in total, after multipart framing.
-    public static let maximumBodyBytes = 16 * 1024 * 1024
+    /// What a request may weigh in total, after multipart framing. The endpoint's own ceiling,
+    /// which is comfortably above the total above.
+    public static let maximumBodyBytes = 14_680_064
 
-    /// What is said when a picture is too big, in the same voice `AttachmentFiles` uses for the
-    /// same refusal in the composer.
+    /// Three limits, three sentences, each naming the one that was hit.
+    ///
+    /// One message for all three would be the easy version and the useless one: "that did not
+    /// work" leaves somebody guessing whether to take a picture off, crop it, or both. In the
+    /// same voice `AttachmentFiles` uses for the same refusal in the composer.
     public static func tooLargeMessage(name: String, bytes: Int) -> String {
-        "\(name) is \(size(bytes)), and Bloom sends images up to \(size(maxImageBytes)) each. "
+        "\(name) is \(size(bytes)), and one image can be \(size(maxImageBytes)) at most. "
             + "Scale it down, or send a crop of the part that matters."
     }
 
     public static func tooManyMessage() -> String {
-        "Bloom sends up to \(maxImages) images with one report."
+        "That is more than \(maxImages) images, which is as many as one report carries."
     }
 
     public static func tooMuchMessage() -> String {
-        "That is more than \(size(maxTotalImageBytes)) of images, which is as much as Bloom sends "
-            + "in one report. Take one off, or send a smaller one."
+        "That is more than \(size(maxTotalImageBytes)) of images all together, which is as much "
+            + "as one report carries. Take one off, or send a smaller one."
     }
 
     public static func notAnImageMessage(name: String) -> String {
@@ -153,8 +161,14 @@ public enum Feedback {
         return "\(limit - count) characters left"
     }
 
+    /// A size as a person would say it.
+    ///
+    /// `.binary`, not `.file`, and only in these sentences. The caps are powers of two, because
+    /// that is how the endpoint counts them, and the decimal style renders eight of those
+    /// megabytes as "8,4 MB": a limit that cannot say its own number out loud is a limit somebody
+    /// will read twice and still not trust.
     static func size(_ bytes: Int) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .binary)
     }
 
     // MARK: - What the machine is
@@ -172,19 +186,45 @@ public enum Feedback {
     public enum InstallSource: String, Sendable, Equatable, CaseIterable, Codable {
         case release
         case local
+        /// A build made from a working tree that had uncommitted changes in it, which is the one
+        /// kind of report where "it does this on my machine" may mean the machine.
+        case localDirty = "local-dirty"
 
-        public init(buildChannel: String?, masterCommit: String?) {
-            let isMasterBuild = !(masterCommit ?? "").isEmpty
-            self = (!isMasterBuild && buildChannel == InstallPing.releaseChannel) ? .release : .local
+        /// `isDirty` is nil when nothing said either way, and then this answers `local`, which is
+        /// the value that is always true of a build that is not a release. Bloom's build scripts
+        /// stamp no such marker today, so today it is always nil; the two shapes below are what a
+        /// stamp would take, so the day one is added nothing here has to change.
+        public init(buildChannel: String?, masterCommit: String?, isDirty: Bool? = nil) {
+            let commit = masterCommit ?? ""
+            let isMasterBuild = !commit.isEmpty
+
+            guard isMasterBuild || buildChannel != InstallPing.releaseChannel else {
+                self = .release
+                return
+            }
+            // `git describe --dirty` writes the suffix itself, so a commit stamped that way says
+            // it without anybody having to add a second key.
+            self = (isDirty == true || commit.hasSuffix(InstallSource.dirtySuffix)) ? .localDirty : .local
         }
+
+        /// What a build script would append to the commit it stamps.
+        public static let dirtySuffix = "-dirty"
+
+        /// An Info.plist key that says it outright, for a build script that would rather be
+        /// explicit than encode it in a commit string.
+        public static let dirtyKey = "BloomSourceDirty"
     }
 
     /// Which slice this process is actually running as.
     ///
     /// The endpoint takes `arm64` or `x86_64`, which are the two things a process can be, so
     /// Rosetta is reported as what it is from the inside: an `x86_64` process. That is the answer
-    /// a bug report needs, because a translated Bloom behaves like an Intel Bloom. The hardware
-    /// underneath it is not sent, and `unknown` sends nothing at all rather than guessing.
+    /// a bug report needs, because a translated Bloom behaves like an Intel Bloom.
+    ///
+    /// Whether it got there by translation is `translated`, a field of its own, because the two
+    /// are genuinely different bugs: a real Intel Mac is `x86_64` and false, and a translated
+    /// process on Apple silicon is `x86_64` and true. `unknown` sends nothing at all rather than
+    /// guessing.
     public enum Architecture: Sendable, Equatable, CaseIterable {
         case arm64
         case x86_64
@@ -238,6 +278,7 @@ public enum Feedback {
     public enum FieldValue: Sendable, Equatable {
         case text(String)
         case number(Double)
+        case boolean(Bool)
         case list([String])
     }
 
@@ -253,8 +294,8 @@ public enum Feedback {
 
     /// Everything Bloom is allowed to say about where it is running, and nothing else.
     ///
-    /// Twelve stored properties and no dictionary, so there is no shape of this type that carries
-    /// a thirteenth fact. Every string is checked against the pattern the endpoint validates it
+    /// Thirteen stored properties and no dictionary, so there is no shape of this type that
+    /// carries a fourteenth fact. Every string is checked against the pattern the endpoint validates it
     /// with, by the same two functions the install ping is checked with, so the two can never
     /// disagree about what a version string looks like. A field that does not match is left out of
     /// the body: the endpoint takes an environment block with any subset of its keys, so a fact
@@ -270,6 +311,9 @@ public enum Feedback {
         /// `26.1.0`.
         public let macOSVersion: String
         public let architecture: Architecture
+        /// Whether this process is running under Rosetta. Nil when the machine could not be
+        /// asked, and then the field is left out rather than answered with a guess.
+        public let translated: Bool?
         public let installSource: InstallSource
         /// Which coding agent Bloom runs here, as `InstallPing.agentName(installed:)` answers it.
         public let agent: String
@@ -294,6 +338,7 @@ public enum Feedback {
             appBuild: String,
             macOSVersion: String,
             architecture: Architecture,
+            translated: Bool? = nil,
             installSource: InstallSource,
             agent: String,
             agentVersion: String = "",
@@ -307,6 +352,9 @@ public enum Feedback {
             self.appBuild = InstallPing.checked(appBuild, InstallPing.appVersionPattern, or: "")
             self.macOSVersion = InstallPing.checked(macOSVersion, InstallPing.systemVersionPattern, or: "")
             self.architecture = architecture
+            // Nothing to say about translation when the slice itself is unknown: the two facts are
+            // read from the same kernel, and half an answer about the processor is worse than none.
+            self.translated = architecture == .unknown ? nil : translated
             self.installSource = installSource
             self.agent = InstallPing.checked(agent, Feedback.slugPattern, or: "")
             self.agentVersion = InstallPing.checked(agentVersion, Feedback.agentVersionPattern, or: "")
@@ -343,6 +391,9 @@ public enum Feedback {
             text("app_build", appBuild)
             text("macos_version", macOSVersion)
             text("architecture", architecture.wireName ?? "")
+            if let translated {
+                found.append(Field(name: "translated", value: .boolean(translated)))
+            }
             text("install_source", installSource.rawValue)
             text("agent", agent)
             text("agent_version", agentVersion)
@@ -364,6 +415,7 @@ public enum Feedback {
                 switch field.value {
                 case .text(let value): try container.encode(value, forKey: key)
                 case .number(let value): try container.encode(value, forKey: key)
+                case .boolean(let value): try container.encode(value, forKey: key)
                 case .list(let value): try container.encode(value, forKey: key)
                 }
             }
@@ -427,18 +479,30 @@ public enum Feedback {
 
     /// One picture attached to a submission.
     ///
-    /// The filename travels as part of the multipart framing because that is how a file part is
-    /// written, and the endpoint deliberately does not store it: a filename is free text and free
-    /// text is where a path leaks. It is cleaned here anyway, on the way out, so nothing is sent
-    /// that was not meant to be sent even for the moment it takes to be dropped.
+    /// **The name is Bloom's, not the user's.** The endpoint does not store a client filename, and
+    /// it checks the extension it is handed against the type it sniffs out of the bytes, refusing
+    /// the pair when the two disagree. So the name is derived from the bytes rather than carried
+    /// from the disk: a picture is attached to say what the screen looked like, and
+    /// `invoices/2026-final-FINAL.png` says something else entirely. It also means a filename can
+    /// no longer be a way for free text to leave this machine, because there is no longer a
+    /// filename coming from outside.
+    ///
+    /// The panel at the other end lists these as "Screenshot 1", "Screenshot 2" in the order they
+    /// are sent, which is why nothing here reorders them: the order is the one the person put them
+    /// in.
     public struct Image: Sendable, Equatable {
-        public let filename: String
         public let contentType: String
         public let data: Data
 
-        public init(filename: String, contentType: String, data: Data) {
-            self.filename = Feedback.safeFilename(filename)
-            self.contentType = Feedback.checkedContentType(contentType)
+        /// `attachment.png`. Bloom's own name for it, and always the extension that goes with what
+        /// the bytes actually are.
+        public var filename: String { "attachment.\(Feedback.fileExtension(for: contentType))" }
+
+        /// The declared type is a hint. What the bytes say wins, because that is what the far end
+        /// sniffs, and a JPEG somebody renamed to `.png` would otherwise be refused for a reason
+        /// nobody could see.
+        public init(contentType: String, data: Data) {
+            self.contentType = Feedback.sniffedContentType(data) ?? Feedback.checkedContentType(contentType)
             self.data = data
         }
     }
@@ -453,22 +517,54 @@ public enum Feedback {
         return imageContentTypes.contains(trimmed) ? trimmed : "image/png"
     }
 
-    /// The last component of a name, with anything that could change what it means taken out.
+    /// The extension that goes with a type, as the endpoint's own list spells it.
     ///
-    /// A path never travels with a picture, so a name that is a path is reduced to its last
-    /// component before anything else happens: `/Users/someone/Desktop/bug.png` is written as
-    /// `bug.png`, and a name that is nothing but slashes and dots becomes `image`.
-    public static func safeFilename(_ raw: String) -> String {
-        var name = (raw as NSString).lastPathComponent
-        name = name.replacingOccurrences(of: ":", with: "-")
-        name = name.replacingOccurrences(of: "\"", with: "-")
-        name = name.replacingOccurrences(of: "\\", with: "-")
-        name = name.replacingOccurrences(of: "\r", with: " ")
-        name = name.replacingOccurrences(of: "\n", with: " ")
-        name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        while name.hasPrefix(".") { name.removeFirst() }
-        guard !name.isEmpty else { return "image" }
-        return String(name.prefix(120))
+    /// `jpg` for JPEG, which is what every camera, every screenshot tool and every save panel on
+    /// this machine writes, and which that list accepts alongside `jpeg`.
+    public static func fileExtension(for contentType: String) -> String {
+        switch contentType {
+        case "image/png": "png"
+        case "image/jpeg": "jpg"
+        case "image/gif": "gif"
+        case "image/webp": "webp"
+        case "image/heic": "heic"
+        case "image/heif": "heif"
+        default: "png"
+        }
+    }
+
+    /// What a run of bytes actually is, read from the first few of them, or nil when it is not a
+    /// picture Bloom can send.
+    ///
+    /// In the core rather than in the app target for two reasons. It is the same question the
+    /// endpoint asks, and the two answers have to agree or the upload is refused; and it is
+    /// answerable from a handful of bytes, which makes it exactly the kind of rule worth pinning
+    /// in a test rather than trusting `UTType` and a file extension for.
+    public static func sniffedContentType(_ data: Data) -> String? {
+        func starts(with bytes: [UInt8], at offset: Int = 0) -> Bool {
+            guard data.count >= offset + bytes.count else { return false }
+            let start = data.index(data.startIndex, offsetBy: offset)
+            return Array(data[start..<data.index(start, offsetBy: bytes.count)]) == bytes
+        }
+
+        func ascii(at offset: Int, length: Int) -> String? {
+            guard data.count >= offset + length else { return nil }
+            let start = data.index(data.startIndex, offsetBy: offset)
+            return String(bytes: data[start..<data.index(start, offsetBy: length)], encoding: .ascii)
+        }
+
+        if starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) { return "image/png" }
+        if starts(with: [0xFF, 0xD8, 0xFF]) { return "image/jpeg" }
+        if ascii(at: 0, length: 6) == "GIF87a" || ascii(at: 0, length: 6) == "GIF89a" { return "image/gif" }
+        if ascii(at: 0, length: 4) == "RIFF", ascii(at: 8, length: 4) == "WEBP" { return "image/webp" }
+
+        // An ISO base media file says which flavour it is in the brand right after `ftyp`.
+        if ascii(at: 4, length: 4) == "ftyp", let brand = ascii(at: 8, length: 4) {
+            if ["heic", "heix", "heim", "heis", "hevc", "hevx"].contains(brand) { return "image/heic" }
+            if ["mif1", "msf1", "heif"].contains(brand) { return "image/heif" }
+        }
+
+        return nil
     }
 
     /// A feedback submission: what somebody wrote, what they chose to attach, which install it is
@@ -601,6 +697,11 @@ public enum Feedback {
                 [.text(name: "environment[\(field.name)]", value: value)]
             case .number(let value):
                 [.text(name: "environment[\(field.name)]", value: number(value))]
+            case .boolean(let value):
+                // `1` and `0`, which is what a form can carry and what Laravel's boolean rule
+                // reads. `true` and `false` as words are accepted too, but the digits are what
+                // every browser sends and are therefore the shape least likely to surprise.
+                [.text(name: "environment[\(field.name)]", value: value ? "1" : "0")]
             case .list(let values):
                 values.map { .text(name: "environment[\(field.name)][]", value: $0) }
             }
@@ -690,6 +791,41 @@ public enum Feedback {
         case unreachable
     }
 
+    /// What came back: what happened, and the handle the far end filed it under.
+    ///
+    /// The reference is the canonical name for a submission at the other end, so it is worth
+    /// showing rather than dropping: it is what support would ask for, what the detail page is
+    /// titled with, and the one string a person could quote in an email a week later.
+    public struct Result: Sendable, Equatable {
+        public let outcome: Outcome
+        public let reference: String?
+
+        public init(outcome: Outcome, reference: String? = nil) {
+            self.outcome = outcome
+            self.reference = reference
+        }
+
+        public var isSent: Bool { outcome == .sent }
+    }
+
+    /// A ULID: 26 characters of Crockford base32, which has no I, L, O or U in it.
+    public static let referencePattern = #"^[0-9A-HJKMNP-TV-Z]{26}$"#
+
+    /// The reference out of a 201 body, or nil when there is not one that looks like a reference.
+    ///
+    /// Checked against the pattern rather than shown as it arrives, because this is a string from
+    /// a server being printed into Bloom's own interface: a reply that is not JSON, or that
+    /// carries a sentence where a ULID should be, is a reply that has no business being read out
+    /// to somebody as their receipt.
+    public static func reference(in data: Data) -> String? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let raw = root["reference"] as? String
+        else { return nil }
+
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return InstallPing.matches(trimmed, referencePattern) ? trimmed : nil
+    }
+
     public static func outcome(statusCode: Int, retryAfter: String? = nil, now: Date = Date()) -> Outcome {
         switch statusCode {
         case 200..<300: .sent
@@ -737,6 +873,16 @@ public enum Feedback {
             "Tell us about your experience, bugs you have found, or features you would like to see…"
         public static let reportSend = "Send feedback"
         public static let reportSent = "Thank you. That has been sent."
+
+        /// The thanks with the handle the submission was filed under, when the server gave one.
+        ///
+        /// Said in the same line rather than in a dialog of its own, and the sheet stays up a
+        /// little longer when there is one, because a receipt nobody had time to read is not a
+        /// receipt. See `feedbackSuccessPause`.
+        public static func sent(_ thanks: String, reference: String?) -> String {
+            guard let reference else { return thanks }
+            return "\(thanks) Reference \(reference)."
+        }
 
         public static let logsToggle = "Include recent app logs (may include personal data)"
         /// The sentence under the checkbox, which says what "recent" means. A checkbox about

@@ -20,6 +20,14 @@ enum FeedbackPhase: Equatable {
 /// worth a button.
 let feedbackSuccessPause = Duration.milliseconds(900)
 
+/// The same, when the server handed back a reference.
+///
+/// Longer, because there is now something on the line worth reading rather than only something
+/// worth noticing: twenty-six characters that somebody may want to write down. It is selectable
+/// while it is up, and it is still not a button, because a receipt that has to be dismissed is a
+/// step added to every report anybody ever files.
+let feedbackReferencePause = Duration.milliseconds(2_600)
+
 /// The heading and the sentence under it, which is the same shape on both sheets.
 struct FeedbackHeader: View {
     var title: String
@@ -63,6 +71,10 @@ struct FeedbackStatus: View {
             Label(sentMessage, systemImage: "checkmark.circle.fill")
                 .font(Typo.label)
                 .foregroundStyle(Palette.positive)
+                // The reference is in this line, and the only reason it is on screen is so it can
+                // be kept. Selectable so it can be.
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
         case .failed(let message):
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .font(Typo.label)

@@ -70,9 +70,14 @@ enum FeedbackEnvironment {
                 major: system.majorVersion, minor: system.minorVersion, patch: system.patchVersion
             ),
             architecture: architecture(),
+            translated: isTranslated(),
             installSource: Feedback.InstallSource(
                 buildChannel: bundle.object(forInfoDictionaryKey: SoftwareUpdate.buildChannelKey) as? String,
-                masterCommit: bundle.object(forInfoDictionaryKey: SoftwareUpdate.masterCommitKey) as? String
+                masterCommit: bundle.object(forInfoDictionaryKey: SoftwareUpdate.masterCommitKey) as? String,
+                // Nothing writes this today, so this is nil and the answer is `local`. It is read
+                // rather than assumed so that the day a build script stamps it, a report from a
+                // modified working tree says so without a change here. See `InstallSource`.
+                isDirty: bundle.object(forInfoDictionaryKey: Feedback.InstallSource.dirtyKey) as? Bool
             ),
             agent: InstallPing.agentName(installed: installed),
             agentVersion: agentVersion,
@@ -99,11 +104,19 @@ enum FeedbackEnvironment {
     /// on, so a translated build would report an Intel Mac and the most interesting report there
     /// is would be filed under the wrong hardware.
     static func architecture() -> Feedback.Architecture {
-        Feedback.Architecture(
-            isARM: sysctlFlag("hw.optional.arm64"),
-            isTranslated: sysctlFlag("sysctl.proc_translated")
-        )
+        Feedback.Architecture(isARM: sysctlFlag(armFlag), isTranslated: isTranslated())
     }
+
+    /// Whether this process is running under Rosetta, which is a fact about the process and not
+    /// about the Mac: the same binary on the same machine can answer differently depending on
+    /// which slice was launched. Sent beside `architecture` rather than folded into it, because
+    /// "Intel Mac" and "translated on Apple silicon" are different bugs.
+    static func isTranslated() -> Bool {
+        sysctlFlag(translatedFlag)
+    }
+
+    static let armFlag = "hw.optional.arm64"
+    static let translatedFlag = "sysctl.proc_translated"
 
     /// One integer sysctl, read as a flag. Absent means no, which is what both of these mean on a
     /// Mac that does not have them.

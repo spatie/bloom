@@ -13,6 +13,7 @@ struct FeedbackTests {
         appBuild: String = "412",
         macOSVersion: String = "26.1.0",
         architecture: Feedback.Architecture = .arm64,
+        translated: Bool? = false,
         installSource: Feedback.InstallSource = .release,
         agent: String = "claude",
         agentVersion: String = "2.1.234",
@@ -27,6 +28,7 @@ struct FeedbackTests {
             appBuild: appBuild,
             macOSVersion: macOSVersion,
             architecture: architecture,
+            translated: translated,
             installSource: installSource,
             agent: agent,
             agentVersion: agentVersion,
@@ -128,7 +130,7 @@ struct FeedbackTests {
 
     // MARK: - The environment block
 
-    @Test("the environment says exactly twelve things and no thirteenth")
+    @Test("the environment says exactly thirteen things and no fourteenth")
     func environmentKeys() throws {
         let json = try object(environment())
 
@@ -137,6 +139,7 @@ struct FeedbackTests {
             "app_build",
             "macos_version",
             "architecture",
+            "translated",
             "install_source",
             "agent",
             "agent_version",
@@ -156,6 +159,7 @@ struct FeedbackTests {
         #expect(json["app_build"] as? String == "412")
         #expect(json["macos_version"] as? String == "26.1.0")
         #expect(json["architecture"] as? String == "arm64")
+        #expect(json["translated"] as? Bool == false)
         #expect(json["install_source"] as? String == "release")
         #expect(json["agent"] as? String == "claude")
         #expect(json["agent_version"] as? String == "2.1.234")
@@ -171,6 +175,7 @@ struct FeedbackTests {
         let json = try object(
             environment(
                 appVersion: "", appBuild: "", macOSVersion: "", architecture: .unknown,
+                translated: true,
                 agent: "", agentVersion: "", availableAgents: [], permissionMode: "", locale: ""
             )
         )
@@ -226,8 +231,13 @@ struct FeedbackTests {
 
     // MARK: - Pictures, and the multipart body
 
-    private func image(_ name: String = "shot.png", bytes: [UInt8] = [0x89, 0x50]) -> Feedback.Image {
-        Feedback.Image(filename: name, contentType: "image/png", data: Data(bytes))
+    /// A real PNG signature, because what a picture is is now read from its bytes rather than
+    /// from what the caller called it.
+    private static let pngBytes = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01])
+    private static let jpegBytes = Data([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10])
+
+    private func image(_ data: Data = FeedbackTests.pngBytes, declaring type: String = "image/png") -> Feedback.Image {
+        Feedback.Image(contentType: type, data: data)
     }
 
     @Test("a report with pictures goes as multipart, named the way the endpoint reads it")
@@ -238,7 +248,7 @@ struct FeedbackTests {
         #expect(body.contentType == "multipart/form-data; boundary=TESTBOUNDARY")
         #expect(written.contains("name=\"message\""))
         #expect(written.contains("name=\"token\""))
-        #expect(written.contains("name=\"attachments[]\"; filename=\"shot.png\""))
+        #expect(written.contains("name=\"attachments[]\"; filename=\"attachment.png\""))
         #expect(written.contains("Content-Type: image/png"))
         #expect(written.contains("name=\"environment[app_version]\""))
         #expect(written.contains("name=\"environment[available_agents][]\""))
@@ -260,39 +270,59 @@ struct FeedbackTests {
         let written = text(of: try Feedback.body(for: report(images: [image()]), boundary: "B"))
 
         #expect(written.contains("name=\"environment[display_scale]\"\r\n\r\n2\r\n"))
+        // A boolean goes as a digit, which is what a form carries.
+        #expect(written.contains("name=\"environment[translated]\"\r\n\r\n0\r\n"))
     }
 
     @Test("a sixth image is not sent")
     func imageCountCap() {
-        let images = (0..<8).map { image("shot\($0).png") }
+        let images = (0..<8).map { _ in image() }
 
         #expect(report(images: images).images.count == Feedback.maxImages)
     }
 
-    @Test("an image name is a name, never a path, even though the endpoint drops it anyway")
-    func imageNamesAreCleaned() {
-        let cleaned = Feedback.Image(
-            filename: "/Users/someone/Desktop/Screenshot 2026-08-21 at 10.11.12.png",
-            contentType: "image/png",
-            data: Data()
-        )
-
-        #expect(cleaned.filename == "Screenshot 2026-08-21 at 10.11.12.png")
+    @Test("the name that travels is Bloom's, and it matches what the bytes are")
+    func imageNamesAreDerived() {
+        #expect(image().filename == "attachment.png")
+        #expect(image(FeedbackTests.jpegBytes).filename == "attachment.jpg")
     }
 
-    @Test("a filename cannot break out of the part header it is written into")
-    func imageNamesCannotEscape() {
-        let cleaned = Feedback.Image(filename: "a\";\r\nX-Evil: 1.png", contentType: "image/png", data: Data())
+    /// The case the endpoint would refuse: a JPEG somebody renamed to `.png`. What the bytes say
+    /// has to win, or the extension and the sniffed type disagree and the whole upload is dropped.
+    @Test("bytes beat the name they arrived under")
+    func bytesDecideTheType() {
+        let renamed = image(FeedbackTests.jpegBytes, declaring: "image/png")
 
-        #expect(!cleaned.filename.contains("\""))
-        #expect(!cleaned.filename.contains("\r"))
-        #expect(!cleaned.filename.contains("\n"))
+        #expect(renamed.contentType == "image/jpeg")
+        #expect(renamed.filename == "attachment.jpg")
     }
 
-    @Test("an unfamiliar content type is not repeated back")
-    func contentTypeIsChecked() {
-        #expect(Feedback.Image(filename: "a.png", contentType: "application/pdf", data: Data()).contentType == "image/png")
-        #expect(Feedback.Image(filename: "a.webp", contentType: "image/webp", data: Data()).contentType == "image/webp")
+    @Test("what a run of bytes is, read from the bytes", arguments: [
+        (Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]), "image/png"),
+        (Data([0xFF, 0xD8, 0xFF, 0xE0]), "image/jpeg"),
+        (Data("GIF89a....".utf8), "image/gif"),
+        (Data("RIFF????WEBPVP8 ".utf8), "image/webp"),
+        (Data("????ftypheic".utf8), "image/heic"),
+        (Data("????ftypmif1".utf8), "image/heif"),
+    ])
+    func sniffing(bytes: Data, type: String) {
+        #expect(Feedback.sniffedContentType(bytes) == type)
+    }
+
+    @Test("something that is not a picture is not recognised as one")
+    func sniffingRefusesTheRest() {
+        #expect(Feedback.sniffedContentType(Data("%PDF-1.7".utf8)) == nil)
+        #expect(Feedback.sniffedContentType(Data("<svg xmlns=".utf8)) == nil)
+        #expect(Feedback.sniffedContentType(Data()) == nil)
+    }
+
+    @Test("every type Bloom sends has an extension the endpoint's list names")
+    func everyTypeHasAnExtension() {
+        let accepted = ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif"]
+
+        for type in Feedback.imageContentTypes {
+            #expect(accepted.contains(Feedback.fileExtension(for: type)))
+        }
     }
 
     // MARK: - Caps
@@ -309,6 +339,24 @@ struct FeedbackTests {
         #expect(Feedback.remainingMessage(count: 100, limit: 5_000) == nil)
         #expect(Feedback.remainingMessage(count: 4_900, limit: 5_000) == "100 characters left")
         #expect(Feedback.remainingMessage(count: 5_200, limit: 5_000)?.contains("first 5000") == true)
+    }
+
+    @Test("the three limits are the endpoint's, and each is said in its own words")
+    func limits() {
+        #expect(Feedback.maxImages == 5)
+        #expect(Feedback.maxImageBytes == 8 * 1024 * 1024)
+        #expect(Feedback.maxTotalImageBytes == 12 * 1024 * 1024)
+        // The total has to fit inside what a request may weigh, or the sentence above is a lie
+        // and the refusal arrives as a 413 instead.
+        #expect(Feedback.maxTotalImageBytes < Feedback.maximumBodyBytes)
+
+        let tooLarge = Feedback.tooLargeMessage(name: "shot.png", bytes: 9 * 1024 * 1024)
+        #expect(tooLarge.contains("shot.png"))
+        #expect(tooLarge.contains("8 MB"))
+        #expect(Feedback.tooManyMessage().contains("5"))
+        #expect(Feedback.tooMuchMessage().contains("12 MB"))
+        // Three different sentences, so the one on screen says which limit was hit.
+        #expect(Set([tooLarge, Feedback.tooManyMessage(), Feedback.tooMuchMessage()]).count == 3)
     }
 
     @Test("a report with no words in it cannot be sent")
@@ -387,19 +435,36 @@ struct FeedbackTests {
 
     // MARK: - What the machine is
 
-    @Test("a build knows whether it is a release or somebody's own")
+    @Test("a build knows whether it is a release, somebody's own, or somebody's own with edits in it")
     func installSources() {
         #expect(Feedback.InstallSource(buildChannel: "release", masterCommit: nil) == .release)
         #expect(Feedback.InstallSource(buildChannel: "release", masterCommit: "abc1234") == .local)
         #expect(Feedback.InstallSource(buildChannel: nil, masterCommit: nil) == .local)
+
+        // Either shape of marker says the working tree had edits in it.
+        #expect(Feedback.InstallSource(buildChannel: nil, masterCommit: "abc1234-dirty") == .localDirty)
+        #expect(Feedback.InstallSource(buildChannel: nil, masterCommit: nil, isDirty: true) == .localDirty)
+        // And a release is a release whatever a stray marker says, because it was built from a tag.
+        #expect(Feedback.InstallSource(buildChannel: "release", masterCommit: nil, isDirty: true) == .release)
+
+        for source in Feedback.InstallSource.allCases {
+            #expect(InstallPing.matches(source.rawValue, Feedback.slugPattern))
+        }
     }
 
-    @Test("a translated process reports the slice it is running as")
+    @Test("a translated process reports the slice it is running as, and says it was translated")
     func architectures() {
         #expect(Feedback.Architecture(isARM: true, isTranslated: false).wireName == "arm64")
         #expect(Feedback.Architecture(isARM: false, isTranslated: false).wireName == "x86_64")
         #expect(Feedback.Architecture(isARM: true, isTranslated: true).wireName == "x86_64")
         #expect(Feedback.Architecture.unknown.wireName == nil)
+
+        // An Intel Mac and Rosetta are the same slice and different bugs, which is the whole
+        // reason the second field exists.
+        #expect(environment(architecture: .x86_64, translated: false).translated == false)
+        #expect(environment(architecture: .x86_64, translated: true).translated == true)
+        // Half an answer about the processor is worse than none.
+        #expect(environment(architecture: .unknown, translated: true).translated == nil)
     }
 
     @Test("every permission mode has a slug the endpoint accepts")
@@ -414,6 +479,37 @@ struct FeedbackTests {
         for kind in AgentKind.allCases {
             #expect(InstallPing.matches(InstallPing.wireName(kind), Feedback.slugPattern))
         }
+    }
+
+    // MARK: - The reference
+
+    @Test("the reference in a reply is read back, so it can be shown")
+    func readsTheReference() {
+        let body = Data(#"{"reference":"01J8ZQ7Z9K3M4N5P6Q7R8S9T0V"}"#.utf8)
+
+        #expect(Feedback.reference(in: body) == "01J8ZQ7Z9K3M4N5P6Q7R8S9T0V")
+    }
+
+    /// A server's string is about to be printed into Bloom's own interface, so it is checked
+    /// rather than trusted: anything that is not shaped like a reference is not one.
+    @Test("a reply that is not a reference is not shown as one", arguments: [
+        #"{"reference":"see your email"}"#,
+        #"{"reference":""}"#,
+        #"{"reference":"<script>alert(1)</script>"}"#,
+        #"{"ok":true}"#,
+        "not json at all",
+    ])
+    func refusesAStrangeReference(body: String) {
+        #expect(Feedback.reference(in: Data(body.utf8)) == nil)
+    }
+
+    @Test("the thanks carries the reference when there is one, and reads plainly when there is not")
+    func thanksWithReference() {
+        #expect(Feedback.Copy.sent(Feedback.Copy.reportSent, reference: nil) == Feedback.Copy.reportSent)
+        #expect(
+            Feedback.Copy.sent(Feedback.Copy.reportSent, reference: "01J8ZQ7Z9K3M4N5P6Q7R8S9T0V")
+                .contains("Reference 01J8ZQ7Z9K3M4N5P6Q7R8S9T0V")
+        )
     }
 
     // MARK: - The copy
