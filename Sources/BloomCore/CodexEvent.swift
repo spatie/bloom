@@ -294,8 +294,16 @@ public struct CodexFileUpdate: Sendable, Hashable {
     }
 
     public let path: String
-    /// A unified diff, already formed. Bloom's own `DiffParser` reads this shape, so a file change
-    /// row needs no second parser.
+    /// **Not always a diff**, which is the trap in the field's name. Measured against the real
+    /// server:
+    ///
+    ///   * `update` carries a unified diff **hunk**: `@@ -1,3 +1,3 @@` and then the context and
+    ///     the changed lines. No `---`/`+++` file headers, so it is a fragment rather than a whole
+    ///     patch.
+    ///   * `add` carries the **whole new file**, verbatim, with no diff markers at all. A new file
+    ///     holding `hi` arrives as `"hi\n"`, and anything counting `+` lines in it counts nothing.
+    ///   * `delete` is presumed symmetrical and has not been observed, so it is treated as content
+    ///     rather than as a diff and `removedLines` says so.
     public let diff: String
     public let kind: Kind
 
@@ -303,6 +311,41 @@ public struct CodexFileUpdate: Sendable, Hashable {
         self.path = path
         self.diff = diff
         self.kind = kind
+    }
+
+    /// How many lines this change adds, whichever shape the payload is in.
+    public var addedLines: Int {
+        switch kind {
+        case .add: Self.lineCount(diff)
+        case .delete: 0
+        case .update, .unknown: Self.hunkCount(diff, marker: "+")
+        }
+    }
+
+    public var removedLines: Int {
+        switch kind {
+        case .add: 0
+        case .delete: Self.lineCount(diff)
+        case .update, .unknown: Self.hunkCount(diff, marker: "-")
+        }
+    }
+
+    /// Lines of content. A trailing newline ends the last line rather than starting an empty one,
+    /// which is what makes a one-line file count as one.
+    static func lineCount(_ text: String) -> Int {
+        guard !text.isEmpty else { return 0 }
+        var trimmed = text
+        if trimmed.hasSuffix("\n") { trimmed.removeLast() }
+        return trimmed.split(separator: "\n", omittingEmptySubsequences: false).count
+    }
+
+    /// Changed lines in a hunk. `---` and `+++` are file headers rather than content: the observed
+    /// hunks carry none, and counting them would add one of each per file if a future release did.
+    static func hunkCount(_ diff: String, marker: Character) -> Int {
+        diff.split(separator: "\n", omittingEmptySubsequences: false).count { line in
+            guard line.first == marker else { return false }
+            return !line.hasPrefix("+++") && !line.hasPrefix("---")
+        }
     }
 
     static func decode(_ json: JSONValue) -> CodexFileUpdate? {

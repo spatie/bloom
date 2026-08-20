@@ -24,7 +24,7 @@ struct ToolRowView: View {
         VStack(alignment: .leading, spacing: 0) {
             ExpandableRowHeader(isExpanded: isExpanded, onToggle: onToggle) {
                 ToolRowHeader(
-                    presentation: ToolPresenter.present(use),
+                    presentation: TranscriptPresenter.present(use),
                     workspace: workspace,
                     isError: isError,
                     refusal: refusal,

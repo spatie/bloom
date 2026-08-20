@@ -10,6 +10,10 @@ import BloomCore
 /// screen, and that placeholder must not end up in the rename field as if the user had typed it.
 struct SessionTabView: View {
     var session: Session
+    /// Which agent runs this chat, drawn only when the workspace holds more than one. See
+    /// `AgentMark`: a strip of five Claude Code chats stays unmarked, because a mark that is on
+    /// every tab tells you nothing.
+    var agentGlyph: String?
     var isActive: Bool
     var isRunning: Bool
     /// Whether this is the tab the pane's leading edge runs through. See `TabItemView`.
@@ -28,7 +32,7 @@ struct SessionTabView: View {
     var body: some View {
         TabItemView(
             title: session.title.isEmpty ? "Untitled" : session.title,
-            icon: nil,
+            icon: agentGlyph,
             isActive: isActive,
             isRunning: isRunning,
             isAtPaneEdge: isAtPaneEdge,

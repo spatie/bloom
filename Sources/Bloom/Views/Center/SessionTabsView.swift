@@ -144,6 +144,7 @@ struct SessionTabsView: View {
     private func sessionTab(_ session: Session) -> some View {
         SessionTabView(
             session: session,
+            agentGlyph: AgentMark.glyph(for: session.agentKind, in: model.sessions),
             isActive: isSelected(session),
             isRunning: model.isRunning(session),
             isAtPaneEdge: isAtPaneEdge(session.id),

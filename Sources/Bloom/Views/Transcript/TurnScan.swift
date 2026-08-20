@@ -36,6 +36,17 @@ enum TurnScan {
             return
         }
 
+        // Codex writes a patch rather than a call per file: one `fileChange` item can touch
+        // several, and each change carries a real unified diff, so what comes out of here is
+        // measured rather than estimated from the strings a tool was handed.
+        if case .fileChange(let change)? = CodexTranslation.item(in: use.input) {
+            for update in change.changes {
+                merge(path: update.path, added: update.addedLines, removed: update.removedLines,
+                      into: &totals, order: &order)
+            }
+            return
+        }
+
         var added = 0
         var removed = 0
         let path: String
@@ -65,6 +76,16 @@ enum TurnScan {
             return
         }
 
+        merge(path: path, added: added, removed: removed, into: &totals, order: &order)
+    }
+
+    private static func merge(
+        path: String,
+        added: Int,
+        removed: Int,
+        into totals: inout [String: TurnFile],
+        order: inout [String]
+    ) {
         guard !path.isEmpty else { return }
 
         if var existing = totals[path] {
@@ -76,6 +97,7 @@ enum TurnScan {
             order.append(path)
         }
     }
+
 
     /// Rows are stored in sequence order, so finding the turn boundary is a binary search rather
     /// than a walk over every row in the session.

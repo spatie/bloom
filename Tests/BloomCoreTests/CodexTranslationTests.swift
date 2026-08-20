@@ -364,3 +364,66 @@ private func translated(
         #expect(PermissionGrantIndex.match(ask: ask, grants: [other]) == nil)
     }
 }
+
+@Suite struct CodexPatchCountingTests {
+    /// A Codex patch states its own numbers. Bloom's Claude Code counting estimates them from the
+    /// strings a tool was handed, because that is all `Edit` gives it; here there is a real diff.
+    @Test func aRecordedPatchCarriesADiffThatCanBeCounted() throws {
+        let change = try bloomFixtureLines("codex-approval.ndjson")
+            .compactMap { line -> CodexFileChange? in
+                guard case .notification(let notification)? = CodexFrame.decode(line: line),
+                      case .itemStarted(let started) = CodexEvent.decode(notification),
+                      case .fileChange(let change) = started.item
+                else { return nil }
+                return change
+            }
+            .first
+        let patch = try #require(change)
+        let update = try #require(patch.changes.first)
+
+        // The trap in the field's name, measured rather than assumed: a new file's `diff` is the
+        // whole file, with no diff markers in it at all. Anything counting `+` lines here counts
+        // nothing, and anything handing it to a diff parser draws nothing.
+        #expect(update.kind == .add)
+        #expect(update.diff == "hi\n")
+        #expect(!update.diff.contains("@@"))
+        #expect(update.addedLines == 1)
+        #expect(update.removedLines == 0)
+    }
+
+    /// The other shape, recorded from a real edit: a hunk, with no `---`/`+++` file headers, so it
+    /// is a fragment of a patch rather than a patch.
+    @Test func anEditCarriesAHunkAndCountsBothWays() throws {
+        let change = try bloomFixtureLines("codex-edit-patch.ndjson")
+            .compactMap { line -> CodexFileChange? in
+                guard case .notification(let notification)? = CodexFrame.decode(line: line),
+                      case .itemCompleted(let completed) = CodexEvent.decode(notification),
+                      case .fileChange(let change) = completed.item
+                else { return nil }
+                return change
+            }
+            .first
+        let patch = try #require(change)
+        let update = try #require(patch.changes.first)
+
+        #expect(update.kind == .update(movedTo: nil))
+        #expect(update.diff.hasPrefix("@@"))
+        #expect(!update.diff.contains("+++"))
+        #expect(update.addedLines == 1)
+        #expect(update.removedLines == 1)
+    }
+
+    @Test func countsAWholeFileByItsLinesRatherThanItsMarkers() {
+        let added = CodexFileUpdate(path: "a.txt", diff: "one\ntwo\nthree\n", kind: .add)
+        #expect(added.addedLines == 3)
+        #expect(added.removedLines == 0)
+
+        let removed = CodexFileUpdate(path: "a.txt", diff: "one\ntwo\n", kind: .delete)
+        #expect(removed.addedLines == 0)
+        #expect(removed.removedLines == 2)
+
+        // A trailing newline ends the last line rather than starting an empty one.
+        #expect(CodexFileUpdate(path: "a", diff: "hi", kind: .add).addedLines == 1)
+        #expect(CodexFileUpdate(path: "a", diff: "", kind: .add).addedLines == 0)
+    }
+}
