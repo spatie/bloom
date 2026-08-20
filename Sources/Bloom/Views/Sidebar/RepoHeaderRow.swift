@@ -17,11 +17,11 @@ import BloomCore
 /// a running agent updates its diff stat every few seconds.
 ///
 /// Collapsing reads the repo's stored `collapsed` flag directly: while it is set the workspace
-/// rows are simply not in the run. The control that drives it is this row's own leading mark, and
-/// it is the only disclosure control here. Handing a list an `isExpanded` binding is what makes it
-/// draw a second one, and on macOS 26 that one is a chevron pinned to the trailing end of the
-/// header under the pointer, which landed past the gear and the `+` and said what the leading
-/// chevron already said.
+/// rows are simply not in the run. The control that drives it is this row's own leading chevron,
+/// and it is the only disclosure control here. Handing a list an `isExpanded` binding is what
+/// makes it draw a second one, and on macOS 26 that one is a chevron pinned to the trailing end of
+/// the header under the pointer, which landed past the `+` and said what the leading chevron
+/// already said.
 struct RepoHeaderRow: View {
     var repo: Repo
     /// Whether any of this project's workspaces has a finished turn nobody has read.
@@ -45,8 +45,9 @@ struct RepoHeaderRow: View {
     @FocusState private var repoFieldFocused: Bool
 
     @State private var isConfirmingRemove = false
-    /// Lights the `+`. It belongs to this row rather than to a hover id shared across the whole
-    /// list, so crossing the pane lights one project at a time.
+    /// Lights the `+` and swaps the project's mark for its settings gear. It belongs to this row
+    /// rather than to a hover id shared across the whole list, so crossing the pane lights one
+    /// project at a time.
     @State private var isHeaderHovered = false
 
     /// A row, not a section, and one that keeps a section's rhythm.
@@ -82,7 +83,7 @@ struct RepoHeaderRow: View {
         HStack(spacing: Metrics.spacing) {
             disclosure
 
-            RepoIcon(repo: repo)
+            mark
 
             if isRenamingRepo {
                 TextField("Project name", text: $repoDraft)
@@ -96,32 +97,6 @@ struct RepoHeaderRow: View {
             }
 
             Spacer(minLength: Metrics.spacingSmall)
-
-            // The gear is drawn only under the pointer. It used to be present at rest and merely
-            // lit on hover, on the argument that Finder's own sidebar headers do that with Show
-            // and Hide; the owner looked at the result and asked for it to be revealed instead.
-            // A project's settings are the rarest thing anyone does to a project, and a gear on
-            // every header is a column of them down a pane whose job is to name the work.
-            //
-            // Faded rather than built and torn down: the button stays in the hierarchy at every
-            // moment and only its opacity moves, so nothing about the header's layout depends on
-            // where the pointer is, the row cannot reflow as the pointer crosses it, and the view
-            // keeps one identity rather than being a different view on each side of the hover.
-            // The fade is what keeps a pointer travelling down a full pane from reading as a
-            // column of gears flickering on and off, and it goes when Reduce Motion is on, which
-            // leaves the reveal instant rather than animated.
-            //
-            // The `+` beside it stays present at rest. It is the one thing anyone does to a
-            // project often enough to look for, and a trailing edge that empties completely on
-            // every header would leave nothing to aim at.
-            //
-            // Nothing is lost with the pointer away: Project settings is on this header's own
-            // context menu, and in File as Project Settings with Command Shift comma.
-            RepoSettingsButton(repo: repo, isHighlighted: isHeaderHovered)
-                .opacity(isHeaderHovered ? 1 : 0)
-                .animation(
-                    reduceMotion ? nil : .easeInOut(duration: 0.12), value: isHeaderHovered
-                )
 
             // Boxed to the tile's size at the other end of the row, so the header is bracketed by
             // two marks of one size rather than by an icon and a speck. The padding is the click
@@ -153,11 +128,35 @@ struct RepoHeaderRow: View {
         }
         .contentShape(Rectangle())
         .onHoverChange { isHeaderHovered = $0 }
+        // Three groups, and the rule is what each one acts ON.
+        //
+        // The first two items are about the WORKSPACES under this header: one makes another, one
+        // decides whether they are drawn. The next three are about the PROJECT itself: what it is
+        // called, how it is set up, where it lives on disk. The last destroys it, and a
+        // destructive item at the foot of a menu behind a rule of its own is the one grouping this
+        // menu already had.
+        //
+        // Three and not four. The obvious fourth rule would fence Reveal in Finder off as "goes
+        // somewhere else", and that leaves a menu of six items whose bottom half carries a rule
+        // between every item, which says exactly as much as no rules at all. Three is also the
+        // shape the workspace row's menu already has, at the same rhythm: six items in three
+        // groups there, six in three here.
+        //
+        // Ask Siri, which the owner sees at the top of this menu, is not in this list and is not
+        // ours to move. macOS 27 puts it on context menus itself for a user who has Apple
+        // Intelligence on, and developers report it arriving on every context menu in every app.
+        // The menu was read back as AppKit displayed it and carried these six items and nothing
+        // else, so nothing here contributes it. There is also no switch to reach it with:
+        // `NSMenu.allowsContextMenuPlugIns` covers Services and contextual menu plug-ins, Ask Siri
+        // is registered as neither, and a SwiftUI `contextMenu` hands out no `NSMenu` to set it on
+        // in any case. Giving up the App Intents in `Sources/Bloom/Intents` would cost Spotlight
+        // and Shortcuts a real feature and is not known to remove it. So it stays.
         .contextMenu {
             Button("New workspace") { onCreateWorkspace(repo) }
             Button(repo.collapsed ? "Show workspaces" : "Hide workspaces") {
                 Task { await app.toggleCollapsed(repo) }
             }
+            Divider()
             Button("Rename", action: beginRepoRename)
             // The route to this project's settings that needs no pointer on the gear, which is
             // drawn only while the pointer is on the header. File's own Project Settings item
@@ -260,6 +259,83 @@ struct RepoHeaderRow: View {
         } else {
             counted.accessibilityAddTraits(.isHeader)
         }
+    }
+
+    /// The project's mark, and the settings gear that takes its place under the pointer.
+    ///
+    /// The gear used to sit at the trailing edge beside the `+`, revealed on hover in the same
+    /// way. The owner asked for it on the leading side, before the name, and still only under the
+    /// pointer. That is a harder place to put a control than it sounds, because the leading end of
+    /// this header is already two columns wide and both of them are load bearing: the chevron's
+    /// gutter is the step every workspace row underneath is indented by, and the tile starts the
+    /// column a workspace's status mark is drawn in. A gear inserted between them, or given a
+    /// reserved slot of its own, moves one of those columns for good, and the rows below with it.
+    /// A gear that appears and pushes the name aside reflows the row every time the pointer
+    /// crosses it, which is worse again.
+    ///
+    /// So it takes the tile's own box: sixteen points, the same box whether the pointer is there
+    /// or not, with the tile and the gear stacked in it and only their opacity moving. Nothing in
+    /// the header can move, because nothing about the layout depends on the hover, and the
+    /// alignment measured this morning is untouched: the chevron is where it was, the tile's
+    /// column is where it was, and the name starts where it started.
+    ///
+    /// The cost is honest and worth saying out loud, because this repeats a shape that was tried
+    /// and rejected here once. The chevron used to share the tile's box and the tile vanished to
+    /// make room for it, which took the one thing worth scanning out of the header exactly when
+    /// you looked at it, and the gutter was bought to get the tile back. The difference is what
+    /// the box is traded FOR. A chevron is furniture, and losing a project's mark for it buys
+    /// nothing; a gear is the control that was asked for, it is only ever hidden on the one row
+    /// the pointer is on, and the name it stands beside is still naming the project.
+    ///
+    /// The chevron is deliberately not the slot. It is the only way to fold a project with a
+    /// mouse, and a gear that covered it would take that away for as long as the pointer was on
+    /// the row.
+    ///
+    /// The fade goes when Reduce Motion is on, which leaves the swap instant rather than animated,
+    /// matching the archive button on a workspace row and the `+` beside this one.
+    private var mark: some View {
+        ZStack {
+            RepoIcon(repo: repo)
+                .opacity(isHeaderHovered ? 0 : 1)
+
+            settingsButton
+                .opacity(isHeaderHovered ? 1 : 0)
+                // An invisible button still takes clicks, and this one sits on top of the row's
+                // own mark. The pointer has to be on the header for it to be drawn at all, so
+                // this costs nothing real and stops a resting header eating a click on its tile.
+                .allowsHitTesting(isHeaderHovered)
+        }
+        .frame(width: Metrics.repoIcon, height: Metrics.repoIcon)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.12), value: isHeaderHovered)
+    }
+
+    /// The gear itself.
+    ///
+    /// Built here rather than reusing `RepoSettingsButton`, which is boxed to
+    /// `Metrics.headerButton` and carries a hover plate: both were right at the trailing edge and
+    /// neither survives the move. A 24 point box in a 16 point column would hang four points over
+    /// the chevron and four over the name, and a rounded plate drawn in the tile's own column
+    /// would read as a second tile. It opens the window through the same call the menu item does.
+    ///
+    /// Nothing is lost with the pointer away, and that matters more here than it did at the
+    /// trailing edge: Project settings… is on this header's own context menu, and File carries
+    /// Project Settings at Command Shift comma.
+    private var settingsButton: some View {
+        Button {
+            openWindow(id: RepoSettingsWindow.id, value: repo.id)
+        } label: {
+            Label("Settings for \(repo.name)", systemImage: "gearshape")
+                .labelStyle(.iconOnly)
+                .font(Typo.label)
+                // The tile's box exactly. The click target is the label, because a button's hit
+                // area is its label, which is why a `contentShape` outside the button widens
+                // nothing.
+                .frame(width: Metrics.repoIcon, height: Metrics.repoIcon)
+                .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Palette.textPrimary)
+        .help("Settings for \(repo.name)")
     }
 
     /// The control that folds the project away, in a gutter of its own at the leading edge.
