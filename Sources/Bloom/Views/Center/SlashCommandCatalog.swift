@@ -1,119 +1,87 @@
 import Foundation
 import Observation
+import BloomCore
 
-/// Finds and caches the command files for one workspace.
+/// Holds the `/command` list for one workspace, and decides when it is worth reading again.
 ///
-/// The scan is a directory walk plus a small read per file, which is cheap once and wasteful on
-/// every keystroke, so the result is held until the workspace changes.
+/// The scan is a walk of six directories plus a bounded read per file. That is a few milliseconds
+/// once and pure waste on every keystroke, so it happens twice: when the composer first points at
+/// a checkout, and again when the user opens the menu after the list has been sitting still for
+/// `stalenessWindow`. Opening the menu is the only moment a stale list can be seen, and a person
+/// who has just written a new skill in another window types `/` before they can notice it is
+/// missing. Nothing watches the filesystem, because a watcher on `~/.claude` would have to be
+/// alive for every workspace at once to answer a question that is only ever asked here.
 @MainActor
 @Observable
 final class SlashCommandCatalog {
     private(set) var commands: [SlashCommand] = []
-    private var loadedPath: String?
+    /// Whether a scan has finished. The menu says something different before the first one lands
+    /// than it does when the list is genuinely empty.
+    private(set) var isLoaded = false
 
+    private var loadedPath: String?
+    private var loadedAt: Date?
+    /// The scan that is already running, and the checkout it is running for, so a second caller
+    /// joins it rather than starting a duplicate walk of the same directories.
+    private var running: Task<[SlashCommand], Never>?
+    private var runningPath: String?
+
+    /// How long a list is taken on trust before opening the menu re-reads it.
+    static let stalenessWindow: TimeInterval = 3
+
+    /// Builds the list for a checkout, and does nothing at all if it is already the one held.
     func load(workspacePath: String) async {
         guard loadedPath != workspacePath else { return }
-        let home = NSHomeDirectory()
-        commands = await Task.detached(priority: .utility) {
-            SlashCommandCatalog.scan(home: home, workspacePath: workspacePath)
-        }.value
-        loadedPath = workspacePath
+        await scan(workspacePath: workspacePath)
     }
 
+    /// Re-reads only if the held list is old enough to have missed something.
+    func refreshIfStale(workspacePath: String, now: Date = Date()) async {
+        if loadedPath == workspacePath,
+           let loadedAt,
+           now.timeIntervalSince(loadedAt) < Self.stalenessWindow {
+            return
+        }
+        await scan(workspacePath: workspacePath)
+    }
+
+    /// Re-reads whatever the state of the held list.
     func reload(workspacePath: String) async {
-        loadedPath = nil
-        await load(workspacePath: workspacePath)
+        loadedAt = nil
+        await scan(workspacePath: workspacePath)
     }
 
-    /// Filters on the text typed after the `/`, so `/comm` finds `commit` and `cmt` finds it too.
-    func matches(_ query: String) -> [SlashCommand] {
-        guard !query.isEmpty else { return commands }
-        return commands
-            .compactMap { command -> (SlashCommand, Int)? in
-                guard let score = FuzzyMatch.score(command.name, query: query) else { return nil }
-                return (command, score)
-            }
-            .sorted { lhs, rhs in
-                if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
-                return lhs.0.name < rhs.0.name
-            }
-            .map(\.0)
+    /// Ranks the list against the text typed after the `/`.
+    func matches(_ query: String) -> [SlashCommandMatch] {
+        SlashCommand.rank(commands, query: query)
     }
 
     // MARK: - Disk
 
-    /// Project commands come last so they win the name collision, matching how Claude Code resolves
-    /// a command that exists in both places.
-    nonisolated static func scan(home: String, workspacePath: String) -> [SlashCommand] {
-        var byName: [String: SlashCommand] = [:]
-        var order: [String] = []
-
-        for (directory, origin) in [
-            ("\(home)/.claude/commands", SlashCommand.Origin.user),
-            ("\(workspacePath)/.claude/commands", SlashCommand.Origin.project),
-        ] {
-            for command in scan(directory: directory, origin: origin) {
-                if byName[command.name] == nil { order.append(command.name) }
-                byName[command.name] = command
+    private func scan(workspacePath: String) async {
+        let task: Task<[SlashCommand], Never>
+        if let running, runningPath == workspacePath {
+            task = running
+        } else {
+            let home = NSHomeDirectory()
+            task = Task.detached(priority: .utility) {
+                SlashCommandIndex.discover(home: home, project: workspacePath)
             }
+            running = task
+            runningPath = workspacePath
         }
 
-        return order.compactMap { byName[$0] }.sorted { $0.name < $1.name }
-    }
-
-    nonisolated static func scan(directory: String, origin: SlashCommand.Origin) -> [SlashCommand] {
-        let manager = FileManager.default
-        var isDirectory: ObjCBool = false
-        guard manager.fileExists(atPath: directory, isDirectory: &isDirectory), isDirectory.boolValue else {
-            return []
-        }
-        guard let walker = manager.enumerator(atPath: directory) else { return [] }
-
-        var found: [SlashCommand] = []
-        for case let relative as String in walker {
-            guard relative.hasSuffix(".md") else { continue }
-            let full = (directory as NSString).appendingPathComponent(relative)
-            // A command in a subfolder is namespaced with a colon, the way the CLI writes it.
-            let name = String(relative.dropLast(3)).replacing("/", with: ":")
-            found.append(SlashCommand(name: name, detail: describe(full), origin: origin))
-        }
-        return found
-    }
-
-    /// Prefers the `description:` line from YAML frontmatter. Without one, the first real line of
-    /// the file is a better summary than showing nothing.
-    nonisolated static func describe(_ path: String) -> String {
-        guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else { return "" }
-        var lines = contents.components(separatedBy: .newlines)
-
-        if lines.first?.trimmingCharacters(in: .whitespaces) == "---" {
-            lines.removeFirst()
-            var frontmatter: [String] = []
-            while let line = lines.first {
-                lines.removeFirst()
-                if line.trimmingCharacters(in: .whitespaces) == "---" { break }
-                frontmatter.append(line)
-            }
-            for line in frontmatter {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                guard trimmed.lowercased().hasPrefix("description:") else { continue }
-                return clean(String(trimmed.dropFirst("description:".count)))
-            }
+        let found = await task.value
+        if running == task {
+            running = nil
+            runningPath = nil
         }
 
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty else { continue }
-            return clean(String(trimmed.drop { $0 == "#" }))
-        }
-        return ""
-    }
-
-    nonisolated private static func clean(_ text: String) -> String {
-        var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if value.count >= 2, let first = value.first, first == "\"" || first == "'", value.last == first {
-            value = String(value.dropFirst().dropLast())
-        }
-        return value.count > 90 ? String(value.prefix(89)) + "\u{2026}" : value
+        loadedPath = workspacePath
+        loadedAt = Date()
+        isLoaded = true
+        // Assigning an identical list would still invalidate every view observing it, and this
+        // runs every few seconds while a menu is open.
+        if found != commands { commands = found }
     }
 }

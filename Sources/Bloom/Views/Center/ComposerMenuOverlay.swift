@@ -1,9 +1,11 @@
 import SwiftUI
+import BloomCore
 
 /// Whichever completion menu the draft has asked for, floating above the composer.
 struct ComposerMenuOverlay: View {
     var menu: ComposerMenu
-    var commands: [SlashCommand]
+    var commands: [SlashCommandMatch]
+    var commandsAreLoaded: Bool
     var files: [FileMatch]
     var selectedIndex: Int
     var onPickCommand: @MainActor (SlashCommand) -> Void
@@ -14,8 +16,9 @@ struct ComposerMenuOverlay: View {
         switch menu {
         case .slash(let query):
             SlashCommandMenu(
-                commands: commands,
+                matches: commands,
                 query: query,
+                isLoaded: commandsAreLoaded,
                 selectedIndex: selectedIndex,
                 onPick: onPickCommand,
                 onHighlight: onHighlight

@@ -116,6 +116,7 @@ struct ComposerPrompt<Footer: View>: View {
             ComposerMenuOverlay(
                 menu: activeMenu,
                 commands: slashResults,
+                commandsAreLoaded: slashCatalog.isLoaded,
                 files: fileMatches,
                 selectedIndex: menuIndex,
                 onPickCommand: pick(command:),
@@ -124,8 +125,18 @@ struct ComposerPrompt<Footer: View>: View {
             )
             .alignmentGuide(.top) { $0[.bottom] + Metrics.spacing }
         }
-        .onAppear { PromptAttachmentStore.shared.load(sessionID: attachmentKey) }
+        .onAppear {
+            PromptAttachmentStore.shared.load(sessionID: attachmentKey)
+            applyCaptureDraft()
+        }
         .task(id: mentionRoot) { await slashCatalog.load(workspacePath: mentionRoot) }
+        // Opening the menu is the only moment a stale list can be seen, so it is the only moment
+        // worth re-reading one. A skill written in another window while Bloom stayed open is in
+        // the list by the time the user has finished typing the slash.
+        .task(id: isSlashMenuOpen) {
+            guard isSlashMenuOpen else { return }
+            await slashCatalog.refreshIfStale(workspacePath: mentionRoot)
+        }
         .task(id: activeMenu.mention?.query) { await refreshFileMatches() }
         .onChange(of: text) { _, _ in menuIndex = 0 }
         .onChange(of: menu) { old, new in
@@ -134,6 +145,23 @@ struct ComposerPrompt<Footer: View>: View {
             // the token entirely, makes the menu available again.
             if old.kind != new.kind { isMenuDismissed = false }
         }
+    }
+
+    /// `--composer-draft "/revi"` fills the box on first appearance.
+    ///
+    /// A completion menu is the one part of the composer a still of the window cannot otherwise
+    /// show: it only exists while something is half typed, and the capture run has no keyboard.
+    /// Debug builds only, for the same reason `--running` is: a shipped copy has no business
+    /// putting words in the user's draft.
+    private func applyCaptureDraft() {
+        #if DEBUG
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: "--composer-draft"), index + 1 < arguments.count,
+              text.isEmpty else { return }
+        text = arguments[index + 1]
+        caret = (text as NSString).length
+        isFocused = true
+        #endif
     }
 
     // MARK: - Derived state
@@ -159,10 +187,14 @@ struct ComposerPrompt<Footer: View>: View {
 
     /// Only scored while the slash menu is actually on screen, so a keystroke in an ordinary draft
     /// costs nothing.
-    private var slashResults: [SlashCommand] {
+    private var slashResults: [SlashCommandMatch] {
         guard case .slash(let query) = activeMenu else { return [] }
         return slashCatalog.matches(query)
     }
+
+    /// Whether the slash menu is the one the draft is asking for, which is the moment the command
+    /// list is worth reading off disk again.
+    private var isSlashMenuOpen: Bool { activeMenu.kind == .slash }
 
     private var menuCount: Int {
         switch activeMenu {
@@ -212,7 +244,7 @@ struct ComposerPrompt<Footer: View>: View {
         switch activeMenu {
         case .slash:
             guard slashResults.indices.contains(menuIndex) else { return }
-            pick(command: slashResults[menuIndex])
+            pick(command: slashResults[menuIndex].command)
         case .mention:
             guard fileMatches.indices.contains(menuIndex) else { return }
             pick(file: fileMatches[menuIndex])

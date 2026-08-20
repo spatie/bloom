@@ -1,4 +1,5 @@
 import Foundation
+import BloomCore
 
 /// One candidate for an `@mention`.
 ///
