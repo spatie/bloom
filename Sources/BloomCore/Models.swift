@@ -205,6 +205,16 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     public var agentSessionID: String?
     public var model: String
     public var effort: String
+    /// Which CLI drives this chat.
+    ///
+    /// **Per chat, not per workspace.** One worktree can hold a Claude Code conversation and a
+    /// Codex one at the same time, editing the same files, which is already true of two Claude
+    /// chats and is the reason this is not a column on `Workspace`. Anything keyed on "the
+    /// workspace's agent" is wrong by construction.
+    ///
+    /// Every row that existed before this column defaults to Claude Code, because that is what
+    /// every one of them was.
+    public var agentKind: AgentKind
     public var permissionMode: PermissionMode
     public var state: SessionState
     public var sortOrder: Int
@@ -224,6 +234,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         agentSessionID: String? = nil,
         model: String = "opus",
         effort: String = "high",
+        agentKind: AgentKind = .claudeCode,
         permissionMode: PermissionMode = .acceptEdits,
         state: SessionState = .idle,
         sortOrder: Int = 0,
@@ -242,6 +253,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         self.agentSessionID = agentSessionID
         self.model = model
         self.effort = effort
+        self.agentKind = agentKind
         self.permissionMode = permissionMode
         self.state = state
         self.sortOrder = sortOrder

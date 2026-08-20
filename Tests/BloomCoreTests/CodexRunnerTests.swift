@@ -338,3 +338,74 @@ private func eventually(
         #expect(await second.value)
     }
 }
+
+// MARK: - The column
+
+@Suite struct SessionAgentKindTests {
+    /// Every chat that existed before the column did was a Claude Code chat, and the default has
+    /// to say so rather than leaving a value nothing can read.
+    @Test func aChatDefaultsToClaudeCode() async throws {
+        let store = try makeTestStore("agent-kind-default")
+        let (session, _) = try await makeCodexSession(store)
+        #expect(session.agentKind == .claudeCode)
+
+        let stored = try await store.session(id: session.id)
+        #expect(stored?.agentKind == .claudeCode)
+    }
+
+    @Test func theColumnSurvivesARoundTrip() async throws {
+        let store = try makeTestStore("agent-kind-roundtrip")
+        let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r-\(UUID().uuidString)"))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id, name: "w", branch: "b", path: "/tmp/w", baseBranch: "main"
+        ))
+        let session = try await store.upsert(Session(workspaceID: workspace.id, agentKind: .codex))
+
+        #expect(try await store.session(id: session.id)?.agentKind == .codex)
+        let listed = try await store.sessions(workspaceID: workspace.id)
+        #expect(listed.first?.agentKind == .codex)
+    }
+
+    /// The picker changes the backend of a chat that has not spoken yet, and that write must not
+    /// put back anything else: `updateSessionPreferences` is narrow for the same reason it always
+    /// was, and the runner's own columns are not its to touch.
+    @Test func changingTheBackendLeavesTheRunnersColumnsAlone() async throws {
+        let store = try makeTestStore("agent-kind-narrow")
+        let (session, _) = try await makeCodexSession(store)
+
+        try await store.update(sessionID: session.id) {
+            $0.agentSessionID = "thread-1"
+            $0.inputTokens = 42
+        }
+        try await store.updateSessionPreferences(id: session.id, agentKind: .codex)
+
+        let stored = try #require(try await store.session(id: session.id))
+        #expect(stored.agentKind == .codex)
+        #expect(stored.agentSessionID == "thread-1")
+        #expect(stored.inputTokens == 42)
+    }
+
+    /// Every migration step has to survive being replayed over a database that already has it
+    /// applied, because `ADD COLUMN` has no `IF NOT EXISTS` and rewinding `user_version` is how an
+    /// old schema is reproduced. A step that threw here would take the whole transaction with it
+    /// and leave a database no version number describes.
+    @Test func theMigrationSurvivesBeingReplayed() async throws {
+        let path = TestScratch.unique("agent-kind-replay") + ".sqlite"
+        let store = try Store(path: path)
+        let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r-\(UUID().uuidString)"))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id, name: "w", branch: "b", path: "/tmp/w", baseBranch: "main"
+        ))
+        let session = try await store.upsert(Session(workspaceID: workspace.id, agentKind: .codex))
+
+        let raw = try SQLiteDatabase(path: path)
+        raw.userVersion = 0
+
+        let reopened = try Store(path: path)
+        let sessions = try await reopened.sessions(workspaceID: workspace.id)
+        #expect(sessions.count == 1)
+        #expect(sessions.first?.id == session.id)
+        // Replaying must not put the column back to its default either.
+        #expect(sessions.first?.agentKind == .codex)
+    }
+}

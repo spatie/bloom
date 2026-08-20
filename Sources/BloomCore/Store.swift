@@ -294,6 +294,28 @@ public actor Store {
             CREATE INDEX IF NOT EXISTS permission_asks_pending
                 ON permission_asks(session_id, resolved_at);
             """),
+
+            // Which CLI drives a chat.
+            //
+            // On the session rather than on the workspace, because the backend belongs to the
+            // conversation: one worktree can hold a Claude Code chat and a Codex one at the same
+            // time. Every row that exists when this runs is a Claude Code chat, and the default
+            // says so rather than leaving a column nothing can read.
+            //
+            // Real code rather than SQL because `ADD COLUMN` has no `IF NOT EXISTS`, and every
+            // step in this list has to be replayable over a database that already has it applied:
+            // the store's own tests rewind `user_version` to reproduce an old schema, and a step
+            // that could not be replayed would turn that into a migration that throws.
+            { db in
+                let existing = Set(
+                    try db.query("PRAGMA table_info(sessions);").compactMap { $0.string("name") }
+                )
+                if !existing.contains("agent_kind") {
+                    try db.execute(
+                        "ALTER TABLE sessions ADD COLUMN agent_kind TEXT NOT NULL DEFAULT 'claudeCode';"
+                    )
+                }
+            },
         ]
 
         let current = Int(db.userVersion)
@@ -602,15 +624,16 @@ public actor Store {
         try db.run(
             """
             INSERT INTO sessions (
-                id, workspace_id, title, agent_session_id, model, effort, permission_mode,
-                state, sort_order, created_at, updated_at, archived_at, last_read_seq,
-                input_tokens, output_tokens, cost_usd, context_tokens
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, workspace_id, title, agent_session_id, model, effort, agent_kind,
+                permission_mode, state, sort_order, created_at, updated_at, archived_at,
+                last_read_seq, input_tokens, output_tokens, cost_usd, context_tokens
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 agent_session_id = excluded.agent_session_id,
                 model = excluded.model,
                 effort = excluded.effort,
+                agent_kind = excluded.agent_kind,
                 permission_mode = excluded.permission_mode,
                 state = excluded.state,
                 sort_order = excluded.sort_order,
@@ -625,7 +648,8 @@ public actor Store {
             [
                 .text(session.id), .text(session.workspaceID), .text(session.title),
                 session.agentSessionID.map { .text($0) } ?? .null,
-                .text(session.model), .text(session.effort), .text(session.permissionMode.rawValue),
+                .text(session.model), .text(session.effort), .text(session.agentKind.rawValue),
+                .text(session.permissionMode.rawValue),
                 .text(session.state.rawValue), .int(Int64(session.sortOrder)),
                 .double(session.createdAt.timeIntervalSince1970),
                 .double(session.updatedAt.timeIntervalSince1970),
@@ -680,7 +704,12 @@ public actor Store {
         title: String? = nil,
         model: String? = nil,
         effort: String? = nil,
-        permissionMode: PermissionMode? = nil
+        permissionMode: PermissionMode? = nil,
+        /// Only ever set on a chat that has not spoken yet. Changing the backend of a chat that
+        /// already has a message strands its transcript half in one vocabulary and half in the
+        /// other, and its thread id on a server that knows nothing about the new one, so the
+        /// picker forks a new chat instead. See CODEX.md.
+        agentKind: AgentKind? = nil
     ) throws {
         try db.run(
             """
@@ -689,6 +718,7 @@ public actor Store {
                 model = COALESCE(?, model),
                 effort = COALESCE(?, effort),
                 permission_mode = COALESCE(?, permission_mode),
+                agent_kind = COALESCE(?, agent_kind),
                 updated_at = ?
             WHERE id = ?
             """,
@@ -697,6 +727,7 @@ public actor Store {
                 model.map { .text($0) } ?? .null,
                 effort.map { .text($0) } ?? .null,
                 permissionMode.map { .text($0.rawValue) } ?? .null,
+                agentKind.map { .text($0.rawValue) } ?? .null,
                 .double(Date().timeIntervalSince1970),
                 .text(id),
             ]
@@ -1239,6 +1270,8 @@ public actor Store {
             agentSessionID: row.string("agent_session_id"),
             model: row.string("model") ?? "opus",
             effort: row.string("effort") ?? "high",
+            // A row written before the column existed reads as Claude Code, which is what it was.
+            agentKind: AgentKind(rawValue: row.string("agent_kind") ?? "") ?? .claudeCode,
             permissionMode: PermissionMode(rawValue: row.string("permission_mode") ?? "") ?? .acceptEdits,
             state: SessionState(rawValue: row.string("state") ?? "idle") ?? .idle,
             sortOrder: Int(row.int("sort_order") ?? 0),
