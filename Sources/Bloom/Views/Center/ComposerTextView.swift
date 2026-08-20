@@ -4,7 +4,10 @@ import AppKit
 /// resized or focused so the SwiftUI side can keep up, and hands over anything that arrives as a
 /// file rather than as text.
 final class ComposerTextView: NSTextView {
-    var keyHandler: (@MainActor (NSEvent) -> Bool)?
+    /// Offered every key press, together with what is selected when it arrives: the composer's
+    /// answer to backspace depends on whether the caret is a bare insertion point at the start,
+    /// and only the text view knows that.
+    var keyHandler: (@MainActor (NSEvent, NSRange) -> Bool)?
     var onWidthChange: (@MainActor () -> Void)?
     var onFocusChange: (@MainActor (Bool) -> Void)?
     /// Offered every file dropped or pasted into the editor. Returns true when the composer took
@@ -13,7 +16,7 @@ final class ComposerTextView: NSTextView {
     var onAttach: (@MainActor ([AttachmentSource]) -> Bool)?
 
     override func keyDown(with event: NSEvent) {
-        if keyHandler?(event) == true { return }
+        if keyHandler?(event, selectedRange()) == true { return }
         super.keyDown(with: event)
     }
 

@@ -32,14 +32,18 @@ public struct SlashCommand: Identifiable, Hashable, Sendable {
     public var detail: String
     public var kind: Kind
     public var scope: Scope
+    /// The markdown file this came from, absolute. Nil for a built in, which is compiled into the
+    /// CLI and has no file to preview or to open.
+    public var path: String?
 
     public var id: String { name }
 
-    public init(name: String, detail: String, kind: Kind, scope: Scope) {
+    public init(name: String, detail: String, kind: Kind, scope: Scope, path: String? = nil) {
         self.name = name
         self.detail = detail
         self.kind = kind
         self.scope = scope
+        self.path = path
     }
 
     /// The one word the menu row prints after the description, or nothing.

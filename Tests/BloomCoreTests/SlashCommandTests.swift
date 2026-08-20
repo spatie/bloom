@@ -377,6 +377,73 @@ struct SlashCommandTests {
         }
     }
 
+    @Test("a command carries the file it came from, and a built in carries none")
+    func commandsCarryTheirFile() throws {
+        let tree = try Tree()
+        try tree.write(".claude/commands/commit.md", "# Commit\n")
+        try tree.skill(".claude/skills/flare", name: "flare", description: "Manage Flare")
+
+        let found = tree.discover()
+        let commit = try #require(found.first { $0.name == "commit" })
+        let flare = try #require(found.first { $0.name == "flare" })
+        #expect(commit.path == "\(tree.home)/.claude/commands/commit.md")
+        #expect(flare.path == "\(tree.home)/.claude/skills/flare/SKILL.md")
+        #expect(found.filter { $0.scope == .builtIn && $0.path != nil }.isEmpty)
+    }
+
+    // MARK: - What the hover card reads
+
+    @Test("the card reads the prose and not the frontmatter it repeats")
+    func documentationStripsFrontmatter() throws {
+        let tree = try Tree()
+        let path = try tree.write(
+            ".claude/skills/flare/SKILL.md",
+            """
+            ---
+            name: flare
+            description: A description long enough to fill a card on its own
+            ---
+
+            # Flare
+
+            Run `flare errors` to list them.
+            """
+        )
+
+        let found = try #require(SlashCommandIndex.documentation(of: path, lines: 24, columns: 160))
+        #expect(found.lines == ["# Flare", "", "Run `flare errors` to list them."])
+        #expect(!found.truncated)
+    }
+
+    @Test("a long skill is cut to what a card can hold, in both directions")
+    func documentationIsCapped() throws {
+        let tree = try Tree()
+        let long = String(repeating: "x", count: 400)
+        let path = try tree.write(
+            ".claude/skills/big/SKILL.md",
+            "---\nname: big\n---\n\n" + long + "\n" + (1...40).map { "line \($0)" }.joined(separator: "\n")
+        )
+
+        let found = try #require(SlashCommandIndex.documentation(of: path, lines: 24, columns: 160))
+        #expect(found.lines.count == 24)
+        #expect(found.truncated)
+        #expect(found.lines[0].count == 161)
+        #expect(found.lines[0].hasSuffix("\u{2026}"))
+    }
+
+    @Test("a file that is nothing but frontmatter has nothing to show")
+    func documentationOfAnEmptyBody() throws {
+        let tree = try Tree()
+        let path = try tree.write(".claude/skills/bare/SKILL.md", "---\nname: bare\ndescription: x\n---\n\n")
+
+        #expect(SlashCommandIndex.documentation(of: path, lines: 24, columns: 160) == nil)
+    }
+
+    @Test("a command with no file cannot be read, and says so by returning nothing")
+    func documentationOfAMissingFile() {
+        #expect(SlashCommandIndex.documentation(of: "/nowhere/SKILL.md", lines: 24, columns: 160) == nil)
+    }
+
     @Test("the built in list only holds things a Bloom turn can actually carry out")
     func builtInsAreDeliberate() {
         let names = Set(SlashCommandIndex.builtIns.map(\.name))
@@ -551,5 +618,129 @@ struct LocalSlashCommandTests {
         #expect(found.filter { SlashCommandIndex.sanitised($0.name) == nil }.isEmpty)
         // Nothing may be offered twice: the name is what gets typed.
         #expect(Set(found.map(\.name)).count == found.count)
+    }
+}
+
+/// Splitting a draft into the chip the composer draws and the prompt written after it.
+///
+/// The literal text is what the CLI is handed, so the round trip is the whole contract here: a
+/// draft that goes through the split and comes back changed is a prompt that runs the wrong
+/// command, or none.
+@Suite("Slash command draft")
+struct SlashCommandDraftTests {
+    /// Everything the split is ever asked about, each with what it should come back as.
+    static let drafts: [(draft: String, name: String?, body: String)] = [
+        ("", nil, ""),
+        ("just a prompt", nil, "just a prompt"),
+        ("/review ", "review", ""),
+        ("/review the diff", "review", "the diff"),
+        ("/superpowers:requesting-code-review ", "superpowers:requesting-code-review", ""),
+        ("/superpowers:requesting-code-review now please", "superpowers:requesting-code-review", "now please"),
+        ("/review-pr #421", "review-pr", "#421"),
+        // Still being typed, so still text: the menu is open on it and there is no chip yet.
+        ("/revi", nil, "/revi"),
+        ("/review", nil, "/review"),
+        // A path is not a command. Its first token ends at a slash, not at a space.
+        ("/Users/freek/notes.md is the file", nil, "/Users/freek/notes.md is the file"),
+        ("/usr/bin/env python", nil, "/usr/bin/env python"),
+        ("/", nil, "/"),
+        ("/ leading slash", nil, "/ leading slash"),
+        // Only a leading command counts. One in the middle of a sentence is a sentence.
+        ("please /review this", nil, "please /review this"),
+        // Two spaces: the second belongs to the prompt, and has to come back.
+        ("/review  double", "review", " double"),
+        ("/review\nnewline", nil, "/review\nnewline"),
+    ]
+
+    @Test("a draft splits into the command it leads with and everything after it")
+    func splitting() {
+        for expected in Self.drafts {
+            let draft = SlashCommandDraft.parse(expected.draft)
+            #expect(draft.name == expected.name, "\(expected.draft)")
+            #expect(draft.body == expected.body, "\(expected.draft)")
+        }
+    }
+
+    @Test("every draft survives the round trip byte for byte")
+    func roundTrip() {
+        for expected in Self.drafts {
+            #expect(SlashCommandDraft.parse(expected.draft).text == expected.draft)
+        }
+    }
+
+    @Test("editing the prompt leaves the command exactly as it was")
+    func editingTheBody() {
+        var draft = SlashCommandDraft.parse("/superpowers:requesting-code-review ")
+        draft.body = "and be quick about it"
+
+        #expect(draft.text == "/superpowers:requesting-code-review and be quick about it")
+        #expect(SlashCommandDraft.parse(draft.text) == draft)
+    }
+
+    @Test("picking a command writes a draft that reads back as that command")
+    func pickingWritesAChip() {
+        for name in ["review", "review-pr", "superpowers:requesting-code-review", "code_review.v2"] {
+            let picked = SlashCommandDraft(name: name, body: "")
+            #expect(SlashCommandDraft.parse(picked.text).name == name)
+        }
+    }
+
+    @Test("taking the chip off leaves the prompt untouched")
+    func removing() {
+        let draft = SlashCommandDraft.parse("/review the diff please")
+
+        #expect(draft.removingCommand().text == "the diff please")
+        #expect(draft.removingCommand().name == nil)
+    }
+
+    @Test("backspace on a chip with nothing after it puts the text back, ready to edit")
+    func backspaceOnALoneChip() throws {
+        let draft = SlashCommandDraft.parse("/review ")
+        let after = try #require(draft.backspacingCommand())
+
+        #expect(after.text == "/review")
+        #expect(after.name == nil)
+        // The caret lands at the end, so the next press eats a letter and the menu is open again.
+        #expect(draft.caretAfterBackspace == 7)
+        #expect(ComposerMenuQuery.slashQuery(in: after.text) == "review")
+    }
+
+    @Test("backspace on a chip with a prompt after it removes the chip and keeps the prompt")
+    func backspaceWithAPromptAfterIt() throws {
+        let draft = SlashCommandDraft.parse("/review the diff")
+        let after = try #require(draft.backspacingCommand())
+
+        // Putting the name back would join it to the first word and mangle both.
+        #expect(after.text == "the diff")
+        #expect(draft.caretAfterBackspace == 0)
+    }
+
+    @Test("backspace with no chip is not the composer's business")
+    func backspaceWithoutAChip() {
+        #expect(SlashCommandDraft.parse("just a prompt").backspacingCommand() == nil)
+        #expect(SlashCommandDraft.parse("/revi").backspacingCommand() == nil)
+    }
+
+    @Test("every name the index will offer is a name the split recognises")
+    func theIndexAndTheSplitAgree() {
+        let names = [
+            "review", "review-pr", "code_review", "superpowers:requesting-code-review",
+            "git:commit", "modernize-assess", "v2.1",
+        ]
+        for name in names {
+            #expect(SlashCommandIndex.sanitised(name) != nil, "\(name)")
+            #expect(SlashCommandDraft.parse("/\(name) ").name == name, "\(name)")
+        }
+    }
+}
+
+/// The slash token rule, copied out of the composer so the draft tests can hold it to the same
+/// answer. `ComposerMenu` lives in the app target and the core suite cannot see it.
+private enum ComposerMenuQuery {
+    static func slashQuery(in draft: String) -> String? {
+        guard draft.hasPrefix("/") else { return nil }
+        let rest = draft.dropFirst()
+        guard !rest.contains(where: { $0 == " " || $0 == "\n" || $0 == "\t" }) else { return nil }
+        return String(rest)
     }
 }

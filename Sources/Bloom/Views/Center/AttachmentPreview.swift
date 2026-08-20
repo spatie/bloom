@@ -61,7 +61,9 @@ struct AttachmentPreview: View {
             // offer up there is the composer's own.
             Image(image, scale: scale, label: Text("Preview of \(url.lastPathComponent)"))
         case .text(let lines, let truncated):
-            source(lines, truncated: truncated)
+            SourceLines(lines: lines, truncated: truncated)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("The first lines of \(url.lastPathComponent)")
         case .unavailable:
             unpreviewable
         case .missing:
@@ -71,42 +73,6 @@ struct AttachmentPreview: View {
                 detail: "It is no longer on disk."
             )
         }
-    }
-
-    /// The head of a source file, set the way the transcript sets code.
-    ///
-    /// Quick Look can draw a text file and the answer was never worth having: it renders the
-    /// content onto a page, and a page is a portrait rectangle whatever is on it, so a seventeen
-    /// line file came back as a 422 by 445 thumbnail with the text in the top third and two
-    /// hundred and fifty points of white underneath. The card was that shape because the bitmap
-    /// was. Real text has the height of the text in it, which is the whole of what "size to
-    /// content" means here, and it is drawn as glyphs rather than as a picture of glyphs, so it is
-    /// sharp at any scale and legible at this size, which the thumbnail was not.
-    ///
-    /// Leading aligned and not wrapped: code that soft wraps in a hover card reads as different
-    /// code. A long line is cut and says so with the same ellipsis a truncated file gets.
-    private func source(_ lines: [String], truncated: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // One `Text` a line rather than one `Text` with newlines in it. A single run wraps,
-            // and a wrapped line of code is a line of code that is not there; per line, each one
-            // truncates at the card's own width instead, which is also what makes the block as
-            // wide as its widest line and no wider.
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                Text(line)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-
-            if truncated {
-                Text("\u{2026}")
-                    .foregroundStyle(Palette.textTertiary)
-            }
-        }
-        .font(Typo.codeSmall)
-        .foregroundStyle(Palette.textPrimary)
-        .textSelection(.disabled)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("The first lines of \(url.lastPathComponent)")
     }
 
     /// A file Quick Look cannot draw. The file's own icon, its kind and its size: everything that
@@ -201,6 +167,50 @@ struct AttachmentPreview: View {
             guard !Task.isCancelled else { return }
             phase = .unavailable
         }
+    }
+}
+
+/// The head of a source file, set the way the transcript sets code.
+///
+/// Quick Look can draw a text file and the answer was never worth having: it renders the content
+/// onto a page, and a page is a portrait rectangle whatever is on it, so a seventeen line file came
+/// back as a 422 by 445 thumbnail with the text in the top third and two hundred and fifty points
+/// of white underneath. The card was that shape because the bitmap was. Real text has the height of
+/// the text in it, which is the whole of what "size to content" means here, and it is drawn as
+/// glyphs rather than as a picture of glyphs, so it is sharp at any scale and legible at this size,
+/// which the thumbnail was not.
+///
+/// Leading aligned and not wrapped: code that soft wraps in a hover card reads as different code. A
+/// long line is cut and says so with the same ellipsis a truncated file gets.
+///
+/// Its own view because two cards want it. The file preview draws the head of whatever was
+/// attached; the slash command card draws the head of a skill with its frontmatter taken off. Both
+/// are "some lines of a text file, sized to what is in them", and a second copy of this is how the
+/// two would stop looking alike.
+struct SourceLines: View {
+    var lines: [String]
+    var truncated: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // One `Text` a line rather than one `Text` with newlines in it. A single run wraps,
+            // and a wrapped line of code is a line of code that is not there; per line, each one
+            // truncates at the card's own width instead, which is also what makes the block as
+            // wide as its widest line and no wider.
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            if truncated {
+                Text("\u{2026}")
+                    .foregroundStyle(Palette.textTertiary)
+            }
+        }
+        .font(Typo.codeSmall)
+        .foregroundStyle(Palette.textPrimary)
+        .textSelection(.disabled)
     }
 }
 

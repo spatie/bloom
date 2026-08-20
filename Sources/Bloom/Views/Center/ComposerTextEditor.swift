@@ -29,6 +29,14 @@ struct ComposerTextEditor: NSViewRepresentable {
     var maxLines: Int = 12
     var onHeightChange: @MainActor (CGFloat) -> Void
     var onKey: @MainActor (ComposerKey) -> Bool
+    /// Backspace, asked only at a bare caret at the very start of the text, where the thing to the
+    /// left of it is not a character. Returns true when the composer took it.
+    ///
+    /// Its own way in rather than another `ComposerKey`. Everywhere else backspace is a plain
+    /// deletion and the text system's own answer, undo included, is the right one, so this is not
+    /// a key the callers of the composer have any claim on: it is the editor asking the composer
+    /// about the one position where the two disagree about what is there.
+    var onBackspaceAtStart: @MainActor () -> Bool = { false }
     /// Files dropped or pasted into the editor. Returns true when the composer attached them,
     /// which is what keeps AppKit from typing their paths into the draft instead.
     var onAttach: @MainActor ([AttachmentSource]) -> Bool
@@ -80,8 +88,8 @@ struct ComposerTextEditor: NSViewRepresentable {
 
         let textView = ComposerTextView(frame: .zero, textContainer: container)
         textView.delegate = context.coordinator
-        textView.keyHandler = { [weak coordinator = context.coordinator] event in
-            coordinator?.handle(event) ?? false
+        textView.keyHandler = { [weak coordinator = context.coordinator] event, selection in
+            coordinator?.handle(event, selection: selection) ?? false
         }
         // Wrapping depends on the width, so the measurement is only valid until the window is
         // resized. Re-measuring on the frame change is cheaper than laying out speculatively.
@@ -207,7 +215,7 @@ struct ComposerTextEditor: NSViewRepresentable {
 
         /// Maps a raw key event to composer intent. Shift+Return is deliberately not mapped: it
         /// falls through to AppKit, which inserts the newline for us.
-        func handle(_ event: NSEvent) -> Bool {
+        func handle(_ event: NSEvent, selection: NSRange) -> Bool {
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             switch event.keyCode {
             case 36, 76: // Return, Enter
@@ -221,6 +229,14 @@ struct ComposerTextEditor: NSViewRepresentable {
                 return parent.onKey(.up)
             case 48: // Tab
                 return parent.onKey(.tab)
+            case 51: // Delete
+                // Only the bare press, and only with nothing selected and nothing to the left of
+                // the caret. A modified delete, a selection, or a caret anywhere else is the text
+                // system's own business, and taking those would cost the editor its undo.
+                guard flags.isEmpty, selection.length == 0, selection.location == 0 else {
+                    return false
+                }
+                return parent.onBackspaceAtStart()
             default:
                 return false
             }

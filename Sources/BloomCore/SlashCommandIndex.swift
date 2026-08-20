@@ -32,6 +32,10 @@ public enum SlashCommandIndex {
     static let maximumEntriesPerTree = 500
     /// Frontmatter lives at the top of the file, and some skills are very long.
     static let frontmatterByteLimit = 8192
+    /// How much of a file the hover card will read. Enough for a screenful of prose after a long
+    /// frontmatter block, and a hard stop so a skill with a megabyte of reference in it cannot be
+    /// pulled into memory by a pointer resting on a chip.
+    static let documentationByteLimit = 64 * 1024
     static let detailLimit = 90
 
     // MARK: - Entry point
@@ -132,7 +136,8 @@ public enum SlashCommandIndex {
                 name: name,
                 detail: front.description ?? firstProseLine(of: entry.path),
                 kind: .command,
-                scope: scope
+                scope: scope,
+                path: entry.path
             )
         }
     }
@@ -158,7 +163,8 @@ public enum SlashCommandIndex {
                 name: name,
                 detail: front.description ?? "",
                 kind: .skill,
-                scope: scope
+                scope: scope,
+                path: entry.path
             )
         }
     }
@@ -370,6 +376,66 @@ public enum SlashCommandIndex {
             return clean(String(trimmed.drop { $0 == "#" }))
         }
         return ""
+    }
+
+    // MARK: - What a command says for itself
+
+    /// The prose of a command file, with its YAML frontmatter taken off the top.
+    public struct Documentation: Equatable, Sendable {
+        public var lines: [String]
+        /// Whether there was more of the file than fitted.
+        public var truncated: Bool
+
+        public init(lines: [String], truncated: Bool) {
+            self.lines = lines
+            self.truncated = truncated
+        }
+    }
+
+    /// The head of what a command actually tells the agent to do, for the hover card.
+    ///
+    /// The frontmatter is dropped rather than shown. It is the description over again, and a
+    /// skill's description is routinely a paragraph long: printed at the top of the card it would
+    /// fill the card twice over with the one line already set above it. What is worth glancing at
+    /// is the instruction underneath.
+    ///
+    /// Capped in both directions by the caller, which passes the same limits the file preview
+    /// uses, and the whole read is bounded before any of that: a skill can be tens of kilobytes
+    /// and none of it past the first screenful is a hover card's business.
+    public static func documentation(of path: String, lines limit: Int, columns: Int) -> Documentation? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: documentationByteLimit), !data.isEmpty else {
+            return nil
+        }
+        let text = String(decoding: data, as: UTF8.self)
+
+        var lines = text.components(separatedBy: .newlines)
+        if lines.first?.trimmingCharacters(in: .whitespaces) == "---" {
+            lines.removeFirst()
+            while let line = lines.first {
+                lines.removeFirst()
+                if line.trimmingCharacters(in: .whitespaces) == "---" { break }
+            }
+        }
+
+        while let first = lines.first, first.trimmingCharacters(in: .whitespaces).isEmpty {
+            lines.removeFirst()
+        }
+        while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty {
+            lines.removeLast()
+        }
+        guard !lines.isEmpty else { return nil }
+
+        let truncated = lines.count > limit
+        let head = lines.prefix(limit).map { line -> String in
+            // Tabs drawn at their own width make one long line as wide as the screen.
+            let expanded = line.replacing("\t", with: "    ")
+            return expanded.count > columns
+                ? String(expanded.prefix(columns)) + "\u{2026}"
+                : expanded
+        }
+        return Documentation(lines: head, truncated: truncated)
     }
 
     static func clean(_ text: String) -> String {

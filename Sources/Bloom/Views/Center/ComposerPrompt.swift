@@ -58,8 +58,13 @@ struct ComposerPrompt<Footer: View>: View {
     @State private var isDropTarget = false
     /// How wide the box is, which is all the hover card is allowed to be.
     @State private var boxWidth: CGFloat = 0
+    /// How far the box is from the top of the window it is in, which is all the room a card that
+    /// floats above it has. A sheet is its own window, so this is the sheet's own top edge there.
+    @State private var boxTop: CGFloat = 0
 
     @State private var slashCatalog = SlashCommandCatalog()
+    /// Whether the pointer has settled on the command chip, which is what puts its card up.
+    @State private var isCommandPreviewed = false
     @State private var fileMatches: [FileMatch] = []
     @State private var menuIndex = 0
     @State private var isMenuDismissed = false
@@ -70,6 +75,15 @@ struct ComposerPrompt<Footer: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.spacingWide) {
+            if let name = command.name {
+                SlashCommandChip(
+                    name: name,
+                    command: slashCatalog.command(named: name),
+                    onRemove: removeCommand,
+                    onHover: { isCommandPreviewed = $0 }
+                )
+            }
+
             if !attachments.isEmpty {
                 AttachmentBar(
                     attachments: attachments,
@@ -81,12 +95,13 @@ struct ComposerPrompt<Footer: View>: View {
             }
 
             ComposerEditor(
-                text: $text,
+                text: promptBody,
                 caret: $caret,
                 isFocused: $isFocused,
                 height: editorHeight,
                 onContentHeightChange: onContentHeightChange,
                 onKey: handle(key:),
+                onBackspaceAtStart: backspaceCommand,
                 onAttach: attach(sources:),
                 placeholder: placeholder
             )
@@ -94,7 +109,10 @@ struct ComposerPrompt<Footer: View>: View {
             footer(attachFiles)
         }
         .composerBox(isFocused: $isFocused, isDropTarget: isDropTarget)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { boxWidth = $0 }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+            boxWidth = frame.width
+            boxTop = frame.minY
+        }
         // The editor takes the drops that land on the text itself; this takes the ones that land
         // on the chips, the footer and the padding, which is most of the box.
         .dropDestination(for: URL.self) { urls, _ in
@@ -109,6 +127,17 @@ struct ComposerPrompt<Footer: View>: View {
                 attachment: activeMenu == .none ? livePreview : nil,
                 worktree: attachmentRoot,
                 availableWidth: boxWidth
+            )
+            .alignmentGuide(.top) { $0[.bottom] + Metrics.spacing }
+        }
+        .overlay(alignment: .topLeading) {
+            // Same place, same card, same rule as the attachment preview: a menu the user is
+            // typing into outranks anything they are only looking at.
+            SlashCommandCardOverlay(
+                name: activeMenu == .none && isCommandPreviewed ? command.name : nil,
+                command: command.name.flatMap { slashCatalog.command(named: $0) },
+                availableWidth: boxWidth,
+                availableHeight: boxTop - Metrics.spacing * 2
             )
             .alignmentGuide(.top) { $0[.bottom] + Metrics.spacing }
         }
@@ -147,7 +176,8 @@ struct ComposerPrompt<Footer: View>: View {
         }
     }
 
-    /// `--composer-draft "/revi"` fills the box on first appearance.
+    /// `--composer-draft "/revi"` fills the box on first appearance, and `--composer-preview`
+    /// raises the command chip's hover card with it.
     ///
     /// A completion menu is the one part of the composer a still of the window cannot otherwise
     /// show: it only exists while something is half typed, and the capture run has no keyboard.
@@ -159,8 +189,11 @@ struct ComposerPrompt<Footer: View>: View {
         guard let index = arguments.firstIndex(of: "--composer-draft"), index + 1 < arguments.count,
               text.isEmpty else { return }
         text = arguments[index + 1]
-        caret = (text as NSString).length
+        caret = (SlashCommandDraft.parse(text).body as NSString).length
         isFocused = true
+        // `--composer-preview` raises the command chip's card, which otherwise only a pointer
+        // resting on the chip can do, and a capture run has no pointer either.
+        isCommandPreviewed = arguments.contains("--composer-preview")
         #endif
     }
 
@@ -174,9 +207,35 @@ struct ComposerPrompt<Footer: View>: View {
         return previewed
     }
 
+    /// The draft, split into the command it leads with and the prompt written after it.
+    ///
+    /// Derived rather than stored. Nothing here remembers that a chip is up, so nothing can
+    /// disagree with the draft about whether one should be, and `command.text` is byte for byte
+    /// the string that gets sent. See `SlashCommandDraft`.
+    private var command: SlashCommandDraft {
+        SlashCommandDraft.parse(text)
+    }
+
+    /// What the editor is actually editing: everything except the leading `/command`, which is
+    /// drawn as a chip above instead. Writes go back through the split, so the literal text keeps
+    /// its command however the prompt under it is edited.
+    private var promptBody: Binding<String> {
+        Binding {
+            SlashCommandDraft.parse(text).body
+        } set: { edited in
+            var draft = SlashCommandDraft.parse(text)
+            draft.body = edited
+            text = draft.text
+        }
+    }
+
     /// What the text alone asks for, before Escape gets a say.
+    ///
+    /// Resolved against the body rather than the whole draft, because the chip is not text any
+    /// more: with `/review ` already picked, a `@` in the prompt is a mention and a second `/` is
+    /// a new command, and both are measured from where the editor's own caret is.
     private var menu: ComposerMenu {
-        ComposerMenu.resolve(draft: text, caret: caret)
+        ComposerMenu.resolve(draft: command.body, caret: caret)
     }
 
     private var activeMenu: ComposerMenu {
@@ -220,22 +279,50 @@ struct ComposerPrompt<Footer: View>: View {
         }.value
     }
 
-    private func pick(command: SlashCommand) {
-        let replacement = "/\(command.name) "
-        text = replacement
-        caret = (replacement as NSString).length
+    /// Accepting a row replaces the command, and only the command.
+    ///
+    /// The menu is only ever open on a body that is one unbroken `/word`, so there is nothing
+    /// under the caret worth keeping; and a draft that already leads with a command is having that
+    /// command changed, because two of them cannot both lead.
+    private func pick(command picked: SlashCommand) {
+        text = SlashCommandDraft(name: picked.name, body: "").text
+        caret = 0
         isFocused = true
+    }
+
+    /// Takes the command off and leaves the prompt written after it exactly as it was.
+    private func removeCommand() {
+        let draft = command
+        text = draft.removingCommand().text
+        caret = 0
+        isCommandPreviewed = false
+        isFocused = true
+    }
+
+    /// Backspace at the very start of the prompt, where the thing to the left of the caret is the
+    /// chip. See `SlashCommandDraft.backspacingCommand`.
+    private func backspaceCommand() -> Bool {
+        let draft = command
+        guard let after = draft.backspacingCommand() else { return false }
+        text = after.text
+        caret = draft.caretAfterBackspace
+        isCommandPreviewed = false
+        return true
     }
 
     private func pick(file: FileMatch) {
         guard let token = activeMenu.mention else { return }
         let replacement = "@\(file.path) "
-        let updated = NSMutableString(string: text)
+        var draft = command
+        // Measured against the body, which is what the token was found in and what the editor's
+        // caret counts from. Writing it back through the split is what keeps the command intact.
+        let updated = NSMutableString(string: draft.body)
         updated.replaceCharacters(
             in: NSRange(location: token.start, length: token.length),
             with: replacement
         )
-        text = updated as String
+        draft.body = updated as String
+        text = draft.text
         caret = token.start + (replacement as NSString).length
         isFocused = true
     }
@@ -286,6 +373,7 @@ struct ComposerPrompt<Footer: View>: View {
             isMenuDismissed = true
             return true
         }
+
         return onKey(key)
     }
 

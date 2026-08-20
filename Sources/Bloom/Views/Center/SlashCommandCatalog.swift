@@ -51,6 +51,15 @@ final class SlashCommandCatalog {
         await scan(workspacePath: workspacePath)
     }
 
+    /// What the catalogue knows about one name, or nothing.
+    ///
+    /// Nothing is a real answer and not an error: a draft restored from another machine, or a
+    /// mistyped name, still leads with something the CLI will be handed, and the chip that draws
+    /// it says only what it can stand behind.
+    func command(named name: String) -> SlashCommand? {
+        commands.first { $0.name == name }
+    }
+
     /// Ranks the list against the text typed after the `/`.
     func matches(_ query: String) -> [SlashCommandMatch] {
         SlashCommand.rank(commands, query: query)
