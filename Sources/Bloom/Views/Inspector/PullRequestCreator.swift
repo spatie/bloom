@@ -8,6 +8,8 @@ import BloomCore
 /// with no pull request it is the whole point of the strip. Its counterpart once there is one is
 /// Merge, in the same place, at the same weight.
 ///
+/// On a branch with nothing on it there is no button. See `body`.
+///
 /// Nothing here is gated on the GitHub CLI. Pressing it composes a turn and sends it to this
 /// workspace's own agent, which is already authenticated and already standing in the worktree, so
 /// whether Bloom itself can talk to GitHub has no bearing on it. See `WorkspaceModel`.
@@ -35,6 +37,9 @@ struct PullRequestCreator: View {
     /// Whether this branch has anything on it at all. A worktree identical to its base has nothing
     /// to open a pull request for, and Bloom knows that for free, so it says so here rather than
     /// spending a whole agent turn on the agent finding out.
+    ///
+    /// It settles both halves of the strip: the line under the branch name, and whether there is a
+    /// button at all.
     var hasChanges: Bool
     var action: () -> Void
 
@@ -101,7 +106,20 @@ struct PullRequestCreator: View {
                 ProgressView()
                     .controlSize(.small)
                     .accessibilityLabel("Working")
-            } else {
+            } else if hasChanges {
+                // Nothing at all on a branch that is identical to its base, rather than a greyed
+                // out button. There is no work here to open a pull request for and nothing in this
+                // strip, this column or this window will make there be any: the next thing that
+                // happens is the agent editing a file, which is not something a button can wait
+                // for. A control that cannot be used and cannot be brought back to life from where
+                // the reader is standing is not a control, it is a picture of one, and the line
+                // under the branch name already says what the state is.
+                //
+                // It comes back on the same fact it used to be enabled by, `hasChanges`, which is
+                // the inspector's own file list with the workspace's stored diff counts behind it.
+                // Nothing extra is polled for it and nothing is later than it was: the list is
+                // re-read when a turn ends and every six seconds while Bloom is frontmost, which
+                // is what used to take the button from grey to live.
                 ViewThatFits(in: .horizontal) {
                     createButton.labelStyle(.titleOnly)
                     createButton.labelStyle(.iconOnly)
@@ -129,14 +147,13 @@ struct PullRequestCreator: View {
             .buttonStyle(.borderedProminent)
             .tint(Palette.accentFill)
             .controlSize(.regular)
-            .disabled(isAgentBusy || !hasChanges)
+            // Only for a turn that is already running, which ends on its own. A branch with
+            // nothing on it does not draw this button at all: see `body`.
+            .disabled(isAgentBusy)
             .help(helpText)
     }
 
     private var helpText: String {
-        if !hasChanges {
-            return "This worktree is identical to \(baseBranch). There is nothing to open a pull request for yet."
-        }
         if isAgentBusy {
             return "The agent is working. The request is sent as a turn, so it has to wait for this one."
         }
