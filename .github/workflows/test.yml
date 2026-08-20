@@ -60,6 +60,16 @@ jobs:
             exit 1
           fi
 
+      # Around thirty tests make a real commit with this machine's git, and
+      # RepositoryStarter refuses to commit without a name and an address. A
+      # fresh runner has neither, so one of them fails outright and the rest
+      # return early and assert nothing. This is what makes them run at all.
+      - name: Give the runner a git identity
+        run: |
+          set -euo pipefail
+          git config --global user.email "ci@bloom.local"
+          git config --global user.name "Bloom CI"
+
       # Release configuration, because build.sh -r below wants the same objects
       # and there is no reason to compile everything twice. This step is the one
       # that answers "does Sources/Bloom still build".
