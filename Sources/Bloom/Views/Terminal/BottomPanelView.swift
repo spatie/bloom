@@ -64,7 +64,19 @@ struct BottomPanelView: View {
                 app.isBottomPanelVisible.toggle()
             }
 
-            TabStripSeparator()
+            // The rule between the chevron and the tabs, and it answers to the tabs rather than to
+            // the chevron: it is the rule BEFORE the first tab, so it goes exactly the way every
+            // other rule in this strip goes. Hidden against the first tab when that tab is the
+            // selected one, whose own fill is its edge, and hidden when the strip has no first tab
+            // at all.
+            //
+            // The empty case is the one that was wrong. `append` already hides its own rule when
+            // there is no tab for the `+` to come after, but that condition guards a different
+            // rule: this one belongs to the slot before the tabs and knew nothing about them. With
+            // nothing between the two, this rule ended up hard against the `+` and fenced off
+            // nothing from nothing, which is what a panel whose terminals have not arrived yet
+            // opens with.
+            TabStripSeparator(isHidden: order.first.map(isSelected(before:)) ?? true)
         } tabs: {
             tabRow
         } append: {
