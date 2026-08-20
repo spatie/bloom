@@ -498,6 +498,10 @@ public enum AgentEvent: Sendable {
     /// The agent asking to run something, with its turn held open until Bloom answers. Only ever
     /// emitted when the CLI was launched with `--permission-prompt-tool stdio`.
     case permissionAsk(PermissionAsk)
+    /// One question has been answered, by a person or by a rule they granted earlier. A live
+    /// signal only: the durable record is the `permission_asks` table, which is what a transcript
+    /// reopened tomorrow reads.
+    case permissionDecided(PermissionResolution)
     case result(AgentResult)
     case rateLimit(Data)
     case error(AgentError)
@@ -513,6 +517,7 @@ public enum AgentEvent: Sendable {
         case .toolResult(let value): value.raw
         case .hook(let value): value.raw
         case .permissionAsk(let value): value.raw
+        case .permissionDecided: Data()
         case .result(let value): value.raw
         case .error(let value): value.raw
         case .rateLimit(let raw), .unknown(let raw): raw
@@ -566,7 +571,9 @@ public enum AgentEvent: Sendable {
         case .result: .result
         case .error: .error
         case .rateLimit: .notice
-        case .initialized, .streamDelta, .status, .thinkingTokens, .hook, .unknown: .system
+        case .initialized, .streamDelta, .status, .thinkingTokens, .hook, .permissionDecided,
+             .unknown:
+            .system
         }
     }
 
@@ -575,7 +582,9 @@ public enum AgentEvent: Sendable {
     /// the finished block. Status and thinking-token ticks are live indicators, not history.
     public var isTranscriptRow: Bool {
         switch self {
-        case .streamDelta, .status, .thinkingTokens: false
+        // A decision is not a row. The question is the row, and what was decided about it is
+        // read back off the ask itself, so answering one must not append anything.
+        case .streamDelta, .status, .thinkingTokens, .permissionDecided: false
         default: true
         }
     }
@@ -587,6 +596,7 @@ public enum AgentEvent: Sendable {
         case .toolResult(let value): value.toolUseID
         // Filed under the call it is about, so the row lands where the call would have been.
         case .permissionAsk(let value): value.toolUseID
+        case .permissionDecided(let value): value.toolUseID
         default: nil
         }
     }

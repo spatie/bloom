@@ -116,6 +116,15 @@ struct WorkspaceStatusTests {
     func descriptions() throws {
         for status in WorkspaceStatus.allCases {
             #expect(!status.label.isEmpty)
+            // One documented exception. The raised hand is the only mark in the column that asks
+            // for something rather than reporting something, and "Waiting on you" does not say
+            // what it is waiting for or that the agent has stopped. The tooltip is where that is
+            // learned, so it is a sentence rather than the label again.
+            guard status != .awaitingPermission else {
+                #expect(status.summary(pullRequest: nil) != status.label)
+                #expect(status.summary(pullRequest: nil).contains("cannot go on until you answer"))
+                continue
+            }
             #expect(status.summary(pullRequest: nil) == status.label)
         }
 
@@ -320,5 +329,114 @@ struct WorkspaceStatusTests {
             deletions: deletions,
             unread: unread
         )
+    }
+}
+
+/// The sixth signal: a workspace whose agent has stopped and is waiting on a person.
+///
+/// The whole reason it exists is that a blocked workspace must not look like a working one. So the
+/// tests are about precedence and about the numbers that leave the workspace, not about the shape
+/// of the mark.
+@Suite("Waiting on you")
+struct AwaitingPermissionStatusTests {
+    private func workspace(unread: Bool = false, additions: Int = 0) -> Workspace {
+        Workspace(
+            repoID: "r", name: "w", branch: "b", path: "/tmp/w", baseBranch: "main",
+            setupState: .succeeded, additions: additions, unread: unread
+        )
+    }
+
+    /// The one state that outranks running. An agent that is working needs nothing; an agent that
+    /// is blocked is the only row in the column where time is being wasted.
+    @Test("waiting outranks running")
+    func outranksRunning() {
+        let status = WorkspaceStatus.resolve(
+            workspace: workspace(unread: true, additions: 9),
+            isRunning: true,
+            pullRequest: nil,
+            isAwaitingPermission: true
+        )
+
+        #expect(status == .awaitingPermission)
+        #expect(status.needsAnswer)
+    }
+
+    /// Setup is still ahead of it, and deliberately: a workspace whose setup script has not
+    /// finished cannot be trusted to say anything about itself yet.
+    @Test("a workspace still setting up says so first")
+    func setupWinsOverWaiting() {
+        var setting = workspace()
+        setting.setupState = .running
+        let status = WorkspaceStatus.resolve(
+            workspace: setting, isRunning: true, pullRequest: nil, isAwaitingPermission: true
+        )
+
+        #expect(status == .settingUp)
+    }
+
+    /// Every existing caller keeps its meaning without knowing the state exists.
+    @Test("nothing changes for a workspace nobody is waiting on")
+    func defaultsToFalse() {
+        let workspace = workspace(additions: 3)
+
+        #expect(WorkspaceStatus.resolve(workspace: workspace, isRunning: false, pullRequest: nil) == .changed)
+        #expect(WorkspaceStatus.resolve(workspace: workspace, isRunning: true, pullRequest: nil) == .running)
+    }
+
+    @Test("only the waiting state asks for an answer")
+    func onlyOneStateNeedsAnswering() {
+        #expect(WorkspaceStatus.allCases.filter(\.needsAnswer) == [.awaitingPermission])
+    }
+
+    // MARK: What leaves the workspace
+
+    /// The badge is one number and has to mean one thing. An unread result will still be there in
+    /// an hour; a blocked agent is burning the hour, so it wins rather than being added.
+    @Test("the dock badge counts waiting ahead of unread, and never sums them")
+    func dockBadge() {
+        #expect(DockBadge.label(unread: 4, waiting: 2, isEnabled: true) == "2")
+        #expect(DockBadge.label(unread: 4, waiting: 0, isEnabled: true) == "4")
+        #expect(DockBadge.label(unread: 0, waiting: 3, isEnabled: true) == "3")
+        // Not "6".
+        #expect(DockBadge.label(unread: 4, waiting: 2, isEnabled: true) != "6")
+        // Nothing at all is still nothing at all.
+        #expect(DockBadge.label(unread: 0, waiting: 0, isEnabled: true) == nil)
+        // And the preference still switches the whole thing off.
+        #expect(DockBadge.label(unread: 4, waiting: 2, isEnabled: false) == nil)
+    }
+
+    @Test("the badge counts workspaces, not questions")
+    func waitingCount() {
+        let blocked = workspace()
+        let working = workspace()
+        let count = DockBadge.waitingCount(in: [blocked, working, working]) { $0.id == blocked.id }
+
+        #expect(count == 1)
+    }
+
+    /// Waiting first, because it is the only segment whose number costs something to ignore.
+    @Test("the menu bar puts waiting ahead of running")
+    func menuBar() {
+        let segments = MenuBarSummary.segments(running: 3, unread: 1, waiting: 2)
+
+        #expect(segments.map(\.count) == [2, 3, 1])
+        #expect(segments.first?.symbolName == MenuBarSummary.waitingSymbol)
+        #expect(segments.first?.label == "Agents waiting on you")
+    }
+
+    @Test("nothing waiting leaves the strip exactly as it was")
+    func menuBarUnchanged() {
+        #expect(MenuBarSummary.segments(running: 3, unread: 1, waiting: 0)
+            == MenuBarSummary.segments(running: 3, unread: 1))
+        #expect(MenuBarSummary.tooltip(running: 3, unread: 1, waiting: 0)
+            == MenuBarSummary.tooltip(running: 3, unread: 1))
+    }
+
+    @Test("the tooltip says it in words, singular and plural")
+    func tooltip() {
+        #expect(MenuBarSummary.tooltip(running: 0, unread: 0, waiting: 1) == "1 agent waiting on you")
+        #expect(MenuBarSummary.tooltip(running: 0, unread: 0, waiting: 2) == "2 agents waiting on you")
+        #expect(MenuBarSummary.tooltip(running: 1, unread: 0, waiting: 2)
+            == "2 agents waiting on you, 1 agent running")
     }
 }

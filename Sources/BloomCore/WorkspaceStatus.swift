@@ -12,6 +12,13 @@ import Foundation
 public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
     /// The setup script is still running, so nothing here can be trusted yet.
     case settingUp
+    /// An agent asked to do something and is holding its turn open until somebody answers.
+    ///
+    /// Above `running` on purpose, and it is the only state that outranks it. A running agent is
+    /// spending time on the user's behalf and needs nothing; this one is spending time and getting
+    /// nowhere, and it is the only state in the list that gets worse the longer it is left. The
+    /// CLI puts no timer on the question, so nothing resolves it except a person.
+    case awaitingPermission
     /// An agent is mid turn right now.
     case running
     /// The setup script failed, so this workspace never became usable.
@@ -43,12 +50,20 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
     /// and `pullRequest` is optional because gh may be missing, signed out, or simply not asked
     /// yet. A missing pull request is never reported as a bad one: the workspace falls back to
     /// what git alone can say.
+    ///
+    /// `isAwaitingPermission` is passed in for the same reason `isRunning` is: only the app layer
+    /// knows which agents are blocked, and it defaults to false so no existing caller changes
+    /// meaning by not knowing about it.
     public static func resolve(
         workspace: Workspace,
         isRunning: Bool,
-        pullRequest: PullRequest?
+        pullRequest: PullRequest?,
+        isAwaitingPermission: Bool = false
     ) -> WorkspaceStatus {
         if workspace.setupState == .running { return .settingUp }
+        // Ahead of `running`, because a blocked workspace looking the same as a working one is the
+        // failure this state exists to prevent.
+        if isAwaitingPermission { return .awaitingPermission }
         if isRunning { return .running }
         if workspace.setupState == .failed { return .setupFailed }
         if workspace.unread { return .unread }
@@ -72,6 +87,7 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
     public var label: String {
         switch self {
         case .settingUp: "Setting up"
+        case .awaitingPermission: "Waiting on you"
         case .running: "Agent running"
         case .setupFailed: "Setup failed"
         case .unread: "Unread"
@@ -98,12 +114,19 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
         }
     }
 
+    /// Whether this workspace is stopped until a person does something about it. The one state
+    /// where the passage of time is pure waste.
+    public var needsAnswer: Bool { self == .awaitingPermission }
+
     /// The sentence the tooltip and VoiceOver get.
     ///
     /// A colour and a glyph cannot say "1 required check failed", and that number is the reason
     /// the user is hovering the mark in the first place, so the pull request's own summary is
     /// carried through rather than reduced to the state's name.
     public func summary(pullRequest: PullRequest?) -> String {
+        if self == .awaitingPermission {
+            return "The agent is asking for permission and cannot go on until you answer."
+        }
         guard describesPullRequest, let pullRequest else { return label }
 
         var text = "\(label), pull request #\(pullRequest.number)"

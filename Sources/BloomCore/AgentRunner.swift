@@ -74,6 +74,14 @@ public actor AgentRunner {
     /// is where the footer writes it. Re-read at the top of every turn, so toggling it takes
     /// effect on the next thing sent rather than on the next launch of the app.
     private var isFastMode = false
+    /// Questions this process is currently blocked on, newest last.
+    ///
+    /// Held here as well as in the database because the two are needed at different moments. The
+    /// table is what survives a quit; this is what `cancel` can read without awaiting the actor,
+    /// which is the one moment the actor is least available and the one moment a pending ask
+    /// absolutely has to be answered.
+    private let pending = PendingAsks()
+    private var cachedRepoID: String?
     private var alive = false
     private var cancelled = false
     private var persistenceFailures = 0
@@ -161,6 +169,24 @@ public actor AgentRunner {
             "--include-partial-messages",
             "--verbose",
             "--permission-mode", session.permissionMode.cliValue,
+            // Always on, and this is the argument for it. Without it the CLI answers permission
+            // questions on the user's behalf and the answer is no, which is every `permission-rule`
+            // refusal in every transcript. With it the CLI stops deciding and asks.
+            //
+            // It does not make the CLI ask more. The classifier still approves everything it
+            // approved before: measured over one ordinary turn under `acceptEdits` doing a file
+            // read, `ls -la`, `git status`, a write, an edit, `wc -l` and a piped `curl`, the count
+            // was zero questions for seven tool calls. The only calls that reach this wire are the
+            // ones that are refused today, so the flag changes the answer in exactly the cases
+            // where the current answer is "no" and nobody was asked.
+            //
+            // That is also why it is not tied to the permission mode picker. The picker still
+            // means what it meant; this only decides who answers when the mode has escalated, and
+            // making it a setting would be offering to go back to being refused silently.
+            //
+            // Undocumented: absent from `--help`, present in the binary, and the value the
+            // official TypeScript SDK passes whenever a `canUseTool` callback is supplied.
+            "--permission-prompt-tool", "stdio",
             // Translated, because a model id can come from a Conductor settings file and the
             // CLI does not accept Conductor's names. See `ModelAlias`.
             "--model", ModelAlias.cliValue(for: session.model),
@@ -363,6 +389,9 @@ public actor AgentRunner {
             guard block.parentToolUseID == nil, block.usage.contextUsedTokens > 0 else { break }
             lastContextUsed = block.usage.contextUsedTokens
 
+        case .permissionAsk(let ask):
+            await handle(ask)
+
         case .result(let result):
             session = session.with {
                 $0.inputTokens += result.usage.inputTokens
@@ -455,6 +484,139 @@ public actor AgentRunner {
         sink.yield(.error(AgentError(message: message, raw: payload)))
     }
 
+    // MARK: Permission asks
+
+    /// A question has arrived. Either a rule the user already granted answers it, or it goes on
+    /// the pile and the session stops being a session that is working.
+    private func handle(_ ask: PermissionAsk) async {
+        pending.add(ask)
+        do {
+            try await store.appendPermissionAsk(sessionID: session.id, ask: ask)
+        } catch {
+            report("Could not store a permission question", error)
+        }
+
+        if let grants = await matchingGrants(for: ask) {
+            await autoAllow(ask, using: grants)
+            return
+        }
+
+        // Nothing answers it, so somebody has to. This is the state that has to be visible from
+        // outside the workspace: a process that is alive, costing nothing, and doing nothing.
+        session = session.with {
+            $0.state = .waiting
+            $0.updatedAt = Date()
+        }
+        await save(session)
+    }
+
+    /// The project's granted rules, or nil when nothing there covers this ask.
+    ///
+    /// Read from the store on every ask rather than cached. That is what makes revoking a rule
+    /// take effect on the next question instead of on the next launch, and asks are rare enough
+    /// that one query each is not worth a cache that could go stale in the wrong direction.
+    private func matchingGrants(for ask: PermissionAsk) async -> [PermissionGrant]? {
+        guard ask.canWiden, let repoID = await repoID() else { return nil }
+        guard let grants = try? await store.permissionGrants(repoID: repoID) else { return nil }
+        return PermissionGrantIndex.match(ask: ask, grants: grants)
+    }
+
+    /// Answer without troubling anybody, and say in the transcript that that is what happened.
+    private func autoAllow(_ ask: PermissionAsk, using grants: [PermissionGrant]) async {
+        // The wire form of project scope: the CLI is told to stop asking for the rest of this
+        // session, and nothing is written to any settings file.
+        await write(answerTo: ask, decision: .allow(scope: .project))
+        await close(ask, as: PermissionAskOutcome.auto, note: PermissionGrantIndex.note(for: grants))
+
+        for grant in grants {
+            try? await store.recordPermissionGrantUse(id: grant.id)
+        }
+    }
+
+    /// Answer one question, as a person. The turn resumes on the other side of this line.
+    ///
+    /// Not a user turn, which is the whole reason it cannot go through `send`: `send` writes a
+    /// `user` message and files a transcript row, and this writes a `control_response` that
+    /// unblocks a turn already in flight. The two share only the pipe.
+    public func answer(requestID: String, decision: PermissionDecision) async {
+        guard let ask = pending.take(requestID) else { return }
+
+        await write(answerTo: ask, decision: decision)
+        await close(ask, as: decision.storedName, note: "")
+
+        // Granting is Bloom's own bookkeeping and happens after the CLI has been unblocked, so a
+        // database that refuses the write cannot leave an agent hanging on a question that was
+        // already answered.
+        if case .allow(.project) = decision, let repoID = await repoID() {
+            for rule in ask.rules {
+                try? await store.upsert(PermissionGrant.granting(rule, repoID: repoID, for: ask.subject))
+            }
+        }
+    }
+
+    /// Put the answer on stdin, and let the session go back to running if nothing else is waiting.
+    private func write(answerTo ask: PermissionAsk, decision: PermissionDecision) async {
+        guard let line = try? PermissionAnswer.encode(ask: ask, decision: decision) else { return }
+        handle.current?.writeLine(line)
+
+        guard pending.isEmpty, session.state == .waiting else { return }
+        session = session.with {
+            $0.state = .running
+            $0.updatedAt = Date()
+        }
+        await save(session)
+    }
+
+    /// File what was decided and tell the UI, in that order.
+    private func close(_ ask: PermissionAsk, as decision: String, note: String) async {
+        pending.remove(ask.requestID)
+        do {
+            try await store.resolvePermissionAsk(id: ask.requestID, decision: decision)
+        } catch {
+            report("Could not record a permission decision", error)
+        }
+        sink.yield(.permissionDecided(PermissionResolution(
+            requestID: ask.requestID,
+            toolUseID: ask.toolUseID,
+            decision: decision,
+            note: note
+        )))
+    }
+
+    /// What this session's workspace belongs to. Looked up rather than held, because a runner
+    /// outlives any particular view and the answer never changes.
+    private func repoID() async -> String? {
+        if let cachedRepoID { return cachedRepoID }
+        guard let workspace = try? await store.workspace(id: session.workspaceID) else { return nil }
+        cachedRepoID = workspace.repoID
+        return cachedRepoID
+    }
+
+    /// Everything still waiting, so a view can draw the questions without asking the database.
+    public var pendingAsks: [PermissionAsk] { pending.all }
+
+    /// Deny every open question in words, before the pipe closes underneath it.
+    ///
+    /// This is the difference between a turn that ends and a turn that dies. The CLI holds a
+    /// blocked turn open until it gets an answer, an abort, or an EOF, and only the first of those
+    /// produces a `result` line: closing stdin instead leaves the agent dying against a closed
+    /// stream, which is exactly the red exit row this codebase spent three commits making honest.
+    ///
+    /// Synchronous, and reading the asks from a box rather than from actor state, because the two
+    /// callers are Stop and app termination and neither can wait for a busy actor.
+    public nonisolated func denyPendingAsks(_ message: String) {
+        guard let process = handle.current else { return }
+        for ask in pending.drain() {
+            guard let line = try? PermissionAnswer.encode(
+                ask: ask,
+                // `interrupt` is what makes the turn end here rather than carry on without the
+                // call, which is what both callers mean.
+                decision: .deny(message: message, endsTurn: true)
+            ) else { continue }
+            process.writeLine(line)
+        }
+    }
+
     // MARK: Finishing
 
     private func finish(status: Int32, sawResult: Bool, generation: Int) async {
@@ -533,6 +695,9 @@ public actor AgentRunner {
         markCancelled()
 
         guard !wasCancelled, let process = request.process ?? handle.current else { return }
+        // Before the pipe closes, not after. A question left to die against a closed stream ends
+        // the turn as a crash instead of as a result.
+        denyPendingAsks(PermissionDecision.stoppedMessage)
         process.closeStdin()
         process.terminate()
 
@@ -780,5 +945,53 @@ public extension PermissionMode {
         case .bypassPermissions: "bypassPermissions"
         case .plan: "plan"
         }
+    }
+}
+
+
+/// The questions one run is blocked on, reachable without actor isolation.
+///
+/// It has to be readable from `denyPendingAsks`, which runs on the way out of the app and on Stop,
+/// and neither of those can wait for a turn on the actor. The lock is only ever held across an
+/// array access.
+private final class PendingAsks: @unchecked Sendable {
+    private let lock = NSLock()
+    private var asks: [PermissionAsk] = []
+
+    var all: [PermissionAsk] {
+        lock.lock(); defer { lock.unlock() }
+        return asks
+    }
+
+    var isEmpty: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return asks.isEmpty
+    }
+
+    func add(_ ask: PermissionAsk) {
+        lock.lock(); defer { lock.unlock() }
+        // The request id is the identity. A replayed line is the same question, not a second one.
+        guard !asks.contains(where: { $0.requestID == ask.requestID }) else { return }
+        asks.append(ask)
+    }
+
+    /// Claim one, so two answers racing the same question cannot both reach the pipe.
+    func take(_ requestID: String) -> PermissionAsk? {
+        lock.lock(); defer { lock.unlock() }
+        guard let index = asks.firstIndex(where: { $0.requestID == requestID }) else { return nil }
+        return asks.remove(at: index)
+    }
+
+    func remove(_ requestID: String) {
+        lock.lock(); defer { lock.unlock() }
+        asks.removeAll { $0.requestID == requestID }
+    }
+
+    /// Take the lot, in one step, so nothing can be answered twice on the way out.
+    func drain() -> [PermissionAsk] {
+        lock.lock(); defer { lock.unlock() }
+        let all = asks
+        asks = []
+        return all
     }
 }

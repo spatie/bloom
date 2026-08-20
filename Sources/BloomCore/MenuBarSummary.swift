@@ -24,6 +24,9 @@ public enum MenuBarSummary {
         }
     }
 
+    /// The glyph for an agent blocked on a question. The same raised hand `WorkspaceStatusGlyph`
+    /// draws, so the strip and the sidebar say the same thing with the same shape.
+    public static let waitingSymbol = "hand.raised.fill"
     /// The glyph for an agent mid turn. `WorkspaceStatusGlyph` and the Dock menu use the same one.
     public static let runningSymbol = "circle.fill"
     /// The glyph for a workspace that finished something nobody has read.
@@ -35,10 +38,16 @@ public enum MenuBarSummary {
     /// not news, for the same reason the Dock badge is cleared rather than zeroed, and a menu bar
     /// is the most expensive strip of screen in the system to spend on saying nothing.
     ///
-    /// Running comes first because it is the thing still changing. Unread is already settled and
-    /// will wait.
-    public static func segments(running: Int, unread: Int) -> [Segment] {
+    /// Waiting comes first because it is the only one that costs anything to ignore: a blocked
+    /// agent is a paid process doing nothing. Running is next because it is still changing, and
+    /// unread is last because it is already settled and will keep.
+    public static func segments(running: Int, unread: Int, waiting: Int = 0) -> [Segment] {
         var segments: [Segment] = []
+        if waiting > 0 {
+            segments.append(
+                Segment(symbolName: waitingSymbol, count: waiting, label: "Agents waiting on you")
+            )
+        }
         if running > 0 {
             segments.append(
                 Segment(symbolName: runningSymbol, count: running, label: "Agents running")
@@ -54,8 +63,11 @@ public enum MenuBarSummary {
 
     /// The hover text, which is where the glyphs get explained. Two numbers next to two small
     /// shapes are learnable but not self-evident the first time.
-    public static func tooltip(running: Int, unread: Int) -> String {
+    public static func tooltip(running: Int, unread: Int, waiting: Int = 0) -> String {
         var lines: [String] = []
+        if waiting > 0 {
+            lines.append(waiting == 1 ? "1 agent waiting on you" : "\(waiting) agents waiting on you")
+        }
         if running > 0 {
             lines.append(running == 1 ? "1 agent running" : "\(running) agents running")
         }
@@ -68,6 +80,10 @@ public enum MenuBarSummary {
     /// The one disabled row shown when neither list has anything in it, so the menu is never an
     /// empty rectangle that looks broken.
     public static let emptyTitle = "No agents running"
+
+    /// The heading over the workspaces whose agent is blocked on a question. First in the menu,
+    /// because it is the only list where the rows are costing something.
+    public static let waitingHeading = "Waiting on you"
 
     /// The heading over the workspaces with an agent mid turn.
     public static let runningHeading = "Running"

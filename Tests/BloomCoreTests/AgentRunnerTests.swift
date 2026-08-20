@@ -164,9 +164,26 @@ struct AgentRunnerArgvTests {
             "--include-partial-messages",
             "--verbose",
             "--permission-mode", "acceptEdits",
+            "--permission-prompt-tool", "stdio",
             "--model", "opus",
             "--effort", "high",
         ])
+    }
+
+    /// Always on, for every session, and this is where that decision is pinned.
+    ///
+    /// Without the flag the CLI answers permission questions itself and the answer is no. With it
+    /// the CLI asks. It does not make the CLI ask more often: the classifier still approves
+    /// everything it approved before, measured at zero questions across seven tool calls in one
+    /// ordinary turn under `acceptEdits`. The only calls that reach the wire are the ones that are
+    /// silently refused today.
+    @Test("every session can be asked, whatever mode it is in")
+    func alwaysAsks() {
+        for mode in PermissionMode.allCases {
+            let argv = AgentRunner.argv(session: Session(workspaceID: "w", permissionMode: mode), resume: nil)
+
+            #expect(value(of: "--permission-prompt-tool", in: argv) == "stdio")
+        }
     }
 
     // MARK: Effort
@@ -613,4 +630,346 @@ struct AgentRunnerProcessTests {
 
 private func fixtureSessionLines() throws -> [String] {
     try bloomFixtureLines("session-basic.jsonl")
+}
+
+
+// MARK: - Permission asks
+
+/// Answering the CLI's permission question, and answering it on the user's behalf.
+///
+/// The behaviour under test is the part with real consequences: a question that arrives becomes a
+/// session nobody would call "running", a rule granted days ago answers without troubling anyone
+/// and says so, and nothing is ever left hanging against a closed pipe.
+@Suite("AgentRunner permissions", .tags(.agentProtocol, .persistence), .scratchDirectory)
+struct AgentRunnerPermissionTests {
+    /// The captured `can_use_tool` line, with a request id of the caller's choosing so one test
+    /// can raise two different questions.
+    private func askLine(id: String = "req-1", toolUse: String = "toolu_01") -> String {
+        PermissionAskTests.realAsk
+            .replacingOccurrences(of: "2f9899b1-849f-4d1b-b4b2-9c6e1304b300", with: id)
+            .replacingOccurrences(of: "toolu_01AtAvbhP1XGtDNmpbSCSBRf", with: toolUse)
+    }
+
+    private func ask(id: String = "req-1", toolUse: String = "toolu_01") -> PermissionAsk {
+        guard case .permissionAsk(let ask) = AgentEvent.decode(line: askLine(id: id, toolUse: toolUse))! else {
+            fatalError("the fixture stopped being a permission ask")
+        }
+        return ask
+    }
+
+    private func repoID(of session: Session, in store: Store) async throws -> String {
+        try #require(await store.workspace(id: session.workspaceID)).repoID
+    }
+
+    /// A runner with a live fake process behind it, so answers have somewhere to be written.
+    private func running(
+        _ store: Store,
+        session: Session
+    ) async throws -> (runner: AgentRunner, process: FakeProcess) {
+        let recorder = ProcessRecorder()
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session, store: store, makeProcess: recorder.factory
+        )
+        try await runner.send("go")
+        let process = try #require(recorder.last)
+        return (runner, process)
+    }
+
+    /// What the runner wrote back to the CLI, decoded.
+    private func answers(on process: FakeProcess) -> [JSONValue] {
+        process.stdin
+            .compactMap(JSONValue.parse)
+            .filter { $0["type"]?.stringValue == "control_response" }
+    }
+
+    // MARK: Arriving
+
+    @Test("a question makes the session waiting, which is not running")
+    func waiting() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        let (runner, _) = try await running(store, session: session)
+
+        await runner.ingest(.permissionAsk(ask()))
+
+        #expect(await runner.currentSession.state == .waiting)
+        let stored = try #require(await store.session(id: session.id))
+        #expect(stored.state == .waiting)
+        // And it is the one thing in the app that is alive and doing nothing.
+        #expect(stored.state != .running)
+    }
+
+    @Test("the question is on the pile and in the transcript")
+    func recorded() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        let (runner, _) = try await running(store, session: session)
+
+        await runner.ingest(.permissionAsk(ask()))
+
+        #expect(await runner.pendingAsks.map(\.requestID) == ["req-1"])
+        #expect(try await store.pendingPermissionAsks(sessionID: session.id).count == 1)
+
+        // A row where the call would have been, filed under the call it is about.
+        let rows = try await store.messages(sessionID: session.id)
+        let row = try #require(rows.last { $0.kind == .permissionAsk })
+        #expect(row.refID == "toolu_01")
+    }
+
+    // MARK: Answering
+
+    @Test("allowing writes an answer the CLI can act on and lets the turn run again")
+    func allowing() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        let (runner, process) = try await running(store, session: session)
+        await runner.ingest(.permissionAsk(ask()))
+
+        await runner.answer(requestID: "req-1", decision: .allow(scope: .once))
+
+        let answer = try #require(answers(on: process).first)
+        #expect(answer["response"]?["request_id"]?.stringValue == "req-1")
+        #expect(answer["response"]?["response"]?["behavior"]?.stringValue == "allow")
+
+        #expect(await runner.pendingAsks.isEmpty)
+        #expect(await runner.currentSession.state == .running)
+        #expect(try await store.pendingPermissionAsks(sessionID: session.id).isEmpty)
+        #expect(try await store.permissionAskDecisions(sessionID: session.id)["req-1"] == "allow-once")
+    }
+
+    @Test("denying carries the sentence the user typed")
+    func denying() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        let (runner, process) = try await running(store, session: session)
+        await runner.ingest(.permissionAsk(ask()))
+
+        await runner.answer(requestID: "req-1", decision: .deny(message: "Not on my machine.", endsTurn: false))
+
+        let answer = try #require(answers(on: process).first)
+        #expect(answer["response"]?["response"]?["behavior"]?.stringValue == "deny")
+        #expect(answer["response"]?["response"]?["message"]?.stringValue == "Not on my machine.")
+        #expect(try await store.permissionAskDecisions(sessionID: session.id)["req-1"] == "deny")
+    }
+
+    /// Two answers racing one question must not both reach the pipe: the CLI would log the second
+    /// as a mismatch, and the user would have answered twice.
+    @Test("a question can only be answered once")
+    func answeredOnce() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        let (runner, process) = try await running(store, session: session)
+        await runner.ingest(.permissionAsk(ask()))
+
+        await runner.answer(requestID: "req-1", decision: .allow(scope: .once))
+        await runner.answer(requestID: "req-1", decision: .deny(message: "no", endsTurn: false))
+
+        #expect(answers(on: process).count == 1)
+    }
+
+    /// Two questions at once is ordinary, and the session only goes back to running when the last
+    /// of them has been dealt with.
+    @Test("the session keeps waiting while any question is unanswered")
+    func severalAtOnce() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        let (runner, _) = try await running(store, session: session)
+
+        await runner.ingest(.permissionAsk(ask(id: "req-1", toolUse: "toolu_01")))
+        await runner.ingest(.permissionAsk(ask(id: "req-2", toolUse: "toolu_02")))
+
+        await runner.answer(requestID: "req-1", decision: .allow(scope: .once))
+        #expect(await runner.currentSession.state == .waiting)
+
+        await runner.answer(requestID: "req-2", decision: .allow(scope: .once))
+        #expect(await runner.currentSession.state == .running)
+    }
+
+    // MARK: Granting, and being answered by a grant
+
+    @Test("always allow records a rule that outlives the session")
+    func grantsAProjectRule() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        let (runner, _) = try await running(store, session: session)
+        await runner.ingest(.permissionAsk(ask()))
+
+        await runner.answer(requestID: "req-1", decision: .allow(scope: .project))
+
+        let grants = try await store.permissionGrants(repoID: try await repoID(of: session, in: store))
+        #expect(grants.map(\.displayText) == ["Bash(sudo -n true)"])
+        // What the ask was about, so the revocation list can say what was being looked at.
+        #expect(grants.first?.grantedFor == "sudo -n true")
+    }
+
+    @Test("allowing once grants nothing")
+    func onceGrantsNothing() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        let (runner, _) = try await running(store, session: session)
+        await runner.ingest(.permissionAsk(ask()))
+
+        await runner.answer(requestID: "req-1", decision: .allow(scope: .once))
+
+        #expect(try await store.permissionGrants().isEmpty)
+    }
+
+    /// The whole point of the rule model: the second time the same question comes round, nobody is
+    /// asked. The session never enters `waiting`, so nothing anywhere lights up.
+    @Test("a rule granted earlier answers without anybody being asked")
+    func autoAllowed() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        try await store.upsert(PermissionGrant.granting(
+            PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"),
+            repoID: try await repoID(of: session, in: store)
+        ))
+        let (runner, process) = try await running(store, session: session)
+
+        await runner.ingest(.permissionAsk(ask()))
+
+        #expect(answers(on: process).count == 1)
+        #expect(await runner.pendingAsks.isEmpty)
+        #expect(await runner.currentSession.state != .waiting)
+        #expect(try await store.pendingPermissionAsks(sessionID: session.id).isEmpty)
+    }
+
+    /// A call that ran because of a decision made days ago must not look like a call that simply
+    /// ran, or nobody can judge whether to take the rule back.
+    @Test("an auto-allowed call says which rule allowed it")
+    func autoAllowIsVisible() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        try await store.upsert(PermissionGrant.granting(
+            PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"),
+            repoID: try await repoID(of: session, in: store)
+        ))
+        let recorder = ProcessRecorder()
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session, store: store, makeProcess: recorder.factory
+        )
+        try await runner.send("go")
+
+        let events = runner.events
+        let watching = Task<String?, Never> {
+            for await event in events {
+                if case .permissionDecided(let resolution) = event { return resolution.note }
+            }
+            return nil
+        }
+        await runner.ingest(.permissionAsk(ask()))
+        let note = await watching.value
+
+        #expect(note?.contains("Bash(sudo -n true)") == true)
+        #expect(try await store.permissionAskDecisions(sessionID: session.id)["req-1"]
+            == PermissionAskOutcome.auto)
+    }
+
+    @Test("using a rule is counted, so the list can say whether it earns its place")
+    func countsUses() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        let repo = try await repoID(of: session, in: store)
+        try await store.upsert(PermissionGrant.granting(
+            PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"), repoID: repo
+        ))
+        let (runner, _) = try await running(store, session: session)
+
+        await runner.ingest(.permissionAsk(ask(id: "req-1", toolUse: "toolu_01")))
+        await runner.ingest(.permissionAsk(ask(id: "req-2", toolUse: "toolu_02")))
+
+        #expect(try await store.permissionGrants(repoID: repo).first?.useCount == 2)
+    }
+
+    /// Revoking has to bite on the next question, not on the next launch. Nothing caches the
+    /// grants, which is what makes that true.
+    @Test("a revoked rule stops answering immediately")
+    func revocationBites() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        let repo = try await repoID(of: session, in: store)
+        let grant = try await store.upsert(PermissionGrant.granting(
+            PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"), repoID: repo
+        ))
+        let (runner, _) = try await running(store, session: session)
+
+        await runner.ingest(.permissionAsk(ask(id: "req-1", toolUse: "toolu_01")))
+        #expect(await runner.currentSession.state != .waiting)
+
+        try await store.deletePermissionGrant(id: grant.id)
+        await runner.ingest(.permissionAsk(ask(id: "req-2", toolUse: "toolu_02")))
+
+        #expect(await runner.currentSession.state == .waiting)
+        #expect(await runner.pendingAsks.map(\.requestID) == ["req-2"])
+    }
+
+    /// A grant belongs to a project. Another project's grant is not an answer here, which is the
+    /// property that makes keying them by repository worth anything.
+    @Test("another project's rule does not answer this one")
+    func grantsDoNotLeakAcrossProjects() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        let other = try await store.upsert(Repo(name: "other", path: "/tmp/other-\(newID())"))
+        try await store.upsert(PermissionGrant.granting(
+            PermissionRule(toolName: "Bash", ruleContent: "sudo -n true"), repoID: other.id
+        ))
+        let (runner, _) = try await running(store, session: session)
+
+        await runner.ingest(.permissionAsk(ask()))
+
+        #expect(await runner.currentSession.state == .waiting)
+    }
+
+    // MARK: Stopping and quitting
+
+    /// The difference between a turn that ends and a turn that dies. The CLI holds a blocked turn
+    /// open until it gets an answer, an abort, or an EOF, and only the first produces a `result`.
+    @Test("stopping denies every open question in words before the pipe closes")
+    func stopDenies() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        let (runner, process) = try await running(store, session: session)
+        await runner.ingest(.permissionAsk(ask(id: "req-1", toolUse: "toolu_01")))
+        await runner.ingest(.permissionAsk(ask(id: "req-2", toolUse: "toolu_02")))
+
+        await runner.cancel()
+
+        let written = answers(on: process)
+        #expect(written.count == 2)
+        for answer in written {
+            #expect(answer["response"]?["response"]?["behavior"]?.stringValue == "deny")
+            // Ends the turn rather than letting it carry on without the call.
+            #expect(answer["response"]?["response"]?["interrupt"]?.boolValue == true)
+            #expect(answer["response"]?["response"]?["message"]?.stringValue?.isEmpty == false)
+        }
+    }
+
+    @Test("quitting denies in words too, and says it was Bloom that did it")
+    func quitDenies() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        let (runner, process) = try await running(store, session: session)
+        await runner.ingest(.permissionAsk(ask()))
+
+        runner.denyPendingAsks(PermissionDecision.quittingMessage)
+
+        let answer = try #require(answers(on: process).first)
+        #expect(answer["response"]?["response"]?["message"]?.stringValue
+            == PermissionDecision.quittingMessage)
+        #expect(await runner.pendingAsks.isEmpty)
+    }
+
+    /// Draining is one step so a Stop racing a quit cannot answer the same question twice.
+    @Test("denying twice on the way out writes one answer per question")
+    func denyingIsIdempotent() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await makeSession(store)
+        let (runner, process) = try await running(store, session: session)
+        await runner.ingest(.permissionAsk(ask()))
+
+        runner.denyPendingAsks(PermissionDecision.quittingMessage)
+        runner.denyPendingAsks(PermissionDecision.quittingMessage)
+
+        #expect(answers(on: process).count == 1)
+    }
 }

@@ -181,3 +181,27 @@ public enum PermissionAskOutcome {
             : ""
     }
 }
+
+// MARK: - PermissionResolution
+
+/// One question, answered.
+///
+/// Carries the sentence a row should print as well as the decision, because the interesting case
+/// is the one where nobody was asked: a call allowed by a rule granted days ago must say so, or a
+/// person cannot tell it from a call that simply ran, and cannot judge whether to take the rule
+/// back. `note` is empty when a person answered, which is the case that needs no explanation.
+public struct PermissionResolution: Sendable, Hashable {
+    public var requestID: String
+    public var toolUseID: String
+    /// The stored spelling, out of `PermissionDecision.storedName` or `PermissionAskOutcome`.
+    public var decision: String
+    /// What the transcript should say about how this was decided, or empty.
+    public var note: String
+
+    public init(requestID: String, toolUseID: String = "", decision: String, note: String = "") {
+        self.requestID = requestID
+        self.toolUseID = toolUseID
+        self.decision = decision
+        self.note = note
+    }
+}

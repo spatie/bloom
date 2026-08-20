@@ -33,12 +33,31 @@ public enum DockBadge {
         workspaces.count { $0.unread && !isRunning($0) }
     }
 
+    /// How many workspaces have an agent blocked on a question nobody has answered.
+    ///
+    /// Workspaces rather than questions, for the same reason `unreadCount` counts workspaces: the
+    /// sidebar lists workspaces and the badge summarises the sidebar. One agent that asked three
+    /// things in a row is one row to go and look at.
+    public static func waitingCount(
+        in workspaces: [Workspace],
+        isAwaitingPermission: (Workspace) -> Bool
+    ) -> Int {
+        workspaces.count(where: isAwaitingPermission)
+    }
+
     /// The badge text, or nil for no badge at all.
     ///
     /// Nil rather than "0". An empty badge is a red dot on the dock icon announcing that nothing
     /// happened, which is worse than no badge.
-    public static func label(unread: Int, isEnabled: Bool) -> String? {
-        guard isEnabled, unread > 0 else { return nil }
+    ///
+    /// Waiting wins over unread while anything is waiting, and it is not added to it. The badge is
+    /// one number and it has to mean one thing: an unread result will still be there in an hour,
+    /// while a blocked agent is burning the hour. Summing the two would produce a number that
+    /// describes neither and matches nothing in the sidebar.
+    public static func label(unread: Int, waiting: Int = 0, isEnabled: Bool) -> String? {
+        guard isEnabled else { return nil }
+        if waiting > 0 { return String(waiting) }
+        guard unread > 0 else { return nil }
         return String(unread)
     }
 }
