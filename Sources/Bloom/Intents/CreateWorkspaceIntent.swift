@@ -56,6 +56,7 @@ struct CreateWorkspaceIntent: AppIntent {
             workspace: created,
             project: repo.name,
             isAgentRunning: await WorkspaceLookup.isAgentRunning(workspaceID: created.id, store: store),
+            isAwaitingPermission: await WorkspaceLookup.isAwaitingPermission(workspaceID: created.id, store: store),
             pullRequest: nil
         )
         return .result(value: entity, dialog: "Started \(created.name) in \(repo.name).")

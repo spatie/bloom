@@ -36,6 +36,7 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
     private weak var app: AppModel?
     private var runningCount = 0
     private var unreadCount = 0
+    private var waitingCount = 0
 
     private override init() {}
 
@@ -158,6 +159,14 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         refreshButton()
     }
 
+    /// Workspaces whose agent has stopped and is waiting on a person. Drawn first in the strip,
+    /// because it is the only count here that costs something to ignore.
+    func setWaitingCount(_ count: Int) {
+        guard count != waitingCount else { return }
+        waitingCount = count
+        refreshButton()
+    }
+
     // MARK: - The glance
 
     /// The counts beside the mark, each with the glyph that says what it counts.
@@ -168,8 +177,12 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
     /// for the words.
     private func refreshButton() {
         guard let button = item?.button else { return }
-        let segments = MenuBarSummary.segments(running: runningCount, unread: unreadCount)
-        let spoken = MenuBarSummary.tooltip(running: runningCount, unread: unreadCount)
+        let segments = MenuBarSummary.segments(
+            running: runningCount, unread: unreadCount, waiting: waitingCount
+        )
+        let spoken = MenuBarSummary.tooltip(
+            running: runningCount, unread: unreadCount, waiting: waitingCount
+        )
         button.attributedTitle = Self.title(for: segments, font: button.font)
         button.toolTip = spoken
         // VoiceOver would otherwise read the two digits and neither glyph, which is worse than

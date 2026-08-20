@@ -234,6 +234,15 @@ final class AppModel {
             self.store = store
             self.manager = WorkspaceManager(store: store)
             try await store.resetRunningSessions()
+            // The questions those sessions were blocked on. A pending ask whose agent is gone is
+            // not a question, it is a row with four live buttons that answer nothing, so they are
+            // closed here and the rows that asked them say what happened instead. Bloom denies
+            // explicitly on the way out precisely so this stays empty; a crash, a force quit or a
+            // power cut all land here.
+            let abandoned = try await store.abandonPendingPermissionAsks()
+            if abandoned > 0 {
+                Log.permissions.info("closed \(abandoned, privacy: .public) questions left by the last launch")
+            }
             // Same reasoning as the sessions above, one table over: a setup script is a child of
             // this process, so anything still `running` here died with the last launch and would
             // otherwise spin in the sidebar forever.
@@ -584,6 +593,45 @@ final class AppModel {
         } else {
             runningWorkspaceIDs.remove(workspaceID)
         }
+    }
+
+    /// Workspaces whose agent has stopped and is waiting on a person.
+    ///
+    /// A real observable set written from one place, for the reason `runningWorkspaceIDs` is one:
+    /// the obvious alternative is to walk `workspaceModels`, and that dictionary is
+    /// `@ObservationIgnored`, so a reader that walked it would register a dependency on nothing.
+    /// That is precisely how the sidebar strip came to say "Idle" for an hour while agents ran.
+    /// The readers that looked right were being carried by the diff stat poll reassigning
+    /// `workspaces` every few seconds, and this signal has no such accidental carrier: an agent
+    /// blocked on a question writes nothing to the worktree, so nothing would ever invalidate the
+    /// mark and it would sit wrong until something unrelated happened to move.
+    private(set) var waitingWorkspaceIDs: Set<String> = []
+
+    /// Told by `TranscriptModel` whenever a question arrives or is answered. See
+    /// `TranscriptModel.setAwaitingPermission`, which is the one place that flag moves.
+    ///
+    /// Recomputed from the workspace's model rather than taken from the caller, for the same
+    /// reason as above: a workspace can hold several sessions, and one of them being answered does
+    /// not mean the workspace has stopped waiting.
+    func noteWaitingChanged(workspaceID: String) {
+        let isWaiting = workspaceModels[workspaceID]?.isAwaitingPermission ?? false
+        if isWaiting {
+            waitingWorkspaceIDs.insert(workspaceID)
+        } else {
+            waitingWorkspaceIDs.remove(workspaceID)
+        }
+    }
+
+    /// Whether a workspace is blocked on a question, without forcing a `WorkspaceModel` into
+    /// existence. Sidebar rows ask this for every visible workspace on every redraw.
+    func isAwaitingPermission(_ workspace: Workspace) -> Bool {
+        waitingWorkspaceIDs.contains(workspace.id)
+    }
+
+    /// How many workspaces are waiting on the user, for the sidebar's status bar, the Dock badge
+    /// and the menu bar item.
+    var waitingCount: Int {
+        waitingWorkspaceIDs.count
     }
 
     #if DEBUG
@@ -1142,6 +1190,7 @@ final class AppModel {
             // The model is what `noteRunningChanged` reads, so the last word about this workspace
             // has to be said before it goes.
             runningWorkspaceIDs.remove(workspace.id)
+            waitingWorkspaceIDs.remove(workspace.id)
             // One more workspace is archived now, so anything holding the old answer is wrong.
             invalidateArchived()
             await reload()

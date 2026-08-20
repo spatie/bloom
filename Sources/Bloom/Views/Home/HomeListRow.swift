@@ -33,6 +33,7 @@ import BloomCore
 struct HomeListRow: View {
     var row: HomeRow
     var isRunning: Bool
+    var isAwaitingPermission = false
     var now: Date
     /// Whether the row is the one being renamed in place. The list owns the id, so only one field
     /// can ever be open.
@@ -229,7 +230,10 @@ struct HomeListRow: View {
 
     private var status: WorkspaceStatus {
         WorkspaceStatus.resolve(
-            workspace: workspace, isRunning: isRunning, pullRequest: pullRequest
+            workspace: workspace,
+            isRunning: isRunning,
+            pullRequest: pullRequest,
+            isAwaitingPermission: isAwaitingPermission
         )
     }
 

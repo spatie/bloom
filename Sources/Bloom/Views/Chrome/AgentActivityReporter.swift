@@ -31,6 +31,11 @@ struct AgentActivityReporter: ViewModifier {
         // flag goes through `AppModel.markRead`, which writes to the store and reloads, so the
         // badge follows a workspace being read without a poll and without a restart.
         let unread = DockBadge.unreadCount(in: app.workspaces, isRunning: app.isRunning)
+        // The other observable set, written by the transcript that received or answered the
+        // question. It has no accidental carrier of its own: a blocked agent writes nothing to the
+        // worktree, so the diff stat poll that keeps the unread count honest would never invalidate
+        // this one. See `AppModel.waitingWorkspaceIDs`.
+        let waiting = app.waitingCount
 
         return content
             .onChange(of: running, initial: true) { _, count in
@@ -38,6 +43,9 @@ struct AgentActivityReporter: ViewModifier {
             }
             .onChange(of: unread, initial: true) { _, count in
                 AgentActivity.shared.setUnreadCount(count)
+            }
+            .onChange(of: waiting, initial: true) { _, count in
+                AgentActivity.shared.setWaitingCount(count)
             }
             .onChange(of: preventsSleep, initial: true) { _, isOn in
                 AgentActivity.shared.setPreventsSleep(isOn)

@@ -29,6 +29,7 @@ struct SidebarWorkspaceRow: View {
         WorkspaceRow(
             workspace: workspace,
             isRunning: app.isRunning(workspace),
+            isAwaitingPermission: app.isAwaitingPermission(workspace),
             renaming: $renaming,
             onArchive: confirmRowArchive
         )

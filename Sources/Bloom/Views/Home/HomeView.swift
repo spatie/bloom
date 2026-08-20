@@ -126,6 +126,7 @@ struct HomeView: View {
                         HomeListRow(
                             row: row,
                             isRunning: app.isRunning(row.workspace),
+                            isAwaitingPermission: app.isAwaitingPermission(row.workspace),
                             now: now,
                             isRenaming: renaming == row.id,
                             onCommitRename: { commitRename(row, to: $0) },

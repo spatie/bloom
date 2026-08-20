@@ -385,6 +385,26 @@ struct PendingPermissionAskTests {
         #expect(PermissionAskOutcome.advice(decision).contains("worktree still holds"))
     }
 
+    /// What a crash leaves behind, from both halves at once. The session row and the pending ask
+    /// have to be cleared by the same launch, or the two disagree: a session reset to `idle` with
+    /// a question still listed as pending would draw a row with live buttons under a workspace
+    /// showing no mark at all.
+    @Test("a launch after a crash clears the session and the question together")
+    func launchAfterACrash() async throws {
+        let store = try makeTestStore()
+        let session = try await session(in: store)
+        try await store.appendPermissionAsk(sessionID: session.id, ask: realAsk)
+        try await store.update(sessionID: session.id) { $0.state = .waiting }
+
+        // Exactly what `AppModel` does on the way up.
+        try await store.resetRunningSessions()
+        let abandoned = try await store.abandonPendingPermissionAsks()
+
+        #expect(abandoned == 1)
+        #expect(try await store.session(id: session.id)?.state == .idle)
+        #expect(try await store.pendingPermissionAsks().isEmpty)
+    }
+
     /// One query rather than one per session: with five agents running, loading every session to
     /// find out which of them are stuck would be the expensive way to draw a dot.
     @Test("every blocked session is found in one query")

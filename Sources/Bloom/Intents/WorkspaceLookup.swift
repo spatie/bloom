@@ -12,6 +12,16 @@ enum WorkspaceLookup {
         return sessions.contains { $0.state == .running }
     }
 
+    /// Whether an agent here has stopped and is waiting on a person.
+    ///
+    /// Read from the stored session state rather than from `AppModel.waitingWorkspaceIDs`, because
+    /// an intent can run against a workspace no window has open, and the runner writes the state
+    /// column on every change for exactly that reason.
+    static func isAwaitingPermission(workspaceID: String, store: Store) async -> Bool {
+        let sessions = (try? await store.sessions(workspaceID: workspaceID)) ?? []
+        return sessions.contains { $0.state == .waiting }
+    }
+
     /// `includePullRequests` costs one `gh` subprocess per workspace, which is why it is off
     /// wherever the caller is a picker or an unbounded list. GitHub's answer is cached for a
     /// minute, so asking about the same workspace twice in one Shortcut only pays once.
@@ -30,6 +40,7 @@ enum WorkspaceLookup {
                     workspace: workspace,
                     project: names[workspace.repoID] ?? "Unknown project",
                     isAgentRunning: await isAgentRunning(workspaceID: workspace.id, store: store),
+                    isAwaitingPermission: await isAwaitingPermission(workspaceID: workspace.id, store: store),
                     pullRequest: includePullRequests ? await pullRequest(for: workspace) : nil
                 )
             )

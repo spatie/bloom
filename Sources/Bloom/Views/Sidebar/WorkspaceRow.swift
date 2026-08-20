@@ -36,6 +36,7 @@ struct WorkspaceRow: View {
     /// Whether an agent is mid turn in this workspace. Passed in rather than read here, so the row
     /// stays a pure function of its inputs.
     var isRunning: Bool
+    var isAwaitingPermission = false
     /// The id of the row being renamed in place, shared across the whole list so only one field
     /// can ever be open.
     @Binding var renaming: String?
@@ -187,7 +188,10 @@ struct WorkspaceRow: View {
 
     private var status: WorkspaceStatus {
         WorkspaceStatus.resolve(
-            workspace: workspace, isRunning: isRunning, pullRequest: pullRequest
+            workspace: workspace,
+            isRunning: isRunning,
+            pullRequest: pullRequest,
+            isAwaitingPermission: isAwaitingPermission
         )
     }
 

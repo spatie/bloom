@@ -312,6 +312,11 @@ final class WorkspaceModel {
         transcripts.values.contains { $0.isRunning }
     }
 
+    /// Whether any session here has an agent stopped and waiting on a person.
+    var isAwaitingPermission: Bool {
+        transcripts.values.contains { $0.isAwaitingPermission }
+    }
+
     func stopEverything() {
         for transcript in transcripts.values { transcript.stop() }
         setupTask?.cancel()

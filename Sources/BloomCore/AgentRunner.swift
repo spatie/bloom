@@ -623,9 +623,11 @@ public actor AgentRunner {
     ///
     /// Synchronous, and reading the asks from a box rather than from actor state, because the two
     /// callers are Stop and app termination and neither can wait for a busy actor.
-    public nonisolated func denyPendingAsks(_ message: String) {
-        guard let process = handle.current else { return }
-        for ask in pending.drain() {
+    @discardableResult
+    public nonisolated func denyPendingAsks(_ message: String) -> [PermissionAsk] {
+        guard let process = handle.current else { return [] }
+        let denied = pending.drain()
+        for ask in denied {
             guard let line = try? PermissionAnswer.encode(
                 ask: ask,
                 // `interrupt` is what makes the turn end here rather than carry on without the
@@ -633,6 +635,19 @@ public actor AgentRunner {
                 decision: .deny(message: message, endsTurn: true)
             ) else { continue }
             process.writeLine(line)
+        }
+        return denied
+    }
+
+    /// File the questions `denyPendingAsks` answered on the way out.
+    ///
+    /// Separate from the writing because the writing has to be synchronous and this cannot be:
+    /// without it the pipe is unblocked but the database still lists the questions as pending, so
+    /// the launch sweep would report them as abandoned and the rows would keep their live buttons.
+    /// On quit the process usually dies before this runs, which is exactly what the sweep is for.
+    func recordDenied(_ asks: [PermissionAsk], as outcome: String) async {
+        for ask in asks {
+            await close(ask, as: outcome, note: "")
         }
     }
 
@@ -716,7 +731,10 @@ public actor AgentRunner {
         guard !wasCancelled, let process = request.process ?? handle.current else { return }
         // Before the pipe closes, not after. A question left to die against a closed stream ends
         // the turn as a crash instead of as a result.
-        denyPendingAsks(PermissionDecision.stoppedMessage)
+        let denied = denyPendingAsks(PermissionDecision.stoppedMessage)
+        if !denied.isEmpty {
+            Task { [weak self] in await self?.recordDenied(denied, as: PermissionAskOutcome.stopped) }
+        }
         process.closeStdin()
         process.terminate()
 

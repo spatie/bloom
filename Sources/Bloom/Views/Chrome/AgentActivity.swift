@@ -44,6 +44,7 @@ final class AgentActivity {
 
     private var runningCount = 0
     private var unreadCount = 0
+    private var waitingCount = 0
     private var isBadgeEnabled = true
     private var preventsSleep = SleepPrevention.isOnByDefault
 
@@ -91,6 +92,16 @@ final class AgentActivity {
         applyBadge()
     }
 
+    /// How many workspaces have an agent blocked on a question nobody has answered.
+    ///
+    /// This is the one number here that gets worse by being ignored, which is why `DockBadge`
+    /// lets it win over the unread count rather than adding the two together.
+    func setWaitingCount(_ newCount: Int) {
+        guard newCount != waitingCount else { return }
+        waitingCount = newCount
+        applyBadge()
+    }
+
     /// Whether the user wants a badge at all. Applied immediately in both directions: turning it
     /// off takes the badge away now rather than at the next change, and turning it back on puts
     /// the current count back rather than waiting for one.
@@ -102,7 +113,7 @@ final class AgentActivity {
 
     private func applyBadge() {
         NSApp?.dockTile.badgeLabel = DockBadge.label(
-            unread: unreadCount, isEnabled: isBadgeEnabled
+            unread: unreadCount, waiting: waitingCount, isEnabled: isBadgeEnabled
         )
     }
 

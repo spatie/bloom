@@ -46,6 +46,7 @@ struct WorkspaceStatusIntent: AppIntent {
             workspace: row,
             project: repo.name,
             isAgentRunning: await WorkspaceLookup.isAgentRunning(workspaceID: row.id, store: store),
+            isAwaitingPermission: await WorkspaceLookup.isAwaitingPermission(workspaceID: row.id, store: store),
             pullRequest: includePullRequest ? await WorkspaceLookup.pullRequest(for: row) : nil
         )
         return .result(value: entity, dialog: "\(entity.name): \(summary(for: entity, row: row))")

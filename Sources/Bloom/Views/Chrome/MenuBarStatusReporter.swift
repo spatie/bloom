@@ -18,6 +18,9 @@ struct MenuBarStatusReporter: ViewModifier {
         // The same figure the Dock badge is drawn from, deliberately. "Unread" has one definition
         // in this app and `DockBadge` owns it.
         let unread = DockBadge.unreadCount(in: app.workspaces, isRunning: app.isRunning)
+        // The other observable set. See `AppModel.waitingWorkspaceIDs` for why this cannot be
+        // derived by walking the models.
+        let waiting = app.waitingCount
 
         return content
             .onChange(of: isEnabled, initial: true) { _, enabled in
@@ -26,12 +29,16 @@ struct MenuBarStatusReporter: ViewModifier {
                 MenuBarStatusItem.shared.setUnreadCount(
                     DockBadge.unreadCount(in: app.workspaces, isRunning: app.isRunning)
                 )
+                MenuBarStatusItem.shared.setWaitingCount(app.waitingCount)
             }
             .onChange(of: running, initial: true) { _, count in
                 MenuBarStatusItem.shared.setRunningCount(count)
             }
             .onChange(of: unread, initial: true) { _, count in
                 MenuBarStatusItem.shared.setUnreadCount(count)
+            }
+            .onChange(of: waiting, initial: true) { _, count in
+                MenuBarStatusItem.shared.setWaitingCount(count)
             }
     }
 }

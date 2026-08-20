@@ -66,6 +66,16 @@ final class TranscriptModel {
     /// dependency on `storedIsRunning`, which is what a view needs.
     var isRunning: Bool { storedIsRunning }
     private var storedIsRunning = false
+
+    /// Whether this session's agent has stopped and is waiting on a person.
+    ///
+    /// A stored flag for exactly the reason `isRunning` is one, and not a walk over `rows` looking
+    /// for an unanswered question. `rows` is observable, so a derived answer would technically
+    /// invalidate, but it would also be recomputed on every streamed token of every turn, and the
+    /// readers that need this (the sidebar mark, the Dock badge, the menu bar count) are not in a
+    /// position to walk anything: see `AppModel.waitingWorkspaceIDs`.
+    var isAwaitingPermission: Bool { storedIsAwaitingPermission }
+    private var storedIsAwaitingPermission = false
     private(set) var isLoaded = false
 
     /// Text and thinking arriving live, before the completed block is persisted.
@@ -249,9 +259,32 @@ final class TranscriptModel {
     /// Idempotent, so a path that stops an already stopped turn writes nothing and invalidates
     /// nobody.
     private func setRunning(_ value: Bool) {
+        // A turn that has ended cannot still be waiting on a question, and there are six places
+        // that end one: a stale terminal state read back from the row, a send that threw, Stop,
+        // quit, the agent dying, and the result line. Clearing it here rather than at all six is
+        // the same argument that made this method exist, and it happens before the guard because
+        // the two flags can disagree: a turn stopped while blocked is already not running.
+        if !value { setAwaitingPermission(false) }
+
         guard storedIsRunning != value else { return }
         storedIsRunning = value
         app.noteRunningChanged(workspaceID: workspace.id)
+    }
+
+    /// The one place `isAwaitingPermission` moves, for the same reasons `setRunning` is the one
+    /// place `isRunning` does.
+    ///
+    /// Idempotent, so answering the second of two questions writes nothing.
+    private func setAwaitingPermission(_ value: Bool) {
+        guard storedIsAwaitingPermission != value else { return }
+        storedIsAwaitingPermission = value
+        app.noteWaitingChanged(workspaceID: workspace.id)
+    }
+
+    /// Recompute from the questions actually outstanding. Called wherever one is added or settled,
+    /// so a turn that asked three things goes back to running only when the last is answered.
+    private func refreshAwaitingPermission() {
+        setAwaitingPermission(!pendingPermissionAsks.isEmpty)
     }
 
     /// The UI stops looking busy right away, but the pump is deliberately left running: a cancelled
@@ -371,12 +404,14 @@ final class TranscriptModel {
             clearStreaming()
             await appendLatestMessages()
             statusLabel = "Waiting on you"
+            refreshAwaitingPermission()
             await refreshSession()
             NotificationService.shared.agentNeedsPermission(workspace: workspace)
 
         case .permissionDecided(let resolution):
             settle(resolution)
-            if pendingPermissionAsks.isEmpty {
+            refreshAwaitingPermission()
+            if !isAwaitingPermission {
                 statusLabel = isRunning ? "Working" : nil
             }
             await refreshSession()
@@ -409,6 +444,7 @@ final class TranscriptModel {
     /// answers on their way to the same question.
     func answer(requestID: String, decision: PermissionDecision) async {
         settle(PermissionResolution(requestID: requestID, decision: decision.storedName))
+        refreshAwaitingPermission()
         await runner?.answer(requestID: requestID, decision: decision)
     }
 

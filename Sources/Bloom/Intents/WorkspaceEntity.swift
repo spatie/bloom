@@ -35,6 +35,7 @@ struct WorkspaceEntity: AppEntity {
         workspace: Workspace,
         project: String,
         isAgentRunning: Bool,
+        isAwaitingPermission: Bool = false,
         pullRequest: PullRequest?
     ) {
         self.id = workspace.id
@@ -44,7 +45,10 @@ struct WorkspaceEntity: AppEntity {
         self.folder = workspace.path
         self.status = WorkspaceStatusAppEnum(
             WorkspaceStatus.resolve(
-                workspace: workspace, isRunning: isAgentRunning, pullRequest: pullRequest
+                workspace: workspace,
+                isRunning: isAgentRunning,
+                pullRequest: pullRequest,
+                isAwaitingPermission: isAwaitingPermission
             )
         )
         self.isAgentRunning = isAgentRunning

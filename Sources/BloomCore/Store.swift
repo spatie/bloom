@@ -732,9 +732,16 @@ public actor Store {
         try db.run("DELETE FROM sessions WHERE id = ?", [.text(id)])
     }
 
-    /// Any session left `running` when the app died is not actually running.
+    /// Any session left `running` or `waiting` when the app died is doing neither now.
+    ///
+    /// `waiting` is here for a sharper reason than `running`. A blocked agent holds its turn open
+    /// until it is answered, and the CLI puts no timer on that, so a session that was waiting when
+    /// Bloom died would come back claiming to be waiting on a question whose process is long gone:
+    /// the sidebar would show the raised hand, the Dock would carry a badge, and the row would
+    /// offer buttons that write into a closed pipe. See `abandonPendingPermissionAsks`, which is
+    /// the other half and has to run with this one.
     public func resetRunningSessions() throws {
-        try db.run("UPDATE sessions SET state = 'idle' WHERE state = 'running'")
+        try db.run("UPDATE sessions SET state = 'idle' WHERE state IN ('running', 'waiting')")
     }
 
     // MARK: - Messages
