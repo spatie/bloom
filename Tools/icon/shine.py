@@ -57,6 +57,30 @@ graded shape has no gradient in it.
     shape layer in all four, and false on the detail layers Maps draws on top
     of its own puck. It is a per layer switch and it is worth turning off.
 
+TWO THINGS THIS FILE FOUND OUT BY BUILDING THE BUNDLES RATHER THAN BY READING
+THEM, and both of them killed a variation before they were understood.
+
+  7 THE LAYERED DOCUMENT'S RENDERER IGNORES SVG FILTERS. actool draws the layer
+    art with CoreSVG, and `feGaussianBlur` is silently dropped: a `<g filter>`
+    renders its contents unblurred. Clips and masks survive; blur does not.
+    Every soft edge in `lib.py` and in `depth.py` is a blur inside a clip, so
+    ALL OF IT DIES on the layered side, and worse, it does not die quietly. The
+    first cut of rows 04 and 07 came back with the panel flooded pale, because
+    an inner shadow whose softness has been removed is a hard slab. rsvg, which
+    draws the flat `.icns`, blurs correctly, so a baked soft edge is now a flat
+    file device only and the page marks every row that uses one as split.
+  8 ONE PIECE GETS ONE GRADIENT, AND STACKING TWO IS NOT A WAY ROUND IT. A
+    linear gradient has exactly two stops, so a piece cannot be given a lit
+    crown and a seated base by one fill. The obvious answer, a second layer of
+    the same silhouette carrying an alpha ramp, does not work: the system lights
+    every layer separately, so the duplicate gets a specular of its own and the
+    piece comes back lifted and grey rather than shaded. Tried with a plain
+    alpha ramp and again with `Multiply`, and both lift it. Apple never does it
+    either; not one of the four stacks two layers on one shape. The way to say
+    crown and base at once is ONE ramp placed across the piece so that what is
+    above the start clamps light and what is below the stop clamps deep, which
+    is what row 09 does.
+
 HOW THE LAYERED COLUMN ON THE PAGE IS PRODUCED, and why it can be trusted.
 
 depth.py had to SIMULATE the system's pass, because it had no way to ask the
@@ -231,18 +255,54 @@ def layer(name, body, fill=None, opacity=None, blend=None, specular=None):
     return d
 
 
+# ------------------------------------------------------------------------
+# ONLY THE PALE BAR LEAVES ON THE RIGHT, AND THAT IS A CORRECTION.
+#
+# `gen10.figure` clips the two lanes to the panel, and the panel it clips them to
+# is the one that has already had the spur added to it: `clipped(lanes, p)` where
+# `p` is `sh_group(squircle_panel(m), band_in(...))`. So wherever a lane happens
+# to lie inside the spur it follows the spur out over the Foam margin, and at the
+# leaving edge both lanes do lie inside it, because both are easing toward END
+# exactly where the bar is. What crosses the white on the right is therefore mid
+# teal, dark, pale bar, dark, mid teal, in five bands.
+#
+# That is not the spur carrying content; it is a lane that is not being cut at
+# the panel boundary. The left edge shows what was intended: there the lanes are
+# still far from the bar's height, nothing of them is inside the spur, and what
+# crosses the margin is the dark spur with the pale bar inside it and nothing
+# else.
+#
+# THE SPUR ITSELF STAYS. make.py's docstring is right that Shallow on Foam
+# measures 1.26 and cannot be seen, and the dark spur is what holds the bar up
+# across the white. The fix is one window, not one shape: the lanes are clipped
+# to the PLAIN squircle and the bar and the spur are left exactly as they are.
+# Every row below is drawn that way, the baseline included, and shipping it is
+# the same one word change in `gen10.figure`.
+
+
+def lanewindow(sp):
+    """What a lane is cut by: the panel WITHOUT its spur.
+
+    The one line the correction lives in. `sp["panel"]` is the squircle with
+    the spur already unioned on, and clipping a lane to that is what lets it
+    ride out over the margin.
+    """
+    return sp["plain"]
+
+
 def document(sp, mark=None, lanes=None, panel=None, ground=None,
              markkeys=None, bleedkeys=None, panelkeys=None, groundkeys=None):
     """The four groups, back to front, each a list of layers.
 
-    Defaults are the shipped drawing, so a variation states what it changes
-    rather than restating the whole icon.
+    Defaults are the shipped drawing with the leaving edge corrected, so a
+    variation states what it changes rather than restating the whole icon.
     """
     p = sp["panel"]
     mark = mark if mark is not None else [layer("Mark", sp["bar"](sheen("shallow")))]
     if lanes is None:
         lanes = [layer("Bleed", clipped(sp["a"](sheen("spatie"))
-                                        + sp["b"](sheen("current")), p))]
+                                        + sp["b"](sheen("current")),
+                                        lanewindow(sp)))]
     panel = panel if panel is not None else [layer("Panel", p(flat("deep")))]
     ground = ground if ground is not None else [layer("Ground", fullbleed(flat("foam")))]
     return [("Mark", mark, markkeys or MARK),
@@ -253,9 +313,20 @@ def document(sp, mark=None, lanes=None, panel=None, ground=None,
 
 def split_lanes(sp, afill=None, bfill=None, aop=None, bop=None, blend=None):
     """The Bleed group as two layers, so each lane can be lit on its own."""
-    p = sp["panel"]
+    p = lanewindow(sp)
     return [layer("Current", clipped(sp["b"](sheen("current")), p), bfill, bop, blend),
             layer("Spatie", clipped(sp["a"](sheen("spatie")), p), afill, aop, blend)]
+
+
+def cut(sp, body):
+    """A lane drawing, cut at the panel boundary, for the flat file.
+
+    depth.base_flat clips whatever it is handed to the panel WITH the spur, so
+    the correction is applied before it is handed over. Clipping twice to a
+    shape and to a superset of it is the same as clipping once, so nothing else
+    in that function has to know.
+    """
+    return clipped(body, lanewindow(sp))
 
 
 # ------------------------------------------------------------------ the ten
@@ -266,7 +337,8 @@ def v00_current(small=False):
     """The shipped icon, unchanged, so every other row has something to be
     compared against rather than remembered against."""
     sp = shapes(small)
-    return document(sp), base_flat(sp)
+    return document(sp), base_flat(sp, lanes=cut(sp, sp["a"](sheen("spatie"))
+                                               + sp["b"](sheen("current"))))
 
 
 def v01_sheet(small=False):
@@ -296,7 +368,7 @@ def v01_sheet(small=False):
     g = lambda c: paint(c, up, dn, 0, 1024)  # noqa: E731
     body = base_flat(
         sp,
-        lanes=sp["a"](g("spatie")) + sp["b"](g("current")),
+        lanes=cut(sp, sp["a"](g("spatie")) + sp["b"](g("current"))),
         bar=sp["bar"](g("shallow")),
         after_panel=sp["panel"](g("deep")))
     return groups, fullbleed(g("foam")) + body[len(fullbleed(flat("foam"))):]
@@ -328,8 +400,8 @@ def v02_piece(small=False):
         ground=[layer("Ground", fullbleed("#000"), fill("foam", up, dn, *w["ground"]))])
     body = base_flat(
         sp,
-        lanes=(sp["a"](paint("spatie", up, dn, *w["a"]))
-               + sp["b"](paint("current", up, dn, *w["b"]))),
+        lanes=cut(sp, sp["a"](paint("spatie", up, dn, *w["a"]))
+                  + sp["b"](paint("current", up, dn, *w["b"]))),
         bar=sp["bar"](paint("shallow", up, dn, *w["bar"])),
         after_panel=sp["panel"](paint("deep", up, dn, *w["panel"])))
     return groups, fullbleed(paint("foam", up, dn, *w["ground"])) + body[len(fullbleed(flat("foam"))):]
@@ -361,8 +433,8 @@ def v03_crest(small=False):
         ground=[layer("Ground", fullbleed("#000"), fill("foam", 0.05, 0.05))])
     body = base_flat(
         sp,
-        lanes=(sp["a"](paint("spatie", up, 0, *crest(*w["a"])))
-               + sp["b"](paint("current", up, 0, *crest(*w["b"])))),
+        lanes=cut(sp, sp["a"](paint("spatie", up, 0, *crest(*w["a"])))
+                  + sp["b"](paint("current", up, 0, *crest(*w["b"])))),
         bar=sp["bar"](paint("shallow", up, 0, *crest(*w["bar"]))),
         after_panel=sp["panel"](paint("deep", up, 0, *crest(*w["panel"], at=0.09))))
     return groups, (fullbleed(paint("foam", 0.05, 0.05, 0, 1024))
@@ -377,12 +449,16 @@ def v04_rim(small=False):
     added around a shape, which is what would have been a border; both bands
     are clipped INSIDE the piece, so no silhouette changes by a pixel.
 
-    Baked, because a rim of a chosen width on a chosen edge is not something a
-    group key can ask for. Halved in the layered document: the system already
-    draws a specular along the top of every piece, and rule three says two
-    speculars on one edge is mud rather than depth.
+    Split, and finding 7 is the reason. A soft edge in this codebase is a
+    Gaussian blur inside a clip, and the layered document's renderer throws
+    blurs away, which turns the hairline into a slab and floods the panel. So
+    the layered side says rim the only way it can be said in keys: a ramp
+    across the top twentieth of each piece, which is finding 3 pushed as far as
+    it will go, plus the system's own specular turned on for every group so the
+    material draws the edge it is better at drawing than we are. The flat file,
+    which rsvg blurs correctly, bakes the real thing.
     """
-    sp = shapes(small)
+    sp, w = shapes(small), where(small)
     p, c = sp["panel"], sp["bar"]
 
     def rims(k):
@@ -390,15 +466,21 @@ def v04_rim(small=False):
                 + inner(p, (0, -20 * S), 18 * S, 0.34 * k, "#000814")
                 + inner(c, (0, 11 * S), 4 * S, 0.62 * k, "#FFFFFF")
                 + inner(c, (0, -17 * S), 14 * S, 0.30 * k, lib.C["fathom"]))
+    lanes = split_lanes(sp,
+                        afill=fill("spatie", 0.26, 0, *crest(*w["a"], at=0.06)),
+                        bfill=fill("current", 0.26, 0, *crest(*w["b"], at=0.06)))
     groups = document(
         sp,
-        mark=[layer("Mark", c(sheen("shallow"))
-                    + inner(c, (0, 11 * S), 4 * S, 0.31, "#FFFFFF")
-                    + inner(c, (0, -17 * S), 14 * S, 0.15, lib.C["fathom"]))],
-        panel=[layer("Panel", p(flat("deep"))
-                     + inner(p, (0, 13 * S), 5 * S, 0.25, "#FFFFFF")
-                     + inner(p, (0, -20 * S), 18 * S, 0.17, "#000814"))])
-    return groups, base_flat(sp, after_bar=rims(1.0))
+        mark=[layer("Mark", c("#000"), fill("shallow", 0.30, 0, *crest(*w["bar"], at=0.06)))],
+        lanes=lanes,
+        panel=[layer("Panel", p("#000"), fill("deep", 0.34, 0, *crest(*w["panel"], at=0.05)))],
+        markkeys=groupkeys(shadow=0.5, specular=True),
+        bleedkeys=groupkeys(specular=True),
+        panelkeys=groupkeys(shadow=0.55, specular=True),
+        groundkeys=groupkeys(specular=True))
+    return groups, base_flat(sp, lanes=cut(sp, sp["a"](sheen("spatie"))
+                                           + sp["b"](sheen("current"))),
+                             after_bar=rims(1.0))
 
 
 def v05_glass(small=False):
@@ -420,7 +502,9 @@ def v05_glass(small=False):
     groups = document(sp, markkeys=groupkeys(shadow=0.5, specular=True,
                                              translucency=0.5))
     lip = inner(c, (0, 10 * S), 3 * S, 0.75, "#FFFFFF")
-    return groups, base_flat(sp, bar='<g opacity="0.86">%s</g>' % c(sheen("shallow")),
+    return groups, base_flat(sp, lanes=cut(sp, sp["a"](sheen("spatie"))
+                                           + sp["b"](sheen("current"))),
+                             bar='<g opacity="0.86">%s</g>' % c(sheen("shallow")),
                              after_bar=lip)
 
 
@@ -441,8 +525,8 @@ def v06_wash(small=False):
     sp = shapes(small)
     p = sp["panel"]
     groups = document(sp, bleedkeys=groupkeys(translucency=0.55))
-    lanes = ('<g opacity="0.82">%s</g>'
-             % (sp["a"](sheen("spatie")) + sp["b"](sheen("current"))))
+    lanes = cut(sp, '<g opacity="0.82">%s</g>'
+                % (sp["a"](sheen("spatie")) + sp["b"](sheen("current"))))
     return groups, base_flat(sp, lanes=lanes)
 
 
@@ -451,35 +535,43 @@ def v07_seat(small=False):
 
     The quietest of the reference effects and the one that does the most work:
     a shape with a little shadow gathered inside its own lower edge stops
-    floating on what is behind it and starts resting in it. Apple has it on the
-    Home roof, on the Find My rings and under every Photos petal.
+    floating on what is behind it and starts resting in it. Apple has it under
+    every Photos petal and along the bottom of the Find My rings.
 
-    Three bands: inside the panel's bottom, inside the bar's bottom, and inside
-    the lanes where they leave the crossing. All of them are clipped to the
-    piece they belong to, so nothing is drawn on the Foam margin and no
-    silhouette moves. Baked, at two thirds in the layered document, because a
-    per group shadow falls OUTSIDE the group and can never draw a line inside
-    one.
+    03 turned upside down. Where the crest puts the whole ramp in the top
+    seventh and lets everything under it clamp to the palette colour, this puts
+    the ramp in the bottom fifth and lets everything above it clamp there
+    instead, so the piece is its own colour until it nears its base and then
+    deepens into it. Same key, same one gradient per piece, opposite end.
+
+    Split for the same reason as 04. The flat file bakes real blurred inner
+    shadows, which is a better picture of the effect than a ramp; the layered
+    document cannot have them, and the ramp is what it can have.
     """
-    sp = shapes(small)
+    sp, w = shapes(small), where(small)
     p, c = sp["panel"], sp["bar"]
     a, b = sp["a"], sp["b"]
+
+    def base(y0, y1, at=0.20):
+        """The ramp at the BOTTOM of a piece rather than at the top."""
+        return y1 - (y1 - y0) * at, y1
 
     def seats(k):
         return (inner(p, (0, -26 * S), 22 * S, 0.42 * k, "#000814")
                 + inner(c, (0, -20 * S), 15 * S, 0.34 * k, lib.C["fathom"])
-                + clipped(inner(a, (0, -16 * S), 12 * S, 0.30 * k, lib.C["abyss"])
-                          + inner(b, (0, -16 * S), 12 * S, 0.30 * k, lib.C["abyss"]), p))
+                + cut(sp, inner(a, (0, -16 * S), 12 * S, 0.30 * k, lib.C["abyss"])
+                      + inner(b, (0, -16 * S), 12 * S, 0.30 * k, lib.C["abyss"])))
+    lanes = split_lanes(sp,
+                        afill=fill("spatie", 0, 0.24, *base(*w["a"], at=0.26)),
+                        bfill=fill("current", 0, 0.24, *base(*w["b"], at=0.26)))
     groups = document(
         sp,
-        mark=[layer("Mark", c(sheen("shallow"))
-                    + inner(c, (0, -20 * S), 15 * S, 0.23, lib.C["fathom"]))],
-        lanes=[layer("Bleed", clipped(a(sheen("spatie")) + b(sheen("current"))
-                                      + inner(a, (0, -16 * S), 12 * S, 0.20, lib.C["abyss"])
-                                      + inner(b, (0, -16 * S), 12 * S, 0.20, lib.C["abyss"]), p))],
-        panel=[layer("Panel", p(flat("deep"))
-                     + inner(p, (0, -26 * S), 22 * S, 0.28, "#000814"))])
-    return groups, base_flat(sp, after_bar=seats(1.0))
+        mark=[layer("Mark", c("#000"), fill("shallow", 0, 0.20, *base(*w["bar"], at=0.26)))],
+        lanes=lanes,
+        panel=[layer("Panel", p("#000"), fill("deep", 0, 0.34, *base(*w["panel"], at=0.18)))])
+    return groups, base_flat(sp, lanes=cut(sp, sp["a"](sheen("spatie"))
+                                           + sp["b"](sheen("current"))),
+                             after_bar=seats(1.0))
 
 
 def v08_lit(small=False):
@@ -502,34 +594,42 @@ def v08_lit(small=False):
         bleedkeys=groupkeys(shadow=0.30, specular=True),
         panelkeys=groupkeys(shadow=0.42, specular=True),
         groundkeys=groupkeys(specular=True))
-    return groups, base_flat(sp, seat=1.45)
+    return groups, base_flat(sp, lanes=cut(sp, sp["a"](sheen("spatie"))
+                                           + sp["b"](sheen("current"))),
+                             seat=1.45)
 
 
 def v09_liquid(small=False):
-    """The whole Apple recipe on the panel alone, and nothing else touched.
+    """One ramp doing crown and base at once, on the panel and nothing else.
 
-    Grade, crest, rim and seat, all four, on one piece. The point of the row is
-    to find out how much of the shine is carried by the largest shape on the
-    tile: if the panel alone is enough, the bar and the lanes can stay flat and
-    the mark keeps its edge at 16 points, where every painted effect is a
-    liability.
+    Finding 8 in one row. The gradient is placed so that the panel's top eighth
+    is above its start and clamps to the lighter stop, and its bottom third is
+    below its stop and clamps to the deeper one, with the ramp travelling
+    between them. That reads as a lit crown fading into a seated base out of a
+    single two stop fill, which is the most a layered piece can be given and
+    still be given it cleanly.
 
-    Split. The layered document takes the grade and the crest as keys, which
-    the system draws cleanly, and only a reduced rim and seat as paint. The flat
-    file bakes all four.
+    Everything else on the tile is left exactly as it ships. The row exists to
+    find out how much of the shine the largest shape can carry alone, because
+    every painted effect on the bar is a liability at 16 points and this one
+    puts nothing on the bar at all.
+
+    Split. The layered document takes the ramp as a key and the system's own
+    specular on top of it; the flat file takes the same ramp as an SVG gradient
+    and then bakes the blurred rim and seating the layered side cannot have.
     """
     sp, w = shapes(small), where(small)
     p = sp["panel"]
     top, bot = w["panel"]
+    ramp = (top + (bot - top) * 0.10, top + (bot - top) * 0.66)
     groups = document(
         sp,
-        panel=[layer("Panel", p("#000"), fill("deep", 0.22, 0.06, *crest(top, bot, at=0.11)))],
+        panel=[layer("Panel", p("#000"), fill("deep", 0.26, 0.20, *ramp))],
         panelkeys=groupkeys(shadow=0.55, specular=True))
-    groups[2][1][0]["body"] += (inner(p, (0, 13 * S), 5 * S, 0.28, "#FFFFFF")
-                                + inner(p, (0, -26 * S), 22 * S, 0.24, "#000814"))
     body = base_flat(
         sp,
-        after_panel=(p(paint("deep", 0.22, 0.06, *crest(top, bot, at=0.11)))
+        lanes=cut(sp, sp["a"](sheen("spatie")) + sp["b"](sheen("current"))),
+        after_panel=(p(paint("deep", 0.26, 0.20, *ramp))
                      + inner(p, (0, 13 * S), 5 * S, 0.52, "#FFFFFF")
                      + inner(p, (0, -26 * S), 22 * S, 0.44, "#000814")))
     return groups, body
@@ -538,38 +638,42 @@ def v09_liquid(small=False):
 def v10_shine(small=False):
     """The stack, at the dose each part survives at.
 
-    02's per piece grade at two thirds, 03's crest on the bar and the panel,
-    04's rim halved again, 07's seating on the panel, and 05's translucency on
-    the bar as a key rather than as paint. Nothing here is at full strength;
-    every part is set where the grid at the bottom of the page says it is still
-    paying for itself at 32 points.
+    Every piece gets 09's single ramp, placed to give a crown at its top and a
+    seated base at its bottom, at two thirds of 09's strength. The bar gets 05's
+    translucency as a key on top of that, so the panel reads through it and the
+    crossing becomes a blend. The shadow ladder is 08's, softened. The layered
+    document is therefore ALL KEYS AND NO PAINT, which is the only version of
+    this that cannot go muddy under the system's own pass.
 
-    Split, because that is what the pipeline already assumes: the flat file
-    carries the paint and the layered document carries the keys, and the two are
-    built from one set of numbers so they cannot disagree about the design.
+    The flat file, which has no keys at all, bakes the same ramps as SVG
+    gradients and adds the rim and the seating it is allowed to blur. Split,
+    and the two columns on the page are the honest picture of how far apart
+    the two outputs have to be.
     """
     sp, w = shapes(small), where(small)
     p, c = sp["panel"], sp["bar"]
-    up, dn = 0.09, 0.07
+
+    def ramp(y0, y1, a=0.12, b=0.66):
+        return y0 + (y1 - y0) * a, y0 + (y1 - y0) * b
     lanes = split_lanes(sp,
-                        afill=fill("spatie", up, dn, *w["a"]),
-                        bfill=fill("current", up, dn, *w["b"]))
+                        afill=fill("spatie", 0.16, 0.12, *ramp(*w["a"])),
+                        bfill=fill("current", 0.16, 0.12, *ramp(*w["b"])))
     groups = document(
         sp,
-        mark=[layer("Mark", c("#000"), fill("shallow", 0.26, 0.02, *crest(*w["bar"], at=0.18)))],
+        mark=[layer("Mark", c("#000"), fill("shallow", 0.20, 0.10, *ramp(*w["bar"], a=0.16)))],
         lanes=lanes,
-        panel=[layer("Panel", p("#000") + inner(p, (0, -26 * S), 22 * S, 0.26, "#000814"),
-                     fill("deep", 0.20, 0.04, *crest(*w["panel"], at=0.10)))],
+        panel=[layer("Panel", p("#000"), fill("deep", 0.20, 0.14, *ramp(*w["panel"], a=0.10)))],
         ground=[layer("Ground", fullbleed("#000"), fill("foam", 0.05, 0.05))],
         markkeys=groupkeys(shadow=0.72, specular=True, translucency=0.34),
-        bleedkeys=groupkeys(shadow=0.26),
-        panelkeys=groupkeys(shadow=0.46, specular=True))
+        bleedkeys=groupkeys(shadow=0.26, specular=True),
+        panelkeys=groupkeys(shadow=0.46, specular=True),
+        groundkeys=groupkeys(specular=True))
     body = base_flat(
         sp,
-        lanes=(sp["a"](paint("spatie", up, dn, *w["a"]))
-               + sp["b"](paint("current", up, dn, *w["b"]))),
-        bar=c(paint("shallow", 0.26, 0.02, *crest(*w["bar"], at=0.18))),
-        after_panel=(p(paint("deep", 0.20, 0.04, *crest(*w["panel"], at=0.10)))
+        lanes=cut(sp, sp["a"](paint("spatie", 0.16, 0.12, *ramp(*w["a"])))
+                  + sp["b"](paint("current", 0.16, 0.12, *ramp(*w["b"])))),
+        bar=c(paint("shallow", 0.20, 0.10, *ramp(*w["bar"], a=0.16))),
+        after_panel=(p(paint("deep", 0.20, 0.14, *ramp(*w["panel"], a=0.10)))
                      + inner(p, (0, -26 * S), 22 * S, 0.40, "#000814")),
         after_bar=(inner(c, (0, 11 * S), 4 * S, 0.34, "#FFFFFF")
                    + inner(c, (0, -17 * S), 14 * S, 0.22, lib.C["fathom"])))
@@ -582,12 +686,12 @@ VARIANTS = [
     ("01-sheet", "one vertical grade across the whole tile", "system", v01_sheet),
     ("02-piece", "each piece graded across its own height", "system", v02_piece),
     ("03-crest", "the grade compressed into the top seventh", "system", v03_crest),
-    ("04-rim", "a lit upper edge and a shaded lower one", "baked", v04_rim),
+    ("04-rim", "a lit upper edge and a shaded lower one", "split", v04_rim),
     ("05-glass", "the bar translucent, the panel reading through", "split", v05_glass),
     ("06-wash", "the lanes translucent, so the crossings blend", "split", v06_wash),
-    ("07-seat", "a soft shading inside every lower edge", "baked", v07_seat),
+    ("07-seat", "a soft shading inside every lower edge", "split", v07_seat),
     ("08-lit", "no paint at all, the system's material turned up", "system", v08_lit),
-    ("09-liquid", "grade, crest, rim and seat, on the panel alone", "split", v09_liquid),
+    ("09-liquid", "one ramp, crown and base, on the panel alone", "split", v09_liquid),
     ("10-shine", "all of it, at the dose each part survives", "split", v10_shine),
 ]
 
@@ -872,6 +976,88 @@ def sheet(outdir):
     out = os.path.join(outdir, "shine.html")
     with open(out, "w") as f:
         f.write(html)
+    return out, sheet1024(outdir)
+
+
+# ------------------------------------------------------------ the short one
+#
+# The full sheet is long on purpose: an icon is judged at 16 points and the
+# strips are where that is settled. But comparing eleven IDEAS means holding
+# eleven pictures in the eye at once, and no amount of scrolling does that. So
+# there is a second page with the 1024 renders and nothing else, laid out to
+# fit, the shipped drawing among them so the row has a baseline in it.
+GRID1024 = """
+body { margin: 0; background: #16181C; color: #E8EDF0;
+  font: 15px/1.6 ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif; }
+* { box-sizing: border-box; }
+header { padding: 40px 40px 18px; max-width: 96ch; }
+h1 { font-size: 28px; margin: 0 0 12px; letter-spacing: -0.01em; }
+header p { color: #9AA7B0; margin: 0 0 10px; }
+code { font: 13px ui-monospace, "SF Mono", Menlo, monospace; color: #9BE9DC; }
+.wrap { display: grid; gap: 22px; padding: 10px 40px 60px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.t { background: #EDEDED; border-radius: 18px; padding: 16px 16px 12px; }
+.t.d { background: #1C1C1E; }
+.t img { display: block; width: 100%; height: auto; border-radius: 4px; }
+.cap { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; }
+.cap b { font: 13px ui-monospace, Menlo, monospace; font-weight: 600; }
+.t .cap b { color: #22262B; }
+.t.d .cap b { color: #E8EDF0; }
+.cap span { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+.t .cap span { color: #6E7C86; }
+.t.d .cap span { color: #7E8B94; }
+.cap em { font-style: normal; font-size: 12px; }
+.t .cap em { color: #5C6872; }
+.t.d .cap em { color: #7E8B94; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.grounds { padding: 0 40px; color: #6E7C86; font-size: 12px;
+  letter-spacing: 0.06em; text-transform: uppercase; }
+"""
+
+
+def sheet1024(outdir):
+    """The same eleven, at 1024, and nothing else on the page.
+
+    Each tile carries the layered render on a light ground and on a dark one,
+    because a near white icon on a near white page is not a fair look at it.
+    Everything is embedded, so the file can be moved anywhere.
+    """
+    tiles = []
+    for name, blurb, wherekey, fn in VARIANTS:
+        png = os.path.join(BUILD, name, "1024.png")
+        if not os.path.exists(png):
+            groups, _, _ = render(fn, False)
+            png = systemshots(name, groups, [1024])[1024]
+        uri = datauri(png)
+        cap = ('<div class="cap"><b>%s</b><span>%s</span></div>'
+               '<div class="cap"><em>%s</em></div>'
+               % (name, wherekey, blurb))
+        tiles.append('<div class="pair"><div class="t"><img src="%s"></div>'
+                     '<div class="t d"><img src="%s"></div></div>%s'
+                     % (uri, uri, cap))
+    html = ('<!doctype html><meta charset=utf-8><title>Bloom icon, ten shine '
+            'studies at 1024</title><style>%s</style>'
+            '<header><h1>Bloom, ten shine studies at 1024</h1>'
+            '<p>The eleven ideas at full size and nothing else, for comparing '
+            'them against each other rather than against the sizes they have '
+            'to survive. Every tile is the layered <code>.icon</code> as macOS '
+            'itself composites it, on a light ground and a dark one. '
+            '<code>00-current</code> is the shipped drawing and is the '
+            'baseline in the row.</p>'
+            '<p>The design, the palette and the silhouette are the same in all '
+            'eleven. One thing IS corrected in every tile including the '
+            'baseline: at the leaving edge the mid teal lane no longer rides '
+            'out over the Foam margin alongside the bar. The dark spur stays, '
+            'because a pale bar on a near white margin cannot be seen without '
+            'it; only the pale bar and the dark spur cross the edge now. The '
+            'long sheet says how.</p>'
+            '<p>The strips at 512 down to 16, the flat <code>.icns</code> '
+            'column and the verdict are on the long sheet.</p></header>'
+            '<div class="wrap">%s</div>'
+            % (GRID1024, "".join('<div>%s</div>' % t for t in tiles)))
+    out = os.path.join(outdir, "shine-1024.html")
+    with open(out, "w") as f:
+        f.write(html)
     return out
 
 
@@ -898,11 +1084,13 @@ NOTE = {
         "every piece keeps its palette value, which is why this one holds "
         "further down than 02."),
     "04-rim": (
-        "A bright hairline inside the top of the panel and of the bar, and a "
-        "soft dark band inside the bottom of each. Both clipped INSIDE the "
-        "piece, so nothing is added around a shape and no silhouette moves. "
-        "Baked, and halved in the layered document because the system draws a "
-        "specular on that same edge."),
+        "The flat file bakes the real thing: a bright hairline inside the top "
+        "of the panel and of the bar and a soft dark band inside the bottom of "
+        "each, both clipped INSIDE the piece so nothing is added around a shape "
+        "and no silhouette moves. The layered document cannot have it, because "
+        "its renderer throws blurs away, so it says rim in keys instead: a ramp "
+        "across the top twentieth of every piece and the system\u2019s own specular "
+        "turned on for all four groups."),
     "05-glass": (
         "One key. The Mark group is given the document's translucency and "
         "macOS frosts the bar in place, so the panel and both lanes read "
@@ -915,26 +1103,28 @@ NOTE = {
         "through the crossing instead of stopping at it. Layered asks for the "
         "material, flat bakes the nearest alpha."),
     "07-seat": (
-        "A soft shading gathered inside the lower edge of the panel, the bar "
-        "and both lanes, so each piece rests in what is behind it rather than "
-        "floating on it. Baked, at two thirds in the layered document, because "
-        "a group shadow falls outside the group and cannot draw a line inside "
-        "one."),
+        "03 upside down. The ramp sits in the bottom fifth of each piece and "
+        "everything above it clamps to the palette colour, so a piece is its "
+        "own tone until it nears its base and then deepens into it. The flat "
+        "file bakes real blurred inner shadows instead, which is a better "
+        "picture of the same idea than a ramp is."),
     "08-lit": (
         "No paint whatsoever. Every group lit, and the shadow ladder made "
         "real: Ground 0, Panel 0.42, Bleed 0.30, Mark 0.85, against the "
         "shipped 0.55 and 0.50 that tell the system the bar is no higher than "
         "the panel it lies on."),
     "09-liquid": (
-        "Grade, crest, rim and seat, all four, on the panel and on nothing "
-        "else. The row exists to find out how much of the shine the largest "
-        "shape can carry on its own, because every painted effect on the bar "
-        "is a liability at 16 points."),
+        "One ramp placed so the panel\u2019s top tenth is above its start and clamps "
+        "light, its bottom third is below its stop and clamps deep, and the "
+        "grade travels between them: a lit crown fading into a seated base out "
+        "of a single two stop fill. Nothing else on the tile is touched, so "
+        "nothing it does can damage the bar at 16 points."),
     "10-shine": (
-        "02's grade at two thirds, 03's crest on the bar and the panel, 04's "
-        "rim halved again, 07's seating on the panel, and 05's translucency on "
-        "the bar as a key rather than as paint. Every part set where the grid "
-        "below says it is still paying for itself at 32."),
+        "09's ramp on every piece at two thirds strength, 05's translucency on "
+        "the bar as a key, and 08's shadow ladder softened. The layered "
+        "document is all keys and no paint, which is the only version of this "
+        "that cannot go muddy under the system\u2019s own pass; the flat file bakes "
+        "the same ramps and adds the rim and seating it is allowed to blur."),
 }
 
 VERDICT = """
@@ -995,4 +1185,5 @@ and one dictionary.</p>
 if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, ".build",
                                                              "shinesheet")
-    print("==>", sheet(out))
+    for path in sheet(out):
+        print("==>", path)
