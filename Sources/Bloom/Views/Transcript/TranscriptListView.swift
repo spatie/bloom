@@ -30,6 +30,13 @@ struct TranscriptListView: View {
     /// the sentinel row the `ScrollViewReader` used to be pointed at.
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
 
+    /// The session whose history has been put back, if any. See `visibleRows`.
+    ///
+    /// A session id rather than a flag, because this view is the same view in the same place for
+    /// every workspace the window visits, and a flag left standing from the last one would draw
+    /// the next one's whole history onto the frame that is trying to arrive.
+    @State private var drawnInFull = ""
+
     /// Sentinel id, negative so it can never collide with a row sequence number.
     private static let streamingID = -2
     /// How far off the bottom the user may be and still be considered to be following along.
@@ -60,6 +67,34 @@ struct TranscriptListView: View {
             && !showsSetup
     }
 
+    /// The rows this pass draws, which is every row of the session except on the frame that
+    /// arrives at it.
+    ///
+    /// Opening a session on its live end resolves a position at the end of a `LazyVStack`, and
+    /// that realises, measures and styles every row above it: 269ms of the main thread on a four
+    /// thousand row session, which is the whole of the wait between clicking a workspace in the
+    /// sidebar and seeing it, spent on rows thousands of points above the viewport. So the
+    /// arrival draws `TranscriptTail`'s last eighty rows, and the history goes back behind them a
+    /// frame later, where `defaultScrollAnchor(.bottom, for: .sizeChanges)` holds everything on
+    /// screen exactly where it is while the content grows above it. Nothing moves; see `task`.
+    ///
+    /// This is the only thing in the app that ever sees part of a session. `transcript.rows` is
+    /// the whole of it throughout, which is what the unread counts are computed over and what
+    /// `TurnFooterView` hands to `TurnScan` to walk backwards through, and neither could be right
+    /// over a slice that starts in the middle.
+    private var visibleRows: ArraySlice<TranscriptRow> {
+        let rows = transcript.rows
+        guard drawnInFull != transcript.session.id else { return rows[...] }
+
+        let start = TranscriptTail.start(in: rows.map(\.kind))
+        guard start > 0 else { return rows[...] }
+        // A session opens on the first thing the user has not read, and a scroll can only find a
+        // row the list is drawing. Anything unread above the tail and there is no tail: opening in
+        // the right place matters more than arriving quickly.
+        if let unread = transcript.firstUnreadSeq, unread < rows[start].seq { return rows[...] }
+        return rows[start...]
+    }
+
     /// Already rounded, by `TranscriptGeometry.cap`, and rounded before it reaches this view's
     /// state rather than after. A cap that changed on every pixel of a drag failed the row
     /// equality check on every realised row, once a frame.
@@ -81,7 +116,7 @@ struct TranscriptListView: View {
                         onVisibilityChange: { showsSetup = $0 }
                     )
 
-                    ForEach(transcript.rows) { row in
+                    ForEach(visibleRows) { row in
                         if TranscriptNoise.isHidden(row) {
                             EmptyView()
                         } else if row.kind == .result {
@@ -170,9 +205,49 @@ struct TranscriptListView: View {
                 // A session opens at its live end whatever the one being left was scrolled to,
                 // and the anchor is read before the new rows arrive.
                 geometry.isNearBottom = true
+                // Arriving somewhere means arriving on its tail. Cleared here as well as set in
+                // `task`, because leaving a session before its history had landed and coming
+                // straight back would otherwise find its own id still recorded and put four
+                // thousand rows on the frame that is trying to arrive.
+                drawnInFull = ""
             }
             .task(id: transcript.session.id) {
                 await transcript.load()
+
+                // The rest of the session, once the frame carrying the tail has been drawn.
+                //
+                // A wait rather than a yield, because a yield is the same run loop pass and would
+                // put the layout this exists to defer back on the frame it was taken off. Long
+                // enough that the arrival is over and short enough to be finished before a hand
+                // could reach the wheel, and it lands in the gap between the frame and the
+                // answers the rest of the switch is still waiting on: the session query, `git
+                // status`, and `gh`.
+                //
+                // Cancelled with the task when the session changes, so a switch that is left
+                // before this lands never pays for the history of a workspace nobody is on.
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled else { return }
+                drawnInFull = transcript.session.id
+                // And the live end again, in the same breath.
+                //
+                // The size-change anchor is what holds the view still while the history lands,
+                // and it is only in force while `isNearBottom` says the user is following along.
+                // On the first visit of a launch that is not reliably true at this instant: the
+                // rows arrive into a scroll view that is already on screen and already empty, so
+                // there is a pass where the content is tall and the offset is still zero, the
+                // measurement says the user is a long way from the end, and the anchor is dropped
+                // for exactly as long as it takes the arrival to scroll itself down. Growing the
+                // content by four thousand rows with no anchor moved the viewport into a part of
+                // the stack that is not realised, and the transcript went blank and stayed blank.
+                // Filmed: rendered at 620ms, gone at 700ms, still gone three seconds later.
+                //
+                // A session that has just been arrived at is at its live end by construction, so
+                // saying so again costs nothing and cannot be wrong. It is not a second walk over
+                // the rows either: the anchor has already moved the viewport, and this only names
+                // the edge it is already on.
+                scrollPosition.scrollTo(edge: .bottom)
+                SwitchTrace.mark("transcript.history", workspace: transcript.workspace.id)
+                SwitchTrace.markOnScreen("transcript.history", workspace: transcript.workspace.id)
             }
             // Every chip in every row reports to this one object, which is why it is handed down
             // rather than passed as a closure through five layers of view. A closure would be a
