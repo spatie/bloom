@@ -193,6 +193,81 @@ struct RepoIconDetectorTests {
         #expect(name(of: RepoIconDetector.detect(in: onlyDark)) == "logo-dark.svg")
     }
 
+    @Test("the plain favicon beats the ones with an unread count drawn on them")
+    func badgedVariants() throws {
+        // The shape of the owner's own site, which is what this rule was written for. It swaps in
+        // a favicon with a number on it to show unread tickets in the browser tab, and every one
+        // of those sorts before `favicon.svg`, so the sidebar drew a green tile with a red 1 on it.
+        var files: [String: Data] = [
+            "public/favicon.svg": svgData(),
+            "public/favicon.ico": ico([16, 32, 48]),
+            "public/favicon-96x96.png": png(96, 96),
+            "public/apple-touch-icon.png": png(180, 180),
+        ]
+        files["public/favicon-unread.svg"] = svgData()
+        files["public/favicon-unread.ico"] = ico([16, 32, 48])
+        for count in 1...9 {
+            files["public/favicon-unread-\(count).svg"] = svgData()
+            files["public/favicon-unread-\(count).ico"] = ico([16, 32, 48])
+        }
+        let root = try repository(files)
+
+        #expect(name(of: RepoIconDetector.detect(in: root)) == "favicon.svg")
+
+        // Nothing about the word `unread` is known here. What is known is that the name has a word
+        // added to it and the plain one is sitting beside it, so the same holds for whatever the
+        // next project decides to call its second favicon.
+        let invented = try repository([
+            "public/favicon.svg": svgData(),
+            "public/favicon-notification.svg": svgData(),
+            "public/favicon-hover.svg": svgData(),
+            "public/favicon-alert-2.svg": svgData(),
+        ])
+        #expect(name(of: RepoIconDetector.detect(in: invented)) == "favicon.svg")
+
+        // And with no plain one to lose to, the decorated file is still the answer: it is the
+        // artwork this project has.
+        let onlyBadged = try repository(["public/favicon-unread-1.svg": svgData()])
+        #expect(name(of: RepoIconDetector.detect(in: onlyBadged)) == "favicon-unread-1.svg")
+    }
+
+    @Test("a size in a name is not a word added to it")
+    func sizesAreNotDecoration() throws {
+        // The rule about plain names must not fight the rule about sizes, and it does not, because
+        // a number is not a word. All three of these are as plain as each other, so the largest
+        // wins exactly as it did before.
+        #expect(RepoIconDetector.decoration(ofFileNamed: "favicon.svg") == 0)
+        #expect(RepoIconDetector.decoration(ofFileNamed: "favicon-96x96.png") == 0)
+        #expect(RepoIconDetector.decoration(ofFileNamed: "icon-512.png") == 0)
+        #expect(RepoIconDetector.decoration(ofFileNamed: "Icon-60@2x.png") == 0)
+        #expect(RepoIconDetector.decoration(ofFileNamed: "favicon-unread-1.svg") == 1)
+        #expect(RepoIconDetector.decoration(ofFileNamed: "logo-dark.svg") == 1)
+        #expect(RepoIconDetector.decoration(ofFileNamed: "logo-icon-dark.svg") == 2)
+
+        // A name that is three words and adds none of them, and one this knows nothing about.
+        #expect(RepoIconDetector.decoration(ofFileNamed: "apple-touch-icon.png") == 0)
+        #expect(RepoIconDetector.decoration(ofFileNamed: "apple-touch-icon-180.png") == 0)
+        #expect(RepoIconDetector.decoration(ofFileNamed: "web-app-manifest-512x512.png") == 0)
+
+        let sized = try repository([
+            "public/favicon.png": png(32, 32),
+            "public/favicon-512x512.png": png(512, 512),
+        ])
+        #expect(name(of: RepoIconDetector.detect(in: sized)) == "favicon-512x512.png")
+
+        // Where they really do disagree, the plainer name wins over the bigger file: a larger
+        // picture of the wrong artwork is still the wrong artwork.
+        let both = try repository([
+            "public/favicon.png": png(32, 32),
+            "public/favicon-unread-512.png": png(512, 512),
+        ])
+        #expect(name(of: RepoIconDetector.detect(in: both)) == "favicon.png")
+
+        // An apple touch icon has no plain sibling to lose to and is a candidate on its own terms.
+        let touch = try repository(["public/apple-touch-icon.png": png(180, 180)])
+        #expect(name(of: RepoIconDetector.detect(in: touch)) == "apple-touch-icon.png")
+    }
+
     // MARK: - Nothing worth drawing
 
     @Test("a repository with nothing in it keeps its monogram")

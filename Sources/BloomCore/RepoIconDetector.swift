@@ -158,9 +158,12 @@ public enum RepoIconDetector {
         let lower = name.lowercased()
         guard RepoIconFormat.fileFormats.contains(where: { lower.hasSuffix(".\($0.fileExtension)") })
         else { return nil }
+        return origin(ofStem: (lower as NSString).deletingPathExtension)
+    }
 
-        let stem = ((lower as NSString).deletingPathExtension)
-
+    /// The same question asked of a name that has already had its extension taken off, which is
+    /// how `decoration(ofFileNamed:)` asks it of the shorter names inside a longer one.
+    static func origin(ofStem stem: String) -> RepoIconOrigin? {
         if stem == "favicon" || stem.hasPrefix("favicon-") || stem.hasPrefix("favicon_")
             || stem.hasPrefix("apple-touch-icon") {
             return .favicon
@@ -177,6 +180,60 @@ public enum RepoIconDetector {
             return .brand
         }
         return nil
+    }
+
+    // MARK: - How dressed up a name is
+
+    /// How many words have been added to the plainest name this file could have had.
+    ///
+    /// The rule the ranking needs is "prefer the least decorated name", and this is the number it
+    /// compares. `favicon.svg` is nothing added, so zero. `favicon-unread-1.svg` is the same
+    /// artwork with an unread count drawn on it, so one. `logo-dark.svg` is one. A file that got
+    /// two words is two. Nothing here knows what `unread` or `dark` or `hover` mean, and that is
+    /// the entire point: a list of words to demote would have to be added to for ever, and the
+    /// next project will use a word nobody has thought of.
+    ///
+    /// Two things are not decoration.
+    ///
+    /// A **size** is not: `favicon-96x96.png`, `icon-512.png` and `Icon-60@2x.png` are the same
+    /// artwork drawn bigger or smaller, which is what the pixel comparison further down the
+    /// ranking is for. Recognised by shape rather than by a list: a segment of digits, `x` and
+    /// `@` with at least one digit in it is a measurement. The cost is that a `logo-2.svg` that
+    /// really is a second, different logo reads as a size, which is a fair price for never having
+    /// to guess at a word.
+    ///
+    /// The **name of the role itself** is not, however many words it is spelled with.
+    /// `apple-touch-icon.png` is three words and none of them are added: it is what that file is
+    /// called. That falls out for free rather than needing a list of its own, because a word only
+    /// counts once the name without it is still a name `origin(ofStem:)` recognises, and
+    /// `apple-touch` is not.
+    ///
+    /// Zero for a name that is not one of these conventions at all, such as a manifest's
+    /// `web-app-manifest-512x512.png` or an application's `MyApp.icns`. There is no plainer name
+    /// for those to be measured against, so there is nothing to say, and saying nothing leaves
+    /// them ranked exactly as they were.
+    static func decoration(ofFileNamed name: String) -> Int {
+        let stem = ((name as NSString).lastPathComponent as NSString)
+            .deletingPathExtension
+            .lowercased()
+        guard origin(ofStem: stem) != nil else { return 0 }
+
+        var segments = stem.split(whereSeparator: { $0 == "-" || $0 == "_" }).map(String.init)
+        var added = 0
+        while segments.count > 1 {
+            let last = segments.removeLast()
+            // The shorter name has to still be a name. When it is not, the word just removed was
+            // part of what the file is called rather than something added to it.
+            guard origin(ofStem: segments.joined(separator: "-")) != nil else { break }
+            if !isMeasurement(last) { added += 1 }
+        }
+        return added
+    }
+
+    /// Whether a segment of a name states a size rather than adding a word to it.
+    private static func isMeasurement(_ segment: String) -> Bool {
+        guard segment.contains(where: \.isNumber) else { return false }
+        return segment.allSatisfy { $0.isNumber || $0 == "x" || $0 == "@" }
     }
 
     // MARK: - Web manifests
@@ -300,19 +357,35 @@ public enum RepoIconDetector {
             format: measurement.format,
             origin: origin,
             pixels: measurement.pixels,
-            isThemeVariant: isThemeVariant(path)
+            decoration: decoration(ofFileNamed: path)
         )
     }
 
-    /// Whether the name marks the file as one half of a light and dark pair.
+    /// Whether one of these names is the same kind of artwork wearing a plainer name.
     ///
-    /// `logo-dark.svg` is drawn for a dark page, so on a light sidebar it can be a black square,
-    /// and the same in reverse. It is still a real candidate, because a project that ships only
-    /// the dark one has still told us what it looks like. It just loses to its plain sibling.
-    static func isThemeVariant(_ path: String) -> Bool {
-        let stem = ((path as NSString).lastPathComponent as NSString).deletingPathExtension.lowercased()
-        let words = ["dark", "light", "white", "black", "inverse", "inverted", "mono", "monochrome"]
-        return words.contains { stem.hasSuffix("-\($0)") || stem.hasSuffix("_\($0)") }
+    /// The question a stored answer asks of the folder it came out of: is the file Bloom picked
+    /// the dressed up one, with the plain one sitting beside it all along. Names only, so it costs
+    /// one listing of one directory and reads no file at all. See `RepoIconRefresh`, which is the
+    /// only caller and where the reason for asking is written down.
+    ///
+    /// Deliberately narrow. The same extension and the same origin, so this answers "the ranking
+    /// would demote this now" rather than "the folder has something else in it". A plainer sibling
+    /// in a better format would be a candidate that beat this one on format when it was picked,
+    /// which means it was not there at the time, and artwork appearing in a folder is not a reason
+    /// to change a mark under somebody.
+    static func hasPlainerName(than name: String, among names: [String]) -> Bool {
+        let name = (name as NSString).lastPathComponent
+        guard let kind = origin(ofFileNamed: name) else { return false }
+        let added = decoration(ofFileNamed: name)
+        guard added > 0 else { return false }
+        let fileExtension = (name as NSString).pathExtension.lowercased()
+
+        return names.contains { other in
+            other.lowercased() != name.lowercased()
+                && (other as NSString).pathExtension.lowercased() == fileExtension
+                && origin(ofFileNamed: other) == kind
+                && decoration(ofFileNamed: other) < added
+        }
     }
 
     // MARK: - Files
@@ -420,33 +493,42 @@ public struct RepoIconCandidate: Sendable, Hashable, Codable {
     /// The longest edge of the largest image in the file, in pixels. Zero for vector artwork,
     /// which has no such number and needs none.
     public var pixels: Int
-    /// Named as one half of a light and dark pair, and so a tie loser. See `isThemeVariant`.
-    public var isThemeVariant: Bool
+    /// How many words the name adds to the plainest name this file could have had, so that a
+    /// dressed up name loses to the plain one beside it. See `decoration(ofFileNamed:)`.
+    public var decoration: Int
 
     public init(
         path: String,
         format: RepoIconFormat,
         origin: RepoIconOrigin,
         pixels: Int,
-        isThemeVariant: Bool = false
+        decoration: Int = 0
     ) {
         self.path = path
         self.format = format
         self.origin = origin
         self.pixels = pixels
-        self.isThemeVariant = isThemeVariant
+        self.decoration = decoration
     }
 
     /// A total order, so the best candidate is a fact rather than whichever the file system
     /// happened to list first.
     ///
     /// In order: what the file is for, then how well the format draws at any size, then the plain
-    /// name over its dark counterpart, then how much artwork is in it, and finally the path, which
-    /// decides nothing about quality and exists only so the answer never changes between runs.
+    /// name over the dressed up one beside it, then how much artwork is in it, and finally the
+    /// path, which decides nothing about quality and exists only so the answer never changes
+    /// between runs.
+    ///
+    /// The name is compared before the size, and the two are arranged so that they cannot argue.
+    /// A number in a name is not decoration, so `favicon.png` and `favicon-96x96.png` are equally
+    /// plain and the pixels decide between them, which is the existing rule about sizes left
+    /// exactly as it was. When they do disagree it is because a word was added rather than a
+    /// measurement, and then the plainer name wins however big the other file is: a larger picture
+    /// of the wrong artwork is still the wrong artwork.
     public func isBetter(than other: RepoIconCandidate) -> Bool {
         if origin.rank != other.origin.rank { return origin.rank > other.origin.rank }
         if format.tier != other.format.tier { return format.tier > other.format.tier }
-        if isThemeVariant != other.isThemeVariant { return other.isThemeVariant }
+        if decoration != other.decoration { return decoration < other.decoration }
         if pixels != other.pixels { return pixels > other.pixels }
         let depth = path.components(separatedBy: "/").count
         let otherDepth = other.path.components(separatedBy: "/").count
