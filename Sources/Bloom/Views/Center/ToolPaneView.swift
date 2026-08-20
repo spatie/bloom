@@ -10,16 +10,23 @@ struct ToolPaneView: View {
     @Bindable var model: WorkspaceModel
     var tab: CenterTab
 
+    /// The tab whose shell has had its environment and its port settled, or nothing.
+    ///
     /// A shell is forked the first time its view is drawn, with the environment and the port it
     /// keeps for the rest of its life. Both are settled before that happens, or a terminal opened
     /// straight after a relaunch would be handed `BLOOM_PORT=0`.
-    @State private var isTerminalReady = false
+    ///
+    /// A tab id rather than a flag, for the same reason `TranscriptListView.drawnInFull` is one:
+    /// this view is reused from one workspace to the next rather than built again, so a flag left
+    /// standing from the last workspace's terminal would let the next one's shell be forked before
+    /// its port had been allocated. See `CenterPanesView.soloPane`.
+    @State private var readyTabID: String?
 
     var body: some View {
         switch tab.kind {
         case .terminal:
             Group {
-                if isTerminalReady {
+                if readyTabID == tab.id {
                     TerminalSplitView(
                         ownerID: tab.id,
                         workspace: model.workspace,
@@ -58,6 +65,6 @@ struct ToolPaneView: View {
         if model.port == 0 {
             model.port = await Task.detached { (try? PortAllocator.allocate(taken: [])) ?? 0 }.value
         }
-        isTerminalReady = true
+        readyTabID = tab.id
     }
 }

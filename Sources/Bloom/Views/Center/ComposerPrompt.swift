@@ -157,7 +157,12 @@ struct ComposerPrompt<Footer: View>: View {
             )
             .alignmentGuide(.top) { $0[.bottom] + Metrics.spacing }
         }
-        .onAppear {
+        // Keyed on the session rather than run on first appearance, because this view is not built
+        // again for each one. An unsplit centre column is now the same pane in every workspace, so
+        // a composer that read its staged attachments in `onAppear` would read the first session's
+        // and then draw them under every session the window visited afterwards. See
+        // `CenterPanesView.soloPane`.
+        .task(id: attachmentKey) {
             PromptAttachmentStore.shared.load(sessionID: attachmentKey)
             adoptAttachmentsKeptBesideTheDraft()
             applyCaptureDraft()
