@@ -115,12 +115,24 @@ final class WorkspaceTabsStore {
             guard let data = value as? Data,
                   let stored = StoredPaneArrangement(decoding: data),
                   // The kind, recovered from the pointer the record spells out for the root's own
-                  // pane. A record naming no such content cannot be drawn and is dropped, for the
-                  // reason `TabMigration.migrate` drops one it cannot read: an arrangement is the
-                  // cheapest thing in this app to lose, and a key that fails every launch forever
-                  // is worse than no key.
+                  // pane. A record naming no such content cannot be drawn.
                   let root = stored.contents.values.first(where: { $0.id == rootID }),
-                  let arrangement = Arrangement(root: root, stored: stored) else { continue }
+                  let arrangement = Arrangement(root: root, stored: stored) else {
+                // Dropped, for the reason `TabMigration.migrate` drops one it cannot read: an
+                // arrangement is the cheapest thing in this app to lose, and a key that fails
+                // every launch forever is worse than no key. This used to be a bare `continue`
+                // while the comment claimed the record was dropped, so the commonest way to make
+                // one, a crash between the two lines of `apply` that write the new key and delete
+                // the old, left a record naming a root that has left every pane sitting there for
+                // good. Its panes live under the new key, so there is nothing here to lose.
+                //
+                // Not the sparing answer `TerminalPaneCensus` gives its own unreadable bytes, and
+                // deliberately: what it spares is a tmux session nobody can get back, where this
+                // is one tab's layout, held nowhere else, read by nothing else, and rewritten the
+                // moment the user splits that content again.
+                defaults.removeObject(forKey: key)
+                continue
+            }
             arrangements[rootID] = arrangement
         }
     }
