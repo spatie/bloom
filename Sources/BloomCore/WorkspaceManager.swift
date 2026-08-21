@@ -84,12 +84,45 @@ public struct WorkspaceManager: Sendable {
 
     /// Creates the branch, the worktree, copies the configured files and returns immediately.
     /// The setup script runs separately so the UI can stream its output.
+    ///
+    /// This is the lower half of starting a workspace and it does none of the orchestration:
+    /// no session row, no setup run, no naming. `WorkspaceManager.start` is what a route should
+    /// call, and `Tools/house-rules.sh` holds that line so a new route cannot grow its own
+    /// half-copy of the orchestration the way the deep link and the Shortcuts intent both did.
+    ///
+    /// - Parameter origin: who asked. Defaults to the owner because that is what this primitive
+    ///   has always meant and what every test of it is about. The place where the answer cannot be
+    ///   forgotten is `WorkspaceStartRequest`, whose initialiser has no default for it, and every
+    ///   route that could have an agent behind it goes through that.
     public func createWorkspace(
         repo: Repo,
         prompt: String,
         name: String? = nil,
         branch: String? = nil,
-        baseBranch: String? = nil
+        baseBranch: String? = nil,
+        origin: WorkspaceOrigin = .user
+    ) async throws -> Workspace {
+        // Everything below reads the repository and then acts on what it read, so two creates
+        // running at once in one project decide on the same branch and the same directory and the
+        // second one loses. See `WorktreeCutQueue` for why this is serialised rather than
+        // coalesced.
+        try await WorktreeCutQueue.shared.cut(in: repo.path) {
+            try await cut(
+                repo: repo, prompt: prompt, name: name, branch: branch,
+                baseBranch: baseBranch, origin: origin
+            )
+        }
+    }
+
+    /// The body of `createWorkspace`, with the whole read-then-act window inside it, so the queue
+    /// above has one thing to hold rather than a sequence a caller could enter halfway through.
+    private func cut(
+        repo: Repo,
+        prompt: String,
+        name: String?,
+        branch: String?,
+        baseBranch: String?,
+        origin: WorkspaceOrigin
     ) async throws -> Workspace {
         let settings = SettingsLoader.load(repo: repo.path)
         let base = baseBranch ?? repo.defaultBranch
@@ -121,7 +154,8 @@ public struct WorkspaceManager: Sendable {
             path: worktreePath,
             baseBranch: base,
             setupState: settings.setupScript == nil ? .skipped : .pending,
-            sortOrder: try await store.nextWorkspaceSortOrder(repoID: repo.id)
+            sortOrder: try await store.nextWorkspaceSortOrder(repoID: repo.id),
+            origin: origin
         )
         return try await store.upsert(workspace)
     }

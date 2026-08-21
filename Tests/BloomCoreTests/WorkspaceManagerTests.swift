@@ -74,6 +74,60 @@ struct WorkspaceManagerTests {
         #expect(first.path != second.path)
     }
 
+    /// The same collision, from two creates running at once rather than one after another.
+    ///
+    /// Nothing used to be able to do this: creating a workspace meant a person filling in a sheet,
+    /// and a person cannot press Create twice in the same millisecond. An agent starting two
+    /// workspaces from one turn can. Both reads of the branch list used to see the same repository
+    /// and both creates decided on `fix-flaky-test`, so the second `git worktree add` failed with
+    /// git's own words after the first had been reported as a success.
+    @Test("two creates at the same moment get two different worktrees")
+    func avoidsBranchCollisionsUnderConcurrency() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        let manager = WorkspaceManager(store: try makeTestStore("wm"))
+        let registered = try await manager.addRepository(at: repo.path)
+
+        let created = try await withThrowingTaskGroup(of: Workspace.self) { group in
+            for _ in 0..<4 {
+                group.addTask {
+                    try await manager.createWorkspace(repo: registered, prompt: "Fix the flaky test")
+                }
+            }
+            var all: [Workspace] = []
+            for try await workspace in group { all.append(workspace) }
+            return all
+        }
+
+        #expect(Set(created.map(\.branch)).count == 4)
+        #expect(Set(created.map(\.path)).count == 4)
+        for workspace in created {
+            #expect(FileManager.default.fileExists(atPath: workspace.path))
+        }
+    }
+
+    /// Two projects have nothing to contend over, so queueing one behind the other would be a cost
+    /// invented for nothing. This is the shape of the key, held so a later tidy does not make the
+    /// queue global.
+    @Test("creates in two different projects do not queue behind each other")
+    func differentRepositoriesDoNotQueue() async throws {
+        let first = try await TempRepo()
+        defer { first.cleanUp() }
+        let second = try await TempRepo()
+        defer { second.cleanUp() }
+        let manager = WorkspaceManager(store: try makeTestStore("wm"))
+        let one = try await manager.addRepository(at: first.path)
+        let two = try await manager.addRepository(at: second.path)
+
+        async let a = manager.createWorkspace(repo: one, prompt: "Do the thing")
+        async let b = manager.createWorkspace(repo: two, prompt: "Do the thing")
+        let (left, right) = try await (a, b)
+
+        #expect(left.branch == "do-thing")
+        #expect(right.branch == "do-thing")
+        #expect(left.path != right.path)
+    }
+
     @Test("copies the configured files into a new worktree")
     func copiesFiles() async throws {
         let repo = try await TempRepo()
