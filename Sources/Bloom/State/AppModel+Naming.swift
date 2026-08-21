@@ -88,13 +88,16 @@ extension AppModel {
         )
         guard let result = outcome ?? nil, result.didRename else { return }
 
-        // Announced before the reload, so the register already holds the reveal when the row that
-        // will play it is handed its new name.
+        // The register is written here rather than left to the row, because more than one view
+        // can be drawing this name when it lands and they have to scramble in step. `applyName`
+        // has already written the row, so the sidebar is on its way to the new name through the
+        // store's change feed; `WorkspaceNameText` reads the register from its body and keys its
+        // animation on the reveal's id, so an announcement that arrives after the name still
+        // plays. Nothing here depends on which of the two lands first.
         WorkspaceNameReveals.shared.announce(
             workspaceID: result.workspace.id,
             name: result.workspace.name
         )
-        await reload()
 
         if let notice = result.notice {
             self.notice = BloomNotice(message: notice)

@@ -521,6 +521,7 @@ final class WorkspaceModel {
     /// as one has moved and the other has not, it is the sentence in the paragraph above, back
     /// again. One indexed read at the end of a run that took minutes is the cheaper side of that
     /// trade by a long way.
+    ///
     /// The whole row, not the one column. `setupState` is `internal(set)` in BloomCore now, so
     /// there is no assigning it from here at all, and that is the right answer rather than an
     /// obstacle: `WorkspaceManager.runSetup` writes the state and the log together, and a refresh

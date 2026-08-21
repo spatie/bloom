@@ -386,10 +386,17 @@ final class AppModel {
 
     /// Follows the store, so a write anybody makes is a window that has already redrawn.
     ///
-    /// `reload()` is called by hand from twenty one places, and every one of them is a writer that
-    /// remembered. This is the same reload driven by the write itself, from `Store`'s update hook,
-    /// so a writer that forgets, or one that lives in another part of the process entirely, still
-    /// ends up on screen. See `StoreObservation.swift`.
+    /// `reload()` used to be called by hand from twenty one places, every one of them a writer
+    /// that remembered. This is the same reload driven by the write itself, from `Store`'s update
+    /// hook, so a writer that forgets, or one that lives in another part of the process entirely,
+    /// still ends up on screen. See `StoreObservation.swift`.
+    ///
+    /// Four calls are left, and each of them has the same reason: the line after it needs the row
+    /// present now rather than a few milliseconds from now. `bootstrap` restores the selection,
+    /// `adopt` and `restore` select the workspace they have just produced, and
+    /// `undoOptimisticArchive` puts back a row that was only ever removed in memory, so no write
+    /// happened and there is nothing for the feed to publish. Anything else that reloads by hand
+    /// is doing work this task already does.
     ///
     /// Started at the end of `bootstrap` and not earlier, because the recovery writes above it
     /// (`resetRunningSessions`, `abandonPendingPermissionAsks`, `recoverInterruptedSetups`) are the
@@ -454,9 +461,8 @@ final class AppModel {
     }
 
     func refreshDiffStats() async {
-        guard let manager, let store else { return }
-        let current = workspaces
-        for workspace in current {
+        guard let manager else { return }
+        for workspace in workspaces {
             guard !Task.isCancelled else { return }
             // A worktree that has been removed outside Bloom would make git walk up to the parent
             // repository and answer about the wrong tree.
@@ -465,20 +471,11 @@ final class AppModel {
                 await manager.refreshDiffStat(workspace: workspace)
             }
         }
-        if let updated = try? await store.workspaces() {
-            // Never assigned straight over the top, because this answer is about the world as the
-            // store knew it and the list can have moved on while all of those git calls ran. The
-            // case that made it visible: archiving hides the row first and writes to the store
-            // last, so a pass landing in between read a workspace that was still active and put
-            // the row back on screen for as long as the archive had left to run.
-            // `WorkspaceListReconciliation` is the rule, and the reason it is a rule rather than
-            // a special case for archiving.
-            let reconciled = WorkspaceListReconciliation.reconciled(
-                held: workspaces, snapshot: current, fresh: updated
-            )
-            // Only reassign when something actually changed, to avoid pointless view updates.
-            if reconciled != workspaces { workspaces = reconciled }
-        }
+        // Nothing is read back here. `Store.updateDiffStat` only writes when one of the three
+        // numbers has actually moved, and a write that happens publishes itself, so the sidebar is
+        // refreshed by the same feed as every other change to a row. On an idle machine this whole
+        // pass now writes nothing, publishes nothing and costs the window nothing, where it used
+        // to re-read every workspace every six seconds whether or not anything had changed.
     }
 
     /// Runs work with a deadline. One `git` blocked on an `index.lock`, which is routine while an
@@ -773,7 +770,6 @@ final class AppModel {
         guard let manager else { return }
         do {
             _ = try await manager.addRepository(at: path)
-            await reload()
         } catch {
             alert = BloomAlert(title: "Could not add that folder", message: error.readableMessage)
         }
@@ -807,7 +803,6 @@ final class AppModel {
         guard let store else { return }
         do {
             try await store.deleteRepo(id: repo.id)
-            await reload()
         } catch {
             alert = BloomAlert(title: "Could not remove the project", message: error.readableMessage)
         }
@@ -818,13 +813,11 @@ final class AppModel {
         // Toggled against the stored row rather than against the copy the sidebar was drawn
         // from, so the disclosure cannot also write back a project's name, colour or icon.
         _ = try? await store.update(repoID: repo.id) { $0.collapsed.toggle() }
-        await reload()
     }
 
     func rename(_ repo: Repo, to name: String) async {
         guard let store, !name.isEmpty else { return }
         _ = try? await store.update(repoID: repo.id) { $0.name = name }
-        await reload()
     }
 
     // MARK: - Workspaces
@@ -963,13 +956,15 @@ final class AppModel {
     /// typing somewhere else.
     ///
     /// Most of what is here is genuinely about a window: which row is selected, which tab the
-    /// workspace opens on, which chat is in front, and the model that will rename it. `reload` is
-    /// the exception. It is here only because nothing observes the store yet, so the sidebar does
-    /// not know a row appeared until somebody tells it. When the state layer lands and the store
-    /// publishes its own changes, that one call goes and the rest stays.
+    /// workspace opens on, which chat is in front, and the model that will rename it.
     ///
-    /// The order is the order `createWorkspace` had, and it matters: the sidebar has to know the
-    /// row exists before anything selects it.
+    /// `reload` stays, and it is one of the four left in the app now that the store publishes its
+    /// own changes. The order is the reason: the sidebar has to know the row exists before
+    /// anything selects it, and the change feed cannot promise that. It wakes a task, which reads
+    /// the store, which lands some milliseconds after this line. Selecting a workspace the list
+    /// has never heard of leaves the window on a row that is not there, and the observer's reload
+    /// arriving afterwards is a jump rather than a fix. Every deleted `reload` was one whose
+    /// caller did not care when the list caught up. This one does.
     func adopt(
         _ started: StartedWorkspace,
         repo: Repo,
@@ -1064,7 +1059,6 @@ final class AppModel {
             return .failed(error.readableMessage)
         }
 
-        await reload()
         await adopt(continuation, pullRequest: pullRequest)
         return .continued(continuation)
     }
@@ -1308,7 +1302,6 @@ final class AppModel {
             waitingWorkspaceIDs.remove(workspace.id)
             // One more workspace is archived now, so anything holding the old answer is wrong.
             invalidateArchived()
-            await reload()
             await offerUndo(of: workspace, repo: repo, report: report)
             Log.archive.info("archived \(workspace.name, privacy: .public)")
         } catch let error as WorkspaceError {
@@ -1529,7 +1522,6 @@ final class AppModel {
     func rename(_ workspace: Workspace, to name: String) async {
         guard let store, !name.isEmpty else { return }
         _ = try? await store.update(workspaceID: workspace.id) { $0.name = name }
-        await reload()
     }
 
     func togglePinned(_ workspace: Workspace) async {
@@ -1537,7 +1529,6 @@ final class AppModel {
         // Toggled against the stored row rather than against the copy this view was handed,
         // so two presses in quick succession cannot both write the same value.
         _ = try? await store.update(workspaceID: workspace.id) { $0.pinned.toggle() }
-        await reload()
     }
 
     /// Clears the mark that says a turn finished while you were not looking.
@@ -1596,9 +1587,6 @@ final class AppModel {
     func setUnread(_ workspace: Workspace, _ unread: Bool) async {
         guard let store else { return }
         _ = try? await store.update(workspaceID: workspace.id) { $0.unread = unread }
-        // The Dock badge, the menu bar item and the sidebar all read `workspaces`, so one reload
-        // is what keeps the three of them agreeing after a manual mark.
-        await reload()
     }
 
     /// The colour on a workspace row, or nil to take it off.
@@ -1608,7 +1596,6 @@ final class AppModel {
     func setColour(_ workspace: Workspace, to hex: String?) async {
         guard let store else { return }
         _ = try? await store.update(workspaceID: workspace.id) { $0.colour = hex }
-        await reload()
     }
 
     /// What the sidebar's drag ends in.
@@ -1653,7 +1640,6 @@ final class AppModel {
                 $0.pinned = change.pinned
             }
         }
-        await reload()
     }
 
     /// What a drag on a project header ends in.
@@ -1689,7 +1675,6 @@ final class AppModel {
         for change in changes {
             _ = try? await store.update(repoID: change.id) { $0.sortOrder = change.sortOrder }
         }
-        await reload()
     }
 
     // MARK: - Navigation

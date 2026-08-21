@@ -388,7 +388,6 @@ struct RepoSettingsView: View {
             $0.iconPath = icon
             $0.iconSource = source
         }
-        await app.reload()
     }
 
     /// The name as the sidebar would show it, so the preview is the real thing and not an artist's
@@ -410,7 +409,6 @@ struct RepoSettingsView: View {
                     // The colour and nothing else: the icon buttons above write from a value
                     // this one knows nothing about.
                     _ = try? await store.update(repoID: repo.id) { $0.accent = hex }
-                    await app.reload()
                 }
             }
         )

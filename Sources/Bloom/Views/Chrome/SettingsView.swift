@@ -279,8 +279,9 @@ private struct ProjectRow: View {
     }
 
     /// The unchanged check is not a nicety. A colour well reports on every frame of a drag, and
-    /// without it each of those frames is a SQLite write plus a full `app.reload()`. The project
-    /// settings window has the same binding and the same guard.
+    /// without it each of those frames is a SQLite write, which is now also a change published to
+    /// everything watching the store and a reload of the sidebar behind it. The project settings
+    /// window has the same binding and the same guard.
     private var accentBinding: Binding<Color> {
         Binding(
             get: { Color(hexString: repo.accent) },
@@ -289,7 +290,6 @@ private struct ProjectRow: View {
                 Task {
                     guard let store = app.store else { return }
                     _ = try? await store.update(repoID: repo.id) { $0.accent = hex }
-                    await app.reload()
                 }
             }
         )
