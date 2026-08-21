@@ -139,31 +139,26 @@ jobs:
           set -euo pipefail
           swift --version
 
-          # Asked once and kept, rather than run twice: `xcodebuild -version` aborted with
-          # SIGABRT inside its own version handler on run 32529787812, after having answered
-          # correctly a moment earlier in the same step. That failed this step, which skipped
-          # "Give the runner a git identity", which failed a test that needs one, and the run
-          # reported a test failure for a crash in a version check.
+          # `xcodebuild -version` writes two lines and is piped nowhere, deliberately.
           #
-          # Retried once for the same reason. A crash in `xcodebuild -version` says nothing
-          # about the toolchain and everything about the runner, so it is worth one more ask
-          # before it is allowed to fail a build.
-          version=""
-          for attempt in 1 2; do
-            if version="$(xcodebuild -version 2>/dev/null | head -1)" && [ -n "$version" ]; then
-              break
-            fi
-            echo "xcodebuild -version did not answer on attempt $attempt."
-            sleep 5
-          done
+          # Run 32536983369 died here with `-[_NSStdIOFileHandle writeData:]: Broken pipe` and
+          # exit 134. The line was `xcodebuild -version | head -1`: head reads what it wants and
+          # exits, which closes the pipe under a program that is still writing its second line.
+          # xcodebuild writes through a Foundation FileHandle, which raises on EPIPE rather than
+          # taking the signal, so the process aborts. It is a race between head exiting and
+          # xcodebuild finishing, which is why it looked intermittent and was not: every run was
+          # rolling the same dice.
+          #
+          # So the whole output is taken into a variable and the first line is read from there.
+          # Nothing is piped, nothing can close early, and there is nothing left to retry.
+          version="$(xcodebuild -version)"
+          echo "$version"
 
-          if [ -z "$version" ]; then
-            echo "xcodebuild -version would not answer twice. This is the runner, not the tree."
+          major="$(printf '%s\n' "$version" | sed -n '1s/^Xcode \([0-9]*\).*/\1/p')"
+          if [ -z "$major" ]; then
+            echo "Could not read a major version out of: $version"
             exit 1
           fi
-
-          echo "$version"
-          major="$(printf '%s' "$version" | sed -E 's/^Xcode ([0-9]+).*/\1/')"
           if [ "$major" -lt 26 ]; then
             echo "Bloom needs Xcode 26 or newer, this runner has $major."
             exit 1

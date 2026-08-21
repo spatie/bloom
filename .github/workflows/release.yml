@@ -110,9 +110,15 @@ jobs:
       - name: Check the toolchain
         run: |
           set -euo pipefail
-          xcodebuild -version
           swift --version
-          major="$(xcodebuild -version | head -1 | sed -E 's/^Xcode ([0-9]+).*/\1/')"
+
+          # Not piped. See the same step in test.yml: `xcodebuild -version | head -1` closes the
+          # pipe under a program still writing its second line, and xcodebuild raises on EPIPE
+          # rather than taking the signal, so it aborts with 134. This is what stopped release
+          # 32536983369.
+          version="$(xcodebuild -version)"
+          echo "$version"
+          major="$(printf '%s\n' "$version" | sed -n '1s/^Xcode \([0-9]*\).*/\1/p')"
           if [ "$major" -lt 26 ]; then
             echo "Bloom needs Xcode 26 or newer, this runner has $major."
             exit 1
