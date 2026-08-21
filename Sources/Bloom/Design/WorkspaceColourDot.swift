@@ -31,6 +31,39 @@ struct WorkspaceColourDot: View {
     /// in both lists so one workspace cannot be two sizes two hundred points apart.
     private static let size: CGFloat = 7
 
+    /// How far the dot is dropped from the middle of the name's line box, which is where a
+    /// centred `HStack` would otherwise hang it.
+    ///
+    /// A line box is the face's whole vertical run, not the run the letters in it use. Measured
+    /// on SF at the body rung, which is what both lists draw the name at: the box is 16 points
+    /// with the baseline 13 down, so its middle is 5 points above the baseline, while the
+    /// x-height is 6.84 and the cap height 9.16. A mark hung at 5 therefore floats above the mass
+    /// of a capital and well above the mass of a lowercase letter, and workspace names are mostly
+    /// lowercase. That is what the owner was looking at.
+    ///
+    /// So the dot hangs on the x-height band instead, where the face hangs its own round marks.
+    /// The evidence for that band rather than the cap band is that at this size the dot IS one of
+    /// them: SF's lowercase 'o' at 13 points is 7.08 tall and centred 3.42 above the baseline, and
+    /// this dot is 7 across, so it can sit exactly where an 'o' sits and overshoot the baseline
+    /// and the x line by the tenth of a point an 'o' does. The two other round marks the face
+    /// carries agree about the direction: the bullet is centred 3.69 above the baseline and the
+    /// filled circle symbol 4.5, both below the 5 a centred stack gives and neither near it.
+    ///
+    /// Computed from the font rather than written down as 1.58 points, so it follows the rung if
+    /// the name is ever set at another size. `.body` because neither list sets a font on the name,
+    /// so both take the system's default reading size, and a `Font` read back out of the
+    /// environment cannot be measured: it is a description of a face, not a face. A call site that
+    /// sets its own rung would have to say so here.
+    private nonisolated static let dropFromLineCentre: CGFloat = {
+        let font = NSFont.preferredFont(forTextStyle: .body)
+        // What SwiftUI lays a single line out in, reproduced rather than assumed: at the body rung
+        // these two return 16 and 13, which is what `Text` reported for its own height and first
+        // baseline when it was asked.
+        let lineBox = (font.ascender - font.descender + font.leading).rounded()
+        let baseline = (font.ascender + font.leading).rounded()
+        return baseline - font.xHeight / 2 - lineBox / 2
+    }()
+
     var body: some View {
         if let tint {
             Circle()
@@ -42,6 +75,21 @@ struct WorkspaceColourDot: View {
                     Circle().strokeBorder(Palette.textPrimary.opacity(0.12), lineWidth: Metrics.hairline)
                 }
                 .frame(width: Self.size, height: Self.size)
+                // Carried by the dot alone, which is the whole reason this is a guide here rather
+                // than a custom `VerticalAlignment` on the two rows' stacks. Both were rendered
+                // and measured at 2x: with the guide on the NAME the dot lands where it should,
+                // but the pin beside it moves 2.5 pixels down and the name 1 pixel up, because
+                // what moved is the stack's alignment line and everything else in the row hangs
+                // off it, the status glyph in the other half of the `Label` included. With it
+                // here the dot's extents stay well inside the name's, so nothing else in either
+                // row moves at all. Those columns were measured to the point (`SidebarMetrics`)
+                // and this is not what should unpick them.
+                //
+                // Not `.offset(y:)`, which would draw the dot somewhere its layout is not, and
+                // would be a number that stops being right the moment the type size does.
+                .alignmentGuide(VerticalAlignment.center) {
+                    $0[VerticalAlignment.center] - Self.dropFromLineCentre
+                }
                 .accessibilityLabel(accessibilityName.map { "Colour \($0)" } ?? "")
                 .accessibilityHidden(accessibilityName == nil)
         }
