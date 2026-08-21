@@ -40,6 +40,11 @@ SCRATCH="$TMP/bloom-core-build-$ID"
 rm -rf "$WORK"
 mkdir -p "$WORK/Sources" "$WORK/Tests"
 ln -sfn "$ROOT/Sources/BloomCore" "$WORK/Sources/BloomCore"
+# The MCP shim, mirrored alongside. It depends on BloomCore and nothing else, so building it here
+# cannot be stopped by a broken view, which is the whole reason this mirror exists. It is built
+# rather than merely compiled because BridgeShimTests drives the real binary: a shim that is only
+# ever spoken to by another test proves nothing about the process an agent CLI actually launches.
+ln -sfn "$ROOT/Sources/bloom-bridge" "$WORK/Sources/bloom-bridge"
 ln -sfn "$ROOT/Tests/BloomCoreTests" "$WORK/Tests/BloomCoreTests"
 # The tests find a fixture by walking up from their own file, so it has to be reachable
 # from the mirrored Tests directory as well as from the real one.
@@ -54,6 +59,11 @@ let package = Package(
     platforms: [.macOS(.v26)],
     targets: [
         .target(name: "BloomCore", swiftSettings: [.swiftLanguageMode(.v6)]),
+        .executableTarget(
+            name: "bloom-bridge",
+            dependencies: ["BloomCore"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .testTarget(
             name: "BloomCoreTests",
             dependencies: ["BloomCore"],
@@ -73,6 +83,17 @@ done
 extra=(${=BLOOM_TEST_SWIFT_ARGS:-})
 
 cd "$WORK"
+
+# The shim, built once and named in the environment, because `BridgeRegistration.shimPath` looks
+# beside the running executable and the running executable here is the test bundle's. Failing to
+# build it is not fatal: `BridgeShimTests` is skipped when the variable names nothing, exactly as
+# the live suites are, and the rest of the bridge is still covered against the socket directly.
+if swift build --scratch-path "$SCRATCH" --product bloom-bridge >/dev/null 2>&1; then
+  export BLOOM_BRIDGE_SHIM="$(swift build --scratch-path "$SCRATCH" --show-bin-path)/bloom-bridge"
+else
+  print -r -- "===> could not build bloom-bridge, so the shim tests will be skipped"
+fi
+
 runs="${BLOOM_TEST_RUNS:-1}"
 failed=0
 for run in $(seq 1 "$runs"); do

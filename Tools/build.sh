@@ -21,6 +21,10 @@ done
 
 echo "==> swift build -c $CONFIG"
 swift build -c "$CONFIG" --product Bloom
+# The MCP stdio shim an agent CLI launches. A separate invocation because --product names one
+# product, and a separate binary because that is what an MCP server registration can point at: the
+# CLI spawns it, it forwards to the app over a unix socket, and the app answers. See BridgeShim.
+swift build -c "$CONFIG" --product bloom-bridge
 
 BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
 APP="$BIN_DIR/Bloom.app"
@@ -29,6 +33,10 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$BIN_DIR/Bloom" "$APP/Contents/MacOS/Bloom"
+# Beside the app's own executable, which is where BridgeRegistration.shimPath looks for it. A
+# bundle without it is not broken: every chat simply has no bridge tools, which is what every chat
+# had before the bridge existed.
+cp "$BIN_DIR/bloom-bridge" "$APP/Contents/MacOS/bloom-bridge"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
 plist_set() {

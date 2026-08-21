@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v26)],
     products: [
         .executable(name: "Bloom", targets: ["Bloom"]),
+        .executable(name: "bloom-bridge", targets: ["bloom-bridge"]),
         .library(name: "BloomCore", targets: ["BloomCore"]),
     ],
     dependencies: [
@@ -27,6 +28,15 @@ let package = Package(
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        // The MCP stdio shim an agent CLI launches, which forwards to the running app over a unix
+        // domain socket. Its own file is three lines: `Tools/test-core.sh` mirrors only BloomCore
+        // and its tests into the package it runs, so an executable target is invisible to the
+        // suite and everything worth testing lives in `BridgeShim` instead.
+        .executableTarget(
+            name: "bloom-bridge",
+            dependencies: ["BloomCore"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
