@@ -316,7 +316,7 @@ struct AgentCatalogTests {
 /// Everything else in this file is hermetic. This one asserts what docs/AGENTS-INTEGRATION.md recorded
 /// from this machine, so it is opt in:
 ///
-///     BLOOM_LOCAL_AGENTS=1 ./test-core.sh AgentCatalogLocal
+///     BLOOM_LOCAL_AGENTS=1 ./Tools/test-core.sh AgentCatalogLocal
 private let localAgentsEnabled = ProcessInfo.processInfo.environment["BLOOM_LOCAL_AGENTS"] == "1"
 
 @Suite("AgentCatalogLocal", .enabled(if: localAgentsEnabled), .tags(.subprocess))

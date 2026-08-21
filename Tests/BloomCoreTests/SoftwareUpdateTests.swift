@@ -40,7 +40,7 @@ struct SoftwareUpdateTests {
 
     /// The case that costs the most to get wrong: the copy the owner is using all day, built from
     /// a commit rather than from a release, must never be replaced by an older release zip.
-    @Test("never updates the copy master.sh installed, whatever else the bundle claims")
+    @Test("never updates the copy Tools/master.sh installed, whatever else the bundle claims")
     func masterBuildIsLeftAlone() {
         #expect(
             SoftwareUpdate.availability(

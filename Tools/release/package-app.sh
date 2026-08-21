@@ -7,10 +7,10 @@
 #   Tools/release/package-app.sh --preflight
 #
 # --preflight checks the identity and the notarisation credential and stops.
-# release.sh runs it before the build, so a missing credential costs a second
+# Tools/release.sh runs it before the build, so a missing credential costs a second
 # rather than the five minutes it takes to compile the app first.
 #
-# This is the one copy of that sequence. release.sh calls it and so does the
+# This is the one copy of that sequence. Tools/release.sh calls it and so does the
 # release workflow, because the two paths drifting apart is exactly how you end
 # up with a CI build that is signed differently from the one that was tested.
 #
@@ -139,7 +139,7 @@ if [ -n "$ENTITLEMENTS" ]; then
   SIGN_ARGS+=(--entitlements "$ENTITLEMENTS")
 fi
 
-# Inside out, deepest first, rather than --deep. build.sh signs with --deep and
+# Inside out, deepest first, rather than --deep. Tools/build.sh signs with --deep and
 # without the hardened runtime, which is right for a debug build; here every
 # nested piece has to be re-signed with the runtime on, or the app launches and
 # then dies the moment it loads a library that was signed the old way. Doing it
@@ -148,7 +148,7 @@ fi
 echo "==> signing with the hardened runtime"
 
 # What has to be signed before the app itself, and in what order, is worked out
-# by Tools/release/nested-code.sh, which has tests. build.sh signs with --deep
+# by Tools/release/nested-code.sh, which has tests. Tools/build.sh signs with --deep
 # and without the hardened runtime, which is right for a debug build; here
 # every nested piece has to be signed again with the runtime on, or the app
 # launches and then dies the moment it loads something that was signed the old

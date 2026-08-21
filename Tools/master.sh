@@ -2,11 +2,14 @@
 # Builds a copy of Bloom for the owner to actually use, and installs it to
 # ~/Applications/Bloom.app.
 #
-#   ./master.sh              build HEAD, install, relaunch
-#   ./master.sh <ref>        build that commit or branch instead
-#   ./master.sh --no-launch  install without restarting the running app
+#   ./Tools/master.sh              build HEAD, install, relaunch
+#   ./Tools/master.sh <ref>        build that commit or branch instead
+#   ./Tools/master.sh --no-launch  install without restarting the running app
 #
-# Why this exists, and why it is not just `./build.sh`:
+# `make master` is the first of those. The other two want an argument, so
+# they are run directly.
+#
+# Why this exists, and why it is not just `./Tools/build.sh`:
 #
 # Agents work in this repository continuously, so at any moment the working
 # tree can be mid edit and may not compile. It builds from a detached worktree
@@ -24,7 +27,7 @@
 # they never collide with this one.
 
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 REF=HEAD
 LAUNCH=1
@@ -50,7 +53,13 @@ git worktree add --detach "$WORK" "$RESOLVED" >/dev/null
 
 # Its own scratch path, so a concurrent agent build cannot swap objects underneath.
 ( cd "$WORK" && swift build -c release --product Bloom --scratch-path /tmp/bloom-master-build >/dev/null )
-( cd "$WORK" && ./build.sh -r >/dev/null )
+
+# The worktree holds whatever that ref held, and the build script has only lived
+# in Tools since today. Pinning to a commit from before the move is the whole
+# point of taking a ref, so both places are looked in rather than one.
+BUILD_SCRIPT=Tools/build.sh
+[ -x "$WORK/$BUILD_SCRIPT" ] || BUILD_SCRIPT=build.sh
+( cd "$WORK" && "./$BUILD_SCRIPT" -r >/dev/null )
 
 BUILT="$WORK/.build/release/Bloom.app"
 [ -d "$BUILT" ] || BUILT="$(cd "$WORK" && swift build -c release --show-bin-path)/Bloom.app"

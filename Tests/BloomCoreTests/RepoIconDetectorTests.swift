@@ -599,7 +599,7 @@ struct RepoIconDetectorTests {
     @Test("Bloom's own checkout answers with the icon it ships")
     func bloomItself() throws {
         // Four levels up from Tests/BloomCoreTests/<this file>. Symlinks resolved first, because
-        // `./test-core.sh` compiles these sources through a mirror package whose Tests directory
+        // `./Tools/test-core.sh` compiles these sources through a mirror package whose Tests directory
         // is a link to this one, and the unresolved path leads to that scratch copy instead.
         let root = URL(fileURLWithPath: #filePath)
             .resolvingSymlinksInPath()

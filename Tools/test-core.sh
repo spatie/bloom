@@ -5,10 +5,10 @@
 # view stops every core test from running. This mirrors the core sources into a throwaway
 # package that has no app target, which keeps the core suite runnable at all times.
 #
-#   ./test-core.sh                        run everything
-#   ./test-core.sh DiffParser             run one suite by filter
-#   ./test-core.sh DiffParser Git          run several (each argument is its own --filter)
-#   BLOOM_TEST_RUNS=5 ./test-core.sh      run the whole thing five times, to shake out flakes
+#   ./Tools/test-core.sh                   run everything, which is also `make test`
+#   ./Tools/test-core.sh DiffParser        run one suite by filter
+#   ./Tools/test-core.sh DiffParser Git    run several (each argument is its own --filter)
+#   BLOOM_TEST_RUNS=5 ./Tools/test-core.sh run the whole thing five times, to shake out flakes
 #
 # Environment:
 #   BLOOM_TEST_ID       stable name for the work and build directories, so repeated runs by the
@@ -24,7 +24,7 @@
 #
 
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 ROOT="$PWD"
 TMP="${TMPDIR:-/tmp}"
 ID="${BLOOM_TEST_ID:-$$}"

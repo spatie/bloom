@@ -55,7 +55,7 @@ jobs:
           # Report every race and keep going, rather than stopping at the first
           # one. One night should produce the whole list.
           TSAN_OPTIONS: halt_on_error=0
-        run: ./test-core.sh
+        run: ./Tools/test-core.sh
 
   # How much of BloomCore the suite actually touches. Information, not a gate:
   # there is no threshold here to argue with and nothing fails on a number going
@@ -73,7 +73,7 @@ jobs:
           git config --global user.email "ci@bloom.local"
           git config --global user.name "Bloom CI"
 
-      # TMPDIR is pinned so the step below knows where test-core.sh put the
+      # TMPDIR is pinned so the step below knows where Tools/test-core.sh put the
       # build. It derives both directories from TMPDIR and BLOOM_TEST_ID, so
       # fixing those two is what makes the profile findable afterwards.
       - name: Run the core tests with coverage
@@ -81,7 +81,7 @@ jobs:
           TMPDIR: ${{ runner.temp }}
           BLOOM_TEST_ID: coverage
           BLOOM_TEST_SWIFT_ARGS: --enable-code-coverage
-        run: ./test-core.sh
+        run: ./Tools/test-core.sh
 
       - name: Report the coverage
         if: ${{ !cancelled() }}

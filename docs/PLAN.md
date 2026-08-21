@@ -15,8 +15,8 @@ created a worktree, ran the repo's setup script, started an agent, streamed its 
 persisted every event, produced a real diff, and rendered that diff in the inspector. Four
 agents have been run in parallel in four worktrees without interfering with each other.
 
-Three live tests (`BLOOM_LIVE=1 ./test-core.sh LiveAgent`) run against the real `claude` binary
-and cover a full turn with tool use, session resume across two runner instances, and
+Three live tests (`BLOOM_LIVE=1 ./Tools/test-core.sh LiveAgent`) run against the real `claude`
+binary and cover a full turn with tool use, session resume across two runner instances, and
 cancellation. They are opt-in because they spend tokens.
 
 ### Bugs found by running it, all fixed and covered by tests
@@ -62,7 +62,7 @@ Everything here runs locally against the `claude` CLI and `git`.
 
 ## Architecture
 
-- Swift 6, SwiftUI, macOS 26+. Built with SPM, wrapped into an `.app` by `build.sh`.
+- Swift 6, SwiftUI, macOS 26+. Built with SPM, wrapped into an `.app` by `Tools/build.sh`.
 - One dependency: SwiftTerm (embedded terminal). Everything else is stdlib + system SQLite.
 - Persistence: SQLite via the system `SQLite3` module, thin hand-rolled layer (`Store`).
 - All git/gh/claude interaction is subprocess based. No libgit2.
@@ -75,7 +75,8 @@ Each phase has an endgoal that is checkable by running something.
 
 ### Phase 0: Foundation
 SPM package, app bundle build script, three-pane SwiftUI shell.
-**Endgoal:** `./build.sh && open .build/Bloom.app` shows a window with sidebar, center, inspector.
+**Endgoal:** `./Tools/build.sh && open .build/Bloom.app` shows a window with sidebar, center and
+inspector.
 
 ### Phase 1: Data layer
 `Store` over SQLite. Models: Repo, Workspace, Session, Message, TerminalSession, Settings.

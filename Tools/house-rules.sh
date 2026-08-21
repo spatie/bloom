@@ -54,7 +54,7 @@ echo "==> the app is called Bloom"
 # get shorter. A file not on it that mentions the old name is a new mistake.
 baton_allowed=(
   'docs/PROTOCOL.md'                                    # quotes a recorded session
-  'build.sh'                                            # BATON_CODESIGN_IDENTITY, kept working on purpose
+  'Tools/build.sh'                                      # BATON_CODESIGN_IDENTITY, kept working on purpose
   'Tests/fixtures/'                                     # recorded sessions, byte for byte
   'Sources/BloomCore/LegacyDatabase.swift'              # reads the old app's database
   'Sources/BloomCore/LegacyDefaults.swift'              # reads the old app's preferences

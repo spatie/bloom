@@ -1,11 +1,11 @@
 #!/bin/zsh
 # Builds a Bloom anyone can open, and leaves it in a zip you can send.
 #
-#   ./release.sh                    build HEAD
-#   ./release.sh <ref>              build that commit or branch
-#   ./release.sh --tag v1.4.0       stamp that version rather than the plist's
+#   ./Tools/release.sh              build HEAD, which is also `make release`
+#   ./Tools/release.sh <ref>        build that commit or branch
+#   ./Tools/release.sh --tag v1.4.0 stamp that version rather than the plist's
 #
-# What this does that ./master.sh does not: it signs with a real Developer ID,
+# What this does that ./Tools/master.sh does not: it signs with a real Developer ID,
 # turns on the hardened runtime, sends the result to Apple to be notarised, and
 # staples the ticket onto the app. Without all four steps macOS refuses to open
 # a downloaded app without the user going into System Settings, which on recent
@@ -36,7 +36,7 @@
 #   export BLOOM_CODESIGN_IDENTITY="Developer ID Application: Name (TEAMID)"
 
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 REF=HEAD
 TAG=${BLOOM_RELEASE_TAG:-}
@@ -71,13 +71,18 @@ else
   build="$(git rev-list --count "$REF")"
 fi
 
-# Same reasoning as master.sh: a detached worktree at a commit, and a scratch
+# Same reasoning as Tools/master.sh: a detached worktree at a commit, and a scratch
 # path of its own, so nothing uncommitted and nothing from a concurrent build
 # can end up in something being sent to another person.
 git worktree remove --force "$WORK" 2>/dev/null || true
 rm -rf "$WORK"
 git worktree add --detach "$WORK" "$RESOLVED" >/dev/null
-( cd "$WORK" && BLOOM_CODESIGN_IDENTITY="${BLOOM_CODESIGN_IDENTITY:-}" ./build.sh -r >/dev/null )
+# Same as Tools/master.sh: a ref from before the build script moved into Tools still
+# keeps it at the root, and a release cut from an older tag has to keep working.
+BUILD_SCRIPT=Tools/build.sh
+[ -x "$WORK/$BUILD_SCRIPT" ] || BUILD_SCRIPT=build.sh
+( cd "$WORK" && BLOOM_CODESIGN_IDENTITY="${BLOOM_CODESIGN_IDENTITY:-}" \
+    "./$BUILD_SCRIPT" -r >/dev/null )
 
 APP="$WORK/.build/release/Bloom.app"
 [ -d "$APP" ] || APP="$(cd "$WORK" && swift build -c release --show-bin-path)/Bloom.app"
@@ -85,8 +90,8 @@ APP="$WORK/.build/release/Bloom.app"
 mkdir -p "$OUT"
 ZIP="$OUT/Bloom-$version.zip"
 
-# build.sh signs, but without the hardened runtime, which notarisation
-# requires. Signed again in there rather than teaching build.sh about it,
+# Tools/build.sh signs, but without the hardened runtime, which notarisation
+# requires. Signed again in there rather than teaching Tools/build.sh about it,
 # because a debug build wants to stay easy to attach a debugger to.
 ( cd "$WORK" && "$TOOLS/package-app.sh" \
     --app "$APP" --zip "$ZIP" --version "$version" --build "$build" )

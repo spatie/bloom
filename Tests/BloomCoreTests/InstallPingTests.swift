@@ -465,7 +465,7 @@ struct InstallPingTests {
         #expect(endpoint(channel: "local") == nil)
     }
 
-    /// The copy `master.sh` installs is somebody's own build of a commit, not an install.
+    /// The copy `Tools/master.sh` installs is somebody's own build of a commit, not an install.
     @Test("the master build pings nothing at all")
     func masterBuildIsSilent() {
         #expect(endpoint(channel: "release", masterCommit: "abc1234") == nil)
