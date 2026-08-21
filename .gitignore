@@ -2,5 +2,5 @@
 .swiftpm/
 *.xcodeproj
 .DS_Store
-fixtures/*.local.jsonl
+Tests/fixtures/*.local.jsonl
 dist/

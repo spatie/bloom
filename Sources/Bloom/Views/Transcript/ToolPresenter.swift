@@ -4,7 +4,7 @@ import BloomCore
 /// Turns a tool name plus its arbitrary input object into something readable.
 ///
 /// Every built-in Claude Code tool gets a bespoke case. The parameter names are the ones the CLI
-/// actually sends (see docs/PROTOCOL.md and fixtures/session-basic.jsonl), and anything unrecognised
+/// actually sends (see docs/PROTOCOL.md and Tests/fixtures/session-basic.jsonl), and anything unrecognised
 /// still lands on a sensible line rather than nothing, because new tools ship constantly.
 enum ToolPresenter {
     static func present(_ use: AgentToolUse) -> ToolPresentation {

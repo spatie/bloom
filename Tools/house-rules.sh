@@ -35,9 +35,9 @@ en_dash="$(printf '\342\200\223')"
 
 echo "==> no em dashes or en dashes"
 # .claude holds agent skills written elsewhere and vendored in as they are, and
-# fixtures holds recorded sessions that have to stay byte for byte what the
-# agent actually emitted. Neither is house prose and neither may be rewritten.
-if hits="$(git grep -n -I -e "$em_dash" -e "$en_dash" -- ':!.claude' ':!fixtures' || true)" && [ -n "$hits" ]; then
+# Tests/fixtures holds recorded sessions that have to stay byte for byte what
+# the agent actually emitted. Neither is house prose and neither may be rewritten.
+if hits="$(git grep -n -I -e "$em_dash" -e "$en_dash" -- ':!.claude' ':!Tests/fixtures' || true)" && [ -n "$hits" ]; then
   echo "$hits" | while IFS= read -r line; do echo "  $line"; done
   report "A dash that should be a comma, a full stop or a pair of brackets."
 fi
@@ -55,7 +55,7 @@ echo "==> the app is called Bloom"
 baton_allowed=(
   'docs/PROTOCOL.md'                                    # quotes a recorded session
   'build.sh'                                            # BATON_CODESIGN_IDENTITY, kept working on purpose
-  'fixtures/'                                           # recorded sessions, byte for byte
+  'Tests/fixtures/'                                     # recorded sessions, byte for byte
   'Sources/BloomCore/LegacyDatabase.swift'              # reads the old app's database
   'Sources/BloomCore/LegacyDefaults.swift'              # reads the old app's preferences
   'Sources/BloomCore/WorkspaceManager.swift'            # a comment about the old worktree home
@@ -99,7 +99,7 @@ american=(defense offense fulfill fulfillment skeptical acknowledgment maneuver
 american_in_prose=(favorite favorites gray canceled)
 
 for word in "${american[@]}"; do
-  if hits="$(git grep -n -I -i -w "$word" -- ':!.claude' ':!fixtures' ':!Tools/house-rules.sh' || true)" && [ -n "$hits" ]; then
+  if hits="$(git grep -n -I -i -w "$word" -- ':!.claude' ':!Tests/fixtures' ':!Tools/house-rules.sh' || true)" && [ -n "$hits" ]; then
     echo "$hits" | while IFS= read -r line; do echo "  $line"; done
     report "American spelling: $word."
   fi

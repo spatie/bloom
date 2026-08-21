@@ -41,8 +41,9 @@ rm -rf "$WORK"
 mkdir -p "$WORK/Sources" "$WORK/Tests"
 ln -sfn "$ROOT/Sources/BloomCore" "$WORK/Sources/BloomCore"
 ln -sfn "$ROOT/Tests/BloomCoreTests" "$WORK/Tests/BloomCoreTests"
-# Tests resolve fixtures relative to the package root, so it has to exist here too.
-ln -sfn "$ROOT/fixtures" "$WORK/fixtures"
+# The tests find a fixture by walking up from their own file, so it has to be reachable
+# from the mirrored Tests directory as well as from the real one.
+ln -sfn "$ROOT/Tests/fixtures" "$WORK/Tests/fixtures"
 
 cat > "$WORK/Package.swift" <<'EOF'
 // swift-tools-version: 6.0
