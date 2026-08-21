@@ -39,7 +39,7 @@ struct WorkspaceRow: View {
     var isAwaitingPermission = false
     /// The id of the row being renamed in place, shared across the whole list so only one field
     /// can ever be open.
-    @Binding var renaming: String?
+    @Binding var renaming: WorkspaceID?
     /// Raised to `SidebarWorkspaceRow`, which owns both the confirmation and the call into the
     /// model, so this button and the row's context menu cannot end up on different paths.
     var onArchive: (Workspace) -> Void

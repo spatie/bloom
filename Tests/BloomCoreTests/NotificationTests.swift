@@ -14,9 +14,9 @@ struct NotificationPolicyTests {
     func suppressesWhatIsAlreadyOnScreen() {
         let verdict = NotificationPolicy.verdict(
             for: .turnFinished,
-            workspaceID: "w1",
+            workspaceID: WorkspaceID("w1"),
             settings: allOn,
-            context: NotificationContext(isAppActive: true, selectedWorkspaceID: "w1")
+            context: NotificationContext(isAppActive: true, selectedWorkspaceID: WorkspaceID("w1"))
         )
 
         #expect(verdict == .alreadyOnScreen)
@@ -29,9 +29,9 @@ struct NotificationPolicyTests {
         // finishing somewhere the user cannot see.
         let verdict = NotificationPolicy.verdict(
             for: .turnFinished,
-            workspaceID: "w2",
+            workspaceID: WorkspaceID("w2"),
             settings: allOn,
-            context: NotificationContext(isAppActive: true, selectedWorkspaceID: "w1")
+            context: NotificationContext(isAppActive: true, selectedWorkspaceID: WorkspaceID("w1"))
         )
 
         #expect(verdict == .deliver)
@@ -41,7 +41,7 @@ struct NotificationPolicyTests {
     func notifiesWhenNoWorkspaceIsSelected() {
         let verdict = NotificationPolicy.verdict(
             for: .turnFinished,
-            workspaceID: "w1",
+            workspaceID: WorkspaceID("w1"),
             settings: allOn,
             context: NotificationContext(isAppActive: true, selectedWorkspaceID: nil)
         )
@@ -53,9 +53,9 @@ struct NotificationPolicyTests {
     func notifiesInBackgroundRegardlessOfSelection() {
         let verdict = NotificationPolicy.verdict(
             for: .turnFinished,
-            workspaceID: "w1",
+            workspaceID: WorkspaceID("w1"),
             settings: allOn,
-            context: NotificationContext(isAppActive: false, selectedWorkspaceID: "w1")
+            context: NotificationContext(isAppActive: false, selectedWorkspaceID: WorkspaceID("w1"))
         )
 
         #expect(verdict == .deliver)
@@ -66,7 +66,7 @@ struct NotificationPolicyTests {
         for event in NotificationEvent.allCases {
             let verdict = NotificationPolicy.verdict(
                 for: event,
-                workspaceID: "w1",
+                workspaceID: WorkspaceID("w1"),
                 settings: NotificationSettings(isEnabled: false),
                 context: NotificationContext(isAppActive: false, selectedWorkspaceID: nil)
             )
@@ -86,14 +86,14 @@ struct NotificationPolicyTests {
 
             #expect(
                 NotificationPolicy.verdict(
-                    for: event, workspaceID: "w1", settings: settings, context: context
+                    for: event, workspaceID: WorkspaceID("w1"), settings: settings, context: context
                 ) == .eventIsOff
             )
 
             for other in NotificationEvent.allCases where other != event {
                 #expect(
                     NotificationPolicy.verdict(
-                        for: other, workspaceID: "w1", settings: settings, context: context
+                        for: other, workspaceID: WorkspaceID("w1"), settings: settings, context: context
                     ) == .deliver
                 )
             }
@@ -106,9 +106,9 @@ struct NotificationPolicyTests {
         // suppression is what makes "why did it go quiet?" answerable.
         let verdict = NotificationPolicy.verdict(
             for: .checksFinished,
-            workspaceID: "w1",
+            workspaceID: WorkspaceID("w1"),
             settings: NotificationSettings(isEnabled: true, enabledEvents: [.turnFinished]),
-            context: NotificationContext(isAppActive: true, selectedWorkspaceID: "w1")
+            context: NotificationContext(isAppActive: true, selectedWorkspaceID: WorkspaceID("w1"))
         )
 
         #expect(verdict == .eventIsOff)
@@ -182,7 +182,7 @@ struct NotificationDigestTests {
         name: String,
         detail: String = ""
     ) -> NotificationDraft {
-        NotificationDraft(event: event, workspaceID: id, workspaceName: name, detail: detail)
+        NotificationDraft(event: event, workspaceID: WorkspaceID(id), workspaceName: name, detail: detail)
     }
 
     @Test("one workspace gets a banner titled with its own name")
@@ -194,7 +194,7 @@ struct NotificationDigestTests {
 
         #expect(prepared?.title == "auth-refactor")
         #expect(prepared?.body == "Added the token refresh.")
-        #expect(prepared?.workspaceID == "w1")
+        #expect(prepared?.workspaceID == WorkspaceID("w1"))
         #expect(prepared?.identifier == "bloom.turnFinished.w1")
     }
 
@@ -225,7 +225,7 @@ struct NotificationDigestTests {
         #expect(prepared?.title == "3 agents finished")
         #expect(prepared?.body == "auth, billing, search")
         // Clicking has to land somewhere, and the first of them is the only defensible choice.
-        #expect(prepared?.workspaceID == "w1")
+        #expect(prepared?.workspaceID == WorkspaceID("w1"))
         #expect(prepared?.threadIdentifier == "bloom.turnFinished")
     }
 

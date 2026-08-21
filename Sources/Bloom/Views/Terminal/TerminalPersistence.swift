@@ -65,7 +65,7 @@ final class TerminalPersistence {
     // MARK: - Launch
 
     /// What a pane should do, from the snapshot this instance last took.
-    func decision(workspaceID: String, paneID: String) -> TerminalStartDecision {
+    func decision(workspaceID: WorkspaceID, paneID: String) -> TerminalStartDecision {
         TmuxSessions.decide(
             workspaceID: workspaceID,
             paneID: paneID,
@@ -117,7 +117,7 @@ final class TerminalPersistence {
     /// Deliberately not gated on `isSwitchedOn`. Sessions outlive the setting: a user who turns
     /// persistence off, or who archives a workspace whose shells were started while it was on,
     /// must still be left with nothing running in a worktree that is being deleted.
-    func kill(workspaceID: String, paneIDs: [String]) async {
+    func kill(workspaceID: WorkspaceID, paneIDs: [String]) async {
         await kill(sessions: paneIDs.map {
             TmuxSessions.sessionName(workspaceID: workspaceID, paneID: $0)
         })
@@ -126,7 +126,7 @@ final class TerminalPersistence {
     /// Everything one workspace owns, read off the session names rather than off Bloom's own
     /// bookkeeping. Archiving deletes the worktree, so this may not depend on a tab list that was
     /// never loaded or a split layout that was lost.
-    func killEverything(workspaceID: String) async {
+    func killEverything(workspaceID: WorkspaceID) async {
         guard command != nil else { return }
         let sessions = await sessionNames()
         await kill(sessions: TmuxSessions.sessions(ofWorkspace: workspaceID, in: sessions))

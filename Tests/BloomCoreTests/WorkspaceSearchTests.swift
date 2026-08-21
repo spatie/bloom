@@ -15,7 +15,7 @@ struct WorkspaceSearchTests {
         repoID: RepoID = RepoID("repo")
     ) -> Workspace {
         Workspace(
-            id: name,
+            id: WorkspaceID(name),
             repoID: repoID,
             name: name,
             branch: branch,

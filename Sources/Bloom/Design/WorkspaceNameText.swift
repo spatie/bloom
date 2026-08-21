@@ -30,7 +30,7 @@ import BloomCore
 /// Skipped outright, not shortened. The whole effect is motion for its own sake, and half of a
 /// decorative animation is worse than none.
 struct WorkspaceNameText: View {
-    let workspaceID: String
+    let workspaceID: WorkspaceID
     let name: String
     /// Whether this row has finished work nobody has read yet.
     ///
@@ -53,7 +53,7 @@ struct WorkspaceNameText: View {
         self.isUnread = isUnread
     }
 
-    init(workspaceID: String, name: String, isUnread: Bool = false) {
+    init(workspaceID: WorkspaceID, name: String, isUnread: Bool = false) {
         self.workspaceID = workspaceID
         self.name = name
         self.isUnread = isUnread

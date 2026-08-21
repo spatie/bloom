@@ -44,7 +44,7 @@ struct HomeListTests {
         state: WorkspaceState = .active
     ) -> Workspace {
         Workspace(
-            id: name,
+            id: WorkspaceID(name),
             repoID: repoID,
             name: name,
             branch: branch ?? "feature/\(name)",
@@ -309,7 +309,7 @@ struct HomeListTests {
             calendar: Self.calendar
         )
 
-        #expect(listing.groups.flatMap(\.rows).map(\.id) == ["newest", "middle", "old"])
+        #expect(listing.groups.flatMap(\.rows).map(\.id.rawValue) == ["newest", "middle", "old"])
         #expect(listing.groups.map(\.title) == ["Today", "Yesterday", "2 weeks ago"])
         #expect(listing.shown == 3)
         #expect(listing.considered == 3)
@@ -331,8 +331,8 @@ struct HomeListTests {
         )
 
         let rows = listing.groups.flatMap(\.rows)
-        #expect(rows.first { $0.id == "known" }?.repo?.name == "Bloom")
-        #expect(rows.first { $0.id == "orphan" }?.repo == nil)
+        #expect(rows.first { $0.id == WorkspaceID("known") }?.repo?.name == "Bloom")
+        #expect(rows.first { $0.id == WorkspaceID("orphan") }?.repo == nil)
     }
 
     @Test("two workspaces on the same day share one heading")
@@ -378,7 +378,7 @@ struct HomeListTests {
         #expect(shown.considered == 3)
         #expect(shown.archived == 2)
         #expect(shown.shownArchived == 2)
-        #expect(shown.groups.flatMap(\.rows).map(\.id) == ["live", "gone", "older"])
+        #expect(shown.groups.flatMap(\.rows).map(\.id.rawValue) == ["live", "gone", "older"])
 
         let hidden = HomeList.build(
             repos: [repo("repo")],
@@ -409,7 +409,7 @@ struct HomeListTests {
             calendar: Self.calendar
         )
 
-        #expect(listing.groups.flatMap(\.rows).map(\.id) == ["recent", "old"])
+        #expect(listing.groups.flatMap(\.rows).map(\.id.rawValue) == ["recent", "old"])
         #expect(listing.groups.flatMap(\.rows).map(\.isArchived) == [true, false])
     }
 
@@ -430,7 +430,7 @@ struct HomeListTests {
                 filter: HomeFilter(query: query),
                 now: now,
                 calendar: Self.calendar
-            ).groups.flatMap(\.rows).map(\.id)
+            ).groups.flatMap(\.rows).map(\.id.rawValue)
         }
 
         #expect(ids("SIDEBAR") == ["Sidebar rewrite"])

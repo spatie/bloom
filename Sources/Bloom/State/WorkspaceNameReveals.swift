@@ -26,7 +26,7 @@ struct WorkspaceNameReveal: Equatable, Identifiable {
 final class WorkspaceNameReveals {
     static let shared = WorkspaceNameReveals()
 
-    private(set) var reveals: [String: WorkspaceNameReveal] = [:]
+    private(set) var reveals: [WorkspaceID: WorkspaceNameReveal] = [:]
 
     /// How long an announcement stays on the register.
     ///
@@ -35,14 +35,14 @@ final class WorkspaceNameReveals {
     /// event that is over.
     private static let lifetime = ScrambleReveal.interval * (ScrambleReveal.steps + 4)
 
-    private var expiries: [String: Task<Void, Never>] = [:]
+    private var expiries: [WorkspaceID: Task<Void, Never>] = [:]
 
     /// Announce that Bloom, not the user, just renamed this workspace.
     ///
     /// The only caller is the automatic naming path. A rename typed into the sidebar's own text
     /// field never comes through here, which is what stops a user's typing being garbled back at
     /// them.
-    func announce(workspaceID: String, name: String) {
+    func announce(workspaceID: WorkspaceID, name: String) {
         reveals[workspaceID] = WorkspaceNameReveal(name: name, seed: UInt64.random(in: .min ... .max))
 
         expiries[workspaceID]?.cancel()
@@ -55,7 +55,7 @@ final class WorkspaceNameReveals {
     }
 
     /// The reveal for this workspace, but only if it is for the text about to be drawn.
-    func reveal(for workspaceID: String, showing name: String) -> WorkspaceNameReveal? {
+    func reveal(for workspaceID: WorkspaceID, showing name: String) -> WorkspaceNameReveal? {
         guard let reveal = reveals[workspaceID], reveal.name == name else { return nil }
         return reveal
     }

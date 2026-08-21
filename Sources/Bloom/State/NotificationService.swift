@@ -54,7 +54,7 @@ final class NotificationService {
     @ObservationIgnored private var checksTask: Task<Void, Never>?
     /// What CI said about each workspace last time it was looked at, so a transition into a result
     /// can be told from a result that has been sitting there all along.
-    @ObservationIgnored private var lastSeenChecks: [String: PullRequest.Checks] = [:]
+    @ObservationIgnored private var lastSeenChecks: [WorkspaceID: PullRequest.Checks] = [:]
 
     private init() {}
 
@@ -198,7 +198,7 @@ final class NotificationService {
             threadIdentifier: "bloom.test",
             title: "Bloom",
             body: "Notifications are working. This is what an agent finishing looks like.",
-            workspaceID: app?.selection.workspaceID ?? ""
+            workspaceID: app?.selection.workspaceID ?? WorkspaceID("")
         ))
     }
 
@@ -249,7 +249,7 @@ final class NotificationService {
         // `NotificationDigest` threads a single banner under the workspace it is about and a digest
         // under its event, so the two are told apart by whether the thread IS the workspace. That
         // is the same fact the reply box needs: exactly one agent to send to.
-        content.categoryIdentifier = prepared.threadIdentifier == prepared.workspaceID
+        content.categoryIdentifier = prepared.threadIdentifier == prepared.workspaceID.rawValue
             ? Self.workspaceCategory
             : Self.summaryCategory
 
@@ -271,7 +271,7 @@ final class NotificationService {
     /// a workspace and a workspace can hold several. The active one is the right answer: it is the
     /// conversation the notification came out of, and the one the window would show if the click
     /// had opened it instead.
-    func reply(_ text: String, toWorkspace workspaceID: String) async {
+    func reply(_ text: String, toWorkspace workspaceID: WorkspaceID) async {
         guard let app, let workspace = app.workspaces.first(where: { $0.id == workspaceID }) else { return }
 
         let model = app.model(for: workspace)
@@ -299,9 +299,9 @@ final class NotificationService {
 
     /// Which workspace a click should select. Nil for a banner that names none, which only the
     /// test notification does before a workspace has ever been selected.
-    nonisolated static func workspaceID(from response: UNNotificationResponse) -> String? {
+    nonisolated static func workspaceID(from response: UNNotificationResponse) -> WorkspaceID? {
         let stored = response.notification.request.content.userInfo[workspaceKey] as? String
-        return (stored?.isEmpty ?? true) ? nil : stored
+        return (stored?.isEmpty ?? true) ? nil : stored.map(WorkspaceID.init)
     }
 
     // MARK: - Checks

@@ -30,7 +30,7 @@ struct DetailColumn: View {
     /// An archived workspace is a record rather than a destination, so it gets a reader rather
     /// than the centre column. See `ArchivedWorkspaceView`.
     @ViewBuilder
-    private func archived(_ id: String) -> some View {
+    private func archived(_ id: WorkspaceID) -> some View {
         if let model = app.existingModel(for: id) {
             ArchivedWorkspaceView(model: model)
         } else {
@@ -59,7 +59,7 @@ struct DetailColumn: View {
     /// unresolvable selection lands everywhere else in this file. Before the store has answered
     /// there is no list to be missing from, so that case waits instead.
     @ViewBuilder
-    private func workspace(_ id: String) -> some View {
+    private func workspace(_ id: WorkspaceID) -> some View {
         // `existingModel` rather than `model(for:)`: creating one here would mutate observable
         // state during the render pass. The selection setter has already made it.
         if let model = app.existingModel(for: id) {

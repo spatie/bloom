@@ -9,7 +9,7 @@ struct SearchView: View {
     @Environment(AppModel.self) private var app
 
     @FocusState private var fieldFocused: Bool
-    @State private var hovered: String?
+    @State private var hovered: WorkspaceID?
 
     /// Matching runs when the query or the workspace list changes, not on every redraw. A search
     /// stays on screen while agents run, and each of them updates its diff stat every few seconds.

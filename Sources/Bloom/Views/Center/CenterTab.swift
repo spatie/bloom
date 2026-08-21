@@ -25,7 +25,7 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
     }
 
     var id: String = newID()
-    var workspaceID: String
+    var workspaceID: WorkspaceID
     var kind: Kind
     var title: String
     /// Browser only, and kept up to date as the user navigates, so reopening the workspace lands
@@ -61,14 +61,14 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
-        workspaceID = try container.decode(String.self, forKey: .workspaceID)
+        workspaceID = try container.decode(WorkspaceID.self, forKey: .workspaceID)
         kind = try container.decode(Kind.self, forKey: .kind)
         title = try container.decode(String.self, forKey: .title)
         url = try container.decodeIfPresent(String.self, forKey: .url) ?? ""
         path = try container.decodeIfPresent(String.self, forKey: .path) ?? ""
     }
 
-    init(id: String = newID(), workspaceID: String, kind: Kind, title: String, url: String = "", path: String = "") {
+    init(id: String = newID(), workspaceID: WorkspaceID, kind: Kind, title: String, url: String = "", path: String = "") {
         self.id = id
         self.workspaceID = workspaceID
         self.kind = kind

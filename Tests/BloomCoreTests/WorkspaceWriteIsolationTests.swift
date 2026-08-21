@@ -113,7 +113,7 @@ struct WorkspaceWriteIsolationTests {
         let other = try await store.upsert(Repo(name: "other", path: TestScratch.unique("other")))
 
         try await store.update(workspaceID: workspace.id) {
-            $0.id = "some-other-id"
+            $0.id = WorkspaceID("some-other-id")
             $0.repoID = other.id
             $0.name = "renamed"
         }
@@ -372,7 +372,7 @@ struct WorkspaceParentageTests {
         #expect(WorkspaceOrigin(parentWorkspaceID: "", spawnToolUseID: "toolu_e") == .user)
         #expect(
             WorkspaceOrigin(parentWorkspaceID: "w1", spawnToolUseID: "toolu_e")
-                == .agent(parentWorkspaceID: "w1", spawnToolUseID: "toolu_e")
+                == .agent(parentWorkspaceID: WorkspaceID("w1"), spawnToolUseID: "toolu_e")
         )
     }
 }

@@ -20,7 +20,7 @@ import BloomCore
 final class CenterTabStore {
     static let shared = CenterTabStore()
 
-    private(set) var tabsByWorkspace: [String: [CenterTab]] = [:]
+    private(set) var tabsByWorkspace: [WorkspaceID: [CenterTab]] = [:]
 
     /// Live web views, keyed by tab. Ignored by observation on purpose: no view reads this map, it
     /// is only ever asked for one session at a time, and having it invalidate the column every
@@ -31,13 +31,13 @@ final class CenterTabStore {
 
     // MARK: - Reading
 
-    func tabs(for workspaceID: String) -> [CenterTab] {
+    func tabs(for workspaceID: WorkspaceID) -> [CenterTab] {
         tabsByWorkspace[workspaceID] ?? []
     }
 
     /// The workspace's one review tab, if it has been opened. There is never a second: see the
     /// note on `CenterTab`.
-    func review(for workspaceID: String) -> CenterTab? {
+    func review(for workspaceID: WorkspaceID) -> CenterTab? {
         tabs(for: workspaceID).first { $0.kind == .review }
     }
 
@@ -55,7 +55,7 @@ final class CenterTabStore {
     /// Reads the workspace's tabs back from user defaults, once per launch. Called from a task
     /// rather than from a getter, because filling the map is a mutation and a view body may not
     /// cause one.
-    func load(workspaceID: String) {
+    func load(workspaceID: WorkspaceID) {
         guard tabsByWorkspace[workspaceID] == nil else { return }
         tabsByWorkspace[workspaceID] = Self.restore(workspaceID: workspaceID)
     }
@@ -65,7 +65,7 @@ final class CenterTabStore {
     /// name the strip has always given a new tab.
     @discardableResult
     func add(
-        kind: CenterTab.Kind, workspaceID: String, url: String = "", title: String? = nil
+        kind: CenterTab.Kind, workspaceID: WorkspaceID, url: String = "", title: String? = nil
     ) -> CenterTab {
         var tabs = tabs(for: workspaceID)
         let tab = CenterTab(
@@ -84,7 +84,7 @@ final class CenterTabStore {
     /// The launch sweep asks this about workspaces nobody has opened, and it has to be told about
     /// their panes anyway: a tmux session whose tab is only on disk is still one Bloom can reach,
     /// and a sweep that could not see it would kill the shell the user left running in it.
-    func terminalTabIDs(for workspaceID: String) -> [String] {
+    func terminalTabIDs(for workspaceID: WorkspaceID) -> [String] {
         let tabs = tabsByWorkspace[workspaceID] ?? Self.restore(workspaceID: workspaceID)
         return tabs.filter { $0.kind == .terminal }.map(\.id)
     }
@@ -112,7 +112,7 @@ final class CenterTabStore {
     func adoptTerminalTabs(from store: Store?) async {
         guard let store, let workspaces = try? await store.workspaces() else { return }
 
-        var rowsByWorkspace: [String: [TerminalTab]] = [:]
+        var rowsByWorkspace: [WorkspaceID: [TerminalTab]] = [:]
         for workspace in workspaces {
             let rows = (try? await store.terminalTabs(workspaceID: workspace.id)) ?? []
             if !rows.isEmpty { rowsByWorkspace[workspace.id] = rows }
@@ -127,10 +127,10 @@ final class CenterTabStore {
             var tabs = tabsByWorkspace[workspaceID] ?? Self.restore(workspaceID: workspaceID)
             let known = Set(tabs.map(\.id))
 
-            for row in rows where !known.contains(row.id) {
+            for row in rows where !known.contains(row.id.rawValue) {
                 guard Self.isWorthKeeping(row, in: workspaceID, live: live) else { continue }
                 tabs.append(CenterTab(
-                    id: row.id, workspaceID: workspaceID, kind: .terminal, title: row.title
+                    id: row.id.rawValue, workspaceID: workspaceID, kind: .terminal, title: row.title
                 ))
             }
             apply(tabs, to: workspaceID)
@@ -152,11 +152,11 @@ final class CenterTabStore {
     /// on a guess. A machine without tmux answers with none rather than with nil, because there
     /// nothing can be alive and that is a fact rather than a silence.
     private static func isWorthKeeping(
-        _ row: TerminalTab, in workspaceID: String, live: Set<String>?
+        _ row: TerminalTab, in workspaceID: WorkspaceID, live: Set<String>?
     ) -> Bool {
         if !isDefaultTitle(row.title) { return true }
 
-        let panes = TerminalSplitStore.shared.panes(of: row.id)
+        let panes = TerminalSplitStore.shared.panes(of: row.id.rawValue)
         if panes.count > 1 { return true }
 
         guard let live else { return true }
@@ -196,7 +196,7 @@ final class CenterTabStore {
     /// that itself: a review already open in one half of a split column must not be dragged into
     /// the half the reader is typing in just because they clicked a filename.
     @discardableResult
-    func showReview(path: String, workspaceID: String) -> CenterTab {
+    func showReview(path: String, workspaceID: WorkspaceID) -> CenterTab {
         if let existing = review(for: workspaceID) {
             if existing.path != path { update(existing) { $0.path = path } }
             return review(for: workspaceID) ?? existing
@@ -268,14 +268,14 @@ final class CenterTabStore {
         apply(tabs, to: tab.workspaceID)
     }
 
-    private func apply(_ tabs: [CenterTab], to workspaceID: String) {
+    private func apply(_ tabs: [CenterTab], to workspaceID: WorkspaceID) {
         tabsByWorkspace[workspaceID] = tabs
         Self.persist(tabs, workspaceID: workspaceID)
     }
 
-    private static func key(_ workspaceID: String) -> String { "center.tabs.\(workspaceID)" }
+    private static func key(_ workspaceID: WorkspaceID) -> String { "center.tabs.\(workspaceID)" }
 
-    private static func persist(_ tabs: [CenterTab], workspaceID: String) {
+    private static func persist(_ tabs: [CenterTab], workspaceID: WorkspaceID) {
         let defaults = UserDefaults.standard
         guard !tabs.isEmpty else {
             defaults.removeObject(forKey: key(workspaceID))
@@ -285,7 +285,7 @@ final class CenterTabStore {
         defaults.set(data, forKey: key(workspaceID))
     }
 
-    private static func restore(workspaceID: String) -> [CenterTab] {
+    private static func restore(workspaceID: WorkspaceID) -> [CenterTab] {
         guard let data = UserDefaults.standard.data(forKey: key(workspaceID)),
               let tabs = try? JSONDecoder().decode([CenterTab].self, from: data) else { return [] }
         return tabs

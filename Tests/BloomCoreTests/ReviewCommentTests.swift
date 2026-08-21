@@ -269,7 +269,7 @@ struct ReviewCommentSummaryTests {
     ) -> ReviewComment {
         ReviewComment(
             id: "\(path)-\(line)",
-            workspaceID: "w",
+            workspaceID: WorkspaceID("w"),
             filePath: path,
             side: side,
             anchor: ReviewCommentAnchor(line: line, text: "line \(line)"),

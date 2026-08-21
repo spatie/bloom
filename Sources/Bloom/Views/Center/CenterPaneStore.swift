@@ -20,7 +20,7 @@ import BloomCore
 final class CenterPaneStore {
     static let shared = CenterPaneStore()
 
-    private var layouts: [String: SplitLayout] = [:]
+    private var layouts: [WorkspaceID: SplitLayout] = [:]
     /// Keyed by pane id rather than nested under the workspace, because a pane id is unique and a
     /// pane is looked up far more often than a workspace's whole set is.
     private var contents: [String: CenterPaneContent] = [:]
@@ -28,7 +28,7 @@ final class CenterPaneStore {
     /// Bumped per workspace when focus moves by anything but a click, so the pane that now has it
     /// can go and take the keyboard. A counter, because moving away and straight back has to
     /// register twice.
-    private var focusRequests: [String: Int] = [:]
+    private var focusRequests: [WorkspaceID: Int] = [:]
 
     private static let keyPrefix = "center.panes."
 
@@ -41,7 +41,7 @@ final class CenterPaneStore {
             guard let data = value as? Data,
                   let stored = try? JSONDecoder().decode(Stored.self, from: data),
                   let layout = SplitLayout(encoded: stored.layout) else { continue }
-            layouts[String(key.dropFirst(Self.keyPrefix.count))] = layout
+            layouts[WorkspaceID(String(key.dropFirst(Self.keyPrefix.count)))] = layout
             contents.merge(stored.contents) { _, new in new }
         }
     }
@@ -49,15 +49,15 @@ final class CenterPaneStore {
     // MARK: - Reading
 
     /// A workspace nobody has split is one pane carrying the workspace's own id.
-    func layout(for workspaceID: String) -> SplitLayout {
-        layouts[workspaceID] ?? SplitLayout(pane: workspaceID)
+    func layout(for workspaceID: WorkspaceID) -> SplitLayout {
+        layouts[workspaceID] ?? SplitLayout(pane: workspaceID.rawValue)
     }
 
-    func focusRequest(for workspaceID: String) -> Int {
+    func focusRequest(for workspaceID: WorkspaceID) -> Int {
         focusRequests[workspaceID] ?? 0
     }
 
-    func focusedPane(in workspaceID: String) -> String {
+    func focusedPane(in workspaceID: WorkspaceID) -> String {
         layout(for: workspaceID).focus
     }
 
@@ -88,7 +88,7 @@ final class CenterPaneStore {
 
     /// Shows something in a pane. The pane takes focus, because the user just said this is what
     /// they want to be looking at.
-    func show(_ content: CenterPaneContent, in pane: String, of workspaceID: String) {
+    func show(_ content: CenterPaneContent, in pane: String, of workspaceID: WorkspaceID) {
         contents[pane] = content
         var layout = layout(for: workspaceID)
         if layout.focus != pane, layout.setFocus(pane) {
@@ -110,7 +110,7 @@ final class CenterPaneStore {
     /// a keystroke that then asks which tab.
     @discardableResult
     func split(
-        _ workspaceID: String,
+        _ workspaceID: WorkspaceID,
         pane: String? = nil,
         axis: SplitAxis,
         showing content: CenterPaneContent?
@@ -128,7 +128,7 @@ final class CenterPaneStore {
     /// Closes one pane. False means it was the only one, which is a column that cannot be closed:
     /// the tab strip's own close button is how a workspace loses its last conversation.
     @discardableResult
-    func close(pane: String, in workspaceID: String) -> Bool {
+    func close(pane: String, in workspaceID: WorkspaceID) -> Bool {
         var layout = layout(for: workspaceID)
         guard layout.close(pane) else { return false }
         contents[pane] = nil
@@ -138,7 +138,7 @@ final class CenterPaneStore {
 
     /// A pane the user clicked into. No focus request: it already has the keyboard, and asking for
     /// it again mid-click is how a click lands twice.
-    func focus(_ pane: String, in workspaceID: String) {
+    func focus(_ pane: String, in workspaceID: WorkspaceID) {
         var layout = layout(for: workspaceID)
         guard layout.focus != pane, layout.setFocus(pane) else { return }
         apply(layout, to: workspaceID, movingFocus: false)
@@ -147,14 +147,14 @@ final class CenterPaneStore {
     /// False when there is no pane that way, which lets the same keystroke fall through to the app
     /// menu rather than being swallowed by an edge.
     @discardableResult
-    func moveFocus(_ direction: SplitDirection, in workspaceID: String) -> Bool {
+    func moveFocus(_ direction: SplitDirection, in workspaceID: WorkspaceID) -> Bool {
         var layout = layout(for: workspaceID)
         guard layout.moveFocus(direction) else { return false }
         apply(layout, to: workspaceID, movingFocus: true)
         return true
     }
 
-    func setRatio(_ ratio: Double, at path: [Int], in workspaceID: String) {
+    func setRatio(_ ratio: Double, at path: [Int], in workspaceID: WorkspaceID) {
         var layout = layout(for: workspaceID)
         guard layout.setRatio(ratio, at: path) else { return }
         apply(layout, to: workspaceID, movingFocus: false)
@@ -162,7 +162,7 @@ final class CenterPaneStore {
 
     /// Called when a tab goes away, so a pane that was showing it does not sit on a dead pointer
     /// until something else happens to reload the workspace.
-    func forget(_ content: CenterPaneContent, in workspaceID: String) {
+    func forget(_ content: CenterPaneContent, in workspaceID: WorkspaceID) {
         let showing = layout(for: workspaceID).panes.filter { contents[$0] == content }
         guard !showing.isEmpty else { return }
         // The last pane keeps its place and falls back to the active conversation, because closing
@@ -181,15 +181,15 @@ final class CenterPaneStore {
         var contents: [String: CenterPaneContent]
     }
 
-    private func apply(_ layout: SplitLayout, to workspaceID: String, movingFocus: Bool) {
+    private func apply(_ layout: SplitLayout, to workspaceID: WorkspaceID, movingFocus: Bool) {
         layouts[workspaceID] = layout
         if movingFocus { focusRequests[workspaceID] = focusRequest(for: workspaceID) + 1 }
         persist(workspaceID)
     }
 
-    private func persist(_ workspaceID: String) {
+    private func persist(_ workspaceID: WorkspaceID) {
         let defaults = UserDefaults.standard
-        let key = Self.keyPrefix + workspaceID
+        let key = Self.keyPrefix + workspaceID.rawValue
         let layout = layout(for: workspaceID)
 
         // An unsplit column is the default, so it is stored as nothing at all rather than as a

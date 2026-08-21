@@ -6,7 +6,7 @@ import BloomCore
 enum SidebarSelection: Hashable {
     case home
     case search
-    case workspace(String)
+    case workspace(WorkspaceID)
     /// An archived workspace, open for reading.
     ///
     /// Its own case rather than a flag on `workspace`, because an archived workspace is not a
@@ -16,14 +16,14 @@ enum SidebarSelection: Hashable {
     /// Keeping it out of `workspaceID` is what makes all of that fall out for free: the inspector
     /// hides itself, the menu items grey, the background refresh skips it and nothing tries to
     /// reopen it on the next launch.
-    case archived(String)
+    case archived(WorkspaceID)
 
-    var workspaceID: String? {
+    var workspaceID: WorkspaceID? {
         if case .workspace(let id) = self { return id }
         return nil
     }
 
-    var archivedWorkspaceID: String? {
+    var archivedWorkspaceID: WorkspaceID? {
         if case .archived(let id) = self { return id }
         return nil
     }
@@ -163,7 +163,7 @@ final class AppModel {
     /// with nothing.
     private func restoreLastSelection() {
         guard case .home = storedSelection else { return }
-        guard let id = UserDefaults.standard.string(forKey: Self.lastWorkspaceKey),
+        guard let id = UserDefaults.standard.string(forKey: Self.lastWorkspaceKey).map(WorkspaceID.init),
               workspaces.contains(where: { $0.id == id }) else { return }
         selection = .workspace(id)
     }
@@ -216,7 +216,7 @@ final class AppModel {
     /// creating one has to be invisible to SwiftUI: a tracked write here would invalidate, from
     /// inside its own body, every view that had just read the dictionary. What the UI actually
     /// watches is the state inside each model, which stays observable.
-    @ObservationIgnored private var workspaceModels: [String: WorkspaceModel] = [:]
+    @ObservationIgnored private var workspaceModels: [WorkspaceID: WorkspaceModel] = [:]
 
     private var refreshTask: Task<Void, Never>?
     private var storeObservationTask: Task<Void, Never>?
@@ -601,7 +601,7 @@ final class AppModel {
     }
 
     /// A pure lookup, safe from a view body.
-    func existingModel(for id: String) -> WorkspaceModel? {
+    func existingModel(for id: WorkspaceID) -> WorkspaceModel? {
         workspaceModels[id]
     }
 
@@ -630,7 +630,7 @@ final class AppModel {
     /// Writing it is a tracked mutation, so every reader (the strip, Home's summary line, the
     /// sidebar rows, the menu bar item, the Dock badge and the sleep assertion) is invalidated by
     /// the same thing, at the same moment, and none of them needs a private counter.
-    private(set) var runningWorkspaceIDs: Set<String> = []
+    private(set) var runningWorkspaceIDs: Set<WorkspaceID> = []
 
     /// Told by `TranscriptModel` whenever a turn starts or ends. See `TranscriptModel.setRunning`,
     /// which is the one place that flag moves.
@@ -638,7 +638,7 @@ final class AppModel {
     /// The answer is recomputed from the workspace's model rather than taken from the caller,
     /// because a workspace can hold several sessions and one of them finishing does not mean the
     /// workspace has stopped working.
-    func noteRunningChanged(workspaceID: String) {
+    func noteRunningChanged(workspaceID: WorkspaceID) {
         let isRunning = workspaceModels[workspaceID]?.isRunning ?? false
         if isRunning {
             runningWorkspaceIDs.insert(workspaceID)
@@ -657,7 +657,7 @@ final class AppModel {
     /// `workspaces` every few seconds, and this signal has no such accidental carrier: an agent
     /// blocked on a question writes nothing to the worktree, so nothing would ever invalidate the
     /// mark and it would sit wrong until something unrelated happened to move.
-    private(set) var waitingWorkspaceIDs: Set<String> = []
+    private(set) var waitingWorkspaceIDs: Set<WorkspaceID> = []
 
     /// Told by `TranscriptModel` whenever a question arrives or is answered. See
     /// `TranscriptModel.setAwaitingPermission`, which is the one place that flag moves.
@@ -665,7 +665,7 @@ final class AppModel {
     /// Recomputed from the workspace's model rather than taken from the caller, for the same
     /// reason as above: a workspace can hold several sessions, and one of them being answered does
     /// not mean the workspace has stopped waiting.
-    func noteWaitingChanged(workspaceID: String) {
+    func noteWaitingChanged(workspaceID: WorkspaceID) {
         let isWaiting = workspaceModels[workspaceID]?.isAwaitingPermission ?? false
         if isWaiting {
             waitingWorkspaceIDs.insert(workspaceID)
@@ -694,7 +694,7 @@ final class AppModel {
     /// for five real agents. It writes the same set every other reader is watching rather than
     /// adding a second flag beside it, which is the whole point: what is photographed is what a
     /// real turn produces.
-    func setRunningWorkspaceIDsForCapture(_ ids: Set<String>) {
+    func setRunningWorkspaceIDsForCapture(_ ids: Set<WorkspaceID>) {
         runningWorkspaceIDs = ids
     }
     #endif
@@ -1361,7 +1361,7 @@ final class AppModel {
     ///
     /// Outside observation deliberately: nothing draws from it, `reload` is the only reader, and
     /// the write that matters to the UI is the one it makes to `workspaces`.
-    @ObservationIgnored private var archivingWorkspaceIDs: Set<String> = []
+    @ObservationIgnored private var archivingWorkspaceIDs: Set<WorkspaceID> = []
 
     /// Puts a workspace back in the sidebar after the disk refused to let it go.
     ///
@@ -1428,7 +1428,7 @@ final class AppModel {
 
     /// Workspaces whose restore is in flight, so the button that started it can say so and cannot
     /// be pressed twice.
-    private(set) var restoring: Set<String> = []
+    private(set) var restoring: Set<WorkspaceID> = []
 
     /// Opens an archived workspace for reading.
     ///
@@ -1452,7 +1452,7 @@ final class AppModel {
     /// `.bloomOpenWorkspace`. It used to set `.workspace(id)` whatever the id was, and an id that
     /// had since been archived resolved to no workspace at all, so the window quietly fell back
     /// to Home. Now an archived id opens the reader instead of nothing.
-    func open(workspaceID id: String) async {
+    func open(workspaceID id: WorkspaceID) async {
         if workspaces.contains(where: { $0.id == id }) {
             selection = .workspace(id)
             return
@@ -1710,7 +1710,7 @@ final class AppModel {
     // MARK: - Search
 
     struct SearchHit: Identifiable {
-        var id: String { workspace.id }
+        var id: WorkspaceID { workspace.id }
         var workspace: Workspace
         var repo: Repo?
         var reason: String

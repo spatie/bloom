@@ -68,7 +68,7 @@ enum RunningApp {
     }
 
     /// Selects a workspace in the window, the same way a click in the dock menu does.
-    static func select(workspaceID: String) {
+    static func select(workspaceID: WorkspaceID) {
         NSApp.activate(ignoringOtherApps: true)
         NSApp.windows.first?.makeKeyAndOrderFront(nil)
         NotificationCenter.default.post(name: .bloomOpenWorkspace, object: workspaceID)

@@ -14,7 +14,7 @@ struct WorkspaceEntity: AppEntity {
 
     static let defaultQuery = WorkspaceEntityQuery()
 
-    var id: String
+    var id: WorkspaceID
 
     @Property(title: "Name") var name: String
     @Property(title: "Project") var project: String

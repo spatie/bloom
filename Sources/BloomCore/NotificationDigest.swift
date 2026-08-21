@@ -4,13 +4,13 @@ import Foundation
 /// of its own or a line in a summary.
 public struct NotificationDraft: Sendable, Hashable {
     public var event: NotificationEvent
-    public var workspaceID: String
+    public var workspaceID: WorkspaceID
     public var workspaceName: String
     /// The specific thing that happened, if there is one. The agent's closing sentence, the check
     /// rollup, the error. Empty falls back to the event's own wording.
     public var detail: String
 
-    public init(event: NotificationEvent, workspaceID: String, workspaceName: String, detail: String = "") {
+    public init(event: NotificationEvent, workspaceID: WorkspaceID, workspaceName: String, detail: String = "") {
         self.event = event
         self.workspaceID = workspaceID
         self.workspaceName = workspaceName
@@ -30,14 +30,14 @@ public struct PreparedNotification: Sendable, Hashable {
     public var title: String
     public var body: String
     /// Which workspace clicking it selects.
-    public var workspaceID: String
+    public var workspaceID: WorkspaceID
 
     public init(
         identifier: String,
         threadIdentifier: String,
         title: String,
         body: String,
-        workspaceID: String
+        workspaceID: WorkspaceID
     ) {
         self.identifier = identifier
         self.threadIdentifier = threadIdentifier
@@ -100,7 +100,7 @@ public struct NotificationDigest: Sendable {
             let detail = first.detail.trimmingCharacters(in: .whitespacesAndNewlines)
             return PreparedNotification(
                 identifier: "bloom.\(first.event.rawValue).\(first.workspaceID)",
-                threadIdentifier: first.workspaceID,
+                threadIdentifier: first.workspaceID.rawValue,
                 // The workspace name is the title rather than a prefix on the body, because the
                 // one question a banner from this app has to answer is "which one?", and a title
                 // survives truncation where the front of a body does not.

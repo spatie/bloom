@@ -219,7 +219,7 @@ public extension ReviewCommentAnchor {
 /// whole purpose is to be handed to the agent and then let go of.
 public struct ReviewComment: Identifiable, Sendable, Hashable, Codable {
     public var id: String
-    public var workspaceID: String
+    public var workspaceID: WorkspaceID
     /// Repository-relative, as the diff spells it, so it means the same thing in the prompt as it
     /// does to `git` and to the agent's own file tools.
     public var filePath: String
@@ -239,7 +239,7 @@ public struct ReviewComment: Identifiable, Sendable, Hashable, Codable {
 
     public init(
         id: String = newID(),
-        workspaceID: String,
+        workspaceID: WorkspaceID,
         filePath: String,
         side: ReviewCommentSide = .new,
         anchor: ReviewCommentAnchor,

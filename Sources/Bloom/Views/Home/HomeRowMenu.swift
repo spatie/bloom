@@ -22,7 +22,7 @@ import BloomCore
 struct HomeRowMenu: View {
     var row: HomeRow
     /// Raised to the list, which owns the one field that can be open at a time.
-    var onRename: (String) -> Void
+    var onRename: (WorkspaceID) -> Void
 
     @Environment(AppModel.self) private var app
 

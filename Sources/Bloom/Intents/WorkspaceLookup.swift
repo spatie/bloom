@@ -7,7 +7,7 @@ enum WorkspaceLookup {
     /// Whether an agent has a turn open is a fact about a live process, and the only trace of it
     /// outside the app is the session row the runner marks `running`. Bloom resets those rows on
     /// launch, so a stale one cannot survive a crash and claim an agent that is long gone.
-    static func isAgentRunning(workspaceID: String, store: Store) async -> Bool {
+    static func isAgentRunning(workspaceID: WorkspaceID, store: Store) async -> Bool {
         let sessions = (try? await store.sessions(workspaceID: workspaceID)) ?? []
         return sessions.contains { $0.state == .running }
     }
@@ -17,7 +17,7 @@ enum WorkspaceLookup {
     /// Read from the stored session state rather than from `AppModel.waitingWorkspaceIDs`, because
     /// an intent can run against a workspace no window has open, and the runner writes the state
     /// column on every change for exactly that reason.
-    static func isAwaitingPermission(workspaceID: String, store: Store) async -> Bool {
+    static func isAwaitingPermission(workspaceID: WorkspaceID, store: Store) async -> Bool {
         let sessions = (try? await store.sessions(workspaceID: workspaceID)) ?? []
         return sessions.contains { $0.state == .waiting }
     }

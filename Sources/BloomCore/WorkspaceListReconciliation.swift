@@ -64,7 +64,7 @@ public enum WorkspaceListReconciliation {
     ///
     /// `archiving` is emptied before the reload that follows a failed archive, which is what lets
     /// that reload put the row back where it belongs.
-    public static func afterStoreReload(fresh: [Workspace], archiving: Set<String>) -> [Workspace] {
+    public static func afterStoreReload(fresh: [Workspace], archiving: Set<WorkspaceID>) -> [Workspace] {
         guard !archiving.isEmpty else { return fresh }
         return fresh.filter { !archiving.contains($0.id) }
     }

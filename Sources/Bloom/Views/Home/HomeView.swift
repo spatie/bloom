@@ -29,7 +29,7 @@ struct HomeView: View {
     @State private var listing = HomeListing.empty
     /// The list's own selection, not the app's. Writing to `app.selection` would navigate away
     /// from Home, so arrowing down the list would open every workspace it passed.
-    @State private var selected: String?
+    @State private var selected: WorkspaceID?
     /// The instant every age and every date heading on screen was worked out against. Held rather
     /// than read per row, so a list of forty rows cannot show forty slightly different nows, and
     /// so "3 days ago" becomes "4 days ago" for the whole list at once.
@@ -43,10 +43,10 @@ struct HomeView: View {
     @FocusState private var isListFocused: Bool
     /// The row under the pointer, held here rather than in each row, so crossing the pane lights
     /// one row at a time and a hover invalidates the list rather than nothing at all.
-    @State private var hovered: String?
+    @State private var hovered: WorkspaceID?
     /// The id of the row being renamed in place, shared across the whole list so only one field
     /// can ever be open. The same arrangement the sidebar's rows use.
-    @State private var renaming: String?
+    @State private var renaming: WorkspaceID?
 
     /// Which rows have just been added to the list, so they can fade in rather than appear. The
     /// same tracker and the same rules as the sidebar's, which is what stops one workspace
@@ -55,7 +55,7 @@ struct HomeView: View {
     /// Reset with the view, which is exactly what is wanted. `HomeView` is rebuilt every time the
     /// selection leaves Home and comes back, and `RowArrival` says nothing arrives into a list it
     /// has never seen anything in, so coming back to Home lands its forty rows in silence.
-    @State private var arrival = RowArrival()
+    @State private var arrival = RowArrival<WorkspaceID>()
 
     /// Held by `AppModel` rather than by this view, which is thrown away and rebuilt every time
     /// the selection leaves Home and comes back. A filter in `@State` would be cleared by opening
@@ -395,7 +395,7 @@ struct HomeView: View {
         }
     }
 
-    private func row(for id: String) -> HomeRow? {
+    private func row(for id: WorkspaceID) -> HomeRow? {
         for group in listing.groups {
             if let match = group.rows.first(where: { $0.id == id }) { return match }
         }

@@ -205,7 +205,7 @@ struct RootView: View {
             // Through `open(workspaceID:)` rather than straight into the selection, so an id that
             // has since been archived opens its transcript instead of landing on Home with no
             // explanation. See `AppModel.open(workspaceID:)`.
-            if let id = note.object as? String { Task { await app.open(workspaceID: id) } }
+            if let id = note.object as? String { Task { await app.open(workspaceID: WorkspaceID(id)) } }
         }
         .onReceive(NotificationCenter.default.publisher(for: .bloomToggleSidebar)) { _ in
             columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly

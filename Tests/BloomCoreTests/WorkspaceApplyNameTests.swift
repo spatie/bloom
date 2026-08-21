@@ -174,7 +174,7 @@ struct WorkspaceApplyNameTests {
 
         let result = try await fixture.manager.applyName(
             WorkspaceNameSuggestion(name: "Dark mode", branch: "dark-mode"),
-            to: "no-such-workspace",
+            to: WorkspaceID("no-such-workspace"),
             placeholder: fixture.placeholder,
             hasPullRequest: false
         )

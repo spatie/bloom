@@ -627,7 +627,7 @@ extension View {
         #if DEBUG
         return onReceive(NotificationCenter.default.publisher(for: .bloomCaptureRunning)) { note in
             guard let ids = note.object as? Set<String> else { return }
-            app.setRunningWorkspaceIDsForCapture(ids)
+            app.setRunningWorkspaceIDsForCapture(Set(ids.map(WorkspaceID.init)))
         }
         #else
         return self

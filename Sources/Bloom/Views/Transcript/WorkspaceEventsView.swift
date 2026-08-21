@@ -10,7 +10,7 @@ import BloomCore
 /// read it, every flush would re-run the `ForEach` over every row in the session. Nothing above
 /// this view reads the log, so a running setup redraws these rows and nothing else.
 struct WorkspaceEventsView: View {
-    var workspaceID: String
+    var workspaceID: WorkspaceID
     /// Whether a setup run is in flight, as the pane above already knows it. The stored state
     /// catches up a moment later, when the workspace row is next read.
     var isRunning: Bool

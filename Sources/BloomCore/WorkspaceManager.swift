@@ -232,7 +232,7 @@ public struct WorkspaceManager: Sendable {
         let pairs: [(String, String)] = [
             ("IS_LOCAL", "1"),
             ("WORKSPACE_NAME", workspace.branch.replacingOccurrences(of: "/", with: "-")),
-            ("WORKSPACE_ID", workspace.id),
+            ("WORKSPACE_ID", workspace.id.rawValue),
             ("WORKSPACE_PATH", workspace.path),
             ("ROOT_PATH", repo.path),
             ("DEFAULT_BRANCH", repo.defaultBranch),

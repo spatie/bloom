@@ -26,7 +26,7 @@ struct ReviewPayloadTests {
     ) -> ReviewComment {
         ReviewComment(
             id: id ?? "\(path)#\(line)",
-            workspaceID: "w",
+            workspaceID: WorkspaceID("w"),
             filePath: path,
             side: side,
             anchor: ReviewCommentAnchor.make(line: line, in: lines),
@@ -231,7 +231,7 @@ struct ReviewPromptTests {
     private var comments: [ReviewComment] {
         [
             ReviewComment(
-                workspaceID: "w",
+                workspaceID: WorkspaceID("w"),
                 filePath: "Sources/Widget.swift",
                 anchor: ReviewCommentAnchor(line: 5, text: "        return \"hello\""),
                 body: "Return a constant."

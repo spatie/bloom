@@ -59,7 +59,7 @@ import BloomCore
 struct WorkspaceMenuItems: View {
     var workspace: Workspace
     /// Raised to the list, which owns the one rename field that can be open at a time.
-    var onRename: (String) -> Void
+    var onRename: (WorkspaceID) -> Void
 
     @Environment(AppModel.self) private var app
 

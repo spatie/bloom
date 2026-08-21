@@ -56,7 +56,7 @@ struct FilePreview: View {
     }
 
     private struct LoadID: Hashable {
-        var workspaceID: String
+        var workspaceID: WorkspaceID
         var path: String
     }
 

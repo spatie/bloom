@@ -7,9 +7,9 @@ import Foundation
 /// than remembered, since a turn that takes four minutes says nothing about where the user is now.
 public struct NotificationContext: Sendable, Hashable {
     public var isAppActive: Bool
-    public var selectedWorkspaceID: String?
+    public var selectedWorkspaceID: WorkspaceID?
 
-    public init(isAppActive: Bool, selectedWorkspaceID: String?) {
+    public init(isAppActive: Bool, selectedWorkspaceID: WorkspaceID?) {
         self.isAppActive = isAppActive
         self.selectedWorkspaceID = selectedWorkspaceID
     }
@@ -35,7 +35,7 @@ public enum NotificationVerdict: Sendable, Hashable {
 public enum NotificationPolicy {
     public static func verdict(
         for event: NotificationEvent,
-        workspaceID: String,
+        workspaceID: WorkspaceID,
         settings: NotificationSettings,
         context: NotificationContext
     ) -> NotificationVerdict {

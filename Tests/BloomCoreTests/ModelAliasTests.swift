@@ -59,7 +59,7 @@ struct ModelAliasTests {
 
     @Test("the runner sends the translated value, not the stored one")
     func runnerTranslates() throws {
-        let session = Session(workspaceID: "w", model: "opus-5-1m")
+        let session = Session(workspaceID: WorkspaceID("w"), model: "opus-5-1m")
         let argv = AgentRunner.argv(session: session, resume: nil)
         let index = try #require(argv.firstIndex(of: "--model"), "argv carries no --model")
         #expect(argv[index + 1] == "claude-opus-5[1m]")

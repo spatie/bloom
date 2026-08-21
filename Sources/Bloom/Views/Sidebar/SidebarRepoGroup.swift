@@ -61,7 +61,7 @@ enum SidebarPaneRow: Identifiable {
     var id: String {
         switch self {
         case .project(let group): "project:" + group.id.rawValue
-        case .workspace(let workspace, _): "workspace:" + workspace.id
+        case .workspace(let workspace, _): "workspace:" + workspace.id.rawValue
         case .notice(let repoID): "notice:" + repoID.rawValue
         }
     }

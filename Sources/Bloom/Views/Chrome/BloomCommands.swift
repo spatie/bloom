@@ -193,7 +193,7 @@ struct BloomCommands: Commands {
             }
             .disabled(
                 model.selectedArchivedWorkspace == nil
-                    || model.restoring.contains(model.selectedArchivedWorkspace?.id ?? "")
+                    || model.selectedArchivedWorkspace.map { model.restoring.contains($0.id) } == true
             )
 
             Divider()

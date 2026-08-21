@@ -35,10 +35,10 @@ public enum WorkspaceOrigin: Sendable, Equatable, Hashable, Codable {
     /// - Parameter spawnToolUseID: the single tool call that asked. Recorded because a tool call
     ///   is retried by the model, by the transport and by a user pressing the button again, and a
     ///   spawn with no way to recognise a repeat of itself cuts a second worktree every time.
-    case agent(parentWorkspaceID: String, spawnToolUseID: String)
+    case agent(parentWorkspaceID: WorkspaceID, spawnToolUseID: String)
 
     /// The two columns, for the writer.
-    public var parentWorkspaceID: String? {
+    public var parentWorkspaceID: WorkspaceID? {
         switch self {
         case .user: nil
         case .agent(let parent, _): parent
@@ -69,6 +69,6 @@ public enum WorkspaceOrigin: Sendable, Equatable, Hashable, Codable {
             self = .user
             return
         }
-        self = .agent(parentWorkspaceID: parentWorkspaceID, spawnToolUseID: spawnToolUseID)
+        self = .agent(parentWorkspaceID: WorkspaceID(parentWorkspaceID), spawnToolUseID: spawnToolUseID)
     }
 }

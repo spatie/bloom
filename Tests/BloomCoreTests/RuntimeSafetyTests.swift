@@ -415,7 +415,7 @@ struct AgentRunnerPersistenceFailureTests {
     func surfacesFailedAppend() async throws {
         let store = try makeTestStore("runtime")
         // A session that was never inserted: the foreign key on messages refuses every row.
-        let session = Session(workspaceID: "no-such-workspace")
+        let session = Session(workspaceID: WorkspaceID("no-such-workspace"))
         let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
 
         let events = runner.events

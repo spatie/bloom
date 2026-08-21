@@ -109,7 +109,7 @@ public enum SetupState: String, Sendable, Codable, CaseIterable, Hashable {
 }
 
 public struct Workspace: Identifiable, Sendable, Hashable, Codable {
-    public var id: String
+    public var id: WorkspaceID
     public var repoID: RepoID
     public var name: String
     public var branch: String
@@ -155,7 +155,7 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
     public var origin: WorkspaceOrigin
 
     public init(
-        id: String = newID(),
+        id: WorkspaceID = .new(),
         repoID: RepoID,
         name: String,
         branch: String,
@@ -237,7 +237,7 @@ public enum PermissionMode: String, Sendable, Codable, CaseIterable {
 
 public struct Session: Identifiable, Sendable, Hashable, Codable {
     public var id: String
-    public var workspaceID: String
+    public var workspaceID: WorkspaceID
     public var title: String
     public var agentSessionID: String?
     public var model: String
@@ -269,7 +269,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
 
     public init(
         id: String = newID(),
-        workspaceID: String,
+        workspaceID: WorkspaceID,
         title: String = "New session",
         agentSessionID: String? = nil,
         model: String = "opus",
@@ -362,12 +362,12 @@ public struct Message: Identifiable, Sendable, Hashable {
 // MARK: - Terminal
 
 public struct TerminalTab: Identifiable, Sendable, Hashable, Codable {
-    public var id: String
-    public var workspaceID: String
+    public var id: TerminalTabID
+    public var workspaceID: WorkspaceID
     public var title: String
     public var sortOrder: Int
 
-    public init(id: String = newID(), workspaceID: String, title: String, sortOrder: Int = 0) {
+    public init(id: TerminalTabID = .new(), workspaceID: WorkspaceID, title: String, sortOrder: Int = 0) {
         self.id = id
         self.workspaceID = workspaceID
         self.title = title

@@ -25,14 +25,14 @@ final class WorkspacePullRequests {
     /// genuine poll a full interval later is never served from the cache.
     private static let maxAge = Duration.seconds(110)
 
-    private var pullRequests: [String: PullRequest] = [:]
+    private var pullRequests: [WorkspaceID: PullRequest] = [:]
 
     /// The tail of the lookup queue. Each new lookup waits for the previous one, which is what
     /// turns twelve rows appearing at once into twelve sequential `gh` calls instead of twelve
     /// concurrent ones.
     private var queue: Task<Void, Never> = Task {}
 
-    func pullRequest(for workspaceID: String) -> PullRequest? {
+    func pullRequest(for workspaceID: WorkspaceID) -> PullRequest? {
         pullRequests[workspaceID]
     }
 
@@ -44,7 +44,7 @@ final class WorkspacePullRequests {
     /// right trade for a slow network and the wrong one after `AppModel.continueAfterMerge` moves
     /// the worktree to a fresh branch, where the merged pull request in here would keep marking
     /// the row for the rest of the session.
-    func forget(_ workspaceID: String) {
+    func forget(_ workspaceID: WorkspaceID) {
         pullRequests[workspaceID] = nil
     }
 

@@ -332,7 +332,7 @@ struct WorkspaceStartTests {
                     try await manager.start(WorkspaceStartRequest(
                         repo: registered, prompt: "Fix the flaky test",
                         origin: .agent(
-                            parentWorkspaceID: "parent", spawnToolUseID: "toolu_\(index)"
+                            parentWorkspaceID: WorkspaceID("parent"), spawnToolUseID: "toolu_\(index)"
                         )
                     ))
                 }
@@ -344,6 +344,6 @@ struct WorkspaceStartTests {
 
         #expect(Set(started.map(\.workspace.branch)).count == 3)
         #expect(started.compactMap(\.session).count == 3)
-        #expect(try await store.countWorkspaces(startedBy: "parent") == 3)
+        #expect(try await store.countWorkspaces(startedBy: WorkspaceID("parent")) == 3)
     }
 }

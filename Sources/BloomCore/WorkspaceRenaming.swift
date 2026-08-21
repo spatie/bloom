@@ -75,7 +75,7 @@ extension WorkspaceManager {
     ///   unless the stored name is still that string.
     public func applyName(
         _ suggestion: WorkspaceNameSuggestion,
-        to workspaceID: String,
+        to workspaceID: WorkspaceID,
         placeholder: String,
         hasPullRequest: Bool
     ) async throws -> WorkspaceNamingResult? {

@@ -28,7 +28,7 @@ struct SidebarView: View {
     /// is the one that is always on screen.
     @Environment(\.undoManager) private var undoManager
 
-    @State private var renaming: String?
+    @State private var renaming: WorkspaceID?
     @State private var filter: SidebarFilter = .all
 
     /// What the list itself thinks is selected. See the `onChange` pair below for why this is not
@@ -71,7 +71,7 @@ struct SidebarView: View {
     /// Which rows have just been added to the list, so they can fade in rather than appear. The
     /// rules for what counts as "just added" are `RowArrival`'s, and they are the same rules
     /// Home's list uses.
-    @State private var arrival = RowArrival()
+    @State private var arrival = RowArrival<WorkspaceID>()
 
     var body: some View {
         List(selection: $listSelection) {

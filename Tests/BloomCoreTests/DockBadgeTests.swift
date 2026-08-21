@@ -7,7 +7,7 @@ struct DockBadgeTests {
         id: String, unread: Bool
     ) -> Workspace {
         Workspace(
-            id: id,
+            id: WorkspaceID(id),
             repoID: RepoID("repo"),
             name: id,
             branch: "feature/\(id)",
@@ -35,7 +35,7 @@ struct DockBadgeTests {
             workspace(id: "b", unread: true),
         ]
 
-        let count = DockBadge.unreadCount(in: workspaces, isRunning: { $0.id == "b" })
+        let count = DockBadge.unreadCount(in: workspaces, isRunning: { $0.id == WorkspaceID("b") })
 
         #expect(count == 1)
     }

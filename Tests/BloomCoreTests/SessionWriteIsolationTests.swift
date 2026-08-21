@@ -184,7 +184,7 @@ struct SessionWriteIsolationTests {
 
         try await store.update(sessionID: session.id) {
             $0.id = "some-other-id"
-            $0.workspaceID = "some-other-workspace"
+            $0.workspaceID = WorkspaceID("some-other-workspace")
             $0.title = "Renamed"
         }
 

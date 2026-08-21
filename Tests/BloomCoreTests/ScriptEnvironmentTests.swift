@@ -13,7 +13,7 @@ struct ScriptEnvironmentTests {
     private func makeEnvironment(port: Int = 3_100) throws -> [String: String] {
         let repo = Repo(id: RepoID("r1"), name: "There There", path: "/tmp/there", defaultBranch: "main")
         let workspace = Workspace(
-            id: "w1",
+            id: WorkspaceID("w1"),
             repoID: repo.id,
             name: "Fix the inbox",
             branch: "freek/fix-the-inbox",

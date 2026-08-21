@@ -17,11 +17,11 @@ struct SidebarWorkspaceRow: View {
     /// Handed down from `SidebarView`, which owns the one tracker the whole pane shares: a
     /// workspace can move between projects, and two trackers would each read that as an arrival
     /// and a departure of their own.
-    var arrival: RowArrival
+    var arrival: RowArrival<WorkspaceID>
     /// The project this row is under, for the one thing the flat pane cannot say structurally.
     /// See `body`, and `RepoHeaderRow.name` for why this is words rather than an outline level.
     var projectName: String
-    @Binding var renaming: String?
+    @Binding var renaming: WorkspaceID?
 
     @Environment(AppModel.self) private var app
 

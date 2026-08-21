@@ -6,7 +6,7 @@ import Testing
 @Suite("The session lifecycle")
 struct SessionLifecycleTests {
     private func session(_ state: SessionState) -> Session {
-        Session(workspaceID: "w", state: state)
+        Session(workspaceID: WorkspaceID("w"), state: state)
     }
 
     // MARK: - The table

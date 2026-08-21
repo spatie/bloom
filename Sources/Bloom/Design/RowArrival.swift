@@ -40,19 +40,19 @@ import SwiftUI
 ///
 /// Forgetting is symmetric and deliberate: an id that leaves the list is dropped from `known`,
 /// which is the whole reason a row that comes back counts as an arrival the second time.
-struct RowArrival: Equatable {
+struct RowArrival<ID: Hashable>: Equatable {
     /// The ids that count as having just turned up. A row reads its own id out of this as it is
     /// built, and that is the only moment the answer matters: see `ArrivingRow`.
-    private(set) var arriving: Set<String> = []
+    private(set) var arriving: Set<ID> = []
 
     /// The list as it stood the last time it was looked at.
-    private var known: Set<String> = []
+    private var known: Set<ID> = []
 
     /// Whether this tracker has ever seen a row at all. Until it has, nothing can arrive.
     private var hasFilled = false
 
     /// Takes in the list as it now stands, and works out what is new about it.
-    mutating func absorb(_ ids: some Sequence<String>) {
+    mutating func absorb(_ ids: some Sequence<ID>) {
         let current = Set(ids)
         defer { known = current }
 
@@ -75,7 +75,7 @@ struct RowArrival: Equatable {
     /// Takes the list in with nothing arriving out of it.
     ///
     /// What a filter change calls. See the second rule above.
-    mutating func adopt(_ ids: some Sequence<String>) {
+    mutating func adopt(_ ids: some Sequence<ID>) {
         known = Set(ids)
         hasFilled = hasFilled || !known.isEmpty
         arriving = []
@@ -89,7 +89,7 @@ struct RowArrival: Equatable {
         arriving = []
     }
 
-    func isArriving(_ id: String) -> Bool {
+    func isArriving(_ id: ID) -> Bool {
         arriving.contains(id)
     }
 }
@@ -106,7 +106,7 @@ extension View {
     }
 
     /// Lets the tracker stop calling its newest rows new. Goes on the `List`.
-    func settlesArrivals(_ arrival: Binding<RowArrival>) -> some View {
+    func settlesArrivals<ID: Hashable>(_ arrival: Binding<RowArrival<ID>>) -> some View {
         modifier(ArrivalSettle(arrival: arrival))
     }
 }
@@ -190,8 +190,8 @@ private struct ArrivingRow: ViewModifier {
 /// cell 38 milliseconds after the row was absorbed on the machine this was written on, and the
 /// only cost of being generous is that a row that took longer than expected to be drawn still
 /// gets its fade.
-private struct ArrivalSettle: ViewModifier {
-    @Binding var arrival: RowArrival
+private struct ArrivalSettle<ID: Hashable>: ViewModifier {
+    @Binding var arrival: RowArrival<ID>
 
     func body(content: Content) -> some View {
         content.task(id: arrival.arriving) {

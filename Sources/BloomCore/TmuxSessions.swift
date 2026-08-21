@@ -49,8 +49,8 @@ public enum TmuxSessions {
     /// workspace without asking anything else first. Reading the owner off the name means the
     /// teardown works even when the database, the tab list and the split layouts are all unreachable
     /// or already gone, which is exactly the moment it matters most.
-    public static func sessionName(workspaceID: String, paneID: String) -> String {
-        [sessionPrefix, sanitized(workspaceID), sanitized(paneID)].joined(separator: String(separator))
+    public static func sessionName(workspaceID: WorkspaceID, paneID: String) -> String {
+        [sessionPrefix, sanitized(workspaceID.rawValue), sanitized(paneID)].joined(separator: String(separator))
     }
 
     public static func paneID(ofSessionName name: String) -> String? {
@@ -123,7 +123,7 @@ public enum TmuxSessions {
     /// killed behind our back therefore gets a fresh shell rather than an error, which is the
     /// requirement.
     public static func decide(
-        workspaceID: String,
+        workspaceID: WorkspaceID,
         paneID: String,
         persistenceEnabled: Bool,
         tmuxAvailable: Bool,
@@ -181,8 +181,8 @@ public enum TmuxSessions {
     /// Matching on the name rather than walking tabs and split layouts is the point: a pane whose
     /// tab was never loaded this launch, or whose split layout was lost, still has its session
     /// killed. Nothing running is allowed to depend on Bloom having remembered it.
-    public static func sessions(ofWorkspace workspace: String, in sessions: [String]) -> [String] {
-        let owner = sanitized(workspace)
+    public static func sessions(ofWorkspace workspace: WorkspaceID, in sessions: [String]) -> [String] {
+        let owner = sanitized(workspace.rawValue)
         return sessions.filter { workspaceID(ofSessionName: $0) == owner }
     }
 

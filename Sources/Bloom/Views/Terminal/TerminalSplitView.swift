@@ -83,7 +83,7 @@ struct TerminalSplitView: View {
         let isFocused = layout.focus == id
 
         return TerminalView(
-            tab: TerminalTab(id: id, workspaceID: workspace.id, title: "Terminal"),
+            tab: TerminalTab(id: TerminalTabID(id), workspaceID: workspace.id, title: "Terminal"),
             workspace: workspace,
             repo: repo,
             port: port,

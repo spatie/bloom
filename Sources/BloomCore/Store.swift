@@ -560,7 +560,7 @@ public actor Store {
         return try db.query(sql, [.text(repoID)]).map(Self.workspace(from:))
     }
 
-    public func workspace(id: String) throws -> Workspace? {
+    public func workspace(id: WorkspaceID) throws -> Workspace? {
         try db.query("SELECT * FROM workspaces WHERE id = ?", [.text(id)]).first.map(Self.workspace(from:))
     }
 
@@ -654,7 +654,7 @@ public actor Store {
     /// `upsert`, and that is the only thing `upsert` should be reached for.
     @discardableResult
     public func update(
-        workspaceID: String,
+        workspaceID: WorkspaceID,
         _ change: @Sendable (inout Workspace) -> Void
     ) throws -> Workspace? {
         guard var row = try workspace(id: workspaceID) else { return nil }
@@ -689,7 +689,7 @@ public actor Store {
         }
     }
 
-    public func deleteWorkspace(id: String) throws {
+    public func deleteWorkspace(id: WorkspaceID) throws {
         try db.run("DELETE FROM workspaces WHERE id = ?", [.text(id)])
     }
 
@@ -704,7 +704,7 @@ public actor Store {
     ///
     /// The read and the write are both inside the actor with no suspension between them, so this
     /// is still one indivisible change, exactly as `update(workspaceID:)` is.
-    public func updateDiffStat(workspaceID: String, additions: Int, deletions: Int, files: Int) throws {
+    public func updateDiffStat(workspaceID: WorkspaceID, additions: Int, deletions: Int, files: Int) throws {
         let current = try db.query(
             "SELECT additions, deletions, changed_files FROM workspaces WHERE id = ?",
             [.text(workspaceID)]
@@ -721,7 +721,7 @@ public actor Store {
         )
     }
 
-    public func touch(workspaceID: String, unread: Bool? = nil) throws {
+    public func touch(workspaceID: WorkspaceID, unread: Bool? = nil) throws {
         if let unread {
             try db.run(
                 "UPDATE workspaces SET last_activity_at = ?, unread = ? WHERE id = ?",
@@ -783,7 +783,7 @@ public actor Store {
     /// Archived ones are out by default, because this is the list a person or an agent is shown,
     /// and an archived workspace is one that has been dealt with. `countWorkspaces(startedBy:)` is
     /// the counting question and it does not have that default, for the reason written there.
-    public func workspaces(startedBy parentWorkspaceID: String, includeArchived: Bool = false) throws -> [Workspace] {
+    public func workspaces(startedBy parentWorkspaceID: WorkspaceID, includeArchived: Bool = false) throws -> [Workspace] {
         let sql = includeArchived
             ? "SELECT * FROM workspaces WHERE parent_workspace_id = ? ORDER BY created_at"
             : "SELECT * FROM workspaces WHERE parent_workspace_id = ? AND state = 'active' ORDER BY created_at"
@@ -798,7 +798,7 @@ public actor Store {
     /// spend for ever: start a workspace, archive it, start another, and the ceiling is never
     /// reached however many worktrees have been cut and however much has been spent getting them
     /// there. So there is no `includeArchived` parameter to pass the wrong way by accident.
-    public func countWorkspaces(startedBy parentWorkspaceID: String) throws -> Int {
+    public func countWorkspaces(startedBy parentWorkspaceID: WorkspaceID) throws -> Int {
         let rows = try db.query(
             "SELECT COUNT(*) AS n FROM workspaces WHERE parent_workspace_id = ?",
             [.text(parentWorkspaceID)]
@@ -829,7 +829,7 @@ public actor Store {
 
     // MARK: - Sessions
 
-    public func sessions(workspaceID: String) throws -> [Session] {
+    public func sessions(workspaceID: WorkspaceID) throws -> [Session] {
         try db.query(
             "SELECT * FROM sessions WHERE workspace_id = ? AND archived_at IS NULL ORDER BY sort_order, created_at",
             [.text(workspaceID)]
@@ -1154,14 +1154,14 @@ public actor Store {
 
     // MARK: - Review comments
 
-    public func reviewComments(workspaceID: String) throws -> [ReviewComment] {
+    public func reviewComments(workspaceID: WorkspaceID) throws -> [ReviewComment] {
         try db.query(
             "SELECT * FROM review_comments WHERE workspace_id = ? ORDER BY file_path, line, created_at, id",
             [.text(workspaceID)]
         ).map(Self.reviewComment(from:))
     }
 
-    public func reviewComments(workspaceID: String, filePath: String) throws -> [ReviewComment] {
+    public func reviewComments(workspaceID: WorkspaceID, filePath: String) throws -> [ReviewComment] {
         try db.query(
             """
             SELECT * FROM review_comments WHERE workspace_id = ? AND file_path = ?
@@ -1172,7 +1172,7 @@ public actor Store {
     }
 
     /// The ones that actually go out with the next message.
-    public func attachedReviewComments(workspaceID: String) throws -> [ReviewComment] {
+    public func attachedReviewComments(workspaceID: WorkspaceID) throws -> [ReviewComment] {
         try db.query(
             """
             SELECT * FROM review_comments WHERE workspace_id = ? AND attached = 1
@@ -1230,7 +1230,7 @@ public actor Store {
 
     /// What "Remove from chat" does to the whole set once the message has gone out. The comments
     /// stay readable in the diff, they just stop being sent again with every following turn.
-    public func detachReviewComments(workspaceID: String) throws {
+    public func detachReviewComments(workspaceID: WorkspaceID) throws {
         try db.run(
             "UPDATE review_comments SET attached = 0 WHERE workspace_id = ?",
             [.text(workspaceID)]
@@ -1241,7 +1241,7 @@ public actor Store {
         try db.run("DELETE FROM review_comments WHERE id = ?", [.text(id)])
     }
 
-    public func deleteReviewComments(workspaceID: String) throws {
+    public func deleteReviewComments(workspaceID: WorkspaceID) throws {
         try db.run("DELETE FROM review_comments WHERE workspace_id = ?", [.text(workspaceID)])
     }
 
@@ -1408,14 +1408,14 @@ public actor Store {
 
     // MARK: - Terminal tabs
 
-    public func terminalTabs(workspaceID: String) throws -> [TerminalTab] {
+    public func terminalTabs(workspaceID: WorkspaceID) throws -> [TerminalTab] {
         try db.query(
             "SELECT * FROM terminal_tabs WHERE workspace_id = ? ORDER BY sort_order",
             [.text(workspaceID)]
         ).map {
             TerminalTab(
-                id: $0.string("id") ?? newID(),
-                workspaceID: $0.string("workspace_id") ?? "",
+                id: TerminalTabID($0.string("id") ?? newID()),
+                workspaceID: WorkspaceID($0.string("workspace_id") ?? ""),
                 title: $0.string("title") ?? "Terminal",
                 sortOrder: Int($0.int("sort_order") ?? 0)
             )
@@ -1432,7 +1432,7 @@ public actor Store {
         )
     }
 
-    public func deleteTerminalTab(id: String) throws {
+    public func deleteTerminalTab(id: TerminalTabID) throws {
         try db.run("DELETE FROM terminal_tabs WHERE id = ?", [.text(id)])
     }
 
@@ -1455,7 +1455,7 @@ public actor Store {
 
     private static func workspace(from row: Row) -> Workspace {
         Workspace(
-            id: row.string("id") ?? newID(),
+            id: WorkspaceID(row.string("id") ?? newID()),
             repoID: RepoID(row.string("repo_id") ?? ""),
             name: row.string("name") ?? "",
             branch: row.string("branch") ?? "",
@@ -1517,7 +1517,7 @@ public actor Store {
     private static func session(from row: Row) -> Session {
         Session(
             id: row.string("id") ?? newID(),
-            workspaceID: row.string("workspace_id") ?? "",
+            workspaceID: WorkspaceID(row.string("workspace_id") ?? ""),
             title: row.string("title") ?? "Session",
             agentSessionID: row.string("agent_session_id"),
             model: row.string("model") ?? "opus",
@@ -1541,7 +1541,7 @@ public actor Store {
     private static func reviewComment(from row: Row) -> ReviewComment {
         ReviewComment(
             id: row.string("id") ?? newID(),
-            workspaceID: row.string("workspace_id") ?? "",
+            workspaceID: WorkspaceID(row.string("workspace_id") ?? ""),
             filePath: row.string("file_path") ?? "",
             side: ReviewCommentSide(rawValue: row.string("side") ?? "") ?? .new,
             anchor: ReviewCommentAnchor(

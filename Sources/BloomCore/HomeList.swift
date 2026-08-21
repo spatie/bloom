@@ -15,7 +15,7 @@ public struct HomeRow: Identifiable, Hashable, Sendable {
         self.repo = repo
     }
 
-    public var id: String { workspace.id }
+    public var id: WorkspaceID { workspace.id }
 
     public var isArchived: Bool { workspace.state != .active }
 }

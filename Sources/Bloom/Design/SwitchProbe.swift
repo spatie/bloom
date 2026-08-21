@@ -40,8 +40,8 @@ enum SwitchProbe {
         value(for: "--switch-probe") ?? (NSTemporaryDirectory() + "bloom-switch-probe.json")
     }
 
-    private static var order: [String] {
-        (value(for: "--switch-order") ?? "").split(separator: ",").map(String.init)
+    private static var order: [WorkspaceID] {
+        (value(for: "--switch-order") ?? "").split(separator: ",").map { WorkspaceID(String($0)) }
     }
 
     private static var cycles: Int { Int(value(for: "--switch-cycles") ?? "") ?? 3 }
@@ -148,7 +148,7 @@ enum SwitchProbe {
     /// One switch, from the selection to everything the timeline caught.
     @discardableResult
     private static func switchTo(
-        _ id: String, contentView: NSView, ticker: Ticker
+        _ id: WorkspaceID, contentView: NSView, ticker: Ticker
     ) async -> [String: Any] {
         guard let app = model() else {
             FileHandle.standardError.write(Data("switch probe: no app model\n".utf8))
@@ -162,7 +162,7 @@ enum SwitchProbe {
         PaneLayoutTiming.isEnabled = true
         // A line on stderr with the wall clock on it, so a film of the window taken by another
         // process can be lined up with the switch it is a film of.
-        let name = app.workspaces.first { $0.id == id }?.name ?? id
+        let name = app.workspaces.first { $0.id == id }?.name ?? id.rawValue
         FileHandle.standardError.write(
             Data("SWITCH \(name) \(Date().timeIntervalSince1970)\n".utf8)
         )
@@ -205,20 +205,20 @@ enum SwitchProbe {
             let target = step.isMultiple(of: 2) ? first : second
             app.selection = .workspace(target)
             try? await Task.sleep(for: .milliseconds(120))
-            flips.append(["step": step, "selected": target])
+            flips.append(["step": step, "selected": target.rawValue])
         }
 
         // Everything in flight lands here.
         try? await Task.sleep(for: .seconds(8))
 
-        let settled = app.selection.workspaceID ?? ""
-        let model = app.existingModel(for: settled)
+        let settled = app.selection.workspaceID
+        let model = settled.flatMap { app.existingModel(for: $0) }
         // The file list is the tell. It is the one thing a switch fetches with a subprocess, so a
         // list belonging to the other workspace is a stale answer that landed in the wrong place.
         let paths = model?.changedFiles.prefix(4).map(\.path) ?? []
         return [
             "flips": flips,
-            "settled": settled,
+            "settled": settled?.rawValue ?? "",
             "settledName": app.workspaces.first { $0.id == settled }?.name ?? "",
             "changedFileCount": model?.changedFiles.count ?? 0,
             "changedFileSample": Array(paths),
@@ -247,7 +247,7 @@ enum SwitchProbe {
     /// row too, and so is Home, so an index would be a guess that a reordered sidebar breaks
     /// silently. The name comes off the row's accessibility label, which is the same string
     /// VoiceOver reads.
-    private static func click(row id: String, contentView: NSView) async {
+    private static func click(row id: WorkspaceID, contentView: NSView) async {
         guard let app = model() else { return }
         guard let window = contentView.window,
               let name = app.workspaces.first(where: { $0.id == id })?.name,

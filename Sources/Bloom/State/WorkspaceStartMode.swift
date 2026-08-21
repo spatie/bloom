@@ -1,4 +1,5 @@
 import Foundation
+import BloomCore
 
 /// What a workspace opens on the first time you see it.
 ///
@@ -30,11 +31,11 @@ enum WorkspaceStartMode: String, CaseIterable, Identifiable {
     /// User defaults rather than a column: this is a hint about the opening layout, it stops
     /// mattering the moment the user touches a tab, and putting it in the database would mean a
     /// migration for something that is allowed to be forgotten.
-    static func defaultsKey(workspaceID: String) -> String {
+    static func defaultsKey(workspaceID: WorkspaceID) -> String {
         "workspace.opensOnTerminal.\(workspaceID)"
     }
 
-    static func record(_ mode: WorkspaceStartMode, workspaceID: String) {
+    static func record(_ mode: WorkspaceStartMode, workspaceID: WorkspaceID) {
         guard mode == .terminal else { return }
         UserDefaults.standard.set(true, forKey: defaultsKey(workspaceID: workspaceID))
     }
@@ -42,7 +43,7 @@ enum WorkspaceStartMode: String, CaseIterable, Identifiable {
     /// True once, for a workspace created as a terminal one that has not been opened yet. Reading
     /// it clears it, so re-selecting the workspace later does not keep forcing a terminal tab in
     /// front of whatever the user has since arranged.
-    static func consumeOpensOnTerminal(workspaceID: String) -> Bool {
+    static func consumeOpensOnTerminal(workspaceID: WorkspaceID) -> Bool {
         let key = defaultsKey(workspaceID: workspaceID)
         guard UserDefaults.standard.bool(forKey: key) else { return false }
         UserDefaults.standard.removeObject(forKey: key)

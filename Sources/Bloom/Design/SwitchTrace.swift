@@ -1,5 +1,6 @@
 import Foundation
 import QuartzCore
+import BloomCore
 
 /// A timeline of one workspace switch, from the click to the frame that shows the workspace.
 ///
@@ -30,14 +31,14 @@ enum SwitchTrace {
     }
 
     private(set) static var marks: [Mark] = []
-    private(set) static var workspaceID = ""
+    private(set) static var workspaceID: WorkspaceID?
     private static var start: CFTimeInterval = 0
     private static var seen: Set<String> = []
     /// Names waiting for the next display link tick, in the order they were asked for.
     private static var pendingOnScreen: [String] = []
 
     /// Starts a new timeline. Everything stamped from here on is measured from this instant.
-    static func begin(workspaceID id: String) {
+    static func begin(workspaceID id: WorkspaceID) {
         guard isEnabled else { return }
         marks = []
         seen = []
@@ -56,7 +57,7 @@ enum SwitchTrace {
     /// the user has just left cannot be stamped onto the one they are now on. That is the same
     /// rule the app itself has to follow, and having it here is what proved the app was not
     /// following it.
-    static func mark(_ name: String, workspace id: String? = nil) {
+    static func mark(_ name: String, workspace id: WorkspaceID? = nil) {
         guard isEnabled, start > 0 else { return }
         if let id, id != workspaceID { return }
         guard seen.insert(name).inserted else { return }
@@ -65,7 +66,7 @@ enum SwitchTrace {
 
     /// Asks for a stamp at the next vsync, which is the first frame that can show what was just
     /// written. Paired with `mark` at the same call site, the two bracket the render.
-    static func markOnScreen(_ name: String, workspace id: String? = nil) {
+    static func markOnScreen(_ name: String, workspace id: WorkspaceID? = nil) {
         guard isEnabled, start > 0 else { return }
         if let id, id != workspaceID { return }
         guard !seen.contains(name + ".onscreen") else { return }

@@ -33,11 +33,11 @@ import Foundation
 public enum SidebarReorder {
     /// One row's new place. Never a whole `Workspace`: see `Store.reorderWorkspaces`.
     public struct Change: Equatable, Sendable {
-        public var id: String
+        public var id: WorkspaceID
         public var sortOrder: Int
         public var pinned: Bool
 
-        public init(id: String, sortOrder: Int, pinned: Bool) {
+        public init(id: WorkspaceID, sortOrder: Int, pinned: Bool) {
             self.id = id
             self.sortOrder = sortOrder
             self.pinned = pinned
@@ -139,15 +139,15 @@ public enum SidebarReorder {
     /// Every row in the block gets the same answer, so a multiple selection cannot be split
     /// across the boundary and leave the two orders disagreeing.
     private static func pinned(
-        after order: [String], moved: Set<String>, stored: [String: Workspace]
-    ) -> [String: Bool] {
+        after order: [WorkspaceID], moved: Set<WorkspaceID>, stored: [WorkspaceID: Workspace]
+    ) -> [WorkspaceID: Bool] {
         guard let head = order.firstIndex(where: { moved.contains($0) }) else { return [:] }
         let tail = order.lastIndex(where: { moved.contains($0) }) ?? head
 
         let neighbour = tail + 1 < order.count ? order[tail + 1] : (head > 0 ? order[head - 1] : nil)
         guard let neighbour, let workspace = stored[neighbour] else { return [:] }
 
-        var answer: [String: Bool] = [:]
+        var answer: [WorkspaceID: Bool] = [:]
         for id in order where moved.contains(id) { answer[id] = workspace.pinned }
         return answer
     }
@@ -171,7 +171,7 @@ extension SidebarReorder {
     /// thing that has to change is a stored order that is not that list.
     public enum Row: Equatable, Hashable, Sendable {
         case project(RepoID)
-        case workspace(id: String, projectID: RepoID)
+        case workspace(id: WorkspaceID, projectID: RepoID)
         /// The sentence a project draws where its rows would be when it has none. It takes an
         /// offset in the run like anything else, and it is never something to move.
         case notice(projectID: RepoID)

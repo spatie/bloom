@@ -6,7 +6,7 @@ import Testing
 struct TmuxSessionNamingTests {
     @Test("A pane always produces the same session name")
     func stable() {
-        let workspace = "9d4b0f1e-1111-2222-3333-444455556666"
+        let workspace = WorkspaceID("9d4b0f1e-1111-2222-3333-444455556666")
         let pane = "6f1c2b8a-0f4c-4a6b-9a1e-2c3d4e5f6071"
         let name = TmuxSessions.sessionName(workspaceID: workspace, paneID: pane)
         #expect(name == TmuxSessions.sessionName(workspaceID: workspace, paneID: pane))
@@ -15,7 +15,7 @@ struct TmuxSessionNamingTests {
 
     @Test("Different panes never share a session")
     func unique() {
-        let workspace = newID()
+        let workspace = WorkspaceID.new()
         let names = Set((0..<200).map { _ in
             TmuxSessions.sessionName(workspaceID: workspace, paneID: newID())
         })
@@ -24,16 +24,16 @@ struct TmuxSessionNamingTests {
 
     @Test("A session name round trips back to its workspace and its pane")
     func roundTrip() {
-        let workspace = newID()
+        let workspace = WorkspaceID.new()
         let pane = newID()
         let name = TmuxSessions.sessionName(workspaceID: workspace, paneID: pane)
         #expect(TmuxSessions.paneID(ofSessionName: name) == pane)
-        #expect(TmuxSessions.workspaceID(ofSessionName: name) == workspace)
+        #expect(TmuxSessions.workspaceID(ofSessionName: name) == workspace.rawValue)
     }
 
     @Test("Only Bloom's own shape is recognised, so a user's sessions are never touched")
     func foreignSessions() {
-        #expect(TmuxSessions.isBloomSession(TmuxSessions.sessionName(workspaceID: newID(), paneID: newID())))
+        #expect(TmuxSessions.isBloomSession(TmuxSessions.sessionName(workspaceID: WorkspaceID.new(), paneID: newID())))
         #expect(!TmuxSessions.isBloomSession("work"))
         #expect(!TmuxSessions.isBloomSession("bloomish"))
         #expect(!TmuxSessions.isBloomSession("my_bloom_thing"))
@@ -47,7 +47,7 @@ struct TmuxSessionNamingTests {
     // back into its fields, so none of them may survive into an id.
     @Test("Characters that would break a name are folded away", arguments: [".", ":", " ", "$", "_"])
     func unsafeCharacters(character: String) {
-        let name = TmuxSessions.sessionName(workspaceID: "ws", paneID: "pane\(character)one")
+        let name = TmuxSessions.sessionName(workspaceID: WorkspaceID("ws"), paneID: "pane\(character)one")
         #expect(name == "bloom_ws_pane-one")
         #expect(TmuxSessions.paneID(ofSessionName: name) == "pane-one")
     }
@@ -72,7 +72,7 @@ struct TmuxSessionNamingTests {
 
 @Suite("tmux restore decision")
 struct TmuxRestoreDecisionTests {
-    private let workspace = "0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9"
+    private let workspace = WorkspaceID("0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9")
     private let pane = "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed"
     private var name: String { TmuxSessions.sessionName(workspaceID: workspace, paneID: pane) }
 
@@ -141,7 +141,7 @@ struct TmuxRestoreDecisionTests {
 
 @Suite("tmux orphan rule")
 struct TmuxOrphanTests {
-    private let workspace = newID()
+    private let workspace = WorkspaceID.new()
 
     private func session(_ pane: String) -> String {
         TmuxSessions.sessionName(workspaceID: workspace, paneID: pane)
@@ -216,8 +216,8 @@ struct TmuxOrphanTests {
 struct TmuxArchiveTeardownTests {
     @Test("Archiving names every session of that workspace and nothing else")
     func archiveTargetsTheWorkspace() {
-        let archived = newID()
-        let other = newID()
+        let archived = WorkspaceID.new()
+        let other = WorkspaceID.new()
         let doomed = (0..<3).map { _ in TmuxSessions.sessionName(workspaceID: archived, paneID: newID()) }
         let spared = [
             TmuxSessions.sessionName(workspaceID: other, paneID: newID()),
@@ -230,7 +230,7 @@ struct TmuxArchiveTeardownTests {
 
     @Test("An archived workspace leaves no tmux session behind")
     func nothingSurvivesAnArchive() {
-        let archived = newID()
+        let archived = WorkspaceID.new()
         var live = (0..<4).map { _ in TmuxSessions.sessionName(workspaceID: archived, paneID: newID()) }
 
         // What `TerminalSessionStore.discard` does: match by workspace, kill, then look again.
@@ -245,14 +245,14 @@ struct TmuxArchiveTeardownTests {
     func doesNotDependOnLoadedTabs() {
         // The names are the only bookkeeping this path trusts. A tab list that was never loaded,
         // or a split layout that was lost, cannot leave a shell alive in a deleted worktree.
-        let archived = newID()
+        let archived = WorkspaceID.new()
         let session = TmuxSessions.sessionName(workspaceID: archived, paneID: newID())
         #expect(TmuxSessions.sessions(ofWorkspace: archived, in: [session]) == [session])
     }
 
     @Test("A workspace with no terminals leaves nothing to kill")
     func noSessions() {
-        #expect(TmuxSessions.sessions(ofWorkspace: newID(), in: []).isEmpty)
+        #expect(TmuxSessions.sessions(ofWorkspace: WorkspaceID.new(), in: []).isEmpty)
     }
 }
 

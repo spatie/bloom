@@ -158,7 +158,7 @@ struct AgentRunnerArgvTests {
 
     @Test("builds the invocation docs/PROTOCOL.md specifies")
     func buildsArgv() {
-        let session = Session(workspaceID: "w", model: "opus", effort: "high", permissionMode: .acceptEdits)
+        let session = Session(workspaceID: WorkspaceID("w"), model: "opus", effort: "high", permissionMode: .acceptEdits)
         #expect(AgentRunner.argv(session: session, resume: nil) == [
             "-p",
             "--output-format", "stream-json",
@@ -182,7 +182,7 @@ struct AgentRunnerArgvTests {
     @Test("every session can be asked, whatever mode it is in")
     func alwaysAsks() {
         for mode in PermissionMode.allCases {
-            let argv = AgentRunner.argv(session: Session(workspaceID: "w", permissionMode: mode), resume: nil)
+            let argv = AgentRunner.argv(session: Session(workspaceID: WorkspaceID("w"), permissionMode: mode), resume: nil)
 
             #expect(value(of: "--permission-prompt-tool", in: argv) == "stdio")
         }
@@ -192,7 +192,7 @@ struct AgentRunnerArgvTests {
 
     @Test("the reasoning effort the user picked reaches the CLI")
     func passesEffort() {
-        let session = Session(workspaceID: "w", effort: "high")
+        let session = Session(workspaceID: WorkspaceID("w"), effort: "high")
 
         #expect(value(of: "--effort", in: AgentRunner.argv(session: session, resume: nil)) == "high")
     }
@@ -205,7 +205,7 @@ struct AgentRunnerArgvTests {
         arguments: ["low", "medium", "high", "xhigh", "max"]
     )
     func everyComposerEffort(level: String) {
-        let session = Session(workspaceID: "w", effort: level)
+        let session = Session(workspaceID: WorkspaceID("w"), effort: level)
 
         #expect(value(of: "--effort", in: AgentRunner.argv(session: session, resume: nil)) == level)
     }
@@ -217,7 +217,7 @@ struct AgentRunnerArgvTests {
     /// repository asked for with one it did not.
     @Test("an effort Bloom does not recognise is still passed through")
     func unknownEffort() {
-        let session = Session(workspaceID: "w", effort: "ultracode")
+        let session = Session(workspaceID: WorkspaceID("w"), effort: "ultracode")
 
         #expect(value(of: "--effort", in: AgentRunner.argv(session: session, resume: nil)) == "ultracode")
     }
@@ -227,7 +227,7 @@ struct AgentRunnerArgvTests {
     @Test("an empty effort sends no flag at all rather than an empty one")
     func emptyEffort() {
         for blank in ["", "   "] {
-            let argv = AgentRunner.argv(session: Session(workspaceID: "w", effort: blank), resume: nil)
+            let argv = AgentRunner.argv(session: Session(workspaceID: WorkspaceID("w"), effort: blank), resume: nil)
 
             #expect(!argv.contains("--effort"), "a blank effort still sent the flag")
         }
@@ -240,14 +240,14 @@ struct AgentRunnerArgvTests {
     /// sending `adaptive` explicitly would override whatever the session would otherwise pick.
     @Test("fast mode is off unless it is on, and off sends nothing")
     func fastModeOff() {
-        let argv = AgentRunner.argv(session: Session(workspaceID: "w"), resume: nil, isFastMode: false)
+        let argv = AgentRunner.argv(session: Session(workspaceID: WorkspaceID("w")), resume: nil, isFastMode: false)
 
         #expect(!argv.contains("--thinking"))
     }
 
     @Test("fast mode turns thinking off")
     func fastModeOn() {
-        let argv = AgentRunner.argv(session: Session(workspaceID: "w"), resume: nil, isFastMode: true)
+        let argv = AgentRunner.argv(session: Session(workspaceID: WorkspaceID("w")), resume: nil, isFastMode: true)
 
         #expect(value(of: "--thinking", in: argv) == "disabled")
         // Strict where --effort is forgiving: a value outside these three exits 1 before the turn
@@ -278,7 +278,7 @@ struct AgentRunnerArgvTests {
     @Test("the output style the user picked reaches the CLI")
     func passesOutputStyle() {
         let argv = AgentRunner.argv(
-            session: Session(workspaceID: "w"), resume: nil, outputStyle: "Concise"
+            session: Session(workspaceID: WorkspaceID("w")), resume: nil, outputStyle: "Concise"
         )
 
         #expect(value(of: "--settings", in: argv) == #"{"outputStyle":"Concise"}"#)
@@ -293,7 +293,7 @@ struct AgentRunnerArgvTests {
     )
     func everyBuiltInOutputStyle(name: String) {
         let argv = AgentRunner.argv(
-            session: Session(workspaceID: "w"), resume: nil, outputStyle: name
+            session: Session(workspaceID: WorkspaceID("w")), resume: nil, outputStyle: name
         )
 
         #expect(value(of: "--settings", in: argv) == #"{"outputStyle":"\#(name)"}"#)
@@ -311,7 +311,7 @@ struct AgentRunnerArgvTests {
     )
     func defaultOutputStyleSendsNothing(name: String?) {
         let argv = AgentRunner.argv(
-            session: Session(workspaceID: "w"), resume: nil, outputStyle: name
+            session: Session(workspaceID: WorkspaceID("w")), resume: nil, outputStyle: name
         )
 
         #expect(!argv.contains("--settings"), "the default still sent a settings object")
@@ -324,7 +324,7 @@ struct AgentRunnerArgvTests {
     @Test("a custom style name is encoded rather than pasted in")
     func encodesCustomOutputStyle() throws {
         let argv = AgentRunner.argv(
-            session: Session(workspaceID: "w"), resume: nil, outputStyle: #"Say "hi""#
+            session: Session(workspaceID: WorkspaceID("w")), resume: nil, outputStyle: #"Say "hi""#
         )
         let settings = try #require(value(of: "--settings", in: argv))
         let object = try JSONSerialization.jsonObject(with: Data(settings.utf8)) as? [String: String]
@@ -338,7 +338,7 @@ struct AgentRunnerArgvTests {
     @Test("the settings object is passed once and holds only what Bloom states")
     func settingsFlagIsUsedOnce() {
         let argv = AgentRunner.argv(
-            session: Session(workspaceID: "w", effort: "max"),
+            session: Session(workspaceID: WorkspaceID("w"), effort: "max"),
             resume: "abc",
             isFastMode: true,
             outputStyle: "Explanatory"
@@ -357,7 +357,7 @@ struct AgentRunnerArgvTests {
     @Test("no flag is left without its value")
     func noDanglingFlags() {
         let argv = AgentRunner.argv(
-            session: Session(workspaceID: "w", effort: "max"),
+            session: Session(workspaceID: WorkspaceID("w"), effort: "max"),
             resume: "abc",
             isFastMode: true,
             outputStyle: "Concise"
@@ -372,7 +372,7 @@ struct AgentRunnerArgvTests {
 
     @Test("appends resume when there is an agent session to resume")
     func appendsResume() throws {
-        let session = Session(workspaceID: "w", model: "sonnet")
+        let session = Session(workspaceID: WorkspaceID("w"), model: "sonnet")
         let argv = AgentRunner.argv(session: session, resume: "f93932c9-cf0b-40d8-881c-ac75db3f8740")
         #expect(argv.suffix(2) == ["--resume", "f93932c9-cf0b-40d8-881c-ac75db3f8740"])
         let model = try #require(argv.firstIndex(of: "--model"))
@@ -381,7 +381,7 @@ struct AgentRunnerArgvTests {
 
     @Test("leaves resume off for an empty or missing id")
     func skipsEmptyResume() {
-        let session = Session(workspaceID: "w")
+        let session = Session(workspaceID: WorkspaceID("w"))
         #expect(AgentRunner.argv(session: session, resume: "").contains("--resume") == false)
         #expect(AgentRunner.argv(session: session, resume: nil).contains("--resume") == false)
     }
@@ -393,7 +393,7 @@ struct AgentRunnerArgvTests {
         (.plan, "plan"),
     ])
     func mapsPermissionModes(mode: PermissionMode, cliValue: String) throws {
-        let session = Session(workspaceID: "w", permissionMode: mode)
+        let session = Session(workspaceID: WorkspaceID("w"), permissionMode: mode)
         let argv = AgentRunner.argv(session: session, resume: nil)
         let index = try #require(argv.firstIndex(of: "--permission-mode"))
         #expect(argv[index + 1] == cliValue)

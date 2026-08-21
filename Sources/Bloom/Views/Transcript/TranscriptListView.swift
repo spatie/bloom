@@ -37,7 +37,7 @@ struct TranscriptListView: View {
     /// Which rows have only just turned up, so they fade in rather than appear at full opacity in
     /// a single frame. The rules for what counts as "just turned up" are `RowArrival`'s, which is
     /// the same mechanism and the same 180ms the sidebar and Home settle their rows on.
-    @State private var arrival = RowArrival()
+    @State private var arrival = RowArrival<String>()
 
     /// The session the tracker above is following.
     ///

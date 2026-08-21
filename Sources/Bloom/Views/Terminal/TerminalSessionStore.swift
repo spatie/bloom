@@ -29,7 +29,7 @@ final class TerminalSessionStore {
 
     /// Which workspace each pane belongs to, so closing one can name its tmux session without
     /// walking back through tabs that may already be gone.
-    private var paneOwner: [String: String] = [:]
+    private var paneOwner: [String: WorkspaceID] = [:]
 
     private init() {}
 
@@ -112,7 +112,7 @@ final class TerminalSessionStore {
     ///
     /// The workspace is passed when the caller knows it, because a tab can be closed from the strip
     /// without ever having been drawn, and a pane that was never drawn has no owner recorded.
-    func closePanes(of ownerID: String, workspaceID: String? = nil) {
+    func closePanes(of ownerID: String, workspaceID: WorkspaceID? = nil) {
         for pane in TerminalSplitStore.shared.panes(of: ownerID) {
             if let workspaceID { paneOwner[pane] = workspaceID }
             closePane(id: pane)
@@ -127,14 +127,14 @@ final class TerminalSessionStore {
         repo: Repo?,
         port: Int
     ) -> BloomTerminalView {
-        if let existing = terminals[tab.id] { return existing }
+        if let existing = terminals[tab.id.rawValue] { return existing }
 
         let view = BloomTerminalView(frame: CGRect(x: 0, y: 0, width: 640, height: 320))
 
         // A pane that is already over, drawn one last time before SwiftUI catches up. It gets an
         // empty terminal that forks nothing and is not filed under its id, so the draw after this
         // one drops it. See `closedPanes`.
-        guard !closedPanes.contains(tab.id) else {
+        guard !closedPanes.contains(tab.id.rawValue) else {
             view.willStop()
             return view
         }
@@ -146,11 +146,11 @@ final class TerminalSessionStore {
             )
         }
 
-        // `tab.id` is the pane id here: a split hands each pane a `TerminalTab` carrying its own id,
+        // `tab.id.rawValue` is the pane id here: a split hands each pane a `TerminalTab` carrying its own id,
         // and an unsplit tab is its own single pane.
-        paneOwner[tab.id] = workspace.id
+        paneOwner[tab.id.rawValue] = workspace.id
         if let persistence, let command = persistence.command,
-           let session = persistence.decision(workspaceID: workspace.id, paneID: tab.id).session {
+           let session = persistence.decision(workspaceID: workspace.id, paneID: tab.id.rawValue).session {
             view.start(TerminalLaunch.tmux(
                 command: command, session: session, directory: workspace.path, extra: extra
             ))
@@ -158,8 +158,8 @@ final class TerminalSessionStore {
             view.start(TerminalLaunch.loginShell(directory: workspace.path, extra: extra))
         }
 
-        terminals[tab.id] = view
-        if let command = pendingCommands.removeValue(forKey: tab.id) { type(command, into: view) }
+        terminals[tab.id.rawValue] = view
+        if let command = pendingCommands.removeValue(forKey: tab.id.rawValue) { type(command, into: view) }
         return view
     }
 
@@ -261,7 +261,7 @@ final class TerminalSessionStore {
     /// setting says and whether or not this launch ever drew the pane that owns it. A shell sitting
     /// in a worktree that is being deleted is the hazard, and the setting has nothing to say about
     /// it. The sessions are matched by name, so this holds even for a tab that was never loaded.
-    func discard(workspaceID: String) async {
+    func discard(workspaceID: WorkspaceID) async {
         ensurePersistence()
 
         let tabs = CenterTabStore.shared.terminalTabIDs(for: workspaceID)

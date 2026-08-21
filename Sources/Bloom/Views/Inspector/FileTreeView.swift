@@ -28,7 +28,7 @@ struct FileTreeView: View {
     @State private var quickLookArm = 0
 
     private struct LoadID: Hashable {
-        var workspaceID: String
+        var workspaceID: WorkspaceID
         var workspacePath: String
     }
 

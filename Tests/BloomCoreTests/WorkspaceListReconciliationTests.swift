@@ -25,7 +25,7 @@ struct WorkspaceListReconciliationTests {
         setupState: SetupState = .succeeded
     ) -> Workspace {
         Workspace(
-            id: id,
+            id: WorkspaceID(id),
             repoID: RepoID("repo"),
             name: name ?? id,
             branch: "feature/\(id)",
@@ -60,7 +60,7 @@ struct WorkspaceListReconciliationTests {
             fresh: [alpha, beta, gamma]
         )
 
-        #expect(result.map(\.id) == ["alpha", "beta"])
+        #expect(result.map(\.id.rawValue) == ["alpha", "beta"])
     }
 
     /// Two rows hidden in quick succession, one refresh in flight across both of them. Neither
@@ -77,7 +77,7 @@ struct WorkspaceListReconciliationTests {
             fresh: [alpha, beta, gamma]
         )
 
-        #expect(result.map(\.id) == ["alpha"])
+        #expect(result.map(\.id.rawValue) == ["alpha"])
     }
 
     /// The archive failed and the row was put back by a reload before the refresh answered. The
@@ -93,7 +93,7 @@ struct WorkspaceListReconciliationTests {
             fresh: [alpha, gamma]
         )
 
-        #expect(result.map(\.id) == ["alpha", "gamma"])
+        #expect(result.map(\.id.rawValue) == ["alpha", "gamma"])
     }
 
     // MARK: - The other direction
@@ -111,7 +111,7 @@ struct WorkspaceListReconciliationTests {
             fresh: [alpha]
         )
 
-        #expect(result.map(\.id) == ["alpha", "fresh"])
+        #expect(result.map(\.id.rawValue) == ["alpha", "fresh"])
         #expect(result.last == fresh)
     }
 
@@ -188,7 +188,7 @@ struct WorkspaceListReconciliationTests {
             fresh: [alpha, beta]
         )
 
-        #expect(result.map(\.id) == ["beta", "alpha"])
+        #expect(result.map(\.id.rawValue) == ["beta", "alpha"])
     }
 
     /// Nothing at all is a real answer, and the empty list is what a first launch holds.
@@ -208,10 +208,10 @@ struct WorkspaceListReconciliationTests {
         let gamma = workspace("gamma")
 
         let result = WorkspaceListReconciliation.afterStoreReload(
-            fresh: [alpha, gamma], archiving: ["gamma"]
+            fresh: [alpha, gamma], archiving: [WorkspaceID("gamma")]
         )
 
-        #expect(result.map(\.id) == ["alpha"])
+        #expect(result.map(\.id.rawValue) == ["alpha"])
     }
 
     /// The archive failed, the workspace is no longer being archived, and the reload is exactly
@@ -225,7 +225,7 @@ struct WorkspaceListReconciliationTests {
             fresh: [alpha, gamma], archiving: []
         )
 
-        #expect(result.map(\.id) == ["alpha", "gamma"])
+        #expect(result.map(\.id.rawValue) == ["alpha", "gamma"])
     }
 
     /// Two archives running at once, which is what pressing Archive twice in a second gives you.
@@ -236,10 +236,10 @@ struct WorkspaceListReconciliationTests {
         let gamma = workspace("gamma")
 
         let result = WorkspaceListReconciliation.afterStoreReload(
-            fresh: [alpha, beta, gamma], archiving: ["beta", "gamma"]
+            fresh: [alpha, beta, gamma], archiving: [WorkspaceID("beta"), WorkspaceID("gamma")]
         )
 
-        #expect(result.map(\.id) == ["alpha"])
+        #expect(result.map(\.id.rawValue) == ["alpha"])
     }
 
     /// A restore is the case that stops this from being a filter on the list rather than on the
@@ -250,9 +250,9 @@ struct WorkspaceListReconciliationTests {
         let restored = workspace("restored")
 
         let result = WorkspaceListReconciliation.afterStoreReload(
-            fresh: [alpha, restored], archiving: ["gamma"]
+            fresh: [alpha, restored], archiving: [WorkspaceID("gamma")]
         )
 
-        #expect(result.map(\.id) == ["alpha", "restored"])
+        #expect(result.map(\.id.rawValue) == ["alpha", "restored"])
     }
 }

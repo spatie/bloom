@@ -1,4 +1,5 @@
 import SwiftUI
+import BloomCore
 
 /// The `Viewed` checkbox, remembered per workspace and per file.
 ///
@@ -14,12 +15,12 @@ struct ViewedToggle: View {
 
     @AppStorage private var isViewed: Bool
 
-    init(workspaceID: String, path: String, compact: Bool) {
+    init(workspaceID: WorkspaceID, path: String, compact: Bool) {
         self.compact = compact
         _isViewed = AppStorage(wrappedValue: false, Self.key(workspaceID: workspaceID, path: path))
     }
 
-    static func key(workspaceID: String, path: String) -> String {
+    static func key(workspaceID: WorkspaceID, path: String) -> String {
         "inspector.viewed.\(workspaceID).\(path)"
     }
 
