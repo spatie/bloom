@@ -4,7 +4,7 @@
     Tools/release/appcast.py --existing appcast.xml --output appcast.xml \
         --version 1.4.0 --build 431 \
         --url https://example/Bloom-1.4.0.zip --length 8123456 \
-        --signature <edSignature> --min-system 15.0 \
+        --signature <edSignature> --min-system 26.0 \
         --channel beta --notes-file notes.html
 
 The feed is generated from the release rather than edited by hand. Hand editing
@@ -141,7 +141,12 @@ def main() -> int:
     parser.add_argument("--url", required=True, help="public URL of the zip")
     parser.add_argument("--length", required=True, help="size of the zip in bytes")
     parser.add_argument("--signature", required=True, help="sparkle:edSignature")
-    parser.add_argument("--min-system", default="15.0")
+    # Required rather than defaulted. The floor lives in Resources/Info.plist and the
+    # workflow reads it from there; a default here is a second copy of it, and the copy was
+    # still saying 15.0 for as long as it took anybody to look. An appcast that understates
+    # the floor offers a Mac an update it cannot launch.
+    parser.add_argument("--min-system", required=True,
+                        help="LSMinimumSystemVersion of the build being published")
     parser.add_argument("--channel", default="", help="beta, or empty for the default channel")
     parser.add_argument("--notes-file", help="HTML release notes")
     parser.add_argument("--link", default="", help="link element on the item")
