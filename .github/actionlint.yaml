@@ -1,0 +1,7 @@
+# actionlint ships a list of the runner labels GitHub offers and warns about any
+# label it does not know. Its list is a snapshot taken when it was released, and
+# macos-26 arrived after 1.7.7 did, so both workflows here would be flagged for
+# naming a runner that exists. This says the label is real.
+self-hosted-runner:
+  labels:
+    - macos-26
