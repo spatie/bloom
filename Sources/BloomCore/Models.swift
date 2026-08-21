@@ -154,7 +154,23 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
     /// it is supposed to describe.
     public var origin: WorkspaceOrigin
 
-    public init(
+    /// A workspace as it is at rest: the three lifecycle columns spelled out.
+    ///
+    /// **Internal, and that is the whole of this rule's enforcement.** `state`, `setupState` and
+    /// `setupLog` are `public internal(set)` so that nothing outside the module can assign one,
+    /// but while this initialiser was public that bought nothing at all: any line in
+    /// `Sources/Bloom` could build a fresh `Workspace` carrying an existing id and whatever state
+    /// it liked and hand it to `Store.upsert`, which writes every column. One compiling statement
+    /// archived a row without removing a worktree, which is the exact bug in `Store`'s head. So
+    /// the two doors are separated: this one, which takes the states and lives inside the module
+    /// with the lifecycles, and the public one below, which cannot say them.
+    ///
+    /// `Store.workspace(from:)` is the reader; `WorkspaceManager.createWorkspace` is the writer.
+    ///
+    /// The three keep their defaults so that nothing inside the module had to change. A call that
+    /// names none of them is not ambiguous between the two: Swift prefers the overload that has
+    /// fewer defaults left to apply, which is the public one, and it produces the same value.
+    init(
         id: WorkspaceID = .new(),
         repoID: RepoID,
         name: String,
@@ -196,6 +212,56 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
         self.pinned = pinned
         self.colour = colour
         self.origin = origin
+    }
+
+    /// A brand new workspace, which is the only kind anybody outside the module has any business
+    /// making: live, its setup not yet run, and nothing to read in the log.
+    ///
+    /// There is no parameter for the three lifecycle columns because there is nothing to decide.
+    /// A workspace that has just been made is `.active` with a `.pending` setup, every time, and
+    /// moving it off that is `WorkspaceLifecycle` or `SetupLifecycle` doing the work first and
+    /// then saying so. See the internal initialiser above for what happened when this was one
+    /// door instead of two.
+    public init(
+        id: WorkspaceID = .new(),
+        repoID: RepoID,
+        name: String,
+        branch: String,
+        path: String,
+        baseBranch: String,
+        sortOrder: Int = 0,
+        createdAt: Date = Date(),
+        lastActivityAt: Date = Date(),
+        additions: Int = 0,
+        deletions: Int = 0,
+        changedFiles: Int = 0,
+        unread: Bool = false,
+        pinned: Bool = false,
+        colour: String? = nil,
+        origin: WorkspaceOrigin = .user
+    ) {
+        self.init(
+            id: id,
+            repoID: repoID,
+            name: name,
+            branch: branch,
+            path: path,
+            baseBranch: baseBranch,
+            state: .active,
+            setupState: .pending,
+            setupLog: "",
+            sortOrder: sortOrder,
+            createdAt: createdAt,
+            lastActivityAt: lastActivityAt,
+            archivedAt: nil,
+            additions: additions,
+            deletions: deletions,
+            changedFiles: changedFiles,
+            unread: unread,
+            pinned: pinned,
+            colour: colour,
+            origin: origin
+        )
     }
 
     public var hasDiff: Bool { additions > 0 || deletions > 0 }
@@ -267,7 +333,11 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     public var costUSD: Double
     public var contextTokens: Int
 
-    public init(
+    /// A chat as it is at rest, `state` spelled out. **Internal for the same reason
+    /// `Workspace`'s is**, and read that one: `internal(set)` on the property stopped assignment
+    /// and stopped nothing else, because a fresh value carrying an existing id and any state at
+    /// all could be handed to the public `Store.upsert`, which writes every column.
+    init(
         id: SessionID = .new(),
         workspaceID: WorkspaceID,
         title: String = "New session",
@@ -305,6 +375,48 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         self.outputTokens = outputTokens
         self.costUSD = costUSD
         self.contextTokens = contextTokens
+    }
+
+    /// A brand new chat, which is `.idle` and has no other option. Moving it is
+    /// `SessionLifecycle.apply`, which stamps `updatedAt` in the same statement.
+    public init(
+        id: SessionID = .new(),
+        workspaceID: WorkspaceID,
+        title: String = "New session",
+        agentSessionID: String? = nil,
+        model: String = "opus",
+        effort: String = "high",
+        agentKind: AgentKind = .claudeCode,
+        permissionMode: PermissionMode = .acceptEdits,
+        sortOrder: Int = 0,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        lastReadSeq: Int = 0,
+        inputTokens: Int = 0,
+        outputTokens: Int = 0,
+        costUSD: Double = 0,
+        contextTokens: Int = 0
+    ) {
+        self.init(
+            id: id,
+            workspaceID: workspaceID,
+            title: title,
+            agentSessionID: agentSessionID,
+            model: model,
+            effort: effort,
+            agentKind: agentKind,
+            permissionMode: permissionMode,
+            state: .idle,
+            sortOrder: sortOrder,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            archivedAt: nil,
+            lastReadSeq: lastReadSeq,
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            costUSD: costUSD,
+            contextTokens: contextTokens
+        )
     }
 }
 

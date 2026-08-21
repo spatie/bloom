@@ -155,6 +155,10 @@ public struct WorkspaceManager: Sendable {
 
         try copyFiles(settings.filesToCopy, from: repo.path, to: worktreePath)
 
+        // Naming `setupState` reaches the initialiser that is internal to the module, which is
+        // why this can say it and nothing in `Sources/Bloom` can. A workspace with no setup script
+        // to run is born `.skipped` rather than moved there: there is no run to file, and nothing
+        // for `SetupLifecycle` to have done.
         let workspace = Workspace(
             repoID: repo.id,
             name: name ?? Git.title(from: prompt),

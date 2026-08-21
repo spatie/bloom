@@ -190,8 +190,12 @@ echo "==> a state moves through its lifecycle"
 #
 # The compiler holds most of this line. All three are `public internal(set)`, so
 # nothing in `Sources/Bloom` can assign one at all, however it reaches the value:
-# through `Store.update`'s closure, through a copy of a row, anywhere. What is
-# left is a new file inside the core, which the compiler would allow and which is
+# through `Store.update`'s closure, through a copy of a row, anywhere. Nor can it
+# go round the property and fabricate the value instead: the initialisers that
+# name those columns are internal as well, so the one-line version of this (build
+# a `Workspace` with an existing id and any state you like, hand it to the public
+# `Store.upsert`, which writes every column) does not compile either. What is left
+# is a new file inside the core, which the compiler would allow and which is
 # exactly how a fourth writer would start, so that is all this looks at.
 #
 # It matches an assignment of a NAMED case, which is how a half-done transition

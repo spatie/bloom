@@ -17,7 +17,10 @@ import Synchronization
 /// all: `Workspace.state`, `Workspace.setupState` and `Session.state` are `internal(set)`, and the
 /// only way to move them is the event methods in `SetupLifecycle`, `SessionLifecycle` and
 /// `WorkspaceLifecycle`. Read the head of any of those three for why a state and the work that
-/// goes with it have to be one statement.
+/// goes with it have to be one statement. `internal(set)` alone was not enough, and the way round
+/// it was this method: `upsert` is public and writes every column, so a fresh value carrying an
+/// existing id and any state at all did the job in one compiling line. The initialiser that names
+/// those columns is internal too now. See `Workspace.init` in `Models.swift`.
 ///
 /// This is not tidiness. These rows have several writers running at wildly different speeds: a
 /// diff stat refresh every six seconds, an archive that takes seconds of disk work before it can
