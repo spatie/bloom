@@ -1,18 +1,24 @@
 import SwiftUI
 
-/// One of the composer's per-turn pickers: model, effort, permission mode.
+/// One of the composer's per-turn pickers: model, effort, output style, permission mode.
 ///
 /// They are per turn rather than per app on purpose. A setting that lives in a preferences window
 /// is a setting nobody changes per task, and per task is exactly the granularity these need.
+///
+/// The rows themselves are `ComposerOptionItems`, which exists so `MenuProbe` can photograph the
+/// real ones without a `Menu` label to hang them off.
 struct ComposerOptionMenu: View {
     var options: [ComposerOption]
     /// When set, the rows are grouped under headings instead of run together. The model menu is
     /// the one that needs it: with two backends a flat list of five names says nothing about which
     /// agent each name belongs to, and picking a name is picking an agent.
     var sections: [ComposerModelSection]?
-    /// A disabled line under the rows, for something the menu has to explain rather than offer.
-    /// Codex has no Plan mode, and a picker that simply dropped it would leave somebody who knows
-    /// Bloom has one wondering where it went.
+    /// A disabled line under the rows, for something the menu has to say rather than offer. Two
+    /// pickers use it and they use it differently. The permission mode menu explains an absence,
+    /// because Codex has no Plan mode and a picker that simply dropped it would leave somebody who
+    /// knows Bloom has one wondering where it went. The output style menu describes the style
+    /// that is selected, because a style's own sentence is the only thing that tells you what
+    /// picking it would do, and an `NSMenu` row is one line with no room for it.
     var footnote: String?
     var selection: String
     /// What the list is a list of, drawn as the menu's own heading, or nil when the items name
@@ -32,15 +38,15 @@ struct ComposerOptionMenu: View {
 
     var body: some View {
         Menu {
-            // A `Picker` rather than a column of buttons, and the reason is the tick.
-            //
-            // These were `Button { } label: { Label(text, systemImage: "checkmark") }`, and a
-            // symbol handed to a button's label that way is dropped: the menu came up as three
-            // bare names with no marker on any of them, in an app whose whole footer is a row of
-            // settings. The state column of an `NSMenu` item is the menu's to draw and not the
-            // label's, and an inline picker is what asks the platform to draw it. The sidebar's
-            // Filter menu has always been built this way.
-            items
+            ComposerOptionItems(
+                options: options,
+                sections: sections,
+                footnote: footnote,
+                selection: selection,
+                heading: heading,
+                help: help,
+                onSelect: onSelect
+            )
         } label: {
             ComposerControlLabel(
                 systemImage: systemImage,
@@ -63,50 +69,6 @@ struct ComposerOptionMenu: View {
         .help(help)
         .accessibilityLabel(help)
         .accessibilityValue(label)
-    }
-
-    /// The rows, headed or not. `labelsHidden` takes the heading off while leaving the picker its
-    /// own name, so a menu with nothing written over it still announces itself to VoiceOver.
-    @ViewBuilder
-    private var items: some View {
-        let picker = Picker(heading ?? help, selection: binding) {
-            if let sections {
-                // One `Picker` with sections inside it rather than a picker per section: the tick
-                // belongs to the selection, and two pickers would each draw one.
-                ForEach(sections) { section in
-                    Section(section.title) {
-                        ForEach(section.options) { option in
-                            Text(option.label).tag(option.id)
-                        }
-                    }
-                }
-            } else {
-                ForEach(options) { option in
-                    Text(option.label).tag(option.id)
-                }
-            }
-        }
-        .pickerStyle(.inline)
-
-        if heading == nil {
-            picker.labelsHidden()
-        } else {
-            picker
-        }
-
-        if let footnote {
-            Divider()
-            // Plain text in a menu draws as a disabled row, which is what this is: something to
-            // read, not something to press.
-            Text(footnote)
-        }
-    }
-
-    /// The picker writes back through the caller rather than into storage of its own, because
-    /// where the choice lives is the caller's business: a session row in a conversation, a value
-    /// carried into a workspace that does not exist yet in the create sheet.
-    private var binding: Binding<String> {
-        Binding(get: { selection }, set: { id in MainActor.assumeIsolated { onSelect(id) } })
     }
 
     private var label: String {

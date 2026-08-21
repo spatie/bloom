@@ -300,6 +300,9 @@ struct CreateWorkspaceSheet: View {
                     onChange: { controls = $0 },
                     canSend: canCreate,
                     intent: .create,
+                    // The repository, because the worktree this sheet is about to cut does not
+                    // exist yet and a style the project defines is already in the repository.
+                    project: repo?.path,
                     onAttach: onAttach,
                     onSend: create,
                     // A terminal workspace opens a shell and never starts an agent, so the model,
@@ -476,7 +479,8 @@ struct CreateWorkspaceSheet: View {
         isNamingAvailable = loaded.2
         controls = ComposerControls(
             defaults: ComposerDefaults.resolve(repo: loaded.1, app: appDefaults),
-            isFastMode: appDefaults.fastMode
+            isFastMode: appDefaults.fastMode,
+            outputStyle: appDefaults.outputStyle
         )
 
         if !branches.contains(baseBranch) {

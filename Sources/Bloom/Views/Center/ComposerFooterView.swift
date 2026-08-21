@@ -1,12 +1,12 @@
 import SwiftUI
 import BloomCore
 
-/// Everything the user can change about the next turn: the model, the effort, the permission mode,
-/// whether it runs fast, what it has attached, and whether it goes now.
+/// Everything the user can change about the next turn: the model, the effort, the output style,
+/// the permission mode, whether it runs fast, what it has attached, and whether it goes now.
 ///
 /// It is written against `ComposerControls` rather than against a `Session`, because the create
-/// sheet uses this same row before any session exists. Both callers hand over the four choices and
-/// take back the changed set; where they keep them is their own business.
+/// sheet uses this same row before any session exists. Both callers hand over the choices and take
+/// back the changed set; where they keep them is their own business.
 struct ComposerFooterView: View {
     var controls: ComposerControls
     var onChange: @MainActor (ComposerControls) -> Void
@@ -18,6 +18,10 @@ struct ComposerFooterView: View {
     var canSend: Bool
     /// What the button at the end of the row does. See `ComposerIntent`.
     var intent: ComposerIntent = .send
+    /// The checkout the output style menu should look in for styles this project defines, or nil
+    /// where there is not one yet. A repository can carry its own `.claude/output-styles`, and in
+    /// the create sheet the worktree does not exist, so the repository is the honest answer there.
+    var project: String?
     var onAttach: @MainActor () -> Void
     var onSend: @MainActor () -> Void
     var onStop: @MainActor () -> Void = {}
@@ -37,6 +41,12 @@ struct ComposerFooterView: View {
     @State private var extraModels: [String] = []
     @State private var extraEfforts: [String] = []
 
+    /// The output styles this checkout offers. Held here rather than shared, unlike the model
+    /// catalogue below, because its answer depends on which repository the footer is pointing at
+    /// and one composer only ever points at one. `ViewThatFits` still gets a single copy, because
+    /// the three rows it builds are three renders of this one view.
+    @State private var outputStyles = ComposerOutputStyleCatalog()
+
     /// Shared, because `ViewThatFits` below builds this row three times and three copies would be
     /// three fetches of the Codex model list.
     private var catalog: ComposerModelCatalog { ComposerModelCatalog.shared }
@@ -47,8 +57,8 @@ struct ComposerFooterView: View {
         // row does not fit. Left to overflow it clipped from both edges at once, which took the
         // model picker off one end and the attach and send buttons off the other, so the composer
         // had no way to send. Each step drops the least load-bearing thing left: first the words
-        // beside the three picker glyphs, then the context reading, which is the one control here
-        // that reports rather than does.
+        // beside the picker glyphs, then the context reading, which is the one control here that
+        // reports rather than does.
         ViewThatFits(in: .horizontal) {
             row(isCompact: false, showsContext: true)
             row(isCompact: true, showsContext: true)
@@ -63,6 +73,11 @@ struct ComposerFooterView: View {
         // On appearance rather than on first use of the menu, so the Codex section is there when
         // the menu is opened rather than a moment after. It fetches once.
         .task { if showsAgentControls { catalog.load() } }
+        // Re-run when the composer moves to another checkout, because a project's own styles are
+        // that project's. The scan itself does nothing when the answer is already held and fresh.
+        .task(id: project) {
+            if showsAgentControls { await outputStyles.refreshIfStale(project: project) }
+        }
     }
 
     /// Files an id the built-in list has no entry for, once.
@@ -99,6 +114,25 @@ struct ComposerFooterView: View {
                     help: "Choose reasoning effort",
                     onSelect: { id in edit { $0.effort = id } }
                 )
+
+                // Beside the model and the effort rather than after the permission mode, because
+                // those three all answer "how does it think and how does it write", and the
+                // permission mode answers "what may it touch". Absent entirely for Codex, which
+                // has no output styles: see `ComposerControls.offersOutputStyle`.
+                if controls.offersOutputStyle {
+                    ComposerOptionMenu(
+                        options: outputStyles.options(includingCurrent: controls.outputStyle),
+                        // The selected style, in its own words. The CLI's own sentence for the
+                        // four it compiles in, and the file's `description` for a custom one.
+                        footnote: outputStyles.detail(of: controls.outputStyle),
+                        selection: controls.outputStyle,
+                        heading: "Output style",
+                        systemImage: "textformat",
+                        isCompact: isCompact,
+                        help: "Choose the output style",
+                        onSelect: { id in edit { $0.outputStyle = id } }
+                    )
+                }
 
                 ComposerOptionMenu(
                     options: controls.availablePermissionModes.map {

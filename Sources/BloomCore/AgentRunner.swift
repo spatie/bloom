@@ -74,6 +74,13 @@ public actor AgentRunner {
     /// is where the footer writes it. Re-read at the top of every turn, so toggling it takes
     /// effect on the next thing sent rather than on the next launch of the app.
     private var isFastMode = false
+    /// Which output style the composer's picker is on for this session, or nil for the default.
+    ///
+    /// Kept beside fast mode and read the same way, because it is the same kind of thing: a
+    /// composer control with no column on `Session`, living in the key value table under
+    /// `session.<id>.outputStyle`. Nil rather than the word `default`, so "nothing chosen" and
+    /// "chosen and then cleared" cannot drift apart on the way to argv.
+    private var outputStyle: String?
     /// Questions this process is currently blocked on, newest last.
     ///
     /// Held here as well as in the database because the two are needed at different moments. The
@@ -161,7 +168,25 @@ public actor AgentRunner {
     /// `enabled`, `adaptive` and `disabled`. Unlike `--effort` this one is strict: an unrecognised
     /// value exits 1 before the turn starts, which is why only the literal below is ever sent and
     /// why nothing user-supplied may reach it.
-    public static func argv(session: Session, resume: String?, isFastMode: Bool = false) -> [String] {
+    ///
+    /// The output style is the odd one out, because **there is no flag for it**. It is a settings
+    /// key, `outputStyle`, and the only way to state one for a single run without writing to a
+    /// file somebody else owns is `--settings`, which takes a path *or* a JSON string. So a chosen
+    /// style is sent as a one key object. Checked by running it: the CLI accepts the object and
+    /// starts, and it echoes what it resolved back in `output_style` on the `system/init` line,
+    /// which `AgentInit` already reads.
+    ///
+    /// `--settings` is passed here and nowhere else, and it takes one value rather than
+    /// accumulating: a second `--settings` would replace the first rather than merge with it, and
+    /// a malformed string is read as a filename and exits 1 with "Settings file not found". So the
+    /// object is built by `JSONSerialization` rather than by interpolation, and anything else that
+    /// ever needs a setting has to be added to that object rather than to a second flag.
+    public static func argv(
+        session: Session,
+        resume: String?,
+        isFastMode: Bool = false,
+        outputStyle: String? = nil
+    ) -> [String] {
         var arguments = [
             "-p",
             "--output-format", "stream-json",
@@ -201,10 +226,30 @@ public actor AgentRunner {
         if isFastMode {
             arguments += ["--thinking", "disabled"]
         }
+        // Only when a style was actually chosen. The default is the absence of the key, not the
+        // word "default": sending it would state a setting, and a stated setting outranks one the
+        // repository put in its own `.claude/settings.json`. Leaving the picker alone must not
+        // quietly switch off a style the project set for itself.
+        if let settings = settingsJSON(outputStyle: outputStyle) {
+            arguments += ["--settings", settings]
+        }
         if let resume, !resume.isEmpty {
             arguments += ["--resume", resume]
         }
         return arguments
+    }
+
+    /// The `--settings` object for a chosen output style, or nothing at all for the default.
+    ///
+    /// Built rather than written out, because a custom style is named by a file somebody else
+    /// created and a name holding a quote would otherwise produce a string the CLI reads as a
+    /// path. Serialisation cannot fail for a dictionary of two strings, but the failure is handled
+    /// as "send nothing" anyway: a turn that runs unstyled is better than one that does not run.
+    public static func settingsJSON(outputStyle: String?) -> String? {
+        guard let outputStyle, !OutputStyle.isDefault(outputStyle) else { return nil }
+        let object = ["outputStyle": outputStyle.trimmingCharacters(in: .whitespacesAndNewlines)]
+        guard let data = try? JSONSerialization.data(withJSONObject: object) else { return nil }
+        return String(decoding: data, as: UTF8.self)
     }
 
     /// How this runner would spawn right now. Recomputed per start, because the agent session id
@@ -212,7 +257,12 @@ public actor AgentRunner {
     public func launch() -> AgentLaunch {
         AgentLaunch(
             executable: Self.executable,
-            arguments: Self.argv(session: session, resume: session.agentSessionID, isFastMode: isFastMode),
+            arguments: Self.argv(
+                session: session,
+                resume: session.agentSessionID,
+                isFastMode: isFastMode,
+                outputStyle: outputStyle
+            ),
             cwd: workspacePath,
             environment: Shell.environment()
         )
@@ -252,6 +302,7 @@ public actor AgentRunner {
     public func send(_ text: String) async throws {
         try await waitForCancelledRunToExit()
         await refreshFastMode()
+        await refreshOutputStyle()
         try start()
 
         let line = try Self.encodeTurn(text)
@@ -282,6 +333,22 @@ public actor AgentRunner {
             return
         }
         isFastMode = value == "1"
+    }
+
+    /// The other key the composer's footer writes, and the same bargain as `fastModeKey`: the core
+    /// cannot see the view layer, so the string is stated at both ends and
+    /// `outputStyleKeyMatchesTheComposer` in the suite pins the two together. Drift here puts the
+    /// picker back to changing nothing, which is the bug that suite exists for.
+    public static func outputStyleKey(sessionID: String) -> String {
+        "session.\(sessionID).outputStyle"
+    }
+
+    /// A setting that cannot be read leaves the session unstyled rather than refusing the turn.
+    /// Reading `default` back is the same as reading nothing, because the picker stores the word
+    /// and the wire wants the absence.
+    private func refreshOutputStyle() async {
+        let stored = try? await store.setting(Self.outputStyleKey(sessionID: session.id))
+        outputStyle = OutputStyle.isDefault(stored) ? nil : stored
     }
 
     static func encodeTurn(_ text: String) throws -> String {

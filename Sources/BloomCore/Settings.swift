@@ -351,6 +351,7 @@ public struct AppDefaults: Sendable, Hashable {
         public static let permissionMode = "defaults.permissionMode"
         public static let planMode = "defaults.planMode"
         public static let fastMode = "defaults.fastMode"
+        public static let outputStyle = "defaults.outputStyle"
     }
 
     /// The built-in fallbacks, which match `Session`'s own initialiser. Nothing else may invent a
@@ -366,6 +367,12 @@ public struct AppDefaults: Sendable, Hashable {
     public var permissionMode: PermissionMode
     public var planMode: Bool
     public var fastMode: Bool
+    /// Which output style a new session opens on, by name, or `OutputStyle.defaultName` for none.
+    ///
+    /// A name rather than a case, because the set is open: the four the CLI compiles in are only
+    /// the ones it ships with, and anybody can add another by writing a file in
+    /// `~/.claude/output-styles`. See `OutputStyleIndex`.
+    public var outputStyle: String
 
     /// Nil when the user has never chosen one in Settings. `model` always holds a usable value,
     /// so it cannot answer "did they pick this, or is it just the fallback?", and that question is
@@ -380,7 +387,8 @@ public struct AppDefaults: Sendable, Hashable {
         reviewEffort: String = AppDefaults.fallbackEffort,
         permissionMode: PermissionMode = AppDefaults.fallbackPermissionMode,
         planMode: Bool = false,
-        fastMode: Bool = false
+        fastMode: Bool = false,
+        outputStyle: String = OutputStyle.defaultName
     ) {
         self.model = model
         self.effort = effort
@@ -389,6 +397,7 @@ public struct AppDefaults: Sendable, Hashable {
         self.permissionMode = permissionMode
         self.planMode = planMode
         self.fastMode = fastMode
+        self.outputStyle = outputStyle
     }
 
     /// A missing row means "never chosen", so every read falls back rather than failing.
@@ -411,6 +420,7 @@ public struct AppDefaults: Sendable, Hashable {
         }
         defaults.planMode = await value(Key.planMode) == "1"
         defaults.fastMode = await value(Key.fastMode) == "1"
+        defaults.outputStyle = await value(Key.outputStyle) ?? OutputStyle.defaultName
         return defaults
     }
 
@@ -422,5 +432,11 @@ public struct AppDefaults: Sendable, Hashable {
         try? await store.setSetting(Key.permissionMode, permissionMode.rawValue)
         try? await store.setSetting(Key.planMode, planMode ? "1" : "0")
         try? await store.setSetting(Key.fastMode, fastMode ? "1" : "0")
+        // Nil rather than the word, so "never chosen" and "chosen and then cleared" cannot drift
+        // apart. Every other reader of this value asks `OutputStyle.isDefault` rather than
+        // comparing strings, and this is what keeps that question cheap to answer.
+        try? await store.setSetting(
+            Key.outputStyle, OutputStyle.isDefault(outputStyle) ? nil : outputStyle
+        )
     }
 }

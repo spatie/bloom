@@ -5,7 +5,7 @@ import BloomCore
 
 /// Photographs the centre pane's contextual menu, or the items one of its split submenus offers.
 ///
-///     Bloom --menu-probe /tmp/menu.png [--menu-part menu|kinds|row|colour]
+///     Bloom --menu-probe /tmp/menu.png [--menu-part menu|kinds|row|colour|style] [--menu-project <path>]
 ///
 /// It exists because a menu is the one part of this interface that cannot be captured any other
 /// way. `ImageRenderer` draws SwiftUI's yellow placeholder for one, a menu only exists while it is
@@ -21,6 +21,11 @@ import BloomCore
 /// `row` and `colour` are a workspace row's menu and the colour submenu inside it. They need a
 /// workspace, so they read one out of the database this instance was pointed at, which means they
 /// want `BLOOM_DB_PATH` set at a seeded scratch copy rather than the owner's.
+///
+/// `style` is the composer's output style picker. Its list is read off disk rather than written
+/// down, so `--menu-project` points it at a checkout whose `.claude/output-styles` should be in
+/// the picture. Without one the shot is the built in styles alone, which is what almost every
+/// machine has.
 ///
 /// The two are photographed separately because AppKit tracks one menu at a time. A submenu cannot
 /// be opened beside the item it hangs off from inside the process: popping the submenu up while its
@@ -59,6 +64,8 @@ enum MenuProbe {
         case row
         /// The colour submenu inside it, on its own, because AppKit tracks one menu at a time.
         case colour
+        /// The composer's output style picker, rows and describing footnote.
+        case style
     }
 
     private static var part: Part {
@@ -78,6 +85,11 @@ enum MenuProbe {
                 let fresh = AppModel()
                 await fresh.bootstrap()
                 model = fresh
+            }
+            // Read before the menu is built, because building it is synchronous and the scan is a
+            // walk of two directories. An empty catalogue would photograph as the built in list.
+            if part == .style {
+                await outputStyles.refreshIfStale(project: value(for: "--menu-project"))
             }
             run(model: model)
         }
@@ -130,7 +142,26 @@ enum MenuProbe {
             NSHostingMenu(rootView: PaneKindItems { _ in })
         case .row, .colour:
             workspaceMenu(model: model)
+        case .style:
+            NSHostingMenu(rootView: outputStyleItems)
         }
+    }
+
+    /// The output style picker's own rows, built from the same catalogue and the same item view
+    /// the composer's footer uses. Selected on Concise, which is the style this menu was added
+    /// for, so the picture shows both the tick and the sentence that goes with it.
+    private static let outputStyles = ComposerOutputStyleCatalog()
+
+    private static var outputStyleItems: ComposerOptionItems {
+        let selection = "Concise"
+        return ComposerOptionItems(
+            options: outputStyles.options(includingCurrent: selection),
+            footnote: outputStyles.detail(of: selection),
+            selection: selection,
+            heading: "Output style",
+            help: "Choose the output style",
+            onSelect: { _ in }
+        )
     }
 
     private static func workspaceMenu(model: AppModel?) -> NSMenu {

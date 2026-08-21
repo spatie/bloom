@@ -46,6 +46,9 @@ struct ComposerView: View {
     @State private var caret = 0
     @State private var isFocused = false
     @State private var isFastMode = false
+    /// The style name this session is on, mirrored out of the store the way fast mode is. Neither
+    /// has a column on `Session`, so neither can be read off the row the footer is drawn from.
+    @State private var outputStyle = OutputStyle.defaultName
     @State private var draftSaveTask: Task<Void, Never>?
 
     var body: some View {
@@ -85,6 +88,7 @@ struct ComposerView: View {
                 context: ContextWindowUsage.latest(in: transcript.rows),
                 isRunning: transcript.isRunning,
                 canSend: canSend,
+                project: transcript.workspace.path,
                 onAttach: onAttach,
                 onSend: send,
                 onStop: transcript.stop
@@ -157,7 +161,11 @@ struct ComposerView: View {
     }
 
     private var controls: ComposerControls {
-        ComposerControls(session: transcript.session, isFastMode: isFastMode)
+        ComposerControls(
+            session: transcript.session,
+            isFastMode: isFastMode,
+            outputStyle: outputStyle
+        )
     }
 
     private var hasBody: Bool {
@@ -192,14 +200,25 @@ struct ComposerView: View {
 
     // MARK: - Actions
 
-    /// Writes the footer's choices back where a conversation keeps them: the three that are columns
-    /// go on the session row, and fast mode goes in the store's key value table.
+    /// Writes the footer's choices back where a conversation keeps them: the four that are columns
+    /// go on the session row, and fast mode and the output style go in the store's key value table.
     private func apply(controls new: ComposerControls) {
         if new.isFastMode != isFastMode {
             isFastMode = new.isFastMode
             if let store = app.store {
                 let key = ComposerControls.fastModeKey(sessionID: transcript.session.id)
                 let value = new.isFastMode ? "1" : nil
+                Task { try? await store.setSetting(key, value) }
+            }
+        }
+
+        if new.outputStyle != outputStyle {
+            outputStyle = new.outputStyle
+            if let store = app.store {
+                let key = ComposerControls.outputStyleKey(sessionID: transcript.session.id)
+                // The default is stored as no row at all, so a session that was set back to it
+                // reads the same as one that was never asked. See `AgentRunner.refreshOutputStyle`.
+                let value = OutputStyle.isDefault(new.outputStyle) ? nil : new.outputStyle
                 Task { try? await store.setSetting(key, value) }
             }
         }
@@ -325,8 +344,9 @@ struct ComposerView: View {
 
     // MARK: - First open
 
-    /// Settle what a new session starts out as, and read back the fast mode flag. Both are only
-    /// interesting once, hence the `task(id:)`. The precedence rules live in `ComposerDefaults`.
+    /// Settle what a new session starts out as, and read back the two values that are not columns.
+    /// All of it is only interesting once, hence the `task(id:)`. The precedence rules live in
+    /// `ComposerDefaults`.
     private func prepare() async {
         isFocused = true
         caret = (transcript.draft as NSString).length
@@ -336,6 +356,9 @@ struct ComposerView: View {
         isFastMode = (try? await store.setting(
             ComposerControls.fastModeKey(sessionID: sessionID)
         )) == "1"
+        outputStyle = (try? await store.setting(
+            ComposerControls.outputStyleKey(sessionID: sessionID)
+        )) ?? OutputStyle.defaultName
 
         // The marker is what separates "never opened" from "opened and left alone", which the
         // column values cannot express: a session created with the built-in defaults looks exactly
@@ -364,6 +387,19 @@ struct ComposerView: View {
             try? await store.setSetting(
                 ComposerControls.fastModeKey(sessionID: sessionID),
                 appDefaults.fastMode ? "1" : nil
+            )
+        }
+
+        // Same shape as fast mode, and for the same reason: neither is a column, so neither can be
+        // settled by the `sessionEditor.apply` below. The repository's settings file has no say
+        // here, because it has no key for an output style: Bloom's TOML schema does not carry one
+        // and Claude Code's own `.claude/settings.json` is already read by the CLI itself, so
+        // copying its value up into this picker would be Bloom claiming to have chosen it.
+        if appDefaults.outputStyle != outputStyle {
+            outputStyle = appDefaults.outputStyle
+            try? await store.setSetting(
+                ComposerControls.outputStyleKey(sessionID: sessionID),
+                OutputStyle.isDefault(appDefaults.outputStyle) ? nil : appDefaults.outputStyle
             )
         }
 

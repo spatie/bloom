@@ -142,9 +142,11 @@ private final class ProcessRecorder: @unchecked Sendable {
 /// here**. A control that cannot be found in this array is decoration, and asserting the array is
 /// what the file said before is not the same as asserting it is right.
 ///
-/// Both flags below were checked against the installed CLI (2.1.238) by running it, not assumed.
-/// Both are real and both are hidden from `--help`'s summary, and they differ on a bad value in a
-/// way that matters: `--effort` warns on stderr and carries on with exit 0, `--thinking` exits 1.
+/// Everything below was checked against the installed CLI (2.1.238) by running it, not assumed.
+/// `--effort` and `--thinking` are both real and both hidden from `--help`'s summary, and they
+/// differ on a bad value in a way that matters: `--effort` warns on stderr and carries on with
+/// exit 0, `--thinking` exits 1. The output style has no flag at all, only a settings key, so it
+/// travels inside `--settings`, which is documented and takes a JSON string as well as a path.
 @Suite("AgentRunner argv", .tags(.agentProtocol), .scratchDirectory)
 struct AgentRunnerArgvTests {
     /// Reads the value after a flag, so an assertion says what it means rather than counting
@@ -261,13 +263,104 @@ struct AgentRunnerArgvTests {
         #expect(AgentRunner.fastModeKey(sessionID: "abc") == "session.abc.fastMode")
     }
 
+    // MARK: Output style
+
+    /// The picker that started this: Claude Code gained output styles, and Bloom offers them in
+    /// the composer beside the model and the effort.
+    ///
+    /// There is **no flag**. Checked against the installed CLI (2.1.238) rather than assumed:
+    /// `--help` has no `--output-style`, the binary carries an `outputStyle` settings key described
+    /// as "Controls the output style for assistant responses", and `--settings <file-or-json>`
+    /// takes a JSON string on the command line. So the only way to state one for a single run,
+    /// without writing to a file the user owns, is the object below.
+    @Test("the output style the user picked reaches the CLI")
+    func passesOutputStyle() {
+        let argv = AgentRunner.argv(
+            session: Session(workspaceID: "w"), resume: nil, outputStyle: "Concise"
+        )
+
+        #expect(value(of: "--settings", in: argv) == #"{"outputStyle":"Concise"}"#)
+    }
+
+    /// All four the CLI compiles in, one by one, because the two lists agreeing today is not the
+    /// same as them being pinned to each other. These four and their descriptions were read out of
+    /// the binary, and `OutputStyle.builtIns` is the copy the menu draws.
+    @Test(
+        "every built in style the composer offers reaches the CLI by name",
+        arguments: ["Proactive", "Concise", "Explanatory", "Learning"]
+    )
+    func everyBuiltInOutputStyle(name: String) {
+        let argv = AgentRunner.argv(
+            session: Session(workspaceID: "w"), resume: nil, outputStyle: name
+        )
+
+        #expect(value(of: "--settings", in: argv) == #"{"outputStyle":"\#(name)"}"#)
+        #expect(OutputStyle.builtIns.contains { $0.name == name })
+    }
+
+    /// The default adds nothing at all, which is the whole of the reason it is not sent as a word.
+    ///
+    /// `default` is a real value the CLI understands, so sending it would work. It would also be a
+    /// stated setting, and `--settings` outranks a `.claude/settings.json` in the repository. A
+    /// picker left alone must not quietly switch off a style the project chose for itself.
+    @Test(
+        "the default output style sends no settings at all",
+        arguments: [String?](["", "   ", "default", nil])
+    )
+    func defaultOutputStyleSendsNothing(name: String?) {
+        let argv = AgentRunner.argv(
+            session: Session(workspaceID: "w"), resume: nil, outputStyle: name
+        )
+
+        #expect(!argv.contains("--settings"), "the default still sent a settings object")
+    }
+
+    /// A style is named by a file somebody else wrote, so the name is not Bloom's to trust. Built
+    /// rather than interpolated: a quote in a name would otherwise close the object early and the
+    /// CLI would read the remains as a path, which is what it does with anything it cannot parse.
+    /// It exits 1 with "Settings file not found", before the turn starts.
+    @Test("a custom style name is encoded rather than pasted in")
+    func encodesCustomOutputStyle() throws {
+        let argv = AgentRunner.argv(
+            session: Session(workspaceID: "w"), resume: nil, outputStyle: #"Say "hi""#
+        )
+        let settings = try #require(value(of: "--settings", in: argv))
+        let object = try JSONSerialization.jsonObject(with: Data(settings.utf8)) as? [String: String]
+
+        #expect(object == ["outputStyle": #"Say "hi""#])
+    }
+
+    /// `--settings` takes one value and a second occurrence replaces the first rather than merging
+    /// with it, so nothing else may reach for the flag. This is what would catch a second setting
+    /// being added as its own flag instead of another key in this object.
+    @Test("the settings object is passed once and holds only what Bloom states")
+    func settingsFlagIsUsedOnce() {
+        let argv = AgentRunner.argv(
+            session: Session(workspaceID: "w", effort: "max"),
+            resume: "abc",
+            isFastMode: true,
+            outputStyle: "Explanatory"
+        )
+
+        #expect(argv.filter { $0 == "--settings" }.count == 1)
+    }
+
+    /// The core writes this key and the composer's footer writes the same key, from two modules
+    /// that cannot see each other. Exactly as with fast mode, drift here puts the picker back to
+    /// reaching nothing.
+    @Test("the output style key is the one the composer writes")
+    func outputStyleKeyMatchesTheComposer() {
+        #expect(AgentRunner.outputStyleKey(sessionID: "abc") == "session.abc.outputStyle")
+    }
+
     /// A flag left dangling at the end silently eats whatever the CLI reads next, or nothing.
     @Test("no flag is left without its value")
     func noDanglingFlags() {
         let argv = AgentRunner.argv(
             session: Session(workspaceID: "w", effort: "max"),
             resume: "abc",
-            isFastMode: true
+            isFastMode: true,
+            outputStyle: "Concise"
         )
         let valueless: Set<String> = ["--verbose", "--include-partial-messages"]
 
@@ -542,6 +635,47 @@ struct AgentRunnerProcessTests {
         #expect(try await store.messageCount(sessionID: session.id) == 26)
         let first = try await store.messages(sessionID: session.id)[0]
         #expect(first.kind == .user)
+    }
+
+    /// The whole loop, from the row the composer's picker writes to the argv of a real spawn.
+    ///
+    /// The unit tests above pin the array `argv` builds; this pins that the runner actually reads
+    /// the setting and hands it over. A picker that writes a row nothing reads is the bug this
+    /// suite exists for, and it has happened once already with `--effort`.
+    @Test("the stored output style reaches the process the runner spawns")
+    func spawnsWithTheStoredOutputStyle() async throws {
+        let store = try makeTestStore("agent")
+        let session = try await makeSession(store)
+        try await store.setSetting(AgentRunner.outputStyleKey(sessionID: session.id), "Concise")
+
+        let recorder = ProcessRecorder()
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session, store: store, makeProcess: recorder.factory
+        )
+
+        try await runner.send("hello")
+
+        let process = try #require(recorder.last)
+        let index = try #require(process.launch.arguments.firstIndex(of: "--settings"))
+        #expect(process.launch.arguments[index + 1] == #"{"outputStyle":"Concise"}"#)
+    }
+
+    /// The other half, and the one that matters more: a session nobody has set a style on spawns
+    /// with no settings object at all, so a style the repository chose in its own
+    /// `.claude/settings.json` is left standing.
+    @Test("a session with no output style spawns without a settings object")
+    func spawnsWithoutSettingsByDefault() async throws {
+        let store = try makeTestStore("agent")
+        let session = try await makeSession(store)
+        let recorder = ProcessRecorder()
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session, store: store, makeProcess: recorder.factory
+        )
+
+        try await runner.send("hello")
+
+        let process = try #require(recorder.last)
+        #expect(!process.launch.arguments.contains("--settings"))
     }
 
     @Test("records an error row and fails the session on a non-zero exit with no result")

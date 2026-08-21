@@ -17,6 +17,10 @@ struct ModelSettingsView: View {
     /// Guards the first write. Assigning `@State` inside `.task` fires every `onChange`, and
     /// saving there would overwrite real settings with the fallbacks on every window open.
     @State private var isLoaded = false
+    /// The styles this machine has. No project, because this screen is about every repository at
+    /// once: a style a single checkout defines is offered in that checkout's composer and would be
+    /// a setting nothing could honour here.
+    @State private var outputStyles = ComposerOutputStyleCatalog()
 
     var body: some View {
         Form {
@@ -43,6 +47,18 @@ struct ModelSettingsView: View {
             }
 
             Section {
+                // Claude Code only, and nothing here says so, because nothing here mentions a
+                // backend at all: the model list above is Claude's too. The composer is where a
+                // chat picks a backend, and that is where this picker disappears for Codex.
+                Picker(selection: $defaults.outputStyle) {
+                    ForEach(outputStyles.options(includingCurrent: defaults.outputStyle)) { option in
+                        Text(option.label).tag(option.id)
+                    }
+                } label: {
+                    Text("Default output style")
+                    Text(outputStyles.detail(of: defaults.outputStyle) ?? "How new sessions write")
+                }
+
                 Picker(selection: $defaults.permissionMode) {
                     ForEach(PermissionMode.allCases, id: \.self) { mode in
                         Text(mode.label).tag(mode)
@@ -76,6 +92,7 @@ struct ModelSettingsView: View {
         }
         .formStyle(.grouped)
         .task {
+            await outputStyles.refreshIfStale(project: nil)
             guard let store = app.store else { return }
             defaults = await AppDefaults.load(from: store)
             isLoaded = true
