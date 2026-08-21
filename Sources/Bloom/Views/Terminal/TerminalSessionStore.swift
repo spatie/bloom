@@ -2,25 +2,30 @@ import SwiftUI
 import Observation
 import BloomCore
 
-/// The one place that owns live shells and live run scripts.
+/// The one place that owns live shells.
 ///
 /// SwiftUI rebuilds views constantly, and a `LocalProcessTerminalView` that gets rebuilt takes the
 /// user's shell and their whole scrollback with it. So nothing about a terminal lives in a view:
-/// the views are created once here, keyed by terminal tab id, and handed back unchanged for as
-/// long as the app runs. The same reasoning applies to a dev server started from a run script,
-/// which has to survive switching tabs, collapsing the panel and switching workspaces.
+/// the views are created once here, keyed by pane id, and handed back unchanged for as long as the
+/// app runs.
+///
+/// Which terminals a workspace HAS is not here and never was two things: it is `CenterTabStore`,
+/// alongside the browsers and the review, because a terminal is a tab in the centre column like
+/// any other. This owns the processes those tabs point at, and nothing else.
 @MainActor
 @Observable
 final class TerminalSessionStore {
     static let shared = TerminalSessionStore()
 
-    /// Terminal tabs per workspace, mirroring the `terminal_tabs` table so the UI never has to
-    /// wait on SQLite to draw the tab strip.
-    private(set) var tabsByWorkspace: [String: [TerminalTab]] = [:]
-
     private var terminals: [String: BloomTerminalView] = [:]
-    private var runSessions: [String: RunScriptSession] = [:]
-    private var loading: Set<String> = []
+
+    /// A command waiting for its pane's shell to exist, which is how a run script opens: a terminal
+    /// tab named after the script, with the script's own command typed into it.
+    ///
+    /// Typed rather than exec'd, and that is deliberate. The command lands in the shell's history,
+    /// so Ctrl+C then Up then Return restarts a dev server the way it does in any terminal, and
+    /// when it exits the pane is still a shell rather than a pane that closes itself.
+    private var pendingCommands: [String: String] = [:]
 
     /// Which workspace each pane belongs to, so closing one can name its tmux session without
     /// walking back through tabs that may already be gone.
@@ -28,80 +33,16 @@ final class TerminalSessionStore {
 
     private init() {}
 
-    // MARK: - Tabs
-
-    func tabs(for workspaceID: String) -> [TerminalTab] {
-        tabsByWorkspace[workspaceID] ?? []
-    }
-
-    /// Restores the persisted tabs for a workspace. A workspace that has never been opened gets
-    /// one tab called "Terminal", which is what a user expects to find waiting for them.
-    func load(workspaceID: String, store: Store?) async {
-        guard tabsByWorkspace[workspaceID] == nil, !loading.contains(workspaceID) else { return }
-        loading.insert(workspaceID)
-        defer { loading.remove(workspaceID) }
-
-        var tabs: [TerminalTab] = []
-        if let store {
-            tabs = (try? await store.terminalTabs(workspaceID: workspaceID)) ?? []
-        }
-        if tabs.isEmpty {
-            let tab = TerminalTab(workspaceID: workspaceID, title: "Terminal", sortOrder: 0)
-            if let store { try? await store.upsert(tab) }
-            tabs = [tab]
-        }
-        tabsByWorkspace[workspaceID] = tabs
-    }
-
-    @discardableResult
-    func addTab(workspaceID: String, store: Store?) async -> TerminalTab {
-        var tabs = tabs(for: workspaceID)
-        let tab = TerminalTab(
-            workspaceID: workspaceID,
-            title: nextTitle(in: tabs),
-            sortOrder: (tabs.map(\.sortOrder).max() ?? -1) + 1
-        )
-        tabs.append(tab)
-        tabsByWorkspace[workspaceID] = tabs
-        if let store { try? await store.upsert(tab) }
-        return tab
-    }
-
-    /// Closing the last tab immediately opens a fresh one, because a bottom panel with no terminal
-    /// in it is a dead end.
-    @discardableResult
-    func closeTab(_ tab: TerminalTab, store: Store?) async -> [TerminalTab] {
-        closePanes(of: tab.id, workspaceID: tab.workspaceID)
-
-        var tabs = tabs(for: tab.workspaceID).filter { $0.id != tab.id }
-        tabsByWorkspace[tab.workspaceID] = tabs
-        if let store { try? await store.deleteTerminalTab(id: tab.id) }
-
-        if tabs.isEmpty {
-            let replacement = await addTab(workspaceID: tab.workspaceID, store: store)
-            tabs = [replacement]
-        }
-        return tabs
-    }
-
-    func rename(_ tab: TerminalTab, to title: String, store: Store?) async {
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        var tabs = tabs(for: tab.workspaceID)
-        guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
-        tabs[index].title = trimmed
-        tabsByWorkspace[tab.workspaceID] = tabs
-        if let store { try? await store.upsert(tabs[index]) }
-    }
-
-    private func nextTitle(in tabs: [TerminalTab]) -> String {
-        var index = tabs.count + 1
-        let taken = Set(tabs.map(\.title))
-        while taken.contains("Terminal \(index)") { index += 1 }
-        return tabs.isEmpty ? "Terminal" : "Terminal \(index)"
-    }
-
     // MARK: - Terminals
+
+    /// Queues a command for the pane that has not been drawn yet, so the shell runs it the moment
+    /// it is forked. Nothing happens if the pane's shell already exists: a run script opens a tab
+    /// of its own, and the tab is new every time.
+    func run(_ command: String, inPaneID paneID: String) {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        pendingCommands[paneID] = trimmed
+    }
 
     /// Stops one split pane. The shell's whole process group goes, not just the shell: a pty child
     /// is a session leader, so the group is where the `npm run dev` the user started in that pane
@@ -218,7 +159,23 @@ final class TerminalSessionStore {
         }
 
         terminals[tab.id] = view
+        if let command = pendingCommands.removeValue(forKey: tab.id) { type(command, into: view) }
         return view
+    }
+
+    /// Types a command into a shell that has just been forked.
+    ///
+    /// After a beat, because the pty is ready before zsh is: bytes written into it in the same
+    /// turn as the fork arrive before the line editor has been set up, and zsh's own startup then
+    /// redraws over them. A tenth of a second is longer than any of that takes and is under what
+    /// anybody reads as a delay. The command is still typed rather than exec'd, so a shell whose
+    /// rc files run slower than this simply receives it a moment later.
+    private func type(_ command: String, into view: BloomTerminalView) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard view.process?.running == true else { return }
+            view.send(txt: command + "\n")
+        }
     }
 
     /// `WorkspaceManager` needs a store only to exist, so the panel hands one over once and every
@@ -265,28 +222,16 @@ final class TerminalSessionStore {
             guard let self, let store = self.repoStore,
                   let workspaces = try? await store.workspaces() else { return }
 
-            // Every pane Bloom can still reach: each tab of each workspace still in the database,
-            // expanded through the split layout that tab was last left in.
+            // Every pane Bloom can still reach: each terminal tab of each workspace still in the
+            // database, expanded through the split layout that tab was last left in.
             var live: Set<String> = []
             for workspace in workspaces {
-                let tabs = (try? await store.terminalTabs(workspaceID: workspace.id)) ?? []
-                for tab in tabs { live.formUnion(TerminalSplitStore.shared.panes(of: tab.id)) }
+                for tab in CenterTabStore.shared.terminalTabIDs(for: workspace.id) {
+                    live.formUnion(TerminalSplitStore.shared.panes(of: tab))
+                }
             }
             await persistence.sweepOrphans(livePaneIDs: live)
         }
-    }
-
-    // MARK: - Run scripts
-
-    func runSession(for script: RunScript, workspace: Workspace) -> RunScriptSession {
-        let key = "\(workspace.id)/\(script.id)"
-        if let existing = runSessions[key] {
-            existing.script = script
-            return existing
-        }
-        let session = RunScriptSession(script: script, workspace: workspace)
-        runSessions[key] = session
-        return session
     }
 
     // MARK: - Teardown
@@ -305,13 +250,15 @@ final class TerminalSessionStore {
     func discard(workspaceID: String) async {
         ensurePersistence()
 
+        let tabs = CenterTabStore.shared.terminalTabIDs(for: workspaceID)
+
         // Every shell of this workspace is told first that Bloom is the one ending it, because the
         // kill below reaches them without this app signalling anything: a tmux client whose server
         // destroys its session exits cleanly, and a clean exit is what closes a pane. Without this
-        // a workspace being archived would spend the await closing its own tabs, and the bottom
-        // panel would open a replacement terminal for a worktree that is about to be deleted.
-        for tab in tabs(for: workspaceID) {
-            for pane in TerminalSplitStore.shared.panes(of: tab.id) {
+        // a workspace being archived would spend the await closing its own tabs, and the strip
+        // would open a replacement terminal for a worktree that is about to be deleted.
+        for tab in tabs {
+            for pane in TerminalSplitStore.shared.panes(of: tab) {
                 terminals[pane]?.willStop()
             }
         }
@@ -319,29 +266,22 @@ final class TerminalSessionStore {
         await persistence?.killEverything(workspaceID: workspaceID)
 
         var views: [BloomTerminalView] = []
-        for tab in tabs(for: workspaceID) {
+        for tab in tabs {
             // Every pane of the tab, which for a tab nobody split is the tab's own shell.
-            for pane in TerminalSplitStore.shared.panes(of: tab.id) {
+            for pane in TerminalSplitStore.shared.panes(of: tab) {
                 if let view = terminals[pane] { views.append(view) }
                 terminals[pane] = nil
                 paneOwner[pane] = nil
             }
-            TerminalSplitStore.shared.discard(ownerID: tab.id)
-        }
-        tabsByWorkspace[workspaceID] = nil
-
-        var scripts: [RunScriptSession] = []
-        for (key, session) in runSessions where key.hasPrefix("\(workspaceID)/") {
-            scripts.append(session)
-            runSessions[key] = nil
+            TerminalSplitStore.shared.discard(ownerID: tab)
         }
 
-        await stop(terminals: views, runScripts: scripts)
+        await stop(views)
     }
 
-    /// The quit path: every shell and every run script this launch started, whichever workspace
-    /// they belong to. macOS does not kill a process's children, so anything still alive here gets
-    /// reparented to launchd and keeps its ports for the rest of the day.
+    /// The quit path: every shell this launch started, whichever workspace it belongs to. macOS
+    /// does not kill a process's children, so anything still alive here gets reparented to launchd
+    /// and keeps its ports for the rest of the day.
     ///
     /// No tmux session is killed here, and that is the feature. A tmux-backed pane's pty child is a
     /// *client*, and the server is daemonised into its own session, so signalling the client's
@@ -349,21 +289,19 @@ final class TerminalSessionStore {
     /// it stay alive for the next launch to pick back up.
     func shutdownAll() async {
         let views = Array(terminals.values)
-        let scripts = Array(runSessions.values)
         terminals.removeAll()
-        runSessions.removeAll()
-        tabsByWorkspace.removeAll()
         paneOwner.removeAll()
-        await stop(terminals: views, runScripts: scripts)
+        pendingCommands.removeAll()
+        await stop(views)
     }
 
     /// A hangup to every process group, a bounded wait, then SIGKILL to whatever is left.
-    private func stop(terminals views: [BloomTerminalView], runScripts scripts: [RunScriptSession]) async {
+    private func stop(_ views: [BloomTerminalView]) async {
         // Only shells that are still running get signalled. A shell the user exited long ago has had
         // its pid reaped, and macOS hands pids out again, so signalling that number now could land
         // on somebody else's process group.
         let live = views.filter { $0.process?.running == true }
-        guard !live.isEmpty || !scripts.isEmpty else { return }
+        guard !live.isEmpty else { return }
 
         for view in live {
             // Before the signal, for the reason spelled out in `closePane`.
@@ -371,17 +309,14 @@ final class TerminalSessionStore {
             hangUp(on: view)
             view.shutdown()
         }
-        for script in scripts { script.stop() }
 
-        // A moment for the signal to be taken. A shell goes immediately, a dev server usually wants
-        // to close its listeners first.
+        // A moment for the signal to be taken. A shell goes immediately, a dev server started in
+        // one usually wants to close its listeners first.
         try? await Task.sleep(for: .milliseconds(250))
-        await waitForExit(of: scripts, upTo: .seconds(3.25))
 
-        // Anything that sat through SIGTERM is out of chances. A run script escalates to SIGKILL on
-        // its own after three seconds, so this second round is really for the shells. Their pids are
-        // still safe to name: `terminate()` stops the app from reaping them, so nothing has reused
-        // the number in the meantime.
+        // Anything that sat through SIGTERM is out of chances. Their pids are still safe to name:
+        // `terminate()` stops the app from reaping them, so nothing has reused the number in the
+        // meantime.
         for view in live { signal(SIGKILL, toGroupOf: view) }
     }
 
@@ -394,14 +329,4 @@ final class TerminalSessionStore {
         killpg(pid, number)
     }
 
-    /// Polls rather than awaits because a run script owns its process privately. It returns as soon
-    /// as everything has gone, which is the normal case within a frame or two.
-    private func waitForExit(of scripts: [RunScriptSession], upTo limit: Duration) async {
-        guard scripts.contains(where: \.isRunning) else { return }
-        let deadline = ContinuousClock.now.advanced(by: limit)
-        while ContinuousClock.now < deadline {
-            if !scripts.contains(where: \.isRunning) { return }
-            try? await Task.sleep(for: .milliseconds(50))
-        }
-    }
 }

@@ -50,13 +50,9 @@ enum FrameProbe {
 
     private static var driver: String { value(for: "--probe-driver") ?? "mouse" }
 
-    /// Window state a run wants to start in, so the columns can be taken out of the picture one at
-    /// a time. Read by `AppModel`, which owns both switches.
-    ///
-    /// `--probe-no-inspector` leaves the centre column alone with the sidebar;
-    /// `--probe-no-panel` keeps the inspector but drops the terminal inside it.
+    /// Window state a run wants to start in, so the inspector can be taken out of the picture and
+    /// the centre column measured on its own. Read by `AppModel`, which owns the switch.
     static var wantsInspector: Bool { !CommandLine.arguments.contains("--probe-no-inspector") }
-    static var wantsBottomPanel: Bool { !CommandLine.arguments.contains("--probe-no-panel") }
     private static var sweeps: Int { Int(value(for: "--probe-sweeps") ?? "") ?? 6 }
     private static var selection: String? { value(for: "--probe-select") }
 
@@ -326,7 +322,6 @@ enum FrameProbe {
             // two configurations converged on the same number for a reason that had nothing to do
             // with either of them.
             "inspector": wantsInspector,
-            "bottomPanel": wantsBottomPanel,
             "restoredWorkspace":
                 UserDefaults.standard.string(forKey: "sidebar.lastWorkspaceID") ?? "none",
             "configuration": buildConfiguration,

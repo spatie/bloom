@@ -124,13 +124,6 @@ struct BloomCommands: Commands {
             .keyboardShortcut("i", modifiers: [.command, .option])
             .disabled(model.selectedModel == nil)
 
-            Button("Toggle Bottom Panel") {
-                guard model.selectedModel != nil else { return }
-                model.isBottomPanelVisible.toggle()
-            }
-            .keyboardShortcut("b", modifiers: [.command, .option])
-            .disabled(model.selectedModel == nil)
-
             Divider()
 
             Button("Next Workspace") {
@@ -231,6 +224,8 @@ struct BloomCommands: Commands {
 
             Divider()
 
+            runScriptsMenu
+
             Button("Stop Agent") {
                 model.selectedModel?.activeTranscript?.stop()
             }
@@ -265,6 +260,44 @@ struct BloomCommands: Commands {
                 FeedbackPresenter.shared.open(.prompt)
             }
         }
+    }
+
+    /// The repository's run scripts, each of which opens a terminal tab named after itself with
+    /// its command already running.
+    ///
+    /// In the Workspace menu because a run script runs in one worktree, against one port, and the
+    /// project settings window that defines them is not about any particular workspace. They used
+    /// to be tabs in the panel at the bottom of the inspector, each with its own start, stop and
+    /// restart bar over a read-only log. A terminal is that and more: Ctrl+C stops the server, Up
+    /// and Return start it again, and the pane can be split, moved and put beside the conversation
+    /// like every other tab in the column.
+    ///
+    /// Absent rather than greyed out when the repository has none, because a permanently empty
+    /// submenu teaches nothing. See `WorkspaceModel.refreshSettings` for when the list is read.
+    @ViewBuilder
+    private var runScriptsMenu: some View {
+        if let workspace = model.selectedModel, !workspace.settings.runScripts.isEmpty {
+            Menu("Run") {
+                ForEach(workspace.settings.runScripts) { script in
+                    Button(script.name) { run(script, in: workspace) }
+                }
+            }
+
+            Divider()
+        }
+    }
+
+    /// A new tab every time, rather than one that is reused. Two copies of a dev server is a thing
+    /// somebody does on purpose, and a tab that silently restarted the one already running would
+    /// throw away the log they were reading.
+    private func run(_ script: RunScript, in workspace: WorkspaceModel) {
+        let tab = CenterTabStore.shared.add(
+            kind: .terminal, workspaceID: workspace.workspace.id, title: script.name
+        )
+        // Queued rather than sent: the shell is forked by `ToolPaneView`, once it has settled the
+        // port this script is about to bind. See `TerminalSessionStore.run(_:inPaneID:)`.
+        TerminalSessionStore.shared.run(script.command, inPaneID: tab.id)
+        CenterPaneStore.shared.show(.tool(tab.id), in: workspace)
     }
 
     /// Splits the pane the user is in and shows the same tab in the half that opens, which is what

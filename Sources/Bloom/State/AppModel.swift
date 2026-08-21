@@ -124,6 +124,11 @@ final class AppModel {
             storedSelection = newValue
             Self.rememberSelection(newValue)
             SwitchTrace.mark("selection.set")
+            // A switch is the moment to re-read the repository's settings. The Workspace menu
+            // lists this repository's run scripts, and somebody who has just added one expects to
+            // find it there. The read itself is off the main actor and nothing waits for it, so it
+            // is not on the switch's critical path. See `WorkspaceModel.refreshSettings`.
+            if let id = newValue.workspaceID { workspaceModels[id]?.refreshSettings() }
             guard let id = newValue.workspaceID, workspaceModels[id] == nil,
                   let workspace = workspaces.first(where: { $0.id == id }) else {
                 SwitchTrace.mark("model.reused")
@@ -165,16 +170,15 @@ final class AppModel {
 
     /// Window chrome, not per-workspace state.
     ///
-    /// These used to live on `WorkspaceModel`, which meant the only way to bind them was a
+    /// This used to live on `WorkspaceModel`, which meant the only way to bind it was a
     /// `Binding(get:set:)` reading through an optional selected model. That binding's value
     /// flipped as the selection resolved, and `.inspector(isPresented:)` reacting to it mid layout
     /// put the window into an unbounded Update Constraints loop that AppKit eventually turned into
-    /// a crash. Owning them here makes them a plain bindable value. It also matches how a Mac app
+    /// a crash. Owning it here makes it a plain bindable value. It also matches how a Mac app
     /// behaves: an inspector is shown or hidden for the window, not remembered per document.
-    /// Both default to on, and both can be started off by `FrameProbe`, which is how a resize
-    /// measurement tells the centre column's cost apart from the inspector's and the terminal's.
+    /// It defaults to on and can be started off by `FrameProbe`, which is how a resize measurement
+    /// tells the centre column's cost apart from the inspector's.
     var isInspectorVisible = FrameProbe.wantsInspector
-    var isBottomPanelVisible = FrameProbe.wantsBottomPanel
 
     var alert: BloomAlert?
     /// The corner notice. See `BloomNotice`. Set from anywhere, drawn once by `RootView`.
@@ -247,6 +251,18 @@ final class AppModel {
             // this process, so anything still `running` here died with the last launch and would
             // otherwise spin in the sidebar forever.
             try await store.recoverInterruptedSetups()
+            // Before anything can draw a tab strip, because it moves the terminal tabs the bottom
+            // panel used to keep in SQLite into the centre column's own list. A workspace whose
+            // strip had already been read from user defaults would not show them until the next
+            // launch. See `CenterTabStore.adoptTerminalTabs`.
+            await CenterTabStore.shared.adoptTerminalTabs(from: store)
+            // The store every shell's environment is built from, handed over once. It also starts
+            // the launch sweep, which kills tmux sessions no tab names any more. It used to be the
+            // bottom panel that did this on the first workspace opened; nothing opens now until a
+            // terminal tab is drawn, and a launch where none is drawn is exactly the launch whose
+            // orphans nobody would collect.
+            TerminalSessionStore.shared.useStore(store)
+            BottomPanelDefaults.forget()
             await reload()
             // After `reload`, because the stored id is only trustworthy once there is a list to
             // check it against. Before `isLoaded`, so the window never paints Home first and then

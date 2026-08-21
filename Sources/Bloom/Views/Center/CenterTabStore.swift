@@ -60,18 +60,60 @@ final class CenterTabStore {
         tabsByWorkspace[workspaceID] = Self.restore(workspaceID: workspaceID)
     }
 
+    /// `title` is only passed by a caller that has a better name than "Terminal 3", which today
+    /// means a run script opening a shell called after itself. Everything else takes the numbered
+    /// name the strip has always given a new tab.
     @discardableResult
-    func add(kind: CenterTab.Kind, workspaceID: String, url: String = "") -> CenterTab {
+    func add(
+        kind: CenterTab.Kind, workspaceID: String, url: String = "", title: String? = nil
+    ) -> CenterTab {
         var tabs = tabs(for: workspaceID)
         let tab = CenterTab(
             workspaceID: workspaceID,
             kind: kind,
-            title: Self.nextTitle(for: kind, in: tabs),
+            title: title ?? Self.nextTitle(for: kind, in: tabs),
             url: url
         )
         tabs.append(tab)
         apply(tabs, to: workspaceID)
         return tab
+    }
+
+    /// Every terminal tab of a workspace, by id, without loading the workspace into the cache.
+    ///
+    /// The launch sweep asks this about workspaces nobody has opened, and it has to be told about
+    /// their panes anyway: a tmux session whose tab is only on disk is still one Bloom can reach,
+    /// and a sweep that could not see it would kill the shell the user left running in it.
+    func terminalTabIDs(for workspaceID: String) -> [String] {
+        let tabs = tabsByWorkspace[workspaceID] ?? Self.restore(workspaceID: workspaceID)
+        return tabs.filter { $0.kind == .terminal }.map(\.id)
+    }
+
+    /// Takes over the terminal tabs the bottom panel used to keep in SQLite, once, and drops the
+    /// rows behind it.
+    ///
+    /// Each tab keeps its id, and that is the whole point of doing it this way rather than opening
+    /// fresh tabs: a pane id IS the tmux session name and the key `TerminalSplitStore` files a
+    /// split layout under, so a shell the user left running in a split bottom panel tab comes back
+    /// attached, in the same shape, in the centre column.
+    func adoptTerminalTabs(from store: Store?) async {
+        guard let store, let workspaces = try? await store.workspaces() else { return }
+
+        for workspace in workspaces {
+            guard let rows = try? await store.terminalTabs(workspaceID: workspace.id),
+                  !rows.isEmpty else { continue }
+
+            var tabs = tabsByWorkspace[workspace.id] ?? Self.restore(workspaceID: workspace.id)
+            let known = Set(tabs.map(\.id))
+            for row in rows where !known.contains(row.id) {
+                tabs.append(CenterTab(
+                    id: row.id, workspaceID: workspace.id, kind: .terminal, title: row.title
+                ))
+            }
+            apply(tabs, to: workspace.id)
+
+            for row in rows { try? await store.deleteTerminalTab(id: row.id) }
+        }
     }
 
     /// Moves a tool tab to another place in the strip. Tool tabs keep their own run of the strip

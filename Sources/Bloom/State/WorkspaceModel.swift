@@ -3,17 +3,6 @@ import Observation
 import Synchronization
 import BloomCore
 
-/// Which tab the bottom panel of the inspector is showing.
-enum BottomTab: Hashable {
-    case setup
-    case run(String)
-    case terminal(String)
-
-    /// "Whichever terminal tab is first." A workspace picks its bottom tab before its terminal
-    /// tabs have been read from the store, so it cannot name one by id yet.
-    static let firstTerminal = BottomTab.terminal("")
-}
-
 /// A git failure carried back across a task boundary. `any Error` is not `Sendable`, and the only
 /// part of it the UI shows is the message.
 struct GitFailure: Error, Sendable {
@@ -105,8 +94,7 @@ final class WorkspaceModel {
     /// claiming a clean branch before it has looked.
     var localWork: LocalWork?
 
-    // Bottom panel.
-    var bottomTab: BottomTab = .firstTerminal
+    // Setup.
     var setupOutput: String = ""
     /// The tail Bloom keeps in memory. A setup script that prints a megabyte is not unusual, and
     /// none of it is worth re-rendering on every append.
@@ -180,6 +168,30 @@ final class WorkspaceModel {
         self.workspace = workspace
         self.app = app
         self.setupOutput = workspace.setupLog
+        refreshSettings()
+    }
+
+    /// What this workspace's repository asks for: the setup script, the run scripts, the rest of
+    /// `.conductor/settings.toml`.
+    ///
+    /// Held here rather than read where it is needed because the Workspace menu reads it, and a
+    /// `Commands` body is not a view: it cannot await a file, and it cannot carry a task. It is
+    /// re-read whenever the workspace is selected, so a run script added in the project settings
+    /// window is in the menu the next time the workspace is on screen.
+    private(set) var settings = RepoSettings()
+
+    /// Off the main actor, because this parses up to six files and is called on every switch.
+    /// Nothing waits for it: the menu shows the previous answer until this one lands, and on the
+    /// first launch of a workspace that is an empty one for a few milliseconds.
+    func refreshSettings() {
+        guard let path = repo?.path else { return }
+        Task { [weak self] in
+            let loaded = await Task.detached(priority: .utility) {
+                SettingsLoader.load(repo: path)
+            }.value
+            guard let self, self.settings != loaded else { return }
+            self.settings = loaded
+        }
     }
 
     var store: Store? { app.store }
@@ -377,7 +389,8 @@ final class WorkspaceModel {
     /// Which setup run the stored `setupTask` belongs to.
     private var setupGeneration = 0
 
-    /// Runs the setup script, streaming into the Setup tab, then sends the opening prompt.
+    /// Runs the setup script, streaming into the transcript's setup row, then sends the opening
+    /// prompt.
     func runSetupThenSend(prompt: String?, repo: Repo) async {
         guard let manager = app.manager else { return }
 
@@ -393,7 +406,6 @@ final class WorkspaceModel {
             setupStartedAt = .now
             setupDurationMS = nil
             setupExitStatus = nil
-            bottomTab = .setup
             setupOutput = ""
             // A machine with no free block left is not a reason to refuse to run setup. The script
             // simply gets no port to bind, which it can decide for itself what to do about.
@@ -432,15 +444,16 @@ final class WorkspaceModel {
             guard !Task.isCancelled else { return }
 
             if !succeeded {
+                // The one sentence every route says about a failed setup, rather than a second
+                // one written here that would drift from it. It names no tab, which is what makes
+                // it survive the tab it used to name. See `SetupFailure`.
                 app.alert = BloomAlert(
                     title: "Setup failed for \(workspace.name)",
-                    message: "The agent was not started. Check the Setup tab for the output."
+                    message: SetupFailure.instruction
                 )
                 NotificationService.shared.setupFailed(workspace: workspace)
-                bottomTab = .setup
                 return
             }
-            bottomTab = .firstTerminal
         }
 
         await reloadSessions()
