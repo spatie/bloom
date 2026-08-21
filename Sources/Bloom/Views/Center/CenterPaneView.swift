@@ -78,7 +78,11 @@ struct CenterPaneView: View {
         case .tool(let tabID):
             if let tab = CenterTabStore.shared.tabs(for: model.workspace.id)
                 .first(where: { $0.id == tabID }) {
-                ToolPaneView(model: model, tab: tab) { split($0, opening: $1) }
+                ToolPaneView(
+                    model: model, tab: tab,
+                    splitColumn: { split($0, opening: $1) },
+                    paneMenu: hostedMenu
+                )
             } else {
                 emptyState
             }
@@ -100,7 +104,7 @@ struct CenterPaneView: View {
             .allowsHitTesting(false)
     }
 
-    private var menu: some View {
+    private var menu: CenterPaneMenu {
         CenterPaneMenu(
             isSplit: isSplit,
             split: { axis, kind in split(axis, opening: kind) },
@@ -109,6 +113,20 @@ struct CenterPaneView: View {
                 tabs.close(pane: pane, in: tab, of: model.workspace.id)
             }
         )
+    }
+
+    /// The same menu, as an `NSMenu`, for a pane whose content answers the right click itself.
+    ///
+    /// `.contextMenu` above is how every other pane gets this, and it only works when SwiftUI sees
+    /// the event. A browser does not let it: the page is a `WKWebView` and builds a menu of its
+    /// own. So the same view is rendered to an `NSMenu` here and handed down, rather than a second
+    /// list of the same items being written somewhere a browser can reach. See
+    /// `BrowserPageWebView`.
+    ///
+    /// Built on each right click and not held, because `isSplit` and what the pane is showing can
+    /// both have changed since the last one.
+    private func hostedMenu() -> NSMenu {
+        NSHostingMenu(rootView: menu)
     }
 
     // MARK: - Actions

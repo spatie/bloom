@@ -24,10 +24,12 @@ import BloomCore
 /// into a contextual menu as it presents it, and they never appear in `NSMenu.items` at all. A
 /// picture taken the easy way would be a picture of a menu the app never shows.
 ///
-/// `browser` is odder still and is not one of ours at all. The page's contextual menu belongs to
-/// WebKit, and on this macOS it is drawn out of process: the `NSMenu` that begins tracking holds
-/// one hidden placeholder item and never the rows on screen, so there is nothing to read and the
-/// photograph is the only account of what the menu says. It is put up by right clicking a real
+/// `browser` is half ours and half WebKit's. The page's contextual menu is WebKit's, and on this
+/// macOS it is drawn out of process: the `NSMenu` that begins tracking holds one hidden placeholder
+/// item and never the rows on screen, so there is nothing to read and the photograph is the only
+/// account of what the menu says. Under it are the pane's own items, which `BrowserPageWebView`
+/// merges in, and they are the reason this part is worth having: whether they arrive and whether
+/// they draw is a question only a picture answers. It is put up by right clicking a real
 /// `BrowserSession`'s page view, on a page loaded from a string, so nothing is fetched to take a
 /// picture. WebKit answers a right click through its web process rather than on the way back out
 /// of the event, so this part cannot use the loop below: it sends the click and waits.
@@ -269,6 +271,12 @@ enum MenuProbe {
 
         // Empty, so the session has nothing to load and the page below is the only thing in it.
         let session = BrowserSession(url: "")
+        // The pane's own menu, which the page puts under WebKit's. Split, so Close Pane is in the
+        // picture: it is only offered when there is a pane to close back to. The same view
+        // `CenterPaneView` hands down, so this cannot photograph items the app does not have.
+        session.webView.paneMenu = {
+            NSHostingMenu(rootView: CenterPaneMenu(isSplit: true, split: { _, _ in }, close: {}))
+        }
         session.pageView.frame = content.bounds
         content.addSubview(session.pageView)
         session.webView.loadHTMLString(

@@ -6,6 +6,10 @@ import SwiftUI
 /// the agent is working in, which is the whole reason a workspace gets a port of its own.
 struct BrowserTabView: View {
     var tab: CenterTab
+    /// The menu the pane this tab is filling offers, which the page puts under its own. Handed
+    /// down rather than reached for, for the reason `ToolPaneView.splitColumn` is: only the pane
+    /// above knows which pane it is.
+    var paneMenu: (@MainActor () -> NSMenu)?
 
     /// What the field shows, which is not where the page is. Typing has to be allowed to disagree
     /// with the page until Return is pressed, so this is local state and the session is only told
@@ -26,7 +30,7 @@ struct BrowserTabView: View {
         VStack(spacing: 0) {
             toolbar(session)
             Hairline()
-            BrowserWebView(session: session)
+            BrowserWebView(session: session, paneMenu: paneMenu)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Palette.surface)

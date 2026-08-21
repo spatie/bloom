@@ -13,6 +13,9 @@ struct ToolPaneView: View {
     /// down rather than reached for, because only the pane above knows which pane it is, and a
     /// terminal's contextual menu now offers the same three kinds the centre pane's own menu does.
     var splitColumn: @MainActor (SplitAxis, PaneKind) -> Void
+    /// The pane's own contextual menu, as an `NSMenu`, for the kinds of tab that take the right
+    /// click before SwiftUI is offered it. A browser is one; a terminal answers with its own.
+    var paneMenu: (@MainActor () -> NSMenu)?
 
     /// The tab whose shell has had its environment and its port settled, or nothing.
     ///
@@ -49,7 +52,7 @@ struct ToolPaneView: View {
             .task(id: tab.id) { await prepareTerminal() }
 
         case .browser:
-            BrowserTabView(tab: tab)
+            BrowserTabView(tab: tab, paneMenu: paneMenu)
                 .id(tab.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 

@@ -15,7 +15,7 @@ import WebKit
 @MainActor
 @Observable
 final class BrowserSession {
-    let webView: WKWebView
+    let webView: BrowserPageWebView
 
     /// What a pane actually puts on screen, which is not the web view itself.
     ///
@@ -40,7 +40,7 @@ final class BrowserSession {
         Self.preferInspectorDocked()
         let configuration = WKWebViewConfiguration()
         Self.enableDeveloperExtras(on: configuration.preferences)
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        webView = BrowserPageWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = true
         pageView.attach(webView)
         // A dev server is the whole point of this tab, and one that is still booting answers with
