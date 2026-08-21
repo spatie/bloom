@@ -277,16 +277,21 @@ struct BloomCommands: Commands {
     /// have to leave the sentence explaining what went wrong. The other has just edited the script
     /// in the project settings window, and comes back to the workspace to try it.
     ///
+    /// It is no longer the only menu with it. A workspace row's own menu carries it as well, which
+    /// is where somebody who is thinking about one workspace rather than about the app looks
+    /// first: this item was in the menu bar alone for long enough that its author went hunting for
+    /// it on the row and could not find it. See `WorkspaceMenuItems`.
+    ///
     /// Greyed rather than absent while it runs, because the reason it cannot be pressed is that it
     /// is already doing the thing, and an item that vanished mid run would read as the feature
-    /// having gone away.
+    /// having gone away. That, and the absent case beside it, are `SetupRunOffer` now: the same
+    /// item is on a workspace row's own menu, and the two must not word it differently or disagree
+    /// about when it can be pressed.
     @ViewBuilder
     private var setupItem: some View {
-        if let workspace = model.selectedModel, workspace.settings.setupScript != nil {
-            Button(workspace.hasRunSetup ? "Run Setup Again" : "Run Setup") {
-                workspace.runSetupAgain()
-            }
-            .disabled(!workspace.canRunSetup)
+        if let workspace = model.selectedModel, let offer = workspace.setupRunOffer {
+            Button(offer.title) { workspace.runSetupAgain() }
+                .disabled(!offer.isEnabled)
         }
     }
 

@@ -72,8 +72,8 @@ struct RepoScriptsSection: View {
     /// to ask which worktree was meant. Saying where it does live costs a line and closes the loop
     /// somebody editing a broken setup script is standing in.
     private static let rerun =
-        "To run the setup script again in a workspace, use Run Setup Again in the Workspace menu, "
-        + "or the button on the failed setup row in its transcript."
+        "To run the setup script again in a workspace, use Run Setup Again on the workspace's own "
+        + "row, in the Workspace menu, or on the failed setup row in its transcript."
 
     // MARK: - Run scripts
 

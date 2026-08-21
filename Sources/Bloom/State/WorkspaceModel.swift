@@ -196,14 +196,22 @@ final class WorkspaceModel {
     /// Nothing waits for it: the menu shows the previous answer until this one lands, and on the
     /// first launch of a workspace that is an empty one for a few milliseconds.
     func refreshSettings() {
+        Task { [weak self] in await self?.reloadSettings() }
+    }
+
+    /// The same read, awaited, for the one caller that cannot carry on without the answer.
+    ///
+    /// `MenuProbe` builds a workspace row's menu synchronously and photographs it, and the setup
+    /// item is not in that menu until the settings file has been read. Everything else wants the
+    /// call above, which returns immediately and lets the menu show the previous answer until this
+    /// one lands.
+    func reloadSettings() async {
         guard let path = repo?.path else { return }
-        Task { [weak self] in
-            let loaded = await Task.detached(priority: .utility) {
-                SettingsLoader.load(repo: path)
-            }.value
-            guard let self, self.settings != loaded else { return }
-            self.settings = loaded
-        }
+        let loaded = await Task.detached(priority: .utility) {
+            SettingsLoader.load(repo: path)
+        }.value
+        guard settings != loaded else { return }
+        settings = loaded
     }
 
     var store: Store? { app.store }
@@ -539,10 +547,32 @@ final class WorkspaceModel {
         return succeeded
     }
 
+    /// The setup item this workspace's menus should draw, or nil when there should be none.
+    ///
+    /// The three facts are gathered here and the decision is taken in `SetupRunOffer`, in the
+    /// core, because three menus draw this item now and a menu is a place nothing can test.
+    ///
+    /// A workspace whose project has been removed has no repository to read a settings file from,
+    /// so `settings` was never loaded and there is nothing to offer. That is folded into the first
+    /// fact rather than given a case of its own: to this menu the two are one answer, which is
+    /// that there is no script here to run.
+    var setupRunOffer: SetupRunOffer? {
+        SetupRunOffer.offer(
+            hasSetupScript: repo != nil && settings.setupScript != nil,
+            hasRunSetup: hasRunSetup,
+            isRunning: isRunningSetup
+        )
+    }
+
     /// Whether there is a setup script to run in this worktree at all, which is what the two
     /// controls that offer a re-run are enabled by.
+    ///
+    /// The same question `setupRunOffer` answers, asked by the one caller that draws no menu item:
+    /// the failed setup row's link in the transcript, which is either there or not. Written in
+    /// terms of the offer rather than beside it, so a rule added to one cannot go missing from the
+    /// other.
     var canRunSetup: Bool {
-        repo != nil && settings.setupScript != nil && !isRunningSetup
+        setupRunOffer?.isEnabled == true
     }
 
     /// Whether setup has ever run here, so a control can say "again" only when there was a first

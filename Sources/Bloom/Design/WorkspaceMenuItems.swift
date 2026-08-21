@@ -21,12 +21,19 @@ import BloomCore
 ///
 /// ## Three groups, and the rule is what each one acts on
 ///
-/// The first three go somewhere else: they open the worktree, show it, or put its branch on the
-/// clipboard, and every one of them is about the checkout on disk. The next four are about the ROW
+/// The first group is about the CHECKOUT ON DISK: it opens the worktree, shows it, puts its branch
+/// on the clipboard, and runs the repository's setup script in it. The next four are about the ROW
 /// and change nothing outside Bloom: whether it floats, whether it is shouting at you, what colour
 /// it is, what it is called. The last destroys it, behind a rule of its own, which is the grouping
 /// this menu already had and the same rhythm a project header's menu is built on. See
 /// `RepoHeaderRow` for why three rules and not four.
+///
+/// Running setup is the only one of the four that CHANGES the checkout rather than looking at it,
+/// so it sits at the foot of its group rather than at the top next to Open in Editor, where a slip
+/// of the pointer would start a `composer install`. It is not in the row group, which is for the
+/// things that change nothing outside Bloom, and it is not down beside Archive, which is a group
+/// of one on purpose. A fourth rule for one item would say less than the rule the first group
+/// already has.
 ///
 /// Ask Siri, which the owner sees at the top of this menu, is not in this list and is not ours to
 /// move. macOS 27 puts it on context menus itself for a user who has Apple Intelligence on. The
@@ -67,6 +74,7 @@ struct WorkspaceMenuItems: View {
         Button("Open in Editor") { Reveal.inEditor(workspace.path) }
         Button("Reveal in Finder") { Reveal.inFinder(workspace.path) }
         Button("Copy branch name") { Clipboard.copy(workspace.branch) }
+        setupItem
         Divider()
         Button(workspace.pinned ? "Unpin" : "Pin") {
             Task { await app.togglePinned(workspace) }
@@ -92,6 +100,36 @@ struct WorkspaceMenuItems: View {
         // disagreement with this. See `SidebarWorkspaceRow.confirmRowArchive`.
         Button("Archive", role: .destructive) {
             Task { await app.archive(workspace) }
+        }
+    }
+
+    /// Running this repository's setup script in this worktree, worded and gated by
+    /// `SetupRunOffer`, which is also what the menu bar's Workspace menu draws. Absent when the
+    /// repository has no setup script, greyed while a run is going, and "Run Setup" rather than
+    /// "Run Setup Again" on a workspace where it has never run.
+    ///
+    /// **Nothing is offered for a workspace with no live `WorkspaceModel`, and that is not a
+    /// no-op waiting to happen.** Two of the three facts the item is made of are the model's:
+    /// whether the repository has a setup script is what its last read of the settings file said,
+    /// and a settings file is read off disk, asynchronously, per model. A workspace that has not
+    /// been selected in this launch has never had one made, so the menu would be guessing at both
+    /// the title and whether to draw the row at all.
+    ///
+    /// It cannot make one to ask, either. `AppModel.model(for:)` writes, and calling it from a
+    /// view body crashed the app once, which is why `existingModel(for:)` exists and is what this
+    /// reads. Making one in the press instead would be worse than absent: a brand new model's
+    /// settings are empty until its first read lands, so `runSetupAgain`'s own guard would refuse
+    /// the run that was just asked for and say nothing about it.
+    ///
+    /// So it is the rule the transcript's failed setup link already follows, for the same reason.
+    /// See `WorkspaceEventsView.showsRunSetupAgain`. What would remove the gap is the repository's
+    /// settings being cached per project rather than per workspace model, which is a change with
+    /// its own invalidation question and is not this one.
+    @ViewBuilder
+    private var setupItem: some View {
+        if let model = app.existingModel(for: workspace.id), let offer = model.setupRunOffer {
+            Button(offer.title) { model.runSetupAgain() }
+                .disabled(!offer.isEnabled)
         }
     }
 

@@ -106,6 +106,15 @@ enum MenuProbe {
             if part == .row || part == .colour {
                 let fresh = AppModel()
                 await fresh.bootstrap()
+                // The row menu's setup item is drawn only for a workspace that has a live
+                // `WorkspaceModel` with its repository's settings read, which in the app is every
+                // workspace you have selected. Prepared here, awaited rather than fired off,
+                // because the menu below is built synchronously and a settings read that has not
+                // landed yet would photograph as the shorter menu an unopened workspace has. This
+                // is not a view body, which is the rule `AppModel.model(for:)` is written against.
+                if let workspace = fresh.workspaces.first {
+                    await fresh.model(for: workspace).reloadSettings()
+                }
                 model = fresh
             }
             // Read before the menu is built, because building it is synchronous and the scan is a
