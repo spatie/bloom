@@ -150,7 +150,7 @@ struct TmuxOrphanTests {
     @Test("A session whose pane is still reachable is kept")
     func keepsLive() {
         let pane = newID()
-        #expect(TmuxSessions.orphans(sessions: [session(pane)], livePaneIDs: [pane]).isEmpty)
+        #expect(TmuxSessions.orphans(sessions: [session(pane)], livePaneIDs: [pane], sparing: []).isEmpty)
     }
 
     @Test("A session whose pane is gone is swept")
@@ -158,7 +158,7 @@ struct TmuxOrphanTests {
         let live = newID()
         let dead = newID()
         let orphans = TmuxSessions.orphans(
-            sessions: [session(live), session(dead)], livePaneIDs: [live]
+            sessions: [session(live), session(dead)], livePaneIDs: [live], sparing: []
         )
         #expect(orphans == [session(dead)])
     }
@@ -170,7 +170,7 @@ struct TmuxOrphanTests {
         let archived = [newID(), newID()]
         let surviving = newID()
         let orphans = TmuxSessions.orphans(
-            sessions: (archived + [surviving]).map(session), livePaneIDs: [surviving]
+            sessions: (archived + [surviving]).map(session), livePaneIDs: [surviving], sparing: []
         )
         #expect(Set(orphans) == Set(archived.map(session)))
     }
@@ -178,7 +178,7 @@ struct TmuxOrphanTests {
     @Test("A session the user created themselves is never swept")
     func leavesForeignSessions() {
         let orphans = TmuxSessions.orphans(
-            sessions: ["work", "dotfiles", "0", "bloom", "bloom_only-two-fields"], livePaneIDs: []
+            sessions: ["work", "dotfiles", "0", "bloom", "bloom_only-two-fields"], livePaneIDs: [], sparing: []
         )
         #expect(orphans.isEmpty)
     }
@@ -186,7 +186,7 @@ struct TmuxOrphanTests {
     @Test("Nothing live means nothing survives, which is what an empty database should do")
     func sweepsEverythingWhenNothingIsLive() {
         let sessions = [newID(), newID()].map(session)
-        #expect(TmuxSessions.orphans(sessions: sessions, livePaneIDs: []) == sessions)
+        #expect(TmuxSessions.orphans(sessions: sessions, livePaneIDs: [], sparing: []) == sessions)
     }
 
     @Test("Turning the setting off makes every session unreachable, so the sweep takes them all")
@@ -194,13 +194,49 @@ struct TmuxOrphanTests {
         let live = newID()
         let panes = TmuxSessions.reachablePanes([live], persistenceEnabled: false)
         #expect(panes.isEmpty)
-        #expect(TmuxSessions.orphans(sessions: [session(live)], livePaneIDs: panes) == [session(live)])
+        #expect(TmuxSessions.orphans(sessions: [session(live)], livePaneIDs: panes, sparing: []) == [session(live)])
     }
 
     @Test("With the setting on, a live pane stays reachable")
     func settingOnKeepsLivePanes() {
         let live = newID()
         #expect(TmuxSessions.reachablePanes([live], persistenceEnabled: true) == [live])
+    }
+
+    /// The whole point of the doubt channel. A workspace whose stored tab list would not decode
+    /// contributes no pane ids, so without this it reads exactly like an archived workspace and
+    /// every shell it holds is killed. A renamed coding key on `CenterTab` is one edit away from
+    /// that, and a killed shell cannot be got back.
+    @Test("A workspace whose panes could not be enumerated keeps every session it owns")
+    func sparesDoubtfulWorkspace() {
+        let unknown = [newID(), newID()]
+        #expect(TmuxSessions.orphans(
+            sessions: unknown.map(session), livePaneIDs: [], sparing: [workspace]
+        ).isEmpty)
+    }
+
+    /// Sparing is per workspace, not a blanket amnesty: the workspaces that did read cleanly are
+    /// still swept, so one unreadable record cannot stop the sweep collecting anything at all.
+    @Test("Sparing one workspace does not spare another")
+    func sparingIsPerWorkspace() {
+        let other = WorkspaceID.new()
+        let dead = TmuxSessions.sessionName(workspaceID: other, paneID: newID())
+        let orphans = TmuxSessions.orphans(
+            sessions: [session(newID()), dead], livePaneIDs: [], sparing: [workspace]
+        )
+        #expect(orphans == [dead])
+    }
+
+    /// Doubt outranks the setting. Off means the shells of every workspace whose panes are known
+    /// go; it cannot mean "kill what nothing could read", because that is the answer whether the
+    /// shells are wanted or not.
+    @Test("Turning the setting off still does not sweep a workspace nobody could enumerate")
+    func settingOffStillSparesDoubt() {
+        let live = newID()
+        let panes = TmuxSessions.reachablePanes([live], persistenceEnabled: false)
+        #expect(TmuxSessions.orphans(
+            sessions: [session(live)], livePaneIDs: panes, sparing: [workspace]
+        ).isEmpty)
     }
 
     @Test("list-sessions output is read line by line")

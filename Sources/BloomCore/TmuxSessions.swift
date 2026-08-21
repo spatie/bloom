@@ -159,14 +159,31 @@ public enum TmuxSessions {
         persistenceEnabled ? panes : []
     }
 
-    public static func orphans(sessions: [String], livePaneIDs: Set<String>) -> [String] {
+    /// `sparing` is the workspaces the caller could not enumerate at all: their stored tab list or
+    /// split tree is there and would not decode, so `livePaneIDs` says nothing about them either
+    /// way. Every session they own is left alone. Unreachability is a claim, and a caller that
+    /// could not read the record has not made it; acting on the silence anyway is what turns a
+    /// renamed coding key into a workspace's worth of killed shells.
+    ///
+    /// It has no default value on purpose. This function's return value is killed, so a caller
+    /// that has not thought about doubt should not compile.
+    ///
+    /// Doubt outranks the persistence setting, which is the one place the two can disagree. Off
+    /// means "no pane will come back for these, so take them", and that is still right for every
+    /// workspace whose panes are known; a workspace whose panes are unknown is not being kept
+    /// against the setting, it is being left until something can read it. A session left running
+    /// can be collected on any later launch. A shell killed cannot be got back.
+    public static func orphans(
+        sessions: [String], livePaneIDs: Set<String>, sparing sparedWorkspaces: Set<WorkspaceID>
+    ) -> [String] {
         // Both sides are put through the same fold before they are compared. A pane id whose name
         // changed on its way into a session name would otherwise read as unreachable, and this
         // function kills what it returns.
         let live = Set(livePaneIDs.map(sanitized))
+        let spared = Set(sparedWorkspaces.map { sanitized($0.rawValue) })
         return sessions.filter { name in
-            guard let pane = paneID(ofSessionName: name) else { return false }
-            return !live.contains(pane)
+            guard let parts = parts(of: name), !spared.contains(parts.workspace) else { return false }
+            return !live.contains(parts.pane)
         }
     }
 

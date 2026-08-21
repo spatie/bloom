@@ -23,7 +23,10 @@ final class TerminalSplitStore {
     /// and straight back has to register twice.
     private var focusRequests: [String: Int] = [:]
 
-    private static let keyPrefix = "terminal.split."
+    /// `TabDefaults` rather than a literal here, because `TerminalPaneCensus` walks the same keys
+    /// to decide which tmux sessions the orphan sweep may kill. A prefix that drifted on one side
+    /// only would have the sweep see none of the panes below and kill the shells behind them.
+    private static let keyPrefix = TabDefaults.splitPrefix
 
     /// Read in one pass at launch rather than lazily per tab. A getter may not mutate, and loading
     /// from a task instead would leave the first frame showing a single pane, which is long enough

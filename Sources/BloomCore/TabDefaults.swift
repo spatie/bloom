@@ -22,4 +22,24 @@ public enum TabDefaults {
     public static func tabKey(_ rootContentID: String) -> String { tabPrefix + rootContentID }
 
     public static func tabKey(root: PaneContent) -> String { tabKey(root.id) }
+
+    /// `CenterTabStore`'s list of tool tabs, per workspace. Plural, and see the near miss above.
+    ///
+    /// Here rather than private to the store because `TerminalPaneCensus` reads the same key, and
+    /// the two used to say it separately. That duplication is the most dangerous kind this app
+    /// has: the census enumerates every pane the orphan sweep may keep, so a prefix that drifted
+    /// on one side and not the other would have the sweep see no panes at all and kill every tmux
+    /// session behind them. A killed shell cannot be got back. One literal, read by both.
+    public static let tabListPrefix = "center.tabs."
+
+    public static func tabListKey(_ workspaceID: WorkspaceID) -> String {
+        tabListPrefix + workspaceID.rawValue
+    }
+
+    /// `TerminalSplitStore`'s pane tree, per tab, and the second half of what the census reads.
+    /// Same argument as `tabListPrefix`: a tab whose tree cannot be found reads as a single pane,
+    /// so every pane the user split off would look unreachable and be swept.
+    public static let splitPrefix = "terminal.split."
+
+    public static func splitKey(_ tabID: String) -> String { splitPrefix + tabID }
 }

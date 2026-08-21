@@ -42,13 +42,16 @@ struct TerminalPaneCensusTests {
         #expect(TerminalPaneCensus.terminalTabs(of: workspace, in: defaults) == ["t1", "t3"])
     }
 
-    @Test("a workspace with no tab list names no panes")
+    /// No key at all is a fact, not a silence: this workspace has never had a centre terminal in
+    /// it. It answers with none rather than with doubt, because doubt here would mean the sweep
+    /// never collected anything on a machine where most workspaces have no centre terminal.
+    @Test("a workspace with no tab list names no panes and is not in doubt")
     func noTabs() {
         let (name, defaults) = domain()
         defer { clean(name) }
 
-        #expect(TerminalPaneCensus.terminalTabs(of: workspace, in: defaults).isEmpty)
-        #expect(TerminalPaneCensus.livePanes(of: [workspace], in: defaults).isEmpty)
+        #expect(TerminalPaneCensus.terminalTabs(of: workspace, in: defaults) == [])
+        #expect(TerminalPaneCensus.census(of: [workspace], in: defaults) == .init())
     }
 
     /// A tab nobody split is one pane carrying the tab's own id, which is what keeps a shell forked
@@ -84,7 +87,97 @@ struct TerminalPaneCensusTests {
         let value = try #require(layout.encoded)
         defaults.set(value, forKey: "terminal.split.t1")
 
-        #expect(TerminalPaneCensus.livePanes(of: [workspace], in: defaults) == ["t1", "x1", "t3"])
+        #expect(TerminalPaneCensus.census(of: [workspace], in: defaults).panes == ["t1", "x1", "t3"])
+    }
+
+    // MARK: - The wire contract
+
+    /// **The half of this that a renamed field breaks.**
+    ///
+    /// The core suite depends on `BloomCore` alone (read `Package.swift`), so `CenterTab` is out of
+    /// reach from here and a hand written literal is the only way to hold its shape still. That is
+    /// not a workaround, it is the stronger pin: what the census has to read is the bytes already
+    /// on the owner's disk, not what a type says about them today. Rename a coding key, or change
+    /// what `CenterTab.Kind.terminal` encodes as, and this fails, which is the warning that a
+    /// migration is owed. Without it the same rename is silent, and silent here is the empty set,
+    /// which is the answer that kills rather than the one that spares.
+    @Test("the stored tab record is read field for field as CenterTab writes it")
+    func wireContract() {
+        let (name, defaults) = domain()
+        defer { clean(name) }
+
+        // Byte for byte what `CenterTabStore.persist` writes today, and then, as the second
+        // element, a record from before `url` and `path` were added. Both name their pane: this
+        // reads two fields rather than the whole tab exactly so an older record still counts.
+        let current = #"{"id":"t1","workspaceID":"w1","kind":"terminal","title":"Terminal","url":"","path":""}"#
+        let legacy = #"{"id":"t2","workspaceID":"w1","kind":"terminal","title":"Server"}"#
+        defaults.set(Data("[\(current),\(legacy)]".utf8), forKey: "center.tabs.w1")
+
+        #expect(TerminalPaneCensus.terminalTabs(of: workspace, in: defaults) == ["t1", "t2"])
+    }
+
+    /// The keys themselves, written out rather than built, because the literal is the contract.
+    /// `TabDefaults` is where the census and the two view stores now agree on them; before that
+    /// each said it separately and a drift on one side alone would have the sweep see no panes.
+    ///
+    /// The last line is the near miss `TabDefaults.tabPrefix` warns about: `center.tab.` and
+    /// `center.tabs.` differ only in where the dot falls, and a scan for the singular that
+    /// swallowed the plural would read a tab list as an arrangement and throw it away.
+    @Test("the keys the sweep reads are the keys the stores write")
+    func keysArePinned() {
+        #expect(TabDefaults.tabListKey(workspace) == "center.tabs.w1")
+        #expect(TabDefaults.splitKey("t1") == "terminal.split.t1")
+        #expect(!TabDefaults.tabListKey(workspace).hasPrefix(TabDefaults.tabPrefix))
+    }
+
+    // MARK: - Doubt
+
+    /// **The one that decides whether a mistake costs shells.**
+    ///
+    /// A tab list that is there and will not decode is not the same fact as a workspace with no
+    /// terminals in it, and the difference is what `TerminalPersistence.sessions()` already keeps
+    /// by returning nil rather than an empty list. Flattened into a set, unreadable bytes read as
+    /// "nothing here is reachable" and `TmuxSessions.orphans` kills every session the workspace
+    /// owns. Reported as doubt, the sweep leaves them alone and a later launch can collect them.
+    @Test("a tab list that will not decode is doubt, not an answer")
+    func unreadableTabList() {
+        let (name, defaults) = domain()
+        defer { clean(name) }
+        defaults.set(Data("not json".utf8), forKey: "center.tabs.w1")
+
+        #expect(TerminalPaneCensus.terminalTabs(of: workspace, in: defaults) == nil)
+        #expect(TerminalPaneCensus.census(of: [workspace], in: defaults)
+            == .init(doubtful: [workspace]))
+    }
+
+    /// The same argument one level down. A tab whose tree will not decode has panes with ids
+    /// nothing here can name, so answering with the tab's own id alone would name one pane and
+    /// leave every pane split off it looking unreachable.
+    @Test("a split tree that will not decode is doubt, not one pane")
+    func unreadableSplitTree() {
+        let (name, defaults) = domain()
+        defer { clean(name) }
+        tabList(defaults)
+        defaults.set("not a layout", forKey: "terminal.split.t1")
+
+        #expect(TerminalPaneCensus.panes(ofTab: "t1", in: defaults) == nil)
+
+        // t3 still read cleanly, so its pane is named. The workspace is in doubt all the same,
+        // and the sweep spares by workspace, so t3's session is spared with t1's.
+        #expect(TerminalPaneCensus.census(of: [workspace], in: defaults)
+            == .init(panes: ["t3"], doubtful: [workspace]))
+    }
+
+    /// A kind that is not `terminal` is not doubt. The census reads the whole record, learns that
+    /// this tab holds no shell, and says so; only bytes it could not read at all are doubt.
+    @Test("an unknown tab kind names no pane and raises no doubt")
+    func unknownKind() {
+        let (name, defaults) = domain()
+        defer { clean(name) }
+        let json = #"[{"id":"t9","workspaceID":"w1","kind":"canvas","title":"Canvas"}]"#
+        defaults.set(Data(json.utf8), forKey: "center.tabs.w1")
+
+        #expect(TerminalPaneCensus.census(of: [workspace], in: defaults) == .init())
     }
 
     // MARK: - The invariant
@@ -117,13 +210,13 @@ struct TerminalPaneCensusTests {
         let panes = try #require(old.encoded)
         defaults.set(panes, forKey: "center.panes.w1")
 
-        let before = TerminalPaneCensus.livePanes(of: [workspace], in: defaults)
-        #expect(before == ["t1", "x1", "t3"])
+        let before = TerminalPaneCensus.census(of: [workspace], in: defaults)
+        #expect(before == .init(panes: ["t1", "x1", "t3"]))
 
         let migrated = TabMigration.migrateAll(in: defaults)
 
         #expect(migrated.count == 1)
-        #expect(TerminalPaneCensus.livePanes(of: [workspace], in: defaults) == before)
+        #expect(TerminalPaneCensus.census(of: [workspace], in: defaults) == before)
     }
 
     /// The other half of the same argument, and the stronger one: the migration is not merely

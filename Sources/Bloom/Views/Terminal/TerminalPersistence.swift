@@ -144,11 +144,16 @@ final class TerminalPersistence {
 
     /// The launch sweep. Everything on our socket whose pane is no longer reachable from the
     /// database goes, which is the rule stated in `TmuxSessions.orphans`.
-    func sweepOrphans(livePaneIDs: Set<String>) async {
+    ///
+    /// `doubtful` is the workspaces the census could not enumerate. They are handed straight
+    /// through to `orphans`, which spares them: see its note on why silence is not unreachability.
+    func sweepOrphans(livePaneIDs: Set<String>, doubtful: Set<WorkspaceID>) async {
         guard command != nil else { return }
         let sessions = await sessionNames()
         knownSessions = Set(sessions)
         let reachable = TmuxSessions.reachablePanes(livePaneIDs, persistenceEnabled: Self.isSwitchedOn)
-        await kill(sessions: TmuxSessions.orphans(sessions: sessions, livePaneIDs: reachable))
+        await kill(sessions: TmuxSessions.orphans(
+            sessions: sessions, livePaneIDs: reachable, sparing: doubtful
+        ))
     }
 }

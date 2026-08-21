@@ -249,10 +249,15 @@ final class TerminalSessionStore {
             // Where the two can differ the census names MORE panes: it decodes its own two field
             // record per tab where `CenterTabStore` decodes the whole array and returns nothing at
             // all if any element fails. Naming more panes only ever spares a shell.
-            let live = TerminalPaneCensus.livePanes(
+            //
+            // Two answers rather than one set, and the second is the one that matters: a workspace
+            // whose stored tabs are there and will not decode is reported as doubtful rather than
+            // as having no panes, and the sweep leaves its sessions alone. A decode failure used
+            // to read as "nothing is reachable here", which is the killing answer.
+            let census = TerminalPaneCensus.census(
                 of: workspaces.map(\.id), in: UserDefaults.standard
             )
-            await persistence.sweepOrphans(livePaneIDs: live)
+            await persistence.sweepOrphans(livePaneIDs: census.panes, doubtful: census.doubtful)
         }
     }
 

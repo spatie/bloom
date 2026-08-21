@@ -274,7 +274,10 @@ final class CenterTabStore {
         Self.persist(tabs, workspaceID: workspaceID)
     }
 
-    private static func key(_ workspaceID: WorkspaceID) -> String { "center.tabs.\(workspaceID)" }
+    /// `TabDefaults` rather than a literal here, because `TerminalPaneCensus` reads the same key
+    /// to decide which tmux sessions the orphan sweep may kill. The two used to state the prefix
+    /// separately, with nothing pinning them together.
+    private static func key(_ workspaceID: WorkspaceID) -> String { TabDefaults.tabListKey(workspaceID) }
 
     private static func persist(_ tabs: [CenterTab], workspaceID: WorkspaceID) {
         let defaults = UserDefaults.standard
