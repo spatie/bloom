@@ -149,7 +149,7 @@ struct CenterPaneView: View {
 
     /// What the dragged id names. Anything else dropped on a pane, including text from another
     /// app, names nothing and the drop is refused.
-    private func content(forTab id: String) -> CenterPaneContent? {
+    private func content(forTab id: String) -> PaneContent? {
         if model.sessions.contains(where: { $0.id.rawValue == id }) { return .chat(SessionID(id)) }
         if CenterTabStore.shared.tabs(for: model.workspace.id).contains(where: { $0.id == id }) {
             return .tool(id)

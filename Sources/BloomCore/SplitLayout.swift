@@ -298,8 +298,18 @@ public struct SplitLayout: Codable, Sendable, Hashable {
 
     /// JSON, because this is written to user defaults rather than to SQLite: what the user had open
     /// is worth restoring and not worth a table or a migration.
+    ///
+    /// Sorted keys, and that is not tidiness. Without them the same tree encodes to different bytes
+    /// on different calls in the same process, which was measured rather than guessed: two runs of
+    /// the phase A migration over one carve produced `{"focus":...,"root":...}` and
+    /// `{"root":...,"focus":...}`. That migration writes its new key before it deletes the old one,
+    /// so a crash between those two lines leaves it to run again next launch, and "run again" is
+    /// only safe to reason about if the second run lands on exactly the first run's bytes.
+    /// Decoding never cared about the order, so nothing already on disk is affected.
     public var encoded: String? {
-        guard let data = try? JSONEncoder().encode(self) else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        guard let data = try? encoder.encode(self) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 

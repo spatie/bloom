@@ -395,6 +395,24 @@ struct SplitLayoutTests {
         #expect(try #require(SplitLayout(encoded: encoded)) == layout)
     }
 
+    /// Measured rather than assumed: two encodings of one tree used to come out as
+    /// `{"focus":...,"root":...}` and `{"root":...,"focus":...}` in the same process. Phase A of
+    /// the tab migration writes its new key before it deletes the old one, so a crash between
+    /// those two lines leaves it to run again, and it converges only if it lands on the same bytes.
+    @Test("the same tree always encodes to the same bytes")
+    func encodingIsStable() throws {
+        var layout = nested()
+        layout.setRatio(0.3, at: [])
+        layout.setFocus("c")
+
+        let once = try #require(layout.encoded)
+        let twice = try #require(layout.encoded)
+        let round = try #require(SplitLayout(encoded: once))
+
+        #expect(once == twice)
+        #expect(round.encoded == once)
+    }
+
     @Test("nonsense in user defaults is not a layout")
     func decodeGarbage() {
         #expect(SplitLayout(encoded: "") == nil)

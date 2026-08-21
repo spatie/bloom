@@ -23,7 +23,7 @@ final class CenterPaneStore {
     private var layouts: [WorkspaceID: SplitLayout] = [:]
     /// Keyed by pane id rather than nested under the workspace, because a pane id is unique and a
     /// pane is looked up far more often than a workspace's whole set is.
-    private var contents: [String: CenterPaneContent] = [:]
+    private var contents: [String: PaneContent] = [:]
 
     /// Bumped per workspace when focus moves by anything but a click, so the pane that now has it
     /// can go and take the keyboard. A counter, because moving away and straight back has to
@@ -66,18 +66,18 @@ final class CenterPaneStore {
     /// Resolved rather than trusted because both sides can vanish underneath a pane: a session is
     /// archived, a terminal tab is closed. A pane pointing at nothing shows the workspace's active
     /// conversation, which is the one thing a workspace cannot be without.
-    func content(of pane: String, in model: WorkspaceModel) -> CenterPaneContent? {
+    func content(of pane: String, in model: WorkspaceModel) -> PaneContent? {
         if let stored = contents[pane], isAlive(stored, in: model) { return stored }
         return model.activeSession.map { .chat($0.id) }
     }
 
     /// Whether a tab is showing in any pane, which is what the strip marks rather than a single
     /// selection: with the column split, two tabs are open at once and both are open.
-    func isShowing(_ content: CenterPaneContent, in model: WorkspaceModel) -> Bool {
+    func isShowing(_ content: PaneContent, in model: WorkspaceModel) -> Bool {
         layout(for: model.workspace.id).panes.contains { self.content(of: $0, in: model) == content }
     }
 
-    private func isAlive(_ content: CenterPaneContent, in model: WorkspaceModel) -> Bool {
+    private func isAlive(_ content: PaneContent, in model: WorkspaceModel) -> Bool {
         switch content {
         case .chat(let id): model.sessions.contains { $0.id == id }
         case .tool(let id): CenterTabStore.shared.tabs(for: model.workspace.id).contains { $0.id == id }
@@ -88,7 +88,7 @@ final class CenterPaneStore {
 
     /// Shows something in a pane. The pane takes focus, because the user just said this is what
     /// they want to be looking at.
-    func show(_ content: CenterPaneContent, in pane: String, of workspaceID: WorkspaceID) {
+    func show(_ content: PaneContent, in pane: String, of workspaceID: WorkspaceID) {
         contents[pane] = content
         var layout = layout(for: workspaceID)
         if layout.focus != pane, layout.setFocus(pane) {
@@ -99,7 +99,7 @@ final class CenterPaneStore {
     }
 
     /// Shows something in whichever pane the user is in, which is what clicking a tab means.
-    func show(_ content: CenterPaneContent, in model: WorkspaceModel) {
+    func show(_ content: PaneContent, in model: WorkspaceModel) {
         show(content, in: focusedPane(in: model.workspace.id), of: model.workspace.id)
     }
 
@@ -113,7 +113,7 @@ final class CenterPaneStore {
         _ workspaceID: WorkspaceID,
         pane: String? = nil,
         axis: SplitAxis,
-        showing content: CenterPaneContent?
+        showing content: PaneContent?
     ) -> String? {
         var layout = layout(for: workspaceID)
         let target = pane ?? layout.focus
@@ -162,7 +162,7 @@ final class CenterPaneStore {
 
     /// Called when a tab goes away, so a pane that was showing it does not sit on a dead pointer
     /// until something else happens to reload the workspace.
-    func forget(_ content: CenterPaneContent, in workspaceID: WorkspaceID) {
+    func forget(_ content: PaneContent, in workspaceID: WorkspaceID) {
         let showing = layout(for: workspaceID).panes.filter { contents[$0] == content }
         guard !showing.isEmpty else { return }
         // The last pane keeps its place and falls back to the active conversation, because closing
@@ -178,7 +178,7 @@ final class CenterPaneStore {
 
     private struct Stored: Codable {
         var layout: String
-        var contents: [String: CenterPaneContent]
+        var contents: [String: PaneContent]
     }
 
     private func apply(_ layout: SplitLayout, to workspaceID: WorkspaceID, movingFocus: Bool) {
@@ -198,7 +198,7 @@ final class CenterPaneStore {
             defaults.removeObject(forKey: key)
             return
         }
-        let mine = layout.panes.reduce(into: [String: CenterPaneContent]()) { result, pane in
+        let mine = layout.panes.reduce(into: [String: PaneContent]()) { result, pane in
             result[pane] = contents[pane]
         }
         guard let data = try? JSONEncoder().encode(Stored(layout: encoded, contents: mine)) else {

@@ -33,7 +33,7 @@ struct SessionTabsView: View {
     /// What the pane the user is in is showing. That is what the strip marks, because with the
     /// column split there is no single selection: a tab is either in the pane you are working in
     /// or it is not.
-    private var focused: CenterPaneContent? {
+    private var focused: PaneContent? {
         panes.content(of: panes.focusedPane(in: model.workspace.id), in: model)
     }
 
@@ -103,7 +103,7 @@ struct SessionTabsView: View {
         order.first == id
     }
 
-    /// Which tab the strip scrolls into view, as a plain id rather than as `CenterPaneContent`.
+    /// Which tab the strip scrolls into view, as a plain id rather than as `PaneContent`.
     ///
     /// Nil when the focused pane is showing something the strip does not have a tab for, which is
     /// the moment after a tab is closed: aiming a scroll at an id that is no longer laid out does
@@ -125,7 +125,7 @@ struct SessionTabsView: View {
     }
 
     /// Whether a tab is selected, named by id alone. The strip's two runs answer to two different
-    /// cases of `CenterPaneContent`, and `order` has already thrown that distinction away.
+    /// cases of `PaneContent`, and `order` has already thrown that distinction away.
     private func isSelected(_ id: String) -> Bool {
         focused == .chat(SessionID(id)) || focused == .tool(id)
     }
@@ -280,7 +280,7 @@ struct SessionTabsView: View {
 
     /// Opens a tab beside the one the user asked from, rather than in place of it. The menu item
     /// beside the drag is there for anyone who would rather not drag, and for the keyboard.
-    private func split(_ content: CenterPaneContent, axis: SplitAxis) {
+    private func split(_ content: PaneContent, axis: SplitAxis) {
         panes.split(model.workspace.id, axis: axis, showing: content)
     }
 

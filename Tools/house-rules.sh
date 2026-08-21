@@ -263,6 +263,7 @@ id_type_allowed_lines=(
   'Sources/BloomCore/EditorCatalog.swift'             # an application, by bundle id
   'Sources/Bloom/Views/Center/ComposerOption.swift'   # a picker entry, "opus" and friends
   'Sources/Bloom/Views/Center/CenterTab.swift'        # a tab: a terminal row, a browser or the review pane
+  'Sources/BloomCore/TerminalPaneCensus.swift'        # the same tab id, read back off the same bytes
   'Sources/Bloom/Views/Center/PromptAttachment.swift' # a draft key, which has no session yet
   'Sources/Bloom/State/TranscriptModel.swift'         # payload ids, read straight off an event
 )

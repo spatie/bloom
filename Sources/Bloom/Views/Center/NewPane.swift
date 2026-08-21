@@ -30,7 +30,7 @@ enum NewPane {
         _ kind: PaneKind,
         in model: WorkspaceModel,
         url: String = "",
-        place: @escaping @MainActor (CenterPaneContent) -> Void
+        place: @escaping @MainActor (PaneContent) -> Void
     ) {
         switch kind {
         case .chat:
