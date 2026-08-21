@@ -17,9 +17,6 @@ struct BloomApp: App {
         // and exits, so it can be looked at without a screen recording permission. It has to run
         // before any scene exists, which is why it lives in the initialiser.
         if Snapshot.isRequested { Snapshot.runAndExit() }
-        // The same affordance for a context menu, which neither of `Snapshot`'s two routes can
-        // draw: `Bloom --row-menu <out.png> [--submenu Colour]`. See `MenuSnapshot`.
-        if MenuSnapshot.isRequested { MenuSnapshot.runAndExit() }
         if Snapshot.isWindowCaptureRequested { Snapshot.scheduleWindowCapture() }
         Snapshot.scheduleURLIfRequested()
         Snapshot.scheduleRunningStateIfRequested()
