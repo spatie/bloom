@@ -824,7 +824,35 @@ final class AppModel {
         controls: ComposerControls? = nil,
         staged: StagedAttachments? = nil
     ) async -> Workspace? {
-        guard let manager else { return nil }
+        do {
+            return try await startWorkspace(
+                in: repo, prompt: prompt, baseBranch: baseBranch, opensWith: opensWith,
+                branch: branch, controls: controls, staged: staged
+            )
+        } catch {
+            alert = BloomAlert(title: "Could not create the workspace", message: error.readableMessage)
+            return nil
+        }
+    }
+
+    /// The same thing, for a caller that can be told what went wrong.
+    ///
+    /// An alert is the right answer for somebody standing in front of the sheet and no answer at
+    /// all for a Shortcut, which has its own place to show a sentence and had nowhere to read one
+    /// from. So the alert is one line in the wrapper above and everything else is here, shared,
+    /// rather than a second copy of the flow written for callers without a window.
+    @discardableResult
+    func startWorkspace(
+        in repo: Repo,
+        prompt: String,
+        baseBranch: String? = nil,
+        opensWith: WorkspaceStartMode = .chat,
+        branch: String? = nil,
+        controls: ComposerControls? = nil,
+        staged: StagedAttachments? = nil,
+        select: Bool = true
+    ) async throws -> Workspace {
+        guard let manager else { throw AppNotReady.stillStartingUp }
         isCreatingWorkspace = true
         defer { isCreatingWorkspace = false }
 
@@ -861,40 +889,35 @@ final class AppModel {
         // preference, and whether the CLI is installed.
         let wantsAName = shouldNameAutomatically(name: nil, prompt: spoken, opensWith: opensWith)
 
-        do {
-            let started = try await manager.start(request) { [weak self] in
-                // Nil declines, and the workspace keeps the title git would have given it.
-                guard wantsAName, let self else { return nil }
-                return await self.placeholderName()
-            }
-
-            await adopt(started, repo: repo, prompt: spoken, opensWith: opensWith, select: true)
-
-            // The agent gets the sentence as it was written, files and all, because the paths in
-            // it are already the paths those files have in the worktree: staging lays a draft out
-            // under exactly the layout it will have here, so this is a move and nothing has to be
-            // rewritten. What is taken out is anything that failed to arrive, which is a path to
-            // nothing and worse than one file fewer.
-            var opening: String? = opensWith == .chat ? prompt : nil
-            if opensWith == .chat, let staged, !staged.attachments.isEmpty {
-                let moved = Set(
-                    AttachmentFiles
-                        .adopt(staged.attachments, from: staged.directory, into: started.workspace.path)
-                        .map(\.path)
-                )
-                opening = AttachmentDraft
-                    .parse(prompt, paths: staged.attachments.map(\.path))
-                    .keeping { moved.contains($0) }
-            }
-
-            // Setup runs whether or not there is an agent turn to follow it. Only the turn is
-            // skipped for a terminal workspace.
-            model(for: started.workspace).startSetupThenSend(prompt: opening, repo: repo)
-            return started.workspace
-        } catch {
-            alert = BloomAlert(title: "Could not create the workspace", message: error.readableMessage)
-            return nil
+        let started = try await manager.start(request) { [weak self] in
+            // Nil declines, and the workspace keeps the title git would have given it.
+            guard wantsAName, let self else { return nil }
+            return await self.placeholderName()
         }
+
+        await adopt(started, repo: repo, prompt: spoken, opensWith: opensWith, select: select)
+
+        // The agent gets the sentence as it was written, files and all, because the paths in it
+        // are already the paths those files have in the worktree: staging lays a draft out under
+        // exactly the layout it will have here, so this is a move and nothing has to be rewritten.
+        // What is taken out is anything that failed to arrive, which is a path to nothing and
+        // worse than one file fewer.
+        var opening: String? = opensWith == .chat ? prompt : nil
+        if opensWith == .chat, let staged, !staged.attachments.isEmpty {
+            let moved = Set(
+                AttachmentFiles
+                    .adopt(staged.attachments, from: staged.directory, into: started.workspace.path)
+                    .map(\.path)
+            )
+            opening = AttachmentDraft
+                .parse(prompt, paths: staged.attachments.map(\.path))
+                .keeping { moved.contains($0) }
+        }
+
+        // Setup runs whether or not there is an agent turn to follow it. Only the turn is skipped
+        // for a terminal workspace.
+        model(for: started.workspace).startSetupThenSend(prompt: opening, repo: repo)
+        return started.workspace
     }
 
     /// What this window does about a workspace that has just been started.

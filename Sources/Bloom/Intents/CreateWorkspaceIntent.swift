@@ -40,17 +40,19 @@ struct CreateWorkspaceIntent: AppIntent {
             throw IntentFailure.unknownProject
         }
 
-        // Taken before the request rather than compared by timestamp afterwards: two Shortcuts
-        // creating a workspace in the same project at the same second would otherwise each claim
-        // the other's.
-        let before = Set(try await store.workspaces(repoID: repo.id, includeArchived: true).map(\.id))
-
         guard await RunningApp.waitUntilReady() else { throw IntentFailure.appNeverAppeared }
-        await RunningApp.open(link(repo: repo))
 
-        guard let created = try await waitForWorkspace(in: repo, excluding: before, store: store) else {
-            throw IntentFailure.workspaceNeverArrived(prompt)
-        }
+        // Straight into the same code the create sheet runs, and it answers with the workspace or
+        // with what went wrong.
+        //
+        // It used to build a `bloom://` URL, hand it to the window, and then read the database
+        // every 400ms for up to sixty seconds looking for a row it had not seen when it started,
+        // because a URL is one way and there was nothing to return. Two Shortcuts creating a
+        // workspace in one project at the same second could each claim the other's row. A failure
+        // was an alert on somebody's screen that the Shortcut never heard about, and the link
+        // carried nothing but a prompt and a path, so everything the sheet can choose was silently
+        // the default.
+        let created = try await RunningApp.startWorkspace(in: repo, prompt: prompt)
 
         let entity = WorkspaceEntity(
             workspace: created,
@@ -60,33 +62,5 @@ struct CreateWorkspaceIntent: AppIntent {
             pullRequest: nil
         )
         return .result(value: entity, dialog: "Started \(created.name) in \(repo.name).")
-    }
-
-    /// `bloom://` is the link Bloom already accepts from scripts and from Conductor, so an intent
-    /// creating a workspace goes down the same tested path as everything else that creates one
-    /// from outside. Everything is escaped down to the alphanumerics because the parser on the
-    /// other side splits on `&` and `=` and treats `+` as a space.
-    private func link(repo: Repo) -> URL {
-        let escape = { (value: String) in
-            value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? value
-        }
-        return URL(string: "bloom://?prompt=\(escape(prompt))&path=\(escape(repo.path))")!
-    }
-
-    /// Polls, because the link is one way. The worktree is written to disk before the setup script
-    /// runs, so the row appears in seconds even when the workspace is not usable yet; the wait is
-    /// generous only to cover a repository large enough for `git worktree add` to take a while.
-    private func waitForWorkspace(
-        in repo: Repo,
-        excluding before: Set<String>,
-        store: Store
-    ) async throws -> Workspace? {
-        let deadline = ContinuousClock.now + .seconds(60)
-        while ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(400))
-            let now = try await store.workspaces(repoID: repo.id, includeArchived: true)
-            if let created = now.first(where: { !before.contains($0.id) }) { return created }
-        }
-        return nil
     }
 }

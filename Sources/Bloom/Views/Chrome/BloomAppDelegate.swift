@@ -37,6 +37,10 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         // keeps a weak reference and only ever looks when `--switch-probe` asked it to.
         SwitchProbe.attach(model)
         servicesProvider.attach(model)
+        // And a Shortcut needs it for the same reason the Services menu does: an intent runs in
+        // this process and has to execute the same code a click in the create sheet does, rather
+        // than a copy of it written for callers with no window.
+        RunningApp.attach(model)
         // The suppression rule needs to know which workspace the window is showing, and this is
         // the first moment there is a window to ask.
         NotificationService.shared.attach(model)

@@ -7,7 +7,6 @@ enum IntentFailure: Error, CustomLocalizedStringResourceConvertible {
     case unknownProject
     case unknownWorkspace
     case appNeverAppeared
-    case workspaceNeverArrived(String)
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
@@ -17,8 +16,6 @@ enum IntentFailure: Error, CustomLocalizedStringResourceConvertible {
             "That workspace no longer exists in Bloom."
         case .appNeverAppeared:
             "Bloom did not finish opening, so there was nowhere to send the request."
-        case .workspaceNeverArrived(let prompt):
-            "Bloom did not finish creating a workspace for \"\(prompt)\". It may still be working: check the app."
         }
     }
 }
