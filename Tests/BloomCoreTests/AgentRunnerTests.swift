@@ -255,12 +255,14 @@ struct AgentRunnerArgvTests {
         #expect(["enabled", "adaptive", "disabled"].contains(value(of: "--thinking", in: argv) ?? ""))
     }
 
-    /// The core writes this key and the composer's footer writes the same key, from two modules
-    /// that cannot see each other. Drift puts the toggle back to reaching nothing, which is the
-    /// bug this suite is about.
-    @Test("the fast mode key is the one the composer writes")
-    func fastModeKeyMatchesTheComposer() {
-        #expect(AgentRunner.fastModeKey(sessionID: "abc") == "session.abc.fastMode")
+    /// This used to pin two copies of the same string together, one in the core and one in the
+    /// composer's footer, because the two modules could not see each other. `ComposerControls` is
+    /// in the core now and there is only one copy left, so what is left to hold is the string
+    /// itself: it is written into the user's database and changing it silently turns every toggle
+    /// anybody has ever set back off.
+    @Test("the fast mode key is the one already in the database")
+    func fastModeKeyIsStable() {
+        #expect(ComposerControls.fastModeKey(sessionID: "abc") == "session.abc.fastMode")
     }
 
     // MARK: Output style
@@ -345,12 +347,10 @@ struct AgentRunnerArgvTests {
         #expect(argv.filter { $0 == "--settings" }.count == 1)
     }
 
-    /// The core writes this key and the composer's footer writes the same key, from two modules
-    /// that cannot see each other. Exactly as with fast mode, drift here puts the picker back to
-    /// reaching nothing.
-    @Test("the output style key is the one the composer writes")
-    func outputStyleKeyMatchesTheComposer() {
-        #expect(AgentRunner.outputStyleKey(sessionID: "abc") == "session.abc.outputStyle")
+    /// The same, for the same reason. Both keys are in the user's database already.
+    @Test("the output style key is the one already in the database")
+    func outputStyleKeyIsStable() {
+        #expect(ComposerControls.outputStyleKey(sessionID: "abc") == "session.abc.outputStyle")
     }
 
     /// A flag left dangling at the end silently eats whatever the CLI reads next, or nothing.
@@ -646,7 +646,7 @@ struct AgentRunnerProcessTests {
     func spawnsWithTheStoredOutputStyle() async throws {
         let store = try makeTestStore("agent")
         let session = try await makeSession(store)
-        try await store.setSetting(AgentRunner.outputStyleKey(sessionID: session.id), "Concise")
+        try await store.setSetting(ComposerControls.outputStyleKey(sessionID: session.id), "Concise")
 
         let recorder = ProcessRecorder()
         let runner = AgentRunner(

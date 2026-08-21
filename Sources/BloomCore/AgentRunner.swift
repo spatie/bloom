@@ -317,37 +317,26 @@ public actor AgentRunner {
         await save(session)
     }
 
-    /// The key the composer's footer writes. Duplicated as a constant rather than imported,
-    /// because the core cannot see the view layer and a string this load-bearing should be
-    /// findable from both ends: `ComposerControls.fastModeKey` is the other half, and
-    /// `fastModeKeyMatchesTheComposer` in the suite pins the two together.
-    public static func fastModeKey(sessionID: String) -> String {
-        "session.\(sessionID).fastMode"
-    }
-
     /// A setting that cannot be read is not a reason to refuse a turn, so a failure leaves the
     /// flag as it was rather than throwing.
+    ///
+    /// The key is `ComposerControls`'s own, not a copy of it. Both ends used to state the string
+    /// and a test in the suite pinned them together, because the core could not see the view layer
+    /// where the footer lived. `ComposerControls` is in the core now, so there is one string and
+    /// nothing left to drift.
     private func refreshFastMode() async {
-        guard let value = try? await store.setting(Self.fastModeKey(sessionID: session.id)) else {
+        guard let value = try? await store.setting(ComposerControls.fastModeKey(sessionID: session.id)) else {
             isFastMode = false
             return
         }
         isFastMode = value == "1"
     }
 
-    /// The other key the composer's footer writes, and the same bargain as `fastModeKey`: the core
-    /// cannot see the view layer, so the string is stated at both ends and
-    /// `outputStyleKeyMatchesTheComposer` in the suite pins the two together. Drift here puts the
-    /// picker back to changing nothing, which is the bug that suite exists for.
-    public static func outputStyleKey(sessionID: String) -> String {
-        "session.\(sessionID).outputStyle"
-    }
-
     /// A setting that cannot be read leaves the session unstyled rather than refusing the turn.
     /// Reading `default` back is the same as reading nothing, because the picker stores the word
-    /// and the wire wants the absence.
+    /// and the wire wants the absence. Same key and the same bargain as fast mode above.
     private func refreshOutputStyle() async {
-        let stored = try? await store.setting(Self.outputStyleKey(sessionID: session.id))
+        let stored = try? await store.setting(ComposerControls.outputStyleKey(sessionID: session.id))
         outputStyle = OutputStyle.isDefault(stored) ? nil : stored
     }
 

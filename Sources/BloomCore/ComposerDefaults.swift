@@ -1,4 +1,4 @@
-import BloomCore
+import Foundation
 
 /// What a session that has never been opened starts out as.
 ///
@@ -14,13 +14,13 @@ import BloomCore
 ///
 /// The repository file has no say over permission mode, plan mode or fast mode, because it has no
 /// keys for them, so those fall straight from level 3 to level 4.
-struct ComposerDefaults: Equatable {
-    var model: String
-    var effort: String
-    var permissionMode: PermissionMode
+public struct ComposerDefaults: Equatable {
+    public var model: String
+    public var effort: String
+    public var permissionMode: PermissionMode
 
     /// Pure, so the rules above can be checked without a store, a repository or a view.
-    static func resolve(repo: RepoSettings, app: AppDefaults) -> ComposerDefaults {
+    public static func resolve(repo: RepoSettings, app: AppDefaults) -> ComposerDefaults {
         // Repo file, then what the user chose in Settings, then a machine-wide settings file, then
         // the built-in. The home file sits below the Settings screen deliberately: a global
         // Conductor file used to outrank every choice made in the UI, which made the Models screen
@@ -47,7 +47,7 @@ struct ComposerDefaults: Equatable {
     /// The first candidate that is actually set, in precedence order. An empty string counts as
     /// unset, because a settings file with `default = ""` means "I did not choose", not "choose
     /// nothing".
-    static func firstNonEmpty(_ candidates: String?..., fallback: String) -> String {
+    public static func firstNonEmpty(_ candidates: String?..., fallback: String) -> String {
         for candidate in candidates {
             if let candidate, !candidate.trimmingCharacters(in: .whitespaces).isEmpty {
                 return candidate
