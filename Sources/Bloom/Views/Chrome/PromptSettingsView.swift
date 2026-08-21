@@ -55,6 +55,6 @@ struct PromptSettingsView: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .settingsForm()
     }
 }

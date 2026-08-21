@@ -67,7 +67,7 @@ struct AgentsSettingsView: View {
                     if !status.details.isEmpty {
                         Section("Details") {
                             ForEach(status.details) { detail in
-                                LabeledContent(detail.label) {
+                                SettingsRow(detail.label) {
                                     Text(detail.value)
                                         .font(Typo.label)
                                         .foregroundStyle(Palette.textSecondary)
@@ -88,7 +88,7 @@ struct AgentsSettingsView: View {
                 capabilitySection
             }
         }
-        .formStyle(.grouped)
+        .settingsForm()
         .task { await bootstrap() }
         .onChange(of: selection) { _, kind in
             commitPathDraft()
@@ -159,12 +159,12 @@ struct AgentsSettingsView: View {
     /// Two rows, because "where is Bloom running this from" and "where have you told it to look"
     /// are different questions. The resolved path used to be passed as the text field's title,
     /// which on macOS is a visible label rather than a placeholder, so it was drawn as loose
-    /// centred text beside the field and wrapped across two lines mid-path. As its own value row
-    /// it gets the trailing alignment every other value in the window has, one line, and the
-    /// middle of a long path elided so both the home directory and the binary name survive.
+    /// centred text beside the field and wrapped across two lines mid-path. As its own row it sits
+    /// beside its label like every other value in the window, on one line, with the middle of a
+    /// long path elided so both the home directory and the binary name survive.
     private func executableSection(_ status: AgentStatus) -> some View {
         Section {
-            LabeledContent("Executable") {
+            SettingsRow("Executable") {
                 if let path = status.executablePath {
                     Text(path)
                         .font(Typo.codeSmall)
@@ -181,7 +181,7 @@ struct AgentsSettingsView: View {
                 }
             }
 
-            LabeledContent("Custom path") {
+            SettingsRow("Custom path") {
                 HStack(spacing: Metrics.spacing) {
                     // `prompt:` and `labelsHidden()`, because on macOS the first argument of a
                     // `TextField` is a visible label, not a placeholder. Passing the path there
@@ -194,9 +194,6 @@ struct AgentsSettingsView: View {
                     .labelsHidden()
                     .textFieldStyle(.roundedBorder)
                     .font(Typo.codeSmall)
-                    // The form's trailing alignment reaches into the field otherwise, and a text
-                    // field whose text starts at the right edge is not a Mac text field.
-                    .multilineTextAlignment(.leading)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity)
                     .focused($isEditingPath)
@@ -229,7 +226,7 @@ struct AgentsSettingsView: View {
     private func configurationSection(_ status: AgentStatus) -> some View {
         if let path = status.configPath, let isDirectory = existenceKind(of: path) {
             Section("Configuration") {
-                LabeledContent(isDirectory ? "Config folder" : "Config file") {
+                SettingsRow(isDirectory ? "Config folder" : "Config file") {
                     HStack(spacing: Metrics.gutter) {
                         Text(path)
                             .font(Typo.codeSmall)

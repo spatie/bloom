@@ -90,7 +90,7 @@ struct ModelSettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .formStyle(.grouped)
+        .settingsForm()
         .task {
             await outputStyles.refreshIfStale(project: nil)
             guard let store = app.store else { return }

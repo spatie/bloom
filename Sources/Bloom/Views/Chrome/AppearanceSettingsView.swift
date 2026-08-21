@@ -68,7 +68,7 @@ struct AppearanceSettingsView: View {
                 Toggle("Use Ghostty terminal theme", isOn: $usesGhosttyTheme)
                     .help("Reads the font and colours from your Ghostty configuration. Off uses Bloom's own palette.")
 
-                LabeledContent("Text size") {
+                SettingsRow("Text size") {
                     HStack(spacing: Metrics.gutter) {
                         Stepper(value: sizeBinding, in: TerminalTextSize.range, step: TerminalTextSize.step) {
                             Text("\(Int(effectiveTerminalSize)) pt")
@@ -100,7 +100,7 @@ struct AppearanceSettingsView: View {
                     .foregroundStyle(Palette.textSecondary)
             }
         }
-        .formStyle(.grouped)
+        .settingsForm()
         // The picker only records the choice; this is what makes the running app take it.
         .onAppear { AppearancePreference.apply(appearance) }
         .onChange(of: appearance) { _, value in AppearancePreference.apply(value) }

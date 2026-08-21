@@ -102,7 +102,7 @@ private struct GeneralSettingsView: View {
 
             InstallPingSettingsSection()
 
-            LabeledContent("New workspaces") {
+            SettingsRow("New workspaces") {
                 HStack(spacing: Metrics.gutter) {
                     Text(WorkspaceManager.workspacesRoot.path)
                         .font(Typo.codeSmall)
@@ -116,7 +116,7 @@ private struct GeneralSettingsView: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .settingsForm()
     }
 }
 
@@ -180,7 +180,7 @@ private struct ProjectSettingsView: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .settingsForm()
         .onAppear {
             if selectedRepoID == nil { selectedRepoID = app.repos.first?.id }
         }
@@ -313,12 +313,10 @@ private struct EffectiveSettingsView: View {
 
     var body: some View {
         Group {
-            LabeledContent {
+            SettingsRow("Configuration") {
                 Button("Open Project Settings") {
                     Reveal.inEditor((repo.path as NSString).appendingPathComponent(".conductor/settings.toml"))
                 }
-            } label: {
-                Text("Configuration")
             }
 
             SettingValue(title: "Contributing files", value: settings.sources.isEmpty ? "None" : settings.sources.joined(separator: "\n"))
@@ -357,24 +355,23 @@ private struct SettingValue: View {
     let value: String
 
     var body: some View {
-        LabeledContent(title) {
+        SettingsRow(title) {
             Text(value)
                 .font(Typo.codeSmall)
                 .foregroundStyle(Palette.textSecondary)
                 .textSelection(.enabled)
-                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
 
 /// A script this project resolves to, read only.
 ///
-/// Not a `LabeledContent`. A form's value column carries `multilineTextAlignment(.trailing)` in
-/// its environment, and `Text` obeys it, so a forty line setup script was set flush right: every
-/// line ragged on the left, the indentation destroyed, and the whole thing squeezed into whatever
-/// the label column left over. Shell is code, so it is shown the way the rest of the app shows
-/// code, in the editor `ScriptEditor` wraps: left aligned, line numbered, syntax coloured, and
-/// bounded so a long script scrolls instead of stretching the pane.
+/// Its title above it rather than beside it, which is the one thing on this pane that is not a
+/// `SettingsRow`. A forty line shell script is not a value that belongs in a row's second half at
+/// any width: it is code, so it is shown the way the rest of the app shows code, in the editor
+/// `ScriptEditor` wraps, left aligned, line numbered, syntax coloured, and bounded so a long
+/// script scrolls instead of stretching the pane.
 private struct ScriptValue: View {
     let title: String
     let value: String?
@@ -412,7 +409,7 @@ private struct ToolSettingsView: View {
                 ToolPathRow(name: "gh", path: Shell.which("gh"))
             }
         }
-        .formStyle(.grouped)
+        .settingsForm()
     }
 }
 
@@ -422,7 +419,7 @@ private struct ToolPathRow: View {
     let path: String?
 
     var body: some View {
-        LabeledContent(name) {
+        SettingsRow(name) {
             if let path {
                 Text(path)
                     .font(Typo.codeSmall)
@@ -449,7 +446,7 @@ private struct AboutSettingsView: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Application") {
+                SettingsRow("Application") {
                     HStack(spacing: Metrics.spacing) {
                         // The app's own icon, read out of the running bundle. It used to be an SF
                         // Symbol of three connected dots, which was a stand-in from before Bloom
@@ -463,9 +460,9 @@ private struct AboutSettingsView: View {
                             .foregroundStyle(Palette.textPrimary)
                     }
                 }
-                LabeledContent("Version", value: version)
-                LabeledContent("Purpose", value: "Parallel coding agents in isolated git worktrees")
-                LabeledContent("Website") {
+                SettingsRow("Version", value: version)
+                SettingsRow("Purpose", value: "Parallel coding agents in isolated git worktrees")
+                SettingsRow("Website") {
                     Link("runbloom.app", destination: URL(string: "https://runbloom.app")!)
                 }
             }
@@ -475,14 +472,14 @@ private struct AboutSettingsView: View {
             }
 
             Section("Account") {
-                LabeledContent("GitHub user") {
+                SettingsRow("GitHub user") {
                     Text(GitHubIdentity.cachedUsername ?? "Not resolved")
                         .font(Typo.codeSmall)
                         .foregroundStyle(Palette.textSecondary)
                 }
             }
         }
-        .formStyle(.grouped)
+        .settingsForm()
     }
 }
 

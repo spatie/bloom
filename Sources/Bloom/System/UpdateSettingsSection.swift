@@ -20,11 +20,11 @@ struct UpdateSettingsSection: View {
     var body: some View {
         Section(SoftwareUpdate.sectionTitle) {
             if let explanation = SoftwareUpdate.unavailableExplanation(updater.availability) {
-                LabeledContent(SoftwareUpdate.settingTitle) {
+                SettingsRow(SoftwareUpdate.settingTitle) {
                     Text(explanation)
                         .font(Typo.caption)
                         .foregroundStyle(Palette.textSecondary)
-                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
                 // A switch with its explanation underneath, matching every other boolean in this

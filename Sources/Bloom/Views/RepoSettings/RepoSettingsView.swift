@@ -59,8 +59,10 @@ struct RepoSettingsView: View {
         case scripts
     }
 
-    /// Long enough that the scripts are readable, narrow enough that the form's label column does
-    /// not drift away from its fields.
+    /// Long enough that the scripts are readable, and no wider than the longest sentence in the
+    /// window wants: the rows themselves no longer care how wide it is, since `SettingsRow` keeps
+    /// a field beside its label at any width, but a footer set across a very wide pane does not
+    /// read.
     static let idealSize = CGSize(width: 640, height: 700)
     static let minimumSize = CGSize(width: 560, height: 460)
 
@@ -73,7 +75,7 @@ struct RepoSettingsView: View {
                         filesSection
                         removeSection
                     }
-                    .formStyle(.grouped)
+                    .settingsForm()
                 }
 
                 Tab("Workspaces", systemImage: "square.stack.3d.up", value: Pane.workspaces) {
@@ -81,14 +83,14 @@ struct RepoSettingsView: View {
                         RepoFilesToCopySection(model: model)
                         branchSection
                     }
-                    .formStyle(.grouped)
+                    .settingsForm()
                 }
 
                 Tab("Scripts", systemImage: "terminal", value: Pane.scripts) {
                     Form {
                         RepoScriptsSection(model: model)
                     }
-                    .formStyle(.grouped)
+                    .settingsForm()
                 }
             }
 
@@ -128,11 +130,10 @@ struct RepoSettingsView: View {
 
     private var projectSection: some View {
         Section {
-            LabeledContent("Name") {
+            SettingsRow("Name") {
                 TextField("Name", text: $name)
                     .labelsHidden()
                     .textFieldStyle(.roundedBorder)
-                    .multilineTextAlignment(.leading)
                     .focused($isEditingName)
                     .onSubmit(saveName)
                     .onChange(of: isEditingName) { wasEditing, editing in
@@ -143,12 +144,12 @@ struct RepoSettingsView: View {
             markRow
 
             if drawsColour {
-                LabeledContent("Colour") {
+                SettingsRow("Colour") {
                     AccentSwatches(selection: accentBinding)
                 }
             }
 
-            LabeledContent("Folder") {
+            SettingsRow("Folder") {
                 HStack(spacing: Metrics.gutter) {
                     Text(shortPath(repo.path))
                         .font(Typo.codeSmall)
@@ -156,14 +157,9 @@ struct RepoSettingsView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .textSelection(.enabled)
-                        // For the reason the mark's summary has one: without it a long path
-                        // takes the row out of the value column and puts the label above it.
-                        .frame(idealWidth: Self.summaryWidth, maxWidth: .infinity, alignment: .leading)
                         .help(repo.path)
 
                     Button("Reveal") { Reveal.inFinder(repo.path) }
-
-                    Spacer(minLength: 0)
                 }
             }
         } footer: {
@@ -190,15 +186,15 @@ struct RepoSettingsView: View {
     /// says `Find icon` rather than pretending a search already happened and found nothing.
     ///
     /// Three lines: the mark and the emoji that can be it, the buttons that change it, and then
-    /// the line saying where the mark came from. The emoji field is on the first line rather than
-    /// beside the buttons because a `Form` moves a row out of the value column as soon as the
-    /// row's ideal width exceeds it, and a fourth control on the second line is what tips it over
-    /// at this width. That is the whole reason the rows here did not line up before, and it is
-    /// also why the sentence has a line to itself. See `summaryLine`.
-    private static let summaryWidth: CGFloat = 110
-
+    /// the line saying where the mark came from. The split was forced once, by the value column
+    /// this row used to be laid out in: a row asking for more width than that column held was
+    /// moved out of it and started at a different edge from its neighbours, and a fourth control
+    /// on the second line was what tipped it over. `SettingsRow` has no such column and the split
+    /// no longer has to be there, but it is still the right shape. The emoji field is a different
+    /// kind of act from the three buttons, being typing rather than pressing, and the sentence
+    /// underneath is prose that wants a whole line. See `summaryLine`.
     private var markRow: some View {
-        LabeledContent("Mark") {
+        SettingsRow("Mark") {
             VStack(alignment: .leading, spacing: Metrics.spacing) {
                 HStack(spacing: Metrics.gutter) {
                     markTile(size: Metrics.repoIcon * 1.75)
@@ -213,8 +209,6 @@ struct RepoSettingsView: View {
                             if wasEditing, !editing { saveName() }
                         }
                         .help("An emoji here goes in front of the name, and becomes the mark.")
-
-                    Spacer(minLength: 0)
                 }
 
                 HStack(spacing: Metrics.gutter) {
@@ -225,14 +219,11 @@ struct RepoSettingsView: View {
                     // standing and the button would be lying about what it did.
                     Button("Use initials", action: useInitials)
                         .disabled(!repo.hasIcon && mark.isEmpty)
-
-                    Spacer(minLength: 0)
                 }
                 .controlSize(.small)
 
                 summaryLine
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -260,15 +251,7 @@ struct RepoSettingsView: View {
             .lineLimit(2, reservesSpace: true)
             .truncationMode(.middle)
             .fixedSize(horizontal: false, vertical: true)
-            // A `Form` hands its value column a trailing alignment, which nothing here noticed
-            // while the sentence was one line: it is the second line that swings to the far edge
-            // and leaves a ragged left margin under a mark that starts at the leading one.
-            .multilineTextAlignment(.leading)
-            // A sentence asks for as much width as it has letters, and a row that asks for more
-            // than the value column holds is moved out of the column by the form, which is what
-            // made these rows start at four different places. An ideal width keeps the row where
-            // the others are.
-            .frame(idealWidth: Self.summaryWidth, maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .help(repo.iconPath ?? "")
     }
 
@@ -449,11 +432,10 @@ struct RepoSettingsView: View {
 
     private var branchSection: some View {
         Section {
-            LabeledContent("Branch prefix") {
+            SettingsRow("Branch prefix") {
                 VStack(alignment: .leading, spacing: Metrics.spacingTight) {
                     TextField("", text: $model.draft.branchPrefix, prompt: Text("None"))
                         .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.leading)
                     SettingsDestinationLabel(model: model, key: .branchPrefix)
                 }
             }
@@ -476,15 +458,22 @@ struct RepoSettingsView: View {
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textSecondary)
             } else {
+                // Not a `SettingsRow`. The leading half is a path rather than a short label, and
+                // a path in the column every other row in this pane lines up against would push
+                // `Name` and its field most of the way across the window. So it is an ordinary
+                // row: the file, then the button that opens it, held apart.
                 ForEach(model.loaded.sources, id: \.self) { source in
-                    LabeledContent {
-                        Button("Open") { Reveal.inEditor(source) }
-                    } label: {
+                    HStack(spacing: Metrics.gutter) {
                         Text(shortPath(source))
                             .font(Typo.codeSmall)
                             .foregroundStyle(Palette.textSecondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                            .help(source)
+
+                        Spacer(minLength: Metrics.spacingSmall)
+
+                        Button("Open") { Reveal.inEditor(source) }
                     }
                 }
             }
@@ -635,8 +624,6 @@ struct AccentSwatches: View {
                 .labelsHidden()
                 .help("Another colour")
                 .padding(.leading, Metrics.spacingWide)
-
-            Spacer(minLength: 0)
         }
         // The swatches carry their own padding, for the hit area. Taking it back on this edge is
         // what puts the first circle on the same line as the field above it.

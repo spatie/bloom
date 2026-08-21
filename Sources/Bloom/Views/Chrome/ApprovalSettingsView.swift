@@ -68,7 +68,7 @@ struct ApprovalSettingsView: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .settingsForm()
         .task { await reload() }
     }
 

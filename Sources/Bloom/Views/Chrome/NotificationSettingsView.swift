@@ -64,7 +64,7 @@ struct NotificationSettingsView: View {
                     .foregroundStyle(Palette.textSecondary)
             }
         }
-        .formStyle(.grouped)
+        .settingsForm()
         .task { await service.refreshAuthorization() }
         // Revoking the permission happens in System Settings, which means it happens while Bloom is
         // in the background. Coming back is the only moment Bloom gets to notice.
@@ -76,13 +76,18 @@ struct NotificationSettingsView: View {
     /// Said plainly rather than left as a switch that is on and does nothing. This is the state
     /// somebody lands in by clicking "Don't Allow" once, months ago, and never thinking about it
     /// again.
+    /// Not a `SettingsRow`: the leading half is a sentence rather than a label, and a sentence in
+    /// the column the rest of the pane lines up against is a column the width of a sentence.
     private var blockedNotice: some View {
-        LabeledContent {
-            Button("Open Notification Settings", action: service.openSystemSettings)
-        } label: {
+        HStack(spacing: Metrics.gutter) {
             Label("macOS is blocking Bloom's notifications", systemImage: "bell.slash.fill")
                 .font(Typo.label)
                 .foregroundStyle(Palette.warning)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: Metrics.spacingSmall)
+
+            Button("Open Notification Settings", action: service.openSystemSettings)
         }
     }
 
