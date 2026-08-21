@@ -203,6 +203,10 @@ public enum CodexPermission {
         switch decision {
         case .allow(.once): .accept
         case .allow(.session), .allow(.project): .acceptForSession
+        // Codex has no tool that asks a question, so nothing can produce one of these here. It is
+        // mapped to a plain accept rather than left to a `default`, so that adding a Codex tool
+        // that does ask one is a compile error in this file rather than a silently dropped reply.
+        case .answer: .accept
         case .deny(_, let endsTurn): endsTurn ? .cancel : .decline
         }
     }

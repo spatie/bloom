@@ -125,13 +125,23 @@ struct TranscriptRowView: View, Equatable {
 
         case .permissionAsk:
             if let ask = permissionAsk {
-                PermissionAskRowView(
-                    ask: ask,
-                    decision: row.permissionDecision,
-                    note: row.permissionNote,
-                    projectName: projectName,
-                    onAnswer: { onAnswer(ask.requestID, $0) }
-                )
+                // A question is not a permission request, however it travels. See
+                // `AgentQuestionCard` for what drawing it as one did.
+                if AgentQuestionnaire.isQuestion(toolName: ask.toolName) {
+                    AgentQuestionCard(
+                        ask: ask,
+                        decision: row.permissionDecision,
+                        onAnswer: { onAnswer(ask.requestID, $0) }
+                    )
+                } else {
+                    PermissionAskRowView(
+                        ask: ask,
+                        decision: row.permissionDecision,
+                        note: row.permissionNote,
+                        projectName: projectName,
+                        onAnswer: { onAnswer(ask.requestID, $0) }
+                    )
+                }
             }
 
         case .error:

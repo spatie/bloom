@@ -225,13 +225,27 @@ public struct PermissionAsk: Sendable, Hashable, Identifiable {
         rules.map(\.displayText).joined(separator: ", ")
     }
 
+    /// Whether this is the agent asking a question rather than asking to do something.
+    ///
+    /// The distinction is load-bearing rather than cosmetic: a question is answered with words, a
+    /// request is answered with yes or no, and the two travel down the same pipe. See
+    /// `AgentQuestionnaire` and `AgentQuestionCard`.
+    public var isQuestion: Bool { AgentQuestionnaire.isQuestion(toolName: toolName) }
+
     /// Whether a scope wider than this one call can honestly be offered.
     ///
-    /// Three separate ways it can be false, and all three are the CLI's own judgement rather than
-    /// Bloom's taste: no rule was suggested, the ask asked for the persistent option to be
-    /// suppressed, or the ask says a person has to answer on the tool's own surface.
+    /// Three of the four ways it can be false are the CLI's own judgement rather than Bloom's
+    /// taste: no rule was suggested, the ask asked for the persistent option to be suppressed, or
+    /// the ask says a person has to answer on the tool's own surface.
+    ///
+    /// The fourth is Bloom's, and it is not a preference. **A question can never be answered by a
+    /// rule**, because a rule would allow the call with its input unedited, which is a call with no
+    /// answer in it. The agent would be unblocked having been told nothing, and would report that
+    /// no answer came back. The CLI does set `requires_user_interaction` on these, so this is a
+    /// second lock on a door that is already shut; it is here because the cost of that flag ever
+    /// being absent is silent, and this makes it a state that cannot be reached instead.
     public var canWiden: Bool {
-        !rules.isEmpty && !suppressesAlwaysAllow && !requiresUserInteraction
+        !isQuestion && !rules.isEmpty && !suppressesAlwaysAllow && !requiresUserInteraction
     }
 
     /// The one thing worth putting beside the tool name in a collapsed row: the command for a
@@ -328,6 +342,15 @@ public enum PermissionScope: String, Sendable, Hashable, CaseIterable, Codable {
 public enum PermissionDecision: Sendable, Hashable {
     /// Let it run. `scope` decides what else it lets through.
     case allow(scope: PermissionScope)
+    /// An answer to a question the agent asked, which is an allow carrying the reply rather than a
+    /// bare yes.
+    ///
+    /// A separate case rather than an associated value on `.allow`, because the two are not the
+    /// same act and must not be able to be confused: an allow sends the input back untouched, and
+    /// this sends an edited copy. Making that difference a case means every switch has to decide
+    /// which it is dealing with. Only `AskUserQuestion` produces one, and it is always `once`:
+    /// there is no rule that could make the next question not need answering.
+    case answer(input: JSONValue)
     /// Refuse, in the user's own words, and optionally end the turn there.
     case deny(message: String, endsTurn: Bool)
 
@@ -349,9 +372,13 @@ public enum PermissionDecision: Sendable, Hashable {
     public static let stoppedMessage =
         "The turn was stopped before this could be answered."
 
+    /// Whether the call is being let through, however it was said. An answered question is an
+    /// allow: the tool runs, with the reply in its input.
     public var isAllow: Bool {
-        if case .allow = self { return true }
-        return false
+        switch self {
+        case .allow, .answer: true
+        case .deny: false
+        }
     }
 
     /// The word a decided row prints.
@@ -360,6 +387,7 @@ public enum PermissionDecision: Sendable, Hashable {
         case .allow(.once): "allowed once"
         case .allow(.session): "allowed for the session"
         case .allow(.project): "always allowed"
+        case .answer: "answered"
         case .deny: "denied"
         }
     }
@@ -369,6 +397,7 @@ public enum PermissionDecision: Sendable, Hashable {
     public var storedName: String {
         switch self {
         case .allow(let scope): "allow-\(scope.rawValue)"
+        case .answer: "answered"
         case .deny(_, let endsTurn): endsTurn ? "deny-stop" : "deny"
         }
     }
@@ -388,6 +417,14 @@ public enum PermissionAnswer {
         var response: [String: JSONValue] = [:]
 
         switch decision {
+        case .answer(let input):
+            // The one case that edits the input, and it edits it by adding the reply the tool
+            // asked for. Nothing is remembered: a question answered once says nothing about the
+            // next one, so no permissions travel with it. See `AgentQuestionnaire`.
+            response["behavior"] = .string("allow")
+            response["updatedInput"] = input
+            response["decision"] = .string("user_temporary")
+
         case .allow(let scope):
             response["behavior"] = .string("allow")
             // Unedited. Bloom offers no way to change a command before allowing it, and sending
