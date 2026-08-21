@@ -276,21 +276,14 @@ final class NotificationService {
         if model.sessions.isEmpty { await model.reloadSessions() }
         guard let session = model.activeSession else { return }
 
-        let transcript = model.transcript(for: session)
-
-        // A turn that started between the banner arriving and the reply being typed. Dropping the
-        // text would be the worst outcome, so it is parked in the composer and the window is
-        // raised to show it sitting there.
-        guard !transcript.isRunning else {
-            transcript.draft = text
-            await transcript.saveDraft()
-            NSApp.activate(ignoringOtherApps: true)
-            NSApp.windows.first?.makeKeyAndOrderFront(nil)
-            OpenWorkspaceNotification.post(workspaceID)
-            return
-        }
-
-        await transcript.send(text)
+        // A turn that started between the banner arriving and the reply being typed used to be
+        // handled here, by parking the text in the composer and raising the window so it could be
+        // seen sitting there. That was the right instinct and the wrong mechanism: it made the
+        // reply the user's problem again, and it was a second answer to the question the composer
+        // was also answering for itself. `submit` is now the only way into a chat and it queues
+        // whatever cannot go yet, so a reply typed into a banner mid turn lands in the same place,
+        // in the same order, as one typed into the box. See `Delivery`.
+        await model.transcript(for: session).submit(text)
     }
 
     /// Which workspace a click should select. Nonisolated because a click is delivered to the app

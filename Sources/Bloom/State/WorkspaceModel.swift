@@ -392,12 +392,21 @@ final class WorkspaceModel {
     /// halfway through. Cancellation reaches the script itself through `StreamingProcess.lines`.
     /// `prompt` is optional because a terminal workspace has no opening message: it still runs
     /// the setup script, it simply has nothing to say to an agent afterwards.
-    func startSetupThenSend(prompt: String?, repo: Repo) {
+    ///
+    /// **The opening prompt joins the queue here, before the script starts, and this method is
+    /// awaited so that nothing typed into the composer can get in front of it.** It used to be
+    /// held in a local and sent on the far side of the setup run, which put it on a different
+    /// route from anything typed while the script was going, and the two raced: the owner opened a
+    /// workspace with "list the technologies used", typed "test" a moment later, and got "test"
+    /// answered first. See `Delivery` and `TranscriptModel.submit`.
+    func startSetupThenSend(prompt: String?, repo: Repo) async {
+        await enqueueOpening(prompt)
+
         setupTask?.cancel()
         setupGeneration += 1
         let generation = setupGeneration
         setupTask = Task { [weak self] in
-            await self?.runSetupThenSend(prompt: prompt, repo: repo)
+            await self?.runSetupThenSend(repo: repo)
             // Only clear the handle if it is still this run's. A cancelled setup finishes after
             // the one that replaced it has already been stored, and clearing unconditionally
             // dropped the live handle, which left the new run with nothing able to cancel it.
@@ -409,9 +418,26 @@ final class WorkspaceModel {
     /// Which setup run the stored `setupTask` belongs to.
     private var setupGeneration = 0
 
-    /// Runs the setup script, streaming into the transcript's setup row, then sends the opening
-    /// prompt.
-    func runSetupThenSend(prompt: String?, repo: Repo) async {
+    /// Puts the workspace's opening prompt at the front of its chat's queue.
+    ///
+    /// Nil for a terminal workspace, which runs its setup script and has nothing to say to an
+    /// agent afterwards. The session is already there: `AppModel.adopt` creates and loads it
+    /// before this is reached, which is the whole reason the enqueue can name a chat rather than
+    /// wait for one.
+    private func enqueueOpening(_ prompt: String?) async {
+        guard let prompt, let store, let session = activeSession else { return }
+        let body = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return }
+        _ = try? await store.enqueueDelivery(Delivery(targetSessionID: session.id, body: body))
+        // So the pending bubble is on screen from the first frame of the workspace rather than
+        // after the first read of the queue, which is what made the opening prompt invisible for
+        // the whole of a setup run.
+        await transcript(for: session).refreshQueue()
+    }
+
+    /// Runs the setup script, streaming into the transcript's setup row, then lets the chat's
+    /// queue move.
+    func runSetupThenSend(repo: Repo) async {
         guard let manager = app.manager else { return }
 
         // Off the main actor: this reads and parses up to six files from disk, and it runs at the
@@ -442,8 +468,11 @@ final class WorkspaceModel {
         }
 
         await reloadSessions()
-        guard !Task.isCancelled, let prompt, let session = activeSession else { return }
-        await transcript(for: session).send(prompt)
+        guard !Task.isCancelled, let session = activeSession else { return }
+        // The worktree is built, so whatever was asked for while it was being built may go, oldest
+        // first. Nothing is passed in: the opening prompt is already in the queue, and so is
+        // anything typed into the composer since. See `enqueueOpening`.
+        await transcript(for: session).drain()
     }
 
     /// One setup run: the state it resets, the output it streams, and what it leaves behind.
@@ -809,7 +838,7 @@ final class WorkspaceModel {
         // pressed a button in the inspector should be looking at the answer to it.
         activeSessionID = session.id
         isExpectingPullRequest = true
-        await transcript(for: session).send(await pullRequestTurn(text: render.text))
+        await transcript(for: session).submit(await pullRequestTurn(text: render.text))
         return nil
     }
 
@@ -852,7 +881,7 @@ final class WorkspaceModel {
         activeSessionID = session.id
         // No attachment. The pull request instructions are about opening a pull request, and
         // there is already one open by the time this button exists.
-        await transcript(for: session).send(render.text)
+        await transcript(for: session).submit(render.text)
         return nil
     }
 

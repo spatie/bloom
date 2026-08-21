@@ -987,7 +987,7 @@ final class AppModel {
 
         // Setup runs whether or not there is an agent turn to follow it. Only the turn is skipped
         // for a terminal workspace.
-        model(for: started.workspace).startSetupThenSend(prompt: opening, repo: repo)
+        await model(for: started.workspace).startSetupThenSend(prompt: opening, repo: repo)
         return started.workspace
     }
 
@@ -1139,7 +1139,7 @@ final class AppModel {
         guard let session = await continuationSession(in: model) else { return }
         // The reader pressed a button and a turn is about to stream: put them in front of it.
         model.activeSessionID = session.id
-        await model.transcript(for: session).send(render.text)
+        await model.transcript(for: session).submit(render.text)
     }
 
     /// The session the continue turn goes to: the one the workspace was already using, or a new

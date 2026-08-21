@@ -313,7 +313,7 @@ struct ComposerView: View {
         )
         caret = 0
         let transcript = transcript
-        Task { await transcript.send(text) }
+        Task { await transcript.submit(text) }
     }
 
     /// Half a second is long enough that a fast typist writes one row instead of forty, and short

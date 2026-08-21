@@ -473,6 +473,47 @@ public actor Store {
                     """
                 )
             },
+
+            // Messages that have been asked for and have not gone yet. See `Delivery`.
+            //
+            // A table rather than an array in a view model, because of what a queued message has
+            // to survive: quitting Bloom with three of them waiting, a turn that fails instead of
+            // finishing, and a workspace nobody has opened since launch. All three used to end the
+            // same way, which is that the sentence was gone.
+            //
+            // **This is the `deliveries` table in `bloom-handover/mcp-design.md`, laid down here
+            // because the owner needed half of it first.** The columns nothing writes yet are in
+            // it on purpose: `source_workspace_id` and `verdict` are what a child workspace's
+            // report needs, and a migration is the one thing that is expensive to go back and
+            // change. What the two halves share is not a coincidence to be tidied away later, it
+            // is the same question (something arrived for a session that is busy) with the same
+            // answer (park it, deliver it when the turn ends, in the order it was asked).
+            //
+            // Ordered by `created_at, rowid`. The timestamp alone is not a total order: the
+            // opening prompt and a sentence typed a moment later can land in the same millisecond,
+            // and the whole point of this table is that the first thing asked for is the first
+            // thing sent. The rowid breaks the tie in insertion order and costs nothing, since
+            // this table has a TEXT primary key and therefore still has one.
+            //
+            // No foreign key on `target_session_id`, following the design: a delivery is a record
+            // of what was asked for, and it should outlive the chat for the same reason a report
+            // should outlive the parent it was addressed to. An orphan is inert, since every read
+            // here names a session.
+            sql("""
+            CREATE TABLE IF NOT EXISTS deliveries (
+                id TEXT PRIMARY KEY,
+                target_session_id TEXT NOT NULL,
+                source_workspace_id TEXT,
+                kind TEXT NOT NULL DEFAULT 'owner',
+                verdict TEXT,
+                body TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                delivered_at REAL,
+                delivered_seq INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS deliveries_pending
+                ON deliveries(target_session_id, delivered_at);
+            """),
         ]
 
         let current = Int(db.userVersion)
@@ -1208,6 +1249,90 @@ public actor Store {
         }
     }
 
+    // MARK: - Deliveries
+
+    /// Everything asked for on this session that has not gone yet, oldest first.
+    ///
+    /// `created_at, rowid` and not `created_at` alone. The opening prompt and a sentence typed
+    /// while the setup script is still running can land in the same millisecond, and putting them
+    /// back in the wrong order is the bug this whole table exists to fix.
+    public func pendingDeliveries(sessionID: SessionID) throws -> [Delivery] {
+        try db.query(
+            """
+            SELECT * FROM deliveries
+            WHERE target_session_id = ? AND delivered_at IS NULL
+            ORDER BY created_at, rowid
+            """,
+            [.text(sessionID)]
+        ).map(Self.delivery(from:))
+    }
+
+    /// Puts one at the back of the queue.
+    ///
+    /// The value is built here and now, so the id and the timestamp it is handed back with are
+    /// the ones on disk. Callers hold that id to cancel the row again.
+    @discardableResult
+    public func enqueueDelivery(_ delivery: Delivery) throws -> Delivery {
+        try db.run(
+            """
+            INSERT INTO deliveries
+                (id, target_session_id, source_workspace_id, kind, verdict, body, created_at,
+                 delivered_at, delivered_seq)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                .text(delivery.id),
+                .text(delivery.targetSessionID),
+                delivery.sourceWorkspaceID.map { .text($0) } ?? .null,
+                .text(delivery.kind.rawValue),
+                delivery.verdict.map { .text($0) } ?? .null,
+                .text(delivery.body),
+                .double(delivery.createdAt.timeIntervalSince1970),
+                delivery.deliveredAt.map { .double($0.timeIntervalSince1970) } ?? .null,
+                delivery.deliveredSeq.map { .int(Int64($0)) } ?? .null,
+            ]
+        )
+        return delivery
+    }
+
+    /// Marks one as gone.
+    ///
+    /// Named columns rather than a whole-value write, which is the rule the head of this file is
+    /// about: a delivery is read by the transcript to draw it and written by the drain to retire
+    /// it, and those two are not ordered with respect to each other.
+    ///
+    /// `seq` is what the delivery became in the `messages` table where the caller knows it, which
+    /// the owner's own path does not: the runner writes that row as part of starting the turn.
+    /// See `Delivery.deliveredSeq`.
+    public func markDelivered(id: DeliveryID, seq: Int? = nil, at date: Date = Date()) throws {
+        try db.run(
+            "UPDATE deliveries SET delivered_at = ?, delivered_seq = ? WHERE id = ?",
+            [.double(date.timeIntervalSince1970), seq.map { .int(Int64($0)) } ?? .null, .text(id)]
+        )
+    }
+
+    /// Takes one back out of the queue, because whoever asked for it changed their mind.
+    ///
+    /// Only while it is still pending. A delivery that has gone is a turn the agent is already
+    /// running, and deleting the row would not unsay it; the `WHERE` is what makes a cancel
+    /// pressed on the same frame the drain fires a no-op rather than a lie.
+    public func cancelDelivery(id: DeliveryID) throws {
+        try db.run("DELETE FROM deliveries WHERE id = ? AND delivered_at IS NULL", [.text(id)])
+    }
+
+    /// Puts one back in the queue after a send that never started a turn.
+    ///
+    /// The drain retires a delivery before handing it over, so the bubble does not flash on screen
+    /// for the one frame between the two. When the runner refuses to start there is nothing to
+    /// retire it for, and a message the agent never received must go back to being pending rather
+    /// than reading as sent.
+    public func restoreDelivery(id: DeliveryID) throws {
+        try db.run(
+            "UPDATE deliveries SET delivered_at = NULL, delivered_seq = NULL WHERE id = ?",
+            [.text(id)]
+        )
+    }
+
     // MARK: - Review comments
 
     public func reviewComments(workspaceID: WorkspaceID) throws -> [ReviewComment] {
@@ -1534,6 +1659,22 @@ public actor Store {
                 parentWorkspaceID: row.string("parent_workspace_id"),
                 spawnToolUseID: row.string("spawn_tool_use_id")
             )
+        )
+    }
+
+    private static func delivery(from row: Row) -> Delivery {
+        Delivery(
+            id: DeliveryID(row.string("id") ?? newID()),
+            targetSessionID: SessionID(row.string("target_session_id") ?? ""),
+            sourceWorkspaceID: row.string("source_workspace_id").map(WorkspaceID.init),
+            // An unknown word is the owner's, because that is the only kind this app has ever
+            // written and a row it cannot classify is still a sentence somebody is waiting on.
+            kind: Delivery.Kind(rawValue: row.string("kind") ?? "") ?? .owner,
+            verdict: row.string("verdict"),
+            body: row.string("body") ?? "",
+            createdAt: row.date("created_at") ?? Date(),
+            deliveredAt: row.date("delivered_at"),
+            deliveredSeq: row.int("delivered_seq").map(Int.init)
         )
     }
 

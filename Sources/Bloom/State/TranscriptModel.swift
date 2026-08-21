@@ -87,6 +87,22 @@ final class TranscriptModel {
 
     var draft = ""
 
+    /// What has been asked for on this session and has not gone yet, oldest first.
+    ///
+    /// Read by the transcript to draw the pending bubbles and by the drain to decide what goes
+    /// next. It mirrors the `deliveries` table rather than being the queue itself: the table is
+    /// the queue, because a message somebody typed has to survive quitting Bloom. See `Delivery`.
+    private(set) var pendingDeliveries: [Delivery] = []
+
+    /// Whether the turn that is ending was ended by a person pressing Stop.
+    ///
+    /// Stop is not "next, please". Somebody who stops an agent is stepping in, and firing the
+    /// message they queued four minutes ago into the silence they just made is the opposite of
+    /// what they asked for. A cancelled turn still emits its own result (see `stop()`), so the
+    /// drain hanging off that result has to be able to tell the two endings apart. Cleared when a
+    /// turn starts, so it never outlives the turn it describes.
+    private var wasStoppedByHand = false
+
     /// Bumped whenever something outside the list asks it to go back to the newest row. A counter
     /// rather than a flag, so two requests in a row are two requests, and the list has nothing to
     /// clear afterwards. See `jumpToLiveEnd`.
@@ -157,6 +173,10 @@ final class TranscriptModel {
         SwitchTrace.markOnScreen("transcript.rows.built", workspace: workspace.id)
 
         draft = (try? await store.draft(sessionID: session.id)) ?? ""
+        // Read, and deliberately not drained. A message queued before the last quit must not
+        // start a paid turn on a Mac nobody is sitting at, so it is shown as pending and goes with
+        // the owner's next message. See `DeliveryHold.none`.
+        await refreshQueue()
         isLoaded = true
     }
 
@@ -253,35 +273,114 @@ final class TranscriptModel {
 
     // MARK: - Sending
 
-    func send(_ text: String) async {
+    /// Everything anybody says to this chat, and the only way in.
+    ///
+    /// **One ordered queue, because there used to be two paths and they raced.** The prompt typed
+    /// in the create window waited inside the setup task; anything typed into the composer during
+    /// that minute went straight to the runner, since nothing marks a session busy while its
+    /// worktree is being built. The owner opened a workspace asking for one thing, typed a second
+    /// thing while the script ran, and watched the second one answered first. Nothing about that
+    /// was fixable by hurrying one of the two paths along: whichever continuation the scheduler
+    /// reached first won, so the fix is that there is one path and it has an order.
+    ///
+    /// So this never sends. It joins the queue and then asks the queue to move, which is also what
+    /// makes the invariant cheap to state: what is delivered is delivered in the order it was
+    /// asked for, whatever asked for it. See `Delivery`.
+    func submit(_ text: String) async {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, let store else { return }
 
         draft = ""
         try? await store.saveDraft(sessionID: session.id, body: "")
 
+        _ = try? await store.enqueueDelivery(Delivery(targetSessionID: session.id, body: body))
+        // Not from `drain`, and not before the enqueue. The owner saying something is the moment a
+        // queue held over from a relaunch, or paused by a Stop, is meant to move again, and it
+        // moves from the front rather than from what was just typed.
+        wasStoppedByHand = false
+        await drain()
+    }
+
+    /// Why the queue in front of this chat is not moving, which is both the drain's condition and
+    /// the sentence the first pending bubble carries. See `DeliveryHold`.
+    ///
+    /// The setup half is read off the workspace's own model rather than mirrored here. Only that
+    /// model runs the script, and a second copy of "is setup running" is a second thing to get
+    /// wrong: the transcript already spent a release drawing "setup has not run yet" over output
+    /// the script had just printed, for exactly that reason.
+    var deliveryHold: DeliveryHold {
+        let model = app.existingModel(for: workspace.id)
+        return DeliveryHold.of(
+            isRunningSetup: model?.isRunningSetup ?? false,
+            didSetupFail: (model?.workspace ?? workspace).setupState == .failed,
+            isTurnRunning: isRunning,
+            isAwaitingQuestion: isAwaitingPermission
+        )
+    }
+
+    /// Hands the front of the queue to the agent, if anything is allowed to go.
+    ///
+    /// One at a time. The next one goes when this turn ends, which is what "never mid-turn" means
+    /// on both backends and what keeps the queue an ordered thing rather than a burst.
+    ///
+    /// Called from the three moments a queue is meant to move and from nowhere else: the setup
+    /// script finishing, a turn ending of its own accord, and the owner submitting. Not on launch,
+    /// and not after a Stop. Both of those would spend the owner's money on a turn nobody asked
+    /// for at that moment, and both are covered by the queue simply sitting there, visibly, until
+    /// somebody says something.
+    func drain() async {
+        guard let store else { return }
+        await refreshQueue()
+        guard let next = Delivery.next(from: pendingDeliveries, hold: deliveryHold) else { return }
+
+        // Retired before it is handed over, rather than after. The pending bubble and the real one
+        // are two drawings of the same sentence, and a delivery that is still pending while its
+        // turn is starting is drawn twice. `restoreDelivery` below is the one path back.
+        try? await store.markDelivered(id: next.id)
+        await refreshQueue()
+
+        await deliver(next)
+    }
+
+    /// Takes one back out of the queue, because whoever asked for it changed their mind.
+    func cancel(_ delivery: Delivery) async {
+        guard let store else { return }
+        try? await store.cancelDelivery(id: delivery.id)
+        await refreshQueue()
+    }
+
+    /// Re-reads the queue from the table. Public because the moment a workspace's opening prompt
+    /// is enqueued is outside this object, and the bubble has to be on screen from that frame.
+    func refreshQueue() async {
+        guard let store else { return }
+        pendingDeliveries = (try? await store.pendingDeliveries(sessionID: session.id)) ?? []
+    }
+
+    /// The one place a turn starts, reached only from `drain`.
+    private func deliver(_ delivery: Delivery) async {
+        guard let store else { return }
         let runner = ensureRunner()
         turnStartedAt = Date()
+        wasStoppedByHand = false
         setRunning(true)
         statusLabel = "Starting"
 
         do {
-            try await runner.send(body)
+            try await runner.send(delivery.body)
         } catch {
             setRunning(false)
             statusLabel = nil
-            // The composer was emptied on the assumption the turn would start. It did not, so
-            // the words go back where they were typed. An unsent prompt is often minutes of
-            // thought and this app holds the only copy of it; an alert the user cannot paste
-            // out of is not somewhere to leave it.
-            //
-            // Prepended rather than assigned when something is already there, because the only
-            // way that happens is somebody typing while the start failed, and their new sentence
-            // is not this method's to throw away either.
-            draft = draft.isEmpty ? body : body + "\n\n" + draft
-            try? await store.saveDraft(sessionID: session.id, body: draft)
+            // Nothing was said, so the delivery goes back to being pending rather than reading as
+            // sent. It used to go back into the composer, which was right when the composer was
+            // the only place an unsent prompt could live and is wrong now that there is a queue:
+            // a failed start with three messages behind it would have pasted one of them over the
+            // top of whatever the user was typing, and lost its place in the order. An unsent
+            // prompt is often minutes of thought and this app holds the only copy of it; it stays
+            // where it can be read, edited by cancelling it, and sent again.
+            try? await store.restoreDelivery(id: delivery.id)
+            await refreshQueue()
             Log.composer.error(
-                "the agent would not start, so the prompt was put back in the composer: \(error.readableMessage, privacy: .public)"
+                "the agent would not start, so the prompt stayed in the queue: \(error.readableMessage, privacy: .public)"
             )
             app.alert = BloomAlert(title: "Could not start the agent", message: error.readableMessage)
         }
@@ -335,6 +434,9 @@ final class TranscriptModel {
     /// turn still emits its own result, and that event is what writes the final state back into the
     /// session row. Tearing the pump down here used to strand the session until the next launch.
     func stop() {
+        // Remembered so the result this cancellation is about to produce does not look like a turn
+        // that finished, and therefore does not let the queue move. See `wasStoppedByHand`.
+        wasStoppedByHand = true
         runner?.cancelNow()
         setRunning(false)
         statusLabel = nil
@@ -497,6 +599,10 @@ final class TranscriptModel {
             // same result. Reading them back keeps one writer and avoids double counting.
             await refreshSession()
             await notifyFinished(result: result)
+            // A turn that ended by itself is the moment the next queued message is due. A turn the
+            // owner stopped is not: they stepped in, and a message they queued minutes ago going
+            // out into the silence they just made is the opposite of what Stop is for.
+            if !wasStoppedByHand { await drain() }
 
         case .permissionAsk:
             // The row goes in where the call would have been, and the composer stops looking like

@@ -77,6 +77,12 @@ public struct ReviewCommentID: Identifier {
     public init(_ rawValue: String) { self.rawValue = rawValue }
 }
 
+/// A message somebody has asked for that has not gone to the agent yet. See `Delivery`.
+public struct DeliveryID: Identifier {
+    public let rawValue: String
+    public init(_ rawValue: String) { self.rawValue = rawValue }
+}
+
 /// A standing "yes" to a tool the agent asked about, remembered per project.
 public struct PermissionGrantID: Identifier {
     public let rawValue: String

@@ -56,6 +56,13 @@ struct TranscriptListView: View {
 
     /// Sentinel id, negative so it can never collide with a row sequence number.
     private static let streamingID = -2
+
+    /// A pending message's id in the list.
+    ///
+    /// A string rather than an integer, which is what every row id here is, so a delivery can
+    /// never be mistaken for a sequence number however the two lists grow. The same trick
+    /// `WorkspaceEventRow.endID` uses and for the same reason.
+    private static func pendingID(_ id: DeliveryID) -> String { "bloom.pending.\(id)" }
     /// How far off the bottom the user may be and still be considered to be following along.
     private static let stickyThreshold: CGFloat = 96
     /// A user bubble takes this share of the pane, and never gets narrower than the floor, so a
@@ -90,6 +97,11 @@ struct TranscriptListView: View {
             && !transcript.isRunning
             && !transcript.isStreaming
             && !showsSetup
+            // A workspace whose opening prompt is still queued has nothing in its session and a
+            // bubble at the bottom of it. An empty state centred over the pane would be drawn
+            // straight across the one thing on screen, which is the same mistake `showsSetup`
+            // above is here to avoid.
+            && transcript.pendingDeliveries.isEmpty
     }
 
     /// The rows this pass draws, which is every row of the session except on the frame that
@@ -144,7 +156,11 @@ struct TranscriptListView: View {
                     WorkspaceEventsView(
                         workspaceID: transcript.workspace.id,
                         isRunning: isRunningSetup,
-                        isFirstThing: transcript.rows.isEmpty,
+                        // Nothing said yet AND nothing waiting to be said. Once there is a pending
+                        // bubble on screen, "You can ask for something now" is answered by the
+                        // bubble, and answered better: it names the sentence that is waiting
+                        // rather than describing the situation in the abstract.
+                        isFirstThing: transcript.rows.isEmpty && transcript.pendingDeliveries.isEmpty,
                         onVisibilityChange: { showsSetup = $0 },
                         onShowLogEnd: { wasAsked in
                             showSetupLogEnd(proxy, wasAsked: wasAsked)
@@ -198,6 +214,25 @@ struct TranscriptListView: View {
                     StreamingTailView(transcript: transcript)
                         .padding(.horizontal, TranscriptLayout.inset)
                         .id(Self.streamingID)
+
+                    // After everything that has been said, because that is where the next thing to
+                    // be said belongs. Drawn from the workspace's queue rather than from a row, so
+                    // none of it can reach the agent before it is actually sent: see
+                    // `PendingTurnRowView` and `WorkspaceEvent`, which is the same rule.
+                    ForEach(transcript.pendingDeliveries) { delivery in
+                        PendingTurnRowView(
+                            delivery: delivery,
+                            // Only the first is told why it is waiting; the rest are visibly
+                            // behind it.
+                            hold: delivery.id == transcript.pendingDeliveries.first?.id
+                                ? transcript.deliveryHold
+                                : nil,
+                            maxWidth: maxBubbleWidth,
+                            onCancel: { Task { await transcript.cancel(delivery) } }
+                        )
+                        .padding(.horizontal, TranscriptLayout.inset)
+                        .id(Self.pendingID(delivery.id))
+                    }
                 }
                 .padding(.vertical, TranscriptLayout.block)
                 .frame(maxWidth: .infinity, alignment: .leading)

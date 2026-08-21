@@ -40,7 +40,12 @@ struct UserTurnRowView: View {
 
     /// How much of the pane a user turn always leaves empty on its left, so it reads as one side of
     /// a conversation even when it is short.
-    private static let inset: CGFloat = 32
+    ///
+    /// This and the two below are not private, and `CappedWidth` at the foot of the file is not
+    /// either, because `PendingTurnRowView` draws the same object in a different state and every
+    /// number it uses has to be this one. A copied 12 is a bubble that stops matching the moment
+    /// somebody changes one of them.
+    static let inset: CGFloat = 32
 
     /// The bubble's radius, which is its own number rather than `Metrics.corner`.
     ///
@@ -51,12 +56,12 @@ struct UserTurnRowView: View {
     ///
     /// Local on purpose: `Metrics` is where radii live and this is a candidate to move there as
     /// `Metrics.cornerBubble` the moment anything else needs it. Nothing else does yet.
-    private static let corner: CGFloat = 12
+    static let corner: CGFloat = 12
 
     /// Air inside the fill. Wider than the plate it replaces, because a hairline lets text sit
     /// close to the edge and a fill does not: on a coloured ground the words need to look placed
     /// in it rather than pressed against the side of it.
-    private static let padding = EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
+    static let padding = EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
 
     var body: some View {
         HStack(spacing: 0) {
@@ -203,7 +208,7 @@ struct UserTurnRowView: View {
 /// Measuring once at the capped width answers both questions with the same number: a short turn
 /// comes out short, a long one comes out at the cap and wraps inside it, and the height is the
 /// height of the text as it will actually be drawn.
-private struct CappedWidth: Layout {
+struct CappedWidth: Layout {
     var width: CGFloat
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
