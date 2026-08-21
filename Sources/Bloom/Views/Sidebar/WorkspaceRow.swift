@@ -210,16 +210,39 @@ struct WorkspaceRow: View {
         Menu {
             WorkspaceMenuItems(workspace: workspace) { renaming = $0 }
         } label: {
+            // Still the CIRCLED ellipsis, which is not what the colour complaint looked like it
+            // was asking for. A bare `ellipsis` was the obvious partner for `archivebox`, on the
+            // grounds that a plain outline should stand beside a plain outline, and it was drawn
+            // and rejected on the picture: the archive is an enclosing glyph, so three loose dots
+            // beside it read as a control and a smudge rather than as a pair. The ink says the
+            // same. Counted over the two boxes on a window capture, the ring and the archive come
+            // to 176 and 215 inked pixels; the bare dots come to 48, under a quarter of their
+            // neighbour. The circle is the one that matches the weight it has to live next to.
             Label("More for \(workspace.name)", systemImage: "ellipsis.circle")
                 .labelStyle(.iconOnly)
                 .font(Typo.caption)
-                // Sized inside the label, the way the archive button beside it is, so the two
-                // stand in boxes of one size and the press target is the box rather than the
-                // glyph. `fixedSize` below is what stops the menu style widening it again.
+                // The archive button's box, so the two stand at one size and the press target is
+                // the box rather than the glyph. `fixedSize` below is what stops the menu style
+                // widening it again.
                 .frame(width: SidebarMetrics.rowButton, height: SidebarMetrics.rowButton)
                 .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
         }
-        .menuStyle(.borderlessButton)
+        // Not `.borderlessButton`, and this pair of lines is the whole of "it's strange that we
+        // have archive and circle dots in another color".
+        //
+        // `.borderlessButton` draws its label in an ink of its own and ignores the colour it is
+        // given, wherever that colour is stated. Measured off a window capture of this row, with
+        // both controls carrying the identical `foregroundStyle`: the archive's darkest pixel was
+        // #7A7B7C, which is `secondaryLabelColor` composited on the sidebar, and the menu's was
+        // #A5A8A9 with a mean of #B2B5B6, a tertiary weight nothing asked for. Moving the colour
+        // onto the label's own leaf changed neither number by a single count, which is what rules
+        // out the glyph and rules out the call site: the style is simply not passing it down.
+        //
+        // `.button` does pass it down, because it defers to the BUTTON style, and `.plain` is the
+        // one the archive beside it already uses. Re-measured the same way, the ellipsis's dots
+        // came out at #7A7B7C, equal to the archive's darkest pixel to the count.
+        .menuStyle(.button)
+        .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
         .foregroundStyle(isEmphasized ? Palette.textInverted : Palette.textSecondary)
