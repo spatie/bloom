@@ -15,7 +15,7 @@
 # tried to second-guess it would be wrong the first time a file moved.
 
 .DEFAULT_GOAL := help
-.PHONY: help build test app run lint master release
+.PHONY: help build test app run lint master dev dev-db release
 
 help: ## Show this list
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -40,6 +40,12 @@ lint: ## Check the house rules no off the shelf linter knows
 
 master: ## Build HEAD and install it to ~/Applications/Bloom.app
 	./Tools/master.sh
+
+dev: ## Build HEAD as Bloom Dev, a second app that cannot reach the real data
+	./Tools/dev-build.sh
+
+dev-db: ## Copy the real database into Bloom Dev's own container
+	./Tools/dev-db.sh
 
 release: ## Build, sign, notarise and staple a zip you can send
 	./Tools/release.sh
