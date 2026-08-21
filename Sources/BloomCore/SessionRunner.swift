@@ -2,7 +2,7 @@ import Foundation
 
 /// What a Bloom session needs from whatever is driving its agent.
 ///
-/// Deliberately tiny: it is exactly the four things `TranscriptModel` calls plus the one the
+/// Deliberately tiny: it is exactly the five things `TranscriptModel` calls plus the one the
 /// permission prompt calls, and nothing else. Every runner has a great deal more surface than
 /// this, and none of that surface is shared, because the two backends share no protocol: Claude
 /// Code speaks stream-json over stdin and stdout, Codex speaks JSON-RPC over the same pipes, and
@@ -26,14 +26,37 @@ public protocol SessionRunner: Actor {
     /// for everybody.
     nonisolated var events: AsyncStream<AgentEvent> { get }
 
-    var isRunning: Bool { get }
+    /// Whether the backend process is still there.
+    ///
+    /// Named for the process rather than for the turn because the quit path waits on this, and the
+    /// two facts are not the same on both backends: Claude Code's process is killed by Stop and
+    /// spawned again by the next turn, while `codex app-server` is long lived and outlives every
+    /// turn on it. This member used to be `isRunning`, and the Codex side answered it with "a turn
+    /// is open", so quit interrupted the turn, watched it close and concluded the process was gone
+    /// while it was still running. One name, two facts, and the wrong one was being polled.
+    var isProcessAlive: Bool { get }
 
     /// Write one user turn. Starts whatever has to be started, on first use.
     func send(_ text: String) async throws
 
-    /// Stop now, from synchronous code that cannot wait for a turn on the actor. Which is exactly
-    /// when the actor is least available, because it is busy running the thing being stopped.
+    /// Stop the turn now, from synchronous code that cannot wait for a turn on the actor. Which is
+    /// exactly when the actor is least available, because it is busy running the thing being
+    /// stopped.
+    ///
+    /// The chat survives this on both backends and can be sent to again. What it costs differs:
+    /// Claude Code has to kill its process and resume into a new one, Codex interrupts over the
+    /// wire and keeps the connection, along with the grants that only exist inside it.
     nonisolated func cancelNow()
+
+    /// The session is going away for good: quit, close, or the worktree being archived. End the
+    /// turn **and** kill the process, synchronously, before the caller carries on.
+    ///
+    /// Separate from `cancelNow` because on one backend they are the same act and on the other
+    /// they are not, and because everything that reads "the agents are gone" reads it after this.
+    /// A path that only asked politely is the orphaned-children bug: children reparented to
+    /// launchd on quit, and a live agent writing into a worktree `git worktree remove --force` is
+    /// deleting on archive.
+    nonisolated func terminateNow()
 
     /// Answer one permission question. Not a turn: it unblocks a turn already in flight.
     func answer(requestID: String, decision: PermissionDecision) async
@@ -100,4 +123,15 @@ public final class EventFanout<Element: Sendable>: @unchecked Sendable {
 /// one property and no edit inside the file itself.
 extension AgentRunner: SessionRunner {
     public nonisolated var agentKind: AgentKind { .claudeCode }
+
+    /// `isRunning` here has always meant the process, because this runner has only one and Stop
+    /// kills it. The seam says so in its name instead of relying on a reader knowing that.
+    public var isProcessAlive: Bool { isRunning }
+
+    /// Stop and "this is over" are one act on this backend. `cancelNow` already denies the open
+    /// questions in words, SIGTERMs the whole process group and SIGKILLs what ignores it, and the
+    /// next turn spawns a new process with `--resume`, so there is nothing left for a second path
+    /// to do. Calling both is harmless: the run is already marked cancelled and the drained asks
+    /// come back empty.
+    public nonisolated func terminateNow() { cancelNow() }
 }

@@ -251,6 +251,23 @@ Turn shape for a Codex chat:
 5. Draw `item/started` as a row, update it from the deltas, replace it from `item/completed`.
 6. `turn/completed` closes the turn. Status `interrupted` is a stop, not a failure.
 
+### The process's life, and the two ways it ends
+
+`turn/interrupt` ends a turn. **Nothing on this protocol ends the process**, so Bloom has to, and
+the two acts are deliberately not the same one:
+
+- **Stop interrupts and the server stays.** That is what lets the next message resume in the same
+  process, along with the `acceptForSession` grants that live inside it and nowhere else (§7).
+- **Close, archive and quit kill it.** `SessionRunner.terminateNow`, which is SIGTERM to the whole
+  process group with SIGKILL three seconds behind, exactly as the Claude Code side does it.
+
+Claude Code reaches the same contract from the other end, because killing is the only way to stop
+a turn there and the next turn spawns a new process with `--resume`. Measured here while the kill
+was missing: at the moment Bloom's quit path reported the agent gone, `codex` (a node script) and
+the app-server binary it forks were both still running, and both were still running five seconds
+later. The poll behind that report asked whether a turn was open, which the interrupt had just
+made false, and nothing had signalled anything.
+
 ---
 
 ## 6. Storing and drawing Codex items

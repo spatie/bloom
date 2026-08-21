@@ -341,26 +341,39 @@ final class TranscriptModel {
         clearStreaming()
     }
 
+    /// The chat is going away for good, so the process goes with it.
+    ///
+    /// `stop()` above is deliberately not this. Stop leaves a Codex chat's `app-server` running,
+    /// because that is what makes the next message resume in the same process with the grants the
+    /// person already gave; closing, archiving and quitting mean the opposite, and used to reach
+    /// the same method. So a Codex chat's server was never signalled by anything, which is the
+    /// orphaned-children bug this app already fixed once on the Claude Code side.
+    func terminateNow() {
+        stop()
+        runner?.terminateNow()
+    }
+
     /// The session itself is going away, so the pump goes with it. The event stream never ends on
     /// its own, and a pump left iterating one holds its runner alive for the rest of the launch.
     func teardown() {
-        stop()
+        terminateNow()
         pumpTask?.cancel()
         pumpTask = nil
     }
 
     /// Quit path. Signals the agent and waits, briefly, for it to actually be gone, because macOS
     /// hands our children to launchd rather than killing them.
+    ///
+    /// The wait is on the process, not on the turn. Polling "is a turn running" is what let this
+    /// return happily on a Codex chat whose server was still very much alive: the interrupt landed,
+    /// the turn closed, and nothing had ever been signalled.
     func shutdown() async {
         guard let runner else { return }
-        runner.cancelNow()
-        setRunning(false)
-        statusLabel = nil
-        clearStreaming()
+        terminateNow()
 
         let deadline = ContinuousClock.now.advanced(by: .seconds(3.5))
         while ContinuousClock.now < deadline {
-            let alive = await runner.isRunning
+            let alive = await runner.isProcessAlive
             if !alive { return }
             try? await Task.sleep(for: .milliseconds(50))
         }

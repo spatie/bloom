@@ -39,6 +39,12 @@ public actor CodexRunner: SessionRunner {
     /// is written to a database that outlives it.
     private var approvals: [String: CodexApprovalRequest] = [:]
 
+    /// The live connection, held outside the actor so quit, close and archive can signal the
+    /// server without waiting for a turn on one. Attached on every connect and never cleared, for
+    /// the reason `LiveProcess` in `CodexClient` gives: a box emptied by the bookkeeping running
+    /// behind the signal would answer "gone" for a process that was still dying.
+    private let connection = LiveConnection()
+
     private let pending = PendingCodexAsks()
     private let handle = TurnHandle()
     private let sink = EventFanout<AgentEvent>()
@@ -80,7 +86,14 @@ public actor CodexRunner: SessionRunner {
 
     public nonisolated var events: AsyncStream<AgentEvent> { sink.stream() }
 
-    public var isRunning: Bool { handle.isLive }
+    /// Whether the server process is still there, which on this backend is **not** whether a turn
+    /// is running.
+    ///
+    /// The two are one fact for Claude Code, whose process is killed by Stop and started again by
+    /// the next turn, and two facts here: `codex app-server` is long lived by design and outlives
+    /// every turn on it. A quit path polling "is a turn open" watched the interrupt land, saw the
+    /// turn close and concluded the process was gone. It was not. It had never been signalled.
+    public var isProcessAlive: Bool { connection.current?.isProcessAlive ?? false }
 
     public var currentSession: Session { session }
 
@@ -114,14 +127,43 @@ public actor CodexRunner: SessionRunner {
         await save(session)
     }
 
-    /// Stop the turn that is running.
+    /// Stop the turn that is running, and leave the server where it is.
     ///
     /// Interrupting is an RPC here rather than a signal, so unlike the Claude Code side there is
     /// nothing synchronous to do: the intent is recorded now, which is what stops a late result
     /// being filed as a success, and the request goes out on the next turn of the actor.
+    ///
+    /// **Not a kill, deliberately.** Claude Code's Stop has to kill its process because that is
+    /// the only way to stop a turn there, and the next turn spawns another one with `--resume`.
+    /// Killing here would cost something Claude Code has not got: the grants a person gave with
+    /// "allow for this session" live in the app-server process rather than in Bloom's database,
+    /// so every Stop would quietly throw them away and make the next turn ask again. What kills
+    /// the server is `terminateNow`, and the difference between the two is which of them a chat
+    /// is expected to survive.
     public nonisolated func cancelNow() {
         handle.markCancelled()
         Task { await self.interrupt() }
+    }
+
+    /// The chat is going away: quit, close, or the worktree being archived. Kill the server.
+    ///
+    /// **The orphaned-children bug, on the newer backend.** Nothing in this file used to signal
+    /// the process at all. `cancelNow` sent an interrupt and returned, `CodexClient.stop` had no
+    /// caller, and the quit path then polled a flag that means "a turn is open", watched the
+    /// interrupt close the turn and reported success. Measured against the real binary: at the
+    /// moment Bloom concluded the agent was gone, `codex app-server` and the app-server binary
+    /// that node forks were both still running, and still running five seconds later. On quit
+    /// they were reparented to launchd along with anything a turn had spawned; on archive they
+    /// kept their working directory inside a worktree `git worktree remove --force` was about to
+    /// delete, which is what `performArchive` tears the agents down first to prevent.
+    ///
+    /// Synchronous for the same reason `AgentRunner.cancelNow` is: quit and archive run on the
+    /// main actor and cannot wait for a turn on an actor that is busy running the thing being
+    /// ended. Everything that cannot be done in a signal is done in `shutdown` behind it.
+    public nonisolated func terminateNow() {
+        handle.markCancelled()
+        connection.current?.terminateNow()
+        Task { await self.shutdown() }
     }
 
     private func interrupt() async {
@@ -152,15 +194,34 @@ public actor CodexRunner: SessionRunner {
         }
     }
 
-    /// Ends the connection and the pump. The chat can be sent to again afterwards: the thread id
-    /// is stored, so the next turn resumes rather than starting a new conversation.
+    /// Ends the connection and the pump, and files every question that can now never be answered.
+    ///
+    /// Reached from `terminateNow`, which has already signalled the process, so none of the words
+    /// written here reach the server and none of them are meant to. What they reach is the
+    /// database and the transcript: a question left pending keeps its buttons on a row nobody can
+    /// answer any more, and the next launch's sweep files it as "Bloom was not running when this
+    /// was asked", which is untrue and is not what the person saw. `stopped` is what happened,
+    /// and it is the same word the Claude Code side writes for the same moment.
+    ///
+    /// The chat can be sent to again afterwards: the thread id is stored, so the next turn
+    /// reconnects and resumes rather than starting a new conversation.
     public func shutdown() async {
         for ask in pending.drain() {
             await write(answerTo: ask, decision: .decline)
-            await close(ask, as: PermissionAskOutcome.abandoned, note: "")
+            await close(ask, as: PermissionAskOutcome.stopped, note: "")
         }
+        // Stated here as well as in `interrupt`, because a chat can be closed while it is idle
+        // and can be closed while it is mid turn. `SessionLifecycle` refuses a stop on a session
+        // with no turn open, so the one that did not happen writes nothing.
+        if session.apply(.cancelled).moves { await save(session) }
         await client?.stop()
         client = nil
+        // The thread belonged to the process that has just been killed. Held on to, the next
+        // message would open a turn on a thread the new server has never heard of; cleared, the
+        // stored id on the session row makes that message a `thread/resume`, which is the whole
+        // reason the id is on the row.
+        threadID = nil
+        items.removeAll()
         pumpTask?.cancel()
         pumpTask = nil
         handle.end()
@@ -178,6 +239,7 @@ public actor CodexRunner: SessionRunner {
             bridge: bridge
         ))
         self.client = client
+        connection.attach(client)
         // Attached before the handshake, so nothing the server says between connecting and the
         // first turn can arrive with nowhere to go.
         let events = client.events
@@ -498,11 +560,6 @@ private final class TurnHandle: @unchecked Sendable {
         return current
     }
 
-    var isLive: Bool {
-        lock.lock(); defer { lock.unlock() }
-        return current != nil
-    }
-
     var wasCancelled: Bool {
         lock.lock(); defer { lock.unlock() }
         return cancelled
@@ -522,6 +579,22 @@ private final class TurnHandle: @unchecked Sendable {
     func end() {
         lock.lock(); defer { lock.unlock() }
         current = nil
+    }
+}
+
+/// The live connection, where synchronous code can reach it. See `CodexRunner.terminateNow`.
+private final class LiveConnection: @unchecked Sendable {
+    private let lock = NSLock()
+    private var client: CodexClient?
+
+    var current: CodexClient? {
+        lock.lock(); defer { lock.unlock() }
+        return client
+    }
+
+    func attach(_ client: CodexClient) {
+        lock.lock(); defer { lock.unlock() }
+        self.client = client
     }
 }
 

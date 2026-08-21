@@ -345,8 +345,11 @@ final class WorkspaceModel {
         transcripts.values.contains { $0.isAwaitingPermission }
     }
 
+    /// Both callers mean the same thing: this workspace, or the whole app, is going away. So the
+    /// agents are killed here rather than merely interrupted, and killed first, which is what lets
+    /// every SIGTERM escalation run at the same time instead of one after another.
     func stopEverything() {
-        for transcript in transcripts.values { transcript.stop() }
+        for transcript in transcripts.values { transcript.terminateNow() }
         setupTask?.cancel()
         setupTask = nil
         arrivalTask?.cancel()
@@ -362,8 +365,9 @@ final class WorkspaceModel {
         isRunningSetup = false
     }
 
-    /// The workspace itself is going away, so the runners go too. `stopEverything` only ends the
-    /// turns, and a transcript left holding a live runner would keep it for the rest of the launch.
+    /// The workspace itself is going away, so the runners go too. `stopEverything` signals the
+    /// agents, and a transcript left holding a live runner would keep its pump for the rest of the
+    /// launch.
     func teardown() {
         stopEverything()
         for transcript in transcripts.values { transcript.teardown() }

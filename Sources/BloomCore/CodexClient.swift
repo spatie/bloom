@@ -94,6 +94,13 @@ public actor CodexClient {
     private let configuration: Configuration
     private let makeProcess: @Sendable (AgentLaunch) -> any AgentProcessing
     private var process: (any AgentProcessing)?
+    /// The same process again, held outside the actor so it can be signalled without waiting for
+    /// a turn on one.
+    ///
+    /// Quit, close and archive all run on the main actor and all mean "this is over now", and the
+    /// actor at that moment is busy doing the thing being ended. `AgentRunner` keeps a
+    /// `ProcessHandle` outside itself for exactly this reason and this is the same box.
+    private let live = LiveProcess()
     private var readTask: Task<Void, Never>?
     private var stderrTask: Task<Void, Never>?
 
@@ -132,6 +139,10 @@ public actor CodexClient {
 
     public var isRunning: Bool { process?.isRunning ?? false }
 
+    /// The same answer, readable without the actor, which is what a quit path polling for the
+    /// process to actually be gone needs.
+    public nonisolated var isProcessAlive: Bool { live.current?.isRunning ?? false }
+
     public var isReady: Bool { handshakeCompleted }
 
     /// The tail of the server's own tracing, for an error message that would otherwise say only
@@ -150,6 +161,7 @@ public actor CodexClient {
 
         let process = makeProcess(Self.launch(configuration))
         self.process = process
+        live.attach(process)
         readTask = Task { [weak self] in await self?.readLines(from: process) }
         stderrTask = Task { [weak self] in await self?.readErrors(from: process) }
 
@@ -169,12 +181,39 @@ public actor CodexClient {
         handshakeCompleted = true
     }
 
-    /// Ends the connection. Closing stdin is the polite version and the server exits on it, which
-    /// was verified: every recorded run ends with the process exiting 0 after the pipe closed.
+    /// Ends the connection and the process, and files everything still waiting as closed.
     public func stop() {
-        process?.closeStdin()
-        process?.terminate()
+        terminateNow()
         finish(reason: "The Codex connection was closed")
+    }
+
+    /// Signal the server and everything it forked, now, from synchronous code.
+    ///
+    /// Closing stdin is the polite version and the server does exit on it, which was verified:
+    /// every recorded run ends with the process exiting 0 after the pipe closed. Politeness is
+    /// not enough, and this is the orphaned-children bug that `AgentRunner` was fixed for once
+    /// already. Three ways it is not enough, all of them measured or reasoned on this machine:
+    /// `codex` is a node script that forks the real app-server binary, so the thing doing the
+    /// work is a grandchild that no EOF on our pipe reaches; a turn's own children (a test run, a
+    /// dev server) are grandchildren again; and a wedged server that has stopped reading stdin
+    /// never sees the EOF at all. `StreamingProcess.terminate` signals the whole process group,
+    /// which is what reaches all three.
+    ///
+    /// Single shot, so a `stop()` behind a `terminateNow()` does not start a second escalation
+    /// against a process that is already dying.
+    public nonisolated func terminateNow() {
+        guard let process = live.claimForSignal() else { return }
+        process.closeStdin()
+        process.terminate()
+
+        // SIGTERM first because a server mid write should get to finish the line, SIGKILL behind
+        // it because it does not get to hang the app. The same three seconds `AgentRunner` gives
+        // Claude Code, and the quit path outlasts it on purpose.
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, process.isRunning else { return }
+            process.kill()
+        }
     }
 
     // MARK: Sending
@@ -402,6 +441,38 @@ public actor CodexClient {
         sink.finish()
         readTask = nil
         stderrTask = nil
+    }
+}
+
+// MARK: - The process, outside the actor
+
+/// Holds the live process where synchronous code can reach it.
+///
+/// Never cleared, only replaced: the quit path signals the process and then polls for it to be
+/// gone, and a box emptied by the bookkeeping running behind the signal would answer "gone" for a
+/// process that was still dying. That answer is the whole shape of the bug this exists for.
+private final class LiveProcess: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: (any AgentProcessing)?
+    private var signalled = false
+
+    var current: (any AgentProcessing)? {
+        lock.lock(); defer { lock.unlock() }
+        return process
+    }
+
+    func attach(_ process: any AgentProcessing) {
+        lock.lock(); defer { lock.unlock() }
+        self.process = process
+        signalled = false
+    }
+
+    /// The process, once, so the terminate and the kill behind it happen a single time.
+    func claimForSignal() -> (any AgentProcessing)? {
+        lock.lock(); defer { lock.unlock() }
+        guard !signalled, let process else { return nil }
+        signalled = true
+        return process
     }
 }
 

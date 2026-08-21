@@ -315,6 +315,124 @@ private func eventually(
         }
     }
 
+    /// Stop is an interrupt and nothing more, which is what lets the next message land in the same
+    /// server with the grants the person already gave it. Killing on every Stop would throw those
+    /// away, because `acceptForSession` is remembered by the process rather than by Bloom.
+    @Test func stopInterruptsTheTurnAndLeavesTheServerRunning() async throws {
+        let store = try makeTestStore("codex-runner-stop-keeps-server")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+
+        try await runner.send("count to three hundred")
+        runner.cancelNow()
+        await eventually("the interrupt to reach the server") {
+            box.process.sentMethods.contains("turn/interrupt")
+        }
+        for line in try bloomFixtureLines("codex-interrupt.ndjson") {
+            guard let json = JSONValue.parse(line), json["method"]?.stringValue == "turn/completed" else {
+                continue
+            }
+            box.process.emit(line)
+        }
+        await eventually("the session to settle") {
+            (try? await store.session(id: session.id))??.state == .cancelled
+        }
+
+        #expect(box.process.isRunning)
+        #expect(await runner.isProcessAlive)
+
+        // And the chat is sendable again, on the same connection: one handshake, two turns.
+        try await runner.send("carry on")
+        #expect(box.process.sentMethods.filter { $0 == "initialize" }.count == 1)
+        #expect(box.process.sentMethods.filter { $0 == "turn/start" }.count == 2)
+    }
+
+    /// The orphaned-children bug. Quit, close and archive all mean the server goes, and nothing in
+    /// this runner used to signal it at all: the interrupt closed the turn, the quit poll read
+    /// that as the process being gone, and `codex app-server` carried on with its working
+    /// directory inside a worktree that was about to be deleted.
+    @Test func tearingDownKillsTheServer() async throws {
+        let store = try makeTestStore("codex-runner-terminate")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+
+        try await runner.send("count to three hundred")
+        #expect(box.process.isRunning)
+
+        runner.terminateNow()
+
+        // Signalled synchronously, because archive removes the worktree the moment this returns.
+        #expect(box.process.isRunning == false)
+        #expect(await runner.isProcessAlive == false)
+    }
+
+    /// What the signal cannot do, the bookkeeping behind it must: a chat torn down mid question
+    /// keeps live buttons on a row nobody can answer any more, and the next launch's sweep files
+    /// it as "Bloom was not running when this was asked", which is not what happened.
+    @Test func tearingDownFilesTheQuestionNobodyAnswered() async throws {
+        let store = try makeTestStore("codex-runner-terminate-ask")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+
+        let watching = Task { () -> PermissionResolution? in
+            for await event in runner.events {
+                if case .permissionDecided(let resolution) = event { return resolution }
+            }
+            return nil
+        }
+
+        try await runner.send("create note.txt")
+        for line in try bloomFixtureLines("codex-approval.ndjson") {
+            guard let json = JSONValue.parse(line), let method = json["method"]?.stringValue else {
+                continue
+            }
+            guard method == "item/started" || method.hasSuffix("requestApproval") else { continue }
+            box.process.emit(line)
+        }
+        await eventually("the question to be stored") {
+            ((try? await store.pendingPermissionAsks(sessionID: session.id)) ?? []).isEmpty == false
+        }
+        let ask = try #require(try await store.pendingPermissionAsks(sessionID: session.id).first).ask
+
+        runner.terminateNow()
+
+        let resolution = try #require(await watching.value)
+        #expect(resolution.requestID == ask.requestID)
+        #expect(resolution.decision == PermissionAskOutcome.stopped)
+
+        await eventually("the question to be settled in the database") {
+            ((try? await store.pendingPermissionAsks(sessionID: session.id)) ?? []).isEmpty
+        }
+        let decisions = try await store.permissionAskDecisions(sessionID: session.id)
+        #expect(decisions[ask.requestID] == PermissionAskOutcome.stopped)
+        #expect(decisions[ask.requestID] != PermissionAskOutcome.abandoned)
+    }
+
+    /// Killing the server does not end the conversation. The thread id is on the session row, so
+    /// the next message connects again and resumes rather than starting a second conversation.
+    @Test func aChatWhoseServerWasKilledResumesOnTheNextMessage() async throws {
+        let store = try makeTestStore("codex-runner-terminate-resume")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+
+        try await runner.send("hello")
+        runner.terminateNow()
+        // The connection is dropped by the bookkeeping behind the signal, not by the signal.
+        await eventually("the teardown to finish") {
+            (try? await store.session(id: session.id))??.state == .cancelled
+        }
+
+        try await runner.send("again")
+
+        // A second process, and it resumes the thread the first one started.
+        #expect(box.process.sentMethods == ["initialize", "initialized", "thread/resume", "turn/start"])
+        #expect(box.process.isRunning)
+    }
+
     /// A view that stops drawing must not stop the agent.
     @Test func handsEveryConsumerItsOwnStream() async throws {
         let store = try makeTestStore("codex-runner-streams")
