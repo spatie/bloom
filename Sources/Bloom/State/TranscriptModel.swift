@@ -378,7 +378,8 @@ final class TranscriptModel {
         let runner = self.runner ?? Self.makeRunner(
             session: session,
             workspacePath: workspace.path,
-            store: app.store!
+            store: app.store!,
+            bridge: app.bridge?.register(session: session, workspace: workspace)
         )
         self.runner = runner
         if pumpTask == nil { startPump(on: runner) }
@@ -387,20 +388,37 @@ final class TranscriptModel {
 
     /// The one place a backend becomes a process. Static and taking only values, so which runner a
     /// session gets can be asserted on without a workspace, a store or a view.
+    ///
+    /// It is also the one place the workspace bridge is registered, and that is not a coincidence:
+    /// the bridge is per process, so it belongs wherever the process is decided. A runner built
+    /// anywhere else would be a second CLI on the same session row, which is the invariant
+    /// `BridgeServer` refuses to touch and the reason nothing on the bridge's side of the socket
+    /// may build one.
     static func makeRunner(
         session: Session,
         workspacePath: String,
-        store: Store
+        store: Store,
+        bridge: BridgeHandle? = nil
     ) -> any SessionRunner {
         switch session.agentKind {
         case .codex:
-            return CodexRunner(workspacePath: workspacePath, session: session, store: store)
+            return CodexRunner(
+                workspacePath: workspacePath,
+                session: session,
+                store: store,
+                bridge: bridge?.attachment
+            )
         // Cursor and OpenCode have no runner, and `AgentKind.canRunWorkspaces` is what stops a
         // chat ever being on one. A chat that somehow is falls back to Claude Code rather than
         // refusing to start, because a transcript that cannot be typed into is a worse answer
         // than one running the backend every existing chat already runs.
         case .claudeCode, .cursor, .openCode:
-            return AgentRunner(workspacePath: workspacePath, session: session, store: store)
+            return AgentRunner(
+                workspacePath: workspacePath,
+                session: session,
+                store: store,
+                mcpConfigPath: bridge?.mcpConfigPath
+            )
         }
     }
 

@@ -40,6 +40,11 @@ enum Log {
     /// Permission questions: what was granted, and what a crash left unanswered.
     static let permissions = Logger(subsystem: subsystem, category: "permissions")
 
+    /// The workspace bridge: the socket it bound, the handshakes it refused, and the sessions it
+    /// could not register. Every one of those is a tool the agent silently does not have, which is
+    /// invisible from inside a transcript.
+    static let bridge = Logger(subsystem: subsystem, category: "bridge")
+
     /// The app's own bundle id, so an instance running against `BLOOM_DB_PATH` for a test can be
     /// told apart from the one somebody is using.
     private static let subsystem = Bundle.main.bundleIdentifier ?? "be.spatie.bloom"

@@ -107,6 +107,13 @@ struct ArchiveHazards {
 final class AppModel {
     private(set) var store: Store?
     private(set) var manager: WorkspaceManager?
+    /// The workspace bridge: one unix socket for this instance, and the token table an agent's MCP
+    /// shim is checked against.
+    ///
+    /// Outside observation, because nothing draws from it. Nil when the socket could not be bound,
+    /// which leaves every chat exactly as it was before the bridge existed rather than refusing to
+    /// start one.
+    @ObservationIgnored private(set) var bridge: BridgeServer?
 
     private(set) var repos: [Repo] = []
     private(set) var workspaces: [Workspace] = []
@@ -272,6 +279,7 @@ final class AppModel {
             // centre column no tab names any of them.
             TerminalSessionStore.shared.useStore(store)
             BottomPanelDefaults.forget()
+            startBridge(on: store)
             await reload()
             // After `reload`, because the stored id is only trustworthy once there is a list to
             // check it against. Before `isLoaded`, so the window never paints Home first and then
@@ -293,6 +301,24 @@ final class AppModel {
         // every project it has anything to do is one that is drawing its initials meanwhile. See
         // `searchForMissingProjectIcons`.
         startProjectIconSearch()
+    }
+
+    /// The socket an agent's MCP shim forwards to, listening for as long as the app runs.
+    ///
+    /// Failing to bind it is survivable and is not an alert. Everything the bridge serves is new,
+    /// so a chat without one behaves exactly as every chat did last week, and an alert on launch
+    /// about a feature nobody has used yet would be noise in front of somebody trying to work.
+    /// It is logged, because "the tool is not there" needs somewhere to be findable from.
+    private func startBridge(on store: Store) {
+        do {
+            let server = try BridgeServer(store: store) { message in
+                Log.bridge.info("\(message, privacy: .public)")
+            }
+            try server.start()
+            bridge = server
+        } catch {
+            Log.bridge.error("could not start the workspace bridge: \(error.readableMessage, privacy: .public)")
+        }
     }
 
     /// The app is fully usable when the copy out of the old directory fails: it just ran the
@@ -323,6 +349,11 @@ final class AppModel {
         identityTask = nil
         iconSearchTask?.cancel()
         iconSearchTask = nil
+        // Before the agents are signalled, so a turn cannot start a tool call against a socket
+        // that is about to stop being answered. Every token dies with the process anyway: they are
+        // held in memory precisely so nothing outlives the launch that minted it.
+        bridge?.stop()
+        bridge = nil
 
         let models = Array(workspaceModels.values)
         // Signal every agent first, so the SIGTERM escalations all run at the same time rather than
