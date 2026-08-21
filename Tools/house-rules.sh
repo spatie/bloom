@@ -28,6 +28,17 @@
 # file and line so it can be opened. The word lists are deliberately narrow:
 # a rule that cries wolf gets switched off, so anything with a legitimate use in
 # this codebase either stays out of the list or is named in an exception below.
+#
+# **Every search here passes `--untracked`, and that is load bearing.** Six of
+# these seven rules did not, and a plain `git grep` sees only what is tracked, so
+# a brand new file was invisible to all six until somebody staged it. One decoy
+# file inside `Sources/BloomCore` carrying a violation of each raised one finding
+# untracked and six the moment it was added, on identical bytes. That is worst
+# exactly where it matters: rules 4, 5 and 6 say in their own comments that the
+# compiler holds everything EXCEPT a new file inside the core, and a new file is
+# untracked until it is staged, so `make lint` passed on precisely the thing the
+# rule exists to catch. `--untracked` does not include ignored files, so `.build`
+# and the rest of .gitignore stay out.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -55,7 +66,7 @@ echo "==> no em dashes or en dashes"
 # the fixtures hold recorded sessions that have to stay byte for byte what the
 # agent actually emitted. Neither is house prose and neither may be rewritten.
 # The fixtures are matched wherever they sit, because they are being moved.
-if hits="$(git grep -n -I -e "$em_dash" -e "$en_dash" -- ':!.claude' ':!*fixtures/*' || true)" && [ -n "$hits" ]; then
+if hits="$(git grep --untracked -n -I -e "$em_dash" -e "$en_dash" -- ':!.claude' ':!*fixtures/*' || true)" && [ -n "$hits" ]; then
   echo "$hits" | show
   report "A dash that should be a comma, a full stop or a pair of brackets."
 fi
@@ -82,7 +93,7 @@ baton_allowed=(
   'Tests/BloomCoreTests/RepositoryStartPlanTests.swift' # sample folder names
   'Tools/icon/lib9.py'                              # a sample path
 )
-for file in $(git grep -l -I -i baton -- ':!.claude' ':!Tools/house-rules.sh' || true); do
+for file in $(git grep --untracked -l -I -i baton -- ':!.claude' ':!Tools/house-rules.sh' || true); do
   allowed=0
   for prefix in "${baton_allowed[@]}"; do
     # Unquoted on purpose, so an entry can be a pattern. A file is being moved
@@ -91,14 +102,14 @@ for file in $(git grep -l -I -i baton -- ':!.claude' ':!Tools/house-rules.sh' ||
     case "$file" in $prefix*) allowed=1 ;; esac
   done
   if [ "$allowed" -eq 0 ]; then
-    git grep -n -I -i baton -- "$file" | show
+    git grep --untracked -n -I -i baton -- "$file" | show
     report "$file calls the app by its old name."
   fi
 done
 # Not a finding, just housekeeping: an exception nobody needs any more.
 for prefix in "${baton_allowed[@]}"; do
   case "$prefix" in */|*'*'*) continue ;; esac
-  if [ -f "$prefix" ] && ! git grep -q -I -i baton -- "$prefix"; then
+  if [ -f "$prefix" ] && ! git grep --untracked -q -I -i baton -- "$prefix"; then
     echo "  note: $prefix no longer says Baton, so it can come off the list in $0."
   fi
 done
@@ -108,7 +119,7 @@ echo "==> the core does not import SwiftUI"
 # reachable by the test target and everything in Sources/Bloom is not, so a
 # decision that drifts into a view is a decision nothing can test. One import is
 # how that starts.
-if hits="$(git grep -n -I -e 'import SwiftUI' -e 'import AppKit' -- 'Sources/BloomCore/*' || true)" && [ -n "$hits" ]; then
+if hits="$(git grep --untracked -n -I -e 'import SwiftUI' -e 'import AppKit' -- 'Sources/BloomCore/*' || true)" && [ -n "$hits" ]; then
   echo "$hits" | show
   report "BloomCore imports a UI framework. Move the view part into Sources/Bloom and leave the decision here, where the suite can reach it."
 fi
@@ -138,13 +149,13 @@ create_workspace_allowed=(
   'Sources/BloomCore/WorkspaceManager.swift' # declares it
   'Sources/BloomCore/WorkspaceStart.swift'   # the one caller: `start`
 )
-for file in $(git grep -l -I -e 'createWorkspace(' -- 'Sources/BloomCore/*' || true); do
+for file in $(git grep --untracked -l -I -e 'createWorkspace(' -- 'Sources/BloomCore/*' || true); do
   allowed=0
   for path in "${create_workspace_allowed[@]}"; do
     [ "$file" = "$path" ] && allowed=1
   done
   if [ "$allowed" -eq 0 ]; then
-    git grep -n -I -e 'createWorkspace(' -- "$file" | show
+    git grep --untracked -n -I -e 'createWorkspace(' -- "$file" | show
     report "$file cuts a worktree itself instead of calling WorkspaceManager.start. A route that stops at createWorkspace gets no chat, no setup run, no name and no record of who asked, and nothing says so."
   fi
 done
@@ -187,19 +198,19 @@ state_move_allowed=(
   'Sources/BloomCore/WorkspaceLifecycle.swift' # archive() and restore(), which name both
 )
 state_move='(^|[^A-Za-z0-9_])(state|setupState) *= *\.(active|archived|pending|running|succeeded|failed|skipped|idle|waiting|cancelled)([^A-Za-z0-9_]|$)'
-for file in $(git grep -l -I -E "$state_move" -- 'Sources/BloomCore/*' || true); do
+for file in $(git grep --untracked -l -I -E "$state_move" -- 'Sources/BloomCore/*' || true); do
   allowed=0
   for path in "${state_move_allowed[@]}"; do
     [ "$file" = "$path" ] && allowed=1
   done
   if [ "$allowed" -eq 0 ]; then
-    git grep -n -I -E "$state_move" -- "$file" | show
+    git grep --untracked -n -I -E "$state_move" -- "$file" | show
     report "$file sets a lifecycle state directly instead of applying an event. A state written on its own is a state without the work that makes it true: an archive that removed nothing, or an outcome with no log under it. Use apply(), archive() or restore()."
   fi
 done
 # Not a finding, just housekeeping: an exception nobody needs any more.
 for path in "${state_move_allowed[@]}"; do
-  if [ -f "$path" ] && ! git grep -q -I -E "$state_move" -- "$path"; then
+  if [ -f "$path" ] && ! git grep --untracked -q -I -E "$state_move" -- "$path"; then
     echo "  note: $path no longer moves a state, so it can come off the list in $0."
   fi
 done
@@ -270,10 +281,7 @@ id_type_allowed_lines=(
 # A stored property whose name ends in ID or Ids and whose type is a bare
 # String. Trailing `{` is excluded by the `$` anchor, which is what leaves
 # computed properties out.
-# `--untracked` here and nowhere else in this file. This is the one rule about
-# something being NEW, and a new declaration usually arrives in a new file, which
-# plain `git grep` cannot see until it is staged. The pathspec keeps it to
-# `Sources/`, and .gitignore keeps `.build` out.
+# The pathspec keeps this one to `Sources/`, and .gitignore keeps `.build` out.
 id_declaration='^[[:space:]]*(public |private |internal |fileprivate )?(var|let) [A-Za-z_]*([iI][dD]|IDs)[[:space:]]*:[[:space:]]*(String|String\?|\[String\]|Set<String>)[[:space:]]*(=[^{]*)?$'
 while IFS= read -r hit; do
   [ -n "$hit" ] || continue
@@ -307,13 +315,13 @@ american=(defense offense fulfill fulfillment skeptical acknowledgment maneuver
 american_in_prose=(favorite favorites gray canceled)
 
 for word in "${american[@]}"; do
-  if hits="$(git grep -n -I -i -w "$word" -- ':!.claude' ':!*fixtures/*' ':!Tools/house-rules.sh' || true)" && [ -n "$hits" ]; then
+  if hits="$(git grep --untracked -n -I -i -w "$word" -- ':!.claude' ':!*fixtures/*' ':!Tools/house-rules.sh' || true)" && [ -n "$hits" ]; then
     echo "$hits" | show
     report "American spelling: $word."
   fi
 done
 for word in "${american_in_prose[@]}"; do
-  if hits="$(git grep -n -I -i -w "$word" -- '*.md' ':!.claude' ':!Tools/house-rules.sh' || true)" && [ -n "$hits" ]; then
+  if hits="$(git grep --untracked -n -I -i -w "$word" -- '*.md' ':!.claude' ':!Tools/house-rules.sh' || true)" && [ -n "$hits" ]; then
     echo "$hits" | show
     report "American spelling in prose: $word."
   fi
