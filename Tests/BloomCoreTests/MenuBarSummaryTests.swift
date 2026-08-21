@@ -109,6 +109,26 @@ struct MenuBarSummaryTests {
         #expect(listed?.workspaces.count == DockBadge.unreadCount(in: all) { $0.id == busy.id })
     }
 
+    /// The headings are read four rows apart in a menu nobody studies. "Waiting on you" and
+    /// "Waiting for you" were one preposition apart while meaning opposite things: an agent
+    /// blocked on a question, and a turn that ended hours ago. Sharing no word at all is a
+    /// stronger promise than being unequal, and it is the one that was actually broken.
+    @Test("no two headings can be told apart by a preposition")
+    func headingsShareNoWords() {
+        let headings = [
+            MenuBarSummary.waitingHeading,
+            MenuBarSummary.runningHeading,
+            MenuBarSummary.unreadHeading,
+        ]
+        let words = headings.map { Set($0.lowercased().split(separator: " ")) }
+
+        for (index, one) in words.enumerated() {
+            for other in words[(index + 1)...] {
+                #expect(one.isDisjoint(with: other))
+            }
+        }
+    }
+
     @Test("an idle machine has no lists at all")
     func nothingToList() {
         let sections = MenuBarSummary.sections(

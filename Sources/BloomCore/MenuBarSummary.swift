@@ -99,9 +99,16 @@ public enum MenuBarSummary {
 
     /// The heading over the workspaces that finished something nobody has read.
     ///
-    /// "Waiting for you" rather than "Unread", because the row underneath is a place to go rather
-    /// than a message to mark as read.
-    public static let unreadHeading = "Waiting for you"
+    /// It read "Waiting for you", one preposition away from "Waiting on you" above it, and the two
+    /// mean opposite things: one is an agent blocked and costing money, the other is a turn that
+    /// ended and will keep. Nothing collided while `waitingHeading` had no section to head, and
+    /// the first photograph of the menu with all three lists in it put the pair four rows apart.
+    /// A menu is read at a glance, and a glance does not read prepositions.
+    ///
+    /// So "Finished", which borrows neither of the other headings' words. Not "Unread": the row
+    /// underneath is a place to go rather than a message to mark as read, and that was the right
+    /// half of the argument the old wording was built on.
+    public static let unreadHeading = "Finished"
 
     /// One heading in the menu and the workspaces listed under it.
     public struct Section: Equatable, Sendable {
