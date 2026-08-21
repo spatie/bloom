@@ -156,19 +156,6 @@ echo "==> one way to start a workspace"
 # inside the core, which the compiler would allow and which is exactly how the
 # next half-copy would start.
 #
-# The obvious way to delete this rule is to move `start` in beside
-# `createWorkspace` and mark that `private`, since Swift's `private` is file
-# scoped and the whole rule would become a compile error. It has been tried and
-# it does not work, so it is written down here rather than proposed again.
-# `@testable` raises `internal` to visible and leaves `private` alone, measured
-# on a two module spike: "'createWorkspace' is inaccessible due to 'private'
-# protection level". Eleven test suites reach the method directly across 29 call
-# sites, and the paragraph below blesses exactly that, because a test that wants
-# a worktree and nothing else must not have to open a chat, run a setup script
-# and wake the naming model to get one. Making it `private` would take it from
-# them as well as from the next half-copy. The 723 line file the merge would make
-# is the smaller half of the cost.
-#
 # Every file inside the core allowed to name it, and why. This list should only
 # ever get shorter. A file not on it that names it is a new mistake.
 #
