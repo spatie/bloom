@@ -37,6 +37,7 @@ final class BrowserSession {
     @ObservationIgnored private let navigation = NavigationObserver()
 
     init(url: String) {
+        Self.preferInspectorDocked()
         let configuration = WKWebViewConfiguration()
         Self.enableDeveloperExtras(on: configuration.preferences)
         webView = WKWebView(frame: .zero, configuration: configuration)
@@ -121,6 +122,43 @@ final class BrowserSession {
             return
         }
         preferences.setValue(true, forKey: "developerExtrasEnabled")
+    }
+
+    /// The key WebKit remembers the inspector's last attachment in, and it is WebKit's own: it
+    /// writes it into whichever application's defaults the inspected web view belongs to.
+    private static let startsAttachedKey =
+        "__WebInspectorPageGroupLevel1__.WebKit2InspectorStartsAttached"
+
+    /// Asks for the inspector docked into the pane rather than floating in a window of its own.
+    ///
+    /// The first version of this shipped believing the inspector opened docked, because in every
+    /// harness it was measured in it did. It does not always: WebKit refuses to dock into a view
+    /// smaller than 500 points wide, or shorter than 334, and silently opens a window instead.
+    /// Bisected on macOS 27: 500 wide docks and 499 does not, 334 tall docks and 333 does not,
+    /// which is WebKit's 500 point minimum width and its rule that a docked inspector may take
+    /// three quarters of the height and must have 250 points. A browser tab that is one half of a
+    /// split centre column is easily under the first of those, which is where the floating window
+    /// came from.
+    ///
+    /// **And WebKit then remembers it.** A detach writes the key above, and so does an open that
+    /// was forced to detach because the pane was too small, so one look at the inspector in a
+    /// narrow pane makes every later one float, at any size, for good. That is why this writes the
+    /// preference rather than reads it: the state it is correcting is already on disk.
+    ///
+    /// Once per launch, not once per tab, so detaching it on purpose still holds for the rest of
+    /// the session. It is set before the first web view exists, because WebKit reads it when the
+    /// inspector is created and caches it thereafter.
+    ///
+    /// There is no API for this. `WKPreferences` has nothing about attachment and `_WKInspector`
+    /// offers only `attach`, which is refused at these sizes exactly as opening is, and which
+    /// there is no callback to call from: nothing tells the app the reader chose Inspect Element.
+    /// So it is the defaults key, which is at least the one WebKit itself reads.
+    private static var hasAskedForDockedInspector = false
+
+    private static func preferInspectorDocked() {
+        guard !hasAskedForDockedInspector else { return }
+        hasAskedForDockedInspector = true
+        UserDefaults.standard.set(true, forKey: startsAttachedKey)
     }
 
     /// Localhost first, because that is what a workspace's dev server is and what the tab opens on.
