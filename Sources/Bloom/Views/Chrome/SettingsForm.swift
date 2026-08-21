@@ -35,9 +35,11 @@ extension View {
 /// its own longest label and no wider.
 ///
 /// It settles in one extra pass and cannot oscillate, because what a row reports is the width its
-/// label wants, taken before the column is applied to it. Applying the column changes what the
-/// label is drawn in and not what it asked for, so the second pass measures the same numbers as
-/// the first.
+/// label wants and not the width it was given. That distinction is the whole of it, and it is
+/// `SettingsRowStyle` that holds the line: without a fixed ideal width a label reports whatever it
+/// was squeezed to, which turns this into a ratchet that only tightens and can never widen for a
+/// row that appears later. `Colour` arriving as `Colou` over `r` was that bug. See the comment on
+/// the label there for the measurements.
 struct SettingsLabelColumn: ViewModifier {
     @State private var width: CGFloat = 0
 

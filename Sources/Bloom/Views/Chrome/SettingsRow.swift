@@ -64,6 +64,25 @@ private struct SettingsRowStyle: LabeledContentStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Metrics.gutter) {
             configuration.label
+                // Never wrapped, and this is load bearing rather than tidiness.
+                //
+                // `Colour` was arriving as `Colou` over `r`. A label with no `fixedSize` is laid
+                // out against whatever width it is offered, so the width it reports back is the
+                // width it was squeezed to and not the width it wants, and that turns the
+                // measurement below into a ratchet that only ever tightens. Two ways in, both
+                // real. A row whose content is rigid and wide, and the swatches are eleven of
+                // them plus a capsule, leaves its label a narrow offer on the pass where the
+                // column is still zero, so the column settles on a wrapped width and every later
+                // pass hands that same too-narrow width back. And a row that appears later,
+                // which the colour row does because it is only there when the mark is initials,
+                // is measured against a column that is already set: wider than the column, it
+                // wraps, reports the column's own width, and the column can never grow to fit it.
+                // The second is the worse of the two, because any conditional row added after
+                // this one inherits it.
+                //
+                // With the ideal width pinned, what travels up is what the label wants, the
+                // column is the widest of those, and no label is ever offered less than it needs.
+                .fixedSize(horizontal: true, vertical: false)
                 // Measured before the column is applied, so what travels up is the width this
                 // label wants rather than the width it has been given. See `SettingsLabelColumn`.
                 .background(GeometryReader { proxy in
