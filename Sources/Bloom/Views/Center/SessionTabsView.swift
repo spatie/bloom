@@ -328,26 +328,28 @@ struct SessionTabsView: View {
     //
     // The payload is the id rather than a `Transferable` of our own, matching the workspace rows
     // in the sidebar. Anything else dropped on a tab, including text from another app, fails the
-    // membership check below and the drop is refused.
+    // membership check below and the drop does nothing.
+    //
+    // Neither of these answers with a Bool. `dropDestination`'s action used to be asked whether it
+    // had taken the drop; the macOS 26 one returns Void and is not asked, so a returned answer is
+    // a value nobody reads and the compiler says so.
 
-    private func move(_ draggedID: String?, before session: Session) -> Bool {
+    private func move(_ draggedID: String?, before session: Session) {
         guard let draggedID, draggedID != session.id,
               let moved = model.sessions.first(where: { $0.id == draggedID }),
               let index = model.sessions.firstIndex(where: { $0.id == session.id })
-        else { return false }
+        else { return }
 
         Task { await model.reorderSession(moved, to: index) }
-        return true
     }
 
-    private func move(_ draggedID: String?, before tab: CenterTab) -> Bool {
+    private func move(_ draggedID: String?, before tab: CenterTab) {
         guard let draggedID, draggedID != tab.id,
               let moved = toolTabs.first(where: { $0.id == draggedID }),
               let index = toolTabs.firstIndex(where: { $0.id == tab.id })
-        else { return false }
+        else { return }
 
         tabs.move(moved, to: index)
-        return true
     }
 
     // MARK: - Actions
