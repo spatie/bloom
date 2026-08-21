@@ -1,13 +1,16 @@
 import SwiftUI
 import AppKit
-import WebKit
 
-/// A plain container so SwiftUI can attach and detach a long-lived web view without the web view
-/// ever being deallocated, and so the page follows the pane size on every layout pass.
+/// A plain container so SwiftUI can attach and detach a long-lived view without that view ever
+/// being deallocated, and so the page follows the pane size on every layout pass.
+///
+/// Used twice over: once by SwiftUI, for the pane, and once by `BrowserSession`, as the wrapper
+/// the web view lives in so an attached inspector has a superview that outlives the pane. It takes
+/// any `NSView` for that reason.
 final class BrowserHostView: NSView {
-    private weak var page: WKWebView?
+    private weak var page: NSView?
 
-    func attach(_ view: WKWebView) {
+    func attach(_ view: NSView) {
         guard page !== view || view.superview !== self else { return }
         page?.removeFromSuperview()
         view.removeFromSuperview()
@@ -31,11 +34,11 @@ struct BrowserWebView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> BrowserHostView {
         let host = BrowserHostView()
-        host.attach(session.webView)
+        host.attach(session.pageView)
         return host
     }
 
     func updateNSView(_ nsView: BrowserHostView, context: Context) {
-        nsView.attach(session.webView)
+        nsView.attach(session.pageView)
     }
 }

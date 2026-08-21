@@ -5,7 +5,7 @@ import BloomCore
 
 /// Photographs the centre pane's contextual menu, or the items one of its split submenus offers.
 ///
-///     Bloom --menu-probe /tmp/menu.png [--menu-part menu|kinds|terminal|terminalKinds|row|colour|style] [--menu-project <path>]
+///     Bloom --menu-probe /tmp/menu.png [--menu-part menu|kinds|terminal|terminalKinds|browser|row|colour|style] [--menu-project <path>]
 ///
 /// It exists because a menu is the one part of this interface that cannot be captured any other
 /// way. `ImageRenderer` draws SwiftUI's yellow placeholder for one, a menu only exists while it is
@@ -23,6 +23,14 @@ import BloomCore
 /// because those two do not draw the same menu: AppKit merges the text input system's own items
 /// into a contextual menu as it presents it, and they never appear in `NSMenu.items` at all. A
 /// picture taken the easy way would be a picture of a menu the app never shows.
+///
+/// `browser` is odder still and is not one of ours at all. The page's contextual menu belongs to
+/// WebKit, and on this macOS it is drawn out of process: the `NSMenu` that begins tracking holds
+/// one hidden placeholder item and never the rows on screen, so there is nothing to read and the
+/// photograph is the only account of what the menu says. It is put up by right clicking a real
+/// `BrowserSession`'s page view, on a page loaded from a string, so nothing is fetched to take a
+/// picture. WebKit answers a right click through its web process rather than on the way back out
+/// of the event, so this part cannot use the loop below: it sends the click and waits.
 ///
 /// `row` and `colour` are a workspace row's menu and the colour submenu inside it. They need a
 /// workspace, so they read one out of the database this instance was pointed at, which means they
@@ -70,6 +78,8 @@ enum MenuProbe {
         case terminal
         /// The three items one of its split submenus is made of.
         case terminalKinds
+        /// A browser page's own menu, which is WebKit's and not Bloom's.
+        case browser
         /// A workspace row's context menu, as both lists offer it.
         case row
         /// The colour submenu inside it, on its own, because AppKit tracks one menu at a time.
@@ -100,6 +110,10 @@ enum MenuProbe {
             // walk of two directories. An empty catalogue would photograph as the built in list.
             if part == .style {
                 await outputStyles.refreshIfStale(project: value(for: "--menu-project"))
+            }
+            if part == .browser {
+                await runBrowser()
+                return
             }
             run(model: model)
         }
@@ -197,6 +211,9 @@ enum MenuProbe {
         // The submenu on its own, for the reason the two centre menus are separate parts.
         case .terminalKinds:
             terminalSplitKinds()
+        // Never asked for: `runBrowser` takes that part and this is not reached for it.
+        case .browser:
+            NSMenu()
         case .row, .colour:
             workspaceMenu(model: model)
         case .style:
@@ -225,6 +242,74 @@ enum MenuProbe {
         // first picture of this submenu was.
         parentOfKinds = menu
         return kinds
+    }
+
+    // MARK: - The page's own menu
+
+    /// Right clicks a live browser page and photographs whatever WebKit puts up.
+    ///
+    /// Separate from `run` because the two menus arrive by different routes. Every other part here
+    /// is an `NSMenu` this file built, opened with a call that does not return until it closes.
+    /// WebKit's is neither: the click goes to the web process, the menu is opened from the reply,
+    /// and the call that delivered the click returned long before. So the capture is armed first
+    /// and the click is sent after it, and the wait that follows is what lets the menu happen.
+    ///
+    /// The page is loaded from a string rather than fetched. A picture of a menu says nothing
+    /// about where the page came from, and a probe that reaches the network to take one is a probe
+    /// that fails on a train.
+    private static func runBrowser() async {
+        guard let window = NSApp.windows.first(where: {
+            $0.isVisible && $0.contentView != nil && $0.parent == nil && $0.styleMask.contains(.titled)
+        }), let content = window.contentView else {
+            fail("no window to open a menu from")
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+
+        // Empty, so the session has nothing to load and the page below is the only thing in it.
+        let session = BrowserSession(url: "")
+        session.pageView.frame = content.bounds
+        content.addSubview(session.pageView)
+        session.webView.loadHTMLString(
+            "<body style='font:16px -apple-system'><p>Probe page</p></body>",
+            baseURL: URL(string: "http://localhost/")
+        )
+        // Long enough for a string to become a page. There is no navigation to wait on that this
+        // file owns: the session's own delegate is the one WebKit will call.
+        try? await Task.sleep(for: .seconds(2))
+
+        let point = NSPoint(x: 200, y: content.bounds.height - 200)
+        guard let click = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: point,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        ) else { fail("could not build a right click to open the page's menu with") }
+
+        // Tried more than once, for the reason `run` tries more than once: the owner is at this
+        // machine and a click of his anywhere else takes the menu away again. There is no flag to
+        // read between goes, because the run that works never comes back here.
+        for _ in 0..<6 {
+            let timer = after(1.2) {
+                if capture(to: outputPath) {
+                    print(outputPath)
+                    // From inside the timer, because tracking owns the run loop until the menu
+                    // closes and there is nothing left to do once the picture is taken.
+                    exit(0)
+                }
+            }
+            window.sendEvent(click)
+            try? await Task.sleep(for: .seconds(3))
+            timer.invalidate()
+        }
+
+        fail("the page's menu would not stay open long enough to photograph")
     }
 
     private static var parentOfKinds: NSMenu?

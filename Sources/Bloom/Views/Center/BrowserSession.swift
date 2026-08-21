@@ -17,6 +17,17 @@ import WebKit
 final class BrowserSession {
     let webView: WKWebView
 
+    /// What a pane actually puts on screen, which is not the web view itself.
+    ///
+    /// The Web Inspector attaches by adding its own view to the web view's SUPERVIEW and shrinking
+    /// the web view to make room for it. Handing the web view straight to the pane, which is what
+    /// this did first, meant that superview was the host SwiftUI had just made, so switching
+    /// workspace or splitting the pane left the inspector behind in a host that was then thrown
+    /// away: the page sprang back to full size, the inspector was gone from the window, and WebKit
+    /// still reported it as open. A wrapper of this session's own is a superview that travels with
+    /// the web view, so the two move between panes together.
+    let pageView = BrowserHostView()
+
     private(set) var canGoBack = false
     private(set) var canGoForward = false
     private(set) var isLoading = false
@@ -26,8 +37,11 @@ final class BrowserSession {
     @ObservationIgnored private let navigation = NavigationObserver()
 
     init(url: String) {
-        webView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        let configuration = WKWebViewConfiguration()
+        Self.enableDeveloperExtras(on: configuration.preferences)
+        webView = WKWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = true
+        pageView.attach(webView)
         // A dev server is the whole point of this tab, and one that is still booting answers with
         // a connection refused rather than with a page. Painting the app's own surface behind the
         // page keeps that moment from flashing white in a dark window.
@@ -63,6 +77,12 @@ final class BrowserSession {
     func stop() {
         webView.stopLoading()
         webView.navigationDelegate = nil
+        // The page view rather than the web view, so an attached inspector comes out of the window
+        // with the page instead of being left in the wrapper on its own. Releasing this session
+        // would get there anyway, WebKit takes an inspector down with the page it is inspecting,
+        // but only once the pane drawing it has let go, and a closed tab should not still be
+        // showing a console.
+        pageView.removeFromSuperview()
     }
 
     /// What the address field should show for the page that is loaded.
@@ -75,6 +95,32 @@ final class BrowserSession {
         canGoForward = webView.canGoForward
         isLoading = webView.isLoading
         if let url = webView.url { currentURL = url }
+    }
+
+    /// Puts Inspect Element in the page's own context menu, and with it the whole Web Inspector.
+    ///
+    /// Always on, and there is no setting: this tab exists to look at the dev server running in
+    /// the worktree next door, and a dev server that will not paint is a question for the console
+    /// or the network list every time. A preference would only be a way to have it switched off on
+    /// the day it is wanted.
+    ///
+    /// **`WKWebView.isInspectable` is not the property this needs, though it reads as though it
+    /// is.** It was tried first and measured to change nothing here: with it set and nothing else,
+    /// a right click on the page still offers Reload and only Reload. It governs REMOTE
+    /// inspection, which is the Develop menu in Safari on this Mac reaching in. The item in the
+    /// page's own menu is gated on WebKit's `developerExtrasEnabled` setting, which has no public
+    /// spelling, so it is reached by KVC. Measured both ways round on macOS 27: with this setting
+    /// and without `isInspectable` the item is there and the inspector opens attached to the
+    /// bottom of the page; with `isInspectable` and without this setting it is not.
+    ///
+    /// Asked before it is set, because KVC for a key that has stopped existing is an exception and
+    /// not a nil, and a WebKit that renamed this should cost the tab one menu item rather than
+    /// take the app down as the pane opens.
+    private static func enableDeveloperExtras(on preferences: WKPreferences) {
+        guard preferences.responds(to: NSSelectorFromString("_setDeveloperExtrasEnabled:")) else {
+            return
+        }
+        preferences.setValue(true, forKey: "developerExtrasEnabled")
     }
 
     /// Localhost first, because that is what a workspace's dev server is and what the tab opens on.
