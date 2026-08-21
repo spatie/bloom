@@ -99,29 +99,36 @@ struct CenterPaneView: View {
             .allowsHitTesting(false)
     }
 
-    @ViewBuilder
     private var menu: some View {
-        Button("Split Right", systemImage: PaneSymbol.splitRight) { split(.horizontal) }
-        Button("Split Down", systemImage: PaneSymbol.splitDown) { split(.vertical) }
-        if isSplit {
-            Divider()
-            Button("Close Pane", systemImage: PaneSymbol.closePane) {
-                _ = panes.close(pane: pane, in: model.workspace.id)
-            }
-        }
+        CenterPaneMenu(
+            isSplit: isSplit,
+            split: { axis, kind in split(axis, opening: kind) },
+            close: { _ = panes.close(pane: pane, in: model.workspace.id) }
+        )
     }
 
     // MARK: - Actions
 
-    /// Opens a second pane showing the same tab, which is what splitting means everywhere else:
-    /// the same thing twice, and then you change one of them.
-    private func split(_ axis: SplitAxis) {
-        panes.split(
-            model.workspace.id,
-            pane: pane,
-            axis: axis,
-            showing: panes.content(of: pane, in: model)
-        )
+    /// Splits this pane and opens a new chat, terminal or browser in the half that opens.
+    ///
+    /// The pane is captured rather than looked up again, because the split lands after an await
+    /// for a chat, and the focused pane by then is whichever one the user has clicked into since.
+    private func split(_ axis: SplitAxis, opening kind: PaneKind) {
+        let workspaceID = model.workspace.id
+        let pane = pane
+
+        // What this pane is showing is written down before anything is made. A pane nobody has
+        // given anything to falls back to the workspace's ACTIVE conversation, and creating a chat
+        // makes the new one active: without this, Split Right then Chat put the new session in
+        // BOTH halves and the conversation the user was reading vanished out of the half they
+        // right clicked on. See `CenterPaneStore.content(of:in:)`.
+        if let current = panes.content(of: pane, in: model) {
+            panes.show(current, in: pane, of: workspaceID)
+        }
+
+        NewPane.open(kind, in: model) { content in
+            CenterPaneStore.shared.split(workspaceID, pane: pane, axis: axis, showing: content)
+        }
     }
 
     /// A tab let go over this pane. The middle replaces what is showing, an edge opens the tab
@@ -217,7 +224,6 @@ struct CenterPaneView: View {
     }
 
     private func openTerminal() {
-        let tab = CenterTabStore.shared.add(kind: .terminal, workspaceID: model.workspace.id)
-        panes.show(.tool(tab.id), in: model)
+        NewPane.open(.terminal, in: model) { panes.show($0, in: model) }
     }
 }

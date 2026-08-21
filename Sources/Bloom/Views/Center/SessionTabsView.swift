@@ -201,13 +201,17 @@ struct SessionTabsView: View {
 
     /// One control for all four kinds, because they differ in what they open and in nothing else.
     /// The shortcuts are shown here and fired from `shortcuts`, for the reason spelled out there.
+    ///
+    /// The first three take their name and their glyph from `PaneKind` rather than spelling them
+    /// out, because the pane's split submenus offer the same three and the two lists have to keep
+    /// saying the same words.
     private var newTabMenu: some View {
         Menu {
-            Button("Chat", systemImage: "bubble.left.and.bubble.right", action: newChat)
+            Button(PaneKind.chat.title, systemImage: PaneKind.chat.symbol, action: newChat)
                 .keyboardShortcut("t", modifiers: .command)
-            Button("Terminal", systemImage: "apple.terminal", action: newTerminal)
+            Button(PaneKind.terminal.title, systemImage: PaneKind.terminal.symbol, action: newTerminal)
                 .keyboardShortcut("t", modifiers: [.command, .shift])
-            Button("Browser", systemImage: "globe", action: newBrowser)
+            Button(PaneKind.browser.title, systemImage: PaneKind.browser.symbol, action: newBrowser)
                 .keyboardShortcut("b", modifiers: [.command, .shift])
             Divider()
             Button("Changes", systemImage: "doc.text") { FileReview.open(in: model) }
@@ -280,28 +284,24 @@ struct SessionTabsView: View {
         panes.split(model.workspace.id, axis: axis, showing: content)
     }
 
+    /// All three go through `NewPane`, which is the same door the pane's split submenus use, so a
+    /// tab made from the `+` and a tab made by splitting are the same tab.
     private func newChat() {
-        Task {
-            guard let session = await model.createSession() else { return }
-            panes.show(.chat(session.id), in: model)
-        }
+        NewPane.open(.chat, in: model) { panes.show($0, in: model) }
     }
 
-    /// The shell itself is not started here. `ToolPaneView` settles the environment and the
-    /// port first, because both are baked into the process the moment it is forked.
     private func newTerminal() {
-        panes.show(.tool(tabs.add(kind: .terminal, workspaceID: model.workspace.id).id), in: model)
+        NewPane.open(.terminal, in: model) { panes.show($0, in: model) }
     }
 
+    /// The `+` opens a browser on the workspace's own dev server, where a split opens one on
+    /// nothing. That is not drift: this item is the one that means "look at what this workspace is
+    /// running", and it is the only route that has a port to hand.
     private func newBrowser() {
         Task {
             await preparePort()
-            let tab = tabs.add(
-                kind: .browser,
-                workspaceID: model.workspace.id,
-                url: model.port > 0 ? "http://localhost:\(model.port)" : ""
-            )
-            panes.show(.tool(tab.id), in: model)
+            let address = model.port > 0 ? "http://localhost:\(model.port)" : ""
+            NewPane.open(.browser, in: model, url: address) { panes.show($0, in: model) }
         }
     }
 

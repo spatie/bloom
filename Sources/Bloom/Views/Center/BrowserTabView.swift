@@ -32,7 +32,18 @@ struct BrowserTabView: View {
         .background(Palette.surface)
         // Per tab, so switching between two browser tabs puts each field back where its own page
         // is rather than leaving the address of the one that was showing a moment ago.
-        .task(id: tab.id) { address = session.displayAddress }
+        //
+        // A tab with no address at all takes the keyboard into the field. That is what splitting
+        // into a browser makes: the pane opens on nothing, because nobody has said where it should
+        // go, and the toolbar is then the only thing in it that means anything. Without this the
+        // pane reads as a blank rectangle with a dead search box over it, and the user has to work
+        // out that the box is the point and click it. A tab that has somewhere to be does not take
+        // focus, so the `+` menu's browser still opens on the dev server without stealing the
+        // keyboard off the composer next to it.
+        .task(id: tab.id) {
+            address = session.displayAddress
+            if address.isEmpty { isAddressFocused = true }
+        }
         .onChange(of: session.currentURL) {
             // The page navigated on its own: a link, a redirect, a router. The field follows it,
             // unless the user is in the middle of typing a different address into it.
