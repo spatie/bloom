@@ -42,6 +42,15 @@ struct CenterPanesView: View {
     /// on the main actor, and a name that never changes has no business being one of them.
     nonisolated static let soloPane = "solo"
 
+    /// Which pane the pointer is offering to pick up, from whichever grip it is resting on.
+    ///
+    /// It lives here rather than in the grip because the answer is drawn somewhere else: the grip
+    /// is seven points across and the thing it is about is half the column, so the pane itself is
+    /// what says which one is meant. Without it the pair of grips would be two identical marks
+    /// with nothing to tell them apart until after the mouse had gone down, which is exactly the
+    /// guessing having two of them is meant to end.
+    @State private var offered: String?
+
     var body: some View {
         // Read here rather than inside the `GeometryReader`, so the dependency on the store is
         // registered while this body is being tracked. A read that only happens in the layout pass
@@ -63,7 +72,8 @@ struct CenterPanesView: View {
                             model: model,
                             tab: tab,
                             pane: item.pane,
-                            isSplit: layout.paneCount > 1
+                            isSplit: layout.paneCount > 1,
+                            isOffered: item.pane == offered
                         )
                         .frame(width: item.frame.width, height: item.frame.height)
                         // A pane whose content cannot fit the width it was given keeps the
@@ -86,6 +96,21 @@ struct CenterPanesView: View {
                             guard let tab else { return }
                             tabs.setRatio(ratio, at: divider.path, in: tab)
                         }
+                        .position(x: divider.frame.midX, y: divider.frame.midY)
+
+                        // Over the divider rather than inside it. `SplitPaneDivider` is shared
+                        // with the terminal panel's own splits, which have no panes to move and
+                        // no tree to move them in, and a drag source nested inside a view that
+                        // already carries a `DragGesture` is a fight over the same mouse down.
+                        // Two sibling views, each owning its own strip of the divider, is the
+                        // arrangement where neither has to win.
+                        let sides = layout.sides(at: divider.path)
+                        PaneGrabHandle(
+                            axis: divider.axis,
+                            first: sides?.first,
+                            second: sides?.second,
+                            onPointerOver: { offered = $0 }
+                        )
                         .position(x: divider.frame.midX, y: divider.frame.midY)
                     }
                 }

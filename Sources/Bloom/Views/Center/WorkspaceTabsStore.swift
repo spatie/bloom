@@ -370,6 +370,51 @@ final class WorkspaceTabsStore {
         return true
     }
 
+    /// Moves one pane of a tab beside another pane of the same tab, keeping its id.
+    ///
+    /// **Nothing here touches `contents`, and that is the point.** The map is keyed by pane id, no
+    /// pane appears and none goes, so a move is the one edit to an arrangement `TabSurgery` has
+    /// nothing to answer about: no tab is left rooted on something that has left, and nothing is
+    /// handed back to the strip. `SplitLayout.move` is where the tree work and the reasoning are.
+    ///
+    /// It follows that the live views do not move either. `CenterPanesView` positions its panes
+    /// flat from the frames the tree computes, keyed by pane id, so a rearranged tree changes
+    /// where a pane is drawn and never which view is drawing it. A moved terminal keeps the shell
+    /// it had and a moved browser keeps the page it had loaded, scroll position and history
+    /// included, because neither view is rebuilt and neither is reparented.
+    @discardableResult
+    func move(
+        pane: String, beside target: String, axis: SplitAxis, before: Bool,
+        in tab: PaneContent, of model: WorkspaceModel
+    ) -> Bool {
+        guard var arrangement = arrangements[tab.id],
+              arrangement.layout.move(pane, beside: target, axis: axis, before: before)
+        else { return false }
+
+        arrangements[tab.id] = arrangement
+        persist(tab.id)
+        // The moved pane took the keyboard, so the workspace's one active conversation follows it
+        // wherever it landed, exactly as it does when a pane is clicked into.
+        adoptActiveSession(of: tab, in: model)
+        return true
+    }
+
+    /// Exchanges two panes of a tab. What a pane let go over the MIDDLE of another one means: see
+    /// `SplitLayout.exchange` for why that is an exchange rather than the replacement a tab let go
+    /// there would be.
+    @discardableResult
+    func exchange(
+        pane: String, with other: String, in tab: PaneContent, of model: WorkspaceModel
+    ) -> Bool {
+        guard var arrangement = arrangements[tab.id],
+              arrangement.layout.exchange(pane, with: other) else { return false }
+
+        arrangements[tab.id] = arrangement
+        persist(tab.id)
+        adoptActiveSession(of: tab, in: model)
+        return true
+    }
+
     func setRatio(_ ratio: Double, at path: [Int], in tab: PaneContent) {
         guard var arrangement = arrangements[tab.id],
               arrangement.layout.setRatio(ratio, at: path) else { return }
