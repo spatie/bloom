@@ -123,12 +123,47 @@ jobs:
       # and an older one would produce an app that builds with pieces missing.
       # It costs a couple of seconds and turns "the image changed its default
       # Xcode" from a wall of unrelated compiler errors into one sentence.
+      # Before the toolchain check, not after it. `RepositoryStarter` makes a first commit
+      # and a commit needs an author, so this is a prerequisite of the tests rather than a
+      # step that happens to come before them. Behind the version probe it was skipped when
+      # that probe crashed, and the run reported a test failure for a missing git identity
+      # caused by a SIGABRT in xcodebuild.
+      - name: Give the runner a git identity
+        run: |
+          set -euo pipefail
+          git config --global user.email "ci@bloom.local"
+          git config --global user.name "Bloom CI"
+
       - name: Check the toolchain
         run: |
           set -euo pipefail
-          xcodebuild -version
           swift --version
-          major="$(xcodebuild -version | head -1 | sed -E 's/^Xcode ([0-9]+).*/\1/')"
+
+          # Asked once and kept, rather than run twice: `xcodebuild -version` aborted with
+          # SIGABRT inside its own version handler on run 32529787812, after having answered
+          # correctly a moment earlier in the same step. That failed this step, which skipped
+          # "Give the runner a git identity", which failed a test that needs one, and the run
+          # reported a test failure for a crash in a version check.
+          #
+          # Retried once for the same reason. A crash in `xcodebuild -version` says nothing
+          # about the toolchain and everything about the runner, so it is worth one more ask
+          # before it is allowed to fail a build.
+          version=""
+          for attempt in 1 2; do
+            if version="$(xcodebuild -version 2>/dev/null | head -1)" && [ -n "$version" ]; then
+              break
+            fi
+            echo "xcodebuild -version did not answer on attempt $attempt."
+            sleep 5
+          done
+
+          if [ -z "$version" ]; then
+            echo "xcodebuild -version would not answer twice. This is the runner, not the tree."
+            exit 1
+          fi
+
+          echo "$version"
+          major="$(printf '%s' "$version" | sed -E 's/^Xcode ([0-9]+).*/\1/')"
           if [ "$major" -lt 26 ]; then
             echo "Bloom needs Xcode 26 or newer, this runner has $major."
             exit 1
@@ -138,12 +173,6 @@ jobs:
       # RepositoryStarter refuses to commit without a name and an address. A
       # fresh runner has neither, so one of them fails outright and the rest
       # return early and assert nothing. This is what makes them run at all.
-      - name: Give the runner a git identity
-        run: |
-          set -euo pipefail
-          git config --global user.email "ci@bloom.local"
-          git config --global user.name "Bloom CI"
-
       # Debug, because nothing downstream consumes these objects. The question
       # this step answers is "does Sources/Bloom still compile", and a debug
       # build answers it faster. The manual build below makes its own release
