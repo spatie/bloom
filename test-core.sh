@@ -17,6 +17,10 @@
 #   BLOOM_LOCAL_AGENTS  =1 asserts which agent CLIs exist on this machine
 #   BLOOM_LOCAL_SETTINGS=1 parses the .conductor/settings.toml files on this machine
 #   BLOOM_LIVE          =1 drives the real `claude` binary. Costs money.
+#   BLOOM_TEST_SWIFT_ARGS  extra flags for `swift test`, split on spaces. For the runs that are
+#                       not the ordinary one: the nightly workflow passes --sanitize=thread and
+#                       --enable-code-coverage through here rather than reimplementing the
+#                       mirrored package it needs to avoid building the app target.
 #
 
 set -euo pipefail
@@ -63,6 +67,10 @@ for name in "$@"; do
   filters+=(--filter "$name")
 done
 
+# Split on spaces, which is what ${=...} is for. An unset variable leaves an empty array, and an
+# empty array in quotes expands to no words at all, so the ordinary run is unchanged.
+extra=(${=BLOOM_TEST_SWIFT_ARGS:-})
+
 cd "$WORK"
 runs="${BLOOM_TEST_RUNS:-1}"
 failed=0
@@ -70,7 +78,7 @@ for run in $(seq 1 "$runs"); do
   if [[ "$runs" -gt 1 ]]; then
     print -r -- "===> run $run of $runs"
   fi
-  if ! swift test --scratch-path "$SCRATCH" "${filters[@]}"; then
+  if ! swift test --scratch-path "$SCRATCH" "${extra[@]}" "${filters[@]}"; then
     failed=$((failed + 1))
   fi
 done

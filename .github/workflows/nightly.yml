@@ -1,0 +1,183 @@
+name: Nightly
+
+# The checks worth running, but not worth running fifty times a day.
+#
+# test.yml is what a push has to survive, so everything in it has to be fast
+# enough that nobody minds waiting. These three are not. They answer questions
+# that change slowly: is there a data race, how much of the core is covered, and
+# how much of the code is not used by anything. A night is a fine resolution for
+# all three.
+#
+# Nothing here gates anything. No push is blocked by this workflow and no branch
+# is protected by it. It reports, in the run summary, and a red mark in the
+# Actions tab is how you find out.
+
+on:
+  schedule:
+    # 03:00 UTC, which is the small hours in Brussels and the cheapest time to
+    # be holding three macOS runners.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never two of these at once, and if one is somehow still running when the
+  # next night comes round, the older one is the one to keep: it is nearly done.
+  group: bloom-nightly
+  cancel-in-progress: false
+
+jobs:
+  # Thread Sanitizer over the core suite. This app is an actor holding a
+  # database, a JSON-RPC client, git running in the background and an
+  # NSTextView, which is exactly the shape of program TSan was written for. It
+  # makes the suite two to four times slower, which is why it is here and not on
+  # every push.
+  races:
+    runs-on: macos-26
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # The same reason test.yml has it: about thirty tests make a real commit,
+      # and git refuses to commit without a name and an address.
+      - name: Give the runner a git identity
+        run: |
+          set -euo pipefail
+          git config --global user.email "ci@bloom.local"
+          git config --global user.name "Bloom CI"
+
+      - name: Run the core tests under Thread Sanitizer
+        env:
+          BLOOM_TEST_SWIFT_ARGS: --sanitize=thread
+          # Report every race and keep going, rather than stopping at the first
+          # one. One night should produce the whole list.
+          TSAN_OPTIONS: halt_on_error=0
+        run: ./test-core.sh
+
+  # How much of BloomCore the suite actually touches. Information, not a gate:
+  # there is no threshold here to argue with and nothing fails on a number going
+  # down. It is in the summary so the trend is visible.
+  coverage:
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Give the runner a git identity
+        run: |
+          set -euo pipefail
+          git config --global user.email "ci@bloom.local"
+          git config --global user.name "Bloom CI"
+
+      # TMPDIR is pinned so the step below knows where test-core.sh put the
+      # build. It derives both directories from TMPDIR and BLOOM_TEST_ID, so
+      # fixing those two is what makes the profile findable afterwards.
+      - name: Run the core tests with coverage
+        env:
+          TMPDIR: ${{ runner.temp }}
+          BLOOM_TEST_ID: coverage
+          BLOOM_TEST_SWIFT_ARGS: --enable-code-coverage
+        run: ./test-core.sh
+
+      - name: Report the coverage
+        if: ${{ !cancelled() }}
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          build="$TMPDIR/bloom-core-build-coverage/debug"
+          profile="$build/codecov/default.profdata"
+          bundle="$build/BloomCoreOnlyPackageTests.xctest"
+          binary="$bundle/Contents/MacOS/BloomCoreOnlyPackageTests"
+          if [ ! -f "$profile" ] || [ ! -f "$binary" ]; then
+            echo "No coverage profile at $profile. Did the suite run?"
+            echo "The coverage run produced no profile." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # The test sources and the checked out dependencies are not what is
+          # being measured, and leaving them in moves the total for no reason.
+          xcrun llvm-cov report "$binary" \
+            -instr-profile "$profile" \
+            -ignore-filename-regex='.*(Tests|checkouts)/.*' > coverage.txt
+          {
+            echo "### Core coverage"
+            echo
+            echo '```'
+            tail -1 coverage.txt
+            echo '```'
+            echo
+            echo "<details><summary>Every file</summary>"
+            echo
+            echo '```'
+            cat coverage.txt
+            echo '```'
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Unused declarations. Swift will not tell you that a function, an enum case
+  # or a protocol member is dead, because from the compiler's point of view an
+  # internal declaration nobody calls is perfectly legal. Periphery indexes the
+  # whole package and says which ones nothing reaches.
+  #
+  # Advisory, and it will be for a while: the first run found 382 things, which
+  # is a reading list rather than a build failure. It also has a false positive
+  # class worth knowing about, notably `static var description` on every App
+  # Intent, which the framework reads and our code never does.
+  unused:
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the toolchain
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          swift --version
+
+      # The release binary rather than brew, which would install a tap and a
+      # toolchain to build it. Pinned, because this is a binary from the
+      # internet that then reads all of our source.
+      - name: Fetch periphery
+        env:
+          PERIPHERY_VERSION: 3.8.0
+        run: |
+          set -euo pipefail
+          url="https://github.com/peripheryapp/periphery/releases/download/${PERIPHERY_VERSION}/periphery-${PERIPHERY_VERSION}.zip"
+          curl -sSfL -o periphery.zip "$url"
+          unzip -q periphery.zip -d periphery-bin
+          ./periphery-bin/periphery version
+
+      # Timed on purpose. If this turns out to cost about a minute it belongs on
+      # every push instead of here, and the number in the log is what decides
+      # that.
+      - name: Scan for unused code
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          ./periphery-bin/periphery scan --quiet --format json > periphery.json
+          echo "periphery took $((SECONDS - start))s"
+          echo "PERIPHERY_SECONDS=$((SECONDS - start))" >> "$GITHUB_ENV"
+
+      # A summary rather than a wall. The full list is the artifact, the counts
+      # are what tells you whether it is ten things or four hundred.
+      - name: Summarise what it found
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          python3 Tools/periphery-summary.py periphery.json "${PERIPHERY_SECONDS:-0}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the full list
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: periphery
+          path: periphery.json
+          retention-days: 30
+          if-no-files-found: warn
