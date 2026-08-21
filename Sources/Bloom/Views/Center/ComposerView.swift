@@ -6,17 +6,13 @@ import BloomCore
 ///
 /// The surface itself is `ComposerPrompt`, which the create sheet uses too. What is left here is
 /// everything that is true of a conversation and of nothing else: the draft belongs to a
-/// transcript and is saved back to it, the divider above the box, the unread pill, the footer's
-/// values coming off a `Session` row, and the first-open defaults.
+/// transcript and is saved back to it, the divider above the box, the footer's values coming off
+/// a `Session` row, and the first-open defaults.
 struct ComposerView: View {
     @Bindable var transcript: TranscriptModel
     /// Optional so the composer can be dropped anywhere a transcript exists. When it is passed,
     /// the session list is kept in step with edits made here.
     var model: WorkspaceModel?
-    /// The transcript owns the scroll position, so it decides whether the pill is useful. False
-    /// until it says otherwise, because every arrival lands on the live end and a pill offering to
-    /// take you where you already are is the state this used to be stuck in. See `ChatPaneView`.
-    var isScrolledUp: Bool = false
     /// How tall the region the transcript and the composer share is, so a drag can be stopped
     /// before the transcript is squeezed out of it. Zero reads as "not laid out yet, no cap".
     var availableHeight: CGFloat = 0
@@ -93,12 +89,6 @@ struct ComposerView: View {
                 onSend: send,
                 onStop: transcript.stop
             )
-        }
-        .overlay(alignment: .top) {
-            if isScrolledUp {
-                JumpToNewestPill(action: transcript.jumpToLiveEnd)
-                    .alignmentGuide(.top) { $0[.bottom] + Metrics.spacing }
-            }
         }
         .padding(.horizontal, Metrics.gutter)
         .padding(.bottom, Metrics.gutter)

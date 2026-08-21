@@ -13,7 +13,7 @@ struct ChatPaneView: View {
     @Bindable var model: WorkspaceModel
 
     /// Whether the user has scrolled away from the newest row, which is the only thing the jump
-    /// pill is an answer to.
+    /// pill is an answer to. Read here rather than passed on, because the pill is drawn here.
     ///
     /// False to start with, and that is the fix rather than a default. It used to be true, and the
     /// transcript only reports a CHANGE of position, so a pane that opened on the live end (which
@@ -40,11 +40,30 @@ struct ChatPaneView: View {
                 isRunningSetup: model.isRunningSetup
             ) { isTranscriptScrolledUp = $0 }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // On the transcript, not on the composer, and that is the whole of the change.
+            //
+            // The pill is a claim about the transcript ("there is more of this below, come and
+            // see"), so it belongs inside the surface it is talking about. Hung off the top of the
+            // composer it straddled the rule between the two and sat half over the editor, which
+            // read as a control that had something to do with what you were typing.
+            //
+            // It cannot cover the thing it is offering to take you to. It is only ever drawn while
+            // the reader is away from the live end, and the newest row, the echo of a message on
+            // its way out and any queued bubble are all below the viewport in exactly that state.
+            // A short conversation is at its end by definition, so nothing is drawn over it at all.
+            //
+            // A gutter of clearance rather than centred on the boundary, so there is daylight
+            // between the pill and `ComposerResizeHandle`'s hairline underneath it.
+            .overlay(alignment: .bottom) {
+                if isTranscriptScrolledUp {
+                    JumpToNewestPill(action: transcript.jumpToLiveEnd)
+                        .padding(.bottom, Metrics.gutter)
+                }
+            }
 
             ComposerView(
                 transcript: transcript,
                 model: model,
-                isScrolledUp: isTranscriptScrolledUp,
                 availableHeight: conversationHeight
             )
         }
