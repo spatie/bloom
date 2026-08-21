@@ -23,9 +23,13 @@ import BloomCore
 /// nobody has sent it. See `Delivery`.
 struct PendingTurnRowView: View {
     var delivery: Delivery
-    /// The sentence saying why it has not gone, on the first one in the queue only. Everything
-    /// behind that one is visibly behind it, which is all it has to say for itself: four bubbles
-    /// each explaining the same running turn is the same sentence four times.
+    /// The sentence saying why the queue is waiting, under the last bubble in it and nowhere else.
+    ///
+    /// One sentence for the queue rather than one per message: four bubbles each explaining the
+    /// same running turn is the same sentence four times. Under the last rather than the first,
+    /// which is where it was: between two bubbles it read as a caption on the one below it, or as
+    /// a divider somebody had left in. At the foot of the run it reads as what it is, which is a
+    /// note about everything above it.
     var hold: DeliveryHold?
     var maxWidth: CGFloat
     var onCancel: @MainActor () -> Void
@@ -64,7 +68,11 @@ struct PendingTurnRowView: View {
                 .lineSpacing(TranscriptLayout.proseLeading)
                 .foregroundStyle(Palette.textSecondary)
                 .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                // No `maxWidth: .infinity`. `CappedWidth` measures the text at the cap and then
+                // takes the width it actually used, and filling the proposal defeats exactly
+                // that: three words came out in a bubble the full width of the pane with the
+                // words floating at one end of it, while the sent bubble a line above hugged its
+                // own sentence. Two drawings of one object have to agree about this.
                 .padding(Self.padding)
         }
         .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Self.corner))

@@ -222,9 +222,9 @@ struct TranscriptListView: View {
                     ForEach(transcript.pendingDeliveries) { delivery in
                         PendingTurnRowView(
                             delivery: delivery,
-                            // Only the first is told why it is waiting; the rest are visibly
-                            // behind it.
-                            hold: delivery.id == transcript.pendingDeliveries.first?.id
+                            // One sentence for the queue, at the foot of it. See the note on
+                            // `PendingTurnRowView.caption`.
+                            hold: delivery.id == transcript.pendingDeliveries.last?.id
                                 ? transcript.deliveryHold
                                 : nil,
                             maxWidth: maxBubbleWidth,
