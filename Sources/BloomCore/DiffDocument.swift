@@ -1,19 +1,18 @@
 import Foundation
-import BloomCore
 
 /// Everything a diff needs that is worth computing exactly once.
 ///
 /// Lexer carry, word level highlight ranges and the widest line are all sequential or expensive,
 /// and all three are needed by rows that a lazy stack will build in an unpredictable order and
 /// rebuild many times. Computing them in one background pass turns the render into a lookup.
-struct DiffDocument: Sendable {
-    var file: FileDiff
-    var language: Language
+public struct DiffDocument: Sendable {
+    public var file: FileDiff
+    public var language: Language
     /// Keyed by `DiffLine.index`: the lexer state each line begins in.
-    var carries: [Int: LexState]
+    public var carries: [Int: LexState]
     /// Keyed by `DiffLine.index`: the spans that differ from the line this one is paired with.
-    var emphasis: [Int: [Range<String.Index>]]
-    var maxColumns: Int
+    public var emphasis: [Int: [Range<String.Index>]]
+    public var maxColumns: Int
 
     /// Past this many paired lines the word diff stops. A file with thousands of paired edits is
     /// being skimmed, not read, and the LCS per pair is the one superlinear cost in the pass.
@@ -22,7 +21,7 @@ struct DiffDocument: Sendable {
     /// A horizontal scroll wider than this helps nobody and makes the scroller useless.
     private static let columnLimit = 800
 
-    static func parse(patch: String, path: String) -> FileDiff? {
+    public static func parse(patch: String, path: String) -> FileDiff? {
         let files = DiffParser.parse(patch)
         return files.first { $0.displayPath == path } ?? files.first
     }
@@ -34,7 +33,7 @@ struct DiffDocument: Sendable {
     /// Context skipped between hunks is a known gap in this reasoning. Git only gives us the lines
     /// it printed, so a construct opened inside the skipped region cannot be seen, and the first
     /// lines of the next hunk may highlight as if it were never opened.
-    static func prepare(file: FileDiff, path: String) -> DiffDocument {
+    public static func prepare(file: FileDiff, path: String) -> DiffDocument {
         let language = Language.detect(path: path)
         // Plain text has no construct that can span a line, so the whole sequential pass would
         // only ever hand back a clean state. Skipping it makes an unrecognised file free.
@@ -66,7 +65,7 @@ struct DiffDocument: Sendable {
             }
 
             for line in hunk.lines {
-                maxColumns = max(maxColumns, CodeMetrics.columns(of: line.text))
+                maxColumns = max(maxColumns, CodeColumns.count(of: line.text))
 
                 switch line.kind {
                 case .context:

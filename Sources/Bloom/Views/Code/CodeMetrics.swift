@@ -1,4 +1,5 @@
 import AppKit
+import BloomCore
 
 /// Monospaced text lets a view compute its own width arithmetically instead of measuring, which
 /// is what makes a single horizontal scroll view over a whole file affordable.
@@ -50,13 +51,8 @@ enum CodeMetrics {
     /// Between the marker column and the first character of code.
     static let textInset: CGFloat = 8
 
-    /// Display columns a line occupies, counting a tab as four so the width estimate does not
-    /// fall short on indented code.
-    static func columns(of line: String) -> Int {
-        var count = 0
-        for character in line {
-            count += character == "\t" ? 4 : 1
-        }
-        return count
-    }
+    /// Display columns a line occupies. `CodeColumns.count(of:)` in the core, because
+    /// `DiffDocument` runs it over every line of a diff and lives there now, and a width rule
+    /// with two implementations is a scroller that is right in one place and wrong in the other.
+    static func columns(of line: String) -> Int { CodeColumns.count(of: line) }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Supervises one `codex app-server` connection for one Bloom chat.
 ///
@@ -187,9 +188,9 @@ public actor CodexRunner: SessionRunner {
         // Bloom's own bookkeeping, and it happens after the agent has been unblocked, so a
         // database that refuses the write cannot leave a turn hanging on a question that was
         // already answered.
-        if case .allow(.project) = decision, let repoID = await repoID() {
-            for rule in ask.rules {
-                _ = try? await store.upsert(PermissionGrant.granting(rule, repoID: repoID, for: ask.subject))
+        if let repoID = await repoID() {
+            for grant in PermissionGrant.all(granting: decision, from: ask, repoID: repoID) {
+                _ = try? await store.upsert(grant)
             }
         }
     }
@@ -550,51 +551,46 @@ public actor CodexRunner: SessionRunner {
 ///
 /// Stop is pressed from synchronous main-actor code, and the actor at that moment is busy running
 /// the thing being stopped. The intent has to be recorded where it can be read without waiting.
-private final class TurnHandle: @unchecked Sendable {
-    private let lock = NSLock()
-    private var current: String?
-    private var cancelled = false
-
-    var turnID: String? {
-        lock.lock(); defer { lock.unlock() }
-        return current
+///
+/// `Mutex<State>` rather than `NSLock` plus `@unchecked Sendable`, for the reason given on
+/// `EventSink` in `AgentRunner`: `@unchecked` is a promise the compiler cannot check, and the two
+/// fields below have to move together.
+private final class TurnHandle: Sendable {
+    private struct State {
+        var current: String?
+        var cancelled = false
     }
 
-    var wasCancelled: Bool {
-        lock.lock(); defer { lock.unlock() }
-        return cancelled
-    }
+    private let state = Mutex(State())
+
+    var turnID: String? { state.withLock(\.current) }
+
+    var wasCancelled: Bool { state.withLock(\.cancelled) }
 
     func begin(turnID: String) {
-        lock.lock(); defer { lock.unlock() }
-        current = turnID
-        cancelled = false
+        state.withLock { state in
+            state.current = turnID
+            state.cancelled = false
+        }
     }
 
     func markCancelled() {
-        lock.lock(); defer { lock.unlock() }
-        cancelled = true
+        state.withLock { $0.cancelled = true }
     }
 
     func end() {
-        lock.lock(); defer { lock.unlock() }
-        current = nil
+        state.withLock { $0.current = nil }
     }
 }
 
 /// The live connection, where synchronous code can reach it. See `CodexRunner.terminateNow`.
-private final class LiveConnection: @unchecked Sendable {
-    private let lock = NSLock()
-    private var client: CodexClient?
+private final class LiveConnection: Sendable {
+    private let client = Mutex<CodexClient?>(nil)
 
-    var current: CodexClient? {
-        lock.lock(); defer { lock.unlock() }
-        return client
-    }
+    var current: CodexClient? { client.withLock { $0 } }
 
     func attach(_ client: CodexClient) {
-        lock.lock(); defer { lock.unlock() }
-        self.client = client
+        self.client.withLock { $0 = client }
     }
 }
 

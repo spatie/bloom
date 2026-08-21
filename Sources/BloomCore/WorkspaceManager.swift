@@ -136,11 +136,8 @@ public struct WorkspaceManager: Sendable {
         let base = baseBranch ?? repo.defaultBranch
 
         let existingBranches = Set(try await Git.branches(of: repo.path))
-        var slug = branch ?? Git.slug(from: prompt)
-        if let prefix = settings.branchPrefix, !prefix.isEmpty, branch == nil {
-            slug = "\(prefix)/\(slug)"
-        }
-        let finalBranch = Git.uniqueBranch(slug, taken: existingBranches)
+        let stem = Git.branchStem(prompt: prompt, prefix: settings.branchPrefix, branch: branch)
+        let finalBranch = Git.uniqueBranch(stem, taken: existingBranches)
 
         let directoryName = finalBranch.replacingOccurrences(of: "/", with: "-")
         let root = Self.workspacesRoot.appendingPathComponent(repo.name, isDirectory: true)

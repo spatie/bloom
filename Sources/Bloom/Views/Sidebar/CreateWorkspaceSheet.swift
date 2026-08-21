@@ -421,13 +421,12 @@ struct CreateWorkspaceSheet: View {
         )
     }
 
-    /// Mirrors `WorkspaceManager.createWorkspace`, minus the uniquing suffix which depends on
-    /// branches that could appear between now and Create. Only shown when no model is going to
-    /// rewrite it, because a preview that is about to be replaced is a lie with a monospaced font.
+    /// The same function `WorkspaceManager.cut` derives the real branch from, minus the uniquing
+    /// suffix, which depends on branches that could appear between now and Create. Only shown when
+    /// no model is going to rewrite it, because a preview that is about to be replaced is a lie
+    /// with a monospaced font.
     private var branchPreview: String {
-        let slug = Git.slug(from: spokenPrompt)
-        guard let prefix = branchPrefix, !prefix.isEmpty else { return slug }
-        return "\(prefix)/\(slug)"
+        Git.branchStem(prompt: spokenPrompt, prefix: branchPrefix)
     }
 
     // MARK: - Keys

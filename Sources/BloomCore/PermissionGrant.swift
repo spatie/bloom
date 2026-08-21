@@ -65,6 +65,21 @@ public struct PermissionGrant: Identifiable, Sendable, Hashable, Codable {
             grantedFor: subject
         )
     }
+
+    /// Every grant one decision would write, or none when the decision was not a project one.
+    ///
+    /// Here rather than in each runner because it is Bloom's own bookkeeping rather than either
+    /// backend's protocol. `SessionRunner`'s head argues that runner surface is not shared, and it
+    /// is right about the protocol; this is not protocol. It was two identical loops under two
+    /// identical comments, which meant a change to what project scope stores had to be made twice
+    /// and could be made once.
+    public static func all(
+        granting decision: PermissionDecision, from ask: PermissionAsk, repoID: RepoID
+    ) -> [PermissionGrant] {
+        guard case .allow(.project) = decision else { return [] }
+
+        return ask.rules.map { granting($0, repoID: repoID, for: ask.subject) }
+    }
 }
 
 // MARK: - PermissionGrantIndex

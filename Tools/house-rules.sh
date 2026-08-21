@@ -335,6 +335,42 @@ done <<EOF
 $(git grep --untracked -n -I -E "$id_declaration" -- 'Sources/*' || true)
 EOF
 
+echo "==> Views do not run subprocesses"
+# The one rule CLAUDE.md states that had nothing behind it, which is exactly the
+# state every rule in this file was in the day before it was written.
+#
+# The subprocess calls on `Git` and `Shell` are all async, so `await Git.` and
+# `await Shell.` is the whole test: the pure helpers on the same types (Git.slug,
+# Git.title, Git.countLines, Shell.which, Shell.environment) are synchronous and
+# fall out for free without having to be listed.
+#
+# A view that needs one of these gets a helper type beside it, which is what
+# FileRevert, FileIndex and TerminalPersistence are. Those live under Views/ and
+# are the allowed list; they are not views, they are what a view calls instead of
+# reaching for a process itself.
+subprocess_allowed_files=(
+  'Sources/Bloom/Views/Inspector/FileRevert.swift'        # a helper type, not a view
+  'Sources/Bloom/Views/Center/FileIndex.swift'            # a helper type, not a view
+  'Sources/Bloom/Views/Terminal/TerminalPersistence.swift' # a helper type, not a view
+  # The exception CLAUDE.md names, and the one entry here that should come off:
+  # CreateWorkspaceSheet still asks Git for the branch list from its own .task.
+  'Sources/Bloom/Views/Sidebar/CreateWorkspaceSheet.swift'
+)
+while IFS= read -r hit; do
+  [ -n "$hit" ] || continue
+  file="${hit%%:*}"
+  allowed=0
+  for path in "${subprocess_allowed_files[@]}"; do
+    [ "$file" = "$path" ] && allowed=1
+  done
+  if [ "$allowed" -eq 0 ]; then
+    echo "$hit" | show
+    report "$file runs a subprocess from the view layer. Put it on a store, a model or a helper type beside the view (FileRevert and FileIndex are the shape), or add it to the list in $0. A decision taken inside a View is a decision nothing can test, and a body that shells out is a body that runs it again on every redraw."
+  fi
+done <<EOF
+$(git grep --untracked -n -I -E 'await (Git|Shell)\.' -- 'Sources/Bloom/Views/*' || true)
+EOF
+
 echo "==> British spelling"
 # Words with an American spelling that has no other job in this codebase.
 # Deliberately absent: colour, behaviour, centre, dialogue, catalogue and

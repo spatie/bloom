@@ -458,3 +458,67 @@ struct PendingPermissionAskTests {
         #expect(pending.first?.requestID == realAsk.requestID)
     }
 }
+
+/// The block that used to be copied into both runners, under identical comments. It is Bloom's own
+/// bookkeeping rather than either backend's protocol, which is why it is shared and why it is
+/// tested here rather than twice.
+@Suite("Permission grants: what a decision stores")
+struct PermissionGrantWritingTests {
+    private let repoID = RepoID(rawValue: "repo-1")
+
+    private func ask(rules: [PermissionRule]) -> PermissionAsk {
+        PermissionAsk(
+            requestID: "req-1",
+            toolName: "Bash",
+            input: .object(["command": .string("ls")]),
+            suggestions: [
+                PermissionSuggestion(type: "addRules", behavior: "allow", rules: rules, raw: .object([:]))
+            ]
+        )
+    }
+
+    @Test("a project allow writes one grant per rule, credited to what was asked about")
+    func projectAllowWritesEveryRule() {
+        let grants = PermissionGrant.all(
+            granting: .allow(scope: .project),
+            from: ask(rules: [
+                PermissionRule(toolName: "Bash", ruleContent: "ls"),
+                PermissionRule(toolName: "Bash", ruleContent: "git status"),
+            ]),
+            repoID: repoID
+        )
+
+        #expect(grants.count == 2)
+        #expect(grants.map(\.ruleContent) == ["ls", "git status"])
+        #expect(grants.allSatisfy { $0.repoID == repoID })
+        #expect(grants.allSatisfy { $0.grantedFor == "ls" })
+    }
+
+    @Test("nothing narrower than project scope is remembered")
+    func narrowerScopesStoreNothing() {
+        let question = ask(rules: [PermissionRule(toolName: "Bash", ruleContent: "ls")])
+
+        #expect(PermissionGrant.all(granting: .allow(scope: .once), from: question, repoID: repoID).isEmpty)
+        #expect(PermissionGrant.all(granting: .allow(scope: .session), from: question, repoID: repoID).isEmpty)
+        #expect(
+            PermissionGrant.all(
+                granting: .deny(message: "no", endsTurn: false), from: question, repoID: repoID
+            ).isEmpty
+        )
+        #expect(
+            PermissionGrant.all(granting: .answer(input: .object([:])), from: question, repoID: repoID)
+                .isEmpty
+        )
+    }
+
+    /// The CLI offering no rule is the case a path outside the worktree produces. Bloom does not
+    /// invent one, so a project allow on an ask with no rules stores nothing rather than storing
+    /// something broader than was offered.
+    @Test("an ask carrying no rules stores nothing, even on a project allow")
+    func nothingOfferedIsNothingStored() {
+        #expect(
+            PermissionGrant.all(granting: .allow(scope: .project), from: ask(rules: []), repoID: repoID)
+                .isEmpty
+        )
+    }
+}

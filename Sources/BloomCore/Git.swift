@@ -1427,6 +1427,27 @@ public enum Git {
     }
 
     /// Append -2, -3 and so on until the branch name is free.
+    /// The branch a prompt would be cut on, before anything checks whether it is free.
+    ///
+    /// One function because two places need the same answer and only one of them can act on it:
+    /// `WorkspaceManager.cut` puts a worktree on it, and the create sheet prints it under the box
+    /// so somebody can see what they are about to make. Those were two copies of the same three
+    /// lines, one of them carrying a comment saying it mirrored the other, which is a drift waiting
+    /// for the next change to either side. A preview that has drifted is a lie in a monospaced font.
+    ///
+    /// An explicit branch is returned untouched, prefix and all: somebody who typed a branch name
+    /// meant that branch name. The uniquing suffix is deliberately not here, because it depends on
+    /// what the repository holds at the moment of cutting and the preview has no business guessing.
+    public static func branchStem(prompt: String, prefix: String?, branch: String? = nil) -> String {
+        if let branch, !branch.isEmpty { return branch }
+
+        let slug = Self.slug(from: prompt)
+
+        guard let prefix, !prefix.isEmpty else { return slug }
+
+        return "\(prefix)/\(slug)"
+    }
+
     public static func uniqueBranch(_ desired: String, taken: Set<String>) -> String {
         guard taken.contains(desired) else { return desired }
         var suffix = 2
