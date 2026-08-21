@@ -27,6 +27,18 @@ final class WorkspaceModel {
 
     var sessions: [Session] = []
 
+    /// Whether the store has answered about this workspace's sessions at all, this launch.
+    ///
+    /// The same distinction `hasReadChanges` keeps below, and here it is not about what a pane is
+    /// allowed to say but about what gets deleted. An empty `sessions` means two different things,
+    /// "the store was asked and this workspace has none" and "nobody has asked yet", and
+    /// `WorkspaceTabsStore.reconcile` destroys every pane pointer no live session answers for. It
+    /// ran from the tab strip's `.task` while this model was still on the `Store` actor, read the
+    /// empty list as proof, and dissolved any tab holding a chat beside a terminal or a page on
+    /// the first visit of every launch. See `TabReconciliation`, which now refuses an answer
+    /// nobody has yet, and `TerminalPaneCensus`, where the same trap cost shells.
+    private(set) var hasReadSessions = false
+
     /// Switching tab is the moment a transcript should come into existence, rather than the
     /// moment a view body happens to ask for one. Preparing it here keeps model creation, which
     /// is an observable write, out of the render pass.
@@ -217,6 +229,10 @@ final class WorkspaceModel {
         let fresh = (try? await store.sessions(workspaceID: workspace.id)) ?? []
         SwitchTrace.mark("sessions.query.done", workspace: workspace.id)
         if sessions != fresh { sessions = fresh }
+        // Conditional for the reason every write here is, and raised only once the answer is in
+        // hand: the guard above is the store not being there to ask, which is doubt rather than an
+        // empty workspace.
+        if !hasReadSessions { hasReadSessions = true }
         SwitchTrace.mark("sessions.assigned", workspace: workspace.id)
         if activeSessionID == nil || !sessions.contains(where: { $0.id == activeSessionID }) {
             activeSessionID = sessions.first?.id
@@ -905,7 +921,9 @@ final class WorkspaceModel {
     /// read was written after that.
     func onAppear() async {
         SwitchTrace.mark("onAppear.start", workspace: workspace.id)
-        let isFirstVisit = sessions.isEmpty
+        // Whether the store has answered, rather than whether the answer was empty. A workspace
+        // whose conversations have all been archived is not on its first visit forever.
+        let isFirstVisit = !hasReadSessions
         if isFirstVisit { await reloadSessions() }
         SwitchTrace.mark("sessions.loaded", workspace: workspace.id)
 

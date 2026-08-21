@@ -96,12 +96,12 @@ struct SessionTabsView: View {
             inspectorToggle
         }
         .background { shortcuts }
+        // The list, and nothing else. Reconciling used to be here too, right after this line, and
+        // it was wrong by exactly one await: this body has no suspension point in it, so it ran
+        // while `WorkspaceModel` was still on the `Store` actor and judged real tool tabs against
+        // an empty session list. It is `CenterColumnView`'s task now, after `onAppear`.
         .task(id: model.workspace.id) {
             tabs.load(workspaceID: model.workspace.id)
-            // After the list is back, because that is what a stored pointer is checked against.
-            // A session archived or a tool tab closed in another launch leaves a pane holding a
-            // pointer nothing calls `forget` for.
-            store.reconcile(in: model)
         }
     }
 

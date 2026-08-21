@@ -387,38 +387,31 @@ final class WorkspaceTabsStore {
     /// A session can be archived, or a tool tab closed, in a launch that is not this one: the
     /// stores that would have called `forget` were not running. Without this a restored pane sits
     /// on a dead pointer showing an empty state, and the arrangement it is part of never heals.
-    /// Called from the same task that loads the workspace's tool tabs, so the list it checks
-    /// against is the one that has just been read back.
+    ///
+    /// **Both lists are handed over as an answer or as doubt, never flattened.** `TabReconciliation`
+    /// carries the reasoning and the tests; the part that belongs here is that neither store can be
+    /// asked to guess on its behalf. `model.sessions` is empty until the `Store` actor comes back,
+    /// and `CenterTabStore.tabs(for:)` is empty both for a workspace with no tool tabs and for one
+    /// whose stored list would not decode.
+    ///
+    /// Called from `CenterColumnView` after `WorkspaceModel.onAppear`, which is what makes the
+    /// first of those an answer rather than doubt on the first visit of a launch. Its own task
+    /// loads the tool tabs before it awaits, so both are settled by the time this runs.
     func reconcile(in model: WorkspaceModel) {
         let workspaceID = model.workspace.id
-        let sessions = model.sessions.map(\.id)
-        let tools = CenterTabStore.shared.tabs(for: workspaceID).map(\.id)
-        let live = Set(sessions.map(PaneContent.chat) + tools.map(PaneContent.tool))
+        let tabs = CenterTabStore.shared
 
-        // This workspace's tabs, and only those. An arrangement is filed under a content id and
-        // nothing else, so there is no key that says which workspace a tab belongs to; asking
-        // whether its root is one of THIS workspace's things is the same question and is the only
-        // one that can be answered. Walking every arrangement instead would judge another
-        // workspace's tabs against this workspace's sessions, and every one of them would look
-        // dead.
-        //
-        // A tab whose own root has gone is left alone, and is inert rather than wrong: `claimed`
-        // only ever asks the tabs the strip has, so nothing it holds is hidden by it.
-        var dead: Set<PaneContent> = []
-        for tab in live {
-            guard let arrangement = arrangements[tab.id] else { continue }
-            for pane in arrangement.layout.panes {
-                guard let content = arrangement.contents[pane], !live.contains(content) else {
-                    continue
-                }
-                dead.insert(content)
-            }
+        var stored: [PaneContent: StoredPaneArrangement] = [:]
+        for arrangement in arrangements.values {
+            stored[arrangement.root] = arrangement.stored
         }
 
-        // Sorted, so a workspace with two dead pointers heals the same way every launch: a tab
-        // whose root is one of them is re-filed, and which one is dealt with first decides what it
-        // is re-filed under.
-        for content in dead.sorted(by: { $0.id < $1.id }) {
+        let dead = TabReconciliation.dead(
+            in: stored,
+            sessions: model.hasReadSessions ? model.sessions.map(\.id) : nil,
+            tools: tabs.hasReadTabs(for: workspaceID) ? tabs.tabs(for: workspaceID).map(\.id) : nil
+        )
+        for content in dead {
             forget(content, workspaceID: workspaceID)
         }
     }

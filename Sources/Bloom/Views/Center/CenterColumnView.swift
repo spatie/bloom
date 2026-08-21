@@ -20,6 +20,15 @@ struct CenterColumnView: View {
         .task(id: model.workspace.id) {
             openStartingTerminal()
             await model.onAppear()
+            // Last, and that ordering is the whole of it. `onAppear` does not return until the
+            // first visit of a launch has the workspace's sessions in hand, and the tool tabs were
+            // read back synchronously above, so this is the one place in the column where both
+            // lists are answers rather than silence. Reconciling forgets every pane pointer
+            // nothing accounts for, so it ran from the strip's own task and deleted the chat pane
+            // of every terminal or browser tab somebody had split, on the first open after each
+            // relaunch. `TabReconciliation` refuses an unread list as well, because an ordering
+            // that is only correct by inspection is one edit away from being incorrect.
+            WorkspaceTabsStore.shared.reconcile(in: model)
         }
     }
 

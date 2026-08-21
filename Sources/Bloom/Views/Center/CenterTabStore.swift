@@ -23,6 +23,16 @@ final class CenterTabStore {
 
     private(set) var tabsByWorkspace: [WorkspaceID: [CenterTab]] = [:]
 
+    /// Workspaces whose stored list is there and would not decode.
+    ///
+    /// A decode failure and a workspace that has never opened a tool tab both leave an empty list
+    /// in the map, and they are not the same fact. `WorkspaceTabsStore.reconcile` deletes every
+    /// pane pointer no live tab answers for, so reading the first as the second would shred the
+    /// arrangement of exactly the workspace whose record is already damaged. Ignored by
+    /// observation because nothing draws from it: see `TerminalPaneCensus`, which keeps the same
+    /// distinction for the orphan sweep, where getting it wrong costs a shell instead.
+    @ObservationIgnored private var unreadable: Set<WorkspaceID> = []
+
     /// Live web views, keyed by tab. Ignored by observation on purpose: no view reads this map, it
     /// is only ever asked for one session at a time, and having it invalidate the column every
     /// time a tab is first drawn would be a redraw for nothing.
@@ -34,6 +44,13 @@ final class CenterTabStore {
 
     func tabs(for workspaceID: WorkspaceID) -> [CenterTab] {
         tabsByWorkspace[workspaceID] ?? []
+    }
+
+    /// Whether `tabs(for:)` is an answer rather than a placeholder: the list has been read back
+    /// this launch, and it read cleanly. False is doubt, and the only caller that has to care is
+    /// the one that deletes what it cannot account for.
+    func hasReadTabs(for workspaceID: WorkspaceID) -> Bool {
+        tabsByWorkspace[workspaceID] != nil && !unreadable.contains(workspaceID)
     }
 
     /// The workspace's one review tab, if it has been opened. There is never a second: see the
@@ -58,7 +75,14 @@ final class CenterTabStore {
     /// cause one.
     func load(workspaceID: WorkspaceID) {
         guard tabsByWorkspace[workspaceID] == nil else { return }
-        tabsByWorkspace[workspaceID] = Self.restore(workspaceID: workspaceID)
+        guard let restored = Self.restore(workspaceID: workspaceID) else {
+            // The strip has to draw something, and there is nothing to draw, so the map still gets
+            // an empty list. What is remembered here is that it is not an answer.
+            unreadable.insert(workspaceID)
+            tabsByWorkspace[workspaceID] = []
+            return
+        }
+        tabsByWorkspace[workspaceID] = restored
     }
 
     /// `title` is only passed by a caller that has a better name than "Terminal 3", which today
@@ -86,7 +110,7 @@ final class CenterTabStore {
     /// their panes anyway: a tmux session whose tab is only on disk is still one Bloom can reach,
     /// and a sweep that could not see it would kill the shell the user left running in it.
     func terminalTabIDs(for workspaceID: WorkspaceID) -> [String] {
-        let tabs = tabsByWorkspace[workspaceID] ?? Self.restore(workspaceID: workspaceID)
+        let tabs = tabsByWorkspace[workspaceID] ?? Self.restore(workspaceID: workspaceID) ?? []
         return tabs.filter { $0.kind == .terminal }.map(\.id)
     }
 
@@ -125,7 +149,7 @@ final class CenterTabStore {
         let live = await TerminalSessionStore.shared.liveSessions(store: store).map(Set.init)
 
         for (workspaceID, rows) in rowsByWorkspace {
-            var tabs = tabsByWorkspace[workspaceID] ?? Self.restore(workspaceID: workspaceID)
+            var tabs = tabsByWorkspace[workspaceID] ?? Self.restore(workspaceID: workspaceID) ?? []
             let known = Set(tabs.map(\.id))
 
             for row in rows where !known.contains(row.id.rawValue) {
@@ -270,6 +294,9 @@ final class CenterTabStore {
     }
 
     private func apply(_ tabs: [CenterTab], to workspaceID: WorkspaceID) {
+        // Whatever could not be read is about to be overwritten by this, so the doubt goes with
+        // it: from here the list in hand is the list on disk.
+        unreadable.remove(workspaceID)
         tabsByWorkspace[workspaceID] = tabs
         Self.persist(tabs, workspaceID: workspaceID)
     }
@@ -289,10 +316,11 @@ final class CenterTabStore {
         defaults.set(data, forKey: key(workspaceID))
     }
 
-    private static func restore(workspaceID: WorkspaceID) -> [CenterTab] {
-        guard let data = UserDefaults.standard.data(forKey: key(workspaceID)),
-              let tabs = try? JSONDecoder().decode([CenterTab].self, from: data) else { return [] }
-        return tabs
+    /// Nil when a list is stored and will not decode, which is doubt. No key at all is a fact and
+    /// answers with none: most workspaces have never opened a terminal or a browser.
+    private static func restore(workspaceID: WorkspaceID) -> [CenterTab]? {
+        guard let data = UserDefaults.standard.data(forKey: key(workspaceID)) else { return [] }
+        return try? JSONDecoder().decode([CenterTab].self, from: data)
     }
 
     /// "Terminal", then "Terminal 2". The bare first name matches what the bottom panel calls its
