@@ -275,6 +275,13 @@ enum Snapshot {
                 .map { $0 + 1 }
                 .flatMap { $0 < arguments.count && !arguments[$0].hasPrefix("--") ? arguments[$0] : nil }
 
+            // `--about` captures the About window, for the reason `--settings` captures the
+            // settings one: it is reachable only through a menu item, so without this the only
+            // way to look at it is to ask a human for a screenshot, and every change to it goes in
+            // unverified. It is a designed window rather than AppKit's panel now, which makes both
+            // appearances worth a picture. Same caveat about flag order as above.
+            let wantsAbout = arguments.contains("--about")
+
             // Polled rather than slept through, and the settings action is re-sent each time round.
             // How long the first window takes depends on how much the store has to read, and a
             // fixed wait that is long enough on a small database is a coin toss on a real one.
@@ -290,7 +297,7 @@ enum Snapshot {
             // showing, and it titles the MAIN window after the selected workspace, so a title
             // comparison against "Bloom" matched neither and every settings capture silently
             // returned a picture of the main window instead.
-            if wantsSettings || wantsRepoSettings {
+            if wantsSettings || wantsRepoSettings || wantsAbout {
                 let main = candidate
                 candidate = nil
                 for _ in 0..<40 {
@@ -300,6 +307,8 @@ enum Snapshot {
                         NotificationCenter.default.post(
                             name: .bloomOpenRepoSettings, object: repoSettingsProject
                         )
+                    } else if wantsAbout {
+                        openAppMenuItem(titled: "About")
                     } else {
                         openSettingsWindow()
                     }
@@ -441,10 +450,19 @@ enum Snapshot {
     /// and it does nothing here: SwiftUI installs the action on the menu item rather than on the
     /// responder chain. Driving the menu item itself is what actually opens the window.
     private static func openSettingsWindow() {
+        // Matched by prefix because the item is titled "Settings…" with an ellipsis.
+        openAppMenuItem(titled: "Settings")
+    }
+
+    /// Picks an item off the application menu by the start of its title.
+    ///
+    /// The menu item is driven rather than its action sent, for the reason above, and the About
+    /// item is in the same position: `BloomCommands` replaces the `.appInfo` group, so the action
+    /// behind it is a SwiftUI `Button` closure and lives nowhere the responder chain can reach.
+    private static func openAppMenuItem(titled prefix: String) {
         NSApp.activate(ignoringOtherApps: true)
         guard let appMenu = NSApp.mainMenu?.items.first?.submenu else { return }
-        // Matched by prefix because the item is titled "Settings…" with an ellipsis.
-        guard let index = appMenu.items.firstIndex(where: { $0.title.hasPrefix("Settings") })
+        guard let index = appMenu.items.firstIndex(where: { $0.title.hasPrefix(prefix) })
         else { return }
         appMenu.performActionForItem(at: index)
     }

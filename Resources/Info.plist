@@ -29,6 +29,14 @@
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.developer-tools</string>
 	<!--
+	    Who made it, in the one place macOS itself reads that from. The Finder's Get Info panel
+	    shows this key, and so does the App Store listing for a bundle that has one. `AboutWindow`
+	    reads the same key rather than carrying a second copy of the sentence, so there is one
+	    string to change when the year does.
+	-->
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 Spatie. All rights reserved.</string>
+	<!--
 	    Sparkle. The two values below are placeholders on purpose: the bucket the appcast will be
 	    published to does not exist yet, and a real-looking default is the one thing that could
 	    make a build check a host nobody owns.

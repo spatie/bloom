@@ -23,6 +23,21 @@ struct BloomCommands: Commands {
     }
 
     var body: some Commands {
+        // Bloom's own About window rather than AppKit's panel. `orderFrontStandardAboutPanel` can
+        // be handed the bundle's keys and a paragraph of credits and nothing else: no mark, no
+        // typeface, no ground. Everything that makes this app recognisable as the one runbloom.app
+        // is about lives in exactly those three, so the panel was the wrong shape for what this
+        // window has to say. See `AboutWindow`.
+        //
+        // Replacing rather than adding to, because the item AppKit puts here cannot be pointed
+        // somewhere else. The update check below stays a group of its own so the separator between
+        // the two is still there.
+        CommandGroup(replacing: .appInfo) {
+            Button("About Bloom") {
+                AboutWindow.show()
+            }
+        }
+
         // Directly under "About Bloom", which is where every Mac app that updates itself puts it
         // and therefore the first place anyone looks. Not in the Help menu, and not in Settings
         // only: the Settings switch decides whether Bloom looks on its own, and this asks now.
