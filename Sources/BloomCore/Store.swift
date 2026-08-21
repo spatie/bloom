@@ -336,6 +336,57 @@ public actor Store {
                     try db.execute("ALTER TABLE workspaces ADD COLUMN colour TEXT;")
                 }
             },
+
+            // Who asked for a workspace: the owner, or an agent running in another workspace.
+            //
+            // NULL is the owner, which is every row that existed when this ran and most rows that
+            // will ever exist, so there is no default to invent and nothing to backfill.
+            //
+            // No `depth` column beside it. The limit on nesting is one, so "has a parent" is the
+            // depth already, and a second number recording the same fact is a second number that
+            // can be wrong.
+            //
+            // No foreign key, deliberately. The parentage record has to survive the parent being
+            // archived, and an `ON DELETE` of any flavour would either take the child's record
+            // with it or refuse the archive. A parent id pointing at nothing is not a broken row:
+            // it reads as "nobody living may reach into this through the bridge", which is the
+            // failure this wants.
+            //
+            // `spawn_tool_use_id` is the tool call that asked, kept so a retried spawn can be
+            // recognised as the same one rather than cutting a second worktree. See
+            // `WorkspaceOrigin` for why the two are one value up in Swift and two columns here.
+            //
+            // Real code rather than SQL for the same reason as the three steps above: `ADD COLUMN`
+            // has no `IF NOT EXISTS`, and the store's own tests rewind `user_version` to reproduce
+            // an old schema, so a step that could not be replayed would throw and take the whole
+            // migration transaction with it.
+            { db in
+                let existing = Set(
+                    try db.query("PRAGMA table_info(workspaces);").compactMap { $0.string("name") }
+                )
+                if !existing.contains("parent_workspace_id") {
+                    try db.execute("ALTER TABLE workspaces ADD COLUMN parent_workspace_id TEXT;")
+                }
+                if !existing.contains("spawn_tool_use_id") {
+                    try db.execute("ALTER TABLE workspaces ADD COLUMN spawn_tool_use_id TEXT;")
+                }
+                try db.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS workspaces_parent
+                        ON workspaces(parent_workspace_id);
+                    """
+                )
+                // Indexed, not unique. Recognising a retry is asking which workspaces this tool
+                // call has already made, and the phase that writes the spawn tool is the one
+                // entitled to decide whether one call may ask for more than one workspace. A
+                // unique index would settle that here, months early, and be a migration to undo.
+                try db.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS workspaces_spawn_tool_use
+                        ON workspaces(spawn_tool_use_id);
+                    """
+                )
+            },
         ]
 
         let current = Int(db.userVersion)
@@ -469,8 +520,9 @@ public actor Store {
             INSERT INTO workspaces (
                 id, repo_id, name, branch, path, base_branch, state, setup_state, setup_log,
                 sort_order, created_at, last_activity_at, archived_at,
-                additions, deletions, changed_files, unread, pinned, colour
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                additions, deletions, changed_files, unread, pinned, colour,
+                parent_workspace_id, spawn_tool_use_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 branch = excluded.branch,
@@ -487,7 +539,9 @@ public actor Store {
                 changed_files = excluded.changed_files,
                 unread = excluded.unread,
                 pinned = excluded.pinned,
-                colour = excluded.colour
+                colour = excluded.colour,
+                parent_workspace_id = excluded.parent_workspace_id,
+                spawn_tool_use_id = excluded.spawn_tool_use_id
             """,
             [
                 .text(workspace.id), .text(workspace.repoID), .text(workspace.name),
@@ -501,6 +555,8 @@ public actor Store {
                 .int(Int64(workspace.changedFiles)),
                 .int(workspace.unread ? 1 : 0), .int(workspace.pinned ? 1 : 0),
                 workspace.colour.map { .text($0) } ?? .null,
+                workspace.origin.parentWorkspaceID.map { .text($0) } ?? .null,
+                workspace.origin.spawnToolUseID.map { .text($0) } ?? .null,
             ]
         )
         return workspace
@@ -610,6 +666,49 @@ public actor Store {
                 .text(SetupState.running.rawValue),
             ]
         )
+    }
+
+    // MARK: - Workspaces an agent asked for
+
+    /// The workspaces started by the agent running in this one.
+    ///
+    /// Archived ones are out by default, because this is the list a person or an agent is shown,
+    /// and an archived workspace is one that has been dealt with. `countWorkspaces(startedBy:)` is
+    /// the counting question and it does not have that default, for the reason written there.
+    public func workspaces(startedBy parentWorkspaceID: String, includeArchived: Bool = false) throws -> [Workspace] {
+        let sql = includeArchived
+            ? "SELECT * FROM workspaces WHERE parent_workspace_id = ? ORDER BY created_at"
+            : "SELECT * FROM workspaces WHERE parent_workspace_id = ? AND state = 'active' ORDER BY created_at"
+        return try db.query(sql, [.text(parentWorkspaceID)]).map(Self.workspace(from:))
+    }
+
+    /// How many workspaces the agent in this one has ever started, archived ones included, and
+    /// with no way to ask otherwise.
+    ///
+    /// This is what a budget is counted against, and the count has to include the archived ones or
+    /// it is not a budget. An allowance that archiving hands back is an allowance an agent can
+    /// spend for ever: start a workspace, archive it, start another, and the ceiling is never
+    /// reached however many worktrees have been cut and however much has been spent getting them
+    /// there. So there is no `includeArchived` parameter to pass the wrong way by accident.
+    public func countWorkspaces(startedBy parentWorkspaceID: String) throws -> Int {
+        let rows = try db.query(
+            "SELECT COUNT(*) AS n FROM workspaces WHERE parent_workspace_id = ?",
+            [.text(parentWorkspaceID)]
+        )
+        return Int(rows.first?.int("n") ?? 0)
+    }
+
+    /// The workspaces one spawn tool call has already made, archived ones included.
+    ///
+    /// A tool call is retried: by the model, by the transport, and by whatever is driving both.
+    /// Asking this before cutting anything is how a repeat of a call is told apart from a second
+    /// request, and archived rows count because a retry arriving after the workspace was archived
+    /// still must not cut a fresh worktree.
+    public func workspaces(spawnToolUseID: String) throws -> [Workspace] {
+        try db.query(
+            "SELECT * FROM workspaces WHERE spawn_tool_use_id = ? ORDER BY created_at",
+            [.text(spawnToolUseID)]
+        ).map(Self.workspace(from:))
     }
 
     public func nextWorkspaceSortOrder(repoID: String) throws -> Int {
@@ -1248,7 +1347,11 @@ public actor Store {
             changedFiles: Int(row.int("changed_files") ?? 0),
             unread: row.bool("unread"),
             pinned: row.bool("pinned"),
-            colour: row.string("colour")
+            colour: row.string("colour"),
+            origin: WorkspaceOrigin(
+                parentWorkspaceID: row.string("parent_workspace_id"),
+                spawnToolUseID: row.string("spawn_tool_use_id")
+            )
         )
     }
 

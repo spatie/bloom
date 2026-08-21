@@ -176,6 +176,199 @@ struct WorkspaceWriteIsolationTests {
         // Replaying must not put the column back to its default either.
         #expect(stored.colour == "D8608C")
     }
+
+    // MARK: - Who asked for the workspace
+
+    /// The record of which agent asked for a workspace is the only thing standing between the
+    /// bridge and letting anybody reach into anybody's worktree, and it is written once, at
+    /// creation, and never again. Every other writer of this row runs afterwards and for the rest
+    /// of the workspace's life. `update` picks a new column up on its own, which is exactly why
+    /// this has to be a test: nothing in the code says out loud that these two columns are carried
+    /// through, so nothing but this would notice a writer that stopped carrying them.
+    @Test("the writers of a workspace row leave its parentage alone")
+    func writersKeepTheOrigin() async throws {
+        let store = try makeTestStore("isolation")
+        let repo = try await store.upsert(Repo(name: "r", path: TestScratch.unique("repo")))
+        let parent = try await seed(store)
+        let started = try await store.upsert(Workspace(
+            repoID: repo.id, name: "started", branch: "feature/started",
+            path: TestScratch.unique("worktree"),
+            baseBranch: "main",
+            origin: .agent(parentWorkspaceID: parent.id, spawnToolUseID: "toolu_01")
+        ))
+
+        try await store.updateDiffStat(workspaceID: started.id, additions: 9, deletions: 1, files: 1)
+        try await store.touch(workspaceID: started.id, unread: true)
+        try await store.updateSetup(workspaceID: started.id, state: .succeeded, log: "done")
+        try await store.update(workspaceID: started.id) { $0.name = "named by the model" }
+        try await store.update(workspaceID: started.id) {
+            $0.state = .archived
+            $0.archivedAt = Date()
+        }
+
+        let stored = try #require(try await store.workspace(id: started.id))
+        #expect(stored.origin == .agent(parentWorkspaceID: parent.id, spawnToolUseID: "toolu_01"))
+        #expect(stored.name == "named by the model")
+        #expect(stored.state == .archived)
+    }
+
+    /// And the owner's workspaces stay the owner's. A writer that filled the columns in with
+    /// something rather than leaving them NULL would hand an agent authority over a worktree
+    /// nobody gave it.
+    @Test("a workspace the owner made never acquires a parent")
+    func theOwnersWorkspacesStayTheOwners() async throws {
+        let store = try makeTestStore("isolation")
+        let workspace = try await seed(store)
+        #expect(workspace.origin == .user)
+
+        try await store.update(workspaceID: workspace.id) { $0.pinned = true }
+        try await store.touch(workspaceID: workspace.id, unread: true)
+
+        let stored = try #require(try await store.workspace(id: workspace.id))
+        #expect(stored.origin == .user)
+        #expect(stored.origin.isAgentSpawned == false)
+    }
+
+    /// Same bargain as the colour above: `ALTER TABLE` has no `IF NOT EXISTS`, and the suite
+    /// rewinds `user_version` to reproduce an old schema.
+    @Test("the parentage migration survives being replayed, and keeps what was stored")
+    func theParentageMigrationReplays() async throws {
+        let path = TestScratch.unique("parentage-replay") + ".sqlite"
+        let store = try Store(path: path)
+        let repo = try await store.upsert(Repo(name: "r", path: TestScratch.unique("repo")))
+        let parent = try await store.upsert(Workspace(
+            repoID: repo.id, name: "parent", branch: "b", path: TestScratch.unique("worktree"),
+            baseBranch: "main"
+        ))
+        let started = try await store.upsert(Workspace(
+            repoID: repo.id, name: "started", branch: "b2", path: TestScratch.unique("worktree"),
+            baseBranch: "main",
+            origin: .agent(parentWorkspaceID: parent.id, spawnToolUseID: "toolu_02")
+        ))
+
+        let raw = try SQLiteDatabase(path: path)
+        raw.userVersion = 0
+
+        let reopened = try Store(path: path)
+        let storedParent = try #require(try await reopened.workspace(id: parent.id))
+        let storedChild = try #require(try await reopened.workspace(id: started.id))
+        #expect(storedParent.origin == .user)
+        #expect(storedChild.origin == .agent(parentWorkspaceID: parent.id, spawnToolUseID: "toolu_02"))
+    }
+}
+
+/// Counting, listing and recognising the workspaces an agent asked for.
+@Suite("Workspaces an agent started", .tags(.persistence), .scratchDirectory)
+struct WorkspaceParentageTests {
+    private func seed(_ store: Store) async throws -> Repo {
+        try await store.upsert(Repo(name: "r", path: TestScratch.unique("repo")))
+    }
+
+    private func makeWorkspace(
+        _ store: Store, repo: Repo, name: String, origin: WorkspaceOrigin = .user
+    ) async throws -> Workspace {
+        try await store.upsert(Workspace(
+            repoID: repo.id, name: name, branch: "feature/\(name)",
+            path: TestScratch.unique("worktree"), baseBranch: "main", origin: origin
+        ))
+    }
+
+    @Test("the list of what an agent started leaves out what it archived")
+    func listsTheLiveOnes() async throws {
+        let store = try makeTestStore("parentage")
+        let repo = try await seed(store)
+        let parent = try await makeWorkspace(store, repo: repo, name: "parent")
+        let first = try await makeWorkspace(
+            store, repo: repo, name: "first",
+            origin: .agent(parentWorkspaceID: parent.id, spawnToolUseID: "toolu_a")
+        )
+        let second = try await makeWorkspace(
+            store, repo: repo, name: "second",
+            origin: .agent(parentWorkspaceID: parent.id, spawnToolUseID: "toolu_b")
+        )
+        _ = try await makeWorkspace(store, repo: repo, name: "unrelated")
+
+        try await store.update(workspaceID: second.id) { $0.state = .archived }
+
+        let live = try await store.workspaces(startedBy: parent.id)
+        #expect(live.map(\.id) == [first.id])
+
+        let all = try await store.workspaces(startedBy: parent.id, includeArchived: true)
+        #expect(Set(all.map(\.id)) == [first.id, second.id])
+    }
+
+    /// The one that matters. An allowance archiving hands back is an allowance that never runs
+    /// out: start, archive, start again, for ever, and every round of it cuts a worktree and
+    /// spends whatever the agent in it spends.
+    @Test("archiving does not refund an agent its budget")
+    func archivingDoesNotRefundTheBudget() async throws {
+        let store = try makeTestStore("parentage")
+        let repo = try await seed(store)
+        let parent = try await makeWorkspace(store, repo: repo, name: "parent")
+
+        for index in 0..<3 {
+            let started = try await makeWorkspace(
+                store, repo: repo, name: "started\(index)",
+                origin: .agent(parentWorkspaceID: parent.id, spawnToolUseID: "toolu_\(index)")
+            )
+            try await store.update(workspaceID: started.id) {
+                $0.state = .archived
+                $0.archivedAt = Date()
+            }
+        }
+
+        #expect(try await store.workspaces(startedBy: parent.id).isEmpty)
+        #expect(try await store.countWorkspaces(startedBy: parent.id) == 3)
+    }
+
+    /// A parent that has been archived, or removed outright, leaves a parent id pointing at
+    /// nothing. That is on purpose: the record of who asked has to outlive the asker. What it must
+    /// not do is read as the owner's, because the owner did not ask for it.
+    @Test("a workspace keeps its parentage after the parent is gone")
+    func parentageOutlivesTheParent() async throws {
+        let store = try makeTestStore("parentage")
+        let repo = try await seed(store)
+        let parent = try await makeWorkspace(store, repo: repo, name: "parent")
+        let started = try await makeWorkspace(
+            store, repo: repo, name: "started",
+            origin: .agent(parentWorkspaceID: parent.id, spawnToolUseID: "toolu_c")
+        )
+
+        try await store.deleteWorkspace(id: parent.id)
+
+        let stored = try #require(try await store.workspace(id: started.id))
+        #expect(stored.origin == .agent(parentWorkspaceID: parent.id, spawnToolUseID: "toolu_c"))
+        #expect(try await store.workspace(id: parent.id) == nil)
+    }
+
+    /// What a retried spawn asks before it cuts anything.
+    @Test("a tool call can find what it already made")
+    func aToolCallFindsWhatItMade() async throws {
+        let store = try makeTestStore("parentage")
+        let repo = try await seed(store)
+        let parent = try await makeWorkspace(store, repo: repo, name: "parent")
+        let started = try await makeWorkspace(
+            store, repo: repo, name: "started",
+            origin: .agent(parentWorkspaceID: parent.id, spawnToolUseID: "toolu_d")
+        )
+        try await store.update(workspaceID: started.id) { $0.state = .archived }
+
+        #expect(try await store.workspaces(spawnToolUseID: "toolu_d").map(\.id) == [started.id])
+        #expect(try await store.workspaces(spawnToolUseID: "toolu_none").isEmpty)
+    }
+
+    /// Half a record is not half an agent spawn, it is a row nobody can vouch for, and the only
+    /// thing parentage grants is authority. So it reads as the owner's.
+    @Test("a parent id with no tool call beside it grants nothing")
+    func halfARecordGrantsNothing() async throws {
+        #expect(WorkspaceOrigin(parentWorkspaceID: "w1", spawnToolUseID: nil) == .user)
+        #expect(WorkspaceOrigin(parentWorkspaceID: nil, spawnToolUseID: "toolu_e") == .user)
+        #expect(WorkspaceOrigin(parentWorkspaceID: "", spawnToolUseID: "toolu_e") == .user)
+        #expect(
+            WorkspaceOrigin(parentWorkspaceID: "w1", spawnToolUseID: "toolu_e")
+                == .agent(parentWorkspaceID: "w1", spawnToolUseID: "toolu_e")
+        )
+    }
 }
 
 /// The same rule, through the callers that carry it, with a real git repository underneath.

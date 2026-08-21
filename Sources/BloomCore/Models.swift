@@ -129,6 +129,12 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
     /// as an index into `WorkspaceColour.all`, so the list can be reordered or added to without
     /// silently recolouring every row that was already marked.
     public var colour: String?
+    /// Who asked for this workspace: the owner, or an agent running in another workspace.
+    ///
+    /// Not a depth counter. The limit on how far this can nest is one, so "has a parent" IS the
+    /// depth, and a number kept beside it is a number that can drift out of step with the parent
+    /// it is supposed to describe.
+    public var origin: WorkspaceOrigin
 
     public init(
         id: String = newID(),
@@ -149,7 +155,8 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
         changedFiles: Int = 0,
         unread: Bool = false,
         pinned: Bool = false,
-        colour: String? = nil
+        colour: String? = nil,
+        origin: WorkspaceOrigin = .user
     ) {
         self.id = id
         self.repoID = repoID
@@ -170,6 +177,7 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
         self.unread = unread
         self.pinned = pinned
         self.colour = colour
+        self.origin = origin
     }
 
     public var hasDiff: Bool { additions > 0 || deletions > 0 }
