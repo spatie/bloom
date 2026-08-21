@@ -17,10 +17,39 @@ struct SessionTabsView: View {
     @Environment(AppModel.self) private var app
 
     @State private var renamingID: String?
+    /// A tab being dragged along the strip, and the order the strip is showing because of it.
+    ///
+    /// The tabs move out from under the pointer while the drag is happening, so letting go changes
+    /// nothing anyone can see and the write behind it is never something they wait for. Before
+    /// this, a drop was the first moment anything moved: whatever the system spent tearing the
+    /// drag down was a wait, with the gesture apparently ignored until it ended, which is what the
+    /// owner reported as "swapping takes a second".
+    @State private var drag: StripDrag?
+    /// Where each tab is centred along the strip. Written continuously, read only as a snapshot at
+    /// the start of a drag.
+    @State private var centres: [PaneContent: Double] = [:]
     /// Which workspace's strip has finished arriving, so the first draw of a workspace is not
     /// animated. Switching workspace replaces every id in the strip at once, and without this the
     /// selection would fly in from wherever the previous workspace happened to have it.
     @Namespace private var selection
+
+    /// One tab being dragged, and everything needed to say where it has got to.
+    private struct StripDrag: Equatable {
+        /// The tab under the pointer.
+        var tab: PaneContent
+        /// Its run, in the order it was stored when the drag began.
+        var run: [PaneContent]
+        /// Where each tab of that run was centred when the drag began. A snapshot on purpose:
+        /// measuring them again while they are moving would feed the answer back into itself and
+        /// the run would judder.
+        var centres: [PaneContent: Double]
+        /// What the strip is showing now.
+        var order: [PaneContent]
+    }
+
+    /// The space the tabs are measured in and the pointer is reported in. It is the row of tabs
+    /// itself, so it scrolls with them and the two sets of numbers cannot drift apart.
+    private static let stripSpace = "bloom.tabStrip"
 
     private var tabs: CenterTabStore { .shared }
 
@@ -36,19 +65,48 @@ struct SessionTabsView: View {
         store.entries(in: model)
     }
 
+    /// The conversations run, in the order the strip is DRAWING it, which is the live order while
+    /// a tab is being dragged along it and the stored order otherwise.
     private var sessionTabs: [Session] {
+        arranged(storedSessionTabs) { .chat($0.id) }
+    }
+
+    private var storedSessionTabs: [Session] {
         entries.compactMap { entry in
             guard case .chat(let id) = entry else { return nil }
             return model.sessions.first { $0.id == id }
         }
     }
 
+    /// The tools run, in the order the strip is DRAWING it. See `sessionTabs`.
     private var toolTabs: [CenterTab] {
+        arranged(storedToolTabs) { .tool($0.id) }
+    }
+
+    private var storedToolTabs: [CenterTab] {
         let open = tabs.tabs(for: model.workspace.id)
         return entries.compactMap { entry in
             guard case .tool(let id) = entry else { return nil }
             return open.first { $0.id == id }
         }
+    }
+
+    /// A run put into the order a drag is currently showing, or left alone when the drag is in the
+    /// other run or when there is no drag.
+    ///
+    /// Reordering the `ForEach` rather than offsetting the tabs by hand, because the ids are stable
+    /// and SwiftUI MOVES a view whose identity it already has rather than building a new one. That
+    /// is safe here in a way it would not be a row lower: a tab in this strip is a label and a close
+    /// button, and the live shell or web view it stands for lives in `CenterPaneView`, which this
+    /// does not touch at all.
+    ///
+    /// Only the run the drag belongs to, matched by its whole set of ids rather than by a flag, so
+    /// the other run cannot be rearranged by a drag that has nothing to do with it.
+    private func arranged<Item>(_ run: [Item], by name: (Item) -> PaneContent) -> [Item] {
+        guard let drag else { return run }
+        let byContent = Dictionary(run.map { (name($0), $0) }, uniquingKeysWith: { first, _ in first })
+        guard byContent.count == run.count, Set(byContent.keys) == Set(drag.order) else { return run }
+        return drag.order.compactMap { byContent[$0] }
     }
 
     /// Which tab the user is in. **One** answer, where `CenterPaneStore.isShowing` gave the strip
@@ -81,6 +139,25 @@ struct SessionTabsView: View {
                         .id(tab.id)
                 }
             }
+            .coordinateSpace(.named(Self.stripSpace))
+            // Where the pointer is, continuously, for as long as a drag is over the strip. This is
+            // what moves the tabs out of the way: `onDropSessionUpdated` carries a live location
+            // where `isTargeted` only says in or out.
+            .onDropSessionUpdated { session in
+                switch session.phase {
+                case .entering, .active: follow(session.location.x)
+                default: return
+                }
+            }
+            // One destination for the whole row rather than one per tab. By the time a drag is let
+            // go the strip has been showing the answer for as long as the user has been dragging,
+            // so which tab it happens to land on decides nothing.
+            .dropDestination(for: String.self) { items, session in
+                commit(items.first, at: session.location.x)
+            }
+            // Only when a drag moves the tabs. A reload that came from anywhere else, a session
+            // arriving or a tab being renamed, must not make the strip slide about.
+            .animation(.snappy(duration: 0.18), value: drag?.order)
         } append: {
             // The rule between the last tab and the `+`, which is the same rule the tabs have
             // between each other and goes the same way: hidden against the selected tab, whose
@@ -189,7 +266,13 @@ struct SessionTabsView: View {
             namespace: selection
         )
         .draggable(session.id.rawValue)
-        .dropDestination(for: String.self) { items, _ in move(items.first, onto: session) }
+        .modifier(StripDragTracking(
+            content: .chat(session.id),
+            space: Self.stripSpace,
+            onMeasure: { centres[.chat(session.id)] = $0 },
+            onBegin: { begin(.chat(session.id)) },
+            onEnd: { finish(taken: $0) }
+        ))
     }
 
     private func toolTab(_ tab: CenterTab) -> some View {
@@ -217,7 +300,13 @@ struct SessionTabsView: View {
             namespace: selection
         )
         .draggable(tab.id)
-        .dropDestination(for: String.self) { items, _ in move(items.first, onto: tab) }
+        .modifier(StripDragTracking(
+            content: .tool(tab.id),
+            space: Self.stripSpace,
+            onMeasure: { centres[.tool(tab.id)] = $0 },
+            onBegin: { begin(.tool(tab.id)) },
+            onEnd: { finish(taken: $0) }
+        ))
     }
 
     private func closeTitle(for tab: CenterTab) -> String {
@@ -413,34 +502,104 @@ struct SessionTabsView: View {
     // the gesture looked ignored. `TabReorder` states the answer in ids, over both lists at once,
     // and is in the core because that is a decision with cases worth testing.
 
-    private func move(_ draggedID: String?, onto session: Session) {
-        guard let draggedID,
-              let moved = model.sessions.first(where: { $0.id.rawValue == draggedID }),
-              let order = TabReorder.reorder(
-                  all: model.sessions.map(\.id),
-                  visible: sessionTabs.map(\.id),
-                  moving: moved.id,
-                  onto: session.id
-              ),
-              // The place in the order `TabReorder` worked out, not a place counted off the strip.
-              // `reorderSession` takes the moved session out before it puts it back, so an offset
-              // into the finished order is exactly the offset it wants.
-              let index = order.firstIndex(of: moved.id)
-        else { return }
-
-        Task { await model.reorderSession(moved, to: index) }
+    /// A drag of this tab has begun. The run and where its tabs are now are frozen here, so the
+    /// answer cannot chase its own tail once they start moving.
+    private func begin(_ tab: PaneContent) {
+        guard drag?.tab != tab else { return }
+        let run = run(containing: tab)
+        guard run.count > 1 else { return }
+        drag = StripDrag(tab: tab, run: run, centres: centres, order: run)
     }
 
-    private func move(_ draggedID: String?, onto tab: CenterTab) {
-        guard let draggedID,
-              let order = TabReorder.reorder(
-                  all: tabs.tabs(for: model.workspace.id).map(\.id),
-                  visible: toolTabs.map(\.id),
-                  moving: draggedID,
-                  onto: tab.id
-              )
-        else { return }
+    /// The pointer has moved. Nothing else about the strip is touched: this is the only thing that
+    /// writes the live order, and it writes it only when it has actually changed, because assigning
+    /// an equal value is still a mutation as far as Observation is concerned.
+    private func follow(_ pointer: Double) {
+        guard var current = drag else { return }
+        let order = TabDragOrder.live(
+            current.run, moving: current.tab, centres: current.centres, to: pointer
+        )
+        guard order != current.order else { return }
+        current.order = order
+        drag = current
+    }
 
+    /// The drag has been let go over the strip. What is written is the order the strip has been
+    /// SHOWING, never a rule about which tab it happened to land on: a live preview that commits
+    /// something else is the one thing worse than no preview at all.
+    ///
+    /// It falls back to working the order out here, from the payload and where the pointer was,
+    /// when there is no live drag to read. That is not a leftover. `onDragSessionUpdated` is what
+    /// says a drag has begun, and if it were ever not to fire, reordering would stop working
+    /// altogether rather than merely stop animating. The fallback is the same computation done once
+    /// instead of continuously.
+    private func commit(_ droppedID: String?, at pointer: Double) {
+        guard let tab = drag?.tab ?? droppedID.flatMap(content(named:)) else { return }
+        let run = drag?.run ?? run(containing: tab)
+        guard run.count > 1 else { return drag = nil }
+
+        settle(
+            drag?.order ?? TabDragOrder.live(
+                run, moving: tab, centres: drag?.centres ?? centres, to: pointer
+            ),
+            of: tab
+        )
+    }
+
+    /// The other end of the same gesture. A tab let go over a PANE is taken by the pane and the
+    /// strip's own drop never runs, so the preview would sit there for good; a drag thrown away
+    /// outside the window has to spring back rather than be written.
+    private func finish(taken: Bool) {
+        guard let current = drag else { return }
+        guard taken else { return drag = nil }
+        settle(current.order, of: current.tab)
+    }
+
+    /// Writes a run's new order and clears the preview. Whichever end of the drag gets here first
+    /// does the work, and the other finds nothing pending.
+    private func settle(_ order: [PaneContent], of tab: PaneContent) {
+        drag = nil
+        switch tab {
+        case .chat: reorderSessions(to: order)
+        case .tool: reorderTools(to: order)
+        }
+    }
+
+    /// Which run a tab belongs to, and empty for something that is in neither, which is anything
+    /// dropped here from outside the app.
+    private func run(containing tab: PaneContent) -> [PaneContent] {
+        let chats = storedSessionTabs.map { PaneContent.chat($0.id) }
+        if chats.contains(tab) { return chats }
+        let tools = storedToolTabs.map { PaneContent.tool($0.id) }
+        return tools.contains(tab) ? tools : []
+    }
+
+    /// What a dragged id names. The payload is a bare id, because that is what the strip has always
+    /// sent, so which of the two runs it belongs to is recovered by looking it up.
+    private func content(named id: String) -> PaneContent? {
+        if model.sessions.contains(where: { $0.id.rawValue == id }) { return .chat(SessionID(id)) }
+        if tabs.tabs(for: model.workspace.id).contains(where: { $0.id == id }) { return .tool(id) }
+        return nil
+    }
+
+    private func reorderSessions(to visible: [PaneContent]) {
+        let drawn = visible.compactMap { content -> SessionID? in
+            guard case .chat(let id) = content else { return nil }
+            return id
+        }
+        guard drawn.count == visible.count,
+              let order = TabReorder.apply(drawn, to: model.sessions.map(\.id)) else { return }
+        model.reorderSessions(to: order)
+    }
+
+    private func reorderTools(to visible: [PaneContent]) {
+        let drawn = visible.compactMap { content -> String? in
+            guard case .tool(let id) = content else { return nil }
+            return id
+        }
+        let stored = tabs.tabs(for: model.workspace.id).map(\.id)
+        guard drawn.count == visible.count,
+              let order = TabReorder.apply(drawn, to: stored) else { return }
         tabs.reorder(order, in: model.workspace.id)
     }
 

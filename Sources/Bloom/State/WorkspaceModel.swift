@@ -259,18 +259,35 @@ final class WorkspaceModel {
         return stored
     }
 
-    /// Moves a session to another place in the strip, and writes the whole workspace's order back.
+    /// Puts the workspace's conversations in a given order, and writes it back.
     ///
-    /// The list is updated here first so the tab lands under the pointer on the frame the drop
-    /// happens, rather than a round trip through SQLite later.
-    func reorderSession(_ session: Session, to index: Int) async {
-        guard let store, let from = sessions.firstIndex(where: { $0.id == session.id }) else { return }
-        var ordered = sessions
-        let moved = ordered.remove(at: from)
-        ordered.insert(moved, at: min(max(index, 0), ordered.count))
+    /// Ids rather than an offset, because the strip the user drags in is not the list this holds: a
+    /// chat absorbed into a pane of another tab keeps its place here while having dropped out of
+    /// the strip, so an offset read off the strip means nothing here. `TabReorder` is what turns
+    /// one into the other, and it is in the core because it is a decision with cases worth testing.
+    ///
+    /// **Not async, and that is the point.** The list is put on screen here and the write goes off
+    /// behind it, so the strip is showing the new order on the frame the drag is let go rather than
+    /// after a round trip through an actor. `AppModel.reorderWorkspaces` is the same shape for the
+    /// same reason: a drop is the end of a movement the strip has already made, and waiting for
+    /// SQLite to come back would put a frame of the old order between the settle and the answer.
+    ///
+    /// The write names the one column it changes. `AgentRunner` owns the state, the counters and
+    /// the agent session id on these rows and has been writing them all the while, so handing back
+    /// a whole `Session` the strip was holding would put those columns back to whatever they looked
+    /// like when it read them.
+    func reorderSessions(to ids: [SessionID]) {
+        guard let store else { return }
+        let byID = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var ordered = ids.compactMap { byID[$0] }
+        // The whole run or nothing. `TabReorder` hands back a permutation of the list it was given,
+        // so a short answer means the caller worked from a stale reading, and writing it would drop
+        // every session it had forgotten about out of the strip.
+        guard ordered.count == sessions.count else { return }
+
         for (order, item) in ordered.enumerated() { ordered[order] = item.with { $0.sortOrder = order } }
         sessions = ordered
-        try? await store.reorderSessions(ids: ordered.map(\.id))
+        Task { try? await store.reorderSessions(ids: ordered.map(\.id)) }
     }
 
     /// Whether this session's agent is in the middle of a turn.
