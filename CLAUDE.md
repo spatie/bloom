@@ -115,8 +115,14 @@ rust and orange icon, by "Bloom Dev" in the Dock and the switcher, and by `[DEV]
 window title. Both copies run at once.
 
 **Open the dev copy with `open`, never by running its executable.** `LSEnvironment` is applied by
-LaunchServices. `~/Applications/Bloom\ Dev.app/Contents/MacOS/Bloom` started by hand has no
-`BLOOM_DB_PATH` and falls back to the real database, which defeats every separation above.
+LaunchServices, so `~/Applications/Bloom\ Dev.app/Contents/MacOS/Bloom` started by hand gets no
+`BLOOM_DB_PATH`. That used to mean it fell back to the real database and defeated every separation
+above. It does not any more: with no `BLOOM_DB_PATH`, `Store` derives the directory from
+`Bundle.main.bundleIdentifier`, and only `be.spatie.bloom` resolves to `Bloom`. The dev bundle id
+resolves to `Bloom Dev`, which is where `make dev` points it anyway; a binary in no bundle at all,
+which is `swift run` or `.build/debug/Bloom` and which nothing used to warn about, resolves to
+`Bloom (unbundled)` and starts empty. Open it properly all the same, because the check at the foot
+of `dev-build.sh` is worth having and because two agreeing mechanisms are the point.
 
 **`make dev-db`** copies the real database into the dev container so there is something real to look
 at. It never writes back. It copies the `-wal` and `-shm` as well as `bloom.sqlite`, because in WAL

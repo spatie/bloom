@@ -17,9 +17,12 @@
 #
 #   be.spatie.bloom.dev   its own `defaults` domain and its own saved window state
 #   BLOOM_DB_PATH         its own database, through LSEnvironment in Info.plist,
-#                         which `Store.defaultPath` already honours. The tmux
-#                         socket is derived from the database path, so that
-#                         separates too, and so does the notification identifier
+#                         which `Store.defaultPath` already honours, and, if that
+#                         never arrives because the executable was run rather than
+#                         opened, through the bundle id again: the fallback
+#                         directory is derived from it. The tmux socket is derived
+#                         from the database path, so that separates too, and so
+#                         does the notification identifier
 #   bloomdev:             its own URL scheme, so the dev copy cannot steal a
 #                         `bloom://` deep link meant for the copy in daily use
 #
@@ -104,9 +107,13 @@ plist "Set :NSServices:0:NSMenuItem:default New Bloom Dev Workspace"
 # It is applied by LaunchServices, which means it applies when the app is opened
 # and not when its executable is run directly. Open the dev copy with `open` or
 # from the Dock. A build launched as ~/Applications/Bloom Dev.app/Contents/MacOS/Bloom
-# has no BLOOM_DB_PATH and would fall back to the real database, which is the one
-# way to defeat all of this. The check at the foot of this script reads the value
-# back out of the launched process rather than assuming it arrived.
+# has no BLOOM_DB_PATH at all. That used to be the one way to defeat all of this,
+# and it is not any more: `Store.databaseDirectoryName` derives the fallback
+# directory from the bundle id, and be.spatie.bloom.dev resolves to this same
+# "Bloom Dev" directory rather than to the real one. So this key is belt now, not
+# the only strap, and the two have to agree on the path. The check at the foot of
+# this script reads the value back out of the launched process rather than
+# assuming it arrived.
 #
 # The delete is the one call here allowed to fail, because Resources/Info.plist
 # does not carry an LSEnvironment and PlistBuddy treats deleting an absent key as

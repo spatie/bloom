@@ -33,9 +33,53 @@ public actor Store {
     private let db: SQLiteDatabase
     public nonisolated let path: String
 
+    /// The bundle identifier of the copy the owner actually uses, and the one the dev build gets.
+    ///
+    /// Written down here because these two strings are the difference between a process that may
+    /// open the real database and one that may not. `Tools/dev-build.sh` sets the second, and
+    /// `Tools/guard.sh` names the directory that goes with it.
+    public static let primaryBundleIdentifier = "be.spatie.bloom"
+    public static let devBundleIdentifier = "be.spatie.bloom.dev"
+
+    /// Which Application Support directory a binary with this bundle identifier may use.
+    ///
+    /// **This is the separation between the dev copy and the owner's data, and it used to be a
+    /// paragraph of prose.** The directory was the constant "Bloom", so every process that
+    /// reached `defaultPath` without `BLOOM_DB_PATH` opened the real database: the owner's
+    /// projects, the real worktree paths, the tmux socket derived from that path. CLAUDE.md and
+    /// `Tools/dev-build.sh` both warned about one route into that, `Bloom Dev.app/Contents/MacOS/
+    /// Bloom` started by hand, since `LSEnvironment` is applied by LaunchServices and not by a
+    /// shell. Nothing warned about the other one, which is `swift run` or `.build/debug/Bloom`,
+    /// and neither warning was a control. What was one click away was an archive: a real worktree
+    /// removed and its branch offered up for deletion, out of a build nobody thought was pointed
+    /// at anything real.
+    ///
+    /// So it is derived from the binary instead. `LSEnvironment` is belt now rather than the only
+    /// strap, and the dev copy is separated whether it is opened or run.
+    ///
+    /// The dev identifier maps to "Bloom Dev", which is the same directory `Tools/dev-build.sh`
+    /// points `BLOOM_DB_PATH` at, so a hand started dev binary lands where it was always meant to
+    /// rather than somewhere new. Anything else is a build that is not one of the two: it gets a
+    /// directory named after what it is, because a nameless empty database is a mystery and
+    /// "Bloom (unbundled)" sitting in Application Support answers itself.
+    ///
+    /// A pure function of the identifier, rather than of `Bundle.main`, because `Bundle.main`
+    /// cannot be varied inside one process and this table is the whole of the rule.
+    public static func databaseDirectoryName(forBundleIdentifier identifier: String?) -> String {
+        switch identifier {
+        case primaryBundleIdentifier: "Bloom"
+        case devBundleIdentifier: "Bloom Dev"
+        case .some(let other) where !other.isEmpty: "Bloom (\(other))"
+        // An executable that is not inside a bundle at all: `swift run`, `.build/debug/Bloom`, or
+        // a test host. Nil and empty are the same claim and are treated the same way.
+        default: "Bloom (unbundled)"
+        }
+    }
+
     public static var defaultDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("Bloom", isDirectory: true)
+        let name = databaseDirectoryName(forBundleIdentifier: Bundle.main.bundleIdentifier)
+        return base.appendingPathComponent(name, isDirectory: true)
     }
 
     private static let migrationOutcome = Mutex<LegacyDatabase.Outcome?>(nil)
@@ -62,6 +106,15 @@ public actor Store {
         let directory = defaultDirectory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let destination = directory.appendingPathComponent("bloom.sqlite")
+
+        // Only the real app adopts the database from before the rename, and that is the same rule
+        // as the directory above rather than a second one. `adopt` hands back the LEGACY path when
+        // the copy fails, on purpose, so that a user who cannot be migrated still runs on their own
+        // work; from any other binary that is one more way to end up holding the owner's real rows.
+        // A dev copy has never adopted it either, because `BLOOM_DB_PATH` returns above this line.
+        guard Bundle.main.bundleIdentifier == primaryBundleIdentifier else {
+            return destination.path
+        }
 
         let outcome = LegacyDatabase.adopt(destination: destination)
         migrationOutcome.withLock { $0 = outcome }
