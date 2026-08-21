@@ -128,6 +128,78 @@ public struct SplitLayout: Codable, Sendable, Hashable {
         return true
     }
 
+    /// Moves a pane next to another one, **keeping its id**.
+    ///
+    /// A pane id is not a label. `TmuxSessions.sessionName` builds `bloom_<workspace>_<pane>` out
+    /// of it, so the id IS the running shell's session name, and `TerminalPaneCensus` lets the
+    /// orphan sweep kill every session whose pane id nothing can enumerate. Written as a close
+    /// followed by a split, this move would hand the pane a fresh id, orphan the shell the user
+    /// was working in, and have the sweep kill it at the next launch. So the tree is rebuilt
+    /// around the same id rather than around a new one, and the id set before and after is exactly
+    /// equal. `SplitLayoutTests` pins that.
+    ///
+    /// The pointer map a tab keeps beside this layout needs no edit at all for the same reason:
+    /// `WorkspaceTabsStore.Arrangement.contents` is keyed by pane id, and none of them changed. A
+    /// move is therefore the one edit to a tab's arrangement that `TabSurgery` has nothing to say
+    /// about, because no pane appears and none goes.
+    ///
+    /// The dissolved split's ratio goes with it and the new one opens at even shares, which is
+    /// what `close` and `split` already each do on their own. A moved pane lands the size of half
+    /// of what it landed in, not the size it was, because the space it used to have belongs to
+    /// whatever grew into it.
+    ///
+    /// The moved pane takes the keyboard. It is the thing the user just put down, and it is the
+    /// one place on screen they are certainly looking at.
+    ///
+    /// - Parameters:
+    ///   - pane: the pane being moved.
+    ///   - target: the pane it is being put beside.
+    ///   - axis: `.horizontal` to land beside it, `.vertical` to land above or below it.
+    ///   - before: leading or top rather than trailing or bottom.
+    @discardableResult
+    public mutating func move(
+        _ pane: String, beside target: String, axis: SplitAxis, before: Bool
+    ) -> Bool {
+        guard pane != target, contains(pane), contains(target) else { return false }
+        // A drop that asks for the arrangement already on screen is refused rather than performed,
+        // because performing it would not be free: the split holding the two would be dissolved
+        // and reopened at even shares, silently throwing away a divider the user had set.
+        guard root.siblingSplit(pane, target).map({ $0.axis != axis || $0.isFirst != before }) ?? true
+        else { return false }
+        // Nil only for a tree that IS the pane, which is a tab with one pane and nowhere to move
+        // it to. The guards above cannot reach that case, since `target` would have to be the same
+        // pane, but the tree is what says so rather than a count computed beside it.
+        guard let removal = root.removing(pane), let remaining = removal.node else { return false }
+
+        root = remaining.splitting(target, axis: axis, into: pane, before: before)
+        focus = pane
+        // A zoomed tab shows one pane and no divider, so there is nothing to grab and no
+        // neighbour to aim at. Dropped all the same, for the reason `split` drops it: an
+        // arrangement the user cannot see is one they will think did not happen.
+        zoomed = nil
+        return true
+    }
+
+    /// Exchanges two panes, keeping both ids, both live views and the shape of the tree.
+    ///
+    /// What a pane let go over the MIDDLE of another one means. The tab vocabulary reads a middle
+    /// drop as "show it here", which for a tab is a replacement; a pane cannot be replaced that
+    /// way, because the pane already there is a running shell or a loaded page and nothing about
+    /// a drag says to end it. Exchanging the two is the reading that keeps both, and it is what
+    /// the gesture looks like it should do.
+    ///
+    /// Ratios are untouched: each pane inherits the share the other one had, which is the whole of
+    /// what "exchange" means on screen.
+    @discardableResult
+    public mutating func exchange(_ pane: String, with other: String) -> Bool {
+        guard pane != other, contains(pane), contains(other) else { return false }
+        root = root.exchanging(pane, other)
+        // The keyboard follows the pane the user was dragging, wherever it has landed, exactly as
+        // it does for a move.
+        focus = pane
+        return true
+    }
+
     @discardableResult
     public mutating func setFocus(_ pane: String) -> Bool {
         guard contains(pane) else { return false }
@@ -200,6 +272,26 @@ public struct SplitLayout: Codable, Sendable, Hashable {
     // MARK: - Resizing
 
     public func ratio(at path: [Int]) -> Double? { root.node(at: path)?.ratio }
+
+    /// The single pane on each side of one divider, and nil for a side that is a group of panes
+    /// rather than one.
+    ///
+    /// What decides whether a divider offers something to pick up, and on which of its two sides.
+    /// A group cannot be picked up, because `move` moves one pane and grafting a subtree into
+    /// another tree is an operation this does not have. Nothing is lost by refusing: every pane is
+    /// a leaf, so every pane is a direct child of some split, so every pane has a divider of its
+    /// own that offers it. In `a | (b over c)` the outer divider offers `a` and nothing on its
+    /// other side, and the inner one offers `b` and `c`.
+    ///
+    /// Nil for a path that names no split at all.
+    public func sides(at path: [Int]) -> (first: String?, second: String?)? {
+        guard case .split(_, _, let first, let second)? = root.node(at: path) else { return nil }
+        func leaf(_ node: SplitNode) -> String? {
+            guard case .pane(let id) = node else { return nil }
+            return id
+        }
+        return (leaf(first), leaf(second))
+    }
 
     /// Moves one divider. Clamped at both ends so neither side can be dragged out of existence.
     @discardableResult
@@ -368,18 +460,64 @@ extension SplitNode {
         return (index == 0 ? first : second).node(at: Array(path.dropFirst()))
     }
 
-    func splitting(_ pane: String, axis: SplitAxis, into newPane: String) -> SplitNode {
+    /// `before` puts the new pane on the leading or top side instead of the trailing or bottom
+    /// one. Defaulted, so the two callers that only ever open after a pane read as they did.
+    ///
+    /// It is a real placement rather than a split followed by a swap of what the two panes hold.
+    /// `WorkspaceTabsStore.split` does the swap, and for a pane opening on new content that is
+    /// harmless, because neither pane is showing anything yet. For a pane being MOVED it is not:
+    /// the swap would carry the target's live shell or loaded page into the pane that had just
+    /// been made, which is the reparenting `CenterPanesView` exists to avoid.
+    func splitting(
+        _ pane: String, axis: SplitAxis, into newPane: String, before: Bool = false
+    ) -> SplitNode {
         switch self {
         case .pane(let id):
             guard id == pane else { return self }
-            return .split(axis: axis, ratio: 0.5, first: .pane(id), second: .pane(newPane))
+            return before
+                ? .split(axis: axis, ratio: 0.5, first: .pane(newPane), second: .pane(id))
+                : .split(axis: axis, ratio: 0.5, first: .pane(id), second: .pane(newPane))
 
         case .split(let axis0, let ratio, let first, let second):
             return .split(
                 axis: axis0,
                 ratio: ratio,
-                first: first.splitting(pane, axis: axis, into: newPane),
-                second: second.splitting(pane, axis: axis, into: newPane)
+                first: first.splitting(pane, axis: axis, into: newPane, before: before),
+                second: second.splitting(pane, axis: axis, into: newPane, before: before)
+            )
+        }
+    }
+
+    /// The split whose own two children are exactly these two panes, if there is one, and whether
+    /// the first of them is that split's leading or top child.
+    ///
+    /// What a move asks in order to tell a real rearrangement from a drop onto the arrangement
+    /// already on screen. Only a split of two leaves can answer: two panes with anything between
+    /// them in the tree are not siblings, and moving one beside the other is a genuine change.
+    func siblingSplit(_ pane: String, _ other: String) -> (axis: SplitAxis, isFirst: Bool)? {
+        guard case .split(let axis, _, let first, let second) = self else { return nil }
+        if case .pane(let head) = first, case .pane(let tail) = second {
+            if head == pane, tail == other { return (axis, true) }
+            if head == other, tail == pane { return (axis, false) }
+        }
+        return first.siblingSplit(pane, other) ?? second.siblingSplit(pane, other)
+    }
+
+    /// The same tree with two panes in each other's places. Every split, axis and ratio is left
+    /// exactly as it was, which is what makes this an exchange rather than two moves.
+    func exchanging(_ pane: String, _ other: String) -> SplitNode {
+        switch self {
+        case .pane(let id):
+            if id == pane { return .pane(other) }
+            if id == other { return .pane(pane) }
+            return self
+
+        case .split(let axis, let ratio, let first, let second):
+            return .split(
+                axis: axis,
+                ratio: ratio,
+                first: first.exchanging(pane, other),
+                second: second.exchanging(pane, other)
             )
         }
     }

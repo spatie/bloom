@@ -191,6 +191,248 @@ struct SplitLayoutTests {
         #expect(didClose == false)
     }
 
+    // MARK: - Moving
+
+    /// The whole reason a move exists rather than a close followed by a split.
+    ///
+    /// A pane id is the tmux session name (`TmuxSessions.sessionName` makes `bloom_<workspace>_
+    /// <pane>`) and the orphan sweep kills every session whose pane id nothing can enumerate. A
+    /// move that renamed the pane would orphan the shell the user was working in, and the sweep
+    /// would kill it at the next launch, with no way to get it back.
+    @Test("moving a pane changes no pane's id")
+    func moveKeepsEveryID() {
+        var layout = nested()
+        let before = Set(layout.panes)
+
+        let didMove = layout.move("a", beside: "c", axis: .vertical, before: false)
+        #expect(didMove)
+
+        #expect(Set(layout.panes) == before)
+        #expect(layout.paneCount == 3)
+    }
+
+    @Test("a pane moved below another lands under it")
+    func moveBelow() {
+        var layout = nested()
+        let didMove = layout.move("a", beside: "c", axis: .vertical, before: false)
+        #expect(didMove)
+
+        #expect(layout.root == .split(
+            axis: .vertical,
+            ratio: 0.5,
+            first: .pane("b"),
+            second: .split(axis: .vertical, ratio: 0.5, first: .pane("c"), second: .pane("a"))
+        ))
+    }
+
+    /// The leading and top edges are a real placement, not a split followed by an exchange of what
+    /// the two panes hold. `WorkspaceTabsStore.split` does the exchange, which is harmless for a
+    /// pane opening on new content and wrong for a pane being moved: it would carry the target's
+    /// live shell into the pane that had just been made.
+    @Test("a pane moved to the leading edge lands before its target")
+    func moveBefore() {
+        var layout = nested()
+        let didMove = layout.move("c", beside: "a", axis: .horizontal, before: true)
+        #expect(didMove)
+
+        #expect(layout.root == .split(
+            axis: .horizontal,
+            ratio: 0.5,
+            first: .split(axis: .horizontal, ratio: 0.5, first: .pane("c"), second: .pane("a")),
+            second: .pane("b")
+        ))
+    }
+
+    @Test("the moved pane takes the keyboard")
+    func moveTakesFocus() {
+        var layout = nested()
+        let didFocus = layout.setFocus("b")
+        #expect(didFocus)
+        let didMove = layout.move("a", beside: "c", axis: .vertical, before: false)
+        #expect(didMove)
+
+        #expect(layout.focus == "a")
+    }
+
+    /// The space a moved pane leaves behind belongs to whatever grew into it, so the dissolved
+    /// split's ratio goes with it and the new one opens at even shares. Every split the move did
+    /// not touch keeps the size the user dragged it to.
+    @Test("a move keeps the ratios of the splits it does not touch")
+    func moveKeepsUntouchedRatios() {
+        var layout = SplitLayout(pane: "a")
+        layout.split("a", axis: .horizontal, into: "b")
+        layout.split("b", axis: .vertical, into: "c")
+        layout.split("c", axis: .horizontal, into: "d")
+        // a | (b over (c | d)), with the innermost divider dragged well off centre.
+        let didResize = layout.setRatio(0.8, at: [1, 1])
+        #expect(didResize)
+
+        let didMove = layout.move("a", beside: "b", axis: .vertical, before: true)
+        #expect(didMove)
+
+        #expect(layout.root == .split(
+            axis: .vertical,
+            ratio: 0.5,
+            first: .split(axis: .vertical, ratio: 0.5, first: .pane("a"), second: .pane("b")),
+            second: .split(axis: .horizontal, ratio: 0.8, first: .pane("c"), second: .pane("d"))
+        ))
+    }
+
+    @Test("a move drops a zoom, because an arrangement nobody can see did not happen")
+    func moveUnzooms() {
+        var layout = nested()
+        let didZoom = layout.toggleZoom()
+        #expect(didZoom)
+        #expect(layout.isZoomed)
+
+        let didMove = layout.move("a", beside: "c", axis: .vertical, before: false)
+        #expect(didMove)
+
+        #expect(layout.zoomed == nil)
+    }
+
+    /// Performing it would not be free: the split holding the two would be dissolved and reopened
+    /// at even shares, throwing away a divider the user had dragged to where they wanted it.
+    @Test("a drop asking for the arrangement already on screen is refused")
+    func moveOntoItsOwnPlace() {
+        var layout = SplitLayout(pane: "a")
+        layout.split("a", axis: .horizontal, into: "b")
+        let didResize = layout.setRatio(0.3, at: [])
+        #expect(didResize)
+
+        let didMove = layout.move("a", beside: "b", axis: .horizontal, before: true)
+        #expect(didMove == false)
+        #expect(layout.root == .split(axis: .horizontal, ratio: 0.3, first: .pane("a"), second: .pane("b")))
+    }
+
+    @Test("the same two panes the other way round is a real move")
+    func moveSwapsSiblings() {
+        var layout = SplitLayout(pane: "a")
+        layout.split("a", axis: .horizontal, into: "b")
+
+        let didMove = layout.move("a", beside: "b", axis: .horizontal, before: false)
+        #expect(didMove)
+        #expect(layout.root == .split(axis: .horizontal, ratio: 0.5, first: .pane("b"), second: .pane("a")))
+    }
+
+    @Test("the same two panes on the other axis is a real move")
+    func moveTurnsASplit() {
+        var layout = SplitLayout(pane: "a")
+        layout.split("a", axis: .horizontal, into: "b")
+
+        let didMove = layout.move("a", beside: "b", axis: .vertical, before: true)
+        #expect(didMove)
+        #expect(layout.root == .split(axis: .vertical, ratio: 0.5, first: .pane("a"), second: .pane("b")))
+    }
+
+    @Test("a pane cannot be moved beside itself")
+    func moveOntoItself() {
+        var layout = nested()
+        let didMove = layout.move("a", beside: "a", axis: .horizontal, before: false)
+        #expect(didMove == false)
+    }
+
+    @Test("a pane the tab does not have is not a move")
+    func moveUnknown() {
+        var layout = nested()
+        let didMove = layout.move("z", beside: "a", axis: .horizontal, before: false)
+        #expect(didMove == false)
+        let didMove2 = layout.move("a", beside: "z", axis: .horizontal, before: false)
+        #expect(didMove2 == false)
+        #expect(layout.root == nested().root)
+    }
+
+    /// A tab with one pane has nowhere to put it, which is the same answer `close` gives and for
+    /// the same reason: the tab, not the layout, is what would have to change.
+    @Test("the only pane of a tab has nowhere to move to")
+    func moveTheOnlyPane() {
+        var layout = SplitLayout(pane: "a")
+        let didMove = layout.move("a", beside: "a", axis: .horizontal, before: false)
+        #expect(didMove == false)
+        #expect(layout.panes == ["a"])
+    }
+
+    @Test("a move survives a round trip through the stored form")
+    func moveRoundTrips() throws {
+        var layout = nested()
+        let didMove = layout.move("a", beside: "c", axis: .vertical, before: false)
+        #expect(didMove)
+
+        let encoded = try #require(layout.encoded)
+        #expect(SplitLayout(encoded: encoded) == layout)
+    }
+
+    /// A divider offers a pane to pick up only where its own child is one pane. Nothing is lost:
+    /// every pane is a leaf and so a direct child of some split, which is the divider that offers
+    /// it. In `a | (b over c)` the outer divider offers `a` and nothing opposite, and the inner one
+    /// offers both of the others.
+    @Test("a divider names the single pane on each of its sides, and says when there is not one")
+    func sidesOfADivider() {
+        let layout = nested()
+
+        let outer = layout.sides(at: [])
+        #expect(outer?.first == "a")
+        #expect(outer?.second == nil)
+
+        let inner = layout.sides(at: [1])
+        #expect(inner?.first == "b")
+        #expect(inner?.second == "c")
+    }
+
+    @Test("a path that names no split names no sides")
+    func sidesOfNothing() {
+        #expect(nested().sides(at: [0]) == nil)
+        #expect(SplitLayout(pane: "a").sides(at: []) == nil)
+    }
+
+    // MARK: - Exchanging
+
+    /// What a pane let go over the MIDDLE of another one means. A pane cannot be replaced the way
+    /// a tab can, because the pane already there is a running shell or a loaded page and nothing
+    /// about a drag says to end it.
+    @Test("exchanging two panes puts each in the other's place")
+    func exchange() {
+        var layout = nested()
+        let didExchange = layout.exchange("a", with: "c")
+        #expect(didExchange)
+
+        #expect(layout.root == .split(
+            axis: .horizontal,
+            ratio: 0.5,
+            first: .pane("c"),
+            second: .split(axis: .vertical, ratio: 0.5, first: .pane("b"), second: .pane("a"))
+        ))
+        #expect(layout.focus == "a")
+    }
+
+    @Test("an exchange leaves every split, axis and ratio exactly as it was")
+    func exchangeKeepsShape() {
+        var layout = nested()
+        let didResize = layout.setRatio(0.2, at: [])
+        #expect(didResize)
+        let didResize2 = layout.setRatio(0.7, at: [1])
+        #expect(didResize2)
+        let geometry = layout.geometry(in: CGSize(width: 100, height: 100), dividerThickness: 0)
+
+        let didExchange = layout.exchange("a", with: "b")
+        #expect(didExchange)
+
+        let after = layout.geometry(in: CGSize(width: 100, height: 100), dividerThickness: 0)
+        #expect(after.panes.map(\.frame) == geometry.panes.map(\.frame))
+        #expect(after.dividers == geometry.dividers)
+        #expect(Set(layout.panes) == Set(nested().panes))
+    }
+
+    @Test("a pane cannot be exchanged with itself or with a stranger")
+    func exchangeRefuses() {
+        var layout = nested()
+        let didExchange = layout.exchange("a", with: "a")
+        #expect(didExchange == false)
+        let didExchange2 = layout.exchange("a", with: "z")
+        #expect(didExchange2 == false)
+        #expect(layout.root == nested().root)
+    }
+
     // MARK: - Neighbours
 
     /// a | b over c, the arrangement Cmd+D then Shift+Cmd+D produces.
