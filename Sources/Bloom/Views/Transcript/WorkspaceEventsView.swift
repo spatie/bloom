@@ -84,12 +84,11 @@ struct WorkspaceEventsView: View {
 /// is what a reader who has just read twelve lines of a failure and wants more actually looks for,
 /// at the bottom of those twelve lines rather than up on the header.
 ///
-/// The panel below still holds the whole log and is still selected by `runSetupThenSend` when a
-/// script starts, so nothing has been orphaned for a repository that has a setup script. One case
-/// loses its way in: a repository whose script has since been deleted has no Setup tab in the
-/// strip at all, and for that one the row is now the only route to the output. That is a better
-/// position than before, because the row unfolds to `TextCap.lineCap` lines where it used to stop
-/// at two hundred.
+/// Since the panel at the bottom of the window went, this row is the only place a setup log is
+/// read, which is why it unfolds to `TextCap.lineCap` lines where it used to stop at two hundred.
+/// A failed run gets a second link beside the first, offering the run again, so that the sentence
+/// the row already ends on ("run setup again") can be pressed where it is read rather than looked
+/// for in the Workspace menu.
 struct WorkspaceEventRow: View {
     var event: WorkspaceEvent
     var isFirstThing: Bool
@@ -268,8 +267,9 @@ struct WorkspaceEventRow: View {
                         // here, and that is what made this block change height as output went
                         // past it: measured at the pane's ordinary width, the window of three was
                         // forty eight points tall, then seventy nine, then forty eight again, and
-                        // the sentence under it moved thirty one points every time. The rest of a
-                        // cut line is a click away, in the panel the link below opens.
+                        // the sentence under it moved thirty one points every time. The whole of a
+                        // cut line is a click away, behind the link below: an unfolded tail is one
+                        // piece of text, and it wraps.
                         .lineLimit(1)
                         .truncationMode(.tail)
                         // And a line is the same height whatever glyphs are in it, so a blank
@@ -374,23 +374,71 @@ struct WorkspaceEventRow: View {
                         .frame(width: TranscriptLayout.rule)
                 }
 
-            if event.kind == .setup, canExpand, isExpanded || hasMoreToShow {
-                Button(isExpanded ? "Show less" : "Show more of the log") { isExpanded.toggle() }
-                    .buttonStyle(.link)
-                    .font(Typo.caption)
-                    .padding(.leading, TranscriptLayout.block)
-                    .help(isExpanded ? "Folds the log back to its last lines" : "Unfolds the log in this row")
-                    // The caret above this row is the same control, already announced as one by
-                    // `ExpandableRowHeader` and already carrying the hint that says which way it
-                    // will go. Two buttons that do one thing should be one thing to a reader who
-                    // cannot see that they sit on the same row, so this half is the visible
-                    // affordance and the caret is the spoken one.
-                    .accessibilityHidden(true)
+            // Both links are about the same block of output, so they sit on one line under it
+            // rather than stacking: one shows more of what happened, the other has another go at
+            // it. The row draws nothing at all when neither applies, which is why the pair is
+            // behind a condition of its own instead of being an `HStack` that is sometimes empty:
+            // an empty stack is still a view, and the gap above it would be drawn under every
+            // finished run.
+            if showsExpandLink || showsRunSetupAgain {
+                // Wider than the `spacing` rung most pairs use. These two are plain words in the
+                // same size and the same accent colour, with nothing but the gap to say they are
+                // two controls, and at six points "Show more of the log Run setup again" read as
+                // one sentence somebody had forgotten to punctuate.
+                HStack(spacing: Metrics.gutter) {
+                    if showsExpandLink {
+                        Button(isExpanded ? "Show less" : "Show more of the log") { isExpanded.toggle() }
+                            .buttonStyle(.link)
+                            .font(Typo.caption)
+                            .help(isExpanded ? "Folds the log back to its last lines" : "Unfolds the log in this row")
+                            // The caret above this row is the same control, already announced as
+                            // one by `ExpandableRowHeader` and already carrying the hint that says
+                            // which way it will go. Two buttons that do one thing should be one
+                            // thing to a reader who cannot see that they sit on the same row, so
+                            // this half is the visible affordance and the caret is the spoken one.
+                            .accessibilityHidden(true)
+                    }
+
+                    // Not hidden from accessibility the way its neighbour is. Nothing else on this
+                    // row does what it does, so there is no second announcement of it to prefer.
+                    if showsRunSetupAgain, let model {
+                        Button("Run setup again") { model.runSetupAgain() }
+                            .buttonStyle(.link)
+                            .font(Typo.caption)
+                            .help("Runs this repository's setup script in this workspace again")
+                    }
+                }
+                .padding(.leading, TranscriptLayout.block)
             }
         }
         .padding(.leading, TranscriptLayout.detailIndent)
         .padding(.trailing, TranscriptLayout.inset)
         .padding(.bottom, TranscriptLayout.block)
+    }
+
+    /// Whether the link that unfolds the log is worth drawing. See `hasMoreToShow`.
+    private var showsExpandLink: Bool {
+        event.kind == .setup && canExpand && (isExpanded || hasMoreToShow)
+    }
+
+    /// Whether this row offers to run setup again.
+    ///
+    /// Only on a failure, because that is the row whose own advice ends in "run setup again" and
+    /// the only one where a reader is looking for the way out. A run that finished is not offered
+    /// a second one from here: the Workspace menu is where a re-run is asked for out of the blue,
+    /// and this button is that menu item put where the failure is being read.
+    ///
+    /// `canRunSetup` answers both of the things that would make the offer a lie. A run already in
+    /// flight fails it, so the button is gone for as long as one is going rather than sitting there
+    /// inviting a second `composer install` into the same worktree, and by then the row has turned
+    /// back into a running one with a moving tail anyway. A repository whose setup script has been
+    /// deleted since the failure also fails it, since `WorkspaceModel.settings` is re-read whenever
+    /// the workspace is selected. Should that cached answer ever be a moment stale,
+    /// `WorkspaceManager.runSetup` re-reads the settings file itself and files the run as skipped
+    /// with a line saying what it went looking for, so the worst case is an explanation rather than
+    /// a wrong answer.
+    private var showsRunSetupAgain: Bool {
+        event.kind == .setup && event.outcome == .failed && model?.canRunSetup == true
     }
 
     /// Whether unfolding this row would actually show anything the reader cannot already see.
