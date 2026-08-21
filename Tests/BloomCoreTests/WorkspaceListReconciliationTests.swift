@@ -26,7 +26,7 @@ struct WorkspaceListReconciliationTests {
     ) -> Workspace {
         Workspace(
             id: id,
-            repoID: "repo",
+            repoID: RepoID("repo"),
             name: name ?? id,
             branch: "feature/\(id)",
             path: "/tmp/\(id)",

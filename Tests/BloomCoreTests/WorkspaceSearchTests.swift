@@ -12,7 +12,7 @@ struct WorkspaceSearchTests {
     private func workspace(
         name: String = "add-caching",
         branch: String = "feature/add-caching",
-        repoID: String = "repo"
+        repoID: RepoID = RepoID("repo")
     ) -> Workspace {
         Workspace(
             id: name,
@@ -26,7 +26,7 @@ struct WorkspaceSearchTests {
         )
     }
 
-    private let repo = Repo(id: "repo", name: "there-there", path: "/tmp/there-there")
+    private let repo = Repo(id: RepoID("repo"), name: "there-there", path: "/tmp/there-there")
 
     @Test("the needle is what the user typed, trimmed and lowercased")
     func needle() {

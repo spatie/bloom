@@ -10,7 +10,7 @@ struct ProjectEntity: AppEntity {
 
     static let defaultQuery = ProjectEntityQuery()
 
-    var id: String
+    var id: RepoID
 
     @Property(title: "Name") var name: String
     @Property(title: "Folder") var folder: String

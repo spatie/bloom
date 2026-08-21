@@ -771,7 +771,7 @@ struct RepoIconStorageTests {
         }
 
         let store = try Store(path: path)
-        let repo = try #require(try await store.repos().first { $0.id == id })
+        let repo = try #require(try await store.repos().first { $0.id == RepoID(id) })
         #expect(repo.iconSource == .undetected)
         #expect(repo.iconPath == nil)
         #expect(repo.hasIcon == false)

@@ -797,7 +797,7 @@ struct AgentRunnerPermissionTests {
         return ask
     }
 
-    private func repoID(of session: Session, in store: Store) async throws -> String {
+    private func repoID(of session: Session, in store: Store) async throws -> RepoID {
         try #require(await store.workspace(id: session.workspaceID)).repoID
     }
 

@@ -10,7 +10,7 @@ private func makeCodexSession(
     _ store: Store,
     permissionMode: PermissionMode = .acceptEdits,
     agentSessionID: String? = nil
-) async throws -> (Session, String) {
+) async throws -> (Session, RepoID) {
     let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r-\(UUID().uuidString)"))
     let workspace = try await store.upsert(Workspace(
         repoID: repo.id, name: "w", branch: "b", path: "/tmp/w", baseBranch: "main"

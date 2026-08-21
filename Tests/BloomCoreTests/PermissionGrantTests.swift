@@ -36,7 +36,7 @@ struct PermissionGrantTests {
     }
 
     static func grant(tool: String = "Bash", rule: String? = "bin/test:*") -> PermissionGrant {
-        PermissionGrant(repoID: "repo-1", toolName: tool, ruleContent: rule)
+        PermissionGrant(repoID: RepoID("repo-1"), toolName: tool, ruleContent: rule)
     }
 
     // MARK: Matching

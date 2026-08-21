@@ -17,7 +17,7 @@ struct SidebarRepoGroup: Identifiable {
     /// the project claim there is nothing waiting, which is the opposite of what the mark is for.
     var hasUnreadWork: Bool
 
-    var id: String { repo.id }
+    var id: RepoID { repo.id }
 
     /// Pinned first, then the user's own order, matching `AppModel.workspaces(in:)`.
     static func build(
@@ -25,7 +25,7 @@ struct SidebarRepoGroup: Identifiable {
         workspaces: [Workspace],
         filter: SidebarFilter
     ) -> [SidebarRepoGroup] {
-        var byRepo: [String: [Workspace]] = [:]
+        var byRepo: [RepoID: [Workspace]] = [:]
         for workspace in workspaces {
             byRepo[workspace.repoID, default: []].append(workspace)
         }
@@ -55,14 +55,14 @@ enum SidebarPaneRow: Identifiable {
     /// is under and so the row has to say it itself. See `SidebarWorkspaceRow`.
     case workspace(Workspace, projectName: String)
     /// The sentence that stands where a project's rows would be when it has none.
-    case notice(repoID: String)
+    case notice(repoID: RepoID)
 
     /// Prefixed by kind, because a project and its notice would otherwise share an id.
     var id: String {
         switch self {
-        case .project(let group): "project:" + group.id
+        case .project(let group): "project:" + group.id.rawValue
         case .workspace(let workspace, _): "workspace:" + workspace.id
-        case .notice(let repoID): "notice:" + repoID
+        case .notice(let repoID): "notice:" + repoID.rawValue
         }
     }
 

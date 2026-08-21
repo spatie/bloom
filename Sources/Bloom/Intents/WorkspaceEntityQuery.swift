@@ -32,7 +32,7 @@ struct WorkspaceEntityQuery: EntityStringQuery {
         guard !needle.isEmpty else { return try await suggestedEntities() }
 
         let store = try await IntentDatabase.store()
-        var reposByID: [String: Repo] = [:]
+        var reposByID: [RepoID: Repo] = [:]
         for repo in try await store.repos() { reposByID[repo.id] = repo }
         let workspaces = try await store.workspaces().filter {
             WorkspaceSearch.match(

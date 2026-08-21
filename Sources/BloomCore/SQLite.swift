@@ -47,6 +47,23 @@ public enum SQLValue: Sendable, Equatable {
     }
 }
 
+extension SQLValue {
+    /// Binds a typed identifier without unwrapping it at the call site.
+    ///
+    /// A static method that shadows the `text` case, so every `.text(workspace.id)` in `Store`
+    /// reads exactly as it did when ids were strings. The alternative was `.text(id.rawValue)`
+    /// several hundred times, which is noise in front of the SQL that is the point of those
+    /// lines, and one `.rawValue` forgotten is a compile error rather than a bug, so the
+    /// unwrapping was never buying anything.
+    public static func text(_ id: some Identifier) -> SQLValue { .text(id.rawValue) }
+
+    /// The nullable columns: `workspaces.parent_workspace_id`, and the joins that may not be
+    /// there. Nil binds as SQL NULL, which is what the column already holds.
+    public static func text(_ id: (some Identifier)?) -> SQLValue {
+        id.map { .text($0.rawValue) } ?? .null
+    }
+}
+
 public struct Row: Sendable {
     public let columns: [String: SQLValue]
 

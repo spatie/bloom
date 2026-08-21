@@ -223,7 +223,7 @@ struct SidebarView: View {
 
     /// Which projects are folded, in order. Identity only: this must change when a project is
     /// folded or unfolded and at no other time.
-    private var foldedProjects: [String] {
+    private var foldedProjects: [RepoID] {
         groups.filter(\.repo.collapsed).map(\.id)
     }
 

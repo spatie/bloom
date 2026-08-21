@@ -378,7 +378,7 @@ final class AppModel {
     /// `AppModel+ProjectIcons.swift`. Named columns rather than a whole `Repo`, for the same
     /// reason `Store.update(repoID:)` exists: the value the sweep is holding was read before a
     /// walk of the project's folder, and anything else about the project may have moved since.
-    func adoptProjectIcon(_ path: String?, source: RepoIconSource, forRepoID id: String) {
+    func adoptProjectIcon(_ path: String?, source: RepoIconSource, forRepoID id: RepoID) {
         guard let index = repos.firstIndex(where: { $0.id == id }) else { return }
         repos[index].iconPath = path
         repos[index].iconSource = source
@@ -1659,7 +1659,7 @@ final class AppModel {
     /// or an icon that landed while the drag was happening. See e47a3b7. It is one transaction for
     /// the same reason `reorderWorkspaces` gives: one commit, one announcement, and no moment at
     /// which the observer can reload a half written order.
-    func reorderProjects(id: String, to: Int) async {
+    func reorderProjects(id: RepoID, to: Int) async {
         guard let store else { return }
         let changes = SidebarReorder.move(projects: repos, id: id, to: to)
         guard !changes.isEmpty else { return }

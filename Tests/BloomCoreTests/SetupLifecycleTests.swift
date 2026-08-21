@@ -10,7 +10,7 @@ import Testing
 struct SetupLifecycleTests {
     private func workspace(_ state: SetupState, log: String = "") -> Workspace {
         Workspace(
-            repoID: "r", name: "w", branch: "b", path: "/tmp/w", baseBranch: "main",
+            repoID: RepoID("r"), name: "w", branch: "b", path: "/tmp/w", baseBranch: "main",
             setupState: state, setupLog: log
         )
     }
@@ -192,7 +192,7 @@ struct RefusedTransitionsTests {
     func refusalIsRecorded() {
         RefusedTransitions.forget()
         var subject = Workspace(
-            repoID: "r", name: "w", branch: "b", path: "/tmp/w", baseBranch: "main",
+            repoID: RepoID("r"), name: "w", branch: "b", path: "/tmp/w", baseBranch: "main",
             setupState: .succeeded
         )
 
@@ -210,7 +210,7 @@ struct RefusedTransitionsTests {
     func registerIsBounded() {
         RefusedTransitions.forget()
         var subject = Workspace(
-            repoID: "r", name: "w", branch: "b", path: "/tmp/w", baseBranch: "main",
+            repoID: RepoID("r"), name: "w", branch: "b", path: "/tmp/w", baseBranch: "main",
             setupState: .succeeded
         )
         for _ in 0..<250 { subject.apply(.runInterrupted) }

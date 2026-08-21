@@ -212,7 +212,7 @@ struct WorkspaceEventRow: View {
             presentation: event.presentation,
             // Only ever read by a file chip, and an event has none: its detail is a line of log or
             // a branch name, never a path this row invites anybody to open.
-            workspace: model?.workspace ?? Workspace(repoID: "", name: "", branch: "", path: "", baseBranch: ""),
+            workspace: model?.workspace ?? Workspace(repoID: RepoID(""), name: "", branch: "", path: "", baseBranch: ""),
             isError: event.isFailure,
             durationMS: event.durationMS,
             isExpanded: isExpanded,

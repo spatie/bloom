@@ -168,7 +168,7 @@ public enum EditorCatalog {
 public struct OpenInPreferences: @unchecked Sendable {
     public static let globalKey = "openIn.lastUsed"
 
-    public static func key(forRepo id: String) -> String { "openIn.lastUsed.\(id)" }
+    public static func key(forRepo id: RepoID) -> String { "openIn.lastUsed.\(id)" }
 
     private let defaults: UserDefaults
 
@@ -176,12 +176,12 @@ public struct OpenInPreferences: @unchecked Sendable {
         self.defaults = defaults
     }
 
-    public func lastUsed(repo: String?) -> String? {
+    public func lastUsed(repo: RepoID?) -> String? {
         if let repo, let stored = defaults.string(forKey: Self.key(forRepo: repo)) { return stored }
         return defaults.string(forKey: Self.globalKey)
     }
 
-    public func record(_ bundleID: String, repo: String?) {
+    public func record(_ bundleID: String, repo: RepoID?) {
         defaults.set(bundleID, forKey: Self.globalKey)
         if let repo { defaults.set(bundleID, forKey: Self.key(forRepo: repo)) }
     }

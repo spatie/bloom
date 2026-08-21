@@ -162,12 +162,12 @@ struct HomeBar: View {
     private var projectLabel: String {
         switch filter.projects.count {
         case 0: "All projects"
-        case 1: name(of: filter.projects.first ?? "")
+        case 1: name(of: filter.projects.first)
         default: "\(filter.projects.count) projects"
         }
     }
 
-    private func name(of id: String) -> String {
+    private func name(of id: RepoID?) -> String {
         repos.first { $0.id == id }?.name ?? "1 project"
     }
 

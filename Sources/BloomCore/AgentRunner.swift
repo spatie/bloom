@@ -88,7 +88,7 @@ public actor AgentRunner {
     /// which is the one moment the actor is least available and the one moment a pending ask
     /// absolutely has to be answered.
     private let pending = PendingAsks()
-    private var cachedRepoID: String?
+    private var cachedRepoID: RepoID?
     private var alive = false
     private var cancelled = false
     private var persistenceFailures = 0
@@ -658,7 +658,7 @@ public actor AgentRunner {
 
     /// What this session's workspace belongs to. Looked up rather than held, because a runner
     /// outlives any particular view and the answer never changes.
-    private func repoID() async -> String? {
+    private func repoID() async -> RepoID? {
         if let cachedRepoID { return cachedRepoID }
         guard let workspace = try? await store.workspace(id: session.workspaceID) else { return nil }
         cachedRepoID = workspace.repoID

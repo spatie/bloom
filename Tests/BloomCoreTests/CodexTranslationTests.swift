@@ -353,14 +353,14 @@ private func translated(
         let (ask, _) = try recordedAsk()
         let rule = try #require(ask.rules.first)
         let grant = PermissionGrant(
-            repoID: "repo",
+            repoID: RepoID("repo"),
             toolName: rule.toolName,
             ruleContent: rule.ruleContent
         )
         #expect(PermissionGrantIndex.match(ask: ask, grants: [grant])?.count == 1)
 
         // And a grant for a different path does not.
-        let other = PermissionGrant(repoID: "repo", toolName: "ApplyPatch", ruleContent: "/tmp/other")
+        let other = PermissionGrant(repoID: RepoID("repo"), toolName: "ApplyPatch", ruleContent: "/tmp/other")
         #expect(PermissionGrantIndex.match(ask: ask, grants: [other]) == nil)
     }
 }

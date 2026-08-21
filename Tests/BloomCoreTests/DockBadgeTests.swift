@@ -8,7 +8,7 @@ struct DockBadgeTests {
     ) -> Workspace {
         Workspace(
             id: id,
-            repoID: "repo",
+            repoID: RepoID("repo"),
             name: id,
             branch: "feature/\(id)",
             path: "/tmp/\(id)",

@@ -209,7 +209,7 @@ struct RepoIconRefreshTests {
     @Test("applying an answer changes nothing else about the project")
     func applyingTouchesOnlyTheIcon() {
         var repo = Repo(
-            id: "repo-1",
+            id: RepoID("repo-1"),
             name: "Bloom",
             path: "/projects/bloom",
             defaultBranch: "trunk",

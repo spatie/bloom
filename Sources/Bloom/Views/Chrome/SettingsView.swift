@@ -126,7 +126,7 @@ private struct ProjectSettingsView: View {
     /// This window raises its own copy of the offer. `RootView` presents the one belonging to the
     /// main window, and `Binding.on` keeps a request from appearing on both at once.
     @Bindable private var projectSetup = ProjectSetup.shared
-    @State private var selectedRepoID: String?
+    @State private var selectedRepoID: RepoID?
     @State private var repoPendingRemoval: Repo?
 
     private var selectedRepo: Repo? {

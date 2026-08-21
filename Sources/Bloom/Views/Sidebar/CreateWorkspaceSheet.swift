@@ -27,7 +27,7 @@ struct CreateWorkspaceSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
 
-    @State private var repoID: String?
+    @State private var repoID: RepoID?
     @State private var prompt = ""
     @State private var caret = 0
     @State private var isFocused = false
@@ -183,8 +183,8 @@ struct CreateWorkspaceSheet: View {
                 // above would be a word to read past. `labelsHidden` takes the heading off the
                 // picker without taking its name away from VoiceOver.
                 Picker("Project", selection: Binding(
-                    get: { repoID ?? "" },
-                    set: { repoID = $0.isEmpty ? nil : $0 }
+                    get: { repoID ?? RepoID("") },
+                    set: { repoID = $0.rawValue.isEmpty ? nil : $0 }
                 )) {
                     ForEach(app.repos) { candidate in
                         Label {

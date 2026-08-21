@@ -437,7 +437,7 @@ public actor Store {
         try db.query("SELECT * FROM repos ORDER BY sort_order, created_at").map(Self.repo(from:))
     }
 
-    public func repo(id: String) throws -> Repo? {
+    public func repo(id: RepoID) throws -> Repo? {
         try db.query("SELECT * FROM repos WHERE id = ?", [.text(id)]).first.map(Self.repo(from:))
     }
 
@@ -503,7 +503,7 @@ public actor Store {
     /// Returns nil when there is no such row rather than inserting one.
     @discardableResult
     public func update(
-        repoID: String,
+        repoID: RepoID,
         _ change: @Sendable (inout Repo) -> Void
     ) throws -> Repo? {
         guard var row = try repo(id: repoID) else { return nil }
@@ -540,7 +540,7 @@ public actor Store {
         }
     }
 
-    public func deleteRepo(id: String) throws {
+    public func deleteRepo(id: RepoID) throws {
         try db.run("DELETE FROM repos WHERE id = ?", [.text(id)])
     }
 
@@ -553,7 +553,7 @@ public actor Store {
         return try db.query(sql).map(Self.workspace(from:))
     }
 
-    public func workspaces(repoID: String, includeArchived: Bool = false) throws -> [Workspace] {
+    public func workspaces(repoID: RepoID, includeArchived: Bool = false) throws -> [Workspace] {
         let sql = includeArchived
             ? "SELECT * FROM workspaces WHERE repo_id = ? ORDER BY sort_order, created_at"
             : "SELECT * FROM workspaces WHERE repo_id = ? AND state = 'active' ORDER BY sort_order, created_at"
@@ -819,7 +819,7 @@ public actor Store {
         ).map(Self.workspace(from:))
     }
 
-    public func nextWorkspaceSortOrder(repoID: String) throws -> Int {
+    public func nextWorkspaceSortOrder(repoID: RepoID) throws -> Int {
         let rows = try db.query(
             "SELECT COALESCE(MAX(sort_order), -1) AS m FROM workspaces WHERE repo_id = ?",
             [.text(repoID)]
@@ -1248,7 +1248,7 @@ public actor Store {
     // MARK: - Permission grants
 
     /// Every rule granted in one project, newest first. This is the revocation list.
-    public func permissionGrants(repoID: String) throws -> [PermissionGrant] {
+    public func permissionGrants(repoID: RepoID) throws -> [PermissionGrant] {
         try db.query(
             "SELECT * FROM permission_grants WHERE repo_id = ? ORDER BY granted_at DESC, id",
             [.text(repoID)]
@@ -1294,7 +1294,7 @@ public actor Store {
 
     /// Count one use of a grant, for the list. Deliberately not in the same statement as the
     /// lookup: a grant revoked between the two is simply not updated, which is the right outcome.
-    public func recordPermissionGrantUse(id: String, at date: Date = Date()) throws {
+    public func recordPermissionGrantUse(id: PermissionGrantID, at date: Date = Date()) throws {
         try db.run(
             "UPDATE permission_grants SET use_count = use_count + 1, last_used_at = ? WHERE id = ?",
             [.double(date.timeIntervalSince1970), .text(id)]
@@ -1302,11 +1302,11 @@ public actor Store {
     }
 
     /// Take one back. Immediate: nothing caches these, and the next ask reads the table again.
-    public func deletePermissionGrant(id: String) throws {
+    public func deletePermissionGrant(id: PermissionGrantID) throws {
         try db.run("DELETE FROM permission_grants WHERE id = ?", [.text(id)])
     }
 
-    public func deletePermissionGrants(repoID: String) throws {
+    public func deletePermissionGrants(repoID: RepoID) throws {
         try db.run("DELETE FROM permission_grants WHERE repo_id = ?", [.text(repoID)])
     }
 
@@ -1440,7 +1440,7 @@ public actor Store {
 
     private static func repo(from row: Row) -> Repo {
         Repo(
-            id: row.string("id") ?? newID(),
+            id: RepoID(row.string("id") ?? newID()),
             name: row.string("name") ?? "",
             path: row.string("path") ?? "",
             defaultBranch: row.string("default_branch") ?? "main",
@@ -1456,7 +1456,7 @@ public actor Store {
     private static func workspace(from row: Row) -> Workspace {
         Workspace(
             id: row.string("id") ?? newID(),
-            repoID: row.string("repo_id") ?? "",
+            repoID: RepoID(row.string("repo_id") ?? ""),
             name: row.string("name") ?? "",
             branch: row.string("branch") ?? "",
             path: row.string("path") ?? "",
@@ -1484,8 +1484,8 @@ public actor Store {
     private static func permissionGrant(from row: Row) -> PermissionGrant {
         let content = row.string("rule_content") ?? ""
         return PermissionGrant(
-            id: row.string("id") ?? newID(),
-            repoID: row.string("repo_id") ?? "",
+            id: PermissionGrantID(row.string("id") ?? newID()),
+            repoID: RepoID(row.string("repo_id") ?? ""),
             toolName: row.string("tool_name") ?? "",
             // Stored as an empty string because SQLite counts every NULL as distinct in a unique
             // index, which would have let the same whole-tool grant be inserted over and over.

@@ -15,7 +15,7 @@ struct WorkspaceMarkTests {
         colour: String? = nil
     ) -> Workspace {
         Workspace(
-            repoID: "r", name: "w", branch: "b", path: "/tmp/w", baseBranch: "main",
+            repoID: RepoID("r"), name: "w", branch: "b", path: "/tmp/w", baseBranch: "main",
             state: state, unread: unread, colour: colour
         )
     }

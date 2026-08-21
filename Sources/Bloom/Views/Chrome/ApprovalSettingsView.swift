@@ -25,7 +25,7 @@ struct ApprovalSettingsView: View {
     /// The grant a second press would remove. Revoking is one press and then one more, rather than
     /// a sheet: the action is cheap to undo (the next ask simply comes back) and a modal over a
     /// list of twenty rules would be worse than the mistake it prevents.
-    @State private var confirming: String?
+    @State private var confirming: PermissionGrantID?
 
     var body: some View {
         Form {
@@ -145,7 +145,7 @@ struct ApprovalSettingsView: View {
         return app.repos.filter { granted.contains($0.id) }
     }
 
-    private func grants(in repoID: String) -> [PermissionGrant] {
+    private func grants(in repoID: RepoID) -> [PermissionGrant] {
         grants.filter { $0.repoID == repoID }
     }
 

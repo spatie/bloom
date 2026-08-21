@@ -170,11 +170,11 @@ extension SidebarReorder {
     /// the filter and for the pinned rows: the numbers index the rows as they are DRAWN, and the
     /// thing that has to change is a stored order that is not that list.
     public enum Row: Equatable, Hashable, Sendable {
-        case project(String)
-        case workspace(id: String, projectID: String)
+        case project(RepoID)
+        case workspace(id: String, projectID: RepoID)
         /// The sentence a project draws where its rows would be when it has none. It takes an
         /// offset in the run like anything else, and it is never something to move.
-        case notice(projectID: String)
+        case notice(projectID: RepoID)
     }
 
     /// What a drag over the flattened pane turns out to have been.
@@ -186,7 +186,7 @@ extension SidebarReorder {
         /// A project header was dragged, and every workspace under it goes with it. `to` is an
         /// offset into the project list in `move(fromOffsets:toOffset:)`'s own semantics, which is
         /// to say it counts the dragged project as still being where it was.
-        case project(id: String, to: Int)
+        case project(id: RepoID, to: Int)
 
         /// A workspace was dragged inside its own project. `from` and `to` are offsets into that
         /// project's own drawn rows, which is exactly what `move(visible:all:from:to:)` takes, so
@@ -197,15 +197,15 @@ extension SidebarReorder {
         /// and a drop there arrives here like any other. The row is brought back to the nearest
         /// place inside its own project, which is the end it was dragged towards, so a drag that
         /// aimed past the project's last row lands on its last row rather than nowhere.
-        case workspace(projectID: String, from: IndexSet, to: Int, landedOutside: Bool)
+        case workspace(projectID: RepoID, from: IndexSet, to: Int, landedOutside: Bool)
     }
 
     /// One project's new place. Never a whole `Repo`: see `Store.reorderProjects`.
     public struct ProjectChange: Equatable, Sendable {
-        public var id: String
+        public var id: RepoID
         public var sortOrder: Int
 
-        public init(id: String, sortOrder: Int) {
+        public init(id: RepoID, sortOrder: Int) {
             self.id = id
             self.sortOrder = sortOrder
         }
@@ -254,7 +254,7 @@ extension SidebarReorder {
     /// Ordered by `sort_order` and read back by the same, so a project whose number is already
     /// right is not written. Every remaining project ends up holding its own index, which is what
     /// keeps the numbers from drifting into ties over a long series of drags.
-    public static func move(projects: [Repo], id: String, to: Int) -> [ProjectChange] {
+    public static func move(projects: [Repo], id: RepoID, to: Int) -> [ProjectChange] {
         guard let index = projects.firstIndex(where: { $0.id == id }) else { return [] }
         let ordered = moving(projects, from: IndexSet(integer: index), to: to)
         return ordered.enumerated().compactMap { offset, repo in
@@ -290,7 +290,7 @@ extension SidebarReorder {
 
     /// The flat offsets one project's workspace rows occupy, as a range whose bounds are the first
     /// and last places a row of that project can be dropped at.
-    private static func workspaceRun(rows: [Row], projectID: String) -> Range<Int>? {
+    private static func workspaceRun(rows: [Row], projectID: RepoID) -> Range<Int>? {
         let offsets = rows.indices.filter { offset in
             if case .workspace(_, let owner) = rows[offset] { return owner == projectID }
             return false

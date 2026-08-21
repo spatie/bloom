@@ -25,7 +25,7 @@ public actor CodexRunner: SessionRunner {
     private var translation: CodexTranslation
     private var threadID: String?
     private var cancelled = false
-    private var cachedRepoID: String?
+    private var cachedRepoID: RepoID?
 
     /// The items seen this turn, by id.
     ///
@@ -410,7 +410,7 @@ public actor CodexRunner: SessionRunner {
         )))
     }
 
-    private func repoID() async -> String? {
+    private func repoID() async -> RepoID? {
         if let cachedRepoID { return cachedRepoID }
         guard let workspace = try? await store.workspace(id: session.workspaceID) else { return nil }
         cachedRepoID = workspace.repoID

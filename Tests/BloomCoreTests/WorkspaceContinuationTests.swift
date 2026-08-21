@@ -310,7 +310,7 @@ struct ContinuationPromptTests {
     private var continuation: WorkspaceContinuation {
         WorkspaceContinuation(
             workspace: Workspace(
-                repoID: "repo",
+                repoID: RepoID("repo"),
                 name: "Dark mode toggle",
                 branch: "dark-mode-toggle-2",
                 path: "/tmp/worktree",

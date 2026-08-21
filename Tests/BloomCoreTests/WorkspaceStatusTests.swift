@@ -319,7 +319,7 @@ struct WorkspaceStatusTests {
         deletions: Int = 0
     ) -> Workspace {
         Workspace(
-            repoID: "repo",
+            repoID: RepoID("repo"),
             name: "Glyphs",
             branch: "feature/glyphs",
             path: "/tmp/glyphs",
@@ -341,7 +341,7 @@ struct WorkspaceStatusTests {
 struct AwaitingPermissionStatusTests {
     private func workspace(unread: Bool = false, additions: Int = 0) -> Workspace {
         Workspace(
-            repoID: "r", name: "w", branch: "b", path: "/tmp/w", baseBranch: "main",
+            repoID: RepoID("r"), name: "w", branch: "b", path: "/tmp/w", baseBranch: "main",
             setupState: .succeeded, additions: additions, unread: unread
         )
     }

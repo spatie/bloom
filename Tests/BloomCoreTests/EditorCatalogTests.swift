@@ -116,27 +116,27 @@ struct EditorCatalogTests {
     func nothingRecorded() {
         let (preferences, _) = preferences()
 
-        #expect(preferences.lastUsed(repo: "repo-1") == nil)
+        #expect(preferences.lastUsed(repo: RepoID("repo-1")) == nil)
     }
 
     @Test("a project remembers its own editor")
     func aRepoRemembersItsOwn() {
         let (preferences, _) = preferences()
 
-        preferences.record("com.jetbrains.PhpStorm", repo: "laravel")
-        preferences.record("com.apple.dt.Xcode", repo: "bloom")
+        preferences.record("com.jetbrains.PhpStorm", repo: RepoID("laravel"))
+        preferences.record("com.apple.dt.Xcode", repo: RepoID("bloom"))
 
-        #expect(preferences.lastUsed(repo: "laravel") == "com.jetbrains.PhpStorm")
-        #expect(preferences.lastUsed(repo: "bloom") == "com.apple.dt.Xcode")
+        #expect(preferences.lastUsed(repo: RepoID("laravel")) == "com.jetbrains.PhpStorm")
+        #expect(preferences.lastUsed(repo: RepoID("bloom")) == "com.apple.dt.Xcode")
     }
 
     @Test("a project opened for the first time inherits whatever was used last anywhere")
     func aNewRepoInheritsTheGlobalAnswer() {
         let (preferences, _) = preferences()
 
-        preferences.record("dev.zed.Zed", repo: "laravel")
+        preferences.record("dev.zed.Zed", repo: RepoID("laravel"))
 
-        #expect(preferences.lastUsed(repo: "a-project-never-opened") == "dev.zed.Zed")
+        #expect(preferences.lastUsed(repo: RepoID("a-project-never-opened")) == "dev.zed.Zed")
         #expect(preferences.lastUsed(repo: nil) == "dev.zed.Zed")
     }
 
@@ -148,8 +148,8 @@ struct EditorCatalogTests {
 
         #expect(preferences.lastUsed(repo: nil) == "dev.zed.Zed")
         // And it does not invent an answer for a project that has one already.
-        preferences.record("com.jetbrains.PhpStorm", repo: "laravel")
+        preferences.record("com.jetbrains.PhpStorm", repo: RepoID("laravel"))
         preferences.record("com.microsoft.VSCode", repo: nil)
-        #expect(preferences.lastUsed(repo: "laravel") == "com.jetbrains.PhpStorm")
+        #expect(preferences.lastUsed(repo: RepoID("laravel")) == "com.jetbrains.PhpStorm")
     }
 }

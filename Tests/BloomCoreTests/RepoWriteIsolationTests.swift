@@ -143,7 +143,7 @@ struct RepoWriteIsolationTests {
         let repo = try await seed(store)
 
         try await store.update(repoID: repo.id) {
-            $0.id = "some-other-id"
+            $0.id = RepoID("some-other-id")
             $0.name = "renamed"
         }
 

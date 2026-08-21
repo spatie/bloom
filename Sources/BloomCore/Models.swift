@@ -5,7 +5,7 @@ public func newID() -> String { UUID().uuidString.lowercased() }
 // MARK: - Repo
 
 public struct Repo: Identifiable, Sendable, Hashable, Codable {
-    public var id: String
+    public var id: RepoID
     public var name: String
     public var path: String
     public var defaultBranch: String
@@ -19,7 +19,7 @@ public struct Repo: Identifiable, Sendable, Hashable, Codable {
     public var iconSource: RepoIconSource
 
     public init(
-        id: String = newID(),
+        id: RepoID = .new(),
         name: String,
         path: String,
         defaultBranch: String = "main",
@@ -110,7 +110,7 @@ public enum SetupState: String, Sendable, Codable, CaseIterable, Hashable {
 
 public struct Workspace: Identifiable, Sendable, Hashable, Codable {
     public var id: String
-    public var repoID: String
+    public var repoID: RepoID
     public var name: String
     public var branch: String
     public var path: String
@@ -156,7 +156,7 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
 
     public init(
         id: String = newID(),
-        repoID: String,
+        repoID: RepoID,
         name: String,
         branch: String,
         path: String,

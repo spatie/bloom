@@ -50,7 +50,7 @@ final class BloomServicesProvider: NSObject {
         NSApp.activate(ignoringOtherApps: true)
         guard let (repo, prompt) = confirm(text: text, in: app) else { return }
 
-        UserDefaults.standard.set(repo.id, forKey: Self.lastRepoKey)
+        UserDefaults.standard.set(repo.id.rawValue, forKey: Self.lastRepoKey)
         NSApp.windows.first?.makeKeyAndOrderFront(nil)
         Task { await app.createWorkspace(in: repo, prompt: prompt) }
     }
@@ -111,7 +111,7 @@ final class BloomServicesProvider: NSObject {
 
     /// The project this Service used last, then whatever the window is showing, then the first one.
     private func defaultRepoIndex(in app: AppModel) -> Int {
-        let remembered = UserDefaults.standard.string(forKey: Self.lastRepoKey)
+        let remembered = UserDefaults.standard.string(forKey: Self.lastRepoKey).map(RepoID.init)
         let selected = app.selectedWorkspace.flatMap { app.repo(for: $0) }?.id
         for candidate in [remembered, selected] {
             if let candidate, let index = app.repos.firstIndex(where: { $0.id == candidate }) {

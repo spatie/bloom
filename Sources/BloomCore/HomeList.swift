@@ -77,7 +77,7 @@ public struct HomeFilter: Equatable, Sendable {
     /// Empty means every project. A set rather than an optional so "all" and "none chosen" are
     /// the same state, which is what stops the menu from reaching a configuration that shows
     /// nothing and offers no way back.
-    public var projects: Set<String> = []
+    public var projects: Set<RepoID> = []
     /// Whether archived workspaces are being kept OUT of the list. Off by default, so Home opens
     /// on everything on the machine.
     ///
@@ -90,7 +90,7 @@ public struct HomeFilter: Equatable, Sendable {
     /// to the ones still being worked in.
     public var hidesArchived = false
 
-    public init(query: String = "", projects: Set<String> = [], hidesArchived: Bool = false) {
+    public init(query: String = "", projects: Set<RepoID> = [], hidesArchived: Bool = false) {
         self.query = query
         self.projects = projects
         self.hidesArchived = hidesArchived
@@ -129,7 +129,7 @@ public enum HomeList {
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> HomeListing {
-        var byID: [String: Repo] = [:]
+        var byID: [RepoID: Repo] = [:]
         byID.reserveCapacity(repos.count)
         for repo in repos { byID[repo.id] = repo }
 

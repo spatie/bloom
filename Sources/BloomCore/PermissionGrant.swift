@@ -12,8 +12,8 @@ import Foundation
 ///
 /// Nothing here is a settings file. Bloom writes none, and answers matching asks itself.
 public struct PermissionGrant: Identifiable, Sendable, Hashable, Codable {
-    public var id: String
-    public var repoID: String
+    public var id: PermissionGrantID
+    public var repoID: RepoID
     /// The CLI's tool name, exactly as it arrived.
     public var toolName: String
     /// The CLI's `ruleContent`, exactly as it arrived. Nil is a rule covering the whole tool.
@@ -30,8 +30,8 @@ public struct PermissionGrant: Identifiable, Sendable, Hashable, Codable {
     public var grantedFor: String
 
     public init(
-        id: String = newID(),
-        repoID: String,
+        id: PermissionGrantID = .new(),
+        repoID: RepoID,
         toolName: String,
         ruleContent: String? = nil,
         grantedAt: Date = Date(),
@@ -57,7 +57,7 @@ public struct PermissionGrant: Identifiable, Sendable, Hashable, Codable {
     /// would mean a person revoking a rule they never read.
     public var displayText: String { rule.displayText }
 
-    public static func granting(_ rule: PermissionRule, repoID: String, for subject: String = "") -> PermissionGrant {
+    public static func granting(_ rule: PermissionRule, repoID: RepoID, for subject: String = "") -> PermissionGrant {
         PermissionGrant(
             repoID: repoID,
             toolName: rule.toolName,

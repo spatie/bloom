@@ -38,7 +38,7 @@ struct HomeListTests {
 
     private func workspace(
         _ name: String,
-        repoID: String = "repo",
+        repoID: RepoID = RepoID("repo"),
         branch: String? = nil,
         at activity: Date = Date(),
         state: WorkspaceState = .active
@@ -56,7 +56,7 @@ struct HomeListTests {
     }
 
     private func repo(_ id: String, name: String? = nil) -> Repo {
-        Repo(id: id, name: name ?? id, path: "/tmp/\(id)")
+        Repo(id: RepoID(id), name: name ?? id, path: "/tmp/\(id)")
     }
 
     private func bucket(_ activity: Date, now: Date) -> HomeList.Bucket {
@@ -299,9 +299,9 @@ struct HomeListTests {
         let listing = HomeList.build(
             repos: [repo("a"), repo("b")],
             workspaces: [
-                workspace("old", repoID: "a", at: date(2025, 8, 1, 9, 0, 0)),
-                workspace("newest", repoID: "b", at: date(2025, 8, 19, 11, 0, 0)),
-                workspace("middle", repoID: "a", at: date(2025, 8, 18, 11, 0, 0)),
+                workspace("old", repoID: RepoID("a"), at: date(2025, 8, 1, 9, 0, 0)),
+                workspace("newest", repoID: RepoID("b"), at: date(2025, 8, 19, 11, 0, 0)),
+                workspace("middle", repoID: RepoID("a"), at: date(2025, 8, 18, 11, 0, 0)),
             ],
             archived: [],
             filter: HomeFilter(),
@@ -321,8 +321,8 @@ struct HomeListTests {
         let listing = HomeList.build(
             repos: [repo("a", name: "Bloom")],
             workspaces: [
-                workspace("known", repoID: "a", at: now),
-                workspace("orphan", repoID: "gone", at: now),
+                workspace("known", repoID: RepoID("a"), at: now),
+                workspace("orphan", repoID: RepoID("gone"), at: now),
             ],
             archived: [],
             filter: HomeFilter(),
@@ -418,8 +418,8 @@ struct HomeListTests {
         let now = date(2025, 8, 19, 12, 0, 0)
         let repos = [repo("a", name: "Bloom"), repo("b", name: "Baton")]
         let workspaces = [
-            workspace("Sidebar rewrite", repoID: "a", branch: "feature/sidebar", at: now),
-            workspace("Diff colours", repoID: "b", branch: "feature/palette", at: now),
+            workspace("Sidebar rewrite", repoID: RepoID("a"), branch: "feature/sidebar", at: now),
+            workspace("Diff colours", repoID: RepoID("b"), branch: "feature/palette", at: now),
         ]
 
         func ids(_ query: String) -> [String] {
@@ -447,12 +447,12 @@ struct HomeListTests {
         let listing = HomeList.build(
             repos: [repo("a"), repo("b")],
             workspaces: [
-                workspace("one", repoID: "a", at: now),
-                workspace("two", repoID: "b", at: now),
-                workspace("three", repoID: "b", at: now),
+                workspace("one", repoID: RepoID("a"), at: now),
+                workspace("two", repoID: RepoID("b"), at: now),
+                workspace("three", repoID: RepoID("b"), at: now),
             ],
             archived: [],
-            filter: HomeFilter(projects: ["b"]),
+            filter: HomeFilter(projects: [RepoID("b")]),
             now: now,
             calendar: Self.calendar
         )
@@ -467,8 +467,8 @@ struct HomeListTests {
         let listing = HomeList.build(
             repos: [repo("a"), repo("b")],
             workspaces: [
-                workspace("one", repoID: "a", at: now),
-                workspace("two", repoID: "b", at: now),
+                workspace("one", repoID: RepoID("a"), at: now),
+                workspace("two", repoID: RepoID("b"), at: now),
             ],
             archived: [],
             filter: HomeFilter(),
@@ -498,7 +498,7 @@ struct HomeListTests {
         #expect(!HomeFilter().isNarrowed)
         #expect(!HomeFilter(query: "   ").isNarrowed)
         #expect(HomeFilter(query: "sidebar").isNarrowed)
-        #expect(HomeFilter(projects: ["a"]).isNarrowed)
+        #expect(HomeFilter(projects: [RepoID("a")]).isNarrowed)
         // Hiding archived narrows the list, and is still deliberately not a narrowing by this
         // measure: `isNarrowed` drives a "showing 11 of 312" readout, and a hidden archived
         // workspace is never one of the 312. It is reported by its own clause instead.

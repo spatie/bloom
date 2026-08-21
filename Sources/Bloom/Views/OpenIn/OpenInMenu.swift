@@ -41,12 +41,12 @@ extension EnvironmentValues {
     /// the worktree tree would otherwise carry a repository id it has no other use for, through
     /// three layers of view that have no other use for it either. Set once, at the top of the
     /// inspector. Absent is fine: the menu falls back to whatever was used last anywhere.
-    @Entry var openInRepoID: String?
+    @Entry var openInRepoID: RepoID?
 }
 
 /// Hands a path to another application, and remembers which one.
 enum OpenIn {
-    static func open(_ path: String, with app: DetectedApp, repo: String?) {
+    static func open(_ path: String, with app: DetectedApp, repo: RepoID?) {
         NSWorkspace.shared.open(
             [URL(fileURLWithPath: path)],
             withApplicationAt: app.url,
@@ -61,7 +61,7 @@ enum OpenIn {
     /// applications, and so an application the system contributed can reach the top of the list
     /// the same way a catalogued one does.
     @MainActor
-    static func candidates(for target: OpenInTarget, repo: String?) -> [DetectedApp] {
+    static func candidates(for target: OpenInTarget, repo: RepoID?) -> [DetectedApp] {
         var apps = InstalledApps.all.filter { $0.app.opens(target.kind) }
         if case .file(let path) = target, let extra = InstalledApps.systemDefault(forFile: path) {
             apps.append(extra)
@@ -75,7 +75,7 @@ enum OpenIn {
     /// The application the top item opens: whatever this project was last opened in, and failing
     /// that whatever anything was last opened in, and failing that the first of the catalogue.
     @MainActor
-    static func preferred(for target: OpenInTarget, repo: String?) -> DetectedApp? {
+    static func preferred(for target: OpenInTarget, repo: RepoID?) -> DetectedApp? {
         candidates(for: target, repo: repo).first
     }
 }
