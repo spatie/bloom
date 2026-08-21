@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// One row of a settings form: a short label, and the control it belongs to, side by side.
@@ -48,11 +49,38 @@ extension SettingsRow where Label == Text, Content == Text {
     }
 }
 
+extension View {
+    /// Gives content that carries no text a first text baseline, so a `SettingsRow` label lines up
+    /// with the middle of it rather than dropping to its bottom edge.
+    ///
+    /// A row aligns on first text baseline, which is right for everything with words in it and has
+    /// nothing to work with otherwise. The value put here is the one that makes a single line of
+    /// label look centred against the content: half a cap height above the content's own centre,
+    /// because a line of text is optically centred on the middle of its capitals and not on its
+    /// baseline. Read from the live body font rather than written down, so it still holds when the
+    /// text size is changed in Appearance.
+    func settingsRowBaseline() -> some View {
+        alignmentGuide(.firstTextBaseline) { dimensions in
+            dimensions[VerticalAlignment.center]
+                + NSFont.preferredFont(forTextStyle: .body).capHeight / 2
+        }
+    }
+}
+
 /// Lays the label out in the column the form has settled on and puts the content straight after it.
 ///
-/// First text baseline rather than centre, because the tallest content in these rows is a stack
-/// two or three lines high and a label centred against it sits opposite the middle line rather
-/// than against the thing it names.
+/// The rule is that a label lines up with the FIRST line of its content, and first text baseline
+/// is how that is said. Centre would be wrong: the tallest content in these rows is a stack two or
+/// three lines high, and a label centred against `SettingValue`'s list of contributing files sits
+/// opposite the middle path rather than against the thing it names.
+///
+/// The one case first text baseline cannot answer is content with no text in it at all. SwiftUI
+/// has nothing to align to and falls back to the view's bottom edge, so the label drops to the
+/// foot of the content instead of lining up with it. That is one row in the app, `Colour`, whose
+/// swatches are circles and a colour well, and it read as the label sitting a few points below
+/// the swatches it names. Such content says where its baseline is with `settingsRowBaseline`,
+/// which is a modifier rather than a special case here because this style cannot tell text-free
+/// content from content whose text simply has not loaded yet.
 ///
 /// The content's alignment is reset on the way in. A grouped form puts a trailing
 /// `multilineTextAlignment` into the environment for its value column, which is what set a text

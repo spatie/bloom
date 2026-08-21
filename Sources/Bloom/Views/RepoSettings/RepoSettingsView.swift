@@ -158,7 +158,9 @@ struct RepoSettingsView: View {
 
             if drawsColour {
                 SettingsRow("Colour") {
+                    // Circles and a colour well, with not a word between them. See the modifier.
                     AccentSwatches(selection: accentBinding)
+                        .settingsRowBaseline()
                 }
             }
 
