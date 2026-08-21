@@ -219,6 +219,7 @@ final class AppModel {
     @ObservationIgnored private var workspaceModels: [String: WorkspaceModel] = [:]
 
     private var refreshTask: Task<Void, Never>?
+    private var storeObservationTask: Task<Void, Never>?
     private var identityTask: Task<Void, Never>?
     /// The launch sweep for project icons. Not private, because the work it does is in
     /// `AppModel+ProjectIcons.swift`, and outside observation because nothing draws from it.
@@ -283,6 +284,7 @@ final class AppModel {
         // and `Shell.run` terminates the child when its task is cancelled.
         identityTask = Task { await GitHubIdentity.resolve() }
         startBackgroundRefresh()
+        startObservingStore()
         // Last, and nothing waits for it: the window is already drawn by the time this runs, and
         // every project it has anything to do is one that is drawing its initials meanwhile. See
         // `searchForMissingProjectIcons`.
@@ -311,6 +313,8 @@ final class AppModel {
     func shutdownEverything() async {
         refreshTask?.cancel()
         refreshTask = nil
+        storeObservationTask?.cancel()
+        storeObservationTask = nil
         identityTask?.cancel()
         identityTask = nil
         iconSearchTask?.cancel()
@@ -378,6 +382,37 @@ final class AppModel {
         guard let index = repos.firstIndex(where: { $0.id == id }) else { return }
         repos[index].iconPath = path
         repos[index].iconSource = source
+    }
+
+    /// Follows the store, so a write anybody makes is a window that has already redrawn.
+    ///
+    /// `reload()` is called by hand from twenty one places, and every one of them is a writer that
+    /// remembered. This is the same reload driven by the write itself, from `Store`'s update hook,
+    /// so a writer that forgets, or one that lives in another part of the process entirely, still
+    /// ends up on screen. See `StoreObservation.swift`.
+    ///
+    /// Started at the end of `bootstrap` and not earlier, because the recovery writes above it
+    /// (`resetRunningSessions`, `abandonPendingPermissionAsks`, `recoverInterruptedSetups`) are the
+    /// app tidying up after its last launch, and the first thing this saw would otherwise be that.
+    ///
+    /// It subscribes to the two tables `reload` actually reads and to nothing else. `messages` in
+    /// particular is deliberately absent: it is the hottest write path in the app for the whole of
+    /// a streaming turn, `reload` does not read it, and the transcript has its own precise feed in
+    /// the runner's event pump. Bloom has already put out two performance fires, a busy indicator
+    /// burning eleven seconds of CPU and a workspace switch that took a second, and this is exactly
+    /// how a third would start.
+    ///
+    /// It reads and it publishes. It must never write to the store: read the two rules on
+    /// `StoreChangeHub` before adding anything here.
+    private func startObservingStore() {
+        guard let store else { return }
+        storeObservationTask?.cancel()
+        storeObservationTask = Task { [weak self] in
+            for await _ in store.changes(of: [.repos, .workspaces]) {
+                guard let self else { return }
+                await self.reload()
+            }
+        }
     }
 
     /// Refreshes diff stats for every active workspace so the sidebar counts stay honest even
