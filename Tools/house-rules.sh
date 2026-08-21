@@ -28,6 +28,12 @@ report() {
   echo "$1"
 }
 
+# One line per hit, cut short. A recorded fixture is one line of several
+# kilobytes, and the file and line number are the part you need anyway.
+show() {
+  while IFS= read -r line; do echo "  ${line:0:160}"; done
+}
+
 # The two characters this file is not allowed to contain, since it is scanned by
 # the rule it implements. Built from their UTF-8 bytes instead.
 em_dash="$(printf '\342\200\224')"
@@ -35,17 +41,15 @@ en_dash="$(printf '\342\200\223')"
 
 echo "==> no em dashes or en dashes"
 # .claude holds agent skills written elsewhere and vendored in as they are, and
-# fixtures holds recorded sessions that have to stay byte for byte what the
+# the fixtures hold recorded sessions that have to stay byte for byte what the
 # agent actually emitted. Neither is house prose and neither may be rewritten.
-if hits="$(git grep -n -I -e "$em_dash" -e "$en_dash" -- ':!.claude' ':!fixtures' || true)" && [ -n "$hits" ]; then
-  echo "$hits" | while IFS= read -r line; do echo "  $line"; done
+# The fixtures are matched wherever they sit, because they are being moved.
+if hits="$(git grep -n -I -e "$em_dash" -e "$en_dash" -- ':!.claude' ':!*fixtures/*' || true)" && [ -n "$hits" ]; then
+  echo "$hits" | show
   report "A dash that should be a comma, a full stop or a pair of brackets."
 fi
 
 echo "==> the app is called Bloom"
-# This file is exempt from the two rules below because it has to spell out what
-# it is looking for. The dash rule above does apply to it, which is why the two
-# characters are built from their bytes rather than typed.
 # This file is exempt from this rule and the spelling rule below, because it has
 # to spell out what it is looking for. The dash rule above does apply to it,
 # which is why those two characters are built from their bytes rather than typed.
@@ -53,9 +57,9 @@ echo "==> the app is called Bloom"
 # Every file that is allowed to say Baton, and why. This list should only ever
 # get shorter. A file not on it that mentions the old name is a new mistake.
 baton_allowed=(
-  'PROTOCOL.md'                                     # quotes a recorded session
+  '*PROTOCOL.md'                                    # quotes a recorded session
   'build.sh'                                        # BATON_CODESIGN_IDENTITY, kept working on purpose
-  'fixtures/'                                       # recorded sessions, byte for byte
+  '*fixtures/'                                      # recorded sessions, byte for byte
   'Sources/BloomCore/LegacyDatabase.swift'          # reads the old app's database
   'Sources/BloomCore/LegacyDefaults.swift'          # reads the old app's preferences
   'Sources/BloomCore/WorkspaceManager.swift'        # a comment about the old worktree home
@@ -70,16 +74,19 @@ baton_allowed=(
 for file in $(git grep -l -I -i baton -- ':!.claude' ':!Tools/house-rules.sh' || true); do
   allowed=0
   for prefix in "${baton_allowed[@]}"; do
-    case "$file" in "$prefix"*) allowed=1 ;; esac
+    # Unquoted on purpose, so an entry can be a pattern. A file is being moved
+    # under this list's feet and none of these paths contain a space.
+    # shellcheck disable=SC2254
+    case "$file" in $prefix*) allowed=1 ;; esac
   done
   if [ "$allowed" -eq 0 ]; then
-    git grep -n -I -i baton -- "$file" | while IFS= read -r line; do echo "  $line"; done
+    git grep -n -I -i baton -- "$file" | show
     report "$file calls the app by its old name."
   fi
 done
 # Not a finding, just housekeeping: an exception nobody needs any more.
 for prefix in "${baton_allowed[@]}"; do
-  case "$prefix" in */) continue ;; esac
+  case "$prefix" in */|*'*'*) continue ;; esac
   if [ -f "$prefix" ] && ! git grep -q -I -i baton -- "$prefix"; then
     echo "  note: $prefix no longer says Baton, so it can come off the list in $0."
   fi
@@ -99,14 +106,14 @@ american=(defense offense fulfill fulfillment skeptical acknowledgment maneuver
 american_in_prose=(favorite favorites gray canceled)
 
 for word in "${american[@]}"; do
-  if hits="$(git grep -n -I -i -w "$word" -- ':!.claude' ':!fixtures' ':!Tools/house-rules.sh' || true)" && [ -n "$hits" ]; then
-    echo "$hits" | while IFS= read -r line; do echo "  $line"; done
+  if hits="$(git grep -n -I -i -w "$word" -- ':!.claude' ':!*fixtures/*' ':!Tools/house-rules.sh' || true)" && [ -n "$hits" ]; then
+    echo "$hits" | show
     report "American spelling: $word."
   fi
 done
 for word in "${american_in_prose[@]}"; do
   if hits="$(git grep -n -I -i -w "$word" -- '*.md' ':!.claude' ':!Tools/house-rules.sh' || true)" && [ -n "$hits" ]; then
-    echo "$hits" | while IFS= read -r line; do echo "  $line"; done
+    echo "$hits" | show
     report "American spelling in prose: $word."
   fi
 done
