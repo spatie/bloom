@@ -34,7 +34,6 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
 
     private var item: NSStatusItem?
     private weak var app: AppModel?
-    private var runningCount = 0
     private var unreadCount = 0
     private var waitingCount = 0
 
@@ -145,12 +144,6 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         return window.frame.maxX >= screen.frame.maxX
     }
 
-    func setRunningCount(_ count: Int) {
-        guard count != runningCount else { return }
-        runningCount = count
-        refreshButton()
-    }
-
     /// The same number the Dock badge shows, from the same `DockBadge` count, so the two places
     /// Bloom speaks from while it is behind another window cannot disagree.
     func setUnreadCount(_ count: Int) {
@@ -177,12 +170,8 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
     /// for the words.
     private func refreshButton() {
         guard let button = item?.button else { return }
-        let segments = MenuBarSummary.segments(
-            running: runningCount, unread: unreadCount, waiting: waitingCount
-        )
-        let spoken = MenuBarSummary.tooltip(
-            running: runningCount, unread: unreadCount, waiting: waitingCount
-        )
+        let segments = MenuBarSummary.segments(waiting: waitingCount, unread: unreadCount)
+        let spoken = MenuBarSummary.tooltip(waiting: waitingCount, unread: unreadCount)
         button.attributedTitle = Self.title(for: segments, font: button.font)
         button.toolTip = spoken
         // VoiceOver would otherwise read the two digits and neither glyph, which is worse than
@@ -191,7 +180,7 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
     }
 
     /// Gap between the mark and the first count, and between one count and the next. Wider between
-    /// pairs than inside one, so "dot three envelope two" groups the way it is meant to be read.
+    /// pairs than inside one, so "hand one envelope two" groups the way it is meant to be read.
     private static let leadingGap: CGFloat = 4
     private static let betweenGap: CGFloat = 7
 

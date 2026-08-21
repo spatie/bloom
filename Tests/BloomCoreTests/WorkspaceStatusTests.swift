@@ -414,29 +414,32 @@ struct AwaitingPermissionStatusTests {
         #expect(count == 1)
     }
 
-    /// Waiting first, because it is the only segment whose number costs something to ignore.
-    @Test("the menu bar puts waiting ahead of running")
+    /// Waiting first, because it is the only segment whose number costs something to ignore. It is
+    /// also the only one beside unread: the strip stopped counting running agents, since a filled
+    /// circle and a filled hand are the same blob at menu bar size. See `MenuBarSummary.segments`.
+    @Test("the menu bar puts waiting ahead of unread")
     func menuBar() {
-        let segments = MenuBarSummary.segments(running: 3, unread: 1, waiting: 2)
+        let segments = MenuBarSummary.segments(waiting: 2, unread: 1)
 
-        #expect(segments.map(\.count) == [2, 3, 1])
+        #expect(segments.map(\.count) == [2, 1])
         #expect(segments.first?.symbolName == MenuBarSummary.waitingSymbol)
         #expect(segments.first?.label == "Agents waiting on you")
     }
 
-    @Test("nothing waiting leaves the strip exactly as it was")
+    @Test("nothing waiting leaves the unread count on its own")
     func menuBarUnchanged() {
-        #expect(MenuBarSummary.segments(running: 3, unread: 1, waiting: 0)
-            == MenuBarSummary.segments(running: 3, unread: 1))
-        #expect(MenuBarSummary.tooltip(running: 3, unread: 1, waiting: 0)
-            == MenuBarSummary.tooltip(running: 3, unread: 1))
+        #expect(MenuBarSummary.segments(waiting: 0, unread: 1)
+            == [MenuBarSummary.Segment(
+                symbolName: MenuBarSummary.unreadSymbol, count: 1, label: "Unread results"
+            )])
+        #expect(MenuBarSummary.tooltip(waiting: 0, unread: 1) == "1 unread result")
     }
 
     @Test("the tooltip says it in words, singular and plural")
     func tooltip() {
-        #expect(MenuBarSummary.tooltip(running: 0, unread: 0, waiting: 1) == "1 agent waiting on you")
-        #expect(MenuBarSummary.tooltip(running: 0, unread: 0, waiting: 2) == "2 agents waiting on you")
-        #expect(MenuBarSummary.tooltip(running: 1, unread: 0, waiting: 2)
-            == "2 agents waiting on you, 1 agent running")
+        #expect(MenuBarSummary.tooltip(waiting: 1, unread: 0) == "1 agent waiting on you")
+        #expect(MenuBarSummary.tooltip(waiting: 2, unread: 0) == "2 agents waiting on you")
+        #expect(MenuBarSummary.tooltip(waiting: 2, unread: 1)
+            == "2 agents waiting on you, 1 unread result")
     }
 }
