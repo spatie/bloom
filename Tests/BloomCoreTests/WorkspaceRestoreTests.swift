@@ -294,4 +294,61 @@ struct WorkspaceRestoreTests {
         #expect(report.isSafeToDiscard)
         #expect(report.isRestorableFromBranch)
     }
+
+    // MARK: - What the worktree comes back without
+
+    /// A restored worktree is a fresh checkout. Archiving removed the whole directory, so
+    /// `node_modules`, `vendor`, the built binary and the local database went with it, and none of
+    /// them are in git or in `files_to_copy`.
+    ///
+    /// The row used to keep saying `succeeded`, because that is what the setup run said about a
+    /// directory that no longer exists. So a restored workspace looked ready, had no dependencies
+    /// installed, and nothing anywhere said so.
+    @Test("a restored workspace says its setup has to be run again")
+    func restoreAsksForSetupAgain() async throws {
+        let (repo, registered, manager, workspace) = try await makeWorkspace(settings: """
+        [scripts]
+        setup = "touch installed.txt"
+        """)
+        defer { repo.cleanUp() }
+
+        let succeeded = await manager.runSetup(
+            workspace: workspace, repo: registered, port: 0
+        ) { _ in }
+        #expect(succeeded)
+        #expect(FileManager.default.fileExists(
+            atPath: (workspace.path as NSString).appendingPathComponent("installed.txt")
+        ))
+
+        // Forced, because what setup installed is untracked and the safety report is right to
+        // say so. This is the archive a user gets after they have read that and said yes.
+        try await manager.archive(
+            workspace: workspace, repo: registered, deleteBranch: false, force: true
+        )
+        let archived = try #require(try await manager.store.workspace(id: workspace.id))
+        let outcome = try await manager.restore(workspace: archived, repo: registered)
+
+        // The worktree is back and what setup installed is not.
+        #expect(FileManager.default.fileExists(atPath: outcome.workspace.path))
+        #expect(FileManager.default.fileExists(
+            atPath: (outcome.workspace.path as NSString).appendingPathComponent("installed.txt")
+        ) == false)
+
+        #expect(outcome.workspace.setupState == .pending)
+        #expect(outcome.workspace.setupLog.contains("Run setup again"))
+    }
+
+    /// A project with no setup script has nothing to run, and `pending` there would be an
+    /// invitation to press a button that does nothing.
+    @Test("a project with no setup script comes back skipped, not pending")
+    func restoreWithNoSetupScript() async throws {
+        let (repo, registered, manager, workspace) = try await makeWorkspace()
+        defer { repo.cleanUp() }
+
+        try await manager.archive(workspace: workspace, repo: registered, deleteBranch: false)
+        let archived = try #require(try await manager.store.workspace(id: workspace.id))
+        let outcome = try await manager.restore(workspace: archived, repo: registered)
+
+        #expect(outcome.workspace.setupState == .skipped)
+    }
 }
