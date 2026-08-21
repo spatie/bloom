@@ -170,6 +170,16 @@ struct HomeListRow: View {
     /// The outcome, what it came to, and when. In that order because the glyph is a shape read at
     /// a glance, the counts are numbers read on purpose, and the age is the column the eye runs
     /// down when it is looking for the boundary between two date headings.
+    ///
+    /// **No hover controls here, and the sidebar's row has two.** That is a difference between the
+    /// two lists rather than an omission. This side is three columns of fixed width whose entire
+    /// purpose is that a mark, a count and an age line up down the list; a control revealed in one
+    /// of them would cover a column the eye is running down, and one reserved beside them would
+    /// add a fourth for something that is empty on every row at rest. The row is also a single
+    /// merged accessibility element, which is what makes it readable by ear, and a merged element
+    /// has nowhere to put a button. Home has never had the archive button either, for the same
+    /// reason, and the right click gives this row the identical `WorkspaceMenuItems` the sidebar's
+    /// button opens.
     private var trailing: some View {
         HStack(spacing: Metrics.spacingWide) {
             if row.isArchived {

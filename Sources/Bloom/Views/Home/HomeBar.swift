@@ -8,10 +8,10 @@ import BloomCore
 /// points, the machine name set in title2 bold, a subtitle under it, and a large filled "New
 /// workspace" capsule at the trailing edge. Every one of those is a web convention rather than a
 /// Mac one. A Mac window states what it is in its title bar and offers its primary action in its
-/// toolbar, and this window already does both: `BloomWindowToolbar` puts a `+` split button on the
-/// leading edge that opens the same sheet, and `WindowTitleLabel` names the pane on the trailing
-/// edge. The header was a second title bar drawn inside the content, two hundred points below the
-/// real one, and the capsule was the same command offered twice in one window.
+/// toolbar, and this window already does both: the window's own title names what is showing, and
+/// `BloomWindowToolbar` puts a `+` split button on the leading edge that opens the same sheet. The
+/// header was a second title bar drawn inside the content, two hundred points below the real one,
+/// and the capsule was the same command offered twice in one window.
 ///
 /// What is left is the part that could not move: three controls that only make sense against this
 /// list, and the count they change. They sit in a single accessory strip on the chrome colour, at

@@ -54,6 +54,9 @@ struct SidebarWorkspaceRow: View {
         // Every item in it is `WorkspaceMenuItems`, which Home's rows draw from as well. It used
         // to be a copy of the same six buttons written out here, with a note on the other copy
         // saying what to extract when the two were merged; adding to both was what forced it.
+        //
+        // The row's own hover ellipsis draws the same view, so a press and a right click on one
+        // row cannot come up with different menus. See `WorkspaceRow.moreMenu`.
         .contextMenu { WorkspaceMenuItems(workspace: workspace) { renaming = $0 } }
     }
 

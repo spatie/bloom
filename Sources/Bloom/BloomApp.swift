@@ -89,9 +89,9 @@ struct BloomApp: App {
         // itself. A hidden title also hides the proxy icon, and with it the two things every
         // document window on the Mac can do: drag the folder out of the title bar, and
         // Command-click the title for the path above it. Bloom's workspaces are folders, so that
-        // is worth more than a second copy of the name. `WindowTitleLabel` gave the name up in
-        // return, and has since given up the project as well: it is the worktree's menu and
-        // nothing else.
+        // is worth more than a second copy of the name. The chip that used to sit beside it gave
+        // the name up in return, then the project, then its last three items to the workspace's
+        // own row in the sidebar, and the title bar is the window's again. See `TitleBarStrip`.
         .windowToolbarStyle(.unified(showsTitle: true))
         .defaultSize(width: 1_440, height: 900)
         .commands {
