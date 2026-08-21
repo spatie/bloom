@@ -63,10 +63,17 @@ struct SlashCommandRow: View {
     /// Ranges rather than characters, so a run reads as a word: typing `revi` lights the `revi`
     /// inside `security-review` rather than the stray `r` of `secu(r)ity`, because the matcher
     /// reports the run it scored rather than the first letters it could reach.
+    ///
+    /// Built by interpolating one styled `Text` per run, which is what macOS 26 leaves once `+` on
+    /// two `Text`s is deprecated. An `AttributedString` would be the shorter spelling and is the
+    /// wrong one here: its SwiftUI scope carries `font` and no `fontWeight`, so bolding a run
+    /// would mean naming a whole font and the row would stop inheriting the menu's own.
     private var name: Text {
-        var text = Text("/").foregroundStyle(quiet)
+        var runs = LocalizedStringKey.StringInterpolation(literalCapacity: 0, interpolationCount: 0)
+        runs.appendInterpolation(Text("/").foregroundStyle(quiet))
         guard !match.highlights.isEmpty else {
-            return text + Text(command.name).foregroundStyle(loud)
+            runs.appendInterpolation(Text(command.name).foregroundStyle(loud))
+            return Text(LocalizedStringKey(stringInterpolation: runs))
         }
 
         let characters = Array(command.name)
@@ -77,10 +84,10 @@ struct SlashCommandRow: View {
             var end = index
             while end < characters.count, hits.contains(end) == isHit { end += 1 }
             let run = Text(String(characters[index..<end]))
-            text = text + (isHit ? run.fontWeight(.bold).foregroundStyle(loud) : run.foregroundStyle(quiet))
+            runs.appendInterpolation(isHit ? run.fontWeight(.bold).foregroundStyle(loud) : run.foregroundStyle(quiet))
             index = end
         }
-        return text
+        return Text(LocalizedStringKey(stringInterpolation: runs))
     }
 
     private var loud: Color {
