@@ -37,7 +37,12 @@ public enum PaneContent: Codable, Hashable, Sendable {
         }
     }
 
-    var isChat: Bool {
+    /// Whether this is a conversation rather than a shell, a page or the review.
+    ///
+    /// Public because two decisions turn on it and they are taken in different places:
+    /// `TabMigration.invert` picks the root of a composite tab with it, and `TabSurgery` picks
+    /// the new root when the old one has left every pane. Same rule, said once.
+    public var isChat: Bool {
         if case .chat = self { return true }
         return false
     }
