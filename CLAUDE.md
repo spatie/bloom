@@ -85,8 +85,9 @@ survives the next person who thinks they have a tidier idea.
 ## Prose
 
 **No em dashes and no en dashes anywhere.** Use a comma, a full stop or brackets. **British
-spelling.** The app is called Bloom; it was Baton until it was renamed and the old name still
-arrives from stale memory. `make lint` checks all three and names the file and line.
+spelling.** The app is called Bloom, and it had another name before it was renamed, which still
+arrives from stale memory. `make lint` checks all three, knows the old name so this file does not
+have to, and names the file and line.
 
 ## The dev build, and the rules that keep the owner's data alive
 
