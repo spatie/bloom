@@ -1,0 +1,137 @@
+name: Test
+
+# What a push has to survive. release.yml only reacts to a published release,
+# so until this existed nothing compiled the app or ran a test in reaction to a
+# commit, and a branch could look fine right up to the moment somebody built it.
+#
+# Two things happen here, and they fail for different reasons.
+#
+#   swift build      compiles the app target, Sources/Bloom included.
+#                    test-core.sh mirrors only BloomCore into a throwaway
+#                    package with no app target, so a view that stops compiling
+#                    leaves the whole suite green. That has broken main three
+#                    times in a single day: widen an enum, leave a switch
+#                    non-exhaustive, tests pass, app does not build.
+#   ./test-core.sh   the BloomCore suite, around 1600 tests.
+#
+# Both run even when the other has already failed, because one push should tell
+# you everything that is wrong with it rather than one thing at a time.
+#
+# The runner image and the toolchain check are copied from release.yml on
+# purpose. If the two ever disagree about which Xcode builds Bloom, the release
+# is the one that finds out, and it finds out at the worst moment.
+#
+# Warnings do not fail this build. The app compiles with 16 of them today; once
+# those are gone, adding -warnings-as-errors here is what keeps them gone.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  # Nothing is written. The artifact goes through the actions API, not contents.
+  contents: read
+
+concurrency:
+  # A second push to a branch makes the first one's answer stale, so the older
+  # run is dropped rather than left to occupy a macOS runner.
+  group: bloom-test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Verbatim from release.yml. Swift 6 language mode, actool for the
+      # layered icon and the App Intents metadata processor all come from Xcode,
+      # and an older one would produce an app that builds with pieces missing.
+      - name: Check the toolchain
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          swift --version
+          major="$(xcodebuild -version | head -1 | sed -E 's/^Xcode ([0-9]+).*/\1/')"
+          if [ "$major" -lt 26 ]; then
+            echo "Bloom needs Xcode 26 or newer, this runner has $major."
+            exit 1
+          fi
+
+      # Around thirty tests make a real commit with this machine's git, and
+      # RepositoryStarter refuses to commit without a name and an address. A
+      # fresh runner has neither, so one of them fails outright and the rest
+      # return early and assert nothing. This is what makes them run at all.
+      - name: Give the runner a git identity
+        run: |
+          set -euo pipefail
+          git config --global user.email "ci@bloom.local"
+          git config --global user.name "Bloom CI"
+
+      # Release configuration, because build.sh -r below wants the same objects
+      # and there is no reason to compile everything twice. This step is the one
+      # that answers "does Sources/Bloom still build".
+      - name: Build the app target
+        run: swift build -c release
+
+      # Even if the build above failed: the core suite does not depend on the
+      # app target compiling, and a run that reports both is worth more.
+      - name: Run the core tests
+        if: ${{ !cancelled() }}
+        run: ./test-core.sh
+
+      # Assembles Bloom.app: the icon, the App Intents metadata, the embedded
+      # Sparkle framework, and an ad-hoc signature. No secrets are involved, and
+      # none of the signing, notarisation or bucket steps in release.yml are
+      # touched. The result is an app nobody has vouched for, which is the point
+      # for now: it is here to be tried, not to be handed out.
+      - name: Assemble the app bundle
+        run: ./build.sh -r
+
+      - name: Zip the bundle
+        id: zip
+        run: |
+          set -euo pipefail
+          app="$(swift build -c release --show-bin-path)/Bloom.app"
+          [ -d "$app" ] || { echo "No bundle at $app"; exit 1; }
+          mkdir -p dist
+          # ditto, never zip. Sparkle.framework inside the bundle is a versioned
+          # framework held together by symlinks, and the bundle carries extended
+          # attributes and a signature. zip flattens the symlinks and drops the
+          # rest, and what comes out the far end does not launch.
+          /usr/bin/ditto -c -k --keepParent "$app" dist/Bloom.zip
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Zipped $(du -h dist/Bloom.zip | cut -f1)"
+
+      # The zip is uploaded rather than the bundle, because this action zips
+      # what it is given with a zipper of its own that does not keep symlinks.
+      # A downloaded artifact is therefore a zip inside a zip, and the inner one
+      # is the bundle ditto made.
+      - name: Upload the app
+        uses: actions/upload-artifact@v7
+        with:
+          name: Bloom-${{ steps.zip.outputs.sha }}
+          path: dist/Bloom.zip
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Say how to open it
+        run: |
+          {
+            echo "### Bloom ${{ steps.zip.outputs.sha }}"
+            echo
+            echo "The artifact is a zip holding \`Bloom.zip\`, which holds \`Bloom.app\`."
+            echo "It is ad-hoc signed and not notarised, so Gatekeeper quarantines it"
+            echo "on download and refuses to open it. After unzipping both layers:"
+            echo
+            echo '```'
+            echo "xattr -d -r com.apple.quarantine /path/to/Bloom.app"
+            echo "open /path/to/Bloom.app"
+            echo '```'
+            echo
+            echo "It keeps the real bundle id, so it uses the real database and the"
+            echo "real preferences, and it will not offer to update itself: build.sh"
+            echo "marks a build with no version as local and the updater refuses those."
+          } >> "$GITHUB_STEP_SUMMARY"
