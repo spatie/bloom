@@ -325,15 +325,15 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
     private func entry(for workspace: Workspace, symbol: String, label: String) -> NSMenuItem {
         let item = NSMenuItem(title: workspace.name, action: #selector(select(_:)), keyEquivalent: "")
         item.target = self
-        item.representedObject = workspace.id
+        item.represent(workspace.id)
         item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
         return item
     }
 
     @objc private func select(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String else { return }
+        guard let id = sender.represented(WorkspaceID.self) else { return }
         raiseWindow()
-        NotificationCenter.default.post(name: .bloomOpenWorkspace, object: id)
+        OpenWorkspaceNotification.post(id)
     }
 
     @objc private func openWindow() {

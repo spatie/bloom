@@ -4,8 +4,6 @@ import UserNotifications
 import BloomCore
 
 extension Notification.Name {
-    /// Decouples notification delivery from navigation so the app delegate never owns UI state.
-    static let bloomOpenWorkspace = Notification.Name("bloomOpenWorkspace")
     /// Carries a `bloom://` URL from the Apple Event handler to whichever window is open.
     static let bloomHandleURL = Notification.Name("bloomHandleURL")
 }
@@ -188,7 +186,7 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
                 keyEquivalent: ""
             )
             item.target = self
-            item.representedObject = workspace.id
+            item.represent(workspace.id)
             // The same glyph the sidebar uses for a running agent, so the two lists read as one
             // fact told twice rather than as two different states.
             item.image = NSImage(
@@ -201,10 +199,10 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
     }
 
     @objc private func openWorkspaceFromDock(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String else { return }
+        guard let id = sender.represented(WorkspaceID.self) else { return }
         NSApp.activate(ignoringOtherApps: true)
         NSApp.windows.first?.makeKeyAndOrderFront(nil)
-        NotificationCenter.default.post(name: .bloomOpenWorkspace, object: id)
+        OpenWorkspaceNotification.post(id)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -253,7 +251,7 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
             NSApp.activate(ignoringOtherApps: true)
             NSApp.windows.first?.makeKeyAndOrderFront(nil)
             if let workspaceID {
-                NotificationCenter.default.post(name: .bloomOpenWorkspace, object: workspaceID)
+                OpenWorkspaceNotification.post(workspaceID)
             }
             completionHandler()
         }

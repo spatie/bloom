@@ -138,7 +138,7 @@ enum Snapshot {
         // matters most: `--running w1,w2,w3/w1/` runs three, then one, then none.
         let stages = arguments[index + 1]
             .split(separator: "/", omittingEmptySubsequences: false)
-            .map { Set($0.split(separator: ",").map(String.init)) }
+            .map { Set($0.split(separator: ",").map { WorkspaceID(String($0)) }) }
         let selected = arguments.firstIndex(of: "--select").map { $0 + 1 }
             .flatMap { $0 < arguments.count ? arguments[$0] : nil }
 
@@ -147,7 +147,7 @@ enum Snapshot {
             try? await Task.sleep(for: .seconds(3))
             applyRequestedAppearance()
             if !isWindowCaptureRequested, let selected {
-                NotificationCenter.default.post(name: .bloomOpenWorkspace, object: selected)
+                OpenWorkspaceNotification.post(WorkspaceID(selected))
                 try? await Task.sleep(for: .seconds(2))
             }
             // `--collapse-sidebar` folds the first column away, which is the case the row signal
@@ -229,9 +229,7 @@ enum Snapshot {
             // inspector) can be captured rather than only the home screen.
             let arguments = CommandLine.arguments
             if let index = arguments.firstIndex(of: "--select"), index + 1 < arguments.count {
-                NotificationCenter.default.post(
-                    name: .bloomOpenWorkspace, object: arguments[index + 1]
-                )
+                OpenWorkspaceNotification.post(WorkspaceID(arguments[index + 1]))
                 try? await Task.sleep(for: .seconds(3))
             }
 
@@ -602,9 +600,13 @@ private struct ComponentGallery: View {
 }
 
 extension Notification.Name {
-    /// Carries a `Set<String>` of workspace ids that a capture run wants the window to believe are
-    /// mid turn. Posted only by `Snapshot.scheduleRunningStateIfRequested`, and only in a debug
-    /// build. See `View.acceptsCaptureRunningState`.
+    /// Carries a `Set<WorkspaceID>` of the workspaces a capture run wants the window to believe
+    /// are mid turn. Typed rather than a set of strings, because a notification's object is `Any?`
+    /// and an id that crosses one as a string is an id nothing checks: see
+    /// `OpenWorkspaceNotification`, which is that mistake as it was actually made.
+    ///
+    /// Posted only by `Snapshot.scheduleRunningStateIfRequested`, and only in a debug build. See
+    /// `View.acceptsCaptureRunningState`.
     static let bloomCaptureRunning = Notification.Name("bloom.captureRunning")
 
     /// Asks the setup row to unfold its log. Posted only by
@@ -626,8 +628,8 @@ extension View {
     func acceptsCaptureRunningState(_ app: AppModel) -> some View {
         #if DEBUG
         return onReceive(NotificationCenter.default.publisher(for: .bloomCaptureRunning)) { note in
-            guard let ids = note.object as? Set<String> else { return }
-            app.setRunningWorkspaceIDsForCapture(Set(ids.map(WorkspaceID.init)))
+            guard let ids = note.object as? Set<WorkspaceID> else { return }
+            app.setRunningWorkspaceIDsForCapture(ids)
         }
         #else
         return self

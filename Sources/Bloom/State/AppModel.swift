@@ -1492,9 +1492,9 @@ final class AppModel {
     ///
     /// The one entry point for "show me this workspace" from outside the window: the menu bar
     /// item, the Services item, a deep link and the capture harness all arrive here through
-    /// `.bloomOpenWorkspace`. It used to set `.workspace(id)` whatever the id was, and an id that
-    /// had since been archived resolved to no workspace at all, so the window quietly fell back
-    /// to Home. Now an archived id opens the reader instead of nothing.
+    /// `OpenWorkspaceNotification`. It used to set `.workspace(id)` whatever the id was, and an
+    /// id that had since been archived resolved to no workspace at all, so the window quietly fell
+    /// back to Home. Now an archived id opens the reader instead of nothing.
     func open(workspaceID id: WorkspaceID) async {
         if workspaces.contains(where: { $0.id == id }) {
             selection = .workspace(id)

@@ -95,7 +95,7 @@ enum FrameProbe {
         }
 
         if let selection {
-            NotificationCenter.default.post(name: .bloomOpenWorkspace, object: selection)
+            OpenWorkspaceNotification.post(WorkspaceID(selection))
             // Long enough for the transcript to load and the inspector to fetch its diff.
             try? await Task.sleep(for: .seconds(6))
         }

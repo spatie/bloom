@@ -71,7 +71,7 @@ enum RunningApp {
     static func select(workspaceID: WorkspaceID) {
         NSApp.activate(ignoringOtherApps: true)
         NSApp.windows.first?.makeKeyAndOrderFront(nil)
-        NotificationCenter.default.post(name: .bloomOpenWorkspace, object: workspaceID)
+        OpenWorkspaceNotification.post(workspaceID)
     }
 
     /// The menu bar extra and any panel put windows on `NSApp` too, and neither of them carries

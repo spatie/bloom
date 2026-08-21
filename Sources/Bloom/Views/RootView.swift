@@ -201,11 +201,11 @@ struct RootView: View {
         } message: { alert in
             Text(alert.message)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .bloomOpenWorkspace)) { note in
+        .onReceive(OpenWorkspaceNotification.publisher()) { id in
             // Through `open(workspaceID:)` rather than straight into the selection, so an id that
             // has since been archived opens its transcript instead of landing on Home with no
             // explanation. See `AppModel.open(workspaceID:)`.
-            if let id = note.object as? String { Task { await app.open(workspaceID: WorkspaceID(id)) } }
+            Task { await app.open(workspaceID: id) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .bloomToggleSidebar)) { _ in
             columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
@@ -292,8 +292,9 @@ struct RootView: View {
 }
 
 extension Notification.Name {
-    // bloomOpenWorkspace is declared in BloomAppDelegate.swift, next to the delegate that posts
-    // it. These two are only ever posted by views, so they live here.
+    // The channel that opens a workspace is `OpenWorkspaceNotification`, in the core, and it keeps
+    // its own name private so nothing can post an id down it untyped. These two carry no id and
+    // are only ever posted by views, so they live here.
     static let bloomToggleSidebar = Notification.Name("bloom.toggleSidebar")
     static let bloomNewWorkspace = Notification.Name("bloom.newWorkspace")
 }

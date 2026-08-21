@@ -19,10 +19,6 @@ import BloomCore
 final class NotificationService {
     static let shared = NotificationService()
 
-    /// The `userInfo` key carrying which workspace a banner is about. Nonisolated because a click
-    /// is delivered to the app delegate off the main actor and has to be read before hopping.
-    nonisolated private static let workspaceKey = "bloomWorkspaceID"
-
     /// The category carrying Reply and Open. Only ever set on a banner that names one workspace,
     /// because a reply box on "6 agents finished" would silently send to whichever of the six the
     /// digest happened to point at.
@@ -245,7 +241,7 @@ final class NotificationService {
         content.body = prepared.body
         content.sound = .default
         content.threadIdentifier = prepared.threadIdentifier
-        content.userInfo = [Self.workspaceKey: prepared.workspaceID]
+        content.userInfo = BannerUserInfo.encode(workspaceID: prepared.workspaceID)
         // `NotificationDigest` threads a single banner under the workspace it is about and a digest
         // under its event, so the two are told apart by whether the thread IS the workspace. That
         // is the same fact the reply box needs: exactly one agent to send to.
@@ -290,18 +286,17 @@ final class NotificationService {
             await transcript.saveDraft()
             NSApp.activate(ignoringOtherApps: true)
             NSApp.windows.first?.makeKeyAndOrderFront(nil)
-            NotificationCenter.default.post(name: .bloomOpenWorkspace, object: workspaceID)
+            OpenWorkspaceNotification.post(workspaceID)
             return
         }
 
         await transcript.send(text)
     }
 
-    /// Which workspace a click should select. Nil for a banner that names none, which only the
-    /// test notification does before a workspace has ever been selected.
+    /// Which workspace a click should select. Nonisolated because a click is delivered to the app
+    /// delegate off the main actor and has to be read before hopping.
     nonisolated static func workspaceID(from response: UNNotificationResponse) -> WorkspaceID? {
-        let stored = response.notification.request.content.userInfo[workspaceKey] as? String
-        return (stored?.isEmpty ?? true) ? nil : stored.map(WorkspaceID.init)
+        BannerUserInfo.workspaceID(from: response.notification.request.content.userInfo)
     }
 
     // MARK: - Checks
