@@ -85,16 +85,24 @@ public struct WorkspaceManager: Sendable {
     /// Creates the branch, the worktree, copies the configured files and returns immediately.
     /// The setup script runs separately so the UI can stream its output.
     ///
-    /// This is the lower half of starting a workspace and it does none of the orchestration:
-    /// no session row, no setup run, no naming. `WorkspaceManager.start` is what a route should
-    /// call, and `Tools/house-rules.sh` holds that line so a new route cannot grow its own
-    /// half-copy of the orchestration the way the deep link and the Shortcuts intent both did.
+    /// This is the lower half of starting a workspace and it does none of the orchestration: no
+    /// session row, no setup run, no naming, no idea who asked for it. `WorkspaceManager.start` is
+    /// the whole of that and is what a route calls.
+    ///
+    /// **Internal, and that is the point.** It was public, and every route that reached it grew
+    /// its own half of the orchestration around it: the create sheet had all of it, the `bloom://`
+    /// link and the Services menu had none of it, and the Shortcuts intent could not reach it at
+    /// all and polled the database instead. Internal means the app target cannot call this, so the
+    /// compiler holds the line for every route outside the core, and `Tools/house-rules.sh` holds
+    /// the remaining half: a new file inside the core naming it. The suite still reaches it
+    /// through `@testable`, because a test wanting a worktree and nothing else is not a route.
     ///
     /// - Parameter origin: who asked. Defaults to the owner because that is what this primitive
     ///   has always meant and what every test of it is about. The place where the answer cannot be
     ///   forgotten is `WorkspaceStartRequest`, whose initialiser has no default for it, and every
     ///   route that could have an agent behind it goes through that.
-    public func createWorkspace(
+    @discardableResult
+    func createWorkspace(
         repo: Repo,
         prompt: String,
         name: String? = nil,

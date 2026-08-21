@@ -3,7 +3,7 @@
 #
 #   ./Tools/house-rules.sh
 #
-# Three rules, and every one of them is here because it has already been broken:
+# Five rules, and every one of them is here because it has already been broken:
 #
 #   1. No em dashes and no en dashes. Anywhere. They arrive by the hundred from
 #      anything that writes prose for you, and once one is in a file the next
@@ -12,6 +12,11 @@
 #      name still turns up in new text written from stale memory.
 #   3. British spelling. The tree is already at 69 greys to 1 gray and 74
 #      cancelleds to 1 canceled, so this is about keeping it that way.
+#   4. BloomCore never imports SwiftUI. CLAUDE.md has said so since the split
+#      was made and nothing checked it, which is the state every rule here was
+#      in the day before it was written.
+#   5. One way to start a workspace. Four routes each grew their own half of it
+#      once already; see the rule itself for what that cost.
 #
 # Exit status is 1 if anything was found, and every finding is printed with the
 # file and line so it can be opened. The word lists are deliberately narrow:
@@ -89,6 +94,52 @@ for prefix in "${baton_allowed[@]}"; do
   case "$prefix" in */|*'*'*) continue ;; esac
   if [ -f "$prefix" ] && ! git grep -q -I -i baton -- "$prefix"; then
     echo "  note: $prefix no longer says Baton, so it can come off the list in $0."
+  fi
+done
+
+echo "==> the core does not import SwiftUI"
+# The split only means anything while it holds. Everything in BloomCore is
+# reachable by the test target and everything in Sources/Bloom is not, so a
+# decision that drifts into a view is a decision nothing can test. One import is
+# how that starts.
+if hits="$(git grep -n -I -e 'import SwiftUI' -e 'import AppKit' -- 'Sources/BloomCore/*' || true)" && [ -n "$hits" ]; then
+  echo "$hits" | show
+  report "BloomCore imports a UI framework. Move the view part into Sources/Bloom and leave the decision here, where the suite can reach it."
+fi
+
+echo "==> one way to start a workspace"
+# `WorkspaceManager.createWorkspace` cuts a worktree and writes a row. It does
+# not open the chat, write the model and effort onto it, run the setup script,
+# name the workspace or record who asked for it. All of that is
+# `WorkspaceManager.start`, and it is one method because it used to be four
+# half-copies: the create sheet had the lot, the `bloom://` link and the
+# Services menu had none of it and were silently hardwired to the defaults, and
+# the Shortcuts intent could not reach any of it, so it fired a URL and then
+# read the database every 400ms for a minute hoping to recognise its own row.
+#
+# The compiler holds most of this line, because `createWorkspace` is internal to
+# BloomCore and the app target cannot call it at all. What is left is a new file
+# inside the core, which the compiler would allow and which is exactly how the
+# next half-copy would start.
+#
+# Every file inside the core allowed to name it, and why. This list should only
+# ever get shorter. A file not on it that names it is a new mistake.
+#
+# The suite is not on it and does not need to be: it reaches the method through
+# `@testable`, and a test that wants a worktree and nothing else is not a route
+# into the app.
+create_workspace_allowed=(
+  'Sources/BloomCore/WorkspaceManager.swift' # declares it
+  'Sources/BloomCore/WorkspaceStart.swift'   # the one caller: `start`
+)
+for file in $(git grep -l -I -e 'createWorkspace(' -- 'Sources/BloomCore/*' || true); do
+  allowed=0
+  for path in "${create_workspace_allowed[@]}"; do
+    [ "$file" = "$path" ] && allowed=1
+  done
+  if [ "$allowed" -eq 0 ]; then
+    git grep -n -I -e 'createWorkspace(' -- "$file" | show
+    report "$file cuts a worktree itself instead of calling WorkspaceManager.start. A route that stops at createWorkspace gets no chat, no setup run, no name and no record of who asked, and nothing says so."
   fi
 done
 
