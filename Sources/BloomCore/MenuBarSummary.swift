@@ -1,13 +1,14 @@
 import Foundation
 
-/// What the menu bar item says without being opened.
+/// What the menu bar item says without being opened, and what the menu under it lists.
 ///
 /// The whole reason to live in the menu bar is the glance: if the answer needs a click it might as
 /// well have stayed in the Dock. So the item carries the numbers themselves, and this decides
 /// which of them are worth the width.
 ///
-/// In the core rather than beside the status item, so the wording and the arithmetic can be
-/// tested against fixtures rather than read off a strip of menu bar that cannot be screenshotted.
+/// In the core rather than beside the status item, so the wording, the arithmetic and the three
+/// filters the menu is built from can be tested against fixtures rather than read off a strip of
+/// menu bar that cannot be screenshotted.
 public enum MenuBarSummary {
     /// One number and the glyph that says what it counts.
     public struct Segment: Equatable, Sendable {
@@ -85,8 +86,8 @@ public enum MenuBarSummary {
     /// moment it was clicked. What a bare strip actually means is that nothing needs a person.
     public static let idleTooltip = "Nothing waiting on you"
 
-    /// The one disabled row shown when neither list has anything in it, so the menu is never an
-    /// empty rectangle that looks broken.
+    /// The one disabled row shown when none of the lists has anything in it, so the menu is never
+    /// an empty rectangle that looks broken.
     public static let emptyTitle = "No agents running"
 
     /// The heading over the workspaces whose agent is blocked on a question. First in the menu,
@@ -101,4 +102,80 @@ public enum MenuBarSummary {
     /// "Waiting for you" rather than "Unread", because the row underneath is a place to go rather
     /// than a message to mark as read.
     public static let unreadHeading = "Waiting for you"
+
+    /// One heading in the menu and the workspaces listed under it.
+    public struct Section: Equatable, Sendable {
+        public let heading: String
+        /// The glyph on every row in the section, the same one the strip or the sidebar marks that
+        /// state with, so a count and the rows it stands for are drawn alike.
+        public let symbolName: String
+        /// The accessibility description of that glyph, read one row at a time.
+        public let label: String
+        public let workspaces: [Workspace]
+
+        public init(heading: String, symbolName: String, label: String, workspaces: [Workspace]) {
+            self.heading = heading
+            self.symbolName = symbolName
+            self.label = label
+            self.workspaces = workspaces
+        }
+    }
+
+    /// The menu's lists, in the order they are drawn, with the empty ones left out.
+    ///
+    /// Here rather than beside the status item because this is where a bug lived. The menu used to
+    /// be two filters written inline, and the local holding the second was called `waiting` while
+    /// what it held was unread rows. The workspaces actually blocked on a question had no section
+    /// at all: the strip counted one, and the menu that opened under it offered no way of finding
+    /// out which workspace was asking. A filter written in a view is a decision nothing can test,
+    /// so the three judgements live here, named after what they hold.
+    ///
+    /// `isRunning` and `isAwaitingPermission` are passed in for the reason `DockBadge` takes them:
+    /// only the app layer knows, and it knows from the same observable sets the counts are read
+    /// from, so the number in the strip and the list in the menu cannot disagree.
+    ///
+    /// Each workspace appears once, under the state the sidebar marks it with, because a row in
+    /// two lists would contradict the single glyph beside it. `WorkspaceStatus` resolves waiting
+    /// ahead of running, so running drops the blocked ones; unread is `DockBadge.unreadCount`'s
+    /// own test written as a filter, which has to stay that way for the list to match the count,
+    /// and it needs no waiting term because a blocked agent is a running one.
+    public static func sections(
+        in workspaces: [Workspace],
+        isRunning: (Workspace) -> Bool,
+        isAwaitingPermission: (Workspace) -> Bool
+    ) -> [Section] {
+        var sections: [Section] = []
+
+        let waiting = workspaces.filter(isAwaitingPermission)
+        if !waiting.isEmpty {
+            sections.append(Section(
+                heading: waitingHeading,
+                symbolName: waitingSymbol,
+                label: "Agent waiting on you",
+                workspaces: waiting
+            ))
+        }
+
+        let running = workspaces.filter { isRunning($0) && !isAwaitingPermission($0) }
+        if !running.isEmpty {
+            sections.append(Section(
+                heading: runningHeading,
+                symbolName: runningSymbol,
+                label: "Agent running",
+                workspaces: running
+            ))
+        }
+
+        let unread = workspaces.filter { $0.unread && !isRunning($0) }
+        if !unread.isEmpty {
+            sections.append(Section(
+                heading: unreadHeading,
+                symbolName: unreadSymbol,
+                label: "Unread",
+                workspaces: unread
+            ))
+        }
+
+        return sections
+    }
 }

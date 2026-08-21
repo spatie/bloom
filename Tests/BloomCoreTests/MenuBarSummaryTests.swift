@@ -54,4 +54,81 @@ struct MenuBarSummaryTests {
         #expect(MenuBarSummary.tooltip(waiting: 0, unread: 0) == MenuBarSummary.idleTooltip)
         #expect(MenuBarSummary.tooltip(waiting: 0, unread: 0) != MenuBarSummary.emptyTitle)
     }
+
+    // MARK: - The lists in the menu
+
+    /// The gap this was written for. The strip said one agent was waiting, and the menu that
+    /// opened under it had a Running section and an unread section and no way at all of finding
+    /// out which workspace was asking the question.
+    @Test("a workspace waiting on a person is listed, first")
+    func waitingIsListed() {
+        let asking = workspace(name: "Test bloom mcp")
+        let sections = MenuBarSummary.sections(
+            in: [asking],
+            isRunning: { _ in true },
+            isAwaitingPermission: { $0.id == asking.id }
+        )
+
+        #expect(sections.first?.heading == MenuBarSummary.waitingHeading)
+        #expect(sections.first?.symbolName == MenuBarSummary.waitingSymbol)
+        #expect(sections.first?.workspaces.map(\.name) == ["Test bloom mcp"])
+    }
+
+    /// One row per workspace, under the state the sidebar marks it with. A blocked agent is a
+    /// running one, so without the precedence it would be named twice under two different glyphs.
+    @Test("a blocked agent is not also listed as running")
+    func waitingOutranksRunning() {
+        let asking = workspace(name: "Asking")
+        let working = workspace(name: "Working")
+        let sections = MenuBarSummary.sections(
+            in: [asking, working],
+            isRunning: { _ in true },
+            isAwaitingPermission: { $0.id == asking.id }
+        )
+
+        #expect(sections.map(\.heading) == [MenuBarSummary.waitingHeading, MenuBarSummary.runningHeading])
+        #expect(sections.last?.workspaces.map(\.name) == ["Working"])
+    }
+
+    /// The same test `DockBadge.unreadCount` counts with, so the number in the strip and the rows
+    /// under the heading are the same workspaces.
+    @Test("unread lists exactly what the unread count counted")
+    func unreadMatchesTheCount() {
+        let read = workspace(name: "Read")
+        let unread = workspace(name: "Unread", unread: true)
+        let busy = workspace(name: "Busy", unread: true)
+        let all = [read, unread, busy]
+        let sections = MenuBarSummary.sections(
+            in: all,
+            isRunning: { $0.id == busy.id },
+            isAwaitingPermission: { _ in false }
+        )
+
+        let listed = sections.first { $0.heading == MenuBarSummary.unreadHeading }
+        #expect(listed?.workspaces.map(\.name) == ["Unread"])
+        #expect(listed?.workspaces.count == DockBadge.unreadCount(in: all) { $0.id == busy.id })
+    }
+
+    @Test("an idle machine has no lists at all")
+    func nothingToList() {
+        let sections = MenuBarSummary.sections(
+            in: [workspace(name: "Quiet")],
+            isRunning: { _ in false },
+            isAwaitingPermission: { _ in false }
+        )
+
+        #expect(sections.isEmpty)
+    }
+
+    private func workspace(name: String, unread: Bool = false) -> Workspace {
+        Workspace(
+            repoID: RepoID("repo"),
+            name: name,
+            branch: "feature/\(name)",
+            path: "/tmp/\(name)",
+            baseBranch: "main",
+            setupState: .succeeded,
+            unread: unread
+        )
+    }
 }

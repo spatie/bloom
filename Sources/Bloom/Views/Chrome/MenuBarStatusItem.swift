@@ -1,8 +1,9 @@
 import AppKit
 import BloomCore
 
-/// The menu bar item: which agents are running, which finished while you were away, one click to
-/// land on either, and the switch that decides whether the Mac may fall asleep underneath them.
+/// The menu bar item: which agents are blocked on a question, which are running, which finished
+/// while you were away, one click to land on any of them, and the switch that decides whether the
+/// Mac may fall asleep underneath them.
 ///
 /// An `NSStatusItem` rather than SwiftUI's `MenuBarExtra`. `MenuBarExtra(isInserted:)` is the
 /// obvious way to express a status item that can be switched off, and on macOS 26 a scene whose
@@ -246,30 +247,26 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         menu.addItem(sleepToggle())
         menu.addItem(.separator())
 
-        let running = app?.workspaces.filter { app?.isRunning($0) ?? false } ?? []
-        // The same count the Dock badge is drawn from, so "unread" means one thing in both places:
-        // finished, not read, and not running again.
-        let waiting = app?.workspaces.filter { $0.unread && !(app?.isRunning($0) ?? false) } ?? []
+        // Which lists there are, in which order, and what each one is called: all of it in
+        // `MenuBarSummary`, so the menu cannot fall out of step with the strip above it. Both are
+        // read from the same two observable sets on `AppModel` that the counts are taken from, so
+        // a hand with a 1 beside it in the menu bar and this list always name the same workspace.
+        let sections = MenuBarSummary.sections(
+            in: app?.workspaces ?? [],
+            isRunning: { app?.isRunning($0) ?? false },
+            isAwaitingPermission: { app?.isAwaitingPermission($0) ?? false }
+        )
 
-        if running.isEmpty, waiting.isEmpty {
+        if sections.isEmpty {
             menu.addItem(disabled(MenuBarSummary.emptyTitle))
         }
 
-        if !running.isEmpty {
-            menu.addItem(disabled(MenuBarSummary.runningHeading))
-            for workspace in running {
+        for (index, section) in sections.enumerated() {
+            if index > 0 { menu.addItem(.separator()) }
+            menu.addItem(disabled(section.heading))
+            for workspace in section.workspaces {
                 menu.addItem(entry(
-                    for: workspace, symbol: MenuBarSummary.runningSymbol, label: "Agent running"
-                ))
-            }
-        }
-
-        if !waiting.isEmpty {
-            if !running.isEmpty { menu.addItem(.separator()) }
-            menu.addItem(disabled(MenuBarSummary.unreadHeading))
-            for workspace in waiting {
-                menu.addItem(entry(
-                    for: workspace, symbol: MenuBarSummary.unreadSymbol, label: "Unread"
+                    for: workspace, symbol: section.symbolName, label: section.label
                 ))
             }
         }
