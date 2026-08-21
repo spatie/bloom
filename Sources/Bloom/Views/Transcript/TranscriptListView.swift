@@ -63,8 +63,6 @@ struct TranscriptListView: View {
     /// never be mistaken for a sequence number however the two lists grow. The same trick
     /// `WorkspaceEventRow.endID` uses and for the same reason.
     private static func pendingID(_ id: DeliveryID) -> String { "bloom.pending.\(id)" }
-    /// How far off the bottom the user may be and still be considered to be following along.
-    private static let stickyThreshold: CGFloat = 96
     /// A user bubble takes this share of the pane, and never gets narrower than the floor, so a
     /// long prompt wraps sensibly and a short one still reads as one side of a conversation.
     private static let bubbleShare: CGFloat = 0.7
@@ -264,11 +262,24 @@ struct TranscriptListView: View {
             // is the single most irritating thing a live log can do, and an absent anchor leaves
             // them exactly where they are.
             .defaultScrollAnchor(geometry.isNearBottom ? .bottom : nil, for: .sizeChanges)
-            .onScrollGeometryChange(for: TranscriptGeometry.self, of: Self.measure) { old, new in
+            .onScrollGeometryChange(for: TranscriptGeometry.self, of: Self.measure) { _, new in
                 geometry = new
-                if old.isNearBottom != new.isNearBottom {
-                    onScrolledUpChange?(!new.isNearBottom)
-                }
+                // The state, every time, rather than only on a transition of it.
+                //
+                // This one fact had three copies: SwiftUI's own last projection, this view's
+                // `geometry`, and the pane's flag that the pill is actually drawn from. Only the
+                // first was ever authoritative, and the pane was told about CHANGES rather than
+                // handed the answer, so any moment that moved one copy without moving the others
+                // left the pill standing over a conversation the reader was already at the end of.
+                // The session switch below is one such moment written into this file: it assigns
+                // `geometry.isNearBottom` by hand and cannot reach SwiftUI's copy at all.
+                //
+                // It costs almost nothing to say it every time. This closure runs only when the
+                // projected value changes, and both halves of that value are quantised: the cap
+                // moves about once every eleven points of a drag, and the flag moves when the
+                // reader arrives at or leaves the end. So the extra reports are a handful per
+                // scroll, and each of them is a correction the transition form could not make.
+                onScrolledUpChange?(!new.isNearBottom)
             }
             .settlesArrivals($arrival)
             .onChange(of: transcript.rows.count, initial: true) { _, _ in
@@ -376,25 +387,30 @@ struct TranscriptListView: View {
         }
     }
 
-    /// How far the end of the content is below the bottom edge of the viewport. Negative when the
-    /// content is shorter than the pane, which counts as being at the bottom.
+    /// What the scroll view is telling us, projected down to the two things this view acts on.
+    ///
+    /// Whether the reader is at the end is `ScrollEnd`'s answer rather than a subtraction written
+    /// here, and that is not tidiness. The two cases it adds are exactly the ones a subtraction
+    /// gets wrong, and both of them float the jump pill over a conversation whose last line is
+    /// already on screen: content that fits in the pane, and a pane with no height to fit it in.
     ///
     /// The bubble cap is worked out here, inside the projection, rather than in the body from a
     /// stored width. `onScrollGeometryChange` only calls its handler when the projected value
     /// changes, so rounding on this side of the line means a drag stops writing state, and stops
     /// re-running the list body, for the eleven points of travel between one cap and the next.
     private static func measure(_ scroll: ScrollGeometry) -> TranscriptGeometry {
-        let distanceFromEnd = scroll.contentSize.height
-            - scroll.contentOffset.y
-            - scroll.containerSize.height
-        return TranscriptGeometry(
+        TranscriptGeometry(
             bubbleCap: TranscriptGeometry.cap(
                 width: scroll.containerSize.width,
                 share: bubbleShare,
                 gutter: Metrics.gutter,
                 floor: bubbleFloor
             ),
-            isNearBottom: distanceFromEnd < stickyThreshold
+            isNearBottom: ScrollEnd.isAtEnd(
+                contentHeight: scroll.contentSize.height,
+                viewportHeight: scroll.containerSize.height,
+                offset: scroll.contentOffset.y
+            )
         )
     }
 
@@ -421,7 +437,7 @@ struct TranscriptListView: View {
     ///
     /// `wasAsked` separates the reader's own request from the log moving under them. The request
     /// is obeyed wherever they are. A flush is obeyed only while `isNearBottom` still says they
-    /// are following along, which is the same test, at the same `stickyThreshold`, that decides
+    /// are following along, which is the same test, at the same `ScrollEnd.threshold`, that decides
     /// whether a running turn is followed. There is one rule about dragging a reader in this
     /// window, and this is not a second one.
     private func showSetupLogEnd(_ proxy: ScrollViewProxy, wasAsked: Bool) {
