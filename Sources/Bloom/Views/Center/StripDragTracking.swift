@@ -5,8 +5,9 @@ import BloomCore
 /// pointer: where it is, and when a drag of it starts and stops.
 ///
 /// A modifier rather than three lines repeated on each of the two kinds of tab, because they have
-/// to agree exactly. The two runs are drawn by different functions and a measurement taken in one
-/// space and a pointer reported in another would put every tab of one run at the wrong place.
+/// to agree exactly. A conversation and a tool tab are drawn by different functions, and a
+/// measurement taken in one space with a pointer reported in another would put every tab of one
+/// kind at the wrong place.
 ///
 /// `onDragSessionUpdated` is the only thing that says WHICH tab a drag is carrying while it is in
 /// flight. The drop tells us at the end, and by then it is too late to have moved anything. A drop

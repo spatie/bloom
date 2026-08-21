@@ -12,11 +12,11 @@ import Foundation
 /// the pointer is, which is what direct manipulation means, and it needs nothing remembered from
 /// the start of the gesture to work it out.
 ///
-/// **A run is a run.** The order this returns is a permutation of the one it was given and never
-/// anything else, so a conversation dragged towards the shells stops at the last conversation and
-/// stays visibly stuck there. That is the refusal, and it is a refusal the user can see happening
-/// rather than one they find out about by letting go and watching nothing happen. See `TabSet` for
-/// why the strip is two runs at all.
+/// **The answer is always a permutation of the list it was given**, so whatever a run is taken to
+/// be, a drag cannot add to it, lose from it, or leave it. It was once handed one of the strip's
+/// two runs, which made a conversation dragged towards the shells stop dead at the last
+/// conversation; it is handed the whole strip now, so nothing stops. The property is what matters
+/// and it did not change: a drag rearranges a list and can do nothing else to it.
 public enum TabDragOrder {
     /// The run as it should now read.
     ///

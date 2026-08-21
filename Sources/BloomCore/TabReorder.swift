@@ -23,9 +23,10 @@ import Foundation
 /// a rule about the drop target instead would risk landing somewhere other than where the strip had
 /// been saying it would land, which is the one thing a live preview must never do.
 ///
-/// Generic over the id because the strip's two runs are keyed differently: a conversation is a
-/// `SessionID` row in SQLite, a shell or a page is a `String` line in user defaults. Neither run can
-/// be dragged into the other (see `TabSet`), so one run at a time is the whole of the job.
+/// Generic over the id because it is asked three things that are keyed differently. A conversation
+/// is a `SessionID` row in SQLite and a shell or a page is a `String` line in user defaults, and
+/// each of those two lists has an order of its own to keep; the strip laid over both of them is a
+/// list of `PaneContent`. Same rule, three callers, one implementation.
 public enum TabReorder {
     /// The run's new stored order, or nil when there is nothing to write.
     ///

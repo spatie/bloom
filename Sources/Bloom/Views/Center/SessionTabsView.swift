@@ -59,54 +59,30 @@ struct SessionTabsView: View {
     ///
     /// A tab owns a pane tree, so a thing living in a pane of some other tab is not also a tab of
     /// its own: it is reachable through the tab that has it, and an entry for it here would be a
-    /// second way in. `TabSet.entries` is that rule, and everything below is a reading of this
-    /// list rather than of the two stores under it.
-    private var entries: [PaneContent] {
+    /// second way in. `StripOrder.entries` is that rule together with whatever order the user has
+    /// dragged the strip into, and everything below is a reading of this list rather than of the
+    /// two stores under it.
+    private var stored: [PaneContent] {
         store.entries(in: model)
     }
 
-    /// The conversations run, in the order the strip is DRAWING it, which is the live order while
-    /// a tab is being dragged along it and the stored order otherwise.
-    private var sessionTabs: [Session] {
-        arranged(storedSessionTabs) { .chat($0.id) }
-    }
-
-    private var storedSessionTabs: [Session] {
-        entries.compactMap { entry in
-            guard case .chat(let id) = entry else { return nil }
-            return model.sessions.first { $0.id == id }
-        }
-    }
-
-    /// The tools run, in the order the strip is DRAWING it. See `sessionTabs`.
-    private var toolTabs: [CenterTab] {
-        arranged(storedToolTabs) { .tool($0.id) }
-    }
-
-    private var storedToolTabs: [CenterTab] {
-        let open = tabs.tabs(for: model.workspace.id)
-        return entries.compactMap { entry in
-            guard case .tool(let id) = entry else { return nil }
-            return open.first { $0.id == id }
-        }
-    }
-
-    /// A run put into the order a drag is currently showing, or left alone when the drag is in the
-    /// other run or when there is no drag.
+    /// The strip in the order it is DRAWING, which is the live order while a tab is being dragged
+    /// along it and the stored one otherwise.
+    ///
+    /// **One list, not two runs.** The strip used to be conversations and then tools, because they
+    /// are two kinds of thing kept in two stores; `TabSet` still says so and is still the fallback,
+    /// but a user who has arranged their tabs is arranging one row and that is what this is. The
+    /// owner has one conversation and one terminal, so under the old rule every drag he could make
+    /// was one that could not be honoured.
     ///
     /// Reordering the `ForEach` rather than offsetting the tabs by hand, because the ids are stable
     /// and SwiftUI MOVES a view whose identity it already has rather than building a new one. That
     /// is safe here in a way it would not be a row lower: a tab in this strip is a label and a close
     /// button, and the live shell or web view it stands for lives in `CenterPaneView`, which this
     /// does not touch at all.
-    ///
-    /// Only the run the drag belongs to, matched by its whole set of ids rather than by a flag, so
-    /// the other run cannot be rearranged by a drag that has nothing to do with it.
-    private func arranged<Item>(_ run: [Item], by name: (Item) -> PaneContent) -> [Item] {
-        guard let drag else { return run }
-        let byContent = Dictionary(run.map { (name($0), $0) }, uniquingKeysWith: { first, _ in first })
-        guard byContent.count == run.count, Set(byContent.keys) == Set(drag.order) else { return run }
-        return drag.order.compactMap { byContent[$0] }
+    private var entries: [PaneContent] {
+        guard let drag, Set(drag.order) == Set(stored) else { return stored }
+        return drag.order
     }
 
     /// Which tab the user is in. **One** answer, where `CenterPaneStore.isShowing` gave the strip
@@ -119,24 +95,26 @@ struct SessionTabsView: View {
     var body: some View {
         TabStrip(pane: Self.pane, selection: selectedID) {
             HStack(spacing: 0) {
-                ForEach(Array(sessionTabs.enumerated()), id: \.element.id) { index, session in
+                // One run over one list. A conversation and a terminal are two kinds of thing kept
+                // in two stores, which is why they used to be drawn by two `ForEach`es in that
+                // order, and it is still what the strip falls back to. It is not what the user is
+                // arranging, though: they are arranging one row, and drawing it as two made the one
+                // drag the owner could actually make into a drag that could not be honoured.
+                ForEach(Array(entries.enumerated()), id: \.element) { index, entry in
                     if index > 0 {
-                        TabStripSeparator(
-                            isHidden: isSelected(sessionTabs[index - 1]) || isSelected(session)
-                        )
+                        TabStripSeparator(isHidden: !isSeparated(at: index))
                     }
-                    sessionTab(session)
-                        .id(session.id)
-                }
 
-                ForEach(Array(toolTabs.enumerated()), id: \.element.id) { index, tab in
-                    if index > 0 || !sessionTabs.isEmpty {
-                        TabStripSeparator(
-                            isHidden: isSelected(before: tab, at: index) || isSelected(tab)
-                        )
+                    switch entry {
+                    case .chat(let id):
+                        if let session = session(id) {
+                            sessionTab(session).id(id)
+                        }
+                    case .tool(let id):
+                        if let tab = tool(id) {
+                            toolTab(tab).id(id)
+                        }
                     }
-                    toolTab(tab)
-                        .id(tab.id)
                 }
             }
             .coordinateSpace(.named(Self.stripSpace))
@@ -193,6 +171,16 @@ struct SessionTabsView: View {
         entries.map(\.id)
     }
 
+    /// The conversation or the tool tab one entry of the strip stands for, and nil for an entry
+    /// whose content has gone between the strip being derived and this being asked.
+    private func session(_ id: SessionID) -> Session? {
+        model.sessions.first { $0.id == id }
+    }
+
+    private func tool(_ id: String) -> CenterTab? {
+        tabs.tabs(for: model.workspace.id).first { $0.id == id }
+    }
+
     /// Whether a tab is the one the pane's leading edge runs through.
     ///
     /// This strip begins at that edge: it has no leading control, so its first tab starts where
@@ -211,11 +199,8 @@ struct SessionTabsView: View {
     /// the moment after a tab is closed: aiming a scroll at an id that is no longer laid out does
     /// nothing, and this says so rather than relying on that.
     private var selectedID: AnyHashable? {
-        switch selectedTab {
-        case .chat(let id): sessionTabs.contains { $0.id == id } ? AnyHashable(id) : nil
-        case .tool(let id): toolTabs.contains { $0.id == id } ? AnyHashable(id) : nil
-        case nil: nil
-        }
+        guard let selectedTab, entries.contains(selectedTab) else { return nil }
+        return AnyHashable(selectedTab.id)
     }
 
     private func isSelected(_ session: Session) -> Bool {
@@ -226,19 +211,21 @@ struct SessionTabsView: View {
         selectedTab == .tool(tab.id)
     }
 
-    /// Whether a tab is selected, named by id alone. The strip's two runs answer to two different
-    /// cases of `PaneContent`, and `order` has already thrown that distinction away.
+    /// Whether a tab is selected, named by id alone, for the callers that have thrown away which
+    /// of the two kinds of thing it is. `order` is one such.
     private func isSelected(_ id: String) -> Bool {
         selectedTab?.id == id
     }
 
-    /// Whether whatever sits immediately before this tool tab is the selected one, which is the
-    /// last chat when the tool tabs start and the previous tool tab otherwise.
-    private func isSelected(before tab: CenterTab, at index: Int) -> Bool {
-        if index == 0 {
-            return sessionTabs.last.map(isSelected) ?? false
-        }
-        return isSelected(toolTabs[index - 1])
+    /// Whether the rule between two tabs is drawn.
+    ///
+    /// Hidden against the selected tab on either side, whose own fill is its edge. One rule for the
+    /// whole strip now that the strip is one list: the pair of cases this used to need, "the last
+    /// conversation before the first tool" and "the tool before this one", were the seam between
+    /// two runs and there is no seam any more.
+    private func isSeparated(at index: Int) -> Bool {
+        guard index > 0 else { return false }
+        return !isSelected(entries[index - 1].id) && !isSelected(entries[index].id)
     }
 
     // MARK: - Tabs
@@ -475,39 +462,39 @@ struct SessionTabsView: View {
 
     // MARK: - Reordering
     //
-    // Conversations and tools are two runs of the strip, and a drag stays inside its own run.
+    // The strip is one list and a tab goes anywhere in it. It was two runs, conversations and then
+    // tools, and that rule is still what a workspace nobody has arranged reads as: they are two
+    // kinds of thing kept in two stores with two lifetimes, a conversation being a SQLite row that
+    // outlives the launch and a tool tab a line in user defaults that is better lost than migrated.
+    // What that argument settles is where the ORDER can live, and it settles it well. What it does
+    // not settle is what the user may drag, and treating it as though it did left the owner, whose
+    // workspace is one conversation and one terminal, with no drag he could make that would be
+    // honoured. See `StripOrder`, which holds the interleaving and what losing it costs.
     //
-    // They are not one list because they are not one kind of thing, and because they are not one
-    // store either: a session is a row in SQLite that outlives the launch, a terminal or a browser
-    // tab is a line in user defaults that is better lost than migrated. Interleaving them would
-    // mean one order spanning both, and a session restored from the database would have no way of
-    // knowing where a terminal that no longer exists used to sit. Keeping tools after the
-    // conversations also means opening or closing one never shifts a conversation the user was
-    // aiming at.
+    // Every drag writes three times. The strip's own order is one key in defaults; the
+    // conversations' order among themselves goes back to `sessions.sort_order` and the tools' to
+    // their own list, so a workspace that loses the strip key keeps each kind in the order the user
+    // put it in and loses only the mixing of the two.
     //
-    // The payload is the id rather than a `Transferable` of our own, matching the workspace rows
-    // in the sidebar. Anything else dropped on a tab, including text from another app, names
-    // nothing in the run it was let go over, and `TabReorder` answers with nothing.
+    // What is still refused here is refused for a reason rather than by leftover. Something from
+    // another app names nothing the workspace has. A strip of one tab has no order to change. A
+    // tab absorbed into a pane of another tab is not in the strip to be dragged. There is nothing
+    // left that a drag inside the strip cannot ask for.
     //
-    // Neither of these answers with a Bool. `dropDestination`'s action used to be asked whether it
-    // had taken the drop; the macOS 26 one returns Void and is not asked, so a returned answer is
-    // a value nobody reads and the compiler says so.
+    // The payload is the id rather than a `Transferable` of our own, matching the workspace rows in
+    // the sidebar. It only has to name which tab is being carried: the ORDER comes from where the
+    // pointer is, which is `TabDragOrder`, and by the time the drop arrives the strip has been
+    // showing the answer for as long as the drag has lasted.
     //
-    // Neither of them counts tabs any more. Both used to hand the store the target's OFFSET, and
-    // the two lists that offset could be read in stopped being the same list the day the strip
-    // became derived: `entries` is the stored run minus whatever a tab has absorbed. Stored `[T1, T2, T3]`
-    // with `T2` living in a pane of another tab draws as `[T1, T3]`, so dragging `T1` onto `T3`
-    // took offset 1 and produced `[T2, T1, T3]`, which reads back through the strip as `[T1, T3]`:
-    // the order it started from. The tab sprang back under the pointer, nothing was logged, and
-    // the gesture looked ignored. `TabReorder` states the answer in ids, over both lists at once,
-    // and is in the core because that is a decision with cases worth testing.
+    // The drop does not answer with a Bool. `dropDestination`'s action used to be asked whether it
+    // had taken the drop; the macOS 26 one returns Void and is not asked.
 
-    /// A drag of this tab has begun. The run and where its tabs are now are frozen here, so the
+    /// A drag of this tab has begun. The strip and where its tabs are now are frozen here, so the
     /// answer cannot chase its own tail once they start moving.
     private func begin(_ tab: PaneContent) {
         guard drag?.tab != tab else { return }
-        let run = run(containing: tab)
-        guard run.count > 1 else { return }
+        let run = stored
+        guard run.count > 1, run.contains(tab) else { return }
         drag = StripDrag(tab: tab, run: run, centres: centres, order: run)
     }
 
@@ -535,15 +522,12 @@ struct SessionTabsView: View {
     /// instead of continuously.
     private func commit(_ droppedID: String?, at pointer: Double) {
         guard let tab = drag?.tab ?? droppedID.flatMap(content(named:)) else { return }
-        let run = drag?.run ?? run(containing: tab)
-        guard run.count > 1 else { return drag = nil }
+        let run = drag?.run ?? stored
+        guard run.count > 1, run.contains(tab) else { return drag = nil }
 
-        settle(
-            drag?.order ?? TabDragOrder.live(
-                run, moving: tab, centres: drag?.centres ?? centres, to: pointer
-            ),
-            of: tab
-        )
+        settle(drag?.order ?? TabDragOrder.live(
+            run, moving: tab, centres: drag?.centres ?? centres, to: pointer
+        ))
     }
 
     /// The other end of the same gesture. A tab let go over a PANE is taken by the pane and the
@@ -552,54 +536,49 @@ struct SessionTabsView: View {
     private func finish(taken: Bool) {
         guard let current = drag else { return }
         guard taken else { return drag = nil }
-        settle(current.order, of: current.tab)
+        settle(current.order)
     }
 
-    /// Writes a run's new order and clears the preview. Whichever end of the drag gets here first
-    /// does the work, and the other finds nothing pending.
-    private func settle(_ order: [PaneContent], of tab: PaneContent) {
+    /// Writes the order the strip has been showing, and clears the preview. Whichever end of the
+    /// drag gets here first does the work, and the other finds nothing pending.
+    ///
+    /// Three writes, and the two after the first are what make a lost defaults file cost only the
+    /// interleaving. The strip's own order is one key in user defaults; the conversations' order
+    /// among themselves goes back to `sessions.sort_order` in SQLite and the tools' among
+    /// themselves to their own list, so a workspace that loses the strip key comes back with each
+    /// kind in the order the user put it in and only the mixing of the two undone. See
+    /// `StripOrder`, where that cost is written out.
+    private func settle(_ order: [PaneContent]) {
         drag = nil
-        switch tab {
-        case .chat: reorderSessions(to: order)
-        case .tool: reorderTools(to: order)
-        }
-    }
-
-    /// Which run a tab belongs to, and empty for something that is in neither, which is anything
-    /// dropped here from outside the app.
-    private func run(containing tab: PaneContent) -> [PaneContent] {
-        let chats = storedSessionTabs.map { PaneContent.chat($0.id) }
-        if chats.contains(tab) { return chats }
-        let tools = storedToolTabs.map { PaneContent.tool($0.id) }
-        return tools.contains(tab) ? tools : []
+        store.reorder(order, in: model)
+        reorderSessions(within: order)
+        reorderTools(within: order)
     }
 
     /// What a dragged id names. The payload is a bare id, because that is what the strip has always
-    /// sent, so which of the two runs it belongs to is recovered by looking it up.
+    /// sent, so which of the two kinds it is is recovered by looking it up.
     private func content(named id: String) -> PaneContent? {
         if model.sessions.contains(where: { $0.id.rawValue == id }) { return .chat(SessionID(id)) }
         if tabs.tabs(for: model.workspace.id).contains(where: { $0.id == id }) { return .tool(id) }
         return nil
     }
 
-    private func reorderSessions(to visible: [PaneContent]) {
-        let drawn = visible.compactMap { content -> SessionID? in
-            guard case .chat(let id) = content else { return nil }
+    private func reorderSessions(within strip: [PaneContent]) {
+        let drawn = strip.compactMap { entry -> SessionID? in
+            guard case .chat(let id) = entry else { return nil }
             return id
         }
-        guard drawn.count == visible.count,
-              let order = TabReorder.apply(drawn, to: model.sessions.map(\.id)) else { return }
+        guard let order = TabReorder.apply(drawn, to: model.sessions.map(\.id)) else { return }
         model.reorderSessions(to: order)
     }
 
-    private func reorderTools(to visible: [PaneContent]) {
-        let drawn = visible.compactMap { content -> String? in
-            guard case .tool(let id) = content else { return nil }
+    private func reorderTools(within strip: [PaneContent]) {
+        let drawn = strip.compactMap { entry -> String? in
+            guard case .tool(let id) = entry else { return nil }
             return id
         }
         let stored = tabs.tabs(for: model.workspace.id).map(\.id)
-        guard drawn.count == visible.count,
-              let order = TabReorder.apply(drawn, to: stored) else { return }
+        guard let order = TabReorder.apply(drawn, to: stored) else { return }
         tabs.reorder(order, in: model.workspace.id)
     }
 

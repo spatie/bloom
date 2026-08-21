@@ -37,10 +37,11 @@ struct TabDragOrderTests {
         #expect(TabDragOrder.live(run, moving: "a", centres: centres, to: 130.001) == ["b", "a", "c"])
     }
 
-    /// The refusal, and the whole of it. The answer is a permutation of the run it was handed, so a
-    /// conversation dragged towards the shells runs out of run and stops, visibly, while the
-    /// pointer carries on.
-    @Test("a tab cannot be dragged out of its own run")
+    /// The property the whole thing rests on: a drag rearranges the list it was handed and can do
+    /// nothing else to it. It used to be handed one of the strip's two runs, which is what made a
+    /// conversation dragged towards the shells stop dead; it is handed the whole strip now, and the
+    /// guarantee is the same one.
+    @Test("a drag rearranges the list and cannot leave it")
     func staysInItsRun() {
         let order = TabDragOrder.live(run, moving: "a", centres: centres, to: 5000)
 
