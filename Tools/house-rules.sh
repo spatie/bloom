@@ -3,7 +3,7 @@
 #
 #   ./Tools/house-rules.sh
 #
-# Six rules, and every one of them is here because it has already been broken:
+# Seven rules, and every one of them is here because it has already been broken:
 #
 #   1. No em dashes and no en dashes. Anywhere. They arrive by the hundred from
 #      anything that writes prose for you, and once one is in a file the next
@@ -20,6 +20,9 @@
 #   6. One way to move a state. The three columns that describe what a workspace
 #      or a chat IS are only movable through the lifecycle that also does the
 #      work the move implies; see the rule itself.
+#   7. An id has a type. Every id was a bare String until they were not, and a
+#      new one declared that way puts the hole back without the compiler having
+#      anything to say about it.
 #
 # Exit status is 1 if anything was found, and every finding is printed with the
 # file and line so it can be opened. The word lists are deliberately narrow:
@@ -200,6 +203,94 @@ for path in "${state_move_allowed[@]}"; do
     echo "  note: $path no longer moves a state, so it can come off the list in $0."
   fi
 done
+
+echo "==> an id has a type"
+# Every id in Bloom used to be a bare `String`, so `store.update(workspaceID:
+# session.id)` compiled, ran, and updated no row at all. There is no crash and
+# no log line for that, just a workspace that did not archive. `RepoID`,
+# `WorkspaceID`, `SessionID`, `TerminalTabID`, `ReviewCommentID` and
+# `PermissionGrantID` are what stopped it, and the compiler holds the line
+# everywhere they are used.
+#
+# What the compiler cannot object to is a NEW property declared `var
+# somethingID: String`, because a String is a perfectly good String. That one
+# declaration reopens the hole quietly, and everything downstream of it goes
+# back to being interchangeable. So this rule is about declarations, not usage:
+# usage is already unrepresentable and needs no rule.
+#
+# Only stored properties are looked at. A computed `var id: String { path }` is
+# an `Identifiable` conformance derived from something else and identifies no
+# row, which is why `ChangedFileTree`, `SlashCommand` and a dozen others are not
+# in the lists below and do not need to be.
+#
+# Two vocabularies are exempt wholesale, and both for the same reason: they are
+# not Bloom's words. `AgentEvent` is Claude Code's stream-json and `CodexEvent`
+# is the Codex app-server protocol, and every id in them (`uuid`, `toolUseID`,
+# `threadID`, the CLI's own `sessionID`) is an opaque token Bloom receives,
+# stores and hands back without ever looking inside. Typing those would mean a
+# wrapper at every parse site and would buy nothing, because there is no second
+# kind of thread id to confuse one with.
+id_type_allowed_files=(
+  'Sources/BloomCore/AgentEvent.swift'   # Claude Code's stream-json, as measured
+  'Sources/BloomCore/CodexEvent.swift'   # the Codex app-server protocol
+  'Sources/BloomCore/CodexClient.swift'  # the same protocol's request envelopes
+)
+# Names that are never a Bloom row, wherever they appear. This list should only
+# ever get shorter. A name not on it is a new mistake.
+id_type_allowed_names=(
+  agentSessionID    # the CLI's session, not Bloom's. Different value, different lifetime
+  spawnToolUseID    # a tool_use id out of a payload
+  toolUseID         # the same
+  parentToolUseID   # the same
+  refID             # a stored tool_use id, so a result can find its call
+  requestID         # the CLI's permission request
+  messageID         # the CLI's message
+  uuid              # the CLI's row identity
+  threadID          # Codex's thread
+  turnID            # Codex's turn
+  itemID            # Codex's item
+  clientID          # Codex's client
+  processID         # a pid, as text
+  bundleID          # macOS, not Bloom
+  ownerID           # a split pane, which is the layout's namespace and not a row
+)
+# The remaining stored `String` ids, each one a deliberate decision. This list
+# should only ever get shorter.
+id_type_allowed_lines=(
+  'Sources/BloomCore/HomeList.swift'                  # a date bucket key, not a row
+  'Sources/BloomCore/Settings.swift'                  # a run script named in settings
+  'Sources/BloomCore/CodexModelCatalog.swift'         # a model name the CLI offers
+  'Sources/BloomCore/EditorCatalog.swift'             # an application, by bundle id
+  'Sources/Bloom/Views/Center/ComposerOption.swift'   # a picker entry, "opus" and friends
+  'Sources/Bloom/Views/Center/CenterTab.swift'        # a tab: a terminal row, a browser or the review pane
+  'Sources/Bloom/Views/Center/PromptAttachment.swift' # a draft key, which has no session yet
+  'Sources/Bloom/State/TranscriptModel.swift'         # payload ids, read straight off an event
+)
+# A stored property whose name ends in ID or Ids and whose type is a bare
+# String. Trailing `{` is excluded by the `$` anchor, which is what leaves
+# computed properties out.
+# `--untracked` here and nowhere else in this file. This is the one rule about
+# something being NEW, and a new declaration usually arrives in a new file, which
+# plain `git grep` cannot see until it is staged. The pathspec keeps it to
+# `Sources/`, and .gitignore keeps `.build` out.
+id_declaration='^[[:space:]]*(public |private |internal |fileprivate )?(var|let) [A-Za-z_]*([iI][dD]|IDs)[[:space:]]*:[[:space:]]*(String|String\?|\[String\]|Set<String>)[[:space:]]*(=[^{]*)?$'
+while IFS= read -r hit; do
+  [ -n "$hit" ] || continue
+  file="${hit%%:*}"
+  allowed=0
+  for path in "${id_type_allowed_files[@]}" "${id_type_allowed_lines[@]}"; do
+    [ "$file" = "$path" ] && allowed=1
+  done
+  for name in "${id_type_allowed_names[@]}"; do
+    case "$hit" in *" $name:"*|*" $name "*) allowed=1 ;; esac
+  done
+  if [ "$allowed" -eq 0 ]; then
+    echo "$hit" | show
+    report "$file declares an id as a bare String. Give it a type from Sources/BloomCore/Identifier.swift, or add it to the list in $0 saying which id from outside Bloom it holds. A String id can be handed to any lookup that wants any other id, and the write that lands on no row says nothing at all."
+  fi
+done <<EOF
+$(git grep --untracked -n -I -E "$id_declaration" -- 'Sources/*' || true)
+EOF
 
 echo "==> British spelling"
 # Words with an American spelling that has no other job in this codebase.
