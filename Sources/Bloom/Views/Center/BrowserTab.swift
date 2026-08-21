@@ -6,8 +6,8 @@ import BloomCore
 /// `FileReview` next door is the same shape and exists for the same reason: a row in the
 /// transcript should not have to know how the centre column is arranged in order to put something
 /// in it, and every route to a browser tab should produce exactly the tab a browser tab normally
-/// is. This goes through `CenterTabStore.add` and `CenterPaneStore.show`, which is the door the
-/// strip's own `+` menu uses.
+/// is. This goes through `CenterTabStore.add` and `WorkspaceTabsStore.reveal`, which is the door
+/// the strip's own `+` menu uses.
 @MainActor
 enum BrowserTab {
     /// Whether the in-app browser could show this at all.
@@ -50,7 +50,6 @@ enum BrowserTab {
             tab = tabs.add(kind: .browser, workspaceID: model.workspace.id, url: address)
         }
 
-        guard !CenterPaneStore.shared.isShowing(.tool(tab.id), in: model) else { return }
-        CenterPaneStore.shared.show(.tool(tab.id), in: model)
+        WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
     }
 }

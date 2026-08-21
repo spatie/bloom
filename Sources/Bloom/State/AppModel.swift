@@ -268,13 +268,21 @@ final class AppModel {
             // strip had already been read from user defaults would not show them until the next
             // launch. See `CenterTabStore.adoptTerminalTabs`.
             await CenterTabStore.shared.adoptTerminalTabs(from: store)
+            // Touched, not called: reaching the singleton is what runs its init, which is where
+            // the centre column's own migration lives. Phase A moves `center.panes.<workspace>` to
+            // `center.tab.<content>` and touches neither of the keys `TerminalPaneCensus`
+            // enumerates, so on today's data it provably cannot reach the sweep below whatever
+            // order they run in. It is here anyway, because the next phase folds the terminal
+            // trees in and DOES rewrite a key the census reads, and this line is the slot it
+            // has to arrive in. See `WorkspaceTabsStore.init`.
+            _ = WorkspaceTabsStore.shared
             // The store every shell's environment is built from, handed over once. It also starts
             // the launch sweep, which kills tmux sessions no tab names any more. It used to be the
             // bottom panel that did this on the first workspace opened; nothing opens now until a
             // terminal tab is drawn, and a launch where none is drawn is exactly the launch whose
             // orphans nobody would collect.
             //
-            // AFTER the migration above, and that order is load bearing rather than tidy: the
+            // AFTER both migrations above, and that order is load bearing rather than tidy: the
             // sweep kills every session no tab names, and until those tabs have moved into the
             // centre column no tab names any of them.
             TerminalSessionStore.shared.useStore(store)

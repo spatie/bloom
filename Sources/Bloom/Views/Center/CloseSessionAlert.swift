@@ -69,9 +69,10 @@ final class CloseSessionAlert {
     private func perform(_ session: Session, in model: WorkspaceModel) {
         Task {
             await model.closeSession(session)
-            // A no-op unless the chat was showing somewhere, and the last pane keeps its place
-            // rather than taking the column down with it. See `CenterPaneStore.forget`.
-            CenterPaneStore.shared.forget(.chat(session.id), in: model.workspace.id)
+            // A no-op unless the chat was a pane of some tab. A tab down to one pane dissolves
+            // into whatever is left rather than taking the column with it, and a tab named after
+            // this conversation is re-filed under one of its other panes. See `TabSurgery`.
+            WorkspaceTabsStore.shared.forget(.chat(session.id), workspaceID: model.workspace.id)
         }
     }
 }

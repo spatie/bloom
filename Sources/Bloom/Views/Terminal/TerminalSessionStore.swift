@@ -238,12 +238,20 @@ final class TerminalSessionStore {
 
             // Every pane Bloom can still reach: each terminal tab of each workspace still in the
             // database, expanded through the split layout that tab was last left in.
-            var live: Set<String> = []
-            for workspace in workspaces {
-                for tab in CenterTabStore.shared.terminalTabIDs(for: workspace.id) {
-                    live.formUnion(TerminalSplitStore.shared.panes(of: tab))
-                }
-            }
+            //
+            // Asked of `TerminalPaneCensus` rather than walked here, and that is the whole point
+            // of that type. This enumeration is the difference between a dev server that survives
+            // a quit and one killed by a launch nobody asked anything of, and 2e3d6e3 is the note
+            // saying a migration that changes it takes running shells with it. A test can hold the
+            // census still either side of a migration; it could not hold these two lines still,
+            // so what it was covering was a faithful re-implementation rather than the real path.
+            //
+            // Where the two can differ the census names MORE panes: it decodes its own two field
+            // record per tab where `CenterTabStore` decodes the whole array and returns nothing at
+            // all if any element fails. Naming more panes only ever spares a shell.
+            let live = TerminalPaneCensus.livePanes(
+                of: workspaces.map(\.id), in: UserDefaults.standard
+            )
             await persistence.sweepOrphans(livePaneIDs: live)
         }
     }

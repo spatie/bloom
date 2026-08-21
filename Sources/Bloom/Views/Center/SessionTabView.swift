@@ -25,8 +25,10 @@ struct SessionTabView: View {
     var onCommitRename: @MainActor (String) -> Void
     var onCancelRename: @MainActor () -> Void
     var onClose: @MainActor () -> Void
-    var onSplitRight: @MainActor () -> Void
-    var onSplitDown: @MainActor () -> Void
+    /// Absent when this tab cannot be opened beside the one the user is in. See `TabItemView`,
+    /// which drops the pair of items rather than showing them greyed.
+    var onSplitRight: (@MainActor () -> Void)?
+    var onSplitDown: (@MainActor () -> Void)?
     var namespace: Namespace.ID
 
     var body: some View {

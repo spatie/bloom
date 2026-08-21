@@ -9,6 +9,10 @@ import BloomCore
 /// interaction, and it is the same one every editor on this platform uses.
 struct CenterPaneView: View {
     @Bindable var model: WorkspaceModel
+    /// The tab this pane belongs to, and nil when the workspace has no tab to be in at all. A
+    /// pane belongs to a tab now rather than to the workspace, which is what stops picking a tab
+    /// from rewriting whatever pane the user happened to be standing in.
+    var tab: PaneContent?
     var pane: String
     /// Whether the column is split at all. A single pane has nothing to close back to, so its
     /// menu does not offer it.
@@ -17,7 +21,12 @@ struct CenterPaneView: View {
     @State private var size: CGSize = .zero
     @State private var isTargeted = false
 
-    private var panes: CenterPaneStore { .shared }
+    private var tabs: WorkspaceTabsStore { .shared }
+
+    /// What this pane is showing, or nothing when there is no tab for it to belong to.
+    private var showing: PaneContent? {
+        tab.map { tabs.content(of: pane, in: $0) }
+    }
 
     /// How much of the pane, on each side, counts as "open it beside this one" rather than "show it
     /// here". A quarter: wide enough to hit without aiming, narrow enough that the middle is still
@@ -30,7 +39,10 @@ struct CenterPaneView: View {
             // Simultaneous rather than a plain tap: the transcript, the composer and the terminal
             // all want their own clicks, and this only needs to know that one happened.
             .simultaneousGesture(
-                TapGesture().onEnded { panes.focus(pane, in: model.workspace.id) }
+                TapGesture().onEnded {
+                    guard let tab else { return }
+                    tabs.focus(pane, in: tab, of: model)
+                }
             )
             .dropDestination(for: String.self) { items, location in
                 accept(items.first, at: location)
@@ -39,19 +51,19 @@ struct CenterPaneView: View {
             }
             .overlay { if isTargeted { dropHighlight } }
             .contextMenu { menu }
-            .task(id: panes.content(of: pane, in: model)) { prepare() }
+            .task(id: showing) { prepare() }
     }
 
     /// A pane can be pointed at any session, including one this launch has never opened, so the
     /// transcript it needs is built here rather than by whatever made the session active.
     private func prepare() {
-        guard case .chat(let sessionID)? = panes.content(of: pane, in: model) else { return }
+        guard case .chat(let sessionID)? = showing else { return }
         model.prepareTranscript(for: sessionID)
     }
 
     @ViewBuilder
     private var content: some View {
-        switch panes.content(of: pane, in: model) {
+        switch showing {
         case .chat(let sessionID):
             // The lookup only, never `transcript(for:)`: building one writes observed state, and a
             // body may not do that. `prepare` below is where it is built.
@@ -92,7 +104,10 @@ struct CenterPaneView: View {
         CenterPaneMenu(
             isSplit: isSplit,
             split: { axis, kind in split(axis, opening: kind) },
-            close: { _ = panes.close(pane: pane, in: model.workspace.id) }
+            close: {
+                guard let tab else { return }
+                tabs.close(pane: pane, in: tab, of: model.workspace.id)
+            }
         )
     }
 
@@ -100,49 +115,49 @@ struct CenterPaneView: View {
 
     /// Splits this pane and opens a new chat, terminal or browser in the half that opens.
     ///
-    /// The pane is captured rather than looked up again, because the split lands after an await
-    /// for a chat, and the focused pane by then is whichever one the user has clicked into since.
+    /// The pane and the tab are captured rather than looked up again, because the split lands
+    /// after an await for a chat, and by then the user may have clicked into another pane or
+    /// picked another tab.
+    ///
+    /// There is no longer a write of this pane's own content first. That guard was here because a
+    /// pane nobody had given anything to fell back to the workspace's ACTIVE conversation, and
+    /// creating a chat makes the new one active, so Split Right then Chat used to put the new
+    /// session in BOTH halves. A pane falls back to its tab now, and a tab does not move when a
+    /// session is created.
     private func split(_ axis: SplitAxis, opening kind: PaneKind) {
-        let workspaceID = model.workspace.id
+        guard let tab else { return }
         let pane = pane
 
-        // What this pane is showing is written down before anything is made. A pane nobody has
-        // given anything to falls back to the workspace's ACTIVE conversation, and creating a chat
-        // makes the new one active: without this, Split Right then Chat put the new session in
-        // BOTH halves and the conversation the user was reading vanished out of the half they
-        // right clicked on. See `CenterPaneStore.content(of:in:)`.
-        if let current = panes.content(of: pane, in: model) {
-            panes.show(current, in: pane, of: workspaceID)
-        }
-
         NewPane.open(kind, in: model) { content in
-            CenterPaneStore.shared.split(workspaceID, pane: pane, axis: axis, showing: content)
+            WorkspaceTabsStore.shared.split(tab: tab, pane: pane, axis: axis, showing: content)
         }
     }
 
     /// A tab let go over this pane. The middle replaces what is showing, an edge opens the tab
     /// beside it on that side.
     private func accept(_ droppedID: String?, at location: CGPoint) -> Bool {
-        guard let droppedID, let dropped = content(forTab: droppedID) else { return false }
-        let workspaceID = model.workspace.id
+        guard let tab, let droppedID, let dropped = content(forTab: droppedID) else { return false }
+        // A tab that carries a split arrangement of its own cannot be folded into this one:
+        // grafting one tree into another is an operation `SplitLayout` does not have. See
+        // `WorkspaceTabsStore.canAbsorb`.
+        guard tabs.canAbsorb(dropped) else { return false }
 
         switch edge(at: location) {
         case .none:
-            panes.show(dropped, in: pane, of: workspaceID)
+            tabs.replace(pane: pane, of: tab, with: dropped, in: model)
 
         case .trailing:
-            panes.split(workspaceID, pane: pane, axis: .horizontal, showing: dropped)
+            tabs.split(tab: tab, pane: pane, axis: .horizontal, showing: dropped)
 
         case .bottom:
-            panes.split(workspaceID, pane: pane, axis: .vertical, showing: dropped)
+            tabs.split(tab: tab, pane: pane, axis: .vertical, showing: dropped)
 
         // A split always opens the new pane after the old one, so landing on the leading side is
-        // the same split with the two contents the other way round.
+        // the same split with the two contents the other way round. One call rather than a split
+        // followed by an overwrite, so a tool is never momentarily in two panes at once.
         case .leading, .top:
-            let current = panes.content(of: pane, in: model)
             let axis: SplitAxis = edge(at: location) == .leading ? .horizontal : .vertical
-            panes.split(workspaceID, pane: pane, axis: axis, showing: current)
-            panes.show(dropped, in: pane, of: workspaceID)
+            tabs.split(tab: tab, pane: pane, axis: axis, showing: dropped, before: true)
         }
         return true
     }
@@ -213,6 +228,6 @@ struct CenterPaneView: View {
     }
 
     private func openTerminal() {
-        NewPane.open(.terminal, in: model) { panes.show($0, in: model) }
+        NewPane.open(.terminal, in: model) { tabs.reveal($0, in: model) }
     }
 }

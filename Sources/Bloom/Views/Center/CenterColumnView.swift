@@ -39,6 +39,6 @@ struct CenterColumnView: View {
         CenterTabStore.shared.load(workspaceID: workspaceID)
         guard WorkspaceStartMode.consumeOpensOnTerminal(workspaceID: workspaceID) else { return }
         let tab = CenterTabStore.shared.add(kind: .terminal, workspaceID: workspaceID)
-        CenterPaneStore.shared.show(.tool(tab.id), in: model)
+        WorkspaceTabsStore.shared.select(.tool(tab.id), in: model)
     }
 }

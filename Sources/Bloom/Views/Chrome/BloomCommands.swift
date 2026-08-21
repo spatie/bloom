@@ -325,27 +325,33 @@ struct BloomCommands: Commands {
         // Queued rather than sent: the shell is forked by `ToolPaneView`, once it has settled the
         // port this script is about to bind. See `TerminalSessionStore.run(_:inPaneID:)`.
         TerminalSessionStore.shared.run(script.command, inPaneID: tab.id)
-        CenterPaneStore.shared.show(.tool(tab.id), in: workspace)
+        WorkspaceTabsStore.shared.select(.tool(tab.id), in: workspace)
     }
 
-    /// Splits the pane the user is in and shows the same tab in the half that opens, which is what
-    /// splitting means in every editor: the same thing twice, and then you change one of them.
+    /// Splits the pane the user is in and shows the same thing in the half that opens, which is
+    /// what splitting means in every editor: the same thing twice, and then you change one of them.
+    ///
+    /// A shell or a page cannot actually be shown twice, and asking for it has been possible here
+    /// since panes existed. `PaneDuplicate` is where that is refused and a fresh one of the same
+    /// kind offered instead; it is the same door the strip's own split items use.
     private func splitCentre(_ axis: SplitAxis) {
         guard let workspace = model.selectedModel else { return }
-        let panes = CenterPaneStore.shared
-        let pane = panes.focusedPane(in: workspace.workspace.id)
-        panes.split(
-            workspace.workspace.id,
-            pane: pane,
-            axis: axis,
-            showing: panes.content(of: pane, in: workspace)
-        )
+        let tabs = WorkspaceTabsStore.shared
+        guard let tab = tabs.selectedTab(in: workspace) else { return }
+        let pane = tabs.focusedPane(of: tab)
+
+        PaneDuplicate.open(tabs.content(of: pane, in: tab), in: workspace) { content in
+            tabs.split(tab: tab, pane: pane, axis: axis, showing: content)
+        }
     }
 
     private func closeCentrePane() {
         guard let workspace = model.selectedModel else { return }
-        let panes = CenterPaneStore.shared
-        _ = panes.close(pane: panes.focusedPane(in: workspace.workspace.id), in: workspace.workspace.id)
+        let tabs = WorkspaceTabsStore.shared
+        guard let tab = tabs.selectedTab(in: workspace) else { return }
+        tabs.close(
+            pane: tabs.focusedPane(of: tab), in: tab, of: workspace.workspace.id
+        )
     }
 
     private func addProjectFolder() {

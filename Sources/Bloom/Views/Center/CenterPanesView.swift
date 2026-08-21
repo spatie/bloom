@@ -11,7 +11,7 @@ import BloomCore
 struct CenterPanesView: View {
     @Bindable var model: WorkspaceModel
 
-    private var panes: CenterPaneStore { .shared }
+    private var tabs: WorkspaceTabsStore { .shared }
 
     /// What a split takes out of the space its two panes share. One point, because the strip the
     /// pointer aims at is drawn over the panes rather than reserved between them.
@@ -20,20 +20,20 @@ struct CenterPanesView: View {
     /// What identifies a pane to `ForEach`, which is not the same question as what identifies it
     /// to the store.
     ///
-    /// A workspace nobody has split has one pane, and that pane carries the workspace's own id.
-    /// Used as the view's identity that means the identity of the centre column's whole contents
-    /// changes every time the window moves to another workspace, so SwiftUI destroys the pane and
-    /// builds a new one: the tab strip's tab, the transcript list, every row it has realised, the
+    /// A tab nobody has split has one pane, and that pane carries the id of the content at its
+    /// root. Used as the view's identity that means the identity of the centre column's whole
+    /// contents changes every time the window moves to another workspace, AND every time it moves
+    /// to another tab, so SwiftUI destroys the pane and builds a new one: the tab strip's tab, the transcript list, every row it has realised, the
     /// composer and its text view are made again from nothing, and none of the sizes SwiftUI had
     /// measured for the old one can be reused for the new. Measured on a release build at 1440 by
     /// 900 across four of the owner's own workspaces, forty eight warm switches interleaved
     /// between the two builds: the centre column's layout cost 30ms and its worst frame gap 55ms
     /// with the pane keyed this way, and 8ms and 30ms with it keyed the way below.
     ///
-    /// So an unsplit column is one pane called the same thing in every workspace, and its view is
-    /// reused and handed a different model instead of being replaced. A split column keeps the
-    /// real pane ids, because there the identity has to survive the tree being rearranged around
-    /// it: that is the whole reason these frames are positioned flat rather than nested, and a
+    /// So an unsplit tab is one pane called the same thing in every workspace and in every tab,
+    /// and its view is reused and handed a different model and a different tab instead of being
+    /// replaced. A split tab keeps the real pane ids, because there the identity has to survive
+    /// the tree being rearranged around it: that is the whole reason these frames are positioned flat rather than nested, and a
     /// pane identified by its place in the list would hand a live shell or web view to the view
     /// that used to be its neighbour. Going from one pane to two, or back, rebuilds. That is a
     /// reshape the user asked for and can see, not something that happens on every switch.
@@ -46,7 +46,11 @@ struct CenterPanesView: View {
         // Read here rather than inside the `GeometryReader`, so the dependency on the store is
         // registered while this body is being tracked. A read that only happens in the layout pass
         // is a redraw that only happens by luck.
-        let layout = panes.layout(for: model.workspace.id)
+        //
+        // Nil is a workspace with neither a conversation nor a tool tab to be in. It still gets
+        // one pane, so `CenterPaneView` can draw the empty states that offer a way out of it.
+        let tab = tabs.selectedTab(in: model)
+        let layout = tab.map { tabs.layout(of: $0) } ?? SplitLayout(pane: Self.soloPane)
 
         return GeometryReader { proxy in
             let geometry = layout.geometry(in: proxy.size, dividerThickness: Self.dividerThickness)
@@ -57,6 +61,7 @@ struct CenterPanesView: View {
                     ForEach(geometry.panes, id: isSolo ? \.soloIdentity : \.pane) { item in
                         CenterPaneView(
                             model: model,
+                            tab: tab,
                             pane: item.pane,
                             isSplit: layout.paneCount > 1
                         )
@@ -78,7 +83,8 @@ struct CenterPanesView: View {
                                 : divider.frame.width,
                             color: Palette.border
                         ) { ratio in
-                            panes.setRatio(ratio, at: divider.path, in: model.workspace.id)
+                            guard let tab else { return }
+                            tabs.setRatio(ratio, at: divider.path, in: tab)
                         }
                         .position(x: divider.frame.midX, y: divider.frame.midY)
                     }
@@ -90,6 +96,6 @@ struct CenterPanesView: View {
 }
 
 extension SplitPaneFrame {
-    /// The name every unsplit column's only pane answers to. See `CenterPanesView.soloPane`.
+    /// The name every unsplit tab's only pane answers to. See `CenterPanesView.soloPane`.
     var soloIdentity: String { CenterPanesView.soloPane }
 }

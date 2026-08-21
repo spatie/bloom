@@ -24,26 +24,47 @@ struct SessionTabsView: View {
 
     private var tabs: CenterTabStore { .shared }
 
-    private var toolTabs: [CenterTab] {
-        tabs.tabs(for: model.workspace.id)
+    private var store: WorkspaceTabsStore { .shared }
+
+    /// The strip, derived rather than stored.
+    ///
+    /// A tab owns a pane tree, so a thing living in a pane of some other tab is not also a tab of
+    /// its own: it is reachable through the tab that has it, and an entry for it here would be a
+    /// second way in. `TabSet.entries` is that rule, and everything below is a reading of this
+    /// list rather than of the two stores under it.
+    private var entries: [PaneContent] {
+        store.entries(in: model)
     }
 
-    private var panes: CenterPaneStore { .shared }
+    private var sessionTabs: [Session] {
+        entries.compactMap { entry in
+            guard case .chat(let id) = entry else { return nil }
+            return model.sessions.first { $0.id == id }
+        }
+    }
 
-    /// What the pane the user is in is showing. That is what the strip marks, because with the
-    /// column split there is no single selection: a tab is either in the pane you are working in
-    /// or it is not.
-    private var focused: PaneContent? {
-        panes.content(of: panes.focusedPane(in: model.workspace.id), in: model)
+    private var toolTabs: [CenterTab] {
+        let open = tabs.tabs(for: model.workspace.id)
+        return entries.compactMap { entry in
+            guard case .tool(let id) = entry else { return nil }
+            return open.first { $0.id == id }
+        }
+    }
+
+    /// Which tab the user is in. **One** answer, where `CenterPaneStore.isShowing` gave the strip
+    /// as many marks as the column had panes: a tab owns the panes now, so being in a tab is a
+    /// single fact about the workspace again.
+    private var selectedTab: PaneContent? {
+        store.selectedTab(in: model)
     }
 
     var body: some View {
         TabStrip(pane: Self.pane, selection: selectedID) {
             HStack(spacing: 0) {
-                ForEach(Array(model.sessions.enumerated()), id: \.element.id) { index, session in
+                ForEach(Array(sessionTabs.enumerated()), id: \.element.id) { index, session in
                     if index > 0 {
                         TabStripSeparator(
-                            isHidden: isSelected(model.sessions[index - 1]) || isSelected(session)
+                            isHidden: isSelected(sessionTabs[index - 1]) || isSelected(session)
                         )
                     }
                     sessionTab(session)
@@ -51,7 +72,7 @@ struct SessionTabsView: View {
                 }
 
                 ForEach(Array(toolTabs.enumerated()), id: \.element.id) { index, tab in
-                    if index > 0 || !model.sessions.isEmpty {
+                    if index > 0 || !sessionTabs.isEmpty {
                         TabStripSeparator(
                             isHidden: isSelected(before: tab, at: index) || isSelected(tab)
                         )
@@ -77,6 +98,10 @@ struct SessionTabsView: View {
         .background { shortcuts }
         .task(id: model.workspace.id) {
             tabs.load(workspaceID: model.workspace.id)
+            // After the list is back, because that is what a stored pointer is checked against.
+            // A session archived or a tool tab closed in another launch leaves a pane holding a
+            // pointer nothing calls `forget` for.
+            store.reconcile(in: model)
         }
     }
 
@@ -88,7 +113,7 @@ struct SessionTabsView: View {
     /// Every tab in the strip, in the order it is drawn. Identity and order only: a title that
     /// changes must not make the strip move.
     private var order: [String] {
-        model.sessions.map(\.id.rawValue) + toolTabs.map(\.id)
+        entries.map(\.id)
     }
 
     /// Whether a tab is the one the pane's leading edge runs through.
@@ -109,32 +134,32 @@ struct SessionTabsView: View {
     /// the moment after a tab is closed: aiming a scroll at an id that is no longer laid out does
     /// nothing, and this says so rather than relying on that.
     private var selectedID: AnyHashable? {
-        switch focused {
-        case .chat(let id): model.sessions.contains { $0.id == id } ? AnyHashable(id) : nil
+        switch selectedTab {
+        case .chat(let id): sessionTabs.contains { $0.id == id } ? AnyHashable(id) : nil
         case .tool(let id): toolTabs.contains { $0.id == id } ? AnyHashable(id) : nil
         case nil: nil
         }
     }
 
     private func isSelected(_ session: Session) -> Bool {
-        focused == .chat(session.id)
+        selectedTab == .chat(session.id)
     }
 
     private func isSelected(_ tab: CenterTab) -> Bool {
-        focused == .tool(tab.id)
+        selectedTab == .tool(tab.id)
     }
 
     /// Whether a tab is selected, named by id alone. The strip's two runs answer to two different
     /// cases of `PaneContent`, and `order` has already thrown that distinction away.
     private func isSelected(_ id: String) -> Bool {
-        focused == .chat(SessionID(id)) || focused == .tool(id)
+        selectedTab?.id == id
     }
 
     /// Whether whatever sits immediately before this tool tab is the selected one, which is the
     /// last chat when the tool tabs start and the previous tool tab otherwise.
     private func isSelected(before tab: CenterTab, at index: Int) -> Bool {
         if index == 0 {
-            return model.sessions.last.map(isSelected) ?? false
+            return sessionTabs.last.map(isSelected) ?? false
         }
         return isSelected(toolTabs[index - 1])
     }
@@ -155,8 +180,8 @@ struct SessionTabsView: View {
             onCommitRename: { commitRename(session, to: $0) },
             onCancelRename: { renamingID = nil },
             onClose: { close(session) },
-            onSplitRight: { split(.chat(session.id), axis: .horizontal) },
-            onSplitDown: { split(.chat(session.id), axis: .vertical) },
+            onSplitRight: splitAction(.chat(session.id), axis: .horizontal),
+            onSplitDown: splitAction(.chat(session.id), axis: .vertical),
             namespace: selection
         )
         .draggable(session.id.rawValue)
@@ -175,7 +200,7 @@ struct SessionTabsView: View {
             canClose: true,
             canRename: tab.kind != .review,
             closeTitle: closeTitle(for: tab),
-            onSelect: { panes.show(.tool(tab.id), in: model) },
+            onSelect: { store.select(.tool(tab.id), in: model) },
             onStartRename: { renamingID = tab.id },
             onCommitRename: {
                 renamingID = nil
@@ -183,8 +208,8 @@ struct SessionTabsView: View {
             },
             onCancelRename: { renamingID = nil },
             onClose: { Task { await tabs.close(tab) } },
-            onSplitRight: { split(.tool(tab.id), axis: .horizontal) },
-            onSplitDown: { split(.tool(tab.id), axis: .vertical) },
+            onSplitRight: splitAction(.tool(tab.id), axis: .horizontal),
+            onSplitDown: splitAction(.tool(tab.id), axis: .vertical),
             namespace: selection
         )
         .draggable(tab.id)
@@ -278,20 +303,61 @@ struct SessionTabsView: View {
         .accessibilityHidden(true)
     }
 
+    /// Whether this tab can be opened beside the one the user is in. The pair of menu items is
+    /// dropped when it cannot, rather than shown greyed, which is what `TabItemView` does with
+    /// them everywhere else.
+    ///
+    /// False for a tab that carries a split arrangement of its own: folding it in would mean
+    /// grafting its tree into another tree, which `SplitLayout` has no operation for. See
+    /// `WorkspaceTabsStore.canAbsorb`.
+    ///
+    /// Also false for the review asked of itself, which has no second copy to make: a workspace
+    /// has exactly one of it by design. See `PaneDuplicate`.
+    private func splitAction(
+        _ content: PaneContent, axis: SplitAxis
+    ) -> (@MainActor () -> Void)? {
+        guard canSplit(content) else { return nil }
+        return { split(content, axis: axis) }
+    }
+
+    private func canSplit(_ content: PaneContent) -> Bool {
+        guard let selectedTab else { return false }
+        guard content != selectedTab else { return duplicable(content) }
+        return store.canAbsorb(content)
+    }
+
+    private func duplicable(_ content: PaneContent) -> Bool {
+        guard case .tool(let id) = content else { return true }
+        return tabs.tabs(for: model.workspace.id).first { $0.id == id }?.kind != .review
+    }
+
     /// Opens a tab beside the one the user asked from, rather than in place of it. The menu item
     /// beside the drag is there for anyone who would rather not drag, and for the keyboard.
+    ///
+    /// The tab it opens beside is the one the user is in, which is the whole arrangement rather
+    /// than one pane of it, so the thing named here becomes a pane of that tab and drops out of
+    /// the strip as an entry of its own. Asking this of the tab you are already in is asking for
+    /// the same thing twice, which is `PaneDuplicate`'s question rather than this one's.
     private func split(_ content: PaneContent, axis: SplitAxis) {
-        panes.split(model.workspace.id, axis: axis, showing: content)
+        guard let tab = selectedTab else { return }
+        let pane = store.focusedPane(of: tab)
+
+        guard content != tab else {
+            return PaneDuplicate.open(content, in: model) {
+                store.split(tab: tab, pane: pane, axis: axis, showing: $0)
+            }
+        }
+        store.split(tab: tab, pane: pane, axis: axis, showing: content)
     }
 
     /// All three go through `NewPane`, which is the same door the pane's split submenus use, so a
     /// tab made from the `+` and a tab made by splitting are the same tab.
     private func newChat() {
-        NewPane.open(.chat, in: model) { panes.show($0, in: model) }
+        NewPane.open(.chat, in: model) { store.select($0, in: model) }
     }
 
     private func newTerminal() {
-        NewPane.open(.terminal, in: model) { panes.show($0, in: model) }
+        NewPane.open(.terminal, in: model) { store.select($0, in: model) }
     }
 
     /// The `+` opens a browser on the workspace's own dev server, where a split opens one on
@@ -301,7 +367,7 @@ struct SessionTabsView: View {
         Task {
             await preparePort()
             let address = model.port > 0 ? "http://localhost:\(model.port)" : ""
-            NewPane.open(.browser, in: model, url: address) { panes.show($0, in: model) }
+            NewPane.open(.browser, in: model, url: address) { store.select($0, in: model) }
         }
     }
 
@@ -354,12 +420,14 @@ struct SessionTabsView: View {
 
     // MARK: - Actions
 
-    /// The workspace still has one active session, because the toolbar, the inspector and the
-    /// pull request button all speak about one conversation. Showing a chat in a pane is what
-    /// decides which one that is.
+    /// Picking a tab, which swaps the whole arrangement under it and writes no pane's content.
+    ///
+    /// The workspace's one active session moves with it, because the toolbar, the inspector and
+    /// the pull request button all speak about one conversation. That is `WorkspaceTabsStore`'s
+    /// job now rather than a second line here: a composite tab can be rooted on one chat and
+    /// focused on another, and two callers deciding it separately is how they drift.
     private func select(_ session: Session) {
-        panes.show(.chat(session.id), in: model)
-        model.activeSessionID = session.id
+        store.select(.chat(session.id), in: model)
     }
 
     private func close(_ session: Session) {

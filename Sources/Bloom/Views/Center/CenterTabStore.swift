@@ -8,9 +8,10 @@ import BloomCore
 /// the view that draws it. Switching to another workspace and back must not reload a page or fork
 /// a second shell, and a view cannot promise that about anything it owns itself.
 ///
-/// It holds the list and the lifecycle, never which of them is on screen. Where a tab is showing is
-/// `CenterPaneStore`'s business, because with the column split the answer is a pane rather than a
-/// workspace, and two tabs can be showing at once.
+/// It holds the list and the lifecycle, never which of them is on screen. Which tab the user is in,
+/// and how that tab is carved into panes, is `WorkspaceTabsStore`'s business. Not every tab here is
+/// an entry of the strip either: one absorbed into a pane of another tab is reached through that
+/// tab, which is `TabSet.entries`.
 ///
 /// It deliberately does not live on `AppModel`. Nothing outside the centre column has any business
 /// knowing that a browser tab is open, and the tab list is the sort of state that is better lost
@@ -219,11 +220,11 @@ final class CenterTabStore {
         update(tab) { $0.url = url }
     }
 
-    /// Closes a tab and stops whatever it was running. Any pane showing it falls back to the
-    /// conversation, which is the one thing in this workspace that cannot be closed away.
+    /// Closes a tab and stops whatever it was running. Any pane showing it goes with it, and the
+    /// tab it was a pane of settles around the gap. See `TabSurgery`.
     func close(_ tab: CenterTab) async {
         apply(tabs(for: tab.workspaceID).filter { $0.id != tab.id }, to: tab.workspaceID)
-        CenterPaneStore.shared.forget(.tool(tab.id), in: tab.workspaceID)
+        WorkspaceTabsStore.shared.forget(.tool(tab.id), workspaceID: tab.workspaceID)
 
         switch tab.kind {
         case .browser:

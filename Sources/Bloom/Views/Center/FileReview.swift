@@ -16,8 +16,10 @@ enum FileReview {
     /// Opens the workspace's review on a file, or points the open one at it.
     static func open(path: String, in model: WorkspaceModel) {
         let tab = CenterTabStore.shared.showReview(path: path, workspaceID: model.workspace.id)
-        guard !CenterPaneStore.shared.isShowing(.tool(tab.id), in: model) else { return }
-        CenterPaneStore.shared.show(.tool(tab.id), in: model)
+        // `reveal` brings the tab holding the review forward and takes nothing off a pane, so the
+        // rule above is kept by the door rather than by a guard here. A review already on screen
+        // is already on screen, whichever pane of the tab in front is showing it.
+        WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
     }
 
     /// Opens the review on whatever the reader was last looking at, which is the selected changed
@@ -33,13 +35,17 @@ enum FileReview {
     /// showing it, put the conversation back. The tab stays open, because the keystroke is about
     /// what is in front of them rather than about what they are keeping.
     static func toggle(in model: WorkspaceModel) {
-        let panes = CenterPaneStore.shared
-        let pane = panes.focusedPane(in: model.workspace.id)
+        let tabs = WorkspaceTabsStore.shared
+        guard let tab = tabs.selectedTab(in: model) else { return open(in: model) }
+        let pane = tabs.focusedPane(of: tab)
 
-        if let tab = CenterTabStore.shared.review(for: model.workspace.id),
-           panes.content(of: pane, in: model) == .tool(tab.id) {
+        if let review = CenterTabStore.shared.review(for: model.workspace.id),
+           tabs.content(of: pane, in: tab) == .tool(review.id) {
             guard let session = model.activeSession ?? model.sessions.first else { return }
-            panes.show(.chat(session.id), in: pane, of: model.workspace.id)
+            // In an unsplit review tab this is picking the conversation's tab, which is what the
+            // keystroke means there. In a split it points this one pane back at the conversation
+            // and leaves the other half of the arrangement alone.
+            tabs.replace(pane: pane, of: tab, with: .chat(session.id), in: model)
             return
         }
         open(in: model)
