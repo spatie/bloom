@@ -185,7 +185,14 @@ struct SessionTabsView: View {
             namespace: selection
         )
         .draggable(session.id.rawValue)
-        .dropDestination(for: String.self) { items, _ in move(items.first, onto: session) }
+        .dropDestination(for: String.self) { items, _ in
+            Log.drag.notice("DROP on chat tab \(session.id.rawValue, privacy: .public) items \(items, privacy: .public)")
+            move(items.first, onto: session)
+        }
+        .onDropSessionUpdated { drop in
+            guard drop.phase == .entering else { return }
+            Log.drag.notice("OVER chat tab \(session.id.rawValue, privacy: .public) at \(drop.location.debugDescription, privacy: .public) size \(drop.size.debugDescription, privacy: .public)")
+        }
     }
 
     private func toolTab(_ tab: CenterTab) -> some View {
@@ -213,7 +220,14 @@ struct SessionTabsView: View {
             namespace: selection
         )
         .draggable(tab.id)
-        .dropDestination(for: String.self) { items, _ in move(items.first, onto: tab) }
+        .dropDestination(for: String.self) { items, _ in
+            Log.drag.notice("DROP on tool tab \(tab.id, privacy: .public) items \(items, privacy: .public)")
+            move(items.first, onto: tab)
+        }
+        .onDropSessionUpdated { drop in
+            guard drop.phase == .entering else { return }
+            Log.drag.notice("OVER tool tab \(tab.id, privacy: .public) at \(drop.location.debugDescription, privacy: .public) size \(drop.size.debugDescription, privacy: .public)")
+        }
     }
 
     private func closeTitle(for tab: CenterTab) -> String {
@@ -410,6 +424,7 @@ struct SessionTabsView: View {
     // and is in the core because that is a decision with cases worth testing.
 
     private func move(_ draggedID: String?, onto session: Session) {
+        Log.drag.notice("MOVE chat dragged=\(draggedID ?? "nil", privacy: .public) onto=\(session.id.rawValue, privacy: .public) all=\(model.sessions.map(\.id.rawValue), privacy: .public) visible=\(sessionTabs.map(\.id.rawValue), privacy: .public)")
         guard let draggedID,
               let moved = model.sessions.first(where: { $0.id.rawValue == draggedID }),
               let order = TabReorder.reorder(
@@ -424,10 +439,12 @@ struct SessionTabsView: View {
               let index = order.firstIndex(of: moved.id)
         else { return }
 
+        Log.drag.notice("MOVE chat order=\(order.map(\.rawValue), privacy: .public) index=\(index, privacy: .public)")
         Task { await model.reorderSession(moved, to: index) }
     }
 
     private func move(_ draggedID: String?, onto tab: CenterTab) {
+        Log.drag.notice("MOVE tool dragged=\(draggedID ?? "nil", privacy: .public) onto=\(tab.id, privacy: .public) all=\(tabs.tabs(for: model.workspace.id).map(\.id), privacy: .public) visible=\(toolTabs.map(\.id), privacy: .public)")
         guard let draggedID,
               let order = TabReorder.reorder(
                   all: tabs.tabs(for: model.workspace.id).map(\.id),
@@ -437,6 +454,7 @@ struct SessionTabsView: View {
               )
         else { return }
 
+        Log.drag.notice("MOVE tool order=\(order, privacy: .public)")
         tabs.reorder(order, in: model.workspace.id)
     }
 

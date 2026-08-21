@@ -45,6 +45,15 @@ enum Log {
     /// invisible from inside a transcript.
     static let bridge = Logger(subsystem: subsystem, category: "bridge")
 
+    /// TEMPORARY. Dragging a tab in the strip and dropping it on another one: what the drop
+    /// destination saw, what the payload was, and what the reorder decided. Here because a ghost
+    /// follows the cursor and the tab does not move, and because a headless probe over the same
+    /// view construction says the destination exists, sits exactly where the tab is drawn and runs
+    /// its closure when it is called, none of which proves AppKit routes a real drag to it.
+    ///
+    /// Delete this and its call sites once the routing question is answered.
+    static let drag = Logger(subsystem: subsystem, category: "drag")
+
     /// The app's own bundle id, so an instance running against `BLOOM_DB_PATH` for a test can be
     /// told apart from the one somebody is using.
     private static let subsystem = Bundle.main.bundleIdentifier ?? "be.spatie.bloom"
