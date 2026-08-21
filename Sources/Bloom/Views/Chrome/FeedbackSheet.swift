@@ -28,9 +28,6 @@ struct FeedbackSheet: View {
     @State private var isFocused = false
     @State private var contentHeight = ComposerTextEditor.lineHeight
     @State private var phase: FeedbackPhase = .idle
-    /// The handle the far end filed this under, once it has. Nil until then, and again on the next
-    /// attempt. See `Feedback.reference(in:)`.
-    @State private var reference: String?
     @State private var isShowingLogs = false
     @State private var attachmentProblem: String?
     /// Started when the sheet appears and awaited when Send is pressed, so the slowest fact about
@@ -64,6 +61,8 @@ struct FeedbackSheet: View {
             }
 
             logsRow
+
+            FeedbackEmailField(label: Feedback.Copy.reportEmail, email: $presenter.email)
 
             FeedbackEnvironmentNote()
 
@@ -173,7 +172,7 @@ struct FeedbackSheet: View {
 
             Spacer(minLength: Metrics.gutter)
 
-            FeedbackStatus(phase: phase, sentMessage: Feedback.Copy.sent(Feedback.Copy.reportSent, reference: reference))
+            FeedbackStatus(phase: phase)
 
             Button("Cancel", role: .cancel) { presenter.close() }
                 .keyboardShortcut(.cancelAction)
@@ -181,7 +180,8 @@ struct FeedbackSheet: View {
 
             FeedbackSendButton(
                 title: Feedback.Copy.reportSend,
-                isEnabled: Feedback.canSend(message: presenter.message) && !phase.isSending,
+                isEnabled: canSend,
+                isSending: phase.isSending,
                 action: send
             )
         }
@@ -304,9 +304,17 @@ struct FeedbackSheet: View {
         return await FeedbackEnvironment.current(app: app)
     }
 
+    /// Everything that has to be true before the button does anything. Read by the button and
+    /// again by `send`, because a keyboard shortcut reaches the action without going through the
+    /// button's disabled state.
+    private var canSend: Bool {
+        Feedback.canSend(message: presenter.message)
+            && Feedback.isAcceptableEmail(presenter.email)
+            && !phase.isSending
+    }
+
     private func send() {
-        guard !phase.isSending, Feedback.canSend(message: presenter.message) else { return }
-        reference = nil
+        guard canSend else { return }
         phase = .sending
 
         Task {
@@ -319,6 +327,7 @@ struct FeedbackSheet: View {
 
             let report = Feedback.Report(
                 message: presenter.message,
+                email: presenter.email,
                 logs: presenter.includesLogs ? presenter.logs : nil,
                 images: presenter.images.map(\.wire),
                 token: FeedbackEnvironment.token(),
@@ -332,14 +341,13 @@ struct FeedbackSheet: View {
                 return
             }
 
-            reference = result.reference
             phase = .sent
             // Cleared only here, on the one outcome that means the words have arrived somewhere.
+            // The address is not part of it: it stays, because it is the same person next time.
             presenter.clearReport()
-            // Longer when there is a reference on the line, because it is only worth putting
-            // there if somebody has time to read it.
-            try? await Task.sleep(for: reference == nil ? feedbackSuccessPause : feedbackReferencePause)
-            presenter.close()
+            // The form is replaced by the thank you rather than closing on a timer. See
+            // `FeedbackSentCard` for why it is the same sheet rather than a second one.
+            presenter.open(.reportSent)
         }
     }
 }

@@ -128,6 +128,18 @@ struct RootView: View {
             switch sheet {
             case .report: FeedbackSheet()
             case .prompt: PromptSubmissionSheet()
+            case .reportSent:
+                FeedbackSentCard(
+                    title: Feedback.Copy.reportSent,
+                    detail: Feedback.Copy.reportSentDetail,
+                    onDismiss: feedback.close
+                )
+            case .promptSent:
+                FeedbackSentCard(
+                    title: Feedback.Copy.promptSent,
+                    detail: Feedback.Copy.promptSentDetail,
+                    onDismiss: feedback.close
+                )
             }
         }
         // The offer to turn a folder into a repository. Presented here rather than at each of the

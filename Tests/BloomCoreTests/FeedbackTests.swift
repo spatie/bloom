@@ -44,12 +44,14 @@ struct FeedbackTests {
 
     private func report(
         message: String = "the sidebar flickers",
+        email: String? = nil,
         logs: String? = nil,
         images: [Feedback.Image] = [],
         token: String? = "3F2504E0-4F89-11D3-9A0C-0305E82C3301"
     ) -> Feedback.Report {
         Feedback.Report(
-            message: message, logs: logs, images: images, token: token, environment: environment()
+            message: message, email: email, logs: logs, images: images, token: token,
+            environment: environment()
         )
     }
 
@@ -89,7 +91,8 @@ struct FeedbackTests {
     func promptKeys() throws {
         let json = try object(
             Feedback.PromptSubmission(
-                prompt: "make the sidebar narrower", name: "Freek", token: token, environment: environment()
+                prompt: "make the sidebar narrower", name: "Freek", email: nil, token: token,
+                environment: environment()
             )
         )
 
@@ -100,7 +103,9 @@ struct FeedbackTests {
     @Test("an unnamed prompt submission carries no name key at all")
     func promptWithoutName() throws {
         let json = try object(
-            Feedback.PromptSubmission(prompt: "make it narrower", name: "   ", token: nil, environment: environment())
+            Feedback.PromptSubmission(
+                prompt: "make it narrower", name: "   ", email: nil, token: nil, environment: environment()
+            )
         )
 
         #expect(Set(json.keys) == ["prompt", "environment"])
@@ -110,7 +115,8 @@ struct FeedbackTests {
     func promptWithARefusableName() throws {
         let json = try object(
             Feedback.PromptSubmission(
-                prompt: "make it narrower", name: "someone@example.com", token: nil, environment: environment()
+                prompt: "make it narrower", name: "someone@example.com", email: nil, token: nil,
+                environment: environment()
             )
         )
 
@@ -503,13 +509,14 @@ struct FeedbackTests {
         #expect(Feedback.reference(in: Data(body.utf8)) == nil)
     }
 
-    @Test("the thanks carries the reference when there is one, and reads plainly when there is not")
-    func thanksWithReference() {
-        #expect(Feedback.Copy.sent(Feedback.Copy.reportSent, reference: nil) == Feedback.Copy.reportSent)
-        #expect(
-            Feedback.Copy.sent(Feedback.Copy.reportSent, reference: "01J8ZQ7Z9K3M4N5P6Q7R8S9T0V")
-                .contains("Reference 01J8ZQ7Z9K3M4N5P6Q7R8S9T0V")
-        )
+    /// The reference is still parsed, because the endpoint still returns one and a malformed reply
+    /// still must not be believed. It is simply no longer read out to anybody: the card that
+    /// replaces the form says thank you and nothing else. See `Feedback.Copy.reportSentDetail`.
+    @Test("the thank you says nothing about a reference")
+    func thanksIsPlain() {
+        #expect(!Feedback.Copy.reportSent.contains("Reference"))
+        #expect(!Feedback.Copy.reportSentDetail.contains("Reference"))
+        #expect(!Feedback.Copy.promptSentDetail.contains("Reference"))
     }
 
     // MARK: - The copy
@@ -522,5 +529,107 @@ struct FeedbackTests {
         #expect(Feedback.Copy.reportBlurb.contains(Feedback.supportEmail))
         #expect(Feedback.Copy.environmentNote.contains("No file"))
         #expect(Feedback.Copy.promptNamePlaceholder.contains("not an email"))
+    }
+}
+
+/// The optional address both sheets grew, which is the only piece of contact information anything
+/// in Bloom sends. Every case here is a way somebody could leave the field in a state the endpoint
+/// would refuse, and the rule throughout is the same: drop the address, keep the words.
+@Suite("Feedback: the address")
+struct FeedbackEmailTests {
+    private func environment() -> Feedback.Environment {
+        Feedback.Environment(
+            appVersion: "0.3.0",
+            appBuild: "452",
+            macOSVersion: "26.0",
+            architecture: .arm64,
+            translated: false,
+            installSource: Feedback.InstallSource(buildChannel: "release", masterCommit: nil, isDirty: nil),
+            agent: "claude_code",
+            agentVersion: "1.0.0",
+            availableAgents: ["claude"],
+            permissionMode: "accept-edits",
+            theme: .dark,
+            displayScale: 2,
+            locale: "nl-BE"
+        )
+    }
+
+    private func object(_ value: some Encodable) throws -> [String: Any] {
+        let data = try Feedback.json(value)
+        return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    private func report(email: String?) -> Feedback.Report {
+        Feedback.Report(
+            message: "the sidebar flickers", email: email, logs: nil, images: [], token: nil,
+            environment: environment()
+        )
+    }
+
+    private func submission(email: String?) -> Feedback.PromptSubmission {
+        Feedback.PromptSubmission(
+            prompt: "make it narrower", name: nil, email: email, token: nil, environment: environment()
+        )
+    }
+
+    @Test("a report carries the address it was given")
+    func reportCarriesTheAddress() throws {
+        #expect(try object(report(email: "freek@spatie.be"))["email"] as? String == "freek@spatie.be")
+    }
+
+    @Test("a prompt submission carries it too")
+    func promptCarriesTheAddress() throws {
+        #expect(try object(submission(email: "freek@spatie.be"))["email"] as? String == "freek@spatie.be")
+    }
+
+    @Test("no address means no key at all, rather than a key holding an empty string")
+    func absentIsAbsent() throws {
+        #expect(try object(report(email: nil))["email"] == nil)
+        #expect(try object(report(email: "   "))["email"] == nil)
+        #expect(try object(submission(email: nil))["email"] == nil)
+    }
+
+    /// The sheet has already said what is wrong with it, and losing an address is better than
+    /// losing the report it was attached to.
+    @Test("an address the endpoint would refuse is left out rather than sent to be rejected")
+    func refusableAddressIsDropped() throws {
+        let json = try object(report(email: "not an address"))
+
+        #expect(json["email"] == nil)
+        #expect(json["message"] as? String == "the sidebar flickers")
+    }
+
+    @Test("surrounding whitespace goes, and the case of the local part does not")
+    func normalising() {
+        #expect(Feedback.normalisedEmail("  Freek@Spatie.be  ") == "Freek@Spatie.be")
+        #expect(Feedback.normalisedEmail(String(repeating: "a", count: 300)).count == 254)
+    }
+
+    @Test("an empty field is acceptable, because hearing back is opted into rather than required")
+    func emptyIsAcceptable() {
+        #expect(Feedback.isAcceptableEmail(""))
+        #expect(Feedback.isAcceptableEmail("   "))
+    }
+
+    @Test("what the sheet accepts and what it warns about")
+    func acceptance() {
+        #expect(Feedback.isAcceptableEmail("freek@spatie.be"))
+        #expect(Feedback.isAcceptableEmail("freek+bloom@spatie.co.uk"))
+        #expect(Feedback.isAcceptableEmail("a@b.c"))
+
+        #expect(!Feedback.isAcceptableEmail("freek"))
+        #expect(!Feedback.isAcceptableEmail("freek@spatie"))
+        #expect(!Feedback.isAcceptableEmail("freek @spatie.be"))
+        #expect(!Feedback.isAcceptableEmail("freek@@spatie.be"))
+        #expect(!Feedback.isAcceptableEmail("@spatie.be"))
+    }
+
+    /// The credit line is the field that gets published, so it still refuses an address however
+    /// many other fields now accept one.
+    @Test("the name field still refuses an address, and now says where to put it")
+    func theNameFieldStillRefusesOne() {
+        #expect(!Feedback.isAcceptableName("freek@spatie.be"))
+        #expect(Feedback.nameProblem.contains("field of its own"))
     }
 }

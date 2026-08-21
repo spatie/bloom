@@ -20,6 +20,12 @@ final class FeedbackPresenter {
     enum Sheet: String, Identifiable, CaseIterable {
         case report
         case prompt
+        /// The thank you that replaces each form once the words have arrived.
+        ///
+        /// Cases on the same enum rather than a second `.sheet` of their own, so closing the form
+        /// and showing the card is one assignment to one binding. See `FeedbackSentCard`.
+        case reportSent
+        case promptSent
 
         var id: String { rawValue }
     }
@@ -43,6 +49,13 @@ final class FeedbackPresenter {
     /// Kept after a submission goes, unlike everything else: it is the same person next time, and
     /// typing your own name again to be credited again is a silly thing to ask of anybody.
     var name = ""
+
+    // MARK: - The address, which both sheets share
+
+    /// Kept for the same reason the name is, and shared between the two sheets because it is one
+    /// person with one address: somebody who left it on a report should not have to type it again
+    /// to hear about a prompt. Optional on both, and empty until somebody types it.
+    var email = ""
 
     private init() {}
 

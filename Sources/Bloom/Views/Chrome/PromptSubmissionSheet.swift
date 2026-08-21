@@ -21,9 +21,6 @@ struct PromptSubmissionSheet: View {
     @State private var isFocused = false
     @State private var contentHeight = ComposerTextEditor.lineHeight
     @State private var phase: FeedbackPhase = .idle
-    /// The handle the far end filed this under, once it has. Nil until then, and again on the next
-    /// attempt. See `Feedback.reference(in:)`.
-    @State private var reference: String?
     @State private var facts: Task<Feedback.Environment, Never>?
 
     private static let minimumEditorLines: CGFloat = 6
@@ -37,6 +34,8 @@ struct PromptSubmissionSheet: View {
             editor
 
             nameField
+
+            FeedbackEmailField(label: Feedback.Copy.promptEmail, email: $presenter.email)
 
             FeedbackEnvironmentNote()
 
@@ -127,7 +126,7 @@ struct PromptSubmissionSheet: View {
 
             Spacer(minLength: Metrics.gutter)
 
-            FeedbackStatus(phase: phase, sentMessage: Feedback.Copy.sent(Feedback.Copy.promptSent, reference: reference))
+            FeedbackStatus(phase: phase)
 
             Button("Cancel", role: .cancel) { presenter.close() }
                 .keyboardShortcut(.cancelAction)
@@ -135,7 +134,8 @@ struct PromptSubmissionSheet: View {
 
             FeedbackSendButton(
                 title: Feedback.Copy.promptSend,
-                isEnabled: Feedback.canSend(message: presenter.prompt) && isNameAcceptable && !phase.isSending,
+                isEnabled: canSend,
+                isSending: phase.isSending,
                 action: send
             )
         }
@@ -169,13 +169,19 @@ struct PromptSubmissionSheet: View {
         return await FeedbackEnvironment.current(app: app)
     }
 
-    private func send() {
-        guard !phase.isSending,
-              Feedback.canSend(message: presenter.prompt),
-              isNameAcceptable
-        else { return }
+    /// Everything that has to be true before the button does anything. Read by the button and
+    /// again by `send`, because a keyboard shortcut reaches the action without going through the
+    /// button's disabled state.
+    private var canSend: Bool {
+        Feedback.canSend(message: presenter.prompt)
+            && isNameAcceptable
+            && Feedback.isAcceptableEmail(presenter.email)
+            && !phase.isSending
+    }
 
-        reference = nil
+    private func send() {
+        guard canSend else { return }
+
         phase = .sending
 
         Task {
@@ -184,6 +190,7 @@ struct PromptSubmissionSheet: View {
             let submission = Feedback.PromptSubmission(
                 prompt: presenter.prompt,
                 name: presenter.name,
+                email: presenter.email,
                 token: FeedbackEnvironment.token(),
                 environment: environment
             )
@@ -195,14 +202,13 @@ struct PromptSubmissionSheet: View {
                 return
             }
 
-            reference = result.reference
             phase = .sent
-            // The prompt goes; the name stays, because it is the same person next time.
+            // The prompt goes; the name and the address stay, because it is the same person next
+            // time and typing either again is a silly thing to ask.
             presenter.clearPrompt()
-            // Longer when there is a reference on the line, because it is only worth putting
-            // there if somebody has time to read it.
-            try? await Task.sleep(for: reference == nil ? feedbackSuccessPause : feedbackReferencePause)
-            presenter.close()
+            // The form is replaced by the thank you rather than closing on a timer. See
+            // `FeedbackSentCard` for why it is the same sheet rather than a second one.
+            presenter.open(.promptSent)
         }
     }
 }

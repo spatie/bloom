@@ -108,6 +108,10 @@ public enum Feedback {
     /// The name on a prompt submission, which is a credit line rather than an identity.
     public static let maxNameCharacters = 60
 
+    /// An address somebody volunteers so we can write back. The longest an address is allowed to
+    /// be, which is the endpoint's own ceiling and the one every mail system agrees on.
+    public static let maxEmailCharacters = 254
+
     /// How many pictures may go with one submission, and how big each may be. The endpoint's
     /// numbers.
     ///
@@ -472,8 +476,45 @@ public enum Feedback {
 
     /// What the sheet says under a name it cannot send.
     public static let nameProblem =
-        "A name or a handle, please: letters, numbers, spaces, and . _ ' -. An email address will "
-            + "not be accepted."
+        "A name or a handle, please: letters, numbers, spaces, and . _ ' -. There is a field of "
+            + "its own for your email below."
+
+    /// The shape an address has to have before Bloom will send it.
+    ///
+    /// Deliberately looser than any attempt at RFC 5322, because this check exists to save
+    /// somebody a 422 for an obvious slip, not to be the authority on what an address is. The
+    /// endpoint validates properly; a pattern here that turned away a real address would be worse
+    /// than no pattern at all.
+    public static let emailPattern = #"^[^@\s]+@[^@\s]+\.[^@\s]+$"#
+
+    /// The address as it is sent: trimmed and capped. Never lowercased, because the part before
+    /// the at sign is allowed to be case sensitive and it is not Bloom's business to decide it is
+    /// not.
+    public static func normalisedEmail(_ raw: String) -> String {
+        let email = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(email.prefix(maxEmailCharacters))
+    }
+
+    /// Whether an address would be accepted. Empty is fine, and is the state both sheets start in:
+    /// hearing back is something somebody opts into, not the price of being heard.
+    public static func isAcceptableEmail(_ raw: String) -> Bool {
+        let email = normalisedEmail(raw)
+        return email.isEmpty || matchesEmail(email)
+    }
+
+    /// The address to send, or nil when there is nothing sendable in the field.
+    static func sendableEmail(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let email = normalisedEmail(raw)
+        return email.isEmpty || !matchesEmail(email) ? nil : email
+    }
+
+    private static func matchesEmail(_ email: String) -> Bool {
+        InstallPing.matches(email, emailPattern)
+    }
+
+    /// What both sheets say under an address they cannot send.
+    public static let emailProblem = "That does not look like an email address."
 
     // MARK: - What is sent
 
@@ -571,6 +612,11 @@ public enum Feedback {
     /// from, and where it is running.
     public struct Report: Sendable, Equatable, Encodable {
         public let message: String
+        /// Nil unless somebody typed one, which is how the field starts every time. An address the
+        /// endpoint would refuse is left out rather than sent to be rejected: the sheet has
+        /// already said what is wrong with it, and losing a reply address is better than losing
+        /// the report.
+        public let email: String?
         /// The log excerpt, or nil when the box was left unticked, which is how it starts. Nil
         /// means the key is absent from the body rather than present and empty.
         public let logs: String?
@@ -580,12 +626,14 @@ public enum Feedback {
 
         public init(
             message: String,
+            email: String?,
             logs: String?,
             images: [Image],
             token: String?,
             environment: Environment
         ) {
             self.message = Feedback.trimmed(message, to: Feedback.maxMessageCharacters)
+            self.email = Feedback.sendableEmail(email)
             self.logs = logs.map { Feedback.trimmed($0, to: Feedback.maxLogCharacters) }
             self.images = Array(images.prefix(Feedback.maxImages))
             self.token = token.flatMap { InstallPing.matches($0, InstallPing.tokenPattern) ? $0 : nil }
@@ -595,6 +643,7 @@ public enum Feedback {
         public func encode(to encoder: any Encoder) throws {
             var container = encoder.container(keyedBy: WireKey.self)
             try container.encode(message, forKey: WireKey("message"))
+            try container.encodeIfPresent(email, forKey: WireKey("email"))
             try container.encodeIfPresent(logs, forKey: WireKey("logs"))
             try container.encodeIfPresent(token, forKey: WireKey("token"))
             try container.encode(environment, forKey: WireKey("environment"))
@@ -606,16 +655,20 @@ public enum Feedback {
         public let prompt: String
         /// Nil when nobody typed one, which is allowed: a prompt is worth having anonymously.
         public let name: String?
+        /// Nil unless somebody wants to hear when their prompt ships. Separate from the name
+        /// because the name is published and this is not.
+        public let email: String?
         public let token: String?
         public let environment: Environment
 
-        public init(prompt: String, name: String?, token: String?, environment: Environment) {
+        public init(prompt: String, name: String?, email: String?, token: String?, environment: Environment) {
             self.prompt = Feedback.trimmed(prompt, to: Feedback.maxPromptCharacters)
             let cleaned = name.map(Feedback.normalisedName) ?? ""
             // A name the endpoint would refuse is left out rather than sent to be rejected: the
             // sheet has already said what is wrong with it, and losing the credit line is better
             // than losing the prompt.
             self.name = cleaned.isEmpty || !InstallPing.matches(cleaned, Feedback.namePattern) ? nil : cleaned
+            self.email = Feedback.sendableEmail(email)
             self.token = token.flatMap { InstallPing.matches($0, InstallPing.tokenPattern) ? $0 : nil }
             self.environment = environment
         }
@@ -624,6 +677,7 @@ public enum Feedback {
             var container = encoder.container(keyedBy: WireKey.self)
             try container.encode(prompt, forKey: WireKey("prompt"))
             try container.encodeIfPresent(name, forKey: WireKey("name"))
+            try container.encodeIfPresent(email, forKey: WireKey("email"))
             try container.encodeIfPresent(token, forKey: WireKey("token"))
             try container.encode(environment, forKey: WireKey("environment"))
         }
@@ -872,17 +926,23 @@ public enum Feedback {
         public static let reportPlaceholder =
             "Tell us about your experience, bugs you have found, or features you would like to see…"
         public static let reportSend = "Send feedback"
-        public static let reportSent = "Thank you. That has been sent."
+        public static let reportSent = "Thank you"
 
-        /// The thanks with the handle the submission was filed under, when the server gave one.
+        /// What the card that replaces the form says once the words have arrived.
         ///
-        /// Said in the same line rather than in a dialog of its own, and the sheet stays up a
-        /// little longer when there is one, because a receipt nobody had time to read is not a
-        /// receipt. See `feedbackSuccessPause`.
-        public static func sent(_ thanks: String, reference: String?) -> String {
-            guard let reference else { return thanks }
-            return "\(thanks) Reference \(reference)."
-        }
+        /// **No reference.** The endpoint files every submission under a ULID and used to print it
+        /// here, on the theory that somebody might want to quote it later. Nobody did: it is
+        /// twenty-six characters of Crockford base32 shown for two and a half seconds, which is
+        /// long enough to make the sheet feel slow and nowhere near long enough to copy. The
+        /// address field below is the handle worth having, because it is one the person chose and
+        /// already knows.
+        public static let reportSentDetail =
+            "Your feedback is with us. We read everything that comes in, and if you left an "
+                + "address we will write back."
+        public static let promptSentDetail =
+            "If we run it you will see it in the changelog, and if you left an address we will "
+                + "tell you when it ships."
+        public static let sentDismiss = "Done"
 
         public static let logsToggle = "Include recent app logs (may include personal data)"
         /// The sentence under the checkbox, which says what "recent" means. A checkbox about
@@ -904,8 +964,18 @@ public enum Feedback {
         public static let promptPlaceholder = "Describe what you would like to see built…"
         public static let promptName = "Your name (if we use your prompt, we will credit you in the changelog)"
         public static let promptNamePlaceholder = "A name or a handle, not an email address"
+
+        /// The address field, on both sheets, with what it is for in the label.
+        ///
+        /// Two labels rather than one, because the reason to leave an address differs: on a report
+        /// it is so somebody can answer, on a prompt it is so somebody can say when it shipped.
+        /// A field whose label does not say what will be done with the address is a field people
+        /// are right not to fill in.
+        public static let reportEmail = "Your email (optional, so we can reply)"
+        public static let promptEmail = "Your email (optional, so we can tell you when it ships)"
+        public static let emailPlaceholder = "you@example.com"
         public static let promptSend = "Submit prompt"
-        public static let promptSent = "Thank you. Your prompt is in."
+        public static let promptSent = "Your prompt is in"
 
         /// The line under both Send buttons. Short, and it names the two things somebody would
         /// want to know before pressing it.
