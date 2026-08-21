@@ -7,12 +7,12 @@ name: Test
 # Two things happen on every run, and they fail for different reasons.
 #
 #   swift build      compiles the app target, Sources/Bloom included.
-#                    test-core.sh mirrors only BloomCore into a throwaway
+#                    Tools/test-core.sh mirrors only BloomCore into a throwaway
 #                    package with no app target, so a view that stops compiling
 #                    leaves the whole suite green. That has broken main four
 #                    times in a single day: widen an enum, leave a switch
 #                    non-exhaustive, tests pass, app does not build.
-#   ./test-core.sh   the BloomCore suite, around 1600 tests.
+#   ./Tools/test-core.sh   the BloomCore suite, around 1600 tests.
 #
 # Both run even when the other has already failed, because one push should tell
 # you everything that is wrong with it rather than one thing at a time.
@@ -147,7 +147,7 @@ jobs:
       # Debug, because nothing downstream consumes these objects. The question
       # this step answers is "does Sources/Bloom still compile", and a debug
       # build answers it faster. The manual build below makes its own release
-      # build through build.sh.
+      # build through Tools/build.sh.
       #
       # -warnings-as-errors lives here rather than in Package.swift so that a
       # local build stays tolerant while a run of this workflow does not. The
@@ -167,7 +167,7 @@ jobs:
       # app target compiling, and a run that reports both is worth more.
       - name: Run the core tests
         if: ${{ !cancelled() }}
-        run: ./test-core.sh
+        run: ./Tools/test-core.sh
 
       # Everything below only happens on a manual run.
       #
@@ -178,7 +178,7 @@ jobs:
       # for now: it is here to be tried, not to be handed out.
       - name: Assemble the app bundle
         if: ${{ github.event_name == 'workflow_dispatch' }}
-        run: ./build.sh -r
+        run: ./Tools/build.sh -r
 
       - name: Zip the bundle
         id: zip
@@ -226,6 +226,6 @@ jobs:
             echo '```'
             echo
             echo "It keeps the real bundle id, so it uses the real database and the"
-            echo "real preferences, and it will not offer to update itself: build.sh"
+            echo "real preferences, and it will not offer to update itself: Tools/build.sh"
             echo "marks a build with no version as local and the updater refuses those."
           } >> "$GITHUB_STEP_SUMMARY"
