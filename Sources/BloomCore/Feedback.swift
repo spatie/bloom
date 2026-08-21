@@ -177,7 +177,7 @@ public enum Feedback {
     ///
     /// Two values, because that is what the endpoint stores, and the line falls exactly where it
     /// matters: a crash in a release is everybody's crash, and the same crash in a working copy of
-    /// the source tree may be the working copy. A build `master.sh` installed is a build of a
+    /// the source tree may be the working copy. A build `Tools/master.sh` installed is a build of a
     /// commit somebody made on their own machine, so it is `local` too.
     ///
     /// Read off the same two Info.plist keys `SoftwareUpdate.availability` and

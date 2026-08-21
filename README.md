@@ -25,18 +25,20 @@ Conductor itself is a Tauri app: Rust with a WebKit view. Bloom is SwiftUI with 
 
 ## Building
 
+Every script lives in `Tools/`. `make` on its own lists what there is to run, and each target is
+a one line call into that directory, so anything with an argument is run directly instead.
+
 ```sh
-./build.sh --release --run
+make run     # release build, assembled into .build/release/Bloom.app, launched
+make app     # debug build, which is what you want while changing things
+make test    # the core suite: 1582 tests in 146 suites, no app target needed
+make lint    # the house rules no off the shelf linter knows about
 ```
 
-That produces `.build/release/Bloom.app` and launches it. Without `--release` you get a debug
-build, which is what you want while changing things.
-
-Run the core test suite, which does not need the app target to compile:
+The suite can be narrowed, which `make` does not wrap:
 
 ```sh
-./test-core.sh              # everything, 188 tests
-./test-core.sh DiffParser   # one suite
+./Tools/test-core.sh DiffParser   # one suite
 ```
 
 There is also a small set of live tests that drive the real `claude` binary end to end: a full
@@ -44,8 +46,12 @@ turn with tool use, session resume across two runner instances, and cancellation
 tokens, so they are opt-in:
 
 ```sh
-BLOOM_LIVE=1 ./test-core.sh LiveAgent
+BLOOM_LIVE=1 ./Tools/test-core.sh LiveAgent
 ```
+
+`./Tools/master.sh` builds a commit into `~/Applications/Bloom.app`, which is the copy to use
+while agents are editing the tree. `./Tools/release.sh` is the signed and notarised one; see
+`RELEASING.md`.
 
 ## It reads your existing Conductor config
 
@@ -110,8 +116,20 @@ Sources/Bloom/         SwiftUI.
   Views/                 Sidebar, Center, Transcript, Inspector, Terminal, Markdown, Chrome
 ```
 
-`PROTOCOL.md` documents the `claude` stream-json protocol as verified against the real CLI, with
-a captured session in `fixtures/`. Read that before touching anything agent related.
+## The documents under `docs/`
+
+Each of these was written by measuring something rather than by remembering it, so they are the
+answer to "has this already been worked out" rather than a tour of the code.
+
+- `docs/PROTOCOL.md` documents the `claude` stream-json protocol as verified against the real
+  CLI, with a captured session in `Tests/fixtures/`. Read it before touching anything agent
+  related.
+- `docs/CODEX.md` is the same for Codex's JSON-RPC app-server, plus the decisions that shaped
+  the Codex backend and the work still outstanding on it.
+- `docs/AGENTS-INTEGRATION.md` is what the four agent CLIs actually put on disk, read off a real
+  machine, and the rule that none of it may be rendered.
+- `docs/PLAN.md` is the build order this was written to, kept for the bug reports in it: what
+  broke, why, and what now stops it.
 
 ## What it deliberately does not do
 

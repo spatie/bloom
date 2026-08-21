@@ -5,7 +5,7 @@ it builds the tag, signs it with the Developer ID certificate, has Apple
 notarise it, staples the ticket, uploads the zip to the UpCloud bucket, and
 adds the release to the Sparkle appcast that lives beside it.
 
-The parts of that which are not YAML live in `Tools/release/`, and `release.sh`
+The parts of that which are not YAML live in `Tools/release/`, and `Tools/release.sh`
 calls the same scripts. A local release and a CI release sign and notarise
 through one piece of code on purpose.
 
@@ -31,7 +31,7 @@ replaced rather than added again.
 
 ## Releasing from this machine
 
-`./release.sh` builds, signs, notarises and staples, and leaves a zip in
+`./Tools/release.sh` builds, signs, notarises and staples, and leaves a zip in
 `dist/`. It does not upload anything and does not touch the appcast. It needs:
 
 ```sh
@@ -41,7 +41,7 @@ xcrun notarytool store-credentials bloom \
   --apple-id you@example.com --team-id 97KRXCRMAY --password <app-specific-password>
 ```
 
-`./release.sh --tag v1.4.0` stamps that version instead of the plist's.
+`./Tools/release.sh --tag v1.4.0` stamps that version instead of the plist's.
 
 ## What you have to set up, once
 
@@ -157,7 +157,7 @@ steps' `env` if you need it.
 
 Sparkle will not install an update whose signature it cannot check against the
 public key compiled into the app. The private half signs each zip in CI. The
-public half is a repository variable, and `build.sh` writes it into the bundle.
+public half is a repository variable, and `Tools/build.sh` writes it into the bundle.
 
 ```sh
 # Makes the key pair and puts the private half in your login keychain.
@@ -242,7 +242,7 @@ Specifically these have never happened even once:
 - notarising with an App Store Connect API key
 - stapling and the checks after it
 - any upload to the bucket
-- `build.sh` substituting the feed URL and public key, which is not written yet
+- `Tools/build.sh` substituting the feed URL and public key, which is not written yet
 
 What has been checked:
 
@@ -251,7 +251,7 @@ What has been checked:
 - the order things get signed in was run against a real app with Sparkle
   embedded in it, signed ad-hoc with the hardened runtime rather than with the
   certificate, and `codesign --verify --strict --deep` accepts the result
-- `./release.sh` refuses, before building anything, when there is no Developer
+- `./Tools/release.sh` refuses, before building anything, when there is no Developer
   ID identity, when the identity is an Apple Development one, and when the
   notarisation key is half configured
 

@@ -134,7 +134,7 @@ private final class ProcessRecorder: @unchecked Sendable {
 ///
 /// This suite already existed, and it pinned the invocation with an exact array, which is normally
 /// the strongest shape a test can take. It still missed `--effort` for as long as the composer has
-/// offered a reasoning picker, because the array was written from PROTOCOL.md rather than from
+/// offered a reasoning picker, because the array was written from docs/PROTOCOL.md rather than from
 /// what the app lets somebody choose. Every level anyone picked was written to the session row,
 /// read back into the menu, and went no further.
 ///
@@ -154,7 +154,7 @@ struct AgentRunnerArgvTests {
         return argv[index + 1]
     }
 
-    @Test("builds the invocation PROTOCOL.md specifies")
+    @Test("builds the invocation docs/PROTOCOL.md specifies")
     func buildsArgv() {
         let session = Session(workspaceID: "w", model: "opus", effort: "high", permissionMode: .acceptEdits)
         #expect(AgentRunner.argv(session: session, resume: nil) == [

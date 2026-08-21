@@ -708,7 +708,7 @@ public actor Store {
         /// Only ever set on a chat that has not spoken yet. Changing the backend of a chat that
         /// already has a message strands its transcript half in one vocabulary and half in the
         /// other, and its thread id on a server that knows nothing about the new one, so the
-        /// picker forks a new chat instead. See CODEX.md.
+        /// picker forks a new chat instead. See docs/CODEX.md.
         agentKind: AgentKind? = nil
     ) throws {
         try db.run(

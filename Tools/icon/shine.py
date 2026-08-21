@@ -86,7 +86,7 @@ HOW THE LAYERED COLUMN ON THE PAGE IS PRODUCED, and why it can be trusted.
 depth.py had to SIMULATE the system's pass, because it had no way to ask the
 system what it would draw. This file does not simulate anything. Each variation
 is written out as a real `.icon` bundle, compiled with `actool` exactly the way
-`build.sh` compiles the shipped one, dropped into a throwaway `.app` in
+`Tools/build.sh` compiles the shipped one, dropped into a throwaway `.app` in
 `.build/`, and handed to Icon Services, which composites it and hands back the
 pixels Finder would show. The left hand column of the page is a photograph of
 macOS drawing the icon, not a guess at it. Nothing here writes outside
@@ -749,7 +749,7 @@ def renderer():
 
 
 def systemshots(name, groups, sizes):
-    """Write the variation as a real `.icon`, compile it the way build.sh does,
+    """Write the variation as a real `.icon`, compile it the way Tools/build.sh does,
     and ask macOS to draw it at each size.
 
     Everything lands in `Tools/icon/.build/shine/<name>`, which is ignored, and
@@ -857,7 +857,7 @@ below by the same amount, so a piece's average tone is the palette entry it
 started as.</p>
 <p><span class="real">The left hand column is not a simulation.</span> Each row
 is written out as a real <code>.icon</code> bundle, compiled with
-<code>actool</code> exactly the way <code>build.sh</code> compiles the shipped
+<code>actool</code> exactly the way <code>Tools/build.sh</code> compiles the shipped
 one, and handed to Icon Services, which composites it with the system's own
 material, shadow and specular and gives back the pixels Finder would show. The
 previous sheet had to guess at that pass. This one photographs it.</p>

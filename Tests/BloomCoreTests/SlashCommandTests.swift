@@ -599,7 +599,7 @@ struct SlashCommandTests {
 /// directory being a symlink, the plugin cache holding seven versions of the same plugin, and a
 /// plugin naming itself something other than its settings key.
 ///
-///     BLOOM_LOCAL_SKILLS=1 BLOOM_LOCAL_PROJECT=$PWD ./test-core.sh LocalSlashCommandTests
+///     BLOOM_LOCAL_SKILLS=1 BLOOM_LOCAL_PROJECT=$PWD ./Tools/test-core.sh LocalSlashCommandTests
 @Suite("Local slash commands", .enabled(if: ProcessInfo.processInfo.environment["BLOOM_LOCAL_SKILLS"] == "1"))
 struct LocalSlashCommandTests {
     @Test("this machine's own commands, skills and plugins are found")

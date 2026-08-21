@@ -79,8 +79,8 @@ one.
 
 | Kind | What the field holds | Recorded |
 | --- | --- | --- |
-| `update` | A unified **hunk**: `@@ -1,3 +1,3 @@` and its lines. No `---`/`+++` headers | `fixtures/codex-edit-patch.ndjson` |
-| `add` | The **whole new file**, verbatim, no diff markers at all (`"hi\n"`) | `fixtures/codex-approval.ndjson` |
+| `update` | A unified **hunk**: `@@ -1,3 +1,3 @@` and its lines. No `---`/`+++` headers | `Tests/fixtures/codex-edit-patch.ndjson` |
+| `add` | The **whole new file**, verbatim, no diff markers at all (`"hi\n"`) | `Tests/fixtures/codex-approval.ndjson` |
 | `delete` | Presumed symmetrical. **Not observed**, and treated as content rather than as a diff | |
 
 Anything counting `+` lines to size a new file counts zero, which is what the turn footer would
@@ -126,7 +126,7 @@ Four new files in `Sources/BloomCore/`, nothing else touched:
   `AgentCatalog` does.
 
 Tests: `Tests/BloomCoreTests/CodexProtocolTests.swift` and `CodexClientTests.swift`, 42 of them,
-reading four recorded fixtures in `fixtures/` (`codex-turn.ndjson`, `codex-approval.ndjson`,
+reading four recorded fixtures in `Tests/fixtures/` (`codex-turn.ndjson`, `codex-approval.ndjson`,
 `codex-interrupt.ndjson`, `codex-model-list.json`) captured off the real server. Recorded rather
 than invented, which is how the missing `jsonrpc` member and the server's request numbering were
 found.

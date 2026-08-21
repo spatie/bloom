@@ -131,7 +131,7 @@ struct TOMLTests {
 /// Everything above is hermetic. This is not: what it reads depends on which repositories the
 /// developer has checked out, so it cannot pass or fail the same way twice and is opt in.
 ///
-///     BLOOM_LOCAL_SETTINGS=1 ./test-core.sh TOMLOnDisk
+///     BLOOM_LOCAL_SETTINGS=1 ./Tools/test-core.sh TOMLOnDisk
 ///
 /// It earns its place because real settings files contain shapes nobody would think to write a
 /// fixture for, which is how several of the parser bugs above were found in the first place.

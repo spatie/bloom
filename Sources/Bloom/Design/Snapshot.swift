@@ -102,6 +102,31 @@ enum Snapshot {
         #endif
     }
 
+    /// Unfolds the setup row's log in the transcript, the same way its link does.
+    ///
+    ///     Bloom --select w1 --expand-setup-log 8
+    ///
+    /// The same kind of affordance `--create-sheet` is, and it exists for the same reason. What
+    /// that link does is motion: it jumps to the newest line of the log and then follows the
+    /// script down. Judging that means filming the unfold as it happens, and the only other way
+    /// to press the link is to drive the pointer across the user's own screen.
+    ///
+    /// Debug builds only. Nothing here lies about the app the way `--running` does, but a shipped
+    /// copy has no business being able to open a row nobody clicked either.
+    static func scheduleSetupLogExpansionIfRequested() {
+        #if DEBUG
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: "--expand-setup-log"),
+              index + 1 < arguments.count,
+              let delay = Double(arguments[index + 1]) else { return }
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(delay))
+            NotificationCenter.default.post(name: .bloomExpandSetupLog, object: nil)
+        }
+        #endif
+    }
+
     static func scheduleRunningStateIfRequested() {
         #if DEBUG
         let arguments = CommandLine.arguments
@@ -581,6 +606,11 @@ extension Notification.Name {
     /// mid turn. Posted only by `Snapshot.scheduleRunningStateIfRequested`, and only in a debug
     /// build. See `View.acceptsCaptureRunningState`.
     static let bloomCaptureRunning = Notification.Name("bloom.captureRunning")
+
+    /// Asks the setup row to unfold its log. Posted only by
+    /// `Snapshot.scheduleSetupLogExpansionIfRequested`, and only in a debug build. See
+    /// `View.acceptsCaptureSetupLogExpansion`.
+    static let bloomExpandSetupLog = Notification.Name("bloom.expandSetupLog")
 }
 
 extension View {
@@ -598,6 +628,22 @@ extension View {
         return onReceive(NotificationCenter.default.publisher(for: .bloomCaptureRunning)) { note in
             guard let ids = note.object as? Set<String> else { return }
             app.setRunningWorkspaceIDsForCapture(ids)
+        }
+        #else
+        return self
+        #endif
+    }
+
+    /// Lets a debug build unfold the setup log for a camera.
+    ///
+    /// It runs the row's own toggle rather than setting a flag beside it, so what is filmed is
+    /// exactly what pressing "Show more of the log" produces, jump and all. Compiled out of a
+    /// release build entirely, along with the subscription itself: a transcript row must not pay
+    /// for a notification nothing in a shipped copy ever posts.
+    func acceptsCaptureSetupLogExpansion(_ expand: @escaping @MainActor () -> Void) -> some View {
+        #if DEBUG
+        return onReceive(NotificationCenter.default.publisher(for: .bloomExpandSetupLog)) { _ in
+            expand()
         }
         #else
         return self

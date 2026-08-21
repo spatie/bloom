@@ -173,7 +173,7 @@ jobs:
           printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
           test -s "$RUNNER_TEMP/notary.p8"
 
-      # build.sh substitutes these two into the bundle's Info.plist, where Sparkle
+      # Tools/build.sh substitutes these two into the bundle's Info.plist, where Sparkle
       # reads them. The feed URL is computed from the same variables the appcast
       # is uploaded with, rather than written out again, so the address the app
       # polls and the address the feed is written to cannot drift apart.
@@ -190,7 +190,7 @@ jobs:
           BLOOM_UPDATE_FEED_URL="$(Tools/release/bucket.sh url appcast.xml)"
           export BLOOM_UPDATE_FEED_URL
           echo "Feed the app will poll: $BLOOM_UPDATE_FEED_URL"
-          ./build.sh -r
+          ./Tools/build.sh -r
 
       - name: Sign, notarise and staple
         id: package

@@ -5,10 +5,10 @@
 # view stops every core test from running. This mirrors the core sources into a throwaway
 # package that has no app target, which keeps the core suite runnable at all times.
 #
-#   ./test-core.sh                        run everything
-#   ./test-core.sh DiffParser             run one suite by filter
-#   ./test-core.sh DiffParser Git          run several (each argument is its own --filter)
-#   BLOOM_TEST_RUNS=5 ./test-core.sh      run the whole thing five times, to shake out flakes
+#   ./Tools/test-core.sh                   run everything, which is also `make test`
+#   ./Tools/test-core.sh DiffParser        run one suite by filter
+#   ./Tools/test-core.sh DiffParser Git    run several (each argument is its own --filter)
+#   BLOOM_TEST_RUNS=5 ./Tools/test-core.sh run the whole thing five times, to shake out flakes
 #
 # Environment:
 #   BLOOM_TEST_ID       stable name for the work and build directories, so repeated runs by the
@@ -17,10 +17,14 @@
 #   BLOOM_LOCAL_AGENTS  =1 asserts which agent CLIs exist on this machine
 #   BLOOM_LOCAL_SETTINGS=1 parses the .conductor/settings.toml files on this machine
 #   BLOOM_LIVE          =1 drives the real `claude` binary. Costs money.
+#   BLOOM_TEST_SWIFT_ARGS  extra flags for `swift test`, split on spaces. For the runs that are
+#                       not the ordinary one: the nightly workflow passes --sanitize=thread and
+#                       --enable-code-coverage through here rather than reimplementing the
+#                       mirrored package it needs to avoid building the app target.
 #
 
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 ROOT="$PWD"
 TMP="${TMPDIR:-/tmp}"
 ID="${BLOOM_TEST_ID:-$$}"
@@ -37,8 +41,9 @@ rm -rf "$WORK"
 mkdir -p "$WORK/Sources" "$WORK/Tests"
 ln -sfn "$ROOT/Sources/BloomCore" "$WORK/Sources/BloomCore"
 ln -sfn "$ROOT/Tests/BloomCoreTests" "$WORK/Tests/BloomCoreTests"
-# Tests resolve fixtures relative to the package root, so it has to exist here too.
-ln -sfn "$ROOT/fixtures" "$WORK/fixtures"
+# The tests find a fixture by walking up from their own file, so it has to be reachable
+# from the mirrored Tests directory as well as from the real one.
+ln -sfn "$ROOT/Tests/fixtures" "$WORK/Tests/fixtures"
 
 cat > "$WORK/Package.swift" <<'EOF'
 // swift-tools-version: 6.2
@@ -63,6 +68,10 @@ for name in "$@"; do
   filters+=(--filter "$name")
 done
 
+# Split on spaces, which is what ${=...} is for. An unset variable leaves an empty array, and an
+# empty array in quotes expands to no words at all, so the ordinary run is unchanged.
+extra=(${=BLOOM_TEST_SWIFT_ARGS:-})
+
 cd "$WORK"
 runs="${BLOOM_TEST_RUNS:-1}"
 failed=0
@@ -70,7 +79,7 @@ for run in $(seq 1 "$runs"); do
   if [[ "$runs" -gt 1 ]]; then
     print -r -- "===> run $run of $runs"
   fi
-  if ! swift test --scratch-path "$SCRATCH" "${filters[@]}"; then
+  if ! swift test --scratch-path "$SCRATCH" "${extra[@]}" "${filters[@]}"; then
     failed=$((failed + 1))
   fi
 done

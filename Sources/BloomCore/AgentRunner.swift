@@ -137,7 +137,7 @@ public actor AgentRunner {
 
     public static let executable = "claude"
 
-    /// The invocation from PROTOCOL.md. `--verbose` is not optional: the CLI refuses to run
+    /// The invocation from docs/PROTOCOL.md. `--verbose` is not optional: the CLI refuses to run
     /// `-p --output-format stream-json` without it. Pure and static so it can be asserted on
     /// without spawning anything, which is what `AgentRunnerArgvTests` does: every flag the
     /// composer can set has to be visible in this array, or the control that sets it is decoration.

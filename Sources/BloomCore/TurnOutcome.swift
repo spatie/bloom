@@ -18,7 +18,7 @@ public enum TurnOutcome: Sendable, Hashable {
 public extension AgentResult {
     /// Which of the three a `result` line describes, or nil when it is not worth saying anything.
     ///
-    /// There is no live "the agent is waiting for you" event to hook. PROTOCOL.md has no such
+    /// There is no live "the agent is waiting for you" event to hook. docs/PROTOCOL.md has no such
     /// line: in `-p --output-format stream-json` the CLI answers its own `AskUserQuestion` and the
     /// transcript shows the question read-only, after the fact. What the protocol does surface, on
     /// the `result` line that ends the turn, are the two ways a turn can end with the work not

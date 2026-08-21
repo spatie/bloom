@@ -20,6 +20,7 @@ struct BloomApp: App {
         if Snapshot.isWindowCaptureRequested { Snapshot.scheduleWindowCapture() }
         Snapshot.scheduleURLIfRequested()
         Snapshot.scheduleRunningStateIfRequested()
+        Snapshot.scheduleSetupLogExpansionIfRequested()
 
         // A development affordance too: `Bloom --frame-probe <out.json>` drags the sidebar divider
         // and records how long each frame actually took. See `FrameProbe`.

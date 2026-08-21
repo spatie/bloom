@@ -1,7 +1,7 @@
 # The Claude Code stream-json protocol
 
 Ground truth, captured from `claude` on this machine on 2026-08-18. A real capture lives at
-`fixtures/session-basic.jsonl` (55 lines: thinking, two tool calls, two tool results, text,
+`Tests/fixtures/session-basic.jsonl` (55 lines: thinking, two tool calls, two tool results, text,
 result). Hook payloads in that file were trimmed because they were enormous, nothing else was
 touched.
 

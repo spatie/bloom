@@ -33,7 +33,7 @@
 	    published to does not exist yet, and a real-looking default is the one thing that could
 	    make a build check a host nobody owns.
 
-	    build.sh fills them in from the environment:
+	    Tools/build.sh fills them in from the environment:
 
 	      BLOOM_UPDATE_FEED_URL     the appcast, e.g. https://<bucket-host>/appcast.xml
 	      BLOOM_UPDATE_PUBLIC_KEY   the base64 EdDSA public key printed by Sparkle's generate_keys

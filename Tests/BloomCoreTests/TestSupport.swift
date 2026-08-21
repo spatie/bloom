@@ -217,9 +217,9 @@ struct TempRepo {
 
 // MARK: - Fixtures
 
-/// The captured session lives in the repo, not in a resource bundle, so it is found by walking up
-/// from this file. Symlinks are resolved too, because the core suite is run from a mirrored
-/// package that has no app target (see test-core.sh).
+/// The captured sessions live in `Tests/fixtures`, not in a resource bundle, so they are found by
+/// walking up from this file. Symlinks are resolved too, because the core suite is run from a mirrored
+/// package that has no app target (see Tools/test-core.sh).
 func bloomFixtureLines(_ name: String) throws -> [String] {
     let starts = [
         URL(fileURLWithPath: #filePath),

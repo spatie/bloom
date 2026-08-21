@@ -7,7 +7,7 @@ import Foundation
 /// Every other test in the suite is hermetic. These are not: they spend tokens, need auth, and
 /// need the network, so they only run when asked for:
 ///
-///     BLOOM_LIVE=1 ./test-core.sh LiveAgent
+///     BLOOM_LIVE=1 ./Tools/test-core.sh LiveAgent
 ///
 /// They exist because the agent protocol is the one part of Bloom that cannot be proven correct
 /// against a fixture. A fixture only proves we still decode what the CLI emitted the day it was
@@ -210,7 +210,7 @@ final class EventLog: @unchecked Sendable {
 /// `--system-prompt`, `--safe-mode`) are the CLI's, not Bloom's, and this is the only thing that
 /// notices when one of them changes.
 ///
-///     BLOOM_LIVE=1 ./test-core.sh LiveNaming
+///     BLOOM_LIVE=1 ./Tools/test-core.sh LiveNaming
 @Suite("LiveNaming", .enabled(if: liveEnabled), .tags(.subprocess), .scratchDirectory)
 struct LiveNamingTests {
     @Test("a real model names a real task, in a shape Bloom will accept", .timeLimit(.minutes(2)))

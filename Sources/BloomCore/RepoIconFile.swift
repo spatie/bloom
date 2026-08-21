@@ -11,7 +11,7 @@ import Foundation
 /// Headers only. Nothing here decodes an image: the dimensions of these formats are stated in the
 /// first few bytes or in a table of contents, so measuring a 300 KB `.icns` costs four reads of
 /// eight bytes rather than a megabyte of pixels. That also keeps the whole detector in the core,
-/// where `./test-core.sh` can reach it, with no dependency on ImageIO or AppKit.
+/// where `./Tools/test-core.sh` can reach it, with no dependency on ImageIO or AppKit.
 enum RepoIconFile {
     struct Measurement: Sendable, Hashable {
         var format: RepoIconFormat

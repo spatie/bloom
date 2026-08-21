@@ -80,8 +80,8 @@ public enum InstallPing {
 
     /// Where this build may send, if it may send at all.
     ///
-    /// A build made by `build.sh` without a version stamped on it is a working copy of the source
-    /// tree, and the copy `master.sh` installs is somebody's own build of a commit. Neither is an
+    /// A build made by `Tools/build.sh` without a version stamped on it is a working copy of the source
+    /// tree, and the copy `Tools/master.sh` installs is somebody's own build of a commit. Neither is an
     /// install of a release, and counting either would mean the number is mostly the machines of
     /// the people writing the app. `SoftwareUpdate.availability` refuses to update those same two
     /// cases, for a different reason, off the same two Info.plist keys; this reads them as strings
@@ -107,7 +107,7 @@ public enum InstallPing {
         return validEndpoint(defaultEndpoint)
     }
 
-    /// The value `build.sh` writes into `BloomBuildChannel` for a build that was given a version.
+    /// The value `Tools/build.sh` writes into `BloomBuildChannel` for a build that was given a version.
     /// The same string `SoftwareUpdate.releaseChannel` carries, kept here as well so this rule can
     /// be read and tested without reaching into the updater.
     static let releaseChannel = "release"

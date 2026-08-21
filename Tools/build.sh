@@ -1,12 +1,14 @@
 #!/bin/zsh
 # Builds Bloom and assembles a launchable .app bundle.
 #
-#   ./build.sh            debug build
-#   ./build.sh -r         release build
-#   ./build.sh -r --run   release build, then launch it
+#   ./Tools/build.sh            debug build
+#   ./Tools/build.sh -r         release build
+#   ./Tools/build.sh -r --run   release build, then launch it
+#
+#   make app / make run         the same two through the Makefile
 
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 CONFIG=debug
 RUN=0
@@ -46,10 +48,10 @@ plist_set() {
 # So a build only claims a version when it is given one, and only a build that claims a version is
 # allowed to update itself. `BloomBuildChannel` is what says which of the two this is;
 # `SoftwareUpdate.availability` reads it and refuses to start the updater on a local build. That is
-# also what keeps the copy master.sh installs out of it, and master.sh's own BloomMasterCommit is
-# checked as a second, independent guard on the same case.
+# also what keeps the copy Tools/master.sh installs out of it, and that script's own
+# BloomMasterCommit is checked as a second, independent guard on the same case.
 #
-#   BLOOM_VERSION=0.2.0 BLOOM_BUILD=7 ./build.sh -r
+#   BLOOM_VERSION=0.2.0 BLOOM_BUILD=7 ./Tools/build.sh -r
 #
 # BLOOM_BUILD has to increase with every release and never repeat. The release pipeline should
 # derive both from the tag it is building, and the appcast's sparkle:version MUST equal the
@@ -267,7 +269,7 @@ emit_app_intents_metadata
 # is the only thing that fixes it, and there is no honest default for one, so it is named by the
 # environment.
 #
-#   BLOOM_CODESIGN_IDENTITY="Apple Development: You (TEAMID)" ./build.sh
+#   BLOOM_CODESIGN_IDENTITY="Apple Development: You (TEAMID)" ./Tools/build.sh
 #
 # The pre-rename spelling is still read, so a shell profile or CI job that exports
 # BATON_CODESIGN_IDENTITY keeps producing a signed build rather than silently dropping to ad-hoc.

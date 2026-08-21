@@ -15,19 +15,19 @@ public enum SoftwareUpdate {
     public static let feedURLKey = "SUFeedURL"
     public static let publicKeyKey = "SUPublicEDKey"
 
-    /// Whether this bundle was stamped as a release. Written by `build.sh`. See `availability`.
+    /// Whether this bundle was stamped as a release. Written by `Tools/build.sh`. See `availability`.
     public static let buildChannelKey = "BloomBuildChannel"
 
-    /// Written by `master.sh` into the copy it installs in `~/Applications`. See `availability`.
+    /// Written by `Tools/master.sh` into the copy it installs in `~/Applications`. See `availability`.
     public static let masterCommitKey = "BloomMasterCommit"
 
-    /// What `build.sh` leaves in the two Sparkle keys when nothing has been configured.
+    /// What `Tools/build.sh` leaves in the two Sparkle keys when nothing has been configured.
     ///
     /// A placeholder rather than a plausible-looking URL, because a real-looking default is the
     /// one thing that could make an unconfigured build check a host nobody owns.
     public static let placeholderPrefix = "__BLOOM_"
 
-    /// The value `build.sh` writes into `BloomBuildChannel` for a build that was given a version.
+    /// The value `Tools/build.sh` writes into `BloomBuildChannel` for a build that was given a version.
     public static let releaseChannel = "release"
 
     // MARK: - Scheduling
@@ -59,7 +59,7 @@ public enum SoftwareUpdate {
     /// Two of the three refusals are about not updating over somebody's own work rather than
     /// about missing configuration.
     ///
-    /// A build made by `build.sh` with no version stamped on it is a working copy of the source
+    /// A build made by `Tools/build.sh` with no version stamped on it is a working copy of the source
     /// tree. Its `CFBundleVersion` is whatever `Resources/Info.plist` happens to carry, which
     /// bears no relation to what has been released, so comparing it against an appcast is
     /// meaningless in both directions: a released build looks newer than a working copy that is
@@ -67,7 +67,7 @@ public enum SoftwareUpdate {
     /// everything and would never update again. Neither answer is worth having, so an unstamped
     /// build simply does not ask.
     ///
-    /// `master.sh` installs into `~/Applications/Bloom.app` under the real bundle id, and stamps
+    /// `Tools/master.sh` installs into `~/Applications/Bloom.app` under the real bundle id, and stamps
     /// the commit it built. That is the same case one step further along: an app somebody is
     /// using all day, built from a commit rather than from a release, which must not be replaced
     /// underneath them by an older release zip. It is checked separately from the channel because
