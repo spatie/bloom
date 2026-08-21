@@ -14,9 +14,15 @@ import SwiftUI
 /// General pane half way across, which is the very thing this exists to stop. A tab is also the
 /// most anybody sees at once, so a column agreed across tabs would line up rows that are never on
 /// screen together at the cost of the ones that are.
+///
+/// The third thing it does is take the rule out from under the tab bar of both settings windows.
+/// That rule belongs to the form rather than to the window, which is not where anybody looks for
+/// it, so the whole of why is in `SettingsScrollPocket`.
 extension View {
     func settingsForm() -> some View {
-        formStyle(.grouped).modifier(SettingsLabelColumn())
+        formStyle(.grouped)
+            .hidesScrollEdgeRule()
+            .modifier(SettingsLabelColumn())
     }
 }
 
