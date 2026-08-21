@@ -224,6 +224,8 @@ struct BloomCommands: Commands {
 
             Divider()
 
+            setupItem
+
             runScriptsMenu
 
             Button("Stop Agent") {
@@ -259,6 +261,32 @@ struct BloomCommands: Commands {
             Button("Submit a Prompt…") {
                 FeedbackPresenter.shared.open(.prompt)
             }
+        }
+    }
+
+    /// Running this repository's setup script in this worktree again.
+    ///
+    /// In the Workspace menu rather than in the project settings window, and the reason is what
+    /// the action needs: a setup script runs in ONE worktree, against ONE port, and writes its
+    /// outcome onto ONE workspace row. The settings window is about a project, which usually has
+    /// several workspaces open, so a button there would have to guess which of them was meant, or
+    /// grow a picker to ask. Here the answer is the workspace the window is already showing.
+    ///
+    /// It is also where the two people who press it are. One has just read a failure and wants
+    /// another go; the transcript's own failed row carries the same action for them, so they never
+    /// have to leave the sentence explaining what went wrong. The other has just edited the script
+    /// in the project settings window, and comes back to the workspace to try it.
+    ///
+    /// Greyed rather than absent while it runs, because the reason it cannot be pressed is that it
+    /// is already doing the thing, and an item that vanished mid run would read as the feature
+    /// having gone away.
+    @ViewBuilder
+    private var setupItem: some View {
+        if let workspace = model.selectedModel, workspace.settings.setupScript != nil {
+            Button(workspace.hasRunSetup ? "Run Setup Again" : "Run Setup") {
+                workspace.runSetupAgain()
+            }
+            .disabled(!workspace.canRunSetup)
         }
     }
 

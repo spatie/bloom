@@ -50,6 +50,7 @@ struct RepoScriptsSection: View {
                 Text(Self.variables)
                     .font(Typo.codeTiny)
                 Text(Self.alias)
+                Text(Self.rerun)
             }
             .font(Typo.caption)
             .foregroundStyle(Palette.textSecondary)
@@ -65,6 +66,14 @@ struct RepoScriptsSection: View {
     /// written for Conductor keeps working; a script written today should not be written that way.
     private static let alias = "Each is also set as "
         + "\(WorkspaceManager.deprecatedEnvironmentPrefix)_*, for scripts written for Conductor."
+
+    /// Where to try the script that has just been edited. This window is about a project, and a
+    /// project usually has several workspaces open, so the re-run cannot live here: it would have
+    /// to ask which worktree was meant. Saying where it does live costs a line and closes the loop
+    /// somebody editing a broken setup script is standing in.
+    private static let rerun =
+        "To run the setup script again in a workspace, use Run Setup Again in the Workspace menu, "
+        + "or the button on the failed setup row in its transcript."
 
     // MARK: - Run scripts
 
@@ -91,7 +100,7 @@ struct RepoScriptsSection: View {
             Text("Run scripts")
         } footer: {
             VStack(alignment: .leading, spacing: Metrics.spacingTight) {
-                Text("Started from the panel at the bottom of a workspace, in its own terminal. Use the one-at-a-time mode when the project cannot run twice, because it binds a fixed port or shares one database.")
+                Text("Started from the Workspace menu, each in a terminal tab of its own named after the script. Use the one-at-a-time mode when the project cannot run twice, because it binds a fixed port or shares one database.")
                 SettingsDestinationLabel(model: model, key: .runScripts)
             }
             .font(Typo.caption)

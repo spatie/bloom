@@ -402,42 +402,7 @@ final class WorkspaceModel {
         }.value
 
         if settings.setupScript != nil {
-            isRunningSetup = true
-            setupStartedAt = .now
-            setupDurationMS = nil
-            setupExitStatus = nil
-            setupOutput = ""
-            // A machine with no free block left is not a reason to refuse to run setup. The script
-            // simply gets no port to bind, which it can decide for itself what to do about.
-            port = (try? PortAllocator.allocate(taken: [])) ?? 0
-
-            // Setup scripts are chatty: `composer install` and `bun install` together are
-            // thousands of lines. Hopping to the main actor once per line, each time appending to
-            // a string that keeps growing, is quadratic work on the main queue and it beachballs
-            // the whole window. Lines are collected off-actor and flushed a few times a second.
-            let buffer = LineBuffer()
-            let flusher = Task { @MainActor [weak self] in
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .milliseconds(120))
-                    guard let self else { return }
-                    self.appendSetupOutput(buffer.drain())
-                }
-            }
-
-            let succeeded = await manager.runSetup(
-                workspace: workspace, repo: repo, port: port,
-                onExit: { [weak self] status in
-                    Task { @MainActor in self?.setupExitStatus = status }
-                }
-            ) { line in
-                buffer.append(line)
-            }
-
-            flusher.cancel()
-            appendSetupOutput(buffer.drain())
-            isRunningSetup = false
-            setupDurationMS = setupStartedAt.map { Int(Date.now.timeIntervalSince($0) * 1000) }
-            await refreshSetupState()
+            let succeeded = await stream(setupIn: repo, through: manager)
 
             // Archiving or quitting cancels this task. Starting an agent in a worktree that is on
             // its way out is the one thing that must not happen here.
@@ -459,6 +424,88 @@ final class WorkspaceModel {
         await reloadSessions()
         guard !Task.isCancelled, let prompt, let session = activeSession else { return }
         await transcript(for: session).send(prompt)
+    }
+
+    /// One setup run: the state it resets, the output it streams, and what it leaves behind.
+    ///
+    /// Shared by the run a workspace opens with and by the re-run below, which differ only in what
+    /// happens afterwards. It used to be written out twice, once here and once in the panel's
+    /// Setup tab, and the two had already drifted: only one of them cleared the exit status, so a
+    /// re-run after a failure drew a red cross over a log that was still being written.
+    @discardableResult
+    private func stream(setupIn repo: Repo, through manager: WorkspaceManager) async -> Bool {
+        isRunningSetup = true
+        setupStartedAt = .now
+        setupDurationMS = nil
+        setupExitStatus = nil
+        setupOutput = ""
+        // A machine with no free block left is not a reason to refuse to run setup. The script
+        // simply gets no port to bind, which it can decide for itself what to do about.
+        if port == 0 { port = (try? PortAllocator.allocate(taken: [])) ?? 0 }
+
+        // Setup scripts are chatty: `composer install` and `bun install` together are thousands of
+        // lines. Hopping to the main actor once per line, each time appending to a string that
+        // keeps growing, is quadratic work on the main queue and it beachballs the whole window.
+        // Lines are collected off-actor and flushed a few times a second.
+        let buffer = LineBuffer()
+        let flusher = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(120))
+                guard let self else { return }
+                self.appendSetupOutput(buffer.drain())
+            }
+        }
+
+        let succeeded = await manager.runSetup(
+            workspace: workspace, repo: repo, port: port,
+            onExit: { [weak self] status in
+                Task { @MainActor in self?.setupExitStatus = status }
+            }
+        ) { line in
+            buffer.append(line)
+        }
+
+        flusher.cancel()
+        appendSetupOutput(buffer.drain())
+        isRunningSetup = false
+        setupDurationMS = setupStartedAt.map { Int(Date.now.timeIntervalSince($0) * 1000) }
+        await refreshSetupState()
+        return succeeded
+    }
+
+    /// Whether there is a setup script to run in this worktree at all, which is what the two
+    /// controls that offer a re-run are enabled by.
+    var canRunSetup: Bool {
+        repo != nil && settings.setupScript != nil && !isRunningSetup
+    }
+
+    /// Whether setup has ever run here, so a control can say "again" only when there was a first
+    /// time. It read "Run setup again" on a workspace whose own header said setup had never run.
+    ///
+    /// `.pending` with something in the log is `Store.recoverInterruptedSetups` filing a run this
+    /// app was killed during, which did happen and is the case "again" is written for.
+    var hasRunSetup: Bool {
+        workspace.setupState != .pending || !setupOutput.isEmpty
+    }
+
+    /// Runs the setup script in this worktree again.
+    ///
+    /// A recovery rather than a first run, which is why it sends no prompt and reloads no
+    /// sessions: the script failed, or it was edited, and it is being run once more. A workspace
+    /// that has been open for an hour must not be handed its opening message a second time.
+    ///
+    /// Through the same `setupTask` the first run uses, so archiving or quitting stops a
+    /// `composer install` started from here exactly as it stops one started at creation.
+    func runSetupAgain() {
+        guard canRunSetup, let repo, let manager = app.manager else { return }
+        setupTask?.cancel()
+        setupGeneration += 1
+        let generation = setupGeneration
+        setupTask = Task { [weak self] in
+            await self?.stream(setupIn: repo, through: manager)
+            guard let self, self.setupGeneration == generation else { return }
+            self.setupTask = nil
+        }
     }
 
     /// Re-reads what setup ended up as.
