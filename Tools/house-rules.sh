@@ -3,7 +3,7 @@
 #
 #   ./Tools/house-rules.sh
 #
-# Five rules, and every one of them is here because it has already been broken:
+# Six rules, and every one of them is here because it has already been broken:
 #
 #   1. No em dashes and no en dashes. Anywhere. They arrive by the hundred from
 #      anything that writes prose for you, and once one is in a file the next
@@ -17,6 +17,9 @@
 #      in the day before it was written.
 #   5. One way to start a workspace. Four routes each grew their own half of it
 #      once already; see the rule itself for what that cost.
+#   6. One way to move a state. The three columns that describe what a workspace
+#      or a chat IS are only movable through the lifecycle that also does the
+#      work the move implies; see the rule itself.
 #
 # Exit status is 1 if anything was found, and every finding is printed with the
 # file and line so it can be opened. The word lists are deliberately narrow:
@@ -140,6 +143,61 @@ for file in $(git grep -l -I -e 'createWorkspace(' -- 'Sources/BloomCore/*' || t
   if [ "$allowed" -eq 0 ]; then
     git grep -n -I -e 'createWorkspace(' -- "$file" | show
     report "$file cuts a worktree itself instead of calling WorkspaceManager.start. A route that stops at createWorkspace gets no chat, no setup run, no name and no record of who asked, and nothing says so."
+  fi
+done
+
+echo "==> a state moves through its lifecycle"
+# `Workspace.state`, `Workspace.setupState` and `Session.state` say what a thing
+# IS, and setting one of them is never the whole of changing it. Archiving is
+# removing the worktree and then saying so; a row that said a workspace was live
+# after its worktree had gone is in CLAUDE.md and it does not heal. Filing a
+# setup run is writing the state and the log together; `.failed` with nothing to
+# read is a half-truth the next reader treats as whole, and a restored workspace
+# went on saying `succeeded` about a directory deleted months earlier. So each of
+# those three columns has one owner that takes an EVENT and does the whole job:
+# `SetupLifecycle`, `SessionLifecycle`, `WorkspaceLifecycle`.
+#
+# The compiler holds most of this line. All three are `public internal(set)`, so
+# nothing in `Sources/Bloom` can assign one at all, however it reaches the value:
+# through `Store.update`'s closure, through a copy of a row, anywhere. What is
+# left is a new file inside the core, which the compiler would allow and which is
+# exactly how a fourth writer would start, so that is all this looks at.
+#
+# It matches an assignment of a NAMED case, which is how a half-done transition
+# is actually written, with or without a receiver in front of it: a new file
+# extending `Workspace` can write `setupState = .succeeded` with no dot at all.
+# Carrying a state the lifecycle already produced from one copy of a row to
+# another (`$0.state = session.state` in the two runners) is not that and is not
+# matched: those two lines mirror a value the table decided.
+#
+# Every file inside the core allowed to name one, and why. This list should only
+# ever get shorter. A file not on it that names one is a new mistake.
+#
+# The suite is not on it and does not need to be: `@testable` reaches these, and
+# a fixture stating what a row looked like is not a route into the app.
+# One entry, and the other two lifecycles are absent because they do not need to
+# be: `SetupLifecycle` and `SessionLifecycle` write the destination the table
+# handed them rather than a case they named, so there is nothing here for this to
+# see. If one of them ever starts naming a case, that is worth reading before it
+# is worth allowing.
+state_move_allowed=(
+  'Sources/BloomCore/WorkspaceLifecycle.swift' # archive() and restore(), which name both
+)
+state_move='(^|[^A-Za-z0-9_])(state|setupState) *= *\.(active|archived|pending|running|succeeded|failed|skipped|idle|waiting|cancelled)([^A-Za-z0-9_]|$)'
+for file in $(git grep -l -I -E "$state_move" -- 'Sources/BloomCore/*' || true); do
+  allowed=0
+  for path in "${state_move_allowed[@]}"; do
+    [ "$file" = "$path" ] && allowed=1
+  done
+  if [ "$allowed" -eq 0 ]; then
+    git grep -n -I -E "$state_move" -- "$file" | show
+    report "$file sets a lifecycle state directly instead of applying an event. A state written on its own is a state without the work that makes it true: an archive that removed nothing, or an outcome with no log under it. Use apply(), archive() or restore()."
+  fi
+done
+# Not a finding, just housekeeping: an exception nobody needs any more.
+for path in "${state_move_allowed[@]}"; do
+  if [ -f "$path" ] && ! git grep -q -I -E "$state_move" -- "$path"; then
+    echo "  note: $path no longer moves a state, so it can come off the list in $0."
   fi
 done
 
