@@ -174,7 +174,11 @@ struct SessionTabsView: View {
             isRunning: model.isRunning(session),
             isAtPaneEdge: isAtPaneEdge(session.id.rawValue),
             isRenaming: renamingID == session.id.rawValue,
-            canClose: model.sessions.count > 1,
+            // Always. The workspace's last conversation IS closable, and hiding the cross was the
+            // only thing pretending otherwise: "Close Session" in the File menu holds Cmd+W and has
+            // never had such a guard. What closing costs is asked about instead of drawn around.
+            // See `SessionClosure`.
+            canClose: true,
             onSelect: { select(session) },
             onStartRename: { renamingID = session.id.rawValue },
             onCommitRename: { commitRename(session, to: $0) },

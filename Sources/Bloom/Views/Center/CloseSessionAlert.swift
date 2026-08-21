@@ -2,11 +2,17 @@ import SwiftUI
 import Observation
 import BloomCore
 
-/// The question asked before a session that is mid turn is closed.
+/// The question asked before a conversation is closed, when there is something to lose by it.
 ///
-/// Closing a session stops its agent, and a turn that is stopped halfway is work that has already
-/// been paid for and cannot be picked up again, which is exactly the thing quitting asks about in
-/// `BloomAppDelegate.confirmQuit`. It is the same shape here for the same reason.
+/// Closing a conversation stops its agent, and a turn that is stopped halfway is work that has
+/// already been paid for and cannot be picked up again, which is exactly the thing quitting asks
+/// about in `BloomAppDelegate.confirmQuit`. It is the same shape here for the same reason.
+///
+/// WHAT there is to lose is `BloomCore.SessionClosure` rather than a line of `if` here, because it
+/// is a decision with cases and this target is one the suite cannot see. It is also the answer to a
+/// bug: the tab's close button used to be hidden whenever a workspace was down to its last
+/// conversation while Cmd+W closed it anyway, so the one door that was open was also the one that
+/// said nothing.
 ///
 /// Its own type because two places close a session, the tab's close button and Cmd+W, and a
 /// warning that only one of them asked would be a warning the keyboard walks straight past. Both
@@ -24,36 +30,35 @@ import BloomCore
 final class CloseSessionAlert {
     static let shared = CloseSessionAlert()
 
-    /// A session that is still working, waiting on an answer.
+    /// A conversation waiting on an answer, and what closing it would cost.
     struct Request: Identifiable, Equatable {
         let id = UUID()
         var session: Session
         var model: WorkspaceModel
+        var cost: SessionClosure
 
-        /// Named rather than "Are you sure?", so the question can be answered without opening the
-        /// window behind it to find out which session it is about.
-        var title: String {
-            let name = session.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            return name.isEmpty ? "This session is still working" : "\(name) is still working"
-        }
+        var title: String { cost.title(of: session.title) }
+
+        /// One paragraph per consequence, so a conversation that is both mid turn and the only one
+        /// in its workspace says both things instead of only the more alarming one.
+        var message: String { cost.reasons.joined(separator: "\n\n") }
 
         static func == (lhs: Request, rhs: Request) -> Bool { lhs.id == rhs.id }
     }
 
-    static let message = """
-        Closing it stops the agent. The turn it is in the middle of will not be finished, and it \
-        cannot be resumed.
-        """
-
     /// Non-nil while the dialog is up.
     var request: Request?
 
-    /// Closes the session, asking first when there is a turn to lose. An idle session is never
-    /// asked about: a dialog that appears when there is nothing to lose is a dialog that stops
-    /// being read.
+    /// Closes the conversation, asking first when there is something to lose by it. An idle
+    /// conversation with others beside it is never asked about: a dialog that appears when there is
+    /// nothing to lose is a dialog that stops being read.
     func close(_ session: Session, in model: WorkspaceModel) {
-        guard model.isRunning(session) else { return perform(session, in: model) }
-        request = Request(session: session, model: model)
+        let cost = SessionClosure.closing(
+            isRunning: model.isRunning(session),
+            otherConversations: model.sessions.count - 1
+        )
+        guard cost.needsConfirmation else { return perform(session, in: model) }
+        request = Request(session: session, model: model, cost: cost)
     }
 
     func confirm() {

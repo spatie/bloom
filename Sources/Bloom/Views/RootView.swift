@@ -183,13 +183,16 @@ struct RootView: View {
             isPresented: $closeSession.request.isPresent(),
             titleVisibility: .visible,
             presenting: closeSession.request
-        ) { _ in
-            Button("Close anyway", role: .destructive) { closeSession.confirm() }
-            // Escape keeps the session. See the archive confirmation above for why no cancel
+        ) { request in
+            // The wording answers the question that was asked, which is not always the same
+            // question: a conversation can be mid turn, or the only one its workspace has, or
+            // both. See `SessionClosure`.
+            Button(request.cost.confirmTitle, role: .destructive) { closeSession.confirm() }
+            // Escape keeps the conversation. See the archive confirmation above for why no cancel
             // button in this app carries `.keyboardShortcut(.defaultAction)`.
-            Button("Keep working", role: .cancel) { closeSession.cancel() }
-        } message: { _ in
-            Text(CloseSessionAlert.message)
+            Button(request.cost.cancelTitle, role: .cancel) { closeSession.cancel() }
+        } message: { request in
+            Text(request.message)
         }
         // A single OK that does nothing but dismiss is the system default, so the actions builder
         // is deliberately empty rather than spelling one out.
