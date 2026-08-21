@@ -11,7 +11,7 @@ import Synchronization
 /// this actor, apply the change, and write, with no suspension in between, so a write changes
 /// what it named and nothing else. Where one writer owns a fixed set of columns, it gets a method
 /// that names them: `updateDiffStat`, `touch`, `updateSessionPreferences`, `reorderSessions`,
-/// `updateLastReadSeq`.
+/// `reorderWorkspaces`, `reorderProjects`, `updateLastReadSeq`.
 ///
 /// Three columns are not writable through `update`'s closure by anybody outside this module at
 /// all: `Workspace.state`, `Workspace.setupState` and `Session.state` are `internal(set)`, and the
@@ -512,6 +512,34 @@ public actor Store {
         return try upsert(row)
     }
 
+    /// Writes a whole project drag's new order in one transaction.
+    ///
+    /// One transaction and not a loop of `update(repoID:)` calls, and that is not tidiness either.
+    /// Each of those calls commits on its own, and since the store announces every commit
+    /// (`StoreObservation.swift`) a drag over five projects was five commits and five
+    /// announcements. `AppModel`'s observer reloads the sidebar on `repos`, so its reload could
+    /// land in the actor queue between the second write and the third and put an order that is
+    /// half old and half new on screen: a row visibly jumping back for a frame at the end of a
+    /// drag somebody had just finished. One transaction commits once and is announced once, so
+    /// there is no moment at which the stored order is half written and something is looking.
+    /// Do not turn this back into a loop of separate writes.
+    ///
+    /// Targeted, exactly as `reorderSessions` is: the statement names `sort_order` and nothing
+    /// else, so a rename, an accent or an icon that landed while the drag was happening survives
+    /// it. Writing back a whole `Repo` the sidebar was holding is the bug `update(repoID:)` was
+    /// written for.
+    public func reorderProjects(_ changes: [SidebarReorder.ProjectChange]) throws {
+        guard !changes.isEmpty else { return }
+        try db.transaction {
+            for change in changes {
+                try db.run(
+                    "UPDATE repos SET sort_order = ? WHERE id = ?",
+                    [.int(Int64(change.sortOrder)), .text(change.id)]
+                )
+            }
+        }
+    }
+
     public func deleteRepo(id: String) throws {
         try db.run("DELETE FROM repos WHERE id = ?", [.text(id)])
     }
@@ -633,6 +661,32 @@ public actor Store {
         change(&row)
         row.id = workspaceID
         return try upsert(row)
+    }
+
+    /// Writes a whole workspace drag's new order in one transaction.
+    ///
+    /// The same reasoning as `reorderProjects`, and it is worth reading there: a loop of separate
+    /// `update(workspaceID:)` calls commits once per row, the store announces every commit, and
+    /// the sidebar's observer can therefore reload between two of those writes and draw a list
+    /// that is half reordered. One transaction is one commit and one announcement.
+    ///
+    /// Targeted, so a diff stat refresh or an archive landing during the drag is not rolled back:
+    /// the statement names the two columns a reorder actually changes and leaves the rest of the
+    /// row alone. `SidebarReorder.Change` carries those two columns and never a whole `Workspace`
+    /// for the same reason.
+    public func reorderWorkspaces(_ changes: [SidebarReorder.Change]) throws {
+        guard !changes.isEmpty else { return }
+        try db.transaction {
+            for change in changes {
+                try db.run(
+                    "UPDATE workspaces SET sort_order = ?, pinned = ? WHERE id = ?",
+                    [
+                        .int(Int64(change.sortOrder)), .int(change.pinned ? 1 : 0),
+                        .text(change.id),
+                    ]
+                )
+            }
+        }
     }
 
     public func deleteWorkspace(id: String) throws {

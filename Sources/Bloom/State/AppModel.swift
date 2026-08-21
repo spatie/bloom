@@ -1606,8 +1606,8 @@ final class AppModel {
     /// because that translation is worth testing and a view is not where a test can reach it.
     ///
     /// The new order is put on screen before it is written. A drop is the end of a movement the
-    /// table has already animated, and waiting for four writes and a reload to come back through
-    /// an actor before the rows agree with where they were let go puts a frame of the OLD order
+    /// table has already animated, and waiting for the write and a reload to come back through an
+    /// actor before the rows agree with where they were let go puts a frame of the OLD order
     /// between the settle and the answer.
     ///
     /// That assignment is also what makes the background refresh harmless. `refreshDiffStats`
@@ -1616,8 +1616,13 @@ final class AppModel {
     /// `WorkspaceListReconciliation` leaves a changed row alone: membership and order come from
     /// the list as it stands, which is this one.
     ///
-    /// Each write names the two columns it changes, so nothing here can put back a diff stat or an
+    /// The write names the two columns it changes, so nothing here can put back a diff stat or an
     /// archive that landed while the drag was happening. See 34b840b.
+    ///
+    /// It is also one transaction rather than a write per row, which matters now that the store
+    /// announces what it has written: a commit per row is an announcement per row, and this
+    /// model's own observer would reload the sidebar between two of them and draw a half
+    /// reordered list. `Store.reorderWorkspaces` is where that is written down.
     func reorderWorkspaces(in repo: Repo, visible: [Workspace], from: IndexSet, to: Int) async {
         guard let store else { return }
         let changes = SidebarReorder.move(
@@ -1634,12 +1639,7 @@ final class AppModel {
             return moved
         }
 
-        for change in changes {
-            _ = try? await store.update(workspaceID: change.id) {
-                $0.sortOrder = change.sortOrder
-                $0.pinned = change.pinned
-            }
-        }
+        try? await store.reorderWorkspaces(changes)
     }
 
     /// What a drag on a project header ends in.
@@ -1655,8 +1655,10 @@ final class AppModel {
     /// between the settle and the answer. The list is re-sorted here rather than moved, because
     /// every project it holds ends up carrying its own index either way.
     ///
-    /// Each write names the one column it changes, so a reorder cannot put back a name, a colour
-    /// or an icon that landed while the drag was happening. See e47a3b7.
+    /// The write names the one column it changes, so a reorder cannot put back a name, a colour
+    /// or an icon that landed while the drag was happening. See e47a3b7. It is one transaction for
+    /// the same reason `reorderWorkspaces` gives: one commit, one announcement, and no moment at
+    /// which the observer can reload a half written order.
     func reorderProjects(id: String, to: Int) async {
         guard let store else { return }
         let changes = SidebarReorder.move(projects: repos, id: id, to: to)
@@ -1672,9 +1674,7 @@ final class AppModel {
             }
             .sorted { $0.sortOrder < $1.sortOrder }
 
-        for change in changes {
-            _ = try? await store.update(repoID: change.id) { $0.sortOrder = change.sortOrder }
-        }
+        try? await store.reorderProjects(changes)
     }
 
     // MARK: - Navigation

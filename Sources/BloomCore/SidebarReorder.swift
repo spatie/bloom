@@ -29,9 +29,9 @@ import Foundation
 ///
 /// The result is the smallest set of writes that produces the wanted order: a row whose
 /// `sort_order` and `pinned` are both already right is not in it. Every one of them names the two
-/// columns it changes, which is what `Store.update(workspaceID:)` is for.
+/// columns it changes, which is what `Store.reorderWorkspaces` writes, in one transaction.
 public enum SidebarReorder {
-    /// One row's new place. Never a whole `Workspace`: see `Store.update(workspaceID:)`.
+    /// One row's new place. Never a whole `Workspace`: see `Store.reorderWorkspaces`.
     public struct Change: Equatable, Sendable {
         public var id: String
         public var sortOrder: Int
@@ -200,7 +200,7 @@ extension SidebarReorder {
         case workspace(projectID: String, from: IndexSet, to: Int, landedOutside: Bool)
     }
 
-    /// One project's new place. Never a whole `Repo`: see `Store.update(repoID:)`.
+    /// One project's new place. Never a whole `Repo`: see `Store.reorderProjects`.
     public struct ProjectChange: Equatable, Sendable {
         public var id: String
         public var sortOrder: Int

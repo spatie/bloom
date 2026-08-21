@@ -173,6 +173,72 @@ struct StoreObservationTests {
         listener.stop()
     }
 
+    // MARK: - A reorder is one change
+
+    /// The bug this pins down, and the reason the two reorders are transactions.
+    ///
+    /// A drag used to be written a row at a time, each `await` its own commit and therefore its
+    /// own announcement. The sidebar reloads on `workspaces`, so its reload could be scheduled
+    /// between the third write and the fourth and put a list that was half in the old order on
+    /// screen: a row jumping back for one frame at the end of a drag somebody had just finished.
+    /// Fifteen drags never showed it, which is exactly how long a race like this stays invisible.
+    /// One transaction is one commit and one announcement, and there is no moment in between for
+    /// anything to read.
+    @Test("reordering workspaces is announced once, not once per row")
+    func workspaceReorderIsOneChange() async throws {
+        let store = try makeTestStore("changes")
+        let repo = try await store.upsert(Repo(name: "one", path: TestScratch.unique("repo")))
+        var workspaces: [Workspace] = []
+        for index in 0..<8 {
+            workspaces.append(try await store.upsert(Workspace(
+                repoID: repo.id, name: "w\(index)", branch: "b\(index)",
+                path: TestScratch.unique("worktree"), baseBranch: "main",
+                sortOrder: index
+            )))
+        }
+        // The real translation a drag goes through, so this is the writes the sidebar would ask
+        // for and not a set invented here. The first row dragged to the end moves all eight.
+        let changes = SidebarReorder.move(
+            visible: workspaces, all: workspaces, from: IndexSet(integer: 0), to: 8
+        )
+        #expect(changes.count == 8, "the drag under test has to write more than one row")
+
+        let listener = try await Listener(store, interest: [.workspaces])
+        try await store.reorderWorkspaces(changes)
+
+        #expect(await listener.nextBatch() == [.workspaces])
+        #expect(await listener.nothingFurther())
+        #expect(listener.batches.count == 1, "eight rows moved, \(listener.batches.count) batches")
+
+        let stored = try await store.workspaces(repoID: repo.id).map(\.name)
+        #expect(stored == ["w1", "w2", "w3", "w4", "w5", "w6", "w7", "w0"])
+        listener.stop()
+    }
+
+    /// The same for a project header drag, which had the same shape and the same fix.
+    @Test("reordering projects is announced once, not once per row")
+    func projectReorderIsOneChange() async throws {
+        let store = try makeTestStore("changes")
+        var repos: [Repo] = []
+        for index in 0..<5 {
+            repos.append(try await store.upsert(Repo(
+                name: "p\(index)", path: TestScratch.unique("repo"), sortOrder: index
+            )))
+        }
+        let changes = SidebarReorder.move(projects: repos, id: repos[0].id, to: 5)
+        #expect(changes.count == 5, "the drag under test has to write more than one row")
+
+        let listener = try await Listener(store, interest: [.repos])
+        try await store.reorderProjects(changes)
+
+        #expect(await listener.nextBatch() == [.repos])
+        #expect(await listener.nothingFurther())
+        #expect(listener.batches.count == 1, "five rows moved, \(listener.batches.count) batches")
+
+        #expect(try await store.repos().map(\.name) == ["p1", "p2", "p3", "p4", "p0"])
+        listener.stop()
+    }
+
     // MARK: - Teardown
 
     @Test("cancelling the task iterating a feed takes the subscription with it")
