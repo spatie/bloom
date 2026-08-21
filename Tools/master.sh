@@ -25,9 +25,16 @@
 # The installed app keeps the real bundle id, so it uses the real database and
 # the real preferences. Agents re-identify their own builds precisely so that
 # they never collide with this one.
+#
+# Which is why it refuses to run from inside the copy it would replace. Bloom is
+# developed in Bloom now, so this script can be started by an agent whose own
+# host is the app at the other end of the `rm -rf` below. `Tools/guard.sh` says
+# how that is detected. An agent that wants a build it can install should run
+# `make dev`, which installs a second identity and cannot reach this one.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source "$PWD/Tools/guard.sh"
 
 REF=HEAD
 LAUNCH=1
@@ -42,7 +49,11 @@ done
 RESOLVED="$(git rev-parse --short "$REF")"
 SUBJECT="$(git log -1 --format=%s "$REF")"
 WORK=/tmp/bloom-master-src
-DEST="$HOME/Applications/Bloom.app"
+DEST="$BLOOM_REAL_APP"
+
+# Before the build, not after it. The refusal does not become less true for
+# having spent two minutes compiling first.
+bloom_refuse_if_own_host "$DEST" "$BLOOM_REAL_DB"
 
 echo "==> $RESOLVED  $SUBJECT"
 
