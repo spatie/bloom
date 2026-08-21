@@ -115,3 +115,47 @@ struct RepoMonogramTests {
         #expect(RepoMonogram.initials(for: name).count <= 2)
     }
 }
+
+/// An emoji mark is not a column of its own: it is the first character of the project's name, and
+/// the settings window edits it by editing the name. These pin what may be taken off that name and
+/// what is left when it is.
+@Suite("Emoji marks in a project name")
+struct RepoMarkTests {
+    @Test("reads the leading emoji as the mark", arguments: [
+        ("🌸 Garden", "🌸"),
+        ("🌸Garden", "🌸"),
+        ("🌸", "🌸"),
+    ])
+    func readsLeadingEmoji(name: String, expected: String) {
+        #expect(RepoMonogram.mark(in: name) == expected)
+    }
+
+    @Test("finds no mark where the name has none", arguments: [
+        // Only a LEADING emoji is a mark, which is the same rule `initials(for:)` draws by.
+        "bloom 🌸", "there-there", "2048", "", "   ",
+    ])
+    func findsNoMark(name: String) {
+        #expect(RepoMonogram.mark(in: name).isEmpty)
+    }
+
+    @Test("takes the emoji off and tidies the space behind it")
+    func stripsTheMark() {
+        #expect(RepoMonogram.nameWithoutMark("🌸 Garden") == "Garden")
+        #expect(RepoMonogram.nameWithoutMark("🌸Garden") == "Garden")
+    }
+
+    @Test("leaves a name that carries no mark exactly as it is")
+    func leavesUnmarkedNames() {
+        #expect(RepoMonogram.nameWithoutMark("Garden") == "Garden")
+        #expect(RepoMonogram.nameWithoutMark("bloom 🌸") == "bloom 🌸")
+    }
+
+    /// The case that has a wrong answer. Stripping the mark off a project called nothing but an
+    /// emoji leaves no name at all, so the caller has to be able to tell, and Use initials is
+    /// disabled rather than offered and doing nothing.
+    @Test("answers with nothing when the emoji was the whole name")
+    func emojiOnlyNameStripsToNothing() {
+        #expect(RepoMonogram.nameWithoutMark("🌸").isEmpty)
+        #expect(RepoMonogram.nameWithoutMark("🌸   ").isEmpty)
+    }
+}

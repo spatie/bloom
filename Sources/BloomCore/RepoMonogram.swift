@@ -40,6 +40,33 @@ public enum RepoMonogram {
         return ""
     }
 
+    /// The emoji a name is marked with, if it begins with one.
+    ///
+    /// Asked of `initials(for:)` rather than worked out again, so there is exactly one rule in the
+    /// app for what counts as a picture: that function answers with a single character which is
+    /// neither a letter nor a digit precisely when the name starts with a pictograph.
+    ///
+    /// Here rather than in the settings view it was written in, because the view that used it is
+    /// also the view that now offers to take the mark off, and whether it may is an edge case with
+    /// a wrong answer: a project named nothing but an emoji has no letters underneath to fall back
+    /// to. A rule with a wrong answer belongs where a test can hold it.
+    public static func mark(in name: String) -> String {
+        let initials = initials(for: name)
+        guard initials.count == 1, let character = initials.first,
+              !character.isLetter, !character.isNumber else { return "" }
+        return initials
+    }
+
+    /// The name with its leading emoji taken off, or unchanged when it has none.
+    ///
+    /// Returns an empty string for a name that was nothing but the emoji, which is the caller's
+    /// cue that there is nothing to fall back to rather than a name it may write.
+    public static func nameWithoutMark(_ name: String) -> String {
+        let mark = mark(in: name)
+        guard !mark.isEmpty else { return name }
+        return String(name.dropFirst(mark.count)).trimmingCharacters(in: .whitespaces)
+    }
+
     /// The name split into runs of letters and digits, with camel humps counted as breaks so
     /// `MyApp` gives `MA` rather than `MY`.
     ///

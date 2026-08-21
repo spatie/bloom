@@ -24,8 +24,21 @@ struct RepoSettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var model: RepoSettingsModel
+    /// The project's whole stored name, emoji and all.
+    ///
+    /// It used to be two fields. The name lived here with any leading emoji stripped off it, a
+    /// second field beside the tile held that emoji, and `saveName` glued the two back together.
+    /// The split bought nothing: an emoji mark is not a separate column, it IS the first character
+    /// of `Repo.name`, and `RepoMonogram.initials(for:)` reads it straight off the stored string.
+    /// So the field showed a name the project did not have, and the one place that mattered, the
+    /// title bar, said the real one.
+    ///
+    /// **Typing an emoji at the front of this field is now how a mark is set**, and that is the
+    /// intended way in rather than a side effect. It is also the only way the mark was ever
+    /// stored, so nothing has been taken away: the removed field wrote the same character to the
+    /// same place. See `RepoMonogram.initials(for:)` for what counts as one, which is a single
+    /// leading pictograph and nothing else.
     @State private var name = ""
-    @State private var mark = ""
     /// Which pane a window opens on. `BLOOM_PANE=workspaces|scripts` for a capture run, because
     /// `--repo-settings` can open this window but cannot press a tab, and a tab nobody can
     /// photograph is a tab that changes unverified. Anything else, including nothing, is Project.
@@ -40,10 +53,9 @@ struct RepoSettingsView: View {
     /// What the last thing the Mark row did came to, when it came to nothing. Cleared as soon as
     /// something else is pressed, because it is about that press and not about the project.
     @State private var iconNotice: String?
-    /// The name and the mark are written to the database on commit rather than on every keystroke,
-    /// because each write reloads the whole sidebar and typing a name would do it once a letter.
+    /// The name is written to the database on commit rather than on every keystroke, because each
+    /// write reloads the whole sidebar and typing a name would do it once a letter.
     @FocusState private var isEditingName: Bool
-    @FocusState private var isEditingMark: Bool
 
     init(repo: Repo) {
         self.repo = repo
@@ -105,8 +117,9 @@ struct RepoSettingsView: View {
         .navigationTitle("\(repo.name) Settings")
         .showsProjectInTitleBar(repo)
         .task {
-            name = Self.nameWithoutMark(repo.name)
-            mark = Self.mark(in: repo.name)
+            // The stored name verbatim. Nothing is written back on load, so a project whose name
+            // begins with an emoji keeps it whether or not this window is ever opened.
+            name = repo.name
             await model.load()
         }
         // The usual way a settings file changes while this window is open is a `git pull` in a
@@ -181,49 +194,35 @@ struct RepoSettingsView: View {
     ///
     /// Bloom looks for artwork once, when a project is added, at the places a favicon and an
     /// application icon conventionally live. Everything about that is a guess, however good, so all
-    /// the ways out are here: look again, say which file it is, type an emoji, or have the letters
-    /// back. A project added before Bloom knew how to look has never been searched, and its button
+    /// the ways out are here: look again, say which file it is, put an emoji at the front of the
+    /// name, or have the letters back. A project added before Bloom knew how to look has never been searched, and its button
     /// says `Find icon` rather than pretending a search already happened and found nothing.
     ///
-    /// Three lines: the mark and the emoji that can be it, the buttons that change it, and then
-    /// the line saying where the mark came from. The split was forced once, by the value column
-    /// this row used to be laid out in: a row asking for more width than that column held was
-    /// moved out of it and started at a different edge from its neighbours, and a fourth control
-    /// on the second line was what tipped it over. `SettingsRow` has no such column and the split
-    /// no longer has to be there, but it is still the right shape. The emoji field is a different
-    /// kind of act from the three buttons, being typing rather than pressing, and the sentence
-    /// underneath is prose that wants a whole line. See `summaryLine`.
+    /// Two lines: the mark itself with the three things that change it beside it, and then the
+    /// line saying where it came from. It was three, with an emoji field between the tile and the
+    /// buttons. That field wrote a leading emoji into the project's name, which is the only place
+    /// a mark has ever been stored, so typing the same character at the front of the Name field
+    /// above does exactly what it did. What it cost was a Name field showing a name the project
+    /// did not have. See `name`.
+    ///
+    /// The tile shares a line with the buttons rather than sitting above them. It was kept apart
+    /// once by the value column this row used to be laid out in, where a fourth control on a line
+    /// tipped the row out of the column and started it at a different edge from its neighbours.
+    /// `SettingsRow` has no such column, and with the field gone the line has room. The sentence
+    /// underneath stays on a line of its own, because it is prose. See `summaryLine`.
     private var markRow: some View {
         SettingsRow("Mark") {
             VStack(alignment: .leading, spacing: Metrics.spacing) {
                 HStack(spacing: Metrics.gutter) {
-                    markTile(size: Metrics.repoIcon * 1.75)
+                    markTile(size: Self.markTileSize)
 
-                    TextField("", text: $mark, prompt: Text("Emoji"))
-                        // An empty title is still a title, and a titled field inside a grouped
-                        // form is claimed for the form's own value column and indented half way
-                        // across the window. The same reason `RepoRunScriptRow`'s name field has
-                        // one. See `SettingsRow`.
-                        .labelsHidden()
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 56)
-                        .multilineTextAlignment(.center)
-                        .focused($isEditingMark)
-                        .onSubmit(saveName)
-                        .onChange(of: isEditingMark) { wasEditing, editing in
-                            if wasEditing, !editing { saveName() }
-                        }
-                        .help("An emoji here goes in front of the name, and becomes the mark.")
-                }
-
-                HStack(spacing: Metrics.gutter) {
                     Button(repo.iconSource == .undetected ? "Find icon" : "Look again", action: findIcon)
                     Button("Choose…", action: chooseIcon)
                     // One button for "draw the letters", where there were two. It clears both the
                     // picture and the emoji, because clearing only one of them leaves the other
                     // standing and the button would be lying about what it did.
                     Button("Use initials", action: useInitials)
-                        .disabled(!repo.hasIcon && mark.isEmpty)
+                        .disabled(!repo.hasIcon && !canDropMark)
                 }
                 .controlSize(.small)
 
@@ -281,6 +280,11 @@ struct RepoSettingsView: View {
         RepoIconArt.artwork(for: repo) == nil
     }
 
+    /// The preview tile, drawn larger than the sidebar's 16 so the artwork can actually be judged.
+    /// Named because it is the tallest thing on the mark row's first line, and therefore what the
+    /// label beside it is centred against.
+    static let markTileSize: CGFloat = Metrics.repoIcon * 1.75
+
     /// The tile as the sidebar will draw it: the project's own artwork when it has some, and
     /// otherwise the name being typed, so the preview is the real thing and not an impression.
     @ViewBuilder
@@ -299,8 +303,8 @@ struct RepoSettingsView: View {
             let location = shortPath(path)
             return repo.iconSource == .chosen ? "Chosen: \(location)" : "Found: \(location)"
         }
-        if !mark.trimmingCharacters(in: .whitespaces).isEmpty {
-            return "The emoji in the name."
+        if !RepoMonogram.mark(in: name).isEmpty {
+            return "The emoji at the front of the name."
         }
         switch repo.iconSource {
         // Never searched, rather than searched and empty handed. The button beside it says
@@ -352,14 +356,25 @@ struct RepoSettingsView: View {
     }
 
     /// Back to the letters, whichever of the two things was covering them.
+    ///
+    /// The emoji half of this is now an edit to the name, because that is where the emoji lives.
+    /// `canDropMark` is what keeps it honest: a project called nothing but an emoji has no letters
+    /// underneath to fall back to, and stripping it would leave the project nameless, so the
+    /// button is not offered for that case rather than being offered and doing nothing.
     private func useInitials() {
         iconNotice = nil
-        if !mark.isEmpty {
-            mark = ""
+        if canDropMark {
+            name = RepoMonogram.nameWithoutMark(name)
             saveName()
         }
         guard repo.hasIcon else { return }
         Task { await apply(icon: nil, source: .monogram) }
+    }
+
+    /// Whether there is an emoji at the front of the name with a name still left under it.
+    private var canDropMark: Bool {
+        let stripped = RepoMonogram.nameWithoutMark(name)
+        return stripped != name.trimmingCharacters(in: .whitespaces) && !stripped.isEmpty
     }
 
     private func apply(icon: String?, source: RepoIconSource) async {
@@ -379,12 +394,11 @@ struct RepoSettingsView: View {
     }
 
     /// The name as the sidebar would show it, so the preview is the real thing and not an artist's
-    /// impression of it.
+    /// impression of it. One field now holds the whole of it, emoji included, so there is nothing
+    /// left to compose: this is here because the tile wants the name as it is being typed rather
+    /// than the name as last saved.
     private var previewName: String {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        let emoji = mark.trimmingCharacters(in: .whitespaces)
-        if emoji.isEmpty { return trimmed }
-        return trimmed.isEmpty ? emoji : "\(emoji) \(trimmed)"
+        name.trimmingCharacters(in: .whitespaces)
     }
 
     private var accentBinding: Binding<Color> {
@@ -403,34 +417,15 @@ struct RepoSettingsView: View {
     }
 
     private func saveName() {
-        let composed = previewName
+        let trimmed = previewName
         // An empty field is a slip, not an instruction: put the stored name back rather than
         // leaving the project nameless.
-        guard !composed.isEmpty else {
-            name = Self.nameWithoutMark(repo.name)
-            mark = Self.mark(in: repo.name)
+        guard !trimmed.isEmpty else {
+            name = repo.name
             return
         }
-        guard composed != repo.name else { return }
-        Task { await app.rename(repo, to: composed) }
-    }
-
-    /// The leading emoji, if the name has one.
-    ///
-    /// Asked of `RepoMonogram` rather than worked out again here, so there is exactly one rule in
-    /// the app for what counts as a picture. It answers with a single character that is not a
-    /// letter or a digit precisely when the name starts with one.
-    static func mark(in name: String) -> String {
-        let initials = RepoMonogram.initials(for: name)
-        guard initials.count == 1, let character = initials.first,
-              !character.isLetter, !character.isNumber else { return "" }
-        return initials
-    }
-
-    static func nameWithoutMark(_ name: String) -> String {
-        let mark = mark(in: name)
-        guard !mark.isEmpty else { return name }
-        return String(name.dropFirst(mark.count)).trimmingCharacters(in: .whitespaces)
+        guard trimmed != repo.name else { return }
+        Task { await app.rename(repo, to: trimmed) }
     }
 
     // MARK: - Branches
