@@ -146,6 +146,10 @@ struct TranscriptListView: View {
     private var maxBubbleWidth: CGFloat { geometry.bubbleCap }
 
     var body: some View {
+        // Read once for the pass rather than once per footer: a footer cannot see the row list it
+        // is in, and every realised one would otherwise walk it. See `TranscriptModel`.
+        let stoppedTurnSeq = transcript.stoppedTurnSeq
+
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -185,7 +189,10 @@ struct TranscriptListView: View {
                                 rows: transcript.rows,
                                 row: row,
                                 worktree: transcript.workspace.path,
-                                permissionMode: transcript.session.permissionMode
+                                permissionMode: transcript.session.permissionMode,
+                                // Only the turn the stop was about, which is at most one of them.
+                                // See `TranscriptModel.stoppedTurnSeq`.
+                                wasStopped: row.seq == stoppedTurnSeq
                             )
                             .arrivingRow(isArriving(row))
                             .padding(.horizontal, TranscriptLayout.inset)

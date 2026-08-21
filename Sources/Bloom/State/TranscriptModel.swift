@@ -259,6 +259,25 @@ final class TranscriptModel {
         if message.kind == .user { sending = nil }
     }
 
+    /// The turn somebody stopped, named by the `seq` of the row that closed it.
+    ///
+    /// A stop is a fact about the chat rather than about a row: `SessionState.cancelled` says the
+    /// last turn was ended by hand, and the state leaves `cancelled` the moment another turn
+    /// starts, so the stop can only ever be about the last one. Derived here rather than written
+    /// into `messages` for the reason `WorkspaceEvent`'s header sets out: a row Bloom writes about
+    /// a turn would be read back by whatever assembles a prompt, and a note to the person is not
+    /// something the agent should be told. Derived also means it is simply gone when the next turn
+    /// starts, instead of being a stale second line left behind for ever.
+    ///
+    /// Nil when the stop left no result row at all, which `StoppedTurn` explains.
+    var stoppedTurnSeq: Int? {
+        guard session.state == .cancelled else { return nil }
+        // Lazily, so a session of thousands of rows is not copied into an array of kinds to answer
+        // a question the last two or three rows settle.
+        guard let index = StoppedTurn.closingRow(in: rows.lazy.map(\.kind)) else { return nil }
+        return rows[index].seq
+    }
+
     // MARK: - Unread
 
     var firstUnreadSeq: Int? {

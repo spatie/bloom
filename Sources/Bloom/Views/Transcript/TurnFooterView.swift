@@ -10,8 +10,14 @@ struct TurnFooterView: View {
     /// What the file chips show their paths relative to. See `TurnFile.display(in:)`.
     var worktree: String
     /// What the session is set to, so a turn whose calls were declined can name the setting that
-    /// declined them. See `deniedNotice`.
+    /// declined them. See `TurnEnding.note`.
     var permissionMode: PermissionMode = .acceptEdits
+    /// Whether this is the turn somebody stopped.
+    ///
+    /// Handed down rather than worked out here, because it is a fact about the session and the
+    /// whole row list, and a footer can only see one turn. `TranscriptModel.stoppedTurnSeq` is
+    /// where it is decided, over `StoppedTurn`.
+    var wasStopped = false
 
     /// More chips than this and the footer stops being a footer.
     private static let visibleFileLimit = 6
@@ -40,10 +46,10 @@ struct TurnFooterView: View {
             // A turn's duration is the number a user goes looking for, so it sits a rung above
             // the counts and timings that decorate a single row.
             HStack(spacing: TranscriptLayout.block) {
-                Image(systemName: outcome.glyph)
+                Image(systemName: appearance.glyph)
                     .font(Typo.caption)
                     .imageScale(.medium)
-                    .foregroundStyle(outcome.tint)
+                    .foregroundStyle(appearance.tint)
                     .accessibilityLabel(outcome.label)
 
                 Text(TurnDuration.format(durationMS))
@@ -104,7 +110,7 @@ struct TurnFooterView: View {
             // Under the row rather than in it, and only when there is something to say. This is
             // the one place in a turn that can name what went undone and what would undo it, and
             // it is where somebody looks after a button appeared to do nothing.
-            if let notice = deniedNotice {
+            if let notice = outcome.note(permissionMode: permissionMode) {
                 Text(notice)
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textSecondary)
@@ -135,19 +141,21 @@ struct TurnFooterView: View {
     /// an agent that had been stopped at every door.
     private var denials: Int { result?.permissionDenials ?? 0 }
 
-    private var outcome: (glyph: String, tint: Color, label: String) {
-        if !succeeded { return ("exclamationmark.circle", Palette.negative, "Failed") }
-        if denials > 0 { return ("hand.raised.circle", Palette.warning, "Finished, with calls denied") }
-        return ("checkmark.circle", Palette.positive, "Finished")
+    /// Which of the four endings this was, and the sentence it carries. See `TurnEnding`.
+    private var outcome: TurnEnding {
+        TurnEnding.of(wasStopped: wasStopped, succeeded: succeeded, denials: denials)
     }
 
-    /// Said once for the turn rather than on each declined row, because the answer is one setting
-    /// and repeating it fifteen times would be noise.
-    private var deniedNotice: String? {
-        guard succeeded, denials > 0 else { return nil }
-        let count = denials == 1 ? "1 tool call was" : "\(denials) tool calls were"
-        return "\(count) denied in \(permissionMode.label). "
-            + "Pick another permission mode under the composer, then ask again."
+    /// The drawing of it. A stop is not a failure and must not borrow the failure's red: it is the
+    /// one ending nothing went wrong in, so it is drawn in the ink an ordinary caption uses, with
+    /// the Stop button's own symbol in the ring the other three endings use.
+    private var appearance: (glyph: String, tint: Color) {
+        switch outcome {
+        case .finished: ("checkmark.circle", Palette.positive)
+        case .denied: ("hand.raised.circle", Palette.warning)
+        case .failed: ("exclamationmark.circle", Palette.negative)
+        case .stopped: ("stop.circle", Palette.textSecondary)
+        }
     }
 
     private var durationMS: Int { row.durationMS ?? result?.durationMS ?? 0 }
