@@ -134,24 +134,14 @@ private struct AboutView: View {
         .background(Self.depth)
     }
 
-    /// What the AppKit panel used to print under the name, read out of the same two keys it read.
+    /// What the AppKit panel used to print under the name, except honest about which build it is.
     ///
-    /// Never a literal. `Tools/build.sh` stamps `CFBundleShortVersionString` and `CFBundleVersion`
-    /// from the tag at release time, and `Resources/Info.plist` carries placeholders the rest of
-    /// the time, so a version typed into this file would be wrong on every build but one.
+    /// Never a literal, and never the two version keys read raw. `Resources/Info.plist` carries a
+    /// fixed `0.1.0 (1)` that only the release workflow overwrites, so reading those keys made
+    /// every build on this machine claim a version that had never been released. `BuildIdentity`
+    /// is the type that knows the difference; see its head.
     private var versionLine: String {
-        let bundle = Bundle.main
-        guard let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString")
-            as? String
-        else {
-            return "Development build"
-        }
-        guard let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
-              build != version
-        else {
-            return "Version \(version)"
-        }
-        return "Version \(version) · Build \(build)"
+        BuildIdentity.read(from: .main).line
     }
 
     // MARK: The credit strip

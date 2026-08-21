@@ -439,8 +439,11 @@ private struct AboutSettingsView: View {
     /// Two lines of the row's own type, which is where an icon beside a name belongs.
     private static let iconSize: CGFloat = 32
 
+    /// The same line the About window prints, and for the same reason it is not the raw key: the
+    /// fallback below it used to read "Development", which never fired, because
+    /// `Resources/Info.plist` always carries a version. See `BuildIdentity`.
     private var version: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development"
+        BuildIdentity.read(from: .main).value
     }
 
     var body: some View {
