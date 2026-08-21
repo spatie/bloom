@@ -1,4 +1,5 @@
 import AppKit
+import BloomCore
 
 /// The contextual menu a terminal pane offers on right click.
 ///
@@ -9,6 +10,10 @@ import AppKit
 /// Every item routes through the same `TerminalPaneCommand` the keyboard uses, so the menu cannot
 /// drift away from the shortcuts: there is one implementation of splitting and one of closing, and
 /// the menu is a second way to reach them rather than a second copy of them.
+///
+/// The two directions are submenus, the same three kinds the centre pane's own menu offers and
+/// from the same `PaneKind`, so the direction and what goes in the half are one gesture. See
+/// `CenterPaneMenu`.
 @MainActor
 enum TerminalPaneMenu {
     static func make(
@@ -21,13 +26,13 @@ enum TerminalPaneMenu {
         // would hold it: without this the closures are gone before the user picks anything.
         let menu = OwningMenu(target: target)
 
-        menu.addItem(item(
-            "Split Right", symbol: PaneSymbol.splitRight, key: "d", modifiers: .command,
-            command: .split(.horizontal), target: target
+        menu.addItem(splitItem(
+            "Split Right", symbol: PaneSymbol.splitRight, axis: .horizontal,
+            key: "d", modifiers: .command, target: target
         ))
-        menu.addItem(item(
-            "Split Down", symbol: PaneSymbol.splitDown, key: "d", modifiers: [.command, .shift],
-            command: .split(.vertical), target: target
+        menu.addItem(splitItem(
+            "Split Down", symbol: PaneSymbol.splitDown, axis: .vertical,
+            key: "d", modifiers: [.command, .shift], target: target
         ))
 
         menu.addItem(.separator())
@@ -51,6 +56,45 @@ enum TerminalPaneMenu {
         menu.addItem(close)
 
         return menu
+    }
+
+    /// One direction, and the three things that can be put in the half that opens.
+    ///
+    /// The shortcut is drawn on Terminal rather than on the item this hangs off. AppKit never
+    /// sends the action of an item that has a submenu, so a key equivalent written on the parent
+    /// would be drawn beside a row that cannot fire, and Cmd+D would look like it belonged to a
+    /// list rather than to one entry in it. Terminal is the entry it belongs to: `.split(axis,
+    /// .terminal)` is the exact value `TerminalPaneCommand(key:modifiers:)` builds for Cmd+D, so
+    /// the row and the keystroke are the same command and cannot come apart.
+    ///
+    /// The keystroke itself is unaffected either way. It is read in `BloomTerminalView.keyDown`,
+    /// because that is the only place that knows a shell has the keyboard, and a contextual menu
+    /// is neither the menu bar nor the view hierarchy: what is written here is a label.
+    private static func splitItem(
+        _ title: String,
+        symbol: String,
+        axis: SplitAxis,
+        key: String,
+        modifiers: NSEvent.ModifierFlags,
+        target: ActionTarget
+    ) -> NSMenuItem {
+        let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        parent.image = PaneSymbol.image(symbol, label: title)
+
+        let kinds = NSMenu(title: title)
+        for kind in PaneKind.allCases {
+            let carriesShortcut = kind == .terminal
+            kinds.addItem(item(
+                kind.title,
+                symbol: kind.symbol,
+                key: carriesShortcut ? key : "",
+                modifiers: carriesShortcut ? modifiers : [],
+                command: .split(axis, kind),
+                target: target
+            ))
+        }
+        parent.submenu = kinds
+        return parent
     }
 
     private static func item(

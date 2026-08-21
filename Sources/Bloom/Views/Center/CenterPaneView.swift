@@ -68,7 +68,7 @@ struct CenterPaneView: View {
         case .tool(let tabID):
             if let tab = CenterTabStore.shared.tabs(for: model.workspace.id)
                 .first(where: { $0.id == tabID }) {
-                ToolPaneView(model: model, tab: tab)
+                ToolPaneView(model: model, tab: tab) { split($0, opening: $1) }
             } else {
                 emptyState
             }

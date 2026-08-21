@@ -9,6 +9,10 @@ import BloomCore
 struct ToolPaneView: View {
     @Bindable var model: WorkspaceModel
     var tab: CenterTab
+    /// Splits the centre pane this tab is filling, opening `kind` in the half that opens. Handed
+    /// down rather than reached for, because only the pane above knows which pane it is, and a
+    /// terminal's contextual menu now offers the same three kinds the centre pane's own menu does.
+    var splitColumn: @MainActor (SplitAxis, PaneKind) -> Void
 
     /// The tab whose shell has had its environment and its port settled, or nothing.
     ///
@@ -32,7 +36,8 @@ struct ToolPaneView: View {
                         workspace: model.workspace,
                         repo: model.repo,
                         port: model.port,
-                        onCloseTab: { Task { await CenterTabStore.shared.close(tab) } }
+                        onCloseTab: { Task { await CenterTabStore.shared.close(tab) } },
+                        splitColumn: splitColumn
                     )
                     .id(tab.id)
                 } else {

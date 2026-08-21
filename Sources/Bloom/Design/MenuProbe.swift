@@ -5,7 +5,7 @@ import BloomCore
 
 /// Photographs the centre pane's contextual menu, or the items one of its split submenus offers.
 ///
-///     Bloom --menu-probe /tmp/menu.png [--menu-part menu|kinds|row|colour|style] [--menu-project <path>]
+///     Bloom --menu-probe /tmp/menu.png [--menu-part menu|kinds|terminal|terminalKinds|row|colour|style] [--menu-project <path>]
 ///
 /// It exists because a menu is the one part of this interface that cannot be captured any other
 /// way. `ImageRenderer` draws SwiftUI's yellow placeholder for one, a menu only exists while it is
@@ -17,6 +17,12 @@ import BloomCore
 /// The menus are the real ones. `CenterPaneMenu`, `PaneKindItems` and `WorkspaceMenuItems` are the
 /// same views the app hands to `.contextMenu`, built here with closures that do nothing, so a
 /// picture taken by this probe cannot show an item the app does not have.
+///
+/// `terminal` is the odd one and is the reason `present` exists. It is `TerminalPaneMenu`, put up
+/// through a real `BloomTerminalView`'s right mouse handling rather than through `NSMenu.popUp`,
+/// because those two do not draw the same menu: AppKit merges the text input system's own items
+/// into a contextual menu as it presents it, and they never appear in `NSMenu.items` at all. A
+/// picture taken the easy way would be a picture of a menu the app never shows.
 ///
 /// `row` and `colour` are a workspace row's menu and the colour submenu inside it. They need a
 /// workspace, so they read one out of the database this instance was pointed at, which means they
@@ -60,6 +66,10 @@ enum MenuProbe {
         case menu
         /// The three items a split submenu is made of.
         case kinds
+        /// A terminal pane's own menu, put up the way a right click puts it up.
+        case terminal
+        /// The three items one of its split submenus is made of.
+        case terminalKinds
         /// A workspace row's context menu, as both lists offer it.
         case row
         /// The colour submenu inside it, on its own, because AppKit tracks one menu at a time.
@@ -115,14 +125,14 @@ enum MenuProbe {
         // reported a failure that was really somebody typing.
         for _ in 0..<6 where !capturedOutput {
             // The capture has to run while the menu is tracking, and tracking is its own run loop
-            // mode: `popUp` does not return until the menu closes. A timer added to the common
+            // mode: presenting does not return until the menu closes. A timer added to the common
             // modes is delivered inside it, which is why it is scheduled before the menu opens
             // rather than written after it.
             let timer = after(0.4) {
                 capturedOutput = capture(to: outputPath)
                 menu.cancelTracking()
             }
-            menu.popUp(positioning: nil, at: origin, in: nil)
+            present(menu, at: origin, in: window)
             timer.invalidate()
         }
 
@@ -130,6 +140,48 @@ enum MenuProbe {
         print(outputPath)
         exit(0)
     }
+
+    /// Puts the menu on screen, and does not return until it closes again.
+    ///
+    /// Two ways, because there are two menus. `NSMenu.popUp` is the plain one and is what every
+    /// SwiftUI menu here is photographed with. The terminal's goes up the way a right click puts
+    /// it up, through `BloomTerminalView`, because AppKit adds items of its own on that path and
+    /// only on that path, and whether they are there is the whole question this picture answers.
+    private static func present(_ menu: NSMenu, at origin: NSPoint, in window: NSWindow) {
+        guard part == .terminal, let pane = terminalPane, let content = window.contentView else {
+            menu.popUp(positioning: nil, at: origin, in: nil)
+            return
+        }
+
+        // In the window, because a view outside one has no window number to put on the event, and
+        // AppKit hit tests the contextual menu against the window the event names.
+        if pane.superview == nil {
+            pane.frame = content.bounds
+            content.addSubview(pane)
+        }
+
+        let point = NSPoint(x: 260, y: content.bounds.height - 220)
+        guard let event = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: point,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        ) else { fail("could not build a right click to open the terminal's menu with") }
+
+        pane.rightMouseDown(with: event)
+    }
+
+    /// The shell the terminal menu is photographed over. No process is ever started in it: it is
+    /// here to be the `NSView` AppKit asks for a menu, and an empty one draws the same.
+    private static let terminalPane: BloomTerminalView? = {
+        guard MenuProbe.part == .terminal else { return nil }
+        return BloomTerminalView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+    }()
 
     /// The menu this run photographs, built from the very views the app shows.
     private static func build(model: AppModel?) -> NSMenu {
@@ -140,12 +192,42 @@ enum MenuProbe {
             NSHostingMenu(rootView: CenterPaneMenu(isSplit: true, split: { _, _ in }, close: {}))
         case .kinds:
             NSHostingMenu(rootView: PaneKindItems { _ in })
+        case .terminal:
+            terminalMenu()
+        // The submenu on its own, for the reason the two centre menus are separate parts.
+        case .terminalKinds:
+            terminalSplitKinds()
         case .row, .colour:
             workspaceMenu(model: model)
         case .style:
             NSHostingMenu(rootView: outputStyleItems)
         }
     }
+
+    /// The pane menu a split terminal offers, with every item it can carry: Close Pane is only
+    /// offered when there is a pane to close back to.
+    private static func terminalMenu() -> NSMenu {
+        let menu = TerminalPaneMenu.make(canClose: true, isZoomed: false) { _ in }
+        // The view answers with this one, which is what puts it through AppKit's own contextual
+        // menu path rather than round it. See `present`.
+        terminalPane?.onContextMenu = { menu }
+        return menu
+    }
+
+    private static func terminalSplitKinds() -> NSMenu {
+        let menu = TerminalPaneMenu.make(canClose: true, isZoomed: false) { _ in }
+        guard let kinds = menu.items.first?.submenu else {
+            fail("the terminal pane menu has no split submenu")
+        }
+        // The parent is kept, not just the submenu. It is the menu that owns the items' action
+        // target, `NSMenuItem.target` is weak, and a menu whose target has gone validates every
+        // row against the responder chain instead and draws the lot greyed out. That is what the
+        // first picture of this submenu was.
+        parentOfKinds = menu
+        return kinds
+    }
+
+    private static var parentOfKinds: NSMenu?
 
     /// The output style picker's own rows, built from the same catalogue and the same item view
     /// the composer's footer uses. Selected on Concise, which is the style this menu was added

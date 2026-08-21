@@ -21,6 +21,8 @@ struct TerminalSplitView: View {
     var port: Int
     /// Called when the user closes the last pane, which is the tab asking to go away.
     var onCloseTab: @MainActor () -> Void
+    /// Called when a split asks for something a shell tree cannot hold. See `handle`.
+    var splitColumn: @MainActor (SplitAxis, PaneKind) -> Void
 
     /// The same switch the terminal itself reads, so turning the Ghostty theme off also turns off
     /// Ghostty's way of fading the panes that do not have the keyboard.
@@ -167,8 +169,18 @@ struct TerminalSplitView: View {
         splits.focus(pane, in: ownerID)
 
         switch command {
-        case .split(let axis):
+        // A terminal beside a terminal is the split this tab already knows how to do: another
+        // shell in its own tree, sharing the tab, its title and its tmux server. That is what
+        // Cmd+D has always meant here, and in iTerm and Ghostty before it.
+        case .split(let axis, .terminal):
             return splits.split(ownerID, axis: axis) != nil
+
+        // A conversation and a page cannot live in a shell tree at all, so those two carve the
+        // CENTRE pane this tab is sitting in and open there, through `NewPane`, which is the door
+        // the strip's `+` and the centre pane's own menu already use. See `CenterPaneView.split`.
+        case .split(let axis, let kind):
+            splitColumn(axis, kind)
+            return true
 
         case .focus(let direction):
             return splits.moveFocus(direction, in: ownerID)
