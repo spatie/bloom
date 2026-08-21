@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 import BloomCore
 
 /// The inspector's own tab row: which pane, and the two chrome level choices that outlive
@@ -77,26 +76,11 @@ struct InspectorToolbar: View {
             // workspace's changed files while the app is frontmost, and a finished turn re-reads
             // them at once. A button asking the reader to do the app's job was only ever covering
             // for that not being true.
+            //
+            // The items themselves are `WorktreeMenuItems`, which is a view of its own so that
+            // this menu can be photographed. See its head.
             Menu {
-                Button("Copy branch name", action: copyBranch)
-                Button("Reveal worktree in Finder") { Reveal.inFinder(model.workspace.path) }
-                OpenInItems(target: .folder(model.workspace.path), noun: "Worktree")
-                if let pullRequest = model.pullRequest {
-                    Divider()
-                    Button("Open pull request") { GitHubBridge.open(pullRequest.url) }
-                    if let url = URL(string: pullRequest.url) {
-                        // Here rather than in the pull request strip above. That strip already
-                        // clips at the pane's narrow widths, and one more control in it buys
-                        // discoverability with the merge button's room.
-                        //
-                        // A `ShareLink` rather than a button that presents a picker of its own, so
-                        // the services open as a submenu of the menu the reader is already in,
-                        // which is where Finder puts Share. Labelled with a `Text` rather than a
-                        // title string, because the `.labelStyle(.iconOnly)` below reaches the
-                        // menu's contents too and would leave this item as a bare glyph.
-                        ShareLink(item: url) { Text("Share pull request") }
-                    }
-                }
+                WorktreeMenuItems(workspace: model.workspace, pullRequest: model.pullRequest)
             } label: {
                 Label("More for this worktree", systemImage: "ellipsis.circle")
             }
@@ -140,9 +124,4 @@ struct InspectorToolbar: View {
         return "\(tab.rawValue) (\(model.changedFiles.count))"
     }
 
-    // MARK: - Actions
-
-    private func copyBranch() {
-        Clipboard.copy(model.workspace.branch)
-    }
 }

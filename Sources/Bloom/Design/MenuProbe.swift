@@ -5,7 +5,7 @@ import BloomCore
 
 /// Photographs the centre pane's contextual menu, or the items one of its split submenus offers.
 ///
-///     Bloom --menu-probe /tmp/menu.png [--menu-part menu|kinds|terminal|terminalKinds|browser|row|colour|style] [--menu-project <path>]
+///     Bloom --menu-probe /tmp/menu.png [--menu-part menu|kinds|terminal|terminalKinds|browser|row|colour|style|worktree] [--menu-project <path>]
 ///
 /// It exists because a menu is the one part of this interface that cannot be captured any other
 /// way. `ImageRenderer` draws SwiftUI's yellow placeholder for one, a menu only exists while it is
@@ -14,9 +14,10 @@ import BloomCore
 /// built here, opened here, measured here, and the capture is a rectangle exactly the size of the
 /// menu's own windows: opaque menu pixels and nothing else.
 ///
-/// The menus are the real ones. `CenterPaneMenu`, `PaneKindItems` and `WorkspaceMenuItems` are the
-/// same views the app hands to `.contextMenu`, built here with closures that do nothing, so a
-/// picture taken by this probe cannot show an item the app does not have.
+/// The menus are the real ones. `CenterPaneMenu`, `PaneKindItems`, `WorkspaceMenuItems` and
+/// `WorktreeMenuItems` are the same views the app hands to `.contextMenu` and to its overflow
+/// buttons, built here with closures that do nothing, so a picture taken by this probe cannot show
+/// an item the app does not have.
 ///
 /// `terminal` is the odd one and is the reason `present` exists. It is `TerminalPaneMenu`, put up
 /// through a real `BloomTerminalView`'s right mouse handling rather than through `NSMenu.popUp`,
@@ -37,6 +38,13 @@ import BloomCore
 /// `row` and `colour` are a workspace row's menu and the colour submenu inside it. They need a
 /// workspace, so they read one out of the database this instance was pointed at, which means they
 /// want `BLOOM_DB_PATH` set at a seeded scratch copy rather than the owner's.
+///
+/// `worktree` is the inspector's "More for this worktree" menu. It takes a `Workspace` rather than
+/// a `WorkspaceModel`, so it needs no database and no window state at all: the branch and the path
+/// are made up here, and every item that is not about them is the app's own. `--menu-project`
+/// supplies the worktree path, so the applications offered are the ones that would really be
+/// offered for a checkout on this machine. No pull request, which is the shape a workspace has
+/// before anything is pushed and the shortest the menu ever is.
 ///
 /// `style` is the composer's output style picker. Its list is read off disk rather than written
 /// down, so `--menu-project` points it at a checkout whose `.claude/output-styles` should be in
@@ -88,6 +96,8 @@ enum MenuProbe {
         case colour
         /// The composer's output style picker, rows and describing footnote.
         case style
+        /// The inspector's overflow menu for the worktree it is looking at.
+        case worktree
     }
 
     private static var part: Part {
@@ -229,6 +239,8 @@ enum MenuProbe {
             workspaceMenu(model: model)
         case .style:
             NSHostingMenu(rootView: outputStyleItems)
+        case .worktree:
+            NSHostingMenu(rootView: worktreeItems)
         }
     }
 
@@ -345,6 +357,25 @@ enum MenuProbe {
             heading: "Output style",
             help: "Choose the output style",
             onSelect: { _ in }
+        )
+    }
+
+    /// The inspector's worktree menu, over a workspace invented here.
+    ///
+    /// Nothing is read and nothing is written: the only fields this menu touches are the branch it
+    /// copies and the path it offers, and a path that exists is what makes the Open Worktree in
+    /// submenu answer with the applications a real checkout would be offered.
+    private static var worktreeItems: WorktreeMenuItems {
+        let path = value(for: "--menu-project") ?? FileManager.default.currentDirectoryPath
+        return WorktreeMenuItems(
+            workspace: Workspace(
+                repoID: .new(),
+                name: "Probe",
+                branch: "probe/menu",
+                path: path,
+                baseBranch: "main"
+            ),
+            pullRequest: nil
         )
     }
 

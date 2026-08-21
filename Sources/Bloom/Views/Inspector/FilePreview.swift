@@ -155,6 +155,11 @@ struct FilePreview: View {
     /// opened in, holding it offers everywhere else. The one control does both, which is what
     /// keeps a bar this narrow from growing a second button.
     ///
+    /// `OpenInAppItems` rather than `OpenInItems`, so the hold shows the applications themselves
+    /// and not one submenu row holding them. This control already means "open in", which is what a
+    /// context menu's submenu title has to say in words, and a menu whose only content is a
+    /// submenu is a menu you have to open twice.
+    ///
     /// `arrow.up.forward.app` rather than `square.and.pencil`. The pencil is the mark this
     /// platform puts on "edit this, here", and beside a control whose other half literally is
     /// that, a second pencil meaning "edit it in another application" would be the ambiguity the
@@ -162,7 +167,7 @@ struct FilePreview: View {
     /// to somewhere else.
     private var openInMenu: some View {
         Menu {
-            OpenInItems(target: .file(absolutePath))
+            OpenInAppItems(target: .file(absolutePath))
         } label: {
             Label(openTitle, systemImage: "arrow.up.forward.app")
         } primaryAction: {
