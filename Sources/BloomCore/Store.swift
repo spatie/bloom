@@ -10,8 +10,14 @@ import Synchronization
 /// `update(workspaceID:)`, `update(repoID:)` and `update(sessionID:)` each read the row inside
 /// this actor, apply the change, and write, with no suspension in between, so a write changes
 /// what it named and nothing else. Where one writer owns a fixed set of columns, it gets a method
-/// that names them: `updateDiffStat`, `touch`, `updateSetup`, `updateSessionPreferences`,
-/// `reorderSessions`, `updateLastReadSeq`.
+/// that names them: `updateDiffStat`, `touch`, `updateSessionPreferences`, `reorderSessions`,
+/// `updateLastReadSeq`.
+///
+/// Three columns are not writable through `update`'s closure by anybody outside this module at
+/// all: `Workspace.state`, `Workspace.setupState` and `Session.state` are `internal(set)`, and the
+/// only way to move them is the event methods in `SetupLifecycle`, `SessionLifecycle` and
+/// `WorkspaceLifecycle`. Read the head of any of those three for why a state and the work that
+/// goes with it have to be one statement.
 ///
 /// This is not tidiness. These rows have several writers running at wildly different speeds: a
 /// diff stat refresh every six seconds, an archive that takes seconds of disk work before it can
@@ -609,8 +615,8 @@ public actor Store {
     /// inside that gap left a workspace whose worktree is gone and whose row says it is live.
     /// Unlike a stale count, that one does not heal. It is still there after a relaunch.
     ///
-    /// `updateDiffStat`, `touch` and `updateSetup` are the same rule written out column by column
-    /// for the three writers that already had it. This is the rule itself, so a column added to
+    /// `updateDiffStat` and `touch` are the same rule written out column by column for the two
+    /// writers that already had it. This is the rule itself, so a column added to
     /// `Workspace` next year does not quietly reopen the hole for everybody else.
     ///
     /// Identity is not the caller's to move: `id` is pinned after the change runs, and `repo_id`
@@ -675,18 +681,6 @@ public actor Store {
         }
     }
 
-    /// A setup script can run for minutes, and everything else that touches the workspace keeps
-    /// writing during those minutes: renames, pinning, diff stats, activity. Writing the whole
-    /// `Workspace` value the run started with would roll all of that back, which is the bug
-    /// `updateSessionPreferences` exists to avoid on the sessions table. So the setup run owns
-    /// exactly these two columns and touches nothing else.
-    public func updateSetup(workspaceID: String, state: SetupState, log: String? = nil) throws {
-        try db.run(
-            "UPDATE workspaces SET setup_state = ?, setup_log = COALESCE(?, setup_log) WHERE id = ?",
-            [.text(state.rawValue), log.map { .text($0) } ?? .null, .text(workspaceID)]
-        )
-    }
-
     /// The setup script is a child of this process, so it cannot outlive the app: a row still
     /// `running` at launch is a run that was killed, never a run still going.
     ///
@@ -696,20 +690,35 @@ public actor Store {
     /// spinner, reads as "setup has not run yet" and leaves the re-run button inviting, which is
     /// the honest description. The appended log line is what separates this from a workspace whose
     /// setup genuinely never started.
+    ///
+    /// **Recovery is a transition, so it goes through the transition table like everything else.**
+    /// This is one statement over every affected row rather than a read and a write each, because
+    /// it runs on the launch path before a window exists and a user with sixty workspaces should
+    /// not pay sixty round trips for it. What it must not become is a second opinion, so the states
+    /// it selects and the state it writes are both asked of `SetupLifecycle` rather than spelled
+    /// here, and the line it appends is `SetupEvent.runInterrupted.note`. Add a state to
+    /// `SetupState` and this picks it up; change the table and this follows.
     public func recoverInterruptedSetups() throws {
-        let note = "[bloom] The app stopped while the setup script was running, "
-            + "so this run was interrupted before it could report a result. Run setup again to finish it."
+        let event = SetupEvent.runInterrupted
+        var sources: [SetupState] = []
+        var destination: SetupState?
+        for state in SetupState.allCases {
+            guard case .moves(let next) = state.transition(on: event) else { continue }
+            sources.append(state)
+            destination = next
+        }
+        guard let destination, !sources.isEmpty, let note = event.note else { return }
+
+        let placeholders = sources.map { _ in "?" }.joined(separator: ", ")
         try db.run(
             """
             UPDATE workspaces
             SET setup_state = ?,
                 setup_log = CASE WHEN setup_log = '' THEN ? ELSE setup_log || char(10) || ? END
-            WHERE setup_state = ?
+            WHERE setup_state IN (\(placeholders))
             """,
-            [
-                .text(SetupState.pending.rawValue), .text(note), .text(note),
-                .text(SetupState.running.rawValue),
-            ]
+            [.text(destination.rawValue), .text(note), .text(note)]
+                + sources.map { SQLValue.text($0.rawValue) }
         )
     }
 
@@ -937,8 +946,26 @@ public actor Store {
     /// the sidebar would show the raised hand, the Dock would carry a badge, and the row would
     /// offer buttons that write into a closed pipe. See `abandonPendingPermissionAsks`, which is
     /// the other half and has to run with this one.
+    ///
+    /// The two paragraphs above are the reasoning, and `SessionLifecycle` is where it is written
+    /// down as a rule. This asks that table which states `appRelaunched` moves and where it moves
+    /// them, so the bulk pass and the machine cannot come to different conclusions about what an
+    /// interrupted launch left behind.
     public func resetRunningSessions() throws {
-        try db.run("UPDATE sessions SET state = 'idle' WHERE state IN ('running', 'waiting')")
+        var sources: [SessionState] = []
+        var destination: SessionState?
+        for state in SessionState.allCases {
+            guard case .moves(let next) = state.transition(on: .appRelaunched) else { continue }
+            sources.append(state)
+            destination = next
+        }
+        guard let destination, !sources.isEmpty else { return }
+
+        let placeholders = sources.map { _ in "?" }.joined(separator: ", ")
+        try db.run(
+            "UPDATE sessions SET state = ? WHERE state IN (\(placeholders))",
+            [.text(destination.rawValue)] + sources.map { SQLValue.text($0.rawValue) }
+        )
     }
 
     // MARK: - Messages

@@ -48,7 +48,7 @@ struct StoreTests {
         let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r"))
         var workspace = Workspace(repoID: repo.id, name: "w", branch: "b", path: "/p", baseBranch: "main")
         try await store.upsert(workspace)
-        workspace.state = .archived
+        workspace.archive()
         workspace.archivedAt = Date()
         try await store.upsert(workspace)
 
@@ -146,6 +146,56 @@ struct StoreTests {
         #expect(try await store.session(id: session.id)?.state == .idle)
     }
 
+    /// Commit d81efda. `waiting` is the half that needed saying: a blocked agent holds its turn
+    /// open until it is answered, so a session left there came back drawing a raised hand over a
+    /// process that had been gone since the last launch.
+    ///
+    /// Driven off `SessionLifecycle` rather than off a list written here, so this asserts the
+    /// thing that actually matters: the bulk pass touches exactly the rows the table moves, and
+    /// leaves exactly the rows it does not. Add a state to `SessionState` and this covers it.
+    @Test("the launch pass clears exactly what the table says a relaunch clears",
+          arguments: SessionState.allCases)
+    func relaunchPassFollowsTheTable(state: SessionState) async throws {
+        let store = try makeTestStore("store")
+        let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r"))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id, name: "w", branch: "b", path: "/p", baseBranch: "main"
+        ))
+        var session = Session(workspaceID: workspace.id)
+        session.state = state
+        try await store.upsert(session)
+
+        try await store.resetRunningSessions()
+
+        let expected = state.transition(on: .appRelaunched).destination ?? state
+        #expect(try await store.session(id: session.id)?.state == expected)
+    }
+
+    /// The same property one table over. `recoverInterruptedSetups` is one statement over every
+    /// affected row because it runs before a window exists, and the price of that is that it could
+    /// become a second opinion. It asks `SetupLifecycle` which states to select and where to send
+    /// them, and this is what holds it to that.
+    @Test("the launch pass recovers exactly what the table says an interruption recovers",
+          arguments: SetupState.allCases)
+    func setupRecoveryPassFollowsTheTable(state: SetupState) async throws {
+        let store = try makeTestStore("store")
+        let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r"))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id, name: "w", branch: "b", path: "/p", baseBranch: "main",
+            setupState: state, setupLog: "the original log"
+        ))
+
+        try await store.recoverInterruptedSetups()
+
+        let outcome = state.transition(on: .runInterrupted)
+        let stored = try #require(try await store.workspace(id: workspace.id))
+        #expect(stored.setupState == (outcome.destination ?? state))
+        // The note is the event's own, so the SQL and `Workspace.apply` cannot come to describe the
+        // same interruption in two different sentences.
+        let note = try #require(SetupEvent.runInterrupted.note)
+        #expect(stored.setupLog.contains(note) == outcome.moves)
+    }
+
     @Test("reconciles a setup that was still running when the app died")
     func recoversInterruptedSetup() async throws {
         let store = try makeTestStore("store")
@@ -201,7 +251,10 @@ struct StoreTests {
         })
         try await store.updateDiffStat(workspaceID: stale.id, additions: 12, deletions: 3, files: 2)
 
-        try await store.updateSetup(workspaceID: stale.id, state: .succeeded, log: "done")
+        try await store.update(workspaceID: stale.id) {
+            $0.apply(.runStarted)
+            $0.apply(.runFinished(succeeded: true, log: "done"))
+        }
 
         let stored = try #require(try await store.workspace(id: stale.id))
         #expect(stored.setupState == .succeeded)

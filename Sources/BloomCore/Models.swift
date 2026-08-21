@@ -95,7 +95,12 @@ public enum WorkspaceState: String, Sendable, Codable, CaseIterable {
     case archived
 }
 
-public enum SetupState: String, Sendable, Codable {
+/// How far the project's setup script has got in this worktree.
+///
+/// `CaseIterable` so `Store.recoverInterruptedSetups` can build its `WHERE` clause out of
+/// `SetupLifecycle`'s table rather than restating it in SQL. The launch pass and the machine
+/// disagreeing about which rows are interrupted is the drift that conformance rules out.
+public enum SetupState: String, Sendable, Codable, CaseIterable, Hashable {
     case pending
     case running
     case succeeded
@@ -110,9 +115,22 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
     public var branch: String
     public var path: String
     public var baseBranch: String
-    public var state: WorkspaceState
-    public var setupState: SetupState
-    public var setupLog: String
+    /// Active or archived. **Read anywhere, written only through `archive(at:)` and
+    /// `restore(to:hasSetupScript:)` in `WorkspaceLifecycle`,** because setting this on its own is
+    /// not archiving: archiving is removing the worktree and then saying so, and a row that claims
+    /// a workspace is live after its worktree has gone does not heal.
+    ///
+    /// `internal(set)` so that is a compile error in `Sources/Bloom` rather than a convention. See
+    /// the house rule for the half the compiler cannot see, which is a new file inside the core.
+    public internal(set) var state: WorkspaceState
+    /// How far the setup script has got. **Read anywhere, written only through
+    /// `apply(_: SetupEvent)`,** for the same reason and with the same `internal(set)` behind it:
+    /// this state and `setupLog` are one statement, and `failed` with nothing to read is a
+    /// half-truth the next reader treats as whole. See `SetupLifecycle`.
+    public internal(set) var setupState: SetupState
+    /// What the setup script printed, or the line explaining why there is nothing to read.
+    /// Written by `apply(_: SetupEvent)` alongside the state it belongs to.
+    public internal(set) var setupLog: String
     public var sortOrder: Int
     public var createdAt: Date
     public var lastActivityAt: Date
@@ -185,7 +203,9 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
 
 // MARK: - Session
 
-public enum SessionState: String, Sendable, Codable {
+/// What a chat is doing. `CaseIterable` so `Store.resetRunningSessions` can build its `WHERE`
+/// clause out of `SessionLifecycle`'s table instead of restating it in SQL.
+public enum SessionState: String, Sendable, Codable, CaseIterable, Hashable {
     case idle
     case running
     /// The agent asked to do something and is holding its turn open until somebody answers.
@@ -233,7 +253,10 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     /// every one of them was.
     public var agentKind: AgentKind
     public var permissionMode: PermissionMode
-    public var state: SessionState
+    /// What this chat is doing. **Read anywhere, written only through `apply(_: SessionEvent)`,**
+    /// which stamps `updatedAt` in the same statement because a state change nothing downstream
+    /// notices is not a state change. See `SessionLifecycle`.
+    public internal(set) var state: SessionState
     public var sortOrder: Int
     public var createdAt: Date
     public var updatedAt: Date

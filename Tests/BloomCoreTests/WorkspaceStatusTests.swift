@@ -366,7 +366,7 @@ struct AwaitingPermissionStatusTests {
     @Test("a workspace still setting up says so first")
     func setupWinsOverWaiting() {
         var setting = workspace()
-        setting.setupState = .running
+        setting.apply(.runStarted)
         let status = WorkspaceStatus.resolve(
             workspace: setting, isRunning: true, pullRequest: nil, isAwaitingPermission: true
         )

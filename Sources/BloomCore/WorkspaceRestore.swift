@@ -218,7 +218,7 @@ public extension WorkspaceManager {
         let settings = SettingsLoader.load(repo: repo.path)
         try copyFiles(settings.filesToCopy, from: repo.path, to: path)
 
-        // Nothing is installed in this worktree.
+        // Nothing is installed in this worktree, and the row has to say so.
         //
         // The files git tracks are back and the copied `.env*` are back, and neither of those is
         // `node_modules`, `vendor`, a built binary or a database. Archiving removed the whole
@@ -228,26 +228,15 @@ public extension WorkspaceManager {
         //
         // Setup is not run here. It takes minutes, this method returns to a UI that shows the
         // workspace immediately, and there is nowhere to stream the output to from inside it. What
-        // this does is stop the row lying: `pending` is what a worktree with no dependencies in it
-        // is, it puts the spinner away rather than hanging a failure on a run nobody made, and it
-        // is the state the "Run setup" control is already offered for. See `recoverInterruptedSetups`
-        // for the same bargain after a run was killed.
+        // `restore(to:hasSetupScript:)` does is stop the row lying, in one statement that cannot
+        // do half of it: the state, the date, the new path and the setup columns move together.
+        // Read `WorkspaceLifecycle` for why that is one method rather than four assignments.
         //
-        // `skipped` when the project has no setup script, because then there is nothing to run and
-        // `pending` would be an invitation to press a button that does nothing.
-        let settingsForSetup = settings.setupScript == nil ? SetupState.skipped : .pending
-        let note = "[bloom] This worktree was rebuilt when the workspace was restored, so anything "
-            + "the setup script installed is gone. Run setup again."
-
         // Four columns, not eighteen. `git worktree add` and the file copy above take long enough
         // for a turn to finish or a diff stat pass to land, and a restore that put the whole value
         // back would undo whatever they wrote.
         let updated = try await store.update(workspaceID: workspace.id) {
-            $0.state = .active
-            $0.archivedAt = nil
-            $0.path = path
-            $0.setupState = settingsForSetup
-            $0.setupLog = $0.setupLog.isEmpty ? note : $0.setupLog + "\n" + note
+            $0.restore(to: path, hasSetupScript: settings.setupScript != nil)
         }
         guard let restored = updated else { throw WorkspaceError.workspaceGone(workspace.name) }
         return RestoreOutcome(

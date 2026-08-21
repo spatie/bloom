@@ -102,10 +102,7 @@ public actor CodexRunner: SessionRunner {
         )
         handle.begin(turnID: turn.id)
 
-        session = session.with {
-            $0.state = .running
-            $0.updatedAt = Date()
-        }
+        session.apply(.turnStarted)
         await save(session)
     }
 
@@ -121,6 +118,11 @@ public actor CodexRunner: SessionRunner {
 
     private func interrupt() async {
         cancelled = true
+        // Written here rather than left for the result to infer, which is what the `cancelled`
+        // flag used to do at both of the sites below. `SessionLifecycle` refuses a stop on a
+        // session with no turn open and ignores a result on one that has already been stopped, so
+        // the two facts are stated once each instead of being recombined by a ternary twice.
+        if session.apply(.cancelled).moves { await save(session) }
         guard let client, let threadID, let turnID = handle.turnID else { return }
         try? await client.interruptTurn(threadID: threadID, turnID: turnID)
     }
@@ -296,23 +298,19 @@ public actor CodexRunner: SessionRunner {
         switch event {
         case .result(let result):
             handle.end()
+            session.apply(.turnFinished(isError: result.isError))
             session = session.with {
                 $0.inputTokens += result.usage.inputTokens
                 $0.outputTokens += result.usage.outputTokens
                 // No price reaches this protocol, so `costUSD` is deliberately never touched: a
                 // number that means "we do not know" must not be added to one that means dollars.
                 if result.usage.contextTokens > 0 { $0.contextTokens = result.usage.contextTokens }
-                $0.state = cancelled ? .cancelled : (result.isError ? .failed : .idle)
-                $0.updatedAt = Date()
             }
             await save(session)
 
         case .error:
             handle.end()
-            session = session.with {
-                $0.state = cancelled ? .cancelled : .failed
-                $0.updatedAt = Date()
-            }
+            session.apply(.turnFinished(isError: true))
             await save(session)
 
         default:
@@ -353,10 +351,7 @@ public actor CodexRunner: SessionRunner {
 
         guard grants == nil, pending.contains(ask.requestID) else { return }
 
-        session = session.with {
-            $0.state = .waiting
-            $0.updatedAt = Date()
-        }
+        session.apply(.blocked)
         await save(session)
     }
 
@@ -394,11 +389,8 @@ public actor CodexRunner: SessionRunner {
             await client?.answer(request, decision: decision)
         }
 
-        guard pending.isEmpty, session.state == .waiting else { return }
-        session = session.with {
-            $0.state = .running
-            $0.updatedAt = Date()
-        }
+        guard pending.isEmpty else { return }
+        guard session.apply(.unblocked).moves else { return }
         await save(session)
     }
 
@@ -458,7 +450,8 @@ public actor CodexRunner: SessionRunner {
 
     /// Writes the columns this runner owns, and nothing else. The same rule as `AgentRunner`: a
     /// whole-value write would put back a title, a model or a read mark from whenever this runner
-    /// last read the row.
+    /// last read the row. `state` is carried rather than decided here too: nothing in this file
+    /// assigns it, so what lands on the row is whatever `SessionLifecycle` allowed.
     private func save(_ session: Session) async {
         do {
             try await store.update(sessionID: session.id) {

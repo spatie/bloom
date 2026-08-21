@@ -310,10 +310,7 @@ public actor AgentRunner {
 
         await persist(kind: .user, payload: Data(line.utf8))
 
-        session = session.with {
-            $0.state = .running
-            $0.updatedAt = Date()
-        }
+        session.apply(.turnStarted)
         await save(session)
     }
 
@@ -446,6 +443,12 @@ public actor AgentRunner {
             lastContextUsed = block.usage.contextUsedTokens
 
         case .result(let result):
+            // A cancelled turn also comes back as an error result, because SIGTERM makes the CLI
+            // report error_during_execution on its way out. That is the user pressing stop, not a
+            // failure. This used to be a `cancelled ? .cancelled : ...` ternary here and another
+            // one in `CodexRunner`; `SessionLifecycle` says it once instead, by making
+            // `turnFinished` change nothing on a session that has already been stopped.
+            session.apply(.turnFinished(isError: result.isError))
             session = session.with {
                 $0.inputTokens += result.usage.inputTokens
                 $0.outputTokens += result.usage.outputTokens
@@ -455,11 +458,6 @@ public actor AgentRunner {
                 // looks like. Never `result.usage`, which counts the whole turn rather than the
                 // window; see `lastContextUsed`.
                 if lastContextUsed > 0 { $0.contextTokens = lastContextUsed }
-                // A cancelled turn also comes back as an error result, because SIGTERM makes the
-                // CLI report error_during_execution on its way out. That is the user pressing
-                // stop, not a failure, so cancellation wins over what the result says.
-                $0.state = cancelled ? .cancelled : (result.isError ? .failed : .idle)
-                $0.updatedAt = Date()
             }
             await save(session)
 
@@ -514,6 +512,10 @@ public actor AgentRunner {
     ///
     /// `updatedAt` is included because it is this runner's statement about when the turn moved,
     /// which is what `refreshSession` reads to decide whether a row still describes the last turn.
+    ///
+    /// `state` is carried rather than decided. Nothing in this runner assigns it: every move goes
+    /// through `Session.apply`, so what is mirrored onto the row here is whatever
+    /// `SessionLifecycle` allowed, and this line cannot invent a state the table would refuse.
     private func save(_ session: Session) async {
         do {
             try await store.update(sessionID: session.id) {
@@ -577,10 +579,7 @@ public actor AgentRunner {
 
         // Nothing answers it, so somebody has to. This is the state that has to be visible from
         // outside the workspace: a process that is alive, costing nothing, and doing nothing.
-        session = session.with {
-            $0.state = .waiting
-            $0.updatedAt = Date()
-        }
+        session.apply(.blocked)
         await save(session)
     }
 
@@ -634,11 +633,10 @@ public actor AgentRunner {
         guard let line = try? PermissionAnswer.encode(ask: ask, decision: decision) else { return }
         handle.current?.writeLine(line)
 
-        guard pending.isEmpty, session.state == .waiting else { return }
-        session = session.with {
-            $0.state = .running
-            $0.updatedAt = Date()
-        }
+        guard pending.isEmpty else { return }
+        // `unblocked` on a session that was not waiting is legal and does nothing, so this is one
+        // question of the table rather than a state test and a write that have to agree.
+        guard session.apply(.unblocked).moves else { return }
         await save(session)
     }
 
@@ -749,16 +747,11 @@ public actor AgentRunner {
                 raw: payload
             )))
 
-            session = session.with {
-                $0.state = .failed
-                $0.updatedAt = Date()
-            }
+            session.apply(.processFailed)
             await save(session)
-        } else if session.state == .running {
-            session = session.with {
-                $0.state = .idle
-                $0.updatedAt = Date()
-            }
+        } else if session.apply(.processExited).moves {
+            // A session left `waiting` moves here too, which the state test this replaced did not
+            // do: the pipe is closed, so the question it was blocked on can never be answered.
             await save(session)
         }
     }
@@ -808,10 +801,11 @@ public actor AgentRunner {
         cancelled = true
         alive = false
 
-        session = session.with {
-            $0.state = .cancelled
-            $0.updatedAt = Date()
-        }
+        // Refused on a session with no turn open, and left alone rather than written. Stop is fire
+        // and forget from a button that cannot await, so the request reaches this actor whenever
+        // the actor gets to it; filing a turn that had already finished normally as one the user
+        // abandoned is a claim the transcript then makes for ever.
+        session.apply(.cancelled)
         // The write has to be deferred, because this is reached from synchronous paths, but it
         // deliberately does not carry a snapshot: by the time it runs the user may already have
         // started the next turn, and writing a copy taken now would put that turn back to

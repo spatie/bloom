@@ -268,7 +268,7 @@ public struct WorkspaceManager: Sendable {
         )
 
         guard let launch else {
-            try? await store.updateSetup(workspaceID: workspace.id, state: .skipped)
+            _ = try? await store.update(workspaceID: workspace.id) { $0.apply(.runSkipped(note: nil)) }
             return true
         }
 
@@ -280,13 +280,13 @@ public struct WorkspaceManager: Sendable {
             let note = "The settings file names \(path) as the setup script and there is nothing "
                 + "there, so nothing ran."
             onOutput(note)
-            try? await store.updateSetup(workspaceID: workspace.id, state: .skipped, log: note)
+            _ = try? await store.update(workspaceID: workspace.id) { $0.apply(.runSkipped(note: note)) }
             return true
         case .executable, .source:
             break
         }
 
-        try? await store.updateSetup(workspaceID: workspace.id, state: .running)
+        _ = try? await store.update(workspaceID: workspace.id) { $0.apply(.runStarted) }
 
         let env = environment(for: workspace, repo: repo, port: port)
         let runner = StreamingProcess(
@@ -310,14 +310,14 @@ public struct WorkspaceManager: Sendable {
         let status = await runner.exitStatus
         onExit?(Int(status))
         let succeeded = status == 0
-        let capped = String(log.suffix(200_000))
+        let printed = log
         // The whole `workspace` value here is as old as the run, and a run can take minutes, so
-        // upserting it would clobber every other write to the row made in the meantime.
-        try? await store.updateSetup(
-            workspaceID: workspace.id,
-            state: succeeded ? .succeeded : .failed,
-            log: capped
-        )
+        // upserting it would clobber every other write to the row made in the meantime. `update`
+        // re-reads inside the actor; `apply` writes the state and the log in one statement and
+        // caps the log, so there is no shape of this that files an outcome without its output.
+        _ = try? await store.update(workspaceID: workspace.id) {
+            $0.apply(.runFinished(succeeded: succeeded, log: printed))
+        }
         return succeeded
     }
 
@@ -351,6 +351,14 @@ public struct WorkspaceManager: Sendable {
         force: Bool = false,
         isPullRequestMerged: Bool = false
     ) async throws {
+        // Already archived, so there is nothing here to wind down. Everything below this line acts
+        // on a worktree that has been removed once already: the archive script would run in a
+        // directory that is gone, and `git branch -D` would take a branch whose only remaining
+        // copy is on the remote. `WorkspaceState` has no transition table, for the reason written
+        // in `WorkspaceLifecycle`, but this is the one edge that table would have had, so it is
+        // written where the destructive work starts rather than where the row is finally saved.
+        guard workspace.state == .active else { return }
+
         let settings = SettingsLoader.load(repo: repo.path)
         let shouldDeleteBranch = deleteBranch ?? settings.deleteBranchOnArchive
 
@@ -418,10 +426,7 @@ public struct WorkspaceManager: Sendable {
         // before the safety report, the archive script, the worktree removal and the branch
         // delete, which on a real project is seconds; a rename or an automatic name landing in
         // that window used to be written back out of existence here.
-        try await store.update(workspaceID: workspace.id) {
-            $0.state = .archived
-            $0.archivedAt = Date()
-        }
+        try await store.update(workspaceID: workspace.id) { $0.archive() }
     }
 
     /// Deliberately leaves the stored counts alone when git fails, rather than writing zeroes.

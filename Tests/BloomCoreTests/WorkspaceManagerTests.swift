@@ -277,10 +277,17 @@ struct WorkspaceManagerTests {
             (try? await store.workspace(id: workspace.id))??.setupState == .running
         }
 
-        try await store.upsert(workspace.with {
+        // `update`, not `upsert`. The concurrent writer this stands in for is a rename or a pin
+        // landing mid run, and both of those go through `update`; an `upsert` of the value read
+        // before the run would carry `setup_state` back to `pending` behind the run's back, and
+        // the finishing run would then be reporting a result for a run the row is no longer
+        // tracking. `SetupLifecycle` refuses that, which is the point of it, so simulating a
+        // legitimate writer with an illegitimate write no longer proves anything about this one.
+        // `SetupLifecycleTests` pins the refusal itself.
+        try await store.update(workspaceID: workspace.id) {
             $0.name = "renamed while setup ran"
             $0.pinned = true
-        })
+        }
 
         let worktree = TempRepo(existing: workspace.path)
         try worktree.write("go", "")

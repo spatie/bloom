@@ -514,9 +514,21 @@ final class WorkspaceModel {
     /// row this model is holding is as old as the run that just finished. Without this the Setup
     /// tab read its state out of a value that still said `pending`, so its header announced "Setup
     /// has not run yet" directly above the output the script had printed a second earlier.
+    ///
+    /// Kept rather than left to the store's change feed, which does refresh this model's copy of
+    /// the row and would get here on its own a moment later. A moment is the whole problem. The
+    /// line above this call clears `isRunningSetup`, and the header reads both values: for as long
+    /// as one has moved and the other has not, it is the sentence in the paragraph above, back
+    /// again. One indexed read at the end of a run that took minutes is the cheaper side of that
+    /// trade by a long way.
+    /// The whole row, not the one column. `setupState` is `internal(set)` in BloomCore now, so
+    /// there is no assigning it from here at all, and that is the right answer rather than an
+    /// obstacle: `WorkspaceManager.runSetup` writes the state and the log together, and a refresh
+    /// that took the state without the log would put this model back in the position the bug above
+    /// describes, showing one of the two halves of a run that has finished.
     func refreshSetupState() async {
         guard let store, let fresh = try? await store.workspace(id: workspace.id) else { return }
-        workspace.setupState = fresh.setupState
+        workspace = fresh
     }
 
     /// Appends a batch, keeping only the tail. Called from the flusher, never per line.
@@ -925,7 +937,6 @@ final class WorkspaceModel {
         if let manager = app.manager {
             await manager.refreshDiffStat(workspace: workspace)
         }
-        await app.reload()
 
         // The turn Create pull request sent is waited on rather than fired and forgotten, because
         // what came of it is the answer to a button somebody pressed. Every other turn keeps the

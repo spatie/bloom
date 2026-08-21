@@ -39,7 +39,10 @@ struct WorkspaceWriteIsolationTests {
         // Everything below happens after the caller's copy was read.
         try await store.updateDiffStat(workspaceID: workspace.id, additions: 12, deletions: 3, files: 2)
         try await store.touch(workspaceID: workspace.id, unread: true)
-        try await store.updateSetup(workspaceID: workspace.id, state: .succeeded, log: "done")
+        try await store.update(workspaceID: workspace.id) {
+            $0.apply(.runStarted)
+            $0.apply(.runFinished(succeeded: true, log: "done"))
+        }
 
         try await store.update(workspaceID: workspace.id) { $0.pinned = true }
 
@@ -62,7 +65,7 @@ struct WorkspaceWriteIsolationTests {
         let workspace = try await seed(store)
 
         try await store.update(workspaceID: workspace.id) {
-            $0.state = .archived
+            $0.archive()
             $0.archivedAt = Date()
         }
         // The sidebar is still holding the row as it was before the archive, and the user pins it.
@@ -199,10 +202,13 @@ struct WorkspaceWriteIsolationTests {
 
         try await store.updateDiffStat(workspaceID: started.id, additions: 9, deletions: 1, files: 1)
         try await store.touch(workspaceID: started.id, unread: true)
-        try await store.updateSetup(workspaceID: started.id, state: .succeeded, log: "done")
+        try await store.update(workspaceID: started.id) {
+            $0.apply(.runStarted)
+            $0.apply(.runFinished(succeeded: true, log: "done"))
+        }
         try await store.update(workspaceID: started.id) { $0.name = "named by the model" }
         try await store.update(workspaceID: started.id) {
-            $0.state = .archived
+            $0.archive()
             $0.archivedAt = Date()
         }
 
@@ -288,7 +294,7 @@ struct WorkspaceParentageTests {
         )
         _ = try await makeWorkspace(store, repo: repo, name: "unrelated")
 
-        try await store.update(workspaceID: second.id) { $0.state = .archived }
+        try await store.update(workspaceID: second.id) { $0.archive() }
 
         let live = try await store.workspaces(startedBy: parent.id)
         #expect(live.map(\.id) == [first.id])
@@ -312,7 +318,7 @@ struct WorkspaceParentageTests {
                 origin: .agent(parentWorkspaceID: parent.id, spawnToolUseID: "toolu_\(index)")
             )
             try await store.update(workspaceID: started.id) {
-                $0.state = .archived
+                $0.archive()
                 $0.archivedAt = Date()
             }
         }
@@ -351,7 +357,7 @@ struct WorkspaceParentageTests {
             store, repo: repo, name: "started",
             origin: .agent(parentWorkspaceID: parent.id, spawnToolUseID: "toolu_d")
         )
-        try await store.update(workspaceID: started.id) { $0.state = .archived }
+        try await store.update(workspaceID: started.id) { $0.archive() }
 
         #expect(try await store.workspaces(spawnToolUseID: "toolu_d").map(\.id) == [started.id])
         #expect(try await store.workspaces(spawnToolUseID: "toolu_none").isEmpty)

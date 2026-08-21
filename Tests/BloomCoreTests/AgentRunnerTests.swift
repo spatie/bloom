@@ -558,7 +558,13 @@ struct AgentRunnerPersistenceTests {
     func failsOnErrorResult() async throws {
         let store = try makeTestStore("agent")
         let session = try await makeSession(store)
-        let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
+        // Mid turn, because a result belongs to one. `send` is what applies `turnStarted` in the
+        // app and it needs a real process, so the fixture states the same thing directly:
+        // `SessionLifecycle` ignores a result on a session with no turn open, which is what stops
+        // a late result reopening a turn the process exit has already filed.
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session.with { $0.apply(.turnStarted) }, store: store
+        )
 
         let line = #"""
         {"type":"result","subtype":"error_max_turns","is_error":true,"duration_ms":10,\
