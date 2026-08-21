@@ -201,12 +201,21 @@ final class CenterTabStore {
 
     /// Moves a tool tab to another place in the strip. Tool tabs keep their own run of the strip
     /// after the conversations, so an index here is an index among tool tabs only.
-    func move(_ tab: CenterTab, to index: Int) {
-        var ordered = tabs(for: tab.workspaceID)
-        guard let from = ordered.firstIndex(where: { $0.id == tab.id }) else { return }
-        let moved = ordered.remove(at: from)
-        ordered.insert(moved, at: min(max(index, 0), ordered.count))
-        apply(ordered, to: tab.workspaceID)
+    /// Puts a workspace's tool tabs in a given order.
+    ///
+    /// Ids rather than an offset, because the strip is derived rather than stored: a terminal or a
+    /// page absorbed into a pane of another tab keeps its place in this list while having dropped
+    /// out of the strip, so an offset read off the strip lands somewhere else here. Taking one
+    /// anyway is what made a drag do nothing at all, and it is written down on `TabReorder`.
+    func reorder(_ ids: [String], in workspaceID: WorkspaceID) {
+        let open = tabs(for: workspaceID)
+        let byID = Dictionary(open.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let ordered = ids.compactMap { byID[$0] }
+        // The whole run or nothing. `TabReorder` hands back a permutation of the list it was
+        // given, so a short answer means the caller worked from a stale reading, and applying it
+        // would close every tab it had forgotten about.
+        guard ordered.count == open.count else { return }
+        apply(ordered, to: workspaceID)
     }
 
     func rename(_ tab: CenterTab, to title: String) {

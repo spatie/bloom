@@ -185,7 +185,7 @@ struct SessionTabsView: View {
             namespace: selection
         )
         .draggable(session.id.rawValue)
-        .dropDestination(for: String.self) { items, _ in move(items.first, before: session) }
+        .dropDestination(for: String.self) { items, _ in move(items.first, onto: session) }
     }
 
     private func toolTab(_ tab: CenterTab) -> some View {
@@ -213,7 +213,7 @@ struct SessionTabsView: View {
             namespace: selection
         )
         .draggable(tab.id)
-        .dropDestination(for: String.self) { items, _ in move(items.first, before: tab) }
+        .dropDestination(for: String.self) { items, _ in move(items.first, onto: tab) }
     }
 
     private func closeTitle(for tab: CenterTab) -> String {
@@ -393,29 +393,51 @@ struct SessionTabsView: View {
     // aiming at.
     //
     // The payload is the id rather than a `Transferable` of our own, matching the workspace rows
-    // in the sidebar. Anything else dropped on a tab, including text from another app, fails the
-    // membership check below and the drop does nothing.
+    // in the sidebar. Anything else dropped on a tab, including text from another app, names
+    // nothing in the run it was let go over, and `TabReorder` answers with nothing.
     //
     // Neither of these answers with a Bool. `dropDestination`'s action used to be asked whether it
     // had taken the drop; the macOS 26 one returns Void and is not asked, so a returned answer is
     // a value nobody reads and the compiler says so.
+    //
+    // Neither of them counts tabs any more. Both used to hand the store the target's OFFSET, and
+    // the two lists that offset could be read in stopped being the same list the day the strip
+    // became derived: `entries` is the stored run minus whatever a tab has absorbed. Stored `[T1, T2, T3]`
+    // with `T2` living in a pane of another tab draws as `[T1, T3]`, so dragging `T1` onto `T3`
+    // took offset 1 and produced `[T2, T1, T3]`, which reads back through the strip as `[T1, T3]`:
+    // the order it started from. The tab sprang back under the pointer, nothing was logged, and
+    // the gesture looked ignored. `TabReorder` states the answer in ids, over both lists at once,
+    // and is in the core because that is a decision with cases worth testing.
 
-    private func move(_ draggedID: String?, before session: Session) {
-        guard let draggedID, draggedID != session.id.rawValue,
+    private func move(_ draggedID: String?, onto session: Session) {
+        guard let draggedID,
               let moved = model.sessions.first(where: { $0.id.rawValue == draggedID }),
-              let index = model.sessions.firstIndex(where: { $0.id == session.id })
+              let order = TabReorder.reorder(
+                  all: model.sessions.map(\.id),
+                  visible: sessionTabs.map(\.id),
+                  moving: moved.id,
+                  onto: session.id
+              ),
+              // The place in the order `TabReorder` worked out, not a place counted off the strip.
+              // `reorderSession` takes the moved session out before it puts it back, so an offset
+              // into the finished order is exactly the offset it wants.
+              let index = order.firstIndex(of: moved.id)
         else { return }
 
         Task { await model.reorderSession(moved, to: index) }
     }
 
-    private func move(_ draggedID: String?, before tab: CenterTab) {
-        guard let draggedID, draggedID != tab.id,
-              let moved = toolTabs.first(where: { $0.id == draggedID }),
-              let index = toolTabs.firstIndex(where: { $0.id == tab.id })
+    private func move(_ draggedID: String?, onto tab: CenterTab) {
+        guard let draggedID,
+              let order = TabReorder.reorder(
+                  all: tabs.tabs(for: model.workspace.id).map(\.id),
+                  visible: toolTabs.map(\.id),
+                  moving: draggedID,
+                  onto: tab.id
+              )
         else { return }
 
-        tabs.move(moved, to: index)
+        tabs.reorder(order, in: model.workspace.id)
     }
 
     // MARK: - Actions
