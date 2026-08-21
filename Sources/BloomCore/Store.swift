@@ -1217,11 +1217,11 @@ public actor Store {
 
     /// Only the body, because that is the only thing an edit changes. Rewriting the whole row would
     /// let a stale copy held by the editor put the anchor back to where the line used to be.
-    public func updateReviewCommentBody(id: String, body: String) throws {
+    public func updateReviewCommentBody(id: ReviewCommentID, body: String) throws {
         try db.run("UPDATE review_comments SET body = ? WHERE id = ?", [.text(body), .text(id)])
     }
 
-    public func setReviewCommentAttached(id: String, attached: Bool) throws {
+    public func setReviewCommentAttached(id: ReviewCommentID, attached: Bool) throws {
         try db.run(
             "UPDATE review_comments SET attached = ? WHERE id = ?",
             [.int(attached ? 1 : 0), .text(id)]
@@ -1237,7 +1237,7 @@ public actor Store {
         )
     }
 
-    public func deleteReviewComment(id: String) throws {
+    public func deleteReviewComment(id: ReviewCommentID) throws {
         try db.run("DELETE FROM review_comments WHERE id = ?", [.text(id)])
     }
 
@@ -1540,7 +1540,7 @@ public actor Store {
 
     private static func reviewComment(from row: Row) -> ReviewComment {
         ReviewComment(
-            id: row.string("id") ?? newID(),
+            id: ReviewCommentID(row.string("id") ?? newID()),
             workspaceID: WorkspaceID(row.string("workspace_id") ?? ""),
             filePath: row.string("file_path") ?? "",
             side: ReviewCommentSide(rawValue: row.string("side") ?? "") ?? .new,

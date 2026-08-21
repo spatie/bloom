@@ -25,7 +25,7 @@ struct ReviewPayloadTests {
         id: String? = nil
     ) -> ReviewComment {
         ReviewComment(
-            id: id ?? "\(path)#\(line)",
+            id: ReviewCommentID(id ?? "\(path)#\(line)"),
             workspaceID: WorkspaceID("w"),
             filePath: path,
             side: side,

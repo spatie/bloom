@@ -218,7 +218,7 @@ public extension ReviewCommentAnchor {
 /// Working state of a workspace, not a document: it lives as long as the review does, and its
 /// whole purpose is to be handed to the agent and then let go of.
 public struct ReviewComment: Identifiable, Sendable, Hashable, Codable {
-    public var id: String
+    public var id: ReviewCommentID
     public var workspaceID: WorkspaceID
     /// Repository-relative, as the diff spells it, so it means the same thing in the prompt as it
     /// does to `git` and to the agent's own file tools.
@@ -238,7 +238,7 @@ public struct ReviewComment: Identifiable, Sendable, Hashable, Codable {
     public var fileName: String { (filePath as NSString).lastPathComponent }
 
     public init(
-        id: String = newID(),
+        id: ReviewCommentID = .new(),
         workspaceID: WorkspaceID,
         filePath: String,
         side: ReviewCommentSide = .new,

@@ -268,7 +268,7 @@ struct ReviewCommentSummaryTests {
         body: String = "note"
     ) -> ReviewComment {
         ReviewComment(
-            id: "\(path)-\(line)",
+            id: ReviewCommentID("\(path)-\(line)"),
             workspaceID: WorkspaceID("w"),
             filePath: path,
             side: side,
