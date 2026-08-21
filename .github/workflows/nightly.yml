@@ -103,6 +103,10 @@ jobs:
           xcrun llvm-cov report "$binary" \
             -instr-profile "$profile" \
             -ignore-filename-regex='.*(Tests|checkouts)/.*' > coverage.txt
+          # In the log as well as the summary, so the number can be read from a
+          # terminal without opening the run.
+          echo "Coverage of BloomCore:"
+          tail -1 coverage.txt
           {
             echo "### Core coverage"
             echo
@@ -171,7 +175,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          python3 Tools/periphery-summary.py periphery.json "${PERIPHERY_SECONDS:-0}" >> "$GITHUB_STEP_SUMMARY"
+          # tee, for the same reason the coverage number is echoed: the counts
+          # are worth having in the log too.
+          python3 Tools/periphery-summary.py periphery.json "${PERIPHERY_SECONDS:-0}" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Keep the full list
         if: ${{ !cancelled() }}
