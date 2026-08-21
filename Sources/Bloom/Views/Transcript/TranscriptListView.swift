@@ -159,6 +159,11 @@ struct TranscriptListView: View {
                         // bubble, and answered better: it names the sentence that is waiting
                         // rather than describing the situation in the abstract.
                         isFirstThing: transcript.rows.isEmpty && transcript.pendingDeliveries.isEmpty,
+                        // The one row in this list sized as a share of the pane rather than of its
+                        // own contents. Already rounded, by `TranscriptGeometry.height`, and
+                        // rounded before it reaches this view's state for the reason the bubble cap
+                        // is: see `maxBubbleWidth`.
+                        paneHeight: geometry.paneHeight,
                         onVisibilityChange: { showsSetup = $0 },
                         onShowLogEnd: { wasAsked in
                             showSetupLogEnd(proxy, wasAsked: wasAsked)
@@ -406,6 +411,7 @@ struct TranscriptListView: View {
                 gutter: Metrics.gutter,
                 floor: bubbleFloor
             ),
+            paneHeight: TranscriptGeometry.height(scroll.containerSize.height),
             isNearBottom: ScrollEnd.isAtEnd(
                 contentHeight: scroll.contentSize.height,
                 viewportHeight: scroll.containerSize.height,

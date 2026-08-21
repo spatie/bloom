@@ -17,6 +17,10 @@ struct WorkspaceEventsView: View {
     /// True while the session has no messages, which is the only time it is worth saying that a
     /// prompt typed now will go as soon as setup finishes.
     var isFirstThing: Bool
+    /// How tall the transcript is, so a running setup can take a share of it rather than a fixed
+    /// number of lines. Already quantised by `TranscriptGeometry.height`; nought means the pane has
+    /// not been measured. See `SetupTailWindow`.
+    var paneHeight: CGFloat = 0
     /// Told whether anything is drawn here, so the pane does not put an empty state over the top
     /// of it. Only this view can answer: it is the one that reads the log.
     var onVisibilityChange: (@MainActor (Bool) -> Void)?
@@ -53,6 +57,7 @@ struct WorkspaceEventsView: View {
                 WorkspaceEventRow(
                     event: event,
                     isFirstThing: isFirstThing,
+                    paneHeight: paneHeight,
                     model: model,
                     onShowLogEnd: onShowLogEnd
                 )
@@ -92,6 +97,8 @@ struct WorkspaceEventsView: View {
 struct WorkspaceEventRow: View {
     var event: WorkspaceEvent
     var isFirstThing: Bool
+    /// See `WorkspaceEventsView.paneHeight`, and `tailCap`.
+    var paneHeight: CGFloat = 0
     var model: WorkspaceModel?
     /// See `endID`, and `WorkspaceEventsView.onShowLogEnd`.
     var onShowLogEnd: (@MainActor (Bool) -> Void)?
@@ -104,19 +111,44 @@ struct WorkspaceEventRow: View {
     /// what the window's fixed height is measured in. See `lineHeight`.
     @Environment(\.fontScale) private var fontScale
 
-    /// Enough to see that something is happening, and not so much that a build log pushes the
-    /// conversation off the screen.
+    /// The most lines of a running log this row may show, which is half the pane it is drawn in.
     ///
-    /// Five rather than the three it was. Three lines of a script that prints a line a second is
-    /// three seconds of a window: a line is gone before it has been read. Five is also exactly
-    /// the height this block already drew itself at whenever one of those three lines was long
-    /// enough to wrap, which in a measured run of an ordinary setup script it was in two frames
-    /// out of five: seventy nine points either way. So nothing that fitted in the pane before
-    /// stops fitting, and what changes is that it is that height ALWAYS instead of sometimes. At
-    /// the smallest window Bloom opens, the whole row is about a quarter of the transcript.
-    private static let runningTail = 5
-    /// A failure is read rather than glanced at.
-    private static let failedTail = 12
+    /// It was a constant, five, and the reasoning for five is worth keeping because half of it is
+    /// still doing the work. Three lines of a script that prints a line a second is three seconds
+    /// of a window: a line is gone before it has been read. Five was also exactly the height this
+    /// block already drew itself at whenever one of those three lines was long enough to wrap,
+    /// which in a measured run of an ordinary setup script it was in two frames out of five,
+    /// seventy nine points either way, so fixing it at five made the height ALWAYS that instead of
+    /// sometimes. At the smallest window Bloom opens, the whole row was about a quarter of the
+    /// transcript.
+    ///
+    /// What five could not do is answer "make setup bigger, it can take at least half of the chat
+    /// screen", because that is a proportion and five is a number: it is a quarter of the smallest
+    /// transcript and nearer a tenth of a large one, and the constant that gives half of a large
+    /// window gives most of a laptop one. `SetupTailWindow` works it out from the pane's own
+    /// height instead, with a floor for a pane squeezed by the terminal split and a ceiling so a
+    /// full screen display does not hand over forty lines of `[====>----]`.
+    ///
+    /// Five survives inside it as `SetupTailWindow.settled`, which is the height the block holds
+    /// from its first frame and never goes below, so the first seconds of every run are as still
+    /// as they are today. See `SetupTailWindow.lines(cap:logLines:)`.
+    private var tailCap: Int {
+        SetupTailWindow.cap(paneHeight: Double(paneHeight), lineHeight: Double(lineHeight))
+    }
+
+    /// How many lines the running block is drawn at: the cap, or less while there is less log than
+    /// that to put in it, never below the five it starts at. `SetupTailWindow.lines` is where the
+    /// reasoning lives, and it is there rather than here because it is a decision.
+    private var runningTail: Int {
+        SetupTailWindow.lines(cap: tailCap, logLines: LogTail.lineCount(event.log))
+    }
+
+    /// A failure is read rather than glanced at, so it gets twelve lines, or the pane's own share
+    /// where that is more. Never fewer than a running run in the same pane: a failure showing less
+    /// of its log than a success would be the wrong way round in the one case where the log IS the
+    /// message.
+    private var failedTail: Int { SetupTailWindow.failureLines(cap: tailCap) }
+
     /// What the disclosure opens onto: the cap the transcript already puts on long output.
     ///
     /// Two hundred once, when opening the row was a preview and the whole log lived in the panel
@@ -236,8 +268,8 @@ struct WorkspaceEventRow: View {
         if isExpanded { return LogTail.last(event.log, lines: Self.expandedTail) }
 
         switch event.outcome {
-        case .running: return LogTail.last(event.log, lines: Self.runningTail)
-        case .failed: return LogTail.last(event.log, lines: Self.failedTail)
+        case .running: return LogTail.last(event.log, lines: runningTail)
+        case .failed: return LogTail.last(event.log, lines: failedTail)
         case .succeeded, .partial, .skipped: return ""
         }
     }
@@ -245,9 +277,10 @@ struct WorkspaceEventRow: View {
     /// The tail's own lines, drawn one `Text` each while the script is running so that the window
     /// moves instead of jumping.
     ///
-    /// A running tail is a fixed number of lines and never changes height, so nothing here is a
-    /// scroll: the block stayed exactly where it was and its contents were replaced between one
-    /// frame and the next, which is what "it just immediately shows next lines" was. Given each
+    /// A running tail is a stated number of lines rather than as many as the text asks for, so
+    /// nothing here is a scroll: the block stayed exactly where it was and its contents were
+    /// replaced between one frame and the next, which is what "it just immediately shows next
+    /// lines" was. Given each
     /// line an identity of its own, a line that is still in the window when the next one arrives
     /// is the same view moved to a new place, and SwiftUI slides it there.
     ///
@@ -293,7 +326,17 @@ struct WorkspaceEventRow: View {
             // travel itself, where the departing line is still laid out and the stack is briefly
             // a line taller than it will end up. Top aligned, so a script's first lines start at
             // the top of the block and fill down, the way output does everywhere else.
-            .frame(height: lineHeight * CGFloat(Self.runningTail), alignment: .top)
+            //
+            // `runningTail` is a whole number of lines of a known height, so this is still a
+            // stated height and neither of those two movers can reach it. What it is no longer is
+            // one number for every window: it is the pane's share, filled to the log where there
+            // is less log than that, which is the only way a block that may be half the screen
+            // does not sit there half empty. See `tailCap`. That number changes at most once per
+            // line of real output and never once the log has passed the cap, it changes in step
+            // with `lines`, and the settle below therefore carries the block's own growth as well
+            // as the travel inside it: the block opens by a line as the line that fills it slides
+            // in, over the same 0.12s.
+            .frame(height: lineHeight * CGFloat(runningTail), alignment: .top)
             // So the departing line leaves the block rather than being drawn over the row above,
             // or over the link below, which is where it used to land.
             .clipped()
@@ -447,8 +490,13 @@ struct WorkspaceEventRow: View {
     /// what this row already learned once: see the note on the button below. The closed row shows
     /// `failedTail` or `runningTail` lines depending on how the run ended, so the question is
     /// simply whether the log is longer than that.
+    ///
+    /// `tailCap` rather than `runningTail` on the running side, and the difference matters exactly
+    /// while the block is still filling: `runningTail` is the log's own length there, so comparing
+    /// against it would say there is more to show about a log that is entirely on screen, which is
+    /// the dead link this note is about.
     private var hasMoreToShow: Bool {
-        LogTail.lineCount(event.log) > (event.isFailure ? Self.failedTail : Self.runningTail)
+        LogTail.lineCount(event.log) > (event.isFailure ? failedTail : tailCap)
     }
 }
 
