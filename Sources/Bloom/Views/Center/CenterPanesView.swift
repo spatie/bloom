@@ -58,7 +58,6 @@ struct CenterPanesView: View {
                         CenterPaneView(
                             model: model,
                             pane: item.pane,
-                            isFocused: layout.focus == item.pane,
                             isSplit: layout.paneCount > 1
                         )
                         .frame(width: item.frame.width, height: item.frame.height)

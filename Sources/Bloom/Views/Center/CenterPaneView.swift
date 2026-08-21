@@ -10,9 +10,8 @@ import BloomCore
 struct CenterPaneView: View {
     @Bindable var model: WorkspaceModel
     var pane: String
-    var isFocused: Bool
-    /// Whether the column is split at all. A single pane has no neighbour to be told apart from
-    /// and nothing to close back to, so it wears none of the chrome below.
+    /// Whether the column is split at all. A single pane has nothing to close back to, so its
+    /// menu does not offer it.
     var isSplit: Bool
 
     @State private var size: CGSize = .zero
@@ -39,7 +38,6 @@ struct CenterPaneView: View {
                 isTargeted = $0
             }
             .overlay { if isTargeted { dropHighlight } }
-            .overlay(alignment: .top) { if isSplit && isFocused { focusEdge } }
             .contextMenu { menu }
             .task(id: panes.content(of: pane, in: model)) { prepare() }
     }
@@ -82,15 +80,6 @@ struct CenterPaneView: View {
                 emptyState
             }
         }
-    }
-
-    /// Which pane a click on a tab will fill. Only drawn while the column is split, because with
-    /// one pane the answer is never in doubt.
-    private var focusEdge: some View {
-        Rectangle()
-            .fill(Palette.accent)
-            .frame(height: 2)
-            .allowsHitTesting(false)
     }
 
     private var dropHighlight: some View {
