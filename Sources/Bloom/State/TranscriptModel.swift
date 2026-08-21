@@ -95,6 +95,15 @@ final class TranscriptModel {
     private var runner: (any SessionRunner)?
     private var pumpTask: Task<Void, Never>?
     private var indexByRefID: [String: Int] = [:]
+    /// The one read of this session's history, held so that it happens once however many callers
+    /// ask for it.
+    ///
+    /// Two of them do, and both arrive before it has finished: `WorkspaceModel.transcript(for:)`
+    /// reads a model eagerly the moment it builds one, and `TranscriptListView`'s own task reads it
+    /// again when the pane draws. `isLoaded` cannot keep them apart, since it is only true on the
+    /// last line of the read. `SingleFlight` is named after, and documents, the transcript that
+    /// would not draw when the two of them ran the read at once.
+    private let loader = SingleFlight()
     /// When the current turn was handed to the runner, so a session row written before that can be
     /// recognised as belonging to the previous turn.
     private var turnStartedAt: Date?
@@ -115,23 +124,53 @@ final class TranscriptModel {
             SwitchTrace.markOnScreen("transcript.reused", workspace: workspace.id)
             return
         }
+        // Whichever of the two callers gets here first does the reading, and the other waits on it.
+        // The guard above cannot tell them apart, because neither of them is reusing anything: they
+        // are both asking for the same session's history at the same moment.
+        await loader.run { [self] in await read(from: store) }
+    }
+
+    /// The read itself, reached only through `loader`.
+    ///
+    /// The rows are built into a list off to one side and put on the model in one assignment at the
+    /// end, rather than the model's own list being emptied and then filled. There is an await in
+    /// the middle of this and there will probably be another one day, and a half built row list
+    /// must never be observable: a `ForEach` handed rows whose identifiers repeat lays them out in
+    /// whatever order it pleases, and that is what left an answer undrawn until the scroller was
+    /// dragged.
+    private func read(from store: Store) async {
         SwitchTrace.mark("transcript.read.start", workspace: workspace.id)
         let messages = (try? await store.messages(sessionID: session.id)) ?? []
         SwitchTrace.mark("transcript.read.done", workspace: workspace.id)
-        rows = []
-        indexByRefID = [:]
         // Read once for the whole session rather than per row: a transcript can hold thousands of
         // rows and at most a handful of them are questions.
         let decisions = (try? await store.permissionAskDecisions(sessionID: session.id)) ?? [:]
-        for message in messages { absorb(message, decisions: decisions) }
+
+        var built: [TranscriptRow] = []
+        var index: [String: Int] = [:]
+        for message in messages {
+            Self.absorb(message, decisions: decisions, into: &built, indexByRefID: &index)
+        }
+        rows = built
+        indexByRefID = index
         SwitchTrace.mark("transcript.rows.built", workspace: workspace.id)
         SwitchTrace.markOnScreen("transcript.rows.built", workspace: workspace.id)
+
         draft = (try? await store.draft(sessionID: session.id)) ?? ""
         isLoaded = true
     }
 
     /// Folds a stored message into the row list, pairing tool results onto their tool call.
-    private func absorb(_ message: Message, decisions: [String: String] = [:]) {
+    ///
+    /// Handed the list and the reference index it is folding into rather than reaching for the
+    /// model's own, so that the same rule can build a whole session's rows somewhere nothing can
+    /// see them. See `read(from:)` for why that matters.
+    private static func absorb(
+        _ message: Message,
+        decisions: [String: String],
+        into rows: inout [TranscriptRow],
+        indexByRefID: inout [String: Int]
+    ) {
         if message.kind == .toolResult, let refID = message.refID,
            let index = indexByRefID[refID] {
             rows[index].resultPayload = message.payload
@@ -153,6 +192,11 @@ final class TranscriptModel {
         if message.kind == .toolUse, let refID = message.refID {
             indexByRefID[refID] = rows.count - 1
         }
+    }
+
+    /// The same fold, straight onto the model, for the rows that arrive while the session is open.
+    private func absorb(_ message: Message, decisions: [String: String] = [:]) {
+        Self.absorb(message, decisions: decisions, into: &rows, indexByRefID: &indexByRefID)
     }
 
     // MARK: - Unread
@@ -488,6 +532,11 @@ final class TranscriptModel {
     /// single writer, so reading back from the store keeps one ordering and one source of truth.
     private func appendLatestMessages() async {
         guard let store else { return }
+        // Nothing is appended to a list the first read is still building. A workspace can be handed
+        // a prompt the same moment its model is made, which starts the agent while the history is
+        // still on its way in, and the read ends by putting the whole list on the model in one go:
+        // a row appended here in the meantime would simply be overwritten.
+        await loader.wait()
         let after = rows.map(\.seq).max() ?? -1
         let fresh = (try? await store.messages(sessionID: session.id, afterSeq: after)) ?? []
         for message in fresh { absorb(message) }
