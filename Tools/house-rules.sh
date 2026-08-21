@@ -12,9 +12,9 @@
 #      name still turns up in new text written from stale memory.
 #   3. British spelling. The tree is already at 69 greys to 1 gray and 74
 #      cancelleds to 1 canceled, so this is about keeping it that way.
-#   4. BloomCore never imports SwiftUI. CLAUDE.md has said so since the split
-#      was made and nothing checked it, which is the state every rule here was
-#      in the day before it was written.
+#   4. Only the app target imports a UI framework. CLAUDE.md has said so since
+#      the split was made and nothing checked it, which is the state every rule
+#      here was in the day before it was written.
 #   5. One way to start a workspace. Four routes each grew their own half of it
 #      once already; see the rule itself for what that cost.
 #   6. One way to move a state. The three columns that describe what a workspace
@@ -114,14 +114,31 @@ for prefix in "${baton_allowed[@]}"; do
   fi
 done
 
-echo "==> the core does not import SwiftUI"
+echo "==> only the app target imports a UI framework"
 # The split only means anything while it holds. Everything in BloomCore is
 # reachable by the test target and everything in Sources/Bloom is not, so a
 # decision that drifts into a view is a decision nothing can test. One import is
-# how that starts.
-if hits="$(git grep --untracked -n -I -e 'import SwiftUI' -e 'import AppKit' -- 'Sources/BloomCore/*' || true)" && [ -n "$hits" ]; then
+# how that starts. `bloom-bridge` is scanned for the same reason and one more: it
+# is a stdio relay a CLI launches as a child process, and it has no user
+# interface to put a window in.
+#
+# Two spellings got past the two literals this used to look for, and both were
+# compiled to check rather than reasoned about. `import Cocoa` brings NSView in
+# by re-export, so a core file could have the whole of AppKit without naming it.
+# `import class AppKit.NSView` names AppKit and does not contain the string
+# "import AppKit", because the declaration kind sits between the two words. So
+# this matches the framework after `import` and an optional declaration kind,
+# whatever is in front of them, which also covers `@_exported import AppKit` and
+# `@preconcurrency import SwiftUI`.
+#
+# SwiftTerm and Sparkle are in the same sentence in CLAUDE.md and deliberately
+# not here. Only the app target declares them in `Package.swift`, so an import
+# of either from the core or the bridge is a link error rather than a lint
+# finding, and a rule that can never fire is a rule that gets believed in.
+ui_import='(^|[^A-Za-z0-9_])import[[:space:]]+([a-z]+[[:space:]]+)?(SwiftUI|AppKit|Cocoa)([^A-Za-z0-9_]|$)'
+if hits="$(git grep --untracked -n -I -E "$ui_import" -- 'Sources/BloomCore/*' 'Sources/bloom-bridge/*' || true)" && [ -n "$hits" ]; then
   echo "$hits" | show
-  report "BloomCore imports a UI framework. Move the view part into Sources/Bloom and leave the decision here, where the suite can reach it."
+  report "A target that is not Sources/Bloom imports a UI framework. Move the view part into Sources/Bloom and leave the decision behind, where the suite can reach it."
 fi
 
 echo "==> one way to start a workspace"

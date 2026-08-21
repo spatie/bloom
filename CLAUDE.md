@@ -9,14 +9,23 @@ Longer documents, pointed at rather than repeated here: `README.md` for what the
 protocol as measured, `docs/PROTOCOL.md` for Claude Code's stream-json,
 `docs/AGENTS-INTEGRATION.md` for how the four CLIs are detected, `docs/PLAN.md` for what is next.
 
-## Two targets, and the line between them
+## Three targets, and the line between them
 
 `Sources/BloomCore` is everything that is not a view: `Store`, `Git`, `Shell`, `WorkspaceManager`,
-the agent protocols, the parsers, the models. **It never imports SwiftUI.** `grep -rl "import
-SwiftUI" Sources/BloomCore` returns nothing today and must keep returning nothing.
+the agent protocols, the parsers, the models. **It never imports a UI framework.**
 
 `Sources/Bloom` is the SwiftUI app and the only target allowed to import SwiftUI, AppKit, SwiftTerm
 or Sparkle.
+
+`Sources/bloom-bridge` is the MCP stdio shim an agent CLI launches as a child process, which
+relays lines to the running app over a unix socket. Three lines of `main.swift`; everything worth
+testing is `BridgeShim` in the core. It is a relay with nothing to draw, so it is held to the same
+line as the core.
+
+`make lint` holds that line for both, and it looks for the framework rather than for a literal,
+because `import Cocoa` re-exports the whole of AppKit and `import class AppKit.NSView` names
+AppKit without containing the words next to each other. SwiftTerm and Sparkle need no rule: only
+the app target declares them in `Package.swift`, so importing either anywhere else does not link.
 
 `Tests/BloomCoreTests` depends on `BloomCore` alone. Read `Package.swift`: the test target has one
 dependency and it is not the app. **So a decision taken inside a view is a decision nothing can
