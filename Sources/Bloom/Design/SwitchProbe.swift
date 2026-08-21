@@ -78,7 +78,7 @@ enum SwitchProbe {
             try? await Task.sleep(for: .milliseconds(250))
         }
         guard let window, let contentView = window.contentView else {
-            return fail("no window to probe")
+            fail("no window to probe")
         }
 
         if let size = windowSize {
@@ -87,7 +87,7 @@ enum SwitchProbe {
             try? await Task.sleep(for: .seconds(1))
         }
 
-        guard !order.isEmpty else { return fail("--switch-order named no workspaces") }
+        guard !order.isEmpty else { fail("--switch-order named no workspaces") }
 
         // Everything a fresh launch kicks off settles before the first measurement, so the first
         // switch is not paying for the sidebar's own arrival.
@@ -134,7 +134,7 @@ enum SwitchProbe {
         write([
             "driver": driver,
             "configuration": buildConfiguration,
-            "order": order,
+            "order": order.map(\.rawValue),
             "cycles": cycles,
             "settleMs": settle,
             "windowSize": ["w": window.frame.width, "h": window.frame.height],
@@ -177,7 +177,7 @@ enum SwitchProbe {
         PaneLayoutTiming.isEnabled = false
 
         return [
-            "workspace": id,
+            "workspace": id.rawValue,
             "name": name,
             "marks": SwitchTrace.timeline(),
             "frameCount": ticker.intervalsMs.count,
@@ -344,13 +344,22 @@ enum SwitchProbe {
     }
 
     private static func write(_ report: [String: Any]) {
+        // `JSONSerialization` raises on a value it cannot carry rather than throwing one, and an
+        // Objective-C exception is not something `try?` catches, so the probe died on the last
+        // line of a twenty minute run. What it died on was a `WorkspaceID`: this dictionary is
+        // `[String: Any]`, so a typed id goes in without complaint and arrives as `__SwiftValue`.
+        // Asked first, so the same mistake costs a line on stderr instead of the measurements.
+        guard JSONSerialization.isValidJSONObject(report) else {
+            fail("the report holds a value JSON cannot carry, probably an id that needed .rawValue")
+        }
         let data = (try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted]))
             ?? Data()
         try? data.write(to: URL(fileURLWithPath: outputPath))
         FileHandle.standardError.write(Data("switch probe wrote \(outputPath)\n".utf8))
     }
 
-    private static func fail(_ message: String) {
+    /// `Never`, so the callers above can end the run with it from inside a `guard`.
+    private static func fail(_ message: String) -> Never {
         FileHandle.standardError.write(Data("switch probe: \(message)\n".utf8))
         exit(1)
     }
