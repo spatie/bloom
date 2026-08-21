@@ -200,6 +200,11 @@ struct RepoSettingsView: View {
                     markTile(size: Metrics.repoIcon * 1.75)
 
                     TextField("", text: $mark, prompt: Text("Emoji"))
+                        // An empty title is still a title, and a titled field inside a grouped
+                        // form is claimed for the form's own value column and indented half way
+                        // across the window. The same reason `RepoRunScriptRow`'s name field has
+                        // one. See `SettingsRow`.
+                        .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 56)
                         .multilineTextAlignment(.center)
@@ -435,6 +440,10 @@ struct RepoSettingsView: View {
             SettingsRow("Branch prefix") {
                 VStack(alignment: .leading, spacing: Metrics.spacingTight) {
                     TextField("", text: $model.draft.branchPrefix, prompt: Text("None"))
+                        // Without this the form claims the field for its value column, which put
+                        // it at the far edge of the row with the destination label under it
+                        // starting at the leading one. See the emoji field above.
+                        .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                     SettingsDestinationLabel(model: model, key: .branchPrefix)
                 }
