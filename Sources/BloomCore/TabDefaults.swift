@@ -36,6 +36,19 @@ public enum TabDefaults {
         tabListPrefix + workspaceID.rawValue
     }
 
+    /// The order the user has dragged one workspace's strip into. See `StripOrder`.
+    ///
+    /// `center.strip.` rather than anything nearer the two keys above, and the near miss is worth
+    /// saying out loud for the third time in this file: `center.tab.` is one tab's arrangement and
+    /// `center.tabs.` is a workspace's tool tab list, so a prefix scan that reached either of them
+    /// would read a list of ids as an arrangement, fail, and throw away what it could not read.
+    /// This one shares no prefix with either.
+    public static let stripPrefix = "center.strip."
+
+    public static func stripKey(_ workspaceID: WorkspaceID) -> String {
+        stripPrefix + workspaceID.rawValue
+    }
+
     /// `TerminalSplitStore`'s pane tree, per tab, and the second half of what the census reads.
     /// Same argument as `tabListPrefix`: a tab whose tree cannot be found reads as a single pane,
     /// so every pane the user split off would look unreachable and be swept.

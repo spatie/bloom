@@ -94,6 +94,11 @@ final class WorkspaceTabsStore {
     /// conversation and it still does.
     private var selected: [WorkspaceID: PaneContent] = [:]
 
+    /// The order each workspace's strip has been dragged into, over the two runs it would otherwise
+    /// read as. Absent for a workspace nobody has arranged, which reads exactly as it always did.
+    /// See `BloomCore.StripOrder`, which carries the rule and what a lost defaults file costs.
+    private var stripOrders: [WorkspaceID: [PaneContent]] = [:]
+
     /// Read in one pass at launch rather than lazily per workspace. A getter may not mutate, and
     /// loading from a task would leave the first frame showing a single pane, which is long enough
     /// to fork a shell for a pane the restored layout does not have.
@@ -135,20 +140,59 @@ final class WorkspaceTabsStore {
             }
             arrangements[rootID] = arrangement
         }
+
+        for (key, value) in defaults.dictionaryRepresentation()
+        where key.hasPrefix(TabDefaults.stripPrefix) {
+            let workspaceID = WorkspaceID(String(key.dropFirst(TabDefaults.stripPrefix.count)))
+            guard let data = value as? Data,
+                  let order = try? JSONDecoder().decode([PaneContent].self, from: data) else {
+                // Dropped rather than kept, on the same terms as an unreadable arrangement above:
+                // an order is the cheapest thing in this app to lose, it is held nowhere else, it
+                // costs one drag to make again, and a key that fails every launch forever is worse
+                // than no key. Losing it puts the strip back to conversations and then tools, which
+                // is where it was before anybody dragged anything.
+                defaults.removeObject(forKey: key)
+                continue
+            }
+            stripOrders[workspaceID] = order
+        }
     }
 
     // MARK: - Reading
 
     /// The strip, left to right.
     ///
-    /// Everything the workspace has, minus whatever a tab has absorbed. `TabSet` states that rule
-    /// and this is the only place it is asked, so a tab is in the strip once or not at all.
+    /// Everything the workspace has, minus whatever a tab has absorbed, in whatever order the user
+    /// has dragged it into. `TabSet` states the first rule and `StripOrder` the second, and this is
+    /// the only place either is asked, so a tab is in the strip once or not at all.
     func entries(in model: WorkspaceModel) -> [PaneContent] {
         let sessions = model.sessions.map(\.id)
         let tools = CenterTabStore.shared.tabs(for: model.workspace.id).map(\.id)
-        return TabSet.entries(
-            sessions: sessions, tools: tools, claimed: claimed(sessions: sessions, tools: tools)
+        return StripOrder.entries(
+            sessions: sessions,
+            tools: tools,
+            claimed: claimed(sessions: sessions, tools: tools),
+            stored: stripOrders[model.workspace.id] ?? []
         )
+    }
+
+    /// Writes down the order the user has just dragged the strip into.
+    ///
+    /// Only the interleaving lives here. Each kind's own order goes back to the store that owns it,
+    /// which is the caller's job and not this one's: see `StripOrder` for why that matters, which is
+    /// that a lost defaults file should cost the interleaving and not the order of the
+    /// conversations within it.
+    func reorder(_ drawn: [PaneContent], in model: WorkspaceModel) {
+        let workspaceID = model.workspace.id
+        guard let order = StripOrder.rewritten(
+            drawn,
+            sessions: model.sessions.map(\.id),
+            tools: CenterTabStore.shared.tabs(for: workspaceID).map(\.id),
+            stored: stripOrders[workspaceID] ?? []
+        ) else { return }
+
+        stripOrders[workspaceID] = order
+        persistStrip(workspaceID)
     }
 
     /// Which tab the user is in, or nothing when the workspace has neither a conversation nor a
@@ -172,6 +216,16 @@ final class WorkspaceTabsStore {
             }
         }
         return entries.first
+    }
+
+    private func persistStrip(_ workspaceID: WorkspaceID) {
+        let defaults = UserDefaults.standard
+        let key = TabDefaults.stripKey(workspaceID)
+        guard let order = stripOrders[workspaceID], !order.isEmpty,
+              let data = try? JSONEncoder().encode(order) else {
+            return defaults.removeObject(forKey: key)
+        }
+        defaults.set(data, forKey: key)
     }
 
     /// A tab nobody has split is one pane carrying the id of the content at its root.
