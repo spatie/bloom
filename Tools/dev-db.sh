@@ -110,10 +110,23 @@ while true; do
     # Folds the WAL into the copy and empties it, so the dev container holds one
     # settled database. Safe here and nowhere near the source: nothing else has
     # this file open. TRUNCATE rather than PASSIVE so it cannot half finish.
-    /usr/bin/sqlite3 "$DEST" 'PRAGMA wal_checkpoint(TRUNCATE);' >/dev/null
-    check="$(/usr/bin/sqlite3 "$DEST" 'PRAGMA integrity_check;')"
-    if [[ "$check" == "ok" ]]; then break; fi
-    print -ru2 -- "==> attempt $attempt: the copy failed its integrity check ($check)"
+    #
+    # The answer is read rather than sent to /dev/null, because a checkpoint that
+    # could not run says so in its answer and not in its exit status. `PRAGMA
+    # wal_checkpoint` prints three numbers, the first of which is 1 when it was
+    # blocked, and sqlite3 exits 0 all the same; measured on a copy another
+    # connection held a read transaction open on, which printed `1|1|0` and
+    # exited 0. Sending that to /dev/null turned the only signal that the WAL had
+    # actually been folded in into no signal at all, which is precisely the
+    # promise the head of this file makes.
+    checkpoint="$(/usr/bin/sqlite3 "$DEST" 'PRAGMA wal_checkpoint(TRUNCATE);')"
+    if [[ "${checkpoint%%|*}" != "0" ]]; then
+      print -ru2 -- "==> attempt $attempt: the copy could not be checkpointed ($checkpoint)"
+    else
+      check="$(/usr/bin/sqlite3 "$DEST" 'PRAGMA integrity_check;')"
+      if [[ "$check" == "ok" ]]; then break; fi
+      print -ru2 -- "==> attempt $attempt: the copy failed its integrity check ($check)"
+    fi
   else
     print -ru2 -- "==> attempt $attempt: the database changed while it was being copied"
   fi

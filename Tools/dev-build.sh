@@ -79,6 +79,10 @@ git worktree add --detach "$WORK" "$RESOLVED" >/dev/null
 # ---------------------------------------------------------------- the identity
 
 PLIST="$WORK/Resources/Info.plist"
+# The redirect hides the value PlistBuddy echoes back and nothing else: it
+# reports a missing key or a malformed command on stderr and exits 1, so a
+# mistyped key path still stops the build under `set -e`. Measured, because a
+# silent identity edit is how a dev build ends up wearing the real name.
 plist() { /usr/libexec/PlistBuddy -c "$1" "$PLIST" >/dev/null; }
 
 plist "Set :CFBundleName Bloom Dev"
@@ -103,6 +107,10 @@ plist "Set :NSServices:0:NSMenuItem:default New Bloom Dev Workspace"
 # has no BLOOM_DB_PATH and would fall back to the real database, which is the one
 # way to defeat all of this. The check at the foot of this script reads the value
 # back out of the launched process rather than assuming it arrived.
+#
+# The delete is the one call here allowed to fail, because Resources/Info.plist
+# does not carry an LSEnvironment and PlistBuddy treats deleting an absent key as
+# an error. The two Adds under it are not allowed to fail, and do not.
 plist "Delete :LSEnvironment" 2>/dev/null || true
 plist "Add :LSEnvironment dict"
 plist "Add :LSEnvironment:BLOOM_DB_PATH string $BLOOM_DEV_DB"
@@ -111,15 +119,32 @@ plist "Add :LSEnvironment:BLOOM_DB_PATH string $BLOOM_DEV_DB"
 # same CFBundleIconName, so Tools/build.sh compiles it with actool unchanged.
 python3 Tools/icon/dev-tint.py "$WORK/Resources/Bloom.icon/icon.json"
 
-# The window title, in both of the places that set one.
+# The window title, in all three of the places that set one.
 #
-# `WindowProxyIcon` writes the title from the selected workspace, so once
-# anything is selected there is no static string in the scene left to change. But
-# the scene's own title is what a freshly launched window shows, and SwiftUI
-# applies it after that modifier's first pass, so marking only the modifier
-# leaves the dev copy titled "Bloom" for as long as nobody has clicked a
-# workspace. Measured rather than assumed: the first dev build carried the
-# modifier mark alone and its window still read "Bloom" on launch.
+# Three, and finding the third took two dev builds that came out titled "Bloom"
+# with the marks provably compiled into them:
+#
+#   RootView's `.navigationTitle`  the one that actually wins. SwiftUI reapplies
+#                                  it on every update of the view, so it is the
+#                                  last writer whatever the other two did
+#   the `Window` scene's title     what the window is called before the first
+#                                  update, and what the Window menu shows if the
+#                                  view above it never renders
+#   WindowProxyIcon                sets `window.title` imperatively, on AppKit,
+#                                  when the selection changes
+#
+# All three are marked rather than only the winner, because which of them wrote
+# the title last is a matter of timing, and a title that loses its mark for a
+# frame whenever SwiftUI happens to run in a different order is exactly as
+# dangerous as one that never had it: the owner glances at the window and reads
+# the wrong one.
+#
+# How the third was found, so nobody repeats it: `strings` on the built binary
+# does NOT prove a mark arrived. Swift stores a literal of fifteen UTF-8 bytes or
+# fewer inline in the code rather than in a string table, and "[DEV] Bloom" is
+# eleven, so it never appears in the output. Patching in a marker long enough to
+# land in the table showed both marks present in a binary whose window still read
+# "Bloom", which is what pointed at a third writer rather than at a broken patch.
 #
 # One anchored substitution each, and a build that stops if an anchor has moved.
 # A dev copy wearing the real name is the one outcome worth failing over.
@@ -163,6 +188,10 @@ patch_source "$WORK/Sources/Bloom/BloomApp.swift" \
   '        Window("Bloom", id: "main") {' \
   '        Window("[DEV] Bloom", id: "main") {'
 
+patch_source "$WORK/Sources/Bloom/Views/RootView.swift" \
+  '        .navigationTitle(app.menuWorkspace?.name ?? "Bloom")' \
+  '        .navigationTitle("[DEV] " + (app.menuWorkspace?.name ?? "Bloom"))'
+
 # ------------------------------------------------------------------- the build
 
 # The worktree's `.build` is a symlink into a scratch directory that outlives it.
@@ -176,10 +205,51 @@ patch_source "$WORK/Sources/Bloom/BloomApp.swift" \
 mkdir -p /tmp/bloom-dev-build
 ln -sfn /tmp/bloom-dev-build "$WORK/.build"
 
-( cd "$WORK" && ./Tools/build.sh -r >/dev/null )
+# The bundle the last run left in that scratch, removed before this one starts.
+#
+# The scratch outliving the worktree is what makes a rebuild take seconds, and it
+# is also the one way this script could install something it never built.
+# Tools/build.sh assembles the bundle at .build/release/Bloom.app, and a build
+# that fails before it reaches that step leaves the previous run's bundle sitting
+# at exactly the path the copy below reads. Nothing downstream can tell a bundle
+# from twenty minutes ago apart from a fresh one: same path, same name, same
+# shape. So the old one goes first, and the only bundle that can be installed is
+# one this run produced.
+rm -rf "$WORK/.build/release/Bloom.app"
+
+# The build, kept quiet when it works and printed in full when it does not.
+#
+# This line used to end in `>/dev/null`, and `swift build` writes compiler errors
+# to STDOUT rather than to stderr, so that redirect threw away the only account
+# of what had gone wrong. The script still stopped, `set -e` sees a failing
+# subshell perfectly well, but it stopped after forty seconds with four lines of
+# output and no mention of the error, which is worse than a noisy failure: the
+# next person reads it as the script being broken rather than the code.
+#
+# Kept in a file rather than left on the terminal, because a build that works is
+# a page of module names nobody reads. Printed WHOLE rather than tailed, because
+# a tail is the same mistake in smaller print: Swift reports the first error at
+# the top and then keeps compiling, so the line that explains the failure is not
+# reliably in the last forty.
+BUILD_LOG=/tmp/bloom-dev-build.log
+if ! ( cd "$WORK" && ./Tools/build.sh -r ) >"$BUILD_LOG" 2>&1; then
+  cat "$BUILD_LOG" >&2
+  print -ru2 -- ""
+  print -ru2 -- "==> the dev build failed. The whole log is above, and in $BUILD_LOG."
+  print -ru2 -- "    Nothing was installed, so $DEST is whatever it was before."
+  exit 1
+fi
 
 BUILT="$WORK/.build/release/Bloom.app"
 [ -d "$BUILT" ] || BUILT="$(cd "$WORK" && swift build -c release --show-bin-path)/Bloom.app"
+
+# Belt and braces on the removal above. A build that reports success without
+# leaving a bundle behind must not reach the copy below, because the only thing
+# there would be to copy is whatever somebody else put there.
+if [[ ! -d "$BUILT" ]]; then
+  print -ru2 -- "==> the build reported success but left no bundle at $BUILT"
+  exit 1
+fi
 
 mkdir -p "$HOME/Applications"
 rm -rf "$DEST"
@@ -187,16 +257,38 @@ cp -R "$BUILT" "$DEST"
 
 # What this is, so a stale install can be identified without guessing. The same
 # key Tools/master.sh writes, plus one that says which of the two this is.
-/usr/bin/defaults write "$DEST/Contents/Info.plist" BloomMasterCommit -string "$RESOLVED" 2>/dev/null || true
-/usr/bin/defaults write "$DEST/Contents/Info.plist" BloomDevBuild -bool true 2>/dev/null || true
+#
+# These used to end in `|| true`, which is the wrong trade for the one pair of
+# keys anybody reads when they are already confused about which build they are
+# looking at. If the stamp cannot be written the bundle is unidentifiable, and
+# that is worth stopping for.
+/usr/bin/defaults write "$DEST/Contents/Info.plist" BloomMasterCommit -string "$RESOLVED"
+/usr/bin/defaults write "$DEST/Contents/Info.plist" BloomDevBuild -bool true
 
 # Re-signed, because the two writes above invalidated the signature Tools/build.sh
 # applied. Same identity resolution as that script, so a machine with a real one
 # configured keeps it and everything else stays ad-hoc.
-codesign --force --deep --sign "${BLOOM_CODESIGN_IDENTITY:-${BATON_CODESIGN_IDENTITY:--}}" "$DEST" >/dev/null 2>&1 || true
+#
+# Not `|| true`, unlike the equivalent line in Tools/build.sh. There the bundle
+# has never been signed and an unsigned one still launches, so a failure costs
+# only App Intents. Here the signature was valid until the two writes above broke
+# it, and macOS kills a bundle whose signature no longer matches its contents. A
+# swallowed failure would surface three steps down as "launched, but no process
+# is running from ...", which is true and says nothing about the cause.
+if ! signing="$(codesign --force --deep --sign "${BLOOM_CODESIGN_IDENTITY:-${BATON_CODESIGN_IDENTITY:--}}" "$DEST" 2>&1)"; then
+  print -ru2 -- "$signing"
+  print -ru2 -- "==> re-signing $DEST failed, so it would not launch. The bundle is"
+  print -ru2 -- "    on disk and broken; fix the signing identity and run this again."
+  exit 1
+fi
 
 # LaunchServices caches Info.plist per bundle, LSEnvironment included, so a
 # rebuild that changed it is not seen until the bundle is registered again.
+#
+# Best effort on purpose, and the only redirect here that hides a failure. A
+# refused registration leaves a stale LSEnvironment, which is caught by the check
+# at the foot of this script rather than being trusted, and lsregister has no
+# useful exit status to act on anyway.
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
   -f "$DEST" >/dev/null 2>&1 || true
 

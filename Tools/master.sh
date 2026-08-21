@@ -62,15 +62,40 @@ git worktree remove --force "$WORK" 2>/dev/null || true
 rm -rf "$WORK"
 git worktree add --detach "$WORK" "$RESOLVED" >/dev/null
 
+# Runs a command in the worktree, quiet when it works and printed in full when
+# it does not.
+#
+# Both build lines below used to end in `>/dev/null`, and `swift build` writes
+# compiler errors to STDOUT rather than to stderr, so that redirect threw away
+# the only account of what had gone wrong. `set -e` still stopped the script, but
+# it stopped after a minute of work with nothing to read, which the next person
+# takes for a broken script rather than broken code. Silencing a build that works
+# is worth it, since it is a page of module names nobody reads. Silencing one
+# that fails costs the only thing anybody wanted from it.
+#
+# Printed whole rather than tailed: Swift reports the first error at the top and
+# carries on compiling, so the line that explains the failure is not reliably at
+# the end.
+BUILD_LOG=/tmp/bloom-master-build.log
+build_in_worktree() {
+  if ! ( cd "$WORK" && "$@" ) >"$BUILD_LOG" 2>&1; then
+    cat "$BUILD_LOG" >&2
+    print -ru2 -- ""
+    print -ru2 -- "==> the build failed. The whole log is above, and in $BUILD_LOG."
+    print -ru2 -- "    Nothing was installed, so $DEST is whatever it was before."
+    exit 1
+  fi
+}
+
 # Its own scratch path, so a concurrent agent build cannot swap objects underneath.
-( cd "$WORK" && swift build -c release --product Bloom --scratch-path /tmp/bloom-master-build >/dev/null )
+build_in_worktree swift build -c release --product Bloom --scratch-path /tmp/bloom-master-build
 
 # The worktree holds whatever that ref held, and the build script has only lived
 # in Tools since today. Pinning to a commit from before the move is the whole
 # point of taking a ref, so both places are looked in rather than one.
 BUILD_SCRIPT=Tools/build.sh
 [ -x "$WORK/$BUILD_SCRIPT" ] || BUILD_SCRIPT=build.sh
-( cd "$WORK" && "./$BUILD_SCRIPT" -r >/dev/null )
+build_in_worktree "./$BUILD_SCRIPT" -r
 
 BUILT="$WORK/.build/release/Bloom.app"
 [ -d "$BUILT" ] || BUILT="$(cd "$WORK" && swift build -c release --show-bin-path)/Bloom.app"
