@@ -241,7 +241,7 @@ final class LinkTextView: NSTextView {
         menu.addItem(.separator())
         let copy = NSMenuItem(title: "Copy Link", action: #selector(copyLink(_:)), keyEquivalent: "")
         copy.target = self
-        copy.representedObject = url
+        copy.represent(url)
         menu.addItem(copy)
         return menu
     }
@@ -249,7 +249,7 @@ final class LinkTextView: NSTextView {
     private func item(_ title: String, url: URL, target: TranscriptLinkTarget) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: #selector(openLink(_:)), keyEquivalent: "")
         item.target = self
-        item.representedObject = LinkChoice(url: url, target: target)
+        item.represent(LinkChoice(url: url, target: target))
         return item
     }
 
@@ -259,12 +259,12 @@ final class LinkTextView: NSTextView {
     }
 
     @objc private func openLink(_ sender: NSMenuItem) {
-        guard let choice = sender.representedObject as? LinkChoice else { return }
+        guard let choice = sender.represented(LinkChoice.self) else { return }
         actions.open(choice.url, choice.target)
     }
 
     @objc private func copyLink(_ sender: NSMenuItem) {
-        guard let url = sender.representedObject as? URL else { return }
+        guard let url = sender.represented(URL.self) else { return }
         TranscriptLink.copy(url.absoluteString)
     }
 }

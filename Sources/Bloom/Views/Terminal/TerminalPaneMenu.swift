@@ -112,14 +112,11 @@ enum TerminalPaneMenu {
         // title, and an unnamed one is announced as "image".
         item.image = PaneSymbol.image(symbol, label: title)
         item.target = target
-        item.representedObject = Box(command)
+        // `TerminalPaneCommand` is an enum and `representedObject` is `Any?`, so it travels boxed.
+        // See `MenuItemPayload`, which is this box after the same `Any?` swallowed a `WorkspaceID`
+        // in two other menus.
+        item.represent(command)
         return item
-    }
-
-    /// `TerminalPaneCommand` is an enum, and `representedObject` is `Any?`, so it travels boxed.
-    private final class Box: NSObject {
-        let command: TerminalPaneCommand
-        init(_ command: TerminalPaneCommand) { self.command = command }
     }
 
     @MainActor
@@ -131,8 +128,8 @@ enum TerminalPaneMenu {
         }
 
         @objc func fire(_ sender: NSMenuItem) {
-            guard let box = sender.representedObject as? Box else { return }
-            perform(box.command)
+            guard let command = sender.represented(TerminalPaneCommand.self) else { return }
+            perform(command)
         }
     }
 }
