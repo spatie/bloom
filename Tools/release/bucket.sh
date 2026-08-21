@@ -50,6 +50,15 @@ public_url() {
   echo "${BLOOM_PUBLIC_BASE_URL%/}/$(remote_key "$1")"
 }
 
+# Newer AWS CLI versions send an additional checksum in an aws-chunked body by
+# default, and UpCloud's S3 rejects it with XAmzContentSHA256Mismatch. Measured
+# against the real bucket: the same PutObject fails with the default and
+# succeeds with these two set, so they are not belt and braces, they are what
+# makes an upload work at all. Set here rather than in the workflow so a local
+# release through Tools/release.sh behaves the same way.
+export AWS_REQUEST_CHECKSUM_CALCULATION=when_required
+export AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+
 s3() {
   aws s3api "$@" \
     --bucket "$BLOOM_BUCKET" \
