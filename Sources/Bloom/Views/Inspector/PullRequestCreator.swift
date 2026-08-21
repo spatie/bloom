@@ -68,7 +68,7 @@ struct PullRequestCreator: View {
                 .foregroundStyle(Palette.textTertiary)
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: Metrics.spacingHair) {
                 // Head truncation, and it stays: a branch is `murze/add-personal-notifications`
                 // and the half that says which branch it is is the last half. What head
                 // truncation costs is that the name is then unreachable, and that is what the two

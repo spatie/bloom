@@ -157,7 +157,7 @@ struct PullRequestSummary: View {
     /// and stop competing with the diff. Flattening the two to one treatment is how a strip ends
     /// up either shouting about a merged branch or whispering about one that is ready to land.
     private var headline: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: Metrics.spacingHair) {
             Text(status.text)
                 .font(isPending ? Typo.heading : Typo.title)
                 .foregroundStyle(tint ?? Palette.textPrimary)

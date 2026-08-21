@@ -7,9 +7,7 @@ import SwiftUI
 struct ComposerBox: ViewModifier {
     @Binding var isFocused: Bool
 
-    /// AppKit draws a focus ring only in the key window, and this was drawing one in every window
-    /// at once. With five workspaces open, four of them wore a lit composer while the fifth was
-    /// the one actually taking the keys.
+    /// See `ControlActiveState.showsFocusRing`: a ring belongs in the key window only.
     @Environment(\.controlActiveState) private var activeState
     /// A file is being dragged over the box. Said with the border rather than with a plate over
     /// the content, so the draft stays readable while the drop is being aimed.
@@ -21,7 +19,7 @@ struct ComposerBox: ViewModifier {
     private static let ringWidth: CGFloat = 3
 
     /// Focused, and in the window the keys are going to.
-    private var isRingVisible: Bool { isFocused && activeState != .inactive }
+    private var isRingVisible: Bool { isFocused && activeState.showsFocusRing }
 
     func body(content: Content) -> some View {
         content

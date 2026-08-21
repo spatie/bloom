@@ -31,6 +31,12 @@ struct HomeBar: View {
 
     @FocusState private var fieldFocused: Bool
 
+    /// See `ControlActiveState.showsFocusRing`: a ring belongs in the key window only.
+    @Environment(\.controlActiveState) private var activeState
+
+    /// Focused, and in the window the keys are going to.
+    private var isRingVisible: Bool { fieldFocused && activeState.showsFocusRing }
+
     var body: some View {
         HStack(spacing: Metrics.spacing) {
             field
@@ -105,8 +111,8 @@ struct HomeBar: View {
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                 .stroke(
-                    fieldFocused ? Palette.focusRing : Palette.border,
-                    lineWidth: fieldFocused ? Self.focusRingWidth : Metrics.hairline
+                    isRingVisible ? Palette.focusRing : Palette.border,
+                    lineWidth: isRingVisible ? Self.focusRingWidth : Metrics.hairline
                 )
         }
         .help(Self.searchDescription)

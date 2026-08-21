@@ -27,6 +27,12 @@ struct PromptEditor: View {
 
     @FocusState private var isFocused: Bool
 
+    /// See `ControlActiveState.showsFocusRing`: a ring belongs in the key window only.
+    @Environment(\.controlActiveState) private var activeState
+
+    /// Focused, and in the window the keys are going to.
+    private var isRingVisible: Bool { isFocused && activeState.showsFocusRing }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
             Text(definition.summary)
@@ -77,8 +83,8 @@ struct PromptEditor: View {
             .overlay {
                 RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                     .strokeBorder(
-                        isFocused ? Palette.focusRing : Palette.border,
-                        lineWidth: isFocused ? Self.focusRingWidth : Metrics.hairline
+                        isRingVisible ? Palette.focusRing : Palette.border,
+                        lineWidth: isRingVisible ? Self.focusRingWidth : Metrics.hairline
                     )
             }
             .accessibilityLabel("\(definition.title) prompt")

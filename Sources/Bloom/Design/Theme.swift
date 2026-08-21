@@ -531,6 +531,13 @@ enum Metrics {
     // rounding for no reason other than the two numbers happening to match.
 
     /// Between two things that read as one thing, such as a glyph and its count.
+    /// Two lines that are one thing: a title and the line under it, set closer than a gap.
+    ///
+    /// One point rather than none, because none lets the two baselines collide at large text
+    /// sizes. It is a hairline of air rather than a spacing choice, which is why it has a name of
+    /// its own instead of being `spacingTight` used loosely.
+    static let spacingHair: CGFloat = 1
+
     static let spacingTight: CGFloat = 2
     /// Between a label and the number beside it.
     static let spacingSmall: CGFloat = 4
@@ -909,4 +916,18 @@ extension View {
     func linkButton() -> some View {
         buttonStyle(.link).tint(Palette.link)
     }
+}
+
+// MARK: - Focus rings
+
+extension ControlActiveState {
+    /// Whether a focus ring drawn under this state should be visible at all.
+    ///
+    /// AppKit draws a focus ring only in the key window, and every hand-drawn ring in Bloom was
+    /// drawing one in every window at once: with five workspaces open, four of them showed a lit
+    /// composer while the fifth was the one actually taking the keys.
+    ///
+    /// Named here rather than written out at each ring, because there are five of them and the
+    /// sixth is the one that would be missed.
+    var showsFocusRing: Bool { self != .inactive }
 }

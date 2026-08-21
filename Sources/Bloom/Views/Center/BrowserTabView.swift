@@ -17,12 +17,18 @@ struct BrowserTabView: View {
     @State private var address = ""
     @FocusState private var isAddressFocused: Bool
 
+    /// See `ControlActiveState.showsFocusRing`: a ring belongs in the key window only.
+    @Environment(\.controlActiveState) private var activeState
+
     /// Drawn inside the field's own edge rather than outside it, so the toolbar does not have to
     /// give the ring clearance. See `HomeBar.focusRingWidth`.
     private static let focusRingWidth: CGFloat = 2
 
     private var tabs: CenterTabStore { .shared }
     private var session: BrowserSession { tabs.browser(for: tab) }
+
+    /// Focused, and in the window the keys are going to.
+    private var isRingVisible: Bool { isAddressFocused && activeState.showsFocusRing }
 
     var body: some View {
         let session = self.session
@@ -87,8 +93,8 @@ struct BrowserTabView: View {
                 .overlay {
                     RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                         .strokeBorder(
-                            isAddressFocused ? Palette.focusRing : Palette.border,
-                            lineWidth: isAddressFocused ? Self.focusRingWidth : Metrics.hairline
+                            isRingVisible ? Palette.focusRing : Palette.border,
+                            lineWidth: isRingVisible ? Self.focusRingWidth : Metrics.hairline
                         )
                 }
                 .onSubmit {

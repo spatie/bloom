@@ -24,6 +24,12 @@ struct RepoFilesToCopySection: View {
 
     @FocusState private var isFocused: Bool
 
+    /// See `ControlActiveState.showsFocusRing`: a ring belongs in the key window only.
+    @Environment(\.controlActiveState) private var activeState
+
+    /// Focused, and in the window the keys are going to.
+    private var isRingVisible: Bool { isFocused && activeState.showsFocusRing }
+
     var body: some View {
         Section {
             VStack(alignment: .leading, spacing: Metrics.gutter) {
@@ -60,8 +66,8 @@ struct RepoFilesToCopySection: View {
             .overlay {
                 RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                     .strokeBorder(
-                        isFocused ? Palette.focusRing : Palette.border,
-                        lineWidth: isFocused ? Self.focusRingWidth : Metrics.hairline
+                        isRingVisible ? Palette.focusRing : Palette.border,
+                        lineWidth: isRingVisible ? Self.focusRingWidth : Metrics.hairline
                     )
             }
             .accessibilityLabel("Patterns of files to copy into a new workspace")
