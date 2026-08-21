@@ -69,6 +69,30 @@ public actor Store {
         try Store(path: ":memory:")
     }
 
+    /// Every committed write to this database, by table, coalesced. See `StoreObservation.swift`,
+    /// and read the two rules on `StoreChangeHub` before writing anything that consumes this.
+    ///
+    /// `nonisolated` because subscribing is not a database operation and must not queue behind the
+    /// writes it wants to hear about. `db` is a `let` of a `Sendable` class, so reading it from
+    /// outside the actor is sound.
+    ///
+    /// The domains are named by the caller rather than filtered afterwards, so a subscriber that
+    /// does not care about a table is not woken by it at all. That is not a nicety: `messages` is
+    /// written many times a second for the whole of a streaming turn, and it is the one table an
+    /// interested-in-everything subscriber would spend all its time on.
+    public nonisolated func changes(
+        of domains: Set<StoreDomain> = Set(StoreDomain.allCases)
+    ) -> StoreChanges {
+        StoreChanges(hub: db.changes, interest: domains)
+    }
+
+    /// The hub this store's writes land in.
+    ///
+    /// For the tests, which have to ask one specific database what it published rather than look a
+    /// hub up by path. A `:memory:` store has no path to look up, and that it does not share a hub
+    /// with the next `:memory:` store is exactly the thing worth pinning.
+    nonisolated var changeHub: StoreChangeHub { db.changes }
+
     // MARK: - Migrations
 
     /// One migration step. Most are a block of SQL, but a step that has to look at the rows it is
@@ -609,7 +633,28 @@ public actor Store {
         try db.run("DELETE FROM workspaces WHERE id = ?", [.text(id)])
     }
 
+    /// Writes the three counts, and only when one of them has actually moved.
+    ///
+    /// This runs every six seconds for every active workspace, and on an idle machine it writes
+    /// the same three numbers back every time. SQLite does not care that the values are identical:
+    /// the row is rewritten, the WAL grows, and the update hook fires, so an app sitting there
+    /// doing nothing would announce a change per workspace per six seconds forever and everything
+    /// listening would reload for it. See `StoreChangeHub` for why a write that answers a change
+    /// has to compare and skip; this is the same rule for a write on a timer.
+    ///
+    /// The read and the write are both inside the actor with no suspension between them, so this
+    /// is still one indivisible change, exactly as `update(workspaceID:)` is.
     public func updateDiffStat(workspaceID: String, additions: Int, deletions: Int, files: Int) throws {
+        let current = try db.query(
+            "SELECT additions, deletions, changed_files FROM workspaces WHERE id = ?",
+            [.text(workspaceID)]
+        ).first
+        if let current,
+           current.int("additions") == Int64(additions),
+           current.int("deletions") == Int64(deletions),
+           current.int("changed_files") == Int64(files) {
+            return
+        }
         try db.run(
             "UPDATE workspaces SET additions = ?, deletions = ?, changed_files = ? WHERE id = ?",
             [.int(Int64(additions)), .int(Int64(deletions)), .int(Int64(files)), .text(workspaceID)]
