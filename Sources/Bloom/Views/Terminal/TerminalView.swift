@@ -224,6 +224,34 @@ final class BloomTerminalView: LocalProcessTerminalView {
 
     }
 
+    /// The pane's own menu, put on screen here rather than by AppKit's contextual menu machinery.
+    ///
+    /// That machinery is where AutoFill came from. `NSView.rightMouseDown` ends in
+    /// `NSMenu.popUpContextMenu(_:with:for:)`, and that call asks the view's `NSTextInputContext`
+    /// what the text input system wants to add and merges the answer into the menu WINDOW rather
+    /// than into the `NSMenu` it was handed. `TerminalPaneMenu.make` returns four items and five
+    /// were drawn; the fifth is in `items` at no point, not in `menuNeedsUpdate`, not in
+    /// `willOpenMenu` after `super`, not once tracking has ended. So nothing reachable through
+    /// `NSMenu` could have removed it, and the title is localised, so matching on it would have
+    /// been a fix that worked on this machine and quietly failed on somebody else's. Measured on
+    /// macOS 27, against SwiftTerm's view and against a plain `NSTextView`, which grows the same
+    /// item from the same place.
+    ///
+    /// `NSMenu.popUp(positioning:at:in:)` is the same menu without that merge, and it is the only
+    /// lever here that is neither a title match nor private API. The input context itself is
+    /// untouched, so marked text, dead keys and every input method still work; copy, paste and
+    /// select all are Edit menu commands answered by SwiftTerm and never came through here at all.
+    ///
+    /// A view with no menu of its own falls back to AppKit, so the sign-in sheet's terminal, which
+    /// sets no `onContextMenu`, still gets whatever AppKit would have given it.
+    override func rightMouseDown(with event: NSEvent) {
+        guard onContextMenu != nil, let menu = menu(for: event) else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        menu.popUp(positioning: nil, at: convert(event.locationInWindow, from: nil), in: self)
+    }
+
     /// Keystrokes on their way to the shell, swallowed once it is gone.
     ///
     /// Return used to restart the shell here, and the pane said so. That state is what a terminal
