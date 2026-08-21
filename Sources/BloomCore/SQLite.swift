@@ -4,14 +4,14 @@ import Synchronization
 
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-public enum SQLValue: Sendable, Equatable {
+enum SQLValue: Sendable, Equatable {
     case null
     case int(Int64)
     case double(Double)
     case text(String)
     case blob(Data)
 
-    public var intValue: Int64? {
+    var intValue: Int64? {
         switch self {
         case .int(let value): value
         case .double(let value): Int64(value)
@@ -20,7 +20,7 @@ public enum SQLValue: Sendable, Equatable {
         }
     }
 
-    public var stringValue: String? {
+    var stringValue: String? {
         switch self {
         case .text(let value): value
         case .int(let value): String(value)
@@ -29,7 +29,7 @@ public enum SQLValue: Sendable, Equatable {
         }
     }
 
-    public var doubleValue: Double? {
+    var doubleValue: Double? {
         switch self {
         case .double(let value): value
         case .int(let value): Double(value)
@@ -38,7 +38,7 @@ public enum SQLValue: Sendable, Equatable {
         }
     }
 
-    public var dataValue: Data? {
+    var dataValue: Data? {
         switch self {
         case .blob(let value): value
         case .text(let value): Data(value.utf8)
@@ -55,38 +55,38 @@ extension SQLValue {
     /// several hundred times, which is noise in front of the SQL that is the point of those
     /// lines, and one `.rawValue` forgotten is a compile error rather than a bug, so the
     /// unwrapping was never buying anything.
-    public static func text(_ id: some Identifier) -> SQLValue { .text(id.rawValue) }
+    static func text(_ id: some Identifier) -> SQLValue { .text(id.rawValue) }
 
     /// The nullable columns: `workspaces.parent_workspace_id`, and the joins that may not be
     /// there. Nil binds as SQL NULL, which is what the column already holds.
-    public static func text(_ id: (some Identifier)?) -> SQLValue {
+    static func text(_ id: (some Identifier)?) -> SQLValue {
         id.map { .text($0.rawValue) } ?? .null
     }
 }
 
-public struct Row: Sendable {
-    public let columns: [String: SQLValue]
+struct Row: Sendable {
+    let columns: [String: SQLValue]
 
-    public subscript(key: String) -> SQLValue { columns[key] ?? .null }
+    subscript(key: String) -> SQLValue { columns[key] ?? .null }
 
-    public func int(_ key: String) -> Int64? { self[key].intValue }
-    public func string(_ key: String) -> String? { self[key].stringValue }
-    public func double(_ key: String) -> Double? { self[key].doubleValue }
-    public func data(_ key: String) -> Data? { self[key].dataValue }
+    func int(_ key: String) -> Int64? { self[key].intValue }
+    func string(_ key: String) -> String? { self[key].stringValue }
+    func double(_ key: String) -> Double? { self[key].doubleValue }
+    func data(_ key: String) -> Data? { self[key].dataValue }
 
-    public func bool(_ key: String) -> Bool { (self[key].intValue ?? 0) != 0 }
+    func bool(_ key: String) -> Bool { (self[key].intValue ?? 0) != 0 }
 
-    public func date(_ key: String) -> Date? {
+    func date(_ key: String) -> Date? {
         guard let seconds = self[key].doubleValue else { return nil }
         return Date(timeIntervalSince1970: seconds)
     }
 }
 
-public struct SQLiteError: Error, CustomStringConvertible {
-    public let message: String
-    public let sql: String?
+struct SQLiteError: Error, CustomStringConvertible {
+    let message: String
+    let sql: String?
 
-    public var description: String {
+    var description: String {
         if let sql { return "\(message) [\(sql.prefix(200))]" }
         return message
     }
@@ -94,7 +94,17 @@ public struct SQLiteError: Error, CustomStringConvertible {
 
 /// A very small synchronous SQLite wrapper. Access is serialised by `Store`, which is an actor,
 /// so this type itself does no locking beyond SQLite's own.
-public final class SQLiteDatabase: @unchecked Sendable {
+///
+/// Internal, and that is the rule rather than a tidy-up. `BridgeServer` says a handler "must never
+/// open a second `SQLiteDatabase` on the file, because the cross-connection sequence race is what
+/// `UNIQUE(session_id, seq)` and the retry in `appendNext` exist to survive rather than to
+/// invite", and while this class and its `init` were public that sentence was advice. Nothing in
+/// `Sources/Bloom` or `Sources/bloom-bridge` has ever named this type, so making it unreachable
+/// costs nothing and turns the advice into a compile error. `Store` is the one connection, and
+/// `LegacyDatabase` is the one exception, taking two connections to a file the app is not running
+/// on. The suite reaches this through `@testable`, deliberately: several tests open a raw second
+/// connection precisely to prove what happens across two of them.
+final class SQLiteDatabase: @unchecked Sendable {
     private var handle: OpaquePointer?
 
     /// Who is told when a write commits. See `StoreObservation.swift`.
@@ -108,7 +118,7 @@ public final class SQLiteDatabase: @unchecked Sendable {
     /// about being able to say that in the type system rather than about contention.
     private let uncommitted = Mutex<Set<StoreDomain>>([])
 
-    public init(path: String) throws {
+    init(path: String) throws {
         // Before anything that can throw, because a stored property has to be there whether this
         // initialiser returns or not.
         self.changes = StoreChangeHub.shared(forPath: path)
@@ -202,7 +212,7 @@ public final class SQLiteDatabase: @unchecked Sendable {
         return SQLiteError(message: message, sql: sql)
     }
 
-    public func execute(_ sql: String) throws {
+    func execute(_ sql: String) throws {
         guard sqlite3_exec(handle, sql, nil, nil, nil) == SQLITE_OK else { throw fail(sql) }
         flushChanges()
     }
@@ -247,7 +257,7 @@ public final class SQLiteDatabase: @unchecked Sendable {
     }
 
     @discardableResult
-    public func query(_ sql: String, _ bindings: [SQLValue] = []) throws -> [Row] {
+    func query(_ sql: String, _ bindings: [SQLValue] = []) throws -> [Row] {
         let statement = try prepare(sql, bindings)
         defer { sqlite3_finalize(statement) }
 
@@ -274,7 +284,7 @@ public final class SQLiteDatabase: @unchecked Sendable {
     }
 
     @discardableResult
-    public func run(_ sql: String, _ bindings: [SQLValue] = []) throws -> Int64 {
+    func run(_ sql: String, _ bindings: [SQLValue] = []) throws -> Int64 {
         let statement = try prepare(sql, bindings)
         defer { sqlite3_finalize(statement) }
         let step = sqlite3_step(statement)
@@ -283,7 +293,7 @@ public final class SQLiteDatabase: @unchecked Sendable {
         return sqlite3_last_insert_rowid(handle)
     }
 
-    public func transaction<T>(_ body: () throws -> T) throws -> T {
+    func transaction<T>(_ body: () throws -> T) throws -> T {
         try execute("BEGIN IMMEDIATE;")
         do {
             let result = try body()
@@ -301,7 +311,7 @@ public final class SQLiteDatabase: @unchecked Sendable {
         }
     }
 
-    public var userVersion: Int32 {
+    var userVersion: Int32 {
         get { (try? query("PRAGMA user_version;").first?.int("user_version")).flatMap { $0 }.map(Int32.init) ?? 0 }
         set { try? execute("PRAGMA user_version = \(newValue);") }
     }
