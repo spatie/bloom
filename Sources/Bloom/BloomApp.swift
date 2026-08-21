@@ -17,6 +17,9 @@ struct BloomApp: App {
         // and exits, so it can be looked at without a screen recording permission. It has to run
         // before any scene exists, which is why it lives in the initialiser.
         if Snapshot.isRequested { Snapshot.runAndExit() }
+        // The same affordance for a context menu, which neither of `Snapshot`'s two routes can
+        // draw: `Bloom --row-menu <out.png> [--submenu Colour]`. See `MenuSnapshot`.
+        if MenuSnapshot.isRequested { MenuSnapshot.runAndExit() }
         if Snapshot.isWindowCaptureRequested { Snapshot.scheduleWindowCapture() }
         Snapshot.scheduleURLIfRequested()
         Snapshot.scheduleRunningStateIfRequested()
@@ -29,6 +32,12 @@ struct BloomApp: App {
         // And another: `Bloom --switch-probe <out.json>` times the path from clicking a workspace
         // to seeing it. See `SwitchProbe`.
         if SwitchProbe.isRequested { SwitchProbe.schedule() }
+
+        // And a last one: `Bloom --menu-probe <out.png>` opens one of the centre pane's split
+        // submenus and photographs it, which nothing else can. Debug builds only. See `MenuProbe`.
+        #if DEBUG
+        if MenuProbe.isRequested { MenuProbe.schedule() }
+        #endif
     }
 
     /// The narrowest the window may be dragged.
