@@ -86,12 +86,27 @@ final class TerminalPersistence {
     }
 
     private func sessionNames() async -> [String] {
+        await sessions() ?? []
+    }
+
+    /// The sessions on our socket, or nil when the question could not be asked at all.
+    ///
+    /// The difference matters in exactly one place, and it matters there a great deal: the
+    /// migration that moved the bottom panel's tabs into the centre column drops a tab that holds
+    /// nothing, and "tmux answered, there are none" is a fact while "tmux did not answer" is not.
+    /// A tab whose shell MIGHT still be alive is carried over rather than thrown away, so this
+    /// says which of the two happened instead of flattening both to an empty list.
+    ///
+    /// tmux not being installed is a fact, not a silence: nothing can be alive on a machine with
+    /// no tmux, so that answers with none rather than with nil.
+    func sessions() async -> [String]? {
         guard let command else { return [] }
         // The exit status is deliberately ignored: "no server running" is a failure to tmux and
-        // simply "nothing persisted yet" here.
+        // simply "nothing persisted yet" here. A throw is different, and is the nil case: the
+        // process could not be run, or it was still running when the timeout came round.
         guard let result = try? await Shell.run(
             command.executable, command.listSessions, timeout: .seconds(5)
-        ) else { return [] }
+        ) else { return nil }
         return TmuxSessions.parseSessionList(result.stdout)
     }
 

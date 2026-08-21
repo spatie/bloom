@@ -92,28 +92,86 @@ final class CenterTabStore {
     /// Takes over the terminal tabs the bottom panel used to keep in SQLite, once, and drops the
     /// rows behind it.
     ///
-    /// Each tab keeps its id, and that is the whole point of doing it this way rather than opening
-    /// fresh tabs: a pane id IS the tmux session name and the key `TerminalSplitStore` files a
-    /// split layout under, so a shell the user left running in a split bottom panel tab comes back
-    /// attached, in the same shape, in the centre column.
+    /// A migrated tab keeps its id, and that is the whole point of doing it this way rather than
+    /// opening fresh tabs: a pane id IS the tmux session name and the key `TerminalSplitStore`
+    /// files a split layout under, so a shell the user left running in a split bottom panel tab
+    /// comes back attached, in the same shape, in the centre column.
+    ///
+    /// **Not every row is worth a tab.** The panel opened a terminal for a workspace whether or
+    /// not anybody wanted one: `load` created a tab called "Terminal" the first time a workspace
+    /// was drawn, so there is a row for every workspace ever opened, and moving all of them across
+    /// would put a spare shell in the strip of every workspace on the machine. What is carried
+    /// over is what somebody did something to, which `isWorthKeeping` decides. The rest is dropped
+    /// with its row.
+    ///
+    /// Nothing that is alive is dropped, and where that cannot be established the tab is kept. See
+    /// `TerminalPersistence.sessions`.
+    ///
+    /// It costs nothing on any launch after the first: with no rows left there is nothing to ask
+    /// tmux about, and the whole thing is one query that comes back empty.
     func adoptTerminalTabs(from store: Store?) async {
         guard let store, let workspaces = try? await store.workspaces() else { return }
 
+        var rowsByWorkspace: [String: [TerminalTab]] = [:]
         for workspace in workspaces {
-            guard let rows = try? await store.terminalTabs(workspaceID: workspace.id),
-                  !rows.isEmpty else { continue }
+            let rows = (try? await store.terminalTabs(workspaceID: workspace.id)) ?? []
+            if !rows.isEmpty { rowsByWorkspace[workspace.id] = rows }
+        }
+        guard !rowsByWorkspace.isEmpty else { return }
 
-            var tabs = tabsByWorkspace[workspace.id] ?? Self.restore(workspaceID: workspace.id)
+        // Asked once, for all of them, and only when there is something to decide. `nil` is tmux
+        // failing to answer rather than answering with none, and it keeps every tab.
+        let live = await TerminalSessionStore.shared.liveSessions(store: store).map(Set.init)
+
+        for (workspaceID, rows) in rowsByWorkspace {
+            var tabs = tabsByWorkspace[workspaceID] ?? Self.restore(workspaceID: workspaceID)
             let known = Set(tabs.map(\.id))
+
             for row in rows where !known.contains(row.id) {
+                guard Self.isWorthKeeping(row, in: workspaceID, live: live) else { continue }
                 tabs.append(CenterTab(
-                    id: row.id, workspaceID: workspace.id, kind: .terminal, title: row.title
+                    id: row.id, workspaceID: workspaceID, kind: .terminal, title: row.title
                 ))
             }
-            apply(tabs, to: workspace.id)
+            apply(tabs, to: workspaceID)
 
             for row in rows { try? await store.deleteTerminalTab(id: row.id) }
         }
+    }
+
+    /// Whether one of the bottom panel's terminal tabs is something rather than nothing.
+    ///
+    /// Three ways to be something, and any one of them is enough:
+    ///
+    /// - it was renamed, so somebody said what it was for;
+    /// - it was split, so somebody arranged it;
+    /// - a shell is still waiting for one of its panes on the tmux server.
+    ///
+    /// And one way to be kept without being any of them: `live` is nil when tmux could not be
+    /// asked, and a tab that might be holding a running dev server is not something to throw away
+    /// on a guess. A machine without tmux answers with none rather than with nil, because there
+    /// nothing can be alive and that is a fact rather than a silence.
+    private static func isWorthKeeping(
+        _ row: TerminalTab, in workspaceID: String, live: Set<String>?
+    ) -> Bool {
+        if !isDefaultTitle(row.title) { return true }
+
+        let panes = TerminalSplitStore.shared.panes(of: row.id)
+        if panes.count > 1 { return true }
+
+        guard let live else { return true }
+        return panes.contains {
+            live.contains(TmuxSessions.sessionName(workspaceID: workspaceID, paneID: $0))
+        }
+    }
+
+    /// Whether a title is one the panel handed out rather than one a person typed. It named the
+    /// first tab of a workspace "Terminal" and the ones after it "Terminal 2", "Terminal 3", which
+    /// is the same pair of shapes `nextTitle` still makes below.
+    private static func isDefaultTitle(_ title: String) -> Bool {
+        if title == "Terminal" { return true }
+        guard title.hasPrefix("Terminal ") else { return false }
+        return Int(title.dropFirst("Terminal ".count)) != nil
     }
 
     /// Moves a tool tab to another place in the strip. Tool tabs keep their own run of the strip

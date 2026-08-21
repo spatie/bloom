@@ -195,6 +195,20 @@ final class TerminalSessionStore {
         sweepOrphanedSessions()
     }
 
+    /// Which panes still have a shell waiting for them, or nil when tmux could not be asked.
+    ///
+    /// Separate from `useStore` because it must NOT start the launch sweep. The sweep kills every
+    /// session no tab names, and the one caller of this is the migration that decides which of the
+    /// bottom panel's tabs are worth carrying into the centre column: until it has run, no tab
+    /// names any of them, and a sweep in front of it would kill exactly the shells it is trying to
+    /// save. Bootstrap asks this, migrates, and only then hands the store over.
+    func liveSessions(store: Store?) async -> [String]? {
+        if repoStore == nil { repoStore = store }
+        ensurePersistence()
+        guard let persistence else { return [] }
+        return await persistence.sessions()
+    }
+
     /// Built on demand rather than at init, because archiving a workspace has to be able to kill its
     /// sessions on a launch where no terminal panel was ever opened and no store was handed over.
     private func ensurePersistence() {

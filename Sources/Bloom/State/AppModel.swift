@@ -261,6 +261,10 @@ final class AppModel {
             // bottom panel that did this on the first workspace opened; nothing opens now until a
             // terminal tab is drawn, and a launch where none is drawn is exactly the launch whose
             // orphans nobody would collect.
+            //
+            // AFTER the migration above, and that order is load bearing rather than tidy: the
+            // sweep kills every session no tab names, and until those tabs have moved into the
+            // centre column no tab names any of them.
             TerminalSessionStore.shared.useStore(store)
             BottomPanelDefaults.forget()
             await reload()
