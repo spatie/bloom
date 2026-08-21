@@ -56,6 +56,10 @@ struct TranscriptListView: View {
 
     /// Sentinel id, negative so it can never collide with a row sequence number.
     private static let streamingID = -2
+    /// The same, for the bubble drawn while a message is on its way to the agent. Its own id so
+    /// that the stored row taking its place is an id the list has not seen, which is what makes
+    /// the swap a replacement rather than a row changing under the reader.
+    private static let sendingID = -3
 
     /// A pending message's id in the list.
     ///
@@ -91,15 +95,14 @@ struct TranscriptListView: View {
     /// the whole of what a new workspace gets to see.
     private var showsPlaceholder: Bool {
         transcript.isLoaded
-            && transcript.rows.isEmpty
             && !transcript.isRunning
             && !transcript.isStreaming
             && !showsSetup
-            // A workspace whose opening prompt is still queued has nothing in its session and a
-            // bubble at the bottom of it. An empty state centred over the pane would be drawn
-            // straight across the one thing on screen, which is the same mistake `showsSetup`
-            // above is here to avoid.
-            && transcript.pendingDeliveries.isEmpty
+            // A workspace whose opening prompt is still queued, or whose first message is on its
+            // way out, has nothing in its session and a bubble at the bottom of it. An empty state
+            // centred over the pane would be drawn straight across the one thing on screen, which
+            // is the same mistake `showsSetup` above is here to avoid.
+            && transcript.hasNothingToShow
     }
 
     /// The rows this pass draws, which is every row of the session except on the frame that
@@ -154,11 +157,11 @@ struct TranscriptListView: View {
                     WorkspaceEventsView(
                         workspaceID: transcript.workspace.id,
                         isRunning: isRunningSetup,
-                        // Nothing said yet AND nothing waiting to be said. Once there is a pending
-                        // bubble on screen, "You can ask for something now" is answered by the
-                        // bubble, and answered better: it names the sentence that is waiting
-                        // rather than describing the situation in the abstract.
-                        isFirstThing: transcript.rows.isEmpty && transcript.pendingDeliveries.isEmpty,
+                        // Nothing said yet AND nothing waiting to be said. Once there is a bubble
+                        // on screen, "You can ask for something now" is answered by the bubble,
+                        // and answered better: it names the sentence that is waiting rather than
+                        // describing the situation in the abstract.
+                        isFirstThing: transcript.hasNothingToShow,
                         // The one row in this list sized as a share of the pane rather than of its
                         // own contents. Already rounded, by `TranscriptGeometry.height`, and
                         // rounded before it reaches this view's state for the reason the bubble cap
@@ -214,6 +217,23 @@ struct TranscriptListView: View {
                         }
                     }
 
+                    // Where the stored row for it will be, which is above the answer to it. The
+                    // sentence is drawn here from the moment Return is pressed and is replaced by
+                    // its `messages` row in the same place, at the same measure, in the same view:
+                    // see `TranscriptModel.sending`, and `fades` below, which is what stops the
+                    // stored row fading in over the top of a bubble already on screen.
+                    if let sending = transcript.sending {
+                        let turn = AttachmentTrailer.split(sending.body)
+                        UserTurnRowView(
+                            text: turn.body,
+                            attachments: turn.paths,
+                            workspace: transcript.workspace,
+                            maxWidth: maxBubbleWidth
+                        )
+                        .padding(.horizontal, TranscriptLayout.inset)
+                        .id(Self.sendingID)
+                    }
+
                     StreamingTailView(transcript: transcript)
                         .padding(.horizontal, TranscriptLayout.inset)
                         .id(Self.streamingID)
@@ -222,12 +242,12 @@ struct TranscriptListView: View {
                     // be said belongs. Drawn from the workspace's queue rather than from a row, so
                     // none of it can reach the agent before it is actually sent: see
                     // `PendingTurnRowView` and `WorkspaceEvent`, which is the same rule.
-                    ForEach(transcript.pendingDeliveries) { delivery in
+                    ForEach(transcript.waitingDeliveries) { delivery in
                         PendingTurnRowView(
                             delivery: delivery,
                             // One sentence for the queue, at the foot of it. See the note on
                             // `PendingTurnRowView.caption`.
-                            hold: delivery.id == transcript.pendingDeliveries.last?.id
+                            hold: delivery.id == transcript.waitingDeliveries.last?.id
                                 ? transcript.deliveryHold
                                 : nil,
                             maxWidth: maxBubbleWidth,
@@ -510,11 +530,17 @@ struct TranscriptListView: View {
     /// that: the answer the reader is halfway through would go out and come back over a fifth of
     /// a second, which is the jump those columns exist to avoid.
     ///
-    /// Everything else genuinely arrives. A tool row lands where a "Running Bash" line was, a
-    /// turn footer lands where the status was, and a user turn was not on screen at all.
+    /// Nor is a user turn, and that changed when the echo did. The sentence is drawn from the
+    /// queue the instant Return is pressed and the stored row replaces it in the same place at the
+    /// same measure, so fading it in would take the owner's own message away and bring it back
+    /// over a fifth of a second, which is the flicker the echo exists to remove. See
+    /// `TranscriptModel.sending`.
+    ///
+    /// Everything else genuinely arrives. A tool row lands where a "Running Bash" line was, and a
+    /// turn footer lands where the status was.
     private static func fades(_ kind: MessageKind) -> Bool {
         switch kind {
-        case .assistantText, .thinking: false
+        case .assistantText, .thinking, .user: false
         default: true
         }
     }

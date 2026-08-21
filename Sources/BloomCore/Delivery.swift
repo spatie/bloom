@@ -99,4 +99,22 @@ public struct Delivery: Identifiable, Sendable, Hashable {
         guard hold.allowsDelivery else { return nil }
         return pending.first
     }
+
+    /// Whether something enqueued this instant would go straight out, with nothing in front of it.
+    ///
+    /// **This is what the transcript has to know on the frame Return is pressed.** A message that
+    /// is about to go has been said, and is drawn as an ordinary user bubble from that frame; a
+    /// message that will wait is drawn as the pending one, which says why it is waiting. Getting
+    /// that wrong either way is visible: a dotted bubble that turns solid a few milliseconds
+    /// later, or a bubble that claims to have gone and then sits there for a minute of setup.
+    ///
+    /// Asked of the same function the drain asks, rather than by restating the rule, because the
+    /// two answers disagreeing is the whole class of bug this file exists to close. `pending` is
+    /// the queue as it stands **before** the new message joins it.
+    public static func goesImmediately(behind pending: [Delivery], hold: DeliveryHold) -> Bool {
+        // Nothing may go at all, so nor may this one.
+        guard hold.allowsDelivery else { return false }
+        // Anything already waiting is in front of it, and the front of the queue always wins.
+        return next(from: pending, hold: hold) == nil
+    }
 }

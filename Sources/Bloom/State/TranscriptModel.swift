@@ -94,6 +94,41 @@ final class TranscriptModel {
     /// the queue, because a message somebody typed has to survive quitting Bloom. See `Delivery`.
     private(set) var pendingDeliveries: [Delivery] = []
 
+    /// The sentence that is on its way to the agent and has no `messages` row yet.
+    ///
+    /// **This is the instant echo, and it exists because pressing Return drew nothing at all.**
+    /// The runner writes the user row as part of `send`, and the transcript only ever read rows
+    /// back when an agent event arrived, so the owner's own message did not appear until the
+    /// answer began. Every call to `appendLatestMessages` sat inside `handle(_:)`, and the two
+    /// events that arrive before the model says anything, `initialized` and `status`, are not
+    /// among the cases that call it: the earliest his own sentence could reach the screen was the
+    /// agent's first word about it. That was true before the queue landed and is not a regression
+    /// of it.
+    ///
+    /// So the moment something is submitted with nothing holding the queue, it is held here and
+    /// drawn as an ordinary user bubble, in `UserTurnRowView`, with the same text and the same
+    /// numbers the stored row will use. It is cleared by the user row arriving, in `absorb`, so
+    /// the drawing is replaced by an identical drawing in one pass and nothing moves. A message
+    /// that is NOT free to go is not held here: it stays in `pendingDeliveries` and is drawn as
+    /// the pending bubble, which says why it is waiting. `Delivery.goesImmediately` is the one
+    /// place that decision is taken, and the drain asks the same function.
+    private(set) var sending: Delivery?
+
+    /// The queue as the transcript draws it: everything still waiting, and never the one already
+    /// drawn as a sent bubble. The drain reads `pendingDeliveries`, which is the table, because
+    /// what may be delivered is not a question about what is on screen.
+    var waitingDeliveries: [Delivery] {
+        guard let sending else { return pendingDeliveries }
+        return pendingDeliveries.filter { $0.id != sending.id }
+    }
+
+    /// Whether this chat has nothing on screen at all, counting a sentence on its way out and a
+    /// sentence waiting in the queue as things on screen. An empty state drawn over either of
+    /// them is an empty state drawn over the one thing the owner is looking for.
+    var hasNothingToShow: Bool {
+        rows.isEmpty && sending == nil && pendingDeliveries.isEmpty
+    }
+
     /// Whether the turn that is ending was ended by a person pressing Stop.
     ///
     /// Stop is not "next, please". Somebody who stops an agent is stepping in, and firing the
@@ -217,6 +252,11 @@ final class TranscriptModel {
     /// The same fold, straight onto the model, for the rows that arrive while the session is open.
     private func absorb(_ message: Message, decisions: [String: String] = [:]) {
         Self.absorb(message, decisions: decisions, into: &rows, indexByRefID: &indexByRefID)
+        // The stored row has arrived, so the bubble drawn from the queue is now the same sentence
+        // drawn twice. Retired here rather than after the send returns, because the pump can read
+        // the row first: only one turn is ever in flight, so a user row landing while something is
+        // sending is that sentence. See `sending`.
+        if message.kind == .user { sending = nil }
     }
 
     // MARK: - Unread
@@ -286,14 +326,47 @@ final class TranscriptModel {
     /// So this never sends. It joins the queue and then asks the queue to move, which is also what
     /// makes the invariant cheap to state: what is delivered is delivered in the order it was
     /// asked for, whatever asked for it. See `Delivery`.
+    ///
+    /// **It also draws the sentence before it awaits anything**, which is the whole of the instant
+    /// echo. Enqueueing is two round trips to a SQLite actor that a diff refresh or an archive can
+    /// be sitting in front of, and handing the line to the runner is a process launch behind that.
+    /// None of it is work the owner should watch an empty transcript through, so the message is on
+    /// screen from the frame the key went down, in the state `Delivery.goesImmediately` says it is
+    /// in: as a sent bubble if nothing is holding the queue, as a pending one if something is. See
+    /// `sending`.
     func submit(_ text: String) async {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, let store else { return }
 
         draft = ""
+
+        // Built here rather than inside the enqueue, so the row that goes in the table and the
+        // bubble that goes on screen are one object with one id. Drawn twice under two ids is the
+        // duplicate that would appear the moment the queue was read back.
+        let delivery = Delivery(targetSessionID: session.id, body: body)
+        if Delivery.goesImmediately(behind: pendingDeliveries, hold: deliveryHold) {
+            sending = delivery
+        } else {
+            pendingDeliveries.append(delivery)
+        }
+
         try? await store.saveDraft(sessionID: session.id, body: "")
 
-        _ = try? await store.enqueueDelivery(Delivery(targetSessionID: session.id, body: body))
+        do {
+            _ = try await store.enqueueDelivery(delivery)
+        } catch {
+            // The bubble was drawn on the promise that this would be queued. It was not, so the
+            // promise is taken back rather than left on screen next to a message that is never
+            // going anywhere.
+            sending = nil
+            pendingDeliveries.removeAll { $0.id == delivery.id }
+            Log.composer.error(
+                "the message could not be queued: \(error.readableMessage, privacy: .public)"
+            )
+            app.alert = BloomAlert(title: "Could not queue the message", message: error.readableMessage)
+            return
+        }
+
         // Not from `drain`, and not before the enqueue. The owner saying something is the moment a
         // queue held over from a relaunch, or paused by a Stop, is meant to move again, and it
         // moves from the front rather than from what was just typed.
@@ -333,6 +406,12 @@ final class TranscriptModel {
         await refreshQueue()
         guard let next = Delivery.next(from: pendingDeliveries, hold: deliveryHold) else { return }
 
+        // Drawn as said from here, whichever moment the queue is moving in: the owner submitting
+        // (where `submit` has already done it, to the same id), a setup script finishing, or the
+        // turn in front of it ending. Before the retire below, so there is no frame on which the
+        // sentence has left the queue and has not yet become a bubble. See `sending`.
+        sending = next
+
         // Retired before it is handed over, rather than after. The pending bubble and the real one
         // are two drawings of the same sentence, and a delivery that is still pending while its
         // turn is starting is drawn twice. `restoreDelivery` below is the one path back.
@@ -367,9 +446,18 @@ final class TranscriptModel {
 
         do {
             try await runner.send(delivery.body)
+            // The runner writes the user row as part of the send, and until this line nothing read
+            // it back: the transcript only pulled rows on an agent event, so the owner's own
+            // message did not appear until the answer did. Reading it here is what retires the
+            // echo, and `absorb` is what clears `sending` when the row lands, so the two drawings
+            // of the sentence swap inside one synchronous pass and nothing on screen moves.
+            await appendLatestMessages()
         } catch {
             setRunning(false)
             statusLabel = nil
+            // Nothing was said after all, so the bubble that said it was going stops claiming so.
+            // The restore below puts it back in the queue, where it is drawn as pending again.
+            sending = nil
             // Nothing was said, so the delivery goes back to being pending rather than reading as
             // sent. It used to go back into the composer, which was right when the composer was
             // the only place an unsent prompt could live and is wrong now that there is a queue:

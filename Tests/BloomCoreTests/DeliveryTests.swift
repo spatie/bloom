@@ -269,3 +269,53 @@ struct DeliveryStoreTests {
         #expect(pending[1].verdict == "done")
     }
 }
+
+/// The owner pressed Return and his own sentence did not appear until the agent began answering
+/// it. The runner writes the user row as part of starting the turn, and the transcript only read
+/// rows back when an agent event arrived, so between the process launch and the model's first word
+/// he typed into a transcript that showed no sign of having heard him.
+///
+/// The transcript now draws the sentence on the frame the key goes down, and this is the decision
+/// it needs to take there: sent, or waiting. It has to agree with the drain, always, or the bubble
+/// says one thing and the queue does another.
+@Suite("What the transcript draws the instant Return is pressed")
+struct DeliveryEchoTests {
+    private func waiting(_ bodies: String...) -> [Delivery] {
+        bodies.map { Delivery(targetSessionID: SessionID("s"), body: $0) }
+    }
+
+    @Test("a message typed into an idle chat has gone, so it is drawn as one that has")
+    func idleGoesAtOnce() {
+        #expect(Delivery.goesImmediately(behind: [], hold: .none))
+    }
+
+    @Test("a message typed while anything is holding the queue is drawn as waiting")
+    func heldIsDrawnAsWaiting() {
+        for hold in DeliveryHold.allCases where !hold.allowsDelivery {
+            #expect(!Delivery.goesImmediately(behind: [], hold: hold))
+        }
+    }
+
+    @Test("a message typed behind one that is still waiting waits too")
+    func queuedBehindWaits() {
+        // Nothing is holding this session, and the message still does not go: the one in front of
+        // it does. Drawing it as sent would be the transcript claiming an order the drain will
+        // not honour.
+        #expect(!Delivery.goesImmediately(behind: waiting("first"), hold: .none))
+    }
+
+    @Test("the bubble and the drain never disagree about what goes next")
+    func echoAgreesWithTheDrain() {
+        // The invariant, stated over every shape the queue can be in: what the transcript draws as
+        // sent is exactly what the drain would hand to the runner. Asked of `next`, which is the
+        // ordering rule itself, so a change to that rule cannot leave this behind.
+        let queues = [waiting(), waiting("first"), waiting("first", "second")]
+        for hold in DeliveryHold.allCases {
+            for queue in queues {
+                let typed = Delivery(targetSessionID: SessionID("s"), body: "just typed")
+                let goesNext = Delivery.next(from: queue + [typed], hold: hold)?.id == typed.id
+                #expect(Delivery.goesImmediately(behind: queue, hold: hold) == goesNext)
+            }
+        }
+    }
+}
