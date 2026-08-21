@@ -796,18 +796,25 @@ final class AppModel {
 
     /// Creates the worktree, selects it, kicks off setup, and sends the first prompt once setup
     /// finishes. The whole flow is one call because that is how it reads to the user.
-    @discardableResult
+    ///
+    /// Thin on purpose. Everything about the workspace itself is `WorkspaceManager.start`, in the
+    /// core, where it can be tested; what is left here is a request, an alert, and the part of the
+    /// tail that is genuinely about this window. Opening a workspace from outside the app has to
+    /// run the same code as opening one from the sheet, and until this was split it could not,
+    /// because the code was on the main actor in a target nothing else can reach.
+    ///
     /// `opensWith` decides the starting layout, not a mode: see `WorkspaceStartMode`. A terminal
     /// workspace skips the session and the opening message, because there is nobody to send one
     /// to, and names its own branch since there is no task to derive one from.
-    /// `controls` are the model, effort, permission mode and fast mode chosen in the create sheet's
-    /// composer footer, which have to be written onto the session before its first turn runs rather
-    /// than left to the app-wide defaults. Nil everywhere else, which keeps those callers exactly
-    /// as they were.
+    ///
+    /// `controls` are the model, effort, permission mode and fast mode chosen in the create
+    /// sheet's composer footer. Nil everywhere else, which keeps those callers exactly as they
+    /// were.
     ///
     /// `staged` are attachments written before this worktree existed. They are moved into it here,
     /// between the worktree being cut and the opening turn being handed over, because that is the
     /// only moment at which the destination exists and nothing is reading the prompt yet.
+    @discardableResult
     func createWorkspace(
         in repo: Repo,
         prompt: String,
@@ -817,7 +824,7 @@ final class AppModel {
         controls: ComposerControls? = nil,
         staged: StagedAttachments? = nil
     ) async -> Workspace? {
-        guard let manager, let store else { return nil }
+        guard let manager else { return nil }
         isCreatingWorkspace = true
         defer { isCreatingWorkspace = false }
 
@@ -829,70 +836,50 @@ final class AppModel {
             prompt, paths: staged?.attachments.map(\.path) ?? []
         )
 
-        // The codename the workspace wears until a model answers. Decided before the worktree
-        // exists so the row never appears under one name and changes to another in the same
-        // breath, and nil whenever nothing is going to be asked, in which case `createWorkspace`
-        // falls back to `Git.title` exactly as it always has.
-        let placeholder = shouldNameAutomatically(name: nil, prompt: spoken, opensWith: opensWith)
-            ? await placeholderName()
-            : nil
+        let request = WorkspaceStartRequest(
+            repo: repo,
+            prompt: spoken,
+            // This method is the owner's, on the main actor, reached from the sheet, a `bloom://`
+            // link, the Services menu and a Shortcut. An agent asking for a workspace does not
+            // come through here: it has no window to select a row in.
+            origin: .user,
+            baseBranch: baseBranch,
+            branch: branch,
+            // A terminal workspace is named after the branch the user typed, because there is no
+            // task to derive a name from and nothing is going to be asked.
+            name: opensWith == .terminal ? branch : nil,
+            controls: controls,
+            opensSession: opensWith == .chat,
+            // The app runs setup itself, through `WorkspaceModel`, so the output streams into the
+            // transcript, a failure raises the one sentence every route says about a failed setup,
+            // and an archive can cancel it. See `adopt`.
+            runsSetup: false
+        )
+
+        // Whether to ask a model for a name at all. Read here rather than inside the closure
+        // below, because it is two facts about this machine that only the main actor holds: the
+        // preference, and whether the CLI is installed.
+        let wantsAName = shouldNameAutomatically(name: nil, prompt: spoken, opensWith: opensWith)
 
         do {
-            let workspace = try await manager.createWorkspace(
-                repo: repo,
-                prompt: spoken,
-                name: opensWith == .terminal ? branch : placeholder,
-                branch: branch,
-                baseBranch: baseBranch
-            )
-            await reload()
-
-            if let placeholder {
-                beginAutomaticNaming(
-                    workspace: workspace,
-                    repo: repo,
-                    prompt: spoken,
-                    placeholder: placeholder
-                )
-            }
-            selection = .workspace(workspace.id)
-            WorkspaceStartMode.record(opensWith, workspaceID: workspace.id)
-
-            let model = model(for: workspace)
-
-            guard opensWith == .chat else {
-                // Setup still runs. Only the agent turn is skipped.
-                model.startSetupThenSend(prompt: nil, repo: repo)
-                return workspace
+            let started = try await manager.start(request) { [weak self] in
+                // Nil declines, and the workspace keeps the title git would have given it.
+                guard wantsAName, let self else { return nil }
+                return await self.placeholderName()
             }
 
-            let session = try await store.upsert(Session(
-                workspaceID: workspace.id,
-                title: Git.title(from: spoken, maxLength: 40),
-                model: controls?.model ?? AppDefaults.fallbackModel,
-                effort: controls?.effort ?? AppDefaults.fallbackEffort,
-                // The sheet chooses a backend for the first chat and for no other. Every chat
-                // opened afterwards picks its own, and two chats in one worktree can be on
-                // different ones.
-                agentKind: controls?.agentKind ?? .claudeCode,
-                permissionMode: controls?.permissionMode ?? AppDefaults.fallbackPermissionMode
-            ))
-            // Fast mode has no column, and the marker stops the composer's first-open defaults
-            // from overruling any of the four the moment the workspace is opened.
-            await controls?.store(sessionID: session.id, in: store)
-            await model.reloadSessions()
-            model.activeSessionID = session.id
+            await adopt(started, repo: repo, prompt: spoken, opensWith: opensWith, select: true)
 
             // The agent gets the sentence as it was written, files and all, because the paths in
             // it are already the paths those files have in the worktree: staging lays a draft out
             // under exactly the layout it will have here, so this is a move and nothing has to be
             // rewritten. What is taken out is anything that failed to arrive, which is a path to
             // nothing and worse than one file fewer.
-            var opening = prompt
-            if let staged, !staged.attachments.isEmpty {
+            var opening: String? = opensWith == .chat ? prompt : nil
+            if opensWith == .chat, let staged, !staged.attachments.isEmpty {
                 let moved = Set(
                     AttachmentFiles
-                        .adopt(staged.attachments, from: staged.directory, into: workspace.path)
+                        .adopt(staged.attachments, from: staged.directory, into: started.workspace.path)
                         .map(\.path)
                 )
                 opening = AttachmentDraft
@@ -900,12 +887,58 @@ final class AppModel {
                     .keeping { moved.contains($0) }
             }
 
-            model.startSetupThenSend(prompt: opening, repo: repo)
-            return workspace
+            // Setup runs whether or not there is an agent turn to follow it. Only the turn is
+            // skipped for a terminal workspace.
+            model(for: started.workspace).startSetupThenSend(prompt: opening, repo: repo)
+            return started.workspace
         } catch {
             alert = BloomAlert(title: "Could not create the workspace", message: error.readableMessage)
             return nil
         }
+    }
+
+    /// What this window does about a workspace that has just been started.
+    ///
+    /// The tail of `createWorkspace`, named and separated so that a caller which is not the sheet
+    /// can decide how much of it applies. `select` is the whole reason: taking the selection is
+    /// right when the owner just pressed Create and wrong when a workspace appears while they are
+    /// typing somewhere else.
+    ///
+    /// Most of what is here is genuinely about a window: which row is selected, which tab the
+    /// workspace opens on, which chat is in front, and the model that will rename it. `reload` is
+    /// the exception. It is here only because nothing observes the store yet, so the sidebar does
+    /// not know a row appeared until somebody tells it. When the state layer lands and the store
+    /// publishes its own changes, that one call goes and the rest stays.
+    ///
+    /// The order is the order `createWorkspace` had, and it matters: the sidebar has to know the
+    /// row exists before anything selects it.
+    func adopt(
+        _ started: StartedWorkspace,
+        repo: Repo,
+        prompt: String,
+        opensWith: WorkspaceStartMode,
+        select: Bool
+    ) async {
+        await reload()
+
+        // Nothing waits for this: the worktree exists and the first turn goes out long before a
+        // model has decided what to call it.
+        if let placeholder = started.placeholder {
+            beginAutomaticNaming(
+                workspace: started.workspace,
+                repo: repo,
+                prompt: prompt,
+                placeholder: placeholder
+            )
+        }
+
+        if select { selection = .workspace(started.workspace.id) }
+        WorkspaceStartMode.record(opensWith, workspaceID: started.workspace.id)
+
+        guard let session = started.session else { return }
+        let model = model(for: started.workspace)
+        await model.reloadSessions()
+        model.activeSessionID = session.id
     }
 
     // MARK: - Continuing after a merge
