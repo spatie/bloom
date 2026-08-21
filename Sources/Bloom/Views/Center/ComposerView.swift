@@ -287,8 +287,14 @@ struct ComposerView: View {
         }
     }
 
+    /// Return, or the button at the end of the footer.
+    ///
+    /// No longer refused while a turn is running. What happens to the words is
+    /// `TranscriptModel.submit`'s decision, not this view's: they join the chat's queue and go
+    /// when the queue is allowed to move. Deciding it here would be a second copy of the rule, and
+    /// the rule already exists in a place the suite can reach it. See `DeliveryHold`.
     private func send() {
-        guard canSend, !transcript.isRunning else { return }
+        guard canSend else { return }
         draftSaveTask?.cancel()
 
         // A file can be moved or deleted between being attached and the prompt going, and naming a

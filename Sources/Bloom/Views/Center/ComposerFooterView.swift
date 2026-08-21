@@ -175,12 +175,18 @@ struct ComposerFooterView: View {
                 .accessibilityLabel("Attach a file")
             }
 
+            // Stop before Send, and only while there is a turn to stop. The pair used to be one
+            // control; see `ComposerStopButton` for why it no longer can be, and why Send is the
+            // one that keeps the end of the row in every state.
+            if isRunning {
+                ComposerStopButton(onStop: onStop)
+            }
+
             ComposerSendButton(
                 intent: intent,
                 isRunning: isRunning,
                 canSend: canSend,
-                onSend: onSend,
-                onStop: onStop
+                onSend: onSend
             )
         }
     }
