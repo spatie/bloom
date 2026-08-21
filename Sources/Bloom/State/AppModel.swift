@@ -152,7 +152,11 @@ final class AppModel {
     /// on the work.
     private static func rememberSelection(_ selection: SidebarSelection) {
         guard let id = selection.workspaceID else { return }
-        UserDefaults.standard.set(id, forKey: lastWorkspaceKey)
+        // `rawValue`, not the id itself. User defaults takes an `Any` and only checks at runtime,
+        // so handing it a `WorkspaceID` compiles and then raises inside `NSUserDefaults`, which
+        // AppKit turns into a trap during the layout pass. Every sidebar click reaches this line,
+        // so the app died on selecting any workspace at all.
+        UserDefaults.standard.set(id.rawValue, forKey: lastWorkspaceKey)
     }
 
     /// Reselects the workspace this window was last on.
