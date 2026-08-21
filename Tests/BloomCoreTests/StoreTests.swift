@@ -104,10 +104,10 @@ struct StoreTests {
     @Test("stores and clears drafts")
     func storesDrafts() async throws {
         let store = try makeTestStore("store")
-        try await store.saveDraft(sessionID: "s1", body: "hello")
-        #expect(try await store.draft(sessionID: "s1") == "hello")
-        try await store.saveDraft(sessionID: "s1", body: "")
-        #expect(try await store.draft(sessionID: "s1") == "")
+        try await store.saveDraft(sessionID: SessionID("s1"), body: "hello")
+        #expect(try await store.draft(sessionID: SessionID("s1")) == "hello")
+        try await store.saveDraft(sessionID: SessionID("s1"), body: "")
+        #expect(try await store.draft(sessionID: SessionID("s1")) == "")
     }
 
     @Test("reorders a workspace's sessions without touching what the runner owns")

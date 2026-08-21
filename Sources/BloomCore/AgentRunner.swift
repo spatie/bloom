@@ -46,7 +46,7 @@ public struct AgentLaunch: Sendable, Hashable {
 /// be holding.
 public actor AgentRunner {
     public nonisolated let workspacePath: String
-    public nonisolated let sessionID: String
+    public nonisolated let sessionID: SessionID
 
     private let store: Store
     private let makeProcess: @Sendable (AgentLaunch) -> any AgentProcessing

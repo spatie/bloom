@@ -30,7 +30,7 @@ final class WorkspaceModel {
     /// Switching tab is the moment a transcript should come into existence, rather than the
     /// moment a view body happens to ask for one. Preparing it here keeps model creation, which
     /// is an observable write, out of the render pass.
-    var activeSessionID: String? {
+    var activeSessionID: SessionID? {
         get { storedActiveSessionID }
         set {
             // Only when it moved, for the reason `reloadSessions` spells out: an identical value
@@ -40,10 +40,10 @@ final class WorkspaceModel {
         }
     }
 
-    private var storedActiveSessionID: String?
+    private var storedActiveSessionID: SessionID?
 
     /// One transcript per session, built on demand.
-    private var transcripts: [String: TranscriptModel] = [:]
+    private var transcripts: [SessionID: TranscriptModel] = [:]
 
     // Inspector.
     var inspectorTab: InspectorTab = .changes
@@ -304,13 +304,13 @@ final class WorkspaceModel {
 
     /// The same pure lookup for any session, which is what a pane needs: with the column split,
     /// the conversation on screen is not always the active one.
-    func existingTranscript(for sessionID: String) -> TranscriptModel? {
+    func existingTranscript(for sessionID: SessionID) -> TranscriptModel? {
         transcripts[sessionID]
     }
 
     /// Builds a session's transcript if this launch has not seen it yet. Called from a task, never
     /// from a body, for the reason `transcript(for:)` spells out.
-    func prepareTranscript(for sessionID: String) {
+    func prepareTranscript(for sessionID: SessionID) {
         guard let session = sessions.first(where: { $0.id == sessionID }) else { return }
         transcript(for: session)
     }

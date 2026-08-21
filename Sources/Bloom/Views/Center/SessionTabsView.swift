@@ -88,7 +88,7 @@ struct SessionTabsView: View {
     /// Every tab in the strip, in the order it is drawn. Identity and order only: a title that
     /// changes must not make the strip move.
     private var order: [String] {
-        model.sessions.map(\.id) + toolTabs.map(\.id)
+        model.sessions.map(\.id.rawValue) + toolTabs.map(\.id)
     }
 
     /// Whether a tab is the one the pane's leading edge runs through.
@@ -127,7 +127,7 @@ struct SessionTabsView: View {
     /// Whether a tab is selected, named by id alone. The strip's two runs answer to two different
     /// cases of `CenterPaneContent`, and `order` has already thrown that distinction away.
     private func isSelected(_ id: String) -> Bool {
-        focused == .chat(id) || focused == .tool(id)
+        focused == .chat(SessionID(id)) || focused == .tool(id)
     }
 
     /// Whether whatever sits immediately before this tool tab is the selected one, which is the
@@ -147,11 +147,11 @@ struct SessionTabsView: View {
             agentGlyph: AgentMark.glyph(for: session.agentKind, in: model.sessions),
             isActive: isSelected(session),
             isRunning: model.isRunning(session),
-            isAtPaneEdge: isAtPaneEdge(session.id),
-            isRenaming: renamingID == session.id,
+            isAtPaneEdge: isAtPaneEdge(session.id.rawValue),
+            isRenaming: renamingID == session.id.rawValue,
             canClose: model.sessions.count > 1,
             onSelect: { select(session) },
-            onStartRename: { renamingID = session.id },
+            onStartRename: { renamingID = session.id.rawValue },
             onCommitRename: { commitRename(session, to: $0) },
             onCancelRename: { renamingID = nil },
             onClose: { close(session) },
@@ -159,7 +159,7 @@ struct SessionTabsView: View {
             onSplitDown: { split(.chat(session.id), axis: .vertical) },
             namespace: selection
         )
-        .draggable(session.id)
+        .draggable(session.id.rawValue)
         .dropDestination(for: String.self) { items, _ in move(items.first, before: session) }
     }
 
@@ -335,8 +335,8 @@ struct SessionTabsView: View {
     // a value nobody reads and the compiler says so.
 
     private func move(_ draggedID: String?, before session: Session) {
-        guard let draggedID, draggedID != session.id,
-              let moved = model.sessions.first(where: { $0.id == draggedID }),
+        guard let draggedID, draggedID != session.id.rawValue,
+              let moved = model.sessions.first(where: { $0.id.rawValue == draggedID }),
               let index = model.sessions.firstIndex(where: { $0.id == session.id })
         else { return }
 

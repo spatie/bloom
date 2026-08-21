@@ -836,7 +836,7 @@ public actor Store {
         ).map(Self.session(from:))
     }
 
-    public func session(id: String) throws -> Session? {
+    public func session(id: SessionID) throws -> Session? {
         try db.query("SELECT * FROM sessions WHERE id = ?", [.text(id)]).first.map(Self.session(from:))
     }
 
@@ -913,7 +913,7 @@ public actor Store {
     /// after its workspace was archived cannot put an orphan back.
     @discardableResult
     public func update(
-        sessionID: String,
+        sessionID: SessionID,
         _ change: @Sendable (inout Session) -> Void
     ) throws -> Session? {
         guard var row = try session(id: sessionID) else { return nil }
@@ -929,7 +929,7 @@ public actor Store {
     /// struct from the UI would clobber whatever the runner persisted since that copy was read,
     /// which is how the agent session id (and therefore resume) gets lost.
     public func updateSessionPreferences(
-        id: String,
+        id: SessionID,
         title: String? = nil,
         model: String? = nil,
         effort: String? = nil,
@@ -970,7 +970,7 @@ public actor Store {
     /// strip was holding would put back whatever those columns looked like when it read them.
     /// `sort_order` has been on the table since the first migration and `sessions(workspaceID:)`
     /// already reads by it, so nothing here needs a schema change.
-    public func reorderSessions(ids: [String]) throws {
+    public func reorderSessions(ids: [SessionID]) throws {
         try db.transaction {
             for (order, id) in ids.enumerated() {
                 try db.run(
@@ -981,14 +981,14 @@ public actor Store {
         }
     }
 
-    public func updateLastReadSeq(sessionID: String, seq: Int) throws {
+    public func updateLastReadSeq(sessionID: SessionID, seq: Int) throws {
         try db.run(
             "UPDATE sessions SET last_read_seq = ? WHERE id = ?",
             [.int(Int64(seq)), .text(sessionID)]
         )
     }
 
-    public func deleteSession(id: String) throws {
+    public func deleteSession(id: SessionID) throws {
         try db.run("DELETE FROM sessions WHERE id = ?", [.text(id)])
     }
 
@@ -1024,21 +1024,21 @@ public actor Store {
 
     // MARK: - Messages
 
-    public func messages(sessionID: String, afterSeq: Int = -1, limit: Int = 100_000) throws -> [Message] {
+    public func messages(sessionID: SessionID, afterSeq: Int = -1, limit: Int = 100_000) throws -> [Message] {
         try db.query(
             "SELECT * FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq LIMIT ?",
             [.text(sessionID), .int(Int64(afterSeq)), .int(Int64(limit))]
         ).map(Self.message(from:))
     }
 
-    public func messageCount(sessionID: String) throws -> Int {
+    public func messageCount(sessionID: SessionID) throws -> Int {
         Int(try db.query(
             "SELECT COUNT(*) AS c FROM messages WHERE session_id = ?",
             [.text(sessionID)]
         ).first?.int("c") ?? 0)
     }
 
-    public func nextSeq(sessionID: String) throws -> Int {
+    public func nextSeq(sessionID: SessionID) throws -> Int {
         let rows = try db.query(
             "SELECT COALESCE(MAX(seq), -1) AS m FROM messages WHERE session_id = ?",
             [.text(sessionID)]
@@ -1064,7 +1064,7 @@ public actor Store {
     /// process (a second `Store` on the same file), and losing that race is a retry, not an error.
     @discardableResult
     public func appendNext(
-        sessionID: String,
+        sessionID: SessionID,
         kind: MessageKind,
         payload: Data,
         durationMS: Int? = nil,
@@ -1103,7 +1103,7 @@ public actor Store {
         error.message.contains("UNIQUE constraint failed: messages.session_id")
     }
 
-    private func nextSeqLocked(sessionID: String) throws -> Int {
+    private func nextSeqLocked(sessionID: SessionID) throws -> Int {
         let rows = try db.query(
             "SELECT COALESCE(MAX(seq), -1) AS m FROM messages WHERE session_id = ?",
             [.text(sessionID)]
@@ -1127,7 +1127,7 @@ public actor Store {
     }
 
     /// Find the stored toolUse row a tool_result belongs to.
-    public func message(sessionID: String, refID: String) throws -> Message? {
+    public func message(sessionID: SessionID, refID: String) throws -> Message? {
         try db.query(
             "SELECT * FROM messages WHERE session_id = ? AND ref_id = ? ORDER BY seq DESC LIMIT 1",
             [.text(sessionID), .text(refID)]
@@ -1136,12 +1136,12 @@ public actor Store {
 
     // MARK: - Drafts
 
-    public func draft(sessionID: String) throws -> String {
+    public func draft(sessionID: SessionID) throws -> String {
         try db.query("SELECT body FROM drafts WHERE session_id = ?", [.text(sessionID)])
             .first?.string("body") ?? ""
     }
 
-    public func saveDraft(sessionID: String, body: String) throws {
+    public func saveDraft(sessionID: SessionID, body: String) throws {
         if body.isEmpty {
             try db.run("DELETE FROM drafts WHERE session_id = ?", [.text(sessionID)])
         } else {
@@ -1313,7 +1313,7 @@ public actor Store {
     // MARK: - Pending permission asks
 
     /// File a question. Idempotent on the request id, so a replayed line cannot double up.
-    public func appendPermissionAsk(sessionID: String, ask: PermissionAsk, at date: Date = Date()) throws {
+    public func appendPermissionAsk(sessionID: SessionID, ask: PermissionAsk, at date: Date = Date()) throws {
         try db.run(
             """
             INSERT INTO permission_asks (id, session_id, tool_use_id, payload, created_at)
@@ -1336,7 +1336,7 @@ public actor Store {
     }
 
     /// The questions one session is still holding a turn open for, oldest first.
-    public func pendingPermissionAsks(sessionID: String) throws -> [PendingPermissionAsk] {
+    public func pendingPermissionAsks(sessionID: SessionID) throws -> [PendingPermissionAsk] {
         try db.query(
             """
             SELECT * FROM permission_asks
@@ -1359,7 +1359,7 @@ public actor Store {
     }
 
     /// How a decided ask was decided, for drawing a row that has already been answered.
-    public func permissionAskDecisions(sessionID: String) throws -> [String: String] {
+    public func permissionAskDecisions(sessionID: SessionID) throws -> [String: String] {
         var decisions: [String: String] = [:]
         for row in try db.query(
             "SELECT id, decision FROM permission_asks WHERE session_id = ? AND decision IS NOT NULL",
@@ -1508,7 +1508,7 @@ public actor Store {
         }
         return PendingPermissionAsk(
             requestID: id,
-            sessionID: row.string("session_id") ?? "",
+            sessionID: SessionID(row.string("session_id") ?? ""),
             ask: ask,
             askedAt: row.date("created_at") ?? Date()
         )
@@ -1516,7 +1516,7 @@ public actor Store {
 
     private static func session(from row: Row) -> Session {
         Session(
-            id: row.string("id") ?? newID(),
+            id: SessionID(row.string("id") ?? newID()),
             workspaceID: WorkspaceID(row.string("workspace_id") ?? ""),
             title: row.string("title") ?? "Session",
             agentSessionID: row.string("agent_session_id"),
@@ -1573,7 +1573,7 @@ public actor Store {
     private static func message(from row: Row) -> Message {
         Message(
             id: row.int("id") ?? 0,
-            sessionID: row.string("session_id") ?? "",
+            sessionID: SessionID(row.string("session_id") ?? ""),
             seq: Int(row.int("seq") ?? 0),
             kind: MessageKind(rawValue: row.string("kind") ?? "") ?? .system,
             payload: row.data("payload") ?? Data(),

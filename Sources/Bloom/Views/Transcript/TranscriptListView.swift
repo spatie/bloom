@@ -45,14 +45,14 @@ struct TranscriptListView: View {
     /// eighty rows in one frame and the rest of the history a beat later, and neither is work
     /// turning up in front of the reader: it is the pane being pointed somewhere else. See
     /// `trackArrivals` and the `task` below, which is where a session stops arriving.
-    @State private var arrivalSession = ""
+    @State private var arrivalSession: SessionID?
 
     /// The session whose history has been put back, if any. See `visibleRows`.
     ///
     /// A session id rather than a flag, because this view is the same view in the same place for
     /// every workspace the window visits, and a flag left standing from the last one would draw
     /// the next one's whole history onto the frame that is trying to arrive.
-    @State private var drawnInFull = ""
+    @State private var drawnInFull: SessionID?
 
     /// Sentinel id, negative so it can never collide with a row sequence number.
     private static let streamingID = -2
@@ -261,12 +261,12 @@ struct TranscriptListView: View {
                 // `task`, because leaving a session before its history had landed and coming
                 // straight back would otherwise find its own id still recorded and put four
                 // thousand rows on the frame that is trying to arrive.
-                drawnInFull = ""
+                drawnInFull = nil
                 // And nothing in the session being arrived at counts as having arrived. Cleared
                 // here as well as set in `task` for the same reason `drawnInFull` is: leaving a
                 // session before it had settled and coming straight back must not find its own
                 // id still recorded and fade its whole tail up.
-                arrivalSession = ""
+                arrivalSession = nil
             }
             .task(id: transcript.session.id) {
                 await transcript.load()

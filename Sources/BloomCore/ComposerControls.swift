@@ -104,13 +104,13 @@ public struct ComposerControls: Equatable, Sendable {
 
     /// Fast mode has no column on `Session`, so it lives in the store's key value table. Per
     /// session, and it survives a relaunch, which is all it promises.
-    public static func fastModeKey(sessionID: String) -> String {
+    public static func fastModeKey(sessionID: SessionID) -> String {
         "session.\(sessionID).fastMode"
     }
 
     /// The output style has no column either, for the same reason and on the same terms.
     /// `AgentRunner.refreshOutputStyle` is what reads it back.
-    public static func outputStyleKey(sessionID: String) -> String {
+    public static func outputStyleKey(sessionID: SessionID) -> String {
         "session.\(sessionID).outputStyle"
     }
 
@@ -119,7 +119,7 @@ public struct ComposerControls: Equatable, Sendable {
     /// only by the composer's own first open; the create sheet writes it too, because a model
     /// picked in the sheet is exactly as deliberate as one picked in the footer and must survive
     /// the workspace being opened.
-    public static func defaultsAppliedKey(sessionID: String) -> String {
+    public static func defaultsAppliedKey(sessionID: SessionID) -> String {
         "session.\(sessionID).defaultsApplied"
     }
 
@@ -129,7 +129,7 @@ public struct ComposerControls: Equatable, Sendable {
     /// Both of these store nil for their off state rather than a word for it, so a session that
     /// was never asked and one that was asked and said no read back the same. `AgentRunner` treats
     /// them the same too, which is what keeps the two ends from disagreeing.
-    public func store(sessionID: String, in store: Store) async {
+    public func store(sessionID: SessionID, in store: Store) async {
         try? await store.setSetting(
             Self.fastModeKey(sessionID: sessionID), isFastMode ? "1" : nil
         )

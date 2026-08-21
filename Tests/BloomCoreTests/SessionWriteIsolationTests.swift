@@ -183,7 +183,7 @@ struct SessionWriteIsolationTests {
         let session = try await makeStoredSession(store)
 
         try await store.update(sessionID: session.id) {
-            $0.id = "some-other-id"
+            $0.id = SessionID("some-other-id")
             $0.workspaceID = WorkspaceID("some-other-workspace")
             $0.title = "Renamed"
         }

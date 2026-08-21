@@ -127,13 +127,13 @@ public enum PermissionGrantIndex {
 /// that simply stopped mid sentence.
 public struct PendingPermissionAsk: Identifiable, Sendable, Hashable {
     public var requestID: String
-    public var sessionID: String
+    public var sessionID: SessionID
     public var ask: PermissionAsk
     public var askedAt: Date
 
     public var id: String { requestID }
 
-    public init(requestID: String, sessionID: String, ask: PermissionAsk, askedAt: Date) {
+    public init(requestID: String, sessionID: SessionID, ask: PermissionAsk, askedAt: Date) {
         self.requestID = requestID
         self.sessionID = sessionID
         self.ask = ask

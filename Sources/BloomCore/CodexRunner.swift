@@ -14,7 +14,7 @@ import Foundation
 public actor CodexRunner: SessionRunner {
     public nonisolated let agentKind = AgentKind.codex
     public nonisolated let workspacePath: String
-    public nonisolated let sessionID: String
+    public nonisolated let sessionID: SessionID
 
     private let store: Store
     private let makeClient: @Sendable (CodexClient.Configuration) -> CodexClient

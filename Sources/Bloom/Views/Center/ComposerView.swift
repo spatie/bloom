@@ -76,7 +76,7 @@ struct ComposerView: View {
             isFocused: $isFocused,
             mentionRoot: transcript.workspace.path,
             attachmentRoot: transcript.workspace.path,
-            attachmentKey: transcript.session.id,
+            attachmentKey: transcript.session.id.rawValue,
             editorHeight: editorHeight,
             onContentHeightChange: { contentHeight = $0 },
             onKey: handle(key:),
@@ -173,7 +173,7 @@ struct ComposerView: View {
     }
 
     private var attachments: [PromptAttachment] {
-        PromptAttachmentStore.shared.attachments(for: transcript.session.id)
+        PromptAttachmentStore.shared.attachments(for: transcript.session.id.rawValue)
     }
 
     /// Attachments alone are a turn. Dropping a screenshot in and pressing send is a sentence, and
@@ -309,7 +309,7 @@ struct ComposerView: View {
         // names those paths, and deleting them out from under it would break the one thing they
         // were for.
         PromptAttachmentStore.shared.settle(
-            sent: text, sessionID: transcript.session.id, workspace: worktree
+            sent: text, sessionID: transcript.session.id.rawValue, workspace: worktree
         )
         caret = 0
         let transcript = transcript

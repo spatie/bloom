@@ -262,7 +262,7 @@ struct AgentRunnerArgvTests {
     /// anybody has ever set back off.
     @Test("the fast mode key is the one already in the database")
     func fastModeKeyIsStable() {
-        #expect(ComposerControls.fastModeKey(sessionID: "abc") == "session.abc.fastMode")
+        #expect(ComposerControls.fastModeKey(sessionID: SessionID("abc")) == "session.abc.fastMode")
     }
 
     // MARK: Output style
@@ -350,7 +350,7 @@ struct AgentRunnerArgvTests {
     /// The same, for the same reason. Both keys are in the user's database already.
     @Test("the output style key is the one already in the database")
     func outputStyleKeyIsStable() {
-        #expect(ComposerControls.outputStyleKey(sessionID: "abc") == "session.abc.outputStyle")
+        #expect(ComposerControls.outputStyleKey(sessionID: SessionID("abc")) == "session.abc.outputStyle")
     }
 
     /// A flag left dangling at the end silently eats whatever the CLI reads next, or nothing.

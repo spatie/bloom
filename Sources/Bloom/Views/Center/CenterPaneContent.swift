@@ -1,4 +1,5 @@
 import Foundation
+import BloomCore
 
 /// What one pane of the centre column is showing.
 ///
@@ -11,6 +12,6 @@ import Foundation
 /// than migrated. A pane that outlived what it pointed at falls back to whatever the workspace has
 /// left, which is why `CenterPaneStore` resolves rather than trusts.
 enum CenterPaneContent: Codable, Hashable, Sendable {
-    case chat(String)
+    case chat(SessionID)
     case tool(String)
 }

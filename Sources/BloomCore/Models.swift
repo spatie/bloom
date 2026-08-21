@@ -236,7 +236,7 @@ public enum PermissionMode: String, Sendable, Codable, CaseIterable {
 }
 
 public struct Session: Identifiable, Sendable, Hashable, Codable {
-    public var id: String
+    public var id: SessionID
     public var workspaceID: WorkspaceID
     public var title: String
     public var agentSessionID: String?
@@ -268,7 +268,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     public var contextTokens: Int
 
     public init(
-        id: String = newID(),
+        id: SessionID = .new(),
         workspaceID: WorkspaceID,
         title: String = "New session",
         agentSessionID: String? = nil,
@@ -329,7 +329,7 @@ public enum MessageKind: String, Sendable, Codable {
 
 public struct Message: Identifiable, Sendable, Hashable {
     public var id: Int64
-    public var sessionID: String
+    public var sessionID: SessionID
     public var seq: Int
     public var kind: MessageKind
     public var payload: Data
@@ -340,7 +340,7 @@ public struct Message: Identifiable, Sendable, Hashable {
 
     public init(
         id: Int64 = 0,
-        sessionID: String,
+        sessionID: SessionID,
         seq: Int,
         kind: MessageKind,
         payload: Data,

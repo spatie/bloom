@@ -187,7 +187,7 @@ struct ArchivedWorkspaceView: View {
         HStack(spacing: Metrics.spacingWide) {
             Picker("Session", selection: sessionBinding) {
                 ForEach(model.sessions) { session in
-                    Text(session.title).tag(session.id as String?)
+                    Text(session.title).tag(session.id as SessionID?)
                 }
             }
             .labelsHidden()
@@ -202,7 +202,7 @@ struct ArchivedWorkspaceView: View {
 
     /// Written through a binding of its own rather than `$model.activeSessionID`, so it is clear
     /// that setting it is what prepares the transcript. See `WorkspaceModel.activeSessionID`.
-    private var sessionBinding: Binding<String?> {
+    private var sessionBinding: Binding<SessionID?> {
         Binding(
             get: { model.activeSessionID },
             set: { model.activeSessionID = $0 }
