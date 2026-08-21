@@ -17,15 +17,11 @@ struct CenterPaneView: View {
     /// Whether the column is split at all. A single pane has nothing to close back to, so its
     /// menu does not offer it.
     var isSplit: Bool
-    /// Whether the pointer is resting on the grip that would pick this pane up. See
-    /// `PaneGrabHandle`: the grip is seven points across and what it is about is half the column,
-    /// so the pane is where that gets said.
-    var isOffered = false
 
     @State private var size: CGSize = .zero
     @State private var isTargeted = false
-    /// Which part of this pane a drag in flight is currently over, which is the part it would land
-    /// in. Nil when no drag is over the pane at all.
+    /// Which part of this pane a tab being dragged is currently over, which is the part it would
+    /// land in. Nil when no drag is over the pane at all.
     ///
     /// `isTargeted` alone cannot draw this. It says in or out and nothing else, so the highlight it
     /// used to drive was the whole pane whichever quarter the pointer was in, which says "something
@@ -34,7 +30,7 @@ struct CenterPaneView: View {
     /// measured side by side against a hand built `NSDraggingInfo`, an AppKit point ten up from the
     /// bottom of a sixty point view reaches both of them as fifty down from the top, so the wash
     /// and the drop cannot disagree about which edge was meant.
-    @State private var landing: Edge?
+    @State private var landing: PaneRegion?
 
     private var tabs: WorkspaceTabsStore { .shared }
 
@@ -42,11 +38,6 @@ struct CenterPaneView: View {
     private var showing: PaneContent? {
         tab.map { tabs.content(of: pane, in: $0) }
     }
-
-    /// How much of the pane, on each side, counts as "open it beside this one" rather than "show it
-    /// here". A quarter: wide enough to hit without aiming, narrow enough that the middle is still
-    /// most of the pane.
-    private static let edgeShare: CGFloat = 0.25
 
     var body: some View {
         content
@@ -67,13 +58,11 @@ struct CenterPaneView: View {
             }
             .onDropSessionUpdated { session in
                 switch session.phase {
-                case .entering, .active: landing = edge(at: session.location)
+                case .entering, .active: landing = PaneRegion.at(session.location, in: size)
                 default: landing = nil
                 }
             }
             .overlay { dropHighlight }
-            // The pane a grip would pick up, said on the pane rather than on the grip.
-            .overlay { if isOffered { offeredHighlight } }
             .contextMenu { menu }
             .task(id: showing) { prepare() }
     }
@@ -130,25 +119,14 @@ struct CenterPaneView: View {
     private var dropHighlight: some View {
         if isTargeted, let landing {
             GeometryReader { proxy in
+                let frame = landing.frame(in: CGRect(origin: .zero, size: proxy.size))
                 Rectangle()
                     .fill(Palette.accent.opacity(0.12))
-                    .frame(
-                        width: landing.width(of: proxy.size, share: Self.edgeShare),
-                        height: landing.height(of: proxy.size, share: Self.edgeShare)
-                    )
-                    .offset(landing.offset(in: proxy.size, share: Self.edgeShare))
+                    .frame(width: frame.width, height: frame.height)
+                    .offset(x: frame.minX, y: frame.minY)
             }
             .allowsHitTesting(false)
         }
-    }
-
-    /// Fainter than the drop wash and in the same colour, because it is the same sentence said
-    /// earlier: this pane is what the gesture is about. A grip is hovered before a drag, and a
-    /// region is washed during one, so the two are never on screen at once.
-    private var offeredHighlight: some View {
-        Rectangle()
-            .fill(Palette.accent.opacity(0.06))
-            .allowsHitTesting(false)
     }
 
     private var menu: CenterPaneMenu {
@@ -198,62 +176,24 @@ struct CenterPaneView: View {
         }
     }
 
-    /// Something let go over this pane, which is one of two things.
+    /// A tab let go over this pane: the middle shows it here, an edge opens it beside this pane on
+    /// that side.
     ///
-    /// A TAB from the strip is content arriving: the middle shows it here, an edge opens it beside
-    /// this pane on that side. A PANE of the tab already in front is the arrangement being changed:
-    /// nothing arrives and nothing leaves, the same pane id ends up somewhere else in the tree, and
-    /// so the shell or the page it was showing carries on running untouched.
-    ///
-    /// The two are told apart by the payload rather than by the id, because the id cannot tell
-    /// them apart: an unsplit tab's only pane carries the id of the content at its root, and
-    /// splitting that tab leaves the pane carrying it, so one string is legitimately both. See
-    /// `PaneDrop`.
-    ///
-    /// Both read the same five regions, and deliberately: a user who has learned where to let a
-    /// tab go has learned where to let a pane go. The middle is the one place they differ, and only
-    /// because they must. A tab let go there replaces what the pane was showing, which is free
-    /// because the thing replaced is still a tab of its own; a pane cannot be replaced that way,
-    /// since the pane already there is a running shell or a loaded page and nothing about a drag
-    /// says to end one. So the two exchange places instead.
+    /// Only a tab. A PANE is moved by a gesture on the divider rather than by a drop, and that is
+    /// not a preference: `.dropDestination` installs an `NSView` drawn BEHIND the content it is
+    /// applied to, and a `WKWebView` registers seventeen dragged types of its own and sits on top
+    /// of it, so AppKit offers a drag over a browser pane to the page and never to us. See
+    /// `CenterPaneDivider`, which is where that measurement is written down. The same fault means
+    /// a TAB cannot be dropped on a browser pane either, which is older than any of this and is
+    /// not fixed here.
     private func accept(_ droppedID: String?, at location: CGPoint) -> Bool {
-        guard let tab, let droppedID else { return false }
-
-        switch PaneDrop(encoded: droppedID) {
-        case .pane(let moved): return move(moved, to: edge(at: location), in: tab)
-        case .tab(let id): return show(id, at: edge(at: location), in: tab)
-        }
-    }
-
-    /// A pane of this tab, put somewhere else in this tab.
-    ///
-    /// Only a pane of the tab in front, and there is no other tree on screen for one to have come
-    /// from. A pane dropped anywhere else, the strip included, names nothing that anything there
-    /// holds and is declined rather than half handled: moving a pane into another tab would mean
-    /// grafting it into a second tree and taking it out of the first, which is a different
-    /// operation and not this one.
-    private func move(_ moved: String, to edge: Edge, in tab: PaneContent) -> Bool {
-        guard tabs.layout(of: tab).contains(moved) else { return false }
-
-        guard let placement = edge.placement else {
-            return tabs.exchange(pane: moved, with: pane, in: tab, of: model)
-        }
-        return tabs.move(
-            pane: moved, beside: pane,
-            axis: placement.axis, before: placement.before,
-            in: tab, of: model
-        )
-    }
-
-    /// A tab from the strip, shown here or opened beside this pane.
-    private func show(_ id: String, at edge: Edge, in tab: PaneContent) -> Bool {
-        guard let dropped = droppedTab(named: id) else { return false }
+        guard let tab, let droppedID, let dropped = droppedTab(named: droppedID) else { return false }
         // A tab that carries a split arrangement of its own cannot be folded into this one:
         // grafting one tree into another is an operation `SplitLayout` does not have. See
         // `WorkspaceTabsStore.canAbsorb`.
         guard tabs.canAbsorb(dropped) else { return false }
 
-        guard let placement = edge.placement else {
+        guard let placement = PaneRegion.at(location, in: size).placement else {
             tabs.replace(pane: pane, of: tab, with: dropped, in: model)
             return true
         }
@@ -279,62 +219,6 @@ struct CenterPaneView: View {
             return .tool(id)
         }
         return nil
-    }
-
-    /// Which of the five regions of a pane a point is in.
-    ///
-    /// One vocabulary for both kinds of drop, and one place the geometry of it is written down, so
-    /// the wash drawn while a drag is in flight cannot describe a different region from the one the
-    /// drop then uses.
-    private enum Edge {
-        case none, leading, trailing, top, bottom
-
-        /// Where the thing being dropped goes, or nil for the middle, which is not a placement at
-        /// all: it is a replacement for a tab and an exchange for a pane.
-        var placement: (axis: SplitAxis, before: Bool)? {
-            switch self {
-            case .none: nil
-            case .leading: (.horizontal, true)
-            case .trailing: (.horizontal, false)
-            case .top: (.vertical, true)
-            case .bottom: (.vertical, false)
-            }
-        }
-
-        func width(of size: CGSize, share: CGFloat) -> CGFloat {
-            switch self {
-            case .leading, .trailing: size.width * share
-            case .none, .top, .bottom: size.width
-            }
-        }
-
-        func height(of size: CGSize, share: CGFloat) -> CGFloat {
-            switch self {
-            case .top, .bottom: size.height * share
-            case .none, .leading, .trailing: size.height
-            }
-        }
-
-        /// From the pane's top leading corner, which is where a `GeometryReader` puts what it holds.
-        func offset(in size: CGSize, share: CGFloat) -> CGSize {
-            switch self {
-            case .none, .leading, .top: .zero
-            case .trailing: CGSize(width: size.width * (1 - share), height: 0)
-            case .bottom: CGSize(width: 0, height: size.height * (1 - share))
-            }
-        }
-    }
-
-    private func edge(at location: CGPoint) -> Edge {
-        guard size.width > 0, size.height > 0 else { return .none }
-        let horizontal = size.width * Self.edgeShare
-        let vertical = size.height * Self.edgeShare
-
-        if location.x < horizontal { return .leading }
-        if location.x > size.width - horizontal { return .trailing }
-        if location.y < vertical { return .top }
-        if location.y > size.height - vertical { return .bottom }
-        return .none
     }
 
     // MARK: - Empty states

@@ -8,6 +8,11 @@ import BloomCore
 /// built out of `AnyView` because the view type would be recursive, and every reshape would move a
 /// live transcript, web view or shell into a different superview. Flat means a pane keeps its place
 /// in the hierarchy however the tree is rearranged around it.
+///
+/// That is also what makes a pane MOVE cheap. `SplitLayout.move` keeps every pane id, so a
+/// rearranged tree changes the frame a pane is drawn at and never which view is drawing it: the
+/// `ForEach` below is keyed by pane id, so SwiftUI moves the view it already has rather than
+/// building a new one. A moved terminal keeps its shell and a moved browser keeps its page.
 struct CenterPanesView: View {
     @Bindable var model: WorkspaceModel
 
@@ -16,6 +21,17 @@ struct CenterPanesView: View {
     /// What a split takes out of the space its two panes share. One point, because the strip the
     /// pointer aims at is drawn over the panes rather than reserved between them.
     private static let dividerThickness: Double = 1
+
+    /// The space a pane drag is measured in.
+    ///
+    /// Named rather than local, because the divider a drag starts from MOVES the moment a ratio
+    /// changes, and a translation measured from an origin that the translation itself moved is a
+    /// feedback loop. It is the column, so it is also the space the pane frames are already in and
+    /// the space the wash is drawn in, which means the point the pointer is at, the pane it is
+    /// over and the rectangle that says so are all one set of numbers rather than three.
+    ///
+    /// Nonisolated so `CenterPaneDivider` can name it without being on the main actor to do so.
+    nonisolated static let space = "bloom.centrePanes"
 
     /// What identifies a pane to `ForEach`, which is not the same question as what identifies it
     /// to the store.
@@ -42,14 +58,18 @@ struct CenterPanesView: View {
     /// on the main actor, and a name that never changes has no business being one of them.
     nonisolated static let soloPane = "solo"
 
-    /// Which pane the pointer is offering to pick up, from whichever grip it is resting on.
+    /// A pane being carried, and where it would land if it were let go now.
     ///
-    /// It lives here rather than in the grip because the answer is drawn somewhere else: the grip
-    /// is seven points across and the thing it is about is half the column, so the pane itself is
-    /// what says which one is meant. Without it the pair of grips would be two identical marks
-    /// with nothing to tell them apart until after the mouse had gone down, which is exactly the
-    /// guessing having two of them is meant to end.
-    @State private var offered: String?
+    /// `landing` is nil for a drag over somewhere that would not take it, which is the whole of
+    /// how the gesture refuses: no wash appears, and letting go there does nothing. A drop that
+    /// cannot be honoured says so while it is happening rather than after.
+    private struct PaneMove: Equatable {
+        var pane: String
+        var point: CGPoint
+        var landing: PaneLanding?
+    }
+
+    @State private var move: PaneMove?
 
     var body: some View {
         // Read here rather than inside the `GeometryReader`, so the dependency on the store is
@@ -72,8 +92,7 @@ struct CenterPanesView: View {
                             model: model,
                             tab: tab,
                             pane: item.pane,
-                            isSplit: layout.paneCount > 1,
-                            isOffered: item.pane == offered
+                            isSplit: layout.paneCount > 1
                         )
                         .frame(width: item.frame.width, height: item.frame.height)
                         // A pane whose content cannot fit the width it was given keeps the
@@ -84,39 +103,131 @@ struct CenterPanesView: View {
                     }
 
                     ForEach(geometry.dividers, id: \.path) { divider in
-                        SplitPaneDivider(
+                        let sides = layout.sides(at: divider.path)
+                        CenterPaneDivider(
                             axis: divider.axis,
                             ratio: divider.ratio,
                             span: divider.span,
                             length: divider.axis == .horizontal
                                 ? divider.frame.height
                                 : divider.frame.width,
-                            color: Palette.border
-                        ) { ratio in
-                            guard let tab else { return }
-                            tabs.setRatio(ratio, at: divider.path, in: tab)
-                        }
-                        .position(x: divider.frame.midX, y: divider.frame.midY)
-
-                        // Over the divider rather than inside it. `SplitPaneDivider` is shared
-                        // with the terminal panel's own splits, which have no panes to move and
-                        // no tree to move them in, and a drag source nested inside a view that
-                        // already carries a `DragGesture` is a fight over the same mouse down.
-                        // Two sibling views, each owning its own strip of the divider, is the
-                        // arrangement where neither has to win.
-                        let sides = layout.sides(at: divider.path)
-                        PaneGrabHandle(
-                            axis: divider.axis,
+                            line: divider.frame,
                             first: sides?.first,
                             second: sides?.second,
-                            onPointerOver: { offered = $0 }
+                            onResize: { ratio in
+                                guard let tab else { return }
+                                tabs.setRatio(ratio, at: divider.path, in: tab)
+                            },
+                            onMoveChanged: { pane, point in
+                                move = PaneMove(
+                                    pane: pane,
+                                    point: point,
+                                    landing: landing(of: pane, at: point, in: geometry, of: layout)
+                                )
+                            },
+                            onMoveEnded: { pane, point in
+                                move = nil
+                                guard let tab else { return }
+                                commit(pane, at: point, in: geometry, of: layout, tab: tab)
+                            }
                         )
                         .position(x: divider.frame.midX, y: divider.frame.midY)
                     }
+
+                    if let move {
+                        // Over everything, because it describes where a thing will go rather than
+                        // being a thing in the column.
+                        if let landing = move.landing {
+                            Rectangle()
+                                .fill(Palette.accent.opacity(0.12))
+                                .frame(width: landing.frame.width, height: landing.frame.height)
+                                .position(x: landing.frame.midX, y: landing.frame.midY)
+                                .allowsHitTesting(false)
+                        }
+                        ghost(of: move, in: tab)
+                    }
                 }
             }
+            .coordinateSpace(.named(Self.space))
         }
         .background(Palette.windowBackground)
+    }
+
+    // MARK: - Moving a pane
+
+    /// Where a carried pane would land, or nil for somewhere that would not take it.
+    ///
+    /// It answers by trying the move on a copy of the tree rather than by listing the cases a view
+    /// would have to keep in step with `SplitLayout`. A pane let go on its own middle, on the side
+    /// of the divider it already sits against, or over a gap between panes all come back nil here
+    /// for the same reason they would be refused a moment later, which is the point: the wash the
+    /// user is looking at and the edit they are about to get are the same answer.
+    private func landing(
+        of pane: String, at point: CGPoint, in geometry: SplitGeometry, of layout: SplitLayout
+    ) -> PaneLanding? {
+        guard let landing = geometry.landing(at: point) else { return nil }
+        var probe = layout
+        return apply(pane, to: landing, in: &probe) ? landing : nil
+    }
+
+    @discardableResult
+    private func apply(_ pane: String, to landing: PaneLanding, in layout: inout SplitLayout) -> Bool {
+        guard let placement = landing.region.placement else {
+            return layout.exchange(pane, with: landing.pane)
+        }
+        return layout.move(
+            pane, beside: landing.pane, axis: placement.axis, before: placement.before
+        )
+    }
+
+    private func commit(
+        _ pane: String, at point: CGPoint, in geometry: SplitGeometry, of layout: SplitLayout,
+        tab: PaneContent
+    ) {
+        guard let landing = landing(of: pane, at: point, in: geometry, of: layout) else { return }
+
+        if let placement = landing.region.placement {
+            tabs.move(
+                pane: pane, beside: landing.pane,
+                axis: placement.axis, before: placement.before,
+                in: tab, of: model
+            )
+        } else {
+            tabs.exchange(pane: pane, with: landing.pane, in: tab, of: model)
+        }
+    }
+
+    /// The small plate under the pointer while a pane is being carried.
+    ///
+    /// Deliberately a token rather than a picture of the pane. A live shell or a loaded page cannot
+    /// be snapshotted for a drag without stopping to render it, and a scaled copy of half the
+    /// column is a lot of moving furniture to say one thing. Ghostty carries a small rounded
+    /// rectangle for the same reason, and the wash is what actually says where it is going.
+    @ViewBuilder
+    private func ghost(of move: PaneMove, in tab: PaneContent?) -> some View {
+        let symbol = tab.map { icon(of: tabs.content(of: move.pane, in: $0)) } ?? PaneKind.chat.symbol
+
+        RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
+            .fill(Palette.surface)
+            .overlay {
+                RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
+                    .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+            }
+            .overlay { Image(systemName: symbol).foregroundStyle(Palette.textSecondary) }
+            .frame(width: 96, height: 56)
+            .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
+            .position(x: move.point.x, y: move.point.y)
+            .allowsHitTesting(false)
+    }
+
+    private func icon(of content: PaneContent) -> String {
+        switch content {
+        case .chat:
+            return PaneKind.chat.symbol
+        case .tool(let id):
+            let open = CenterTabStore.shared.tabs(for: model.workspace.id)
+            return open.first { $0.id == id }?.icon ?? PaneKind.terminal.symbol
+        }
     }
 }
 
