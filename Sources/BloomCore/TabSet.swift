@@ -28,7 +28,16 @@ public enum TabSet {
         tools: [String],
         claimed: Set<PaneContent> = []
     ) -> [PaneContent] {
-        (sessions.map(PaneContent.chat) + tools.map(PaneContent.tool))
-            .filter { !claimed.contains($0) }
+        all(sessions: sessions, tools: tools).filter { !claimed.contains($0) }
+    }
+
+    /// Everything a workspace has that COULD be a tab, in the same two runs, including whatever a
+    /// tab has absorbed into a pane.
+    ///
+    /// What a stored strip order is checked against and seeded from. An absorbed thing has to keep
+    /// its place in that list even while it is not in the strip, or closing the tab that holds it
+    /// would hand it back at the far end instead of where the user left it.
+    public static func all(sessions: [SessionID], tools: [String]) -> [PaneContent] {
+        sessions.map(PaneContent.chat) + tools.map(PaneContent.tool)
     }
 }
