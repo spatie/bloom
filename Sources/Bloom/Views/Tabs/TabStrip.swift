@@ -225,12 +225,6 @@ struct TabStrip<Leading: View, Tabs: View, Append: View, Trailing: View>: View {
         // strip halfway down the window, and a light travelling that would be a second heartbeat
         // in a window that is meant to have one.
         .tabStripMaterial(sweeping: pane == .content)
-        // TEMPORARY. Whether a drag reaches the strip at all, which is the question a tab's own
-        // destination not firing cannot answer on its own. Delete with `Log.drag`.
-        .onDropSessionUpdated { drop in
-            guard drop.phase == .entering || drop.phase == .exiting else { return }
-            Log.drag.notice("STRIP \(String(describing: drop.phase), privacy: .public) at \(drop.location.debugDescription, privacy: .public) size \(drop.size.debugDescription, privacy: .public)")
-        }
     }
 }
 
