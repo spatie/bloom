@@ -14,15 +14,17 @@ public struct FilesToCopyPlan: Sendable, Hashable {
     public struct Match: Sendable, Hashable, Identifiable {
         /// Relative to the repository root, which is how the pattern is written.
         public var path: String
-        public var bytes: Int64
         /// Matched by the pattern, but skipped: the copier copies files, not trees.
         public var isDirectory: Bool
 
         public var id: String { path }
 
-        public init(path: String, bytes: Int64, isDirectory: Bool) {
+        /// No size. It was carried here to be shown beside each path, and how big a `.env` is
+        /// answers nothing about whether the pattern is right, which is the only question this
+        /// preview exists to settle. Carrying it cost a `stat` per match, up to `defaultLimit` of
+        /// them, re-run on every keystroke in the pattern field.
+        public init(path: String, isDirectory: Bool) {
             self.path = path
-            self.bytes = bytes
             self.isDirectory = isDirectory
         }
     }
@@ -96,15 +98,12 @@ public enum FilesToCopyResolver {
 
                 if entryIsDirectory.boolValue {
                     plan.directoryCount += 1
-                    found.append(.init(path: relative, bytes: 0, isDirectory: true))
+                    found.append(.init(path: relative, isDirectory: true))
                     continue
                 }
 
                 plan.fileCount += 1
-                let size = try? manager.attributesOfItem(atPath: absolute)[.size]
-                found.append(
-                    .init(path: relative, bytes: (size as? NSNumber)?.int64Value ?? 0, isDirectory: false)
-                )
+                found.append(.init(path: relative, isDirectory: false))
             }
 
             if !matchedAnything { plan.unmatchedPatterns.append(trimmed) }

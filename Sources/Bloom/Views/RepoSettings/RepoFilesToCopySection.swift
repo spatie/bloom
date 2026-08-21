@@ -150,9 +150,15 @@ struct RepoFilesToCopySection: View {
 
                     Spacer(minLength: Metrics.spacingSmall)
 
-                    Text(match.isDirectory ? "folder, not copied" : Self.size(match.bytes))
-                        .font(Typo.caption)
-                        .foregroundStyle(Palette.textSecondary)
+                    // Only the folders say anything on the right. A file's size was here too, and
+                    // it answered a question nobody was asking: the list is here to confirm which
+                    // paths the pattern caught, and a folder needs the note because it is caught
+                    // and then skipped.
+                    if match.isDirectory {
+                        Text("folder, not copied")
+                            .font(Typo.caption)
+                            .foregroundStyle(Palette.textSecondary)
+                    }
                 }
                 .padding(.horizontal, Metrics.inset)
                 .padding(.vertical, Metrics.spacingSmall)
@@ -180,9 +186,5 @@ struct RepoFilesToCopySection: View {
     private var remainder: Int {
         let total = model.plan.fileCount + model.plan.directoryCount
         return max(0, total - Self.listedMatches)
-    }
-
-    private static func size(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }
