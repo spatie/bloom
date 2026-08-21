@@ -28,7 +28,6 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$BIN_DIR/Bloom" "$APP/Contents/MacOS/Bloom"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
-[[ -f Resources/AppIcon.icns ]] && cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 plist_set() {
   local key="$1" type="$2" value="$3"
@@ -132,12 +131,12 @@ embed_sparkle
 # macOS 26 draws an app icon from a layered Icon Composer document rather than from a flat bitmap:
 # the glass, the shadow and the specular pass belong to the system and are applied live to the
 # layers. Resources/Bloom.icon is that document. actool compiles it into an Assets.car, which the
-# system finds through CFBundleIconName in Info.plist. AppIcon.icns and CFBundleIconFile stay
-# exactly as they are and remain what every release before 26 draws, so nothing about the macOS 15
-# deployment target changes; this needs no Xcode project and no raised floor.
+# system finds through CFBundleIconName in Info.plist. It is now the only icon in the bundle: the
+# floor is macOS 26 and there is no system left that would draw a flat one. Tools/icon/make.py's
+# docstring carries the measurement that settled that.
 #
-# Command line tools on their own carry no actool, and a build that failed over the icon would be a
-# worse trade than one that ships the flat icon alone.
+# Command line tools on their own carry no actool, so a machine with only those produces a bundle
+# with no icon at all. That is loud enough to notice and cheaper than failing the build.
 compile_layered_icon() {
   local iconName=Bloom deployment
   [[ -d "Resources/$iconName.icon" ]] || return 0
@@ -160,8 +159,10 @@ compile_layered_icon() {
     --minimum-deployment-target "$deployment" \
     --errors --warnings >/dev/null
 
-  # actool writes a flattened $iconName.icns beside the catalogue as well. AppIcon.icns is the one
-  # built to the measured template, so the spare is dropped rather than shipped next to it.
+  # actool writes a flattened $iconName.icns beside the catalogue as well, as a fallback for a
+  # system that cannot read the catalogue. There is no such system at this floor, and the flattened
+  # file is the layers without the passes that make them read, so it is dropped rather than shipped
+  # as a worse copy of the icon nothing will ask for.
   rm -f "$APP/Contents/Resources/$iconName.icns"
 
   # Nothing above proves the catalogue arrived: actool reports a failure in the plist it prints and

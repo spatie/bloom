@@ -39,10 +39,12 @@ WHAT THE SITE DRAWS AND WHAT IT DOES NOT.
                           lanes opened up on its own dark tile, because at 16
                           pixels the margin is two pixels of white, the
                           crossing it exists for is gone, and a near white tile
-                          on a light tab bar is barely there at all. That is
-                          the same swap the app's `.icns` makes below 64. The
-                          small artwork has not changed, and the script checks
-                          that it has not rather than assuming it
+                          on a light tab bar is barely there at all. The app
+                          used to make the same swap below 64, in the flat
+                          `.icns` it no longer ships; the site is the only place
+                          the unframed artwork is still drawn. It has not
+                          changed, and the script checks that it has not rather
+                          than assuming it
 
   screenshots/og.png      NOT written here. The social card is an HTML page
                           that reads brand/mark.svg, so it has to be
@@ -152,7 +154,7 @@ def main(site=None):
         if os.path.isfile(p):
             before[os.path.normpath(p)] = open(p, "rb").read()
 
-    _, full, _ = design.render()
+    _, full = design.render()
     # A second pass for the flush cut, because `flush` reads lib's def table and
     # design.render leaves it holding the flat body's.
     lib.SMALL = False

@@ -108,12 +108,15 @@ def wrap_layer(body):
     return HEAD + "<defs>" + lib.defs() + "</defs>" + body + "</svg>"
 
 
-# The Big Sur template, kept for one job only. macOS 26 masks a layered icon
-# and a flat .icns alike, but macOS 15 does not: there the .icns is drawn as it
-# is, and it has to carry the old 824 body inside a 1024 canvas or it lands in
-# the dock a fifth too big. Bloom's Info.plist still says 15.0, so the flat
-# fallback is drawn to the old template and only the layered document is full
-# bleed. There is no third option: Apple refused separate icons per OS version.
+# The Big Sur template. NOTHING BLOOM SHIPS IS DRAWN TO IT ANY MORE. macOS 26
+# masks a layered icon and a flat .icns alike, but macOS 15 did not: there the
+# .icns was drawn as it is, and it had to carry the old 824 body inside a 1024
+# canvas or it landed in the dock a fifth too big. Bloom's floor is macOS 26 and
+# it ships no .icns, so `design.py` stopped calling this.
+#
+# It stays because gen9, gen10, depth and shine still draw contact sheets that
+# put the old template beside the new one, and those sheets are the record of
+# how the current design was chosen. Do not wire it back into design.py.
 LEGACY_INSET = 100.0
 LEGACY_BODY = 824.0
 LEGACY_TILE = lib.TILE

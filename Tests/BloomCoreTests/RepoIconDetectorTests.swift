@@ -693,12 +693,16 @@ struct RepoIconDetectorTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .path
-        try #require(FileManager.default.fileExists(atPath: root + "/Resources/AppIcon.icns"))
+        // A layered document, because that is the only icon Bloom ships now. The flat AppIcon.icns
+        // went with the macOS 15 floor: nothing on 26 drew it. This is the one place the detector
+        // is asked about a project whose only mark is an Icon Composer document, which is a shape
+        // more and more repositories will have, so it is worth it being this repository.
+        try #require(FileManager.default.fileExists(atPath: root + "/Resources/Bloom.icon"))
+        #expect(!FileManager.default.fileExists(atPath: root + "/Resources/AppIcon.icns"))
 
         let best = RepoIconDetector.detect(in: root)
-        #expect(name(of: best) == "AppIcon.icns")
-        #expect(best?.format == .icns)
-        #expect((best?.pixels ?? 0) >= 512)
+        #expect(name(of: best) == "Bloom.icon")
+        #expect(best?.format == .layered)
     }
 }
 

@@ -19,8 +19,9 @@ what changed after it.
   make.py's third rule. On macOS 26 each layer carries a two stop
   `linear-gradient` fill with an `orientation` and the system draws it; the
   artwork under it is a silhouette whose own colours are thrown away. The flat
-  `.icns` says the same two stops over the same two canvas coordinates as an
-  SVG gradient, because nothing on macOS 15 will do it for us. Neither output
+  composite, which is now the contact sheets and the website mark rather than
+  an `.icns`, says the same two stops over the same two canvas coordinates as
+  an SVG gradient, because nothing draws that for a bare SVG. Neither output
   gets a second layer, a blur or a baked gloss: `shine.py` found that a
   duplicate silhouette carrying an alpha ramp comes back lifted and grey
   because the system lights every layer separately, and that CoreSVG drops
@@ -57,11 +58,13 @@ what changed after it.
   its own and the spur is the whole reason this design is `tongue` rather than
   `flush`. 17 is a trim. Do not take it to zero.
 
-THE SMALL ARTWORK IS NOT GRADED AND DOES NOT COME FROM HERE. Below 64 the
-`.icns` draws `gen10.unframed()` instead, flat, for the reason make.py gives:
-at 16 a 150 margin is two pixels of white. A grade of a tenth of a tone over
-twelve pixels is not a grade, and the tone it costs at the bottom of a piece is
-real, so the small artwork keeps its palette colours.
+THE SMALL ARTWORK IS NOT GRADED AND DOES NOT COME FROM HERE. `site.py` draws
+the website's favicon from `gen10.unframed()`, flat, for the reason make.py
+gives: at 16 a 150 margin is two pixels of white. A grade of a tenth of a tone
+over twelve pixels is not a grade, and the tone it costs at the bottom of a
+piece is real, so the small artwork keeps its palette colours. The app has no
+size at which it can make that swap: one set of artwork serves every size in a
+layered document.
 """
 import os
 import sys
@@ -75,7 +78,7 @@ import lib9  # noqa: E402
 from gen10 import (BAND_X1, CY, END, H, HS, M, YA, YB, band_in, into, kof,  # noqa: E402
                    squircle_panel)
 from lib import sh_group  # noqa: E402
-from lib9 import clipped, fullbleed, sh_squircle, sheen, wrap_flat, wrap_layer, wrap_legacy  # noqa: E402
+from lib9 import clipped, fullbleed, sh_squircle, sheen, wrap_flat, wrap_layer  # noqa: E402
 
 # How far the spur is proud of the bar, above and below, in the panel's own
 # units, and where its band ends. The end point is the bar's own and must stay
@@ -267,9 +270,14 @@ def body(small=False):
 
 
 def render(small=False):
-    """The groups, the full bleed composite, and the composite at the Big Sur
-    template. Same contract and same order as gen10.render, with groups in
-    place of layers.
+    """The groups and the full bleed composite.
+
+    TWO, WHERE gen10.render AND gen9.render RETURN THREE. Theirs end with the
+    same composite drawn at the Big Sur template, at 824 inside 1024, which was
+    the shape a flat `.icns` had to carry on macOS 15. The app's floor is macOS
+    26 and it ships no flat icon at all, so this file stops producing one; the
+    round nine and round ten files keep theirs because their contact sheets are
+    the record of a comparison that was really made. See make.py.
 
     The two halves are built against separate def tables on purpose. Every
     wrapper embeds the whole of `lib.defs()`, so building the flat body first
@@ -281,4 +289,4 @@ def render(small=False):
           for name, layers, keys in groups(small)]
     lib.reset()
     b = body(small)
-    return gs, wrap_flat(b), wrap_legacy(b)
+    return gs, wrap_flat(b)
