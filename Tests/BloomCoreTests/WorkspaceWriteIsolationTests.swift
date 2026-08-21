@@ -121,6 +121,61 @@ struct WorkspaceWriteIsolationTests {
         #expect(stored.name == "renamed")
         #expect(try await store.workspaces(repoID: other.id).isEmpty)
     }
+
+    // MARK: - The marks a person sets by hand
+
+    /// Both marks go through `update`, so both have to leave everything else alone. The colour is
+    /// the newest column on this table and the one most likely to be written from a menu that has
+    /// been sitting open while an agent worked.
+    @Test("marking a workspace unread, and colouring it, touch nothing else")
+    func theHandMarksTouchNothingElse() async throws {
+        let store = try makeTestStore("marks")
+        let workspace = try await seed(store)
+
+        try await store.updateDiffStat(workspaceID: workspace.id, additions: 4, deletions: 1, files: 1)
+        try await store.update(workspaceID: workspace.id) { $0.pinned = true }
+
+        // Everything below happens after a menu was opened on the row above.
+        try await store.update(workspaceID: workspace.id) { $0.unread = true }
+        try await store.update(workspaceID: workspace.id) { $0.colour = "22A06B" }
+
+        let stored = try #require(try await store.workspace(id: workspace.id))
+        #expect(stored.unread)
+        #expect(stored.colour == "22A06B")
+        #expect(stored.pinned)
+        #expect(stored.additions == 4)
+        #expect(stored.name == "original")
+
+        // And taking the colour off is a write like any other, not a row rebuilt without it.
+        try await store.update(workspaceID: workspace.id) { $0.colour = nil }
+        let cleared = try #require(try await store.workspace(id: workspace.id))
+        #expect(cleared.colour == nil)
+        #expect(cleared.unread)
+        #expect(cleared.pinned)
+    }
+
+    /// The colour arrived in a migration, and `ALTER TABLE` has no `IF NOT EXISTS`. The store's
+    /// own tests rewind `user_version` to reproduce an old schema, so a step that could not be
+    /// replayed would throw and take the whole migration transaction with it.
+    @Test("the colour migration survives being replayed, and keeps what was stored")
+    func theColourMigrationReplays() async throws {
+        let path = TestScratch.unique("colour-replay") + ".sqlite"
+        let store = try Store(path: path)
+        let repo = try await store.upsert(Repo(name: "r", path: TestScratch.unique("repo")))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id, name: "w", branch: "b", path: TestScratch.unique("worktree"),
+            baseBranch: "main"
+        ))
+        try await store.update(workspaceID: workspace.id) { $0.colour = "D8608C" }
+
+        let raw = try SQLiteDatabase(path: path)
+        raw.userVersion = 0
+
+        let reopened = try Store(path: path)
+        let stored = try #require(try await reopened.workspace(id: workspace.id))
+        // Replaying must not put the column back to its default either.
+        #expect(stored.colour == "D8608C")
+    }
 }
 
 /// The same rule, through the callers that carry it, with a real git repository underneath.

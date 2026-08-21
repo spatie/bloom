@@ -3,21 +3,14 @@ import BloomCore
 
 /// The right click menu on a workspace, as Home offers it.
 ///
-/// **This is a second copy, deliberately, and it should not stay one.** The sidebar builds the
-/// same menu in `SidebarWorkspaceRow`, and the two are now the same six items in the same order
-/// because they are the same six things you can do to a workspace: it cannot be right that the
-/// answer depends on which list you happened to right click in. They were split because the
-/// sidebar's copy is inside a file another pair of hands was in at the time, and copying a menu
-/// is cheaper to undo than a bad merge.
+/// **The active case is no longer a copy.** It was one, deliberately and temporarily, with a note
+/// here saying what to extract when the two were put back together. That extraction has happened:
+/// it is `WorkspaceMenuItems`, and the sidebar draws from the same view, so one workspace cannot
+/// answer differently depending on which list you right clicked in. Adding two items to the menu
+/// is what forced it, which is what the note said would.
 ///
-/// What to extract when the two are put back together: a `WorkspaceMenuItems` view taking
-/// `workspace: Workspace` and one closure, `onRename: (String) -> Void`, and reading `AppModel`
-/// from the environment as both sites already do. Everything else in the menu is either a free
-/// function (`Reveal`, `Clipboard`) or a call on the model (`togglePinned`, `archive`), so the
-/// rename is the only thing the two callers genuinely do differently: the sidebar writes an id
-/// into a binding shared across its whole list, Home writes one into its own. Both sites then
-/// become `.contextMenu { WorkspaceMenuItems(workspace: workspace) { renaming = $0 } }`, and the
-/// archive confirmation stays where it already is, in `AppModel.archive`.
+/// What is left here is the ARCHIVED case, which is genuinely Home's alone: the sidebar never
+/// lists an archived workspace at all.
 ///
 /// An archived workspace gets a different menu. Its worktree has been removed, so Open in Editor,
 /// Reveal in Finder and Archive would all be pointing at a directory that is not there. What it
@@ -45,21 +38,7 @@ struct HomeRowMenu: View {
             Divider()
             Button("Copy branch name") { Clipboard.copy(workspace.branch) }
         } else {
-            Button("Open in Editor") { Reveal.inEditor(workspace.path) }
-            Button("Reveal in Finder") { Reveal.inFinder(workspace.path) }
-            Button("Copy branch name") { Clipboard.copy(workspace.branch) }
-            Divider()
-            Button(workspace.pinned ? "Unpin" : "Pin") {
-                Task { await app.togglePinned(workspace) }
-            }
-            Button("Rename") { onRename(workspace.id) }
-            Divider()
-            // Straight through, with no dialog of its own, exactly as the sidebar's menu does it:
-            // whether an archive needs confirming depends on what is uncommitted, what is running
-            // and what GitHub says, and `AppModel.archive` is where all three come together.
-            Button("Archive", role: .destructive) {
-                Task { await app.archive(workspace) }
-            }
+            WorkspaceMenuItems(workspace: workspace, onRename: onRename)
         }
     }
 }

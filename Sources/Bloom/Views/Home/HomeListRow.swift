@@ -87,6 +87,16 @@ struct HomeListRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
 
+                // Right after the name, the same place the sidebar puts it, so one workspace is
+                // marked in one way in both lists. No accessibility label of its own: this row is
+                // merged into a single element below, which would swallow it, so the colour is
+                // said in `accessibilityLabel` instead.
+                //
+                // Nothing special for the archived case. The whole row is drained by `grayscale`
+                // a few lines down, which takes the dot with it, and that is the right answer: an
+                // archived workspace cannot be given a colour or have one taken off.
+                WorkspaceColourDot(hex: workspace.colour)
+
                 if workspace.pinned {
                     Image(systemName: "pin.fill")
                         .font(Typo.micro)
@@ -265,6 +275,7 @@ struct HomeListRow: View {
         var parts = [workspace.name]
         if let repo = row.repo { parts.append("in \(repo.name)") }
         parts.append(statusDescription)
+        if let colour = workspace.colourDescription { parts.append("colour \(colour)") }
         if workspace.pinned { parts.append("pinned") }
         if workspace.hasDiff {
             parts.append("\(workspace.additions) added, \(workspace.deletions) removed")

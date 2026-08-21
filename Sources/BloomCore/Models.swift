@@ -122,6 +122,13 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
     public var changedFiles: Int
     public var unread: Bool
     public var pinned: Bool
+    /// A colour the user put on this row so they can find it again, as a hex string, or nil.
+    ///
+    /// Nil is the normal case and has to look like nothing at all, which is why it is a nullable
+    /// column rather than a default colour every workspace starts with. Stored as text rather than
+    /// as an index into `WorkspaceColour.all`, so the list can be reordered or added to without
+    /// silently recolouring every row that was already marked.
+    public var colour: String?
 
     public init(
         id: String = newID(),
@@ -141,7 +148,8 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
         deletions: Int = 0,
         changedFiles: Int = 0,
         unread: Bool = false,
-        pinned: Bool = false
+        pinned: Bool = false,
+        colour: String? = nil
     ) {
         self.id = id
         self.repoID = repoID
@@ -161,6 +169,7 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
         self.changedFiles = changedFiles
         self.unread = unread
         self.pinned = pinned
+        self.colour = colour
     }
 
     public var hasDiff: Bool { additions > 0 || deletions > 0 }

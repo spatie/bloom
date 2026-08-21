@@ -1470,8 +1470,49 @@ final class AppModel {
     /// one most worth being told about; a mark that counted only successes would go quiet exactly
     /// when something went wrong.
     func markRead(_ workspace: Workspace) async {
-        guard let store, workspace.unread else { return }
-        _ = try? await store.update(workspaceID: workspace.id) { $0.unread = false }
+        guard workspace.unread else { return }
+        await setUnread(workspace, false)
+    }
+
+    /// The mark set by hand, from a workspace row's context menu, in either direction.
+    ///
+    /// **What happens when you mark the workspace you are looking at.** The mark sticks. It is
+    /// worth writing down because the opposite was the obvious guess and it would have made the
+    /// item useless. Nothing re-clears the flag while a workspace stays on screen: the only clear
+    /// is `WorkspaceModel.onAppear`, and the centre column runs that from a `.task(id:)` keyed on
+    /// the workspace id, so it fires when the window ARRIVES on a workspace and not again while it
+    /// sits there. The row goes heavy under the pointer, the badge counts it, and it is still
+    /// there when you come back. `TranscriptModel.markAllRead` is a different mark on a different
+    /// row (`Session.lastReadSeq`, which is where the transcript reopens) and it does not touch
+    /// this one.
+    ///
+    /// The one thing that does clear it is a turn FINISHING in that workspace while you are still
+    /// looking at it, because `TranscriptModel.notifyFinished` writes `unread` either way. That is
+    /// correct rather than a leak: how the turn went is newer information than a reminder set
+    /// before it ended, and you were there to see it.
+    ///
+    /// That is the whole reason this exists in the direction it does. "Mark as Unread" means
+    /// "remind me to come back to this", and a reminder that clears itself while you are still
+    /// standing in front of it is not a reminder.
+    ///
+    /// Narrow, like every other writer of this table: `update` re-reads the row inside the actor
+    /// and changes the one column named. A whole `Workspace` value written from a menu that has
+    /// been open for a few seconds is the bug `Store.update` was written for, three times over.
+    func setUnread(_ workspace: Workspace, _ unread: Bool) async {
+        guard let store else { return }
+        _ = try? await store.update(workspaceID: workspace.id) { $0.unread = unread }
+        // The Dock badge, the menu bar item and the sidebar all read `workspaces`, so one reload
+        // is what keeps the three of them agreeing after a manual mark.
+        await reload()
+    }
+
+    /// The colour on a workspace row, or nil to take it off.
+    ///
+    /// Stored as the hex rather than as a position in `WorkspaceColour.all`, so reordering that
+    /// list later cannot recolour rows somebody already marked.
+    func setColour(_ workspace: Workspace, to hex: String?) async {
+        guard let store else { return }
+        _ = try? await store.update(workspaceID: workspace.id) { $0.colour = hex }
         await reload()
     }
 

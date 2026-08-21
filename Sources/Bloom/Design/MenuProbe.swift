@@ -5,7 +5,7 @@ import BloomCore
 
 /// Photographs the centre pane's contextual menu, or the items one of its split submenus offers.
 ///
-///     Bloom --menu-probe /tmp/menu.png [--menu-part menu|kinds]
+///     Bloom --menu-probe /tmp/menu.png [--menu-part menu|kinds|row|colour]
 ///
 /// It exists because a menu is the one part of this interface that cannot be captured any other
 /// way. `ImageRenderer` draws SwiftUI's yellow placeholder for one, a menu only exists while it is
@@ -14,9 +14,13 @@ import BloomCore
 /// built here, opened here, measured here, and the capture is a rectangle exactly the size of the
 /// menu's own windows: opaque menu pixels and nothing else.
 ///
-/// The menus are the real ones. `CenterPaneMenu` and `PaneKindItems` are the same two views
-/// `CenterPaneView` hands to `.contextMenu`, built here with closures that do nothing, so a picture
-/// taken by this probe cannot show an item the app does not have.
+/// The menus are the real ones. `CenterPaneMenu`, `PaneKindItems` and `WorkspaceMenuItems` are the
+/// same views the app hands to `.contextMenu`, built here with closures that do nothing, so a
+/// picture taken by this probe cannot show an item the app does not have.
+///
+/// `row` and `colour` are a workspace row's menu and the colour submenu inside it. They need a
+/// workspace, so they read one out of the database this instance was pointed at, which means they
+/// want `BLOOM_DB_PATH` set at a seeded scratch copy rather than the owner's.
 ///
 /// The two are photographed separately because AppKit tracks one menu at a time. A submenu cannot
 /// be opened beside the item it hangs off from inside the process: popping the submenu up while its
@@ -46,9 +50,19 @@ enum MenuProbe {
         value(for: "--menu-probe") ?? (NSTemporaryDirectory() + "bloom-menu.png")
     }
 
-    /// Which menu to open: the pane's own, or the three items a split submenu is made of.
-    private static var wantsKinds: Bool {
-        value(for: "--menu-part") == "kinds"
+    /// Which menu to open. `menu` is the pane's own and is the default.
+    private enum Part: String {
+        case menu
+        /// The three items a split submenu is made of.
+        case kinds
+        /// A workspace row's context menu, as both lists offer it.
+        case row
+        /// The colour submenu inside it, on its own, because AppKit tracks one menu at a time.
+        case colour
+    }
+
+    private static var part: Part {
+        value(for: "--menu-part").flatMap(Part.init(rawValue:)) ?? .menu
     }
 
     static func schedule() {
@@ -56,11 +70,20 @@ enum MenuProbe {
             // The same beat the window capture waits for, and for the same reason: the window has
             // to exist before a menu can be opened over it.
             try? await Task.sleep(for: .seconds(3))
-            run()
+            // A model of this probe's own, rather than the one the window is drawing from, which
+            // no static can reach. It reads the same database, so the workspace it finds is a
+            // workspace the sidebar is showing.
+            var model: AppModel?
+            if part == .row || part == .colour {
+                let fresh = AppModel()
+                await fresh.bootstrap()
+                model = fresh
+            }
+            run(model: model)
         }
     }
 
-    private static func run() {
+    private static func run(model: AppModel?) {
         guard let window = NSApp.windows.first(where: {
             $0.isVisible && $0.contentView != nil && $0.parent == nil && $0.styleMask.contains(.titled)
         }) else {
@@ -70,11 +93,7 @@ enum MenuProbe {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
 
-        // Split, so the pane menu carries every item it can carry: Close Pane is only offered when
-        // there is a pane to close back to.
-        let menu: NSMenu = wantsKinds
-            ? NSHostingMenu(rootView: PaneKindItems { _ in })
-            : NSHostingMenu(rootView: CenterPaneMenu(isSplit: true, split: { _, _ in }, close: {}))
+        let menu = build(model: model)
 
         // Over the app's own window, so the menu is the only thing in the rectangle below it.
         let origin = NSPoint(x: window.frame.minX + 260, y: window.frame.maxY - 220)
@@ -98,6 +117,36 @@ enum MenuProbe {
         guard capturedOutput else { fail("the menu would not stay open long enough to photograph") }
         print(outputPath)
         exit(0)
+    }
+
+    /// The menu this run photographs, built from the very views the app shows.
+    private static func build(model: AppModel?) -> NSMenu {
+        switch part {
+        // Split, so the pane menu carries every item it can carry: Close Pane is only offered
+        // when there is a pane to close back to.
+        case .menu:
+            NSHostingMenu(rootView: CenterPaneMenu(isSplit: true, split: { _, _ in }, close: {}))
+        case .kinds:
+            NSHostingMenu(rootView: PaneKindItems { _ in })
+        case .row, .colour:
+            workspaceMenu(model: model)
+        }
+    }
+
+    private static func workspaceMenu(model: AppModel?) -> NSMenu {
+        guard let model, let workspace = model.workspaces.first else {
+            fail("no workspace in this database to draw a row menu for")
+        }
+        let menu = NSHostingMenu(
+            rootView: WorkspaceMenuItems(workspace: workspace) { _ in }.environment(model)
+        )
+        guard part == .colour else { return menu }
+        // The submenu on its own. Popping it up beside its open parent is not available: that ends
+        // the parent's tracking session, which is the same limit the two pane menus are split for.
+        guard let submenu = menu.items.first(where: { $0.title == "Colour" })?.submenu else {
+            fail("the row menu has no Colour submenu")
+        }
+        return submenu
     }
 
     /// Whether a picture has been taken, which is what stops the retry loop above.

@@ -316,6 +316,26 @@ public actor Store {
                     )
                 }
             },
+
+            // A colour the user put on a workspace so they can find it again in a long list.
+            //
+            // Nullable, with no default, because no colour is the normal case and has to stay
+            // distinguishable from a colour somebody chose. A `NOT NULL DEFAULT` here would mean
+            // every workspace that ever existed is marked, and the sidebar would have to guess
+            // which of them meant it.
+            //
+            // Real code rather than SQL for the same reason the two steps above are: `ADD COLUMN`
+            // has no `IF NOT EXISTS`, and the store's own tests rewind `user_version` to reproduce
+            // an old schema, so a step that could not be replayed would throw and take the whole
+            // migration transaction with it.
+            { db in
+                let existing = Set(
+                    try db.query("PRAGMA table_info(workspaces);").compactMap { $0.string("name") }
+                )
+                if !existing.contains("colour") {
+                    try db.execute("ALTER TABLE workspaces ADD COLUMN colour TEXT;")
+                }
+            },
         ]
 
         let current = Int(db.userVersion)
@@ -449,8 +469,8 @@ public actor Store {
             INSERT INTO workspaces (
                 id, repo_id, name, branch, path, base_branch, state, setup_state, setup_log,
                 sort_order, created_at, last_activity_at, archived_at,
-                additions, deletions, changed_files, unread, pinned
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                additions, deletions, changed_files, unread, pinned, colour
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 branch = excluded.branch,
@@ -466,7 +486,8 @@ public actor Store {
                 deletions = excluded.deletions,
                 changed_files = excluded.changed_files,
                 unread = excluded.unread,
-                pinned = excluded.pinned
+                pinned = excluded.pinned,
+                colour = excluded.colour
             """,
             [
                 .text(workspace.id), .text(workspace.repoID), .text(workspace.name),
@@ -479,6 +500,7 @@ public actor Store {
                 .int(Int64(workspace.additions)), .int(Int64(workspace.deletions)),
                 .int(Int64(workspace.changedFiles)),
                 .int(workspace.unread ? 1 : 0), .int(workspace.pinned ? 1 : 0),
+                workspace.colour.map { .text($0) } ?? .null,
             ]
         )
         return workspace
@@ -1225,7 +1247,8 @@ public actor Store {
             deletions: Int(row.int("deletions") ?? 0),
             changedFiles: Int(row.int("changed_files") ?? 0),
             unread: row.bool("unread"),
-            pinned: row.bool("pinned")
+            pinned: row.bool("pinned"),
+            colour: row.string("colour")
         )
     }
 

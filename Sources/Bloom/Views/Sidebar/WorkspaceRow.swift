@@ -84,6 +84,15 @@ struct WorkspaceRow: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
 
+                    // Right after the name, which is where Finder puts a tag on a file. Drawn only
+                    // when there is one, so an unmarked pane looks exactly as it did. It carries
+                    // its own accessibility label here, unlike on Home, because this row exposes
+                    // its children rather than merging them into one sentence.
+                    WorkspaceColourDot(
+                        hex: workspace.colour,
+                        accessibilityName: workspace.colourDescription
+                    )
+
                     Spacer(minLength: Metrics.spacingSmall)
 
                     if workspace.pinned {

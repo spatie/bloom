@@ -51,32 +51,10 @@ struct SidebarWorkspaceRow: View {
         // nesting left in it is unreadable without knowing which project each row belongs to, and
         // content that has to be asked for is content most people never hear.
         .accessibilityCustomContent(Text("Project"), Text(projectName), importance: .high)
-        .contextMenu {
-            Button("Open in Editor") { Reveal.inEditor(workspace.path) }
-            Button("Reveal in Finder") { Reveal.inFinder(workspace.path) }
-            Button("Copy branch name") { Clipboard.copy(workspace.branch) }
-            Divider()
-            Button(workspace.pinned ? "Unpin" : "Pin") {
-                Task { await app.togglePinned(workspace) }
-            }
-            Button("Rename") { renaming = workspace.id }
-            Divider()
-            // Straight through, with no dialog of its own. Whether this needs confirming is not
-            // something this menu can know: it depends on what is uncommitted, what is running and
-            // what GitHub says about the branch, and `AppModel.archive` is where all three come
-            // together. Asking here as well meant a sheet on every archive, including the routine
-            // one, which is exactly how a confirmation stops being read.
-            //
-            // Whether the branch goes too is the repository's setting, rather than a question
-            // asked every time about a workspace that is usually finished with.
-            //
-            // The row's own archive button does ask every time, and that is not a disagreement
-            // with this. See `confirmRowArchive` for why an entry point that appears under the
-            // pointer is the one that should.
-            Button("Archive", role: .destructive) {
-                Task { await app.archive(workspace) }
-            }
-        }
+        // Every item in it is `WorkspaceMenuItems`, which Home's rows draw from as well. It used
+        // to be a copy of the same six buttons written out here, with a note on the other copy
+        // saying what to extract when the two were merged; adding to both was what forced it.
+        .contextMenu { WorkspaceMenuItems(workspace: workspace) { renaming = $0 } }
     }
 
     /// What the row's archive button does instead of archiving.
