@@ -41,12 +41,12 @@ ln -sfn "$ROOT/Tests/BloomCoreTests" "$WORK/Tests/BloomCoreTests"
 ln -sfn "$ROOT/fixtures" "$WORK/fixtures"
 
 cat > "$WORK/Package.swift" <<'EOF'
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
     name: "BloomCoreOnly",
-    platforms: [.macOS(.v15)],
+    platforms: [.macOS(.v26)],
     targets: [
         .target(name: "BloomCore", swiftSettings: [.swiftLanguageMode(.v6)]),
         .testTarget(

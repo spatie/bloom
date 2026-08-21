@@ -21,7 +21,7 @@
 	<key>CFBundleIconName</key>
 	<string>Bloom</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>15.0</string>
+	<string>26.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSSupportsAutomaticTermination</key>

@@ -63,8 +63,6 @@ struct SidebarStatusBar: View {
                     SidebarLegend()
                 }
 
-                // The deployment target is macOS 15, so `SettingsLink` is always available and
-                // there is no need for the older `showSettingsWindow:` selector dance.
                 SettingsLink {
                     Label("Settings", systemImage: "gearshape")
                 }

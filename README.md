@@ -18,7 +18,7 @@ Conductor itself is a Tauri app: Rust with a WebKit view. Bloom is SwiftUI with 
 
 ## Requirements
 
-- macOS 15 or later
+- macOS 26 or later
 - Xcode 26 or a Swift 6 toolchain
 - `claude` on your PATH (Claude Code)
 - `git`, and `gh` if you want the pull request features
