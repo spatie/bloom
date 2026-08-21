@@ -46,16 +46,24 @@ public actor CodexRunner: SessionRunner {
     private var persistenceFailures = 0
     private var lastFailure: String?
 
+    /// The workspace bridge this chat registers, or nil for none. Written once, by whoever built
+    /// this runner, and read on every connect: `CodexClient.Configuration` is rebuilt per connect
+    /// exactly as `AgentRunner`'s argv is recomputed per start, so the two backends re-register on
+    /// the same schedule.
+    private let bridge: BridgeAttachment?
+
     public init(
         workspacePath: String,
         session: Session,
         store: Store,
+        bridge: BridgeAttachment? = nil,
         makeClient: @escaping @Sendable (CodexClient.Configuration) -> CodexClient = CodexRunner.spawn
     ) {
         self.workspacePath = workspacePath
         self.sessionID = session.id
         self.session = session
         self.store = store
+        self.bridge = bridge
         self.makeClient = makeClient
         self.translation = CodexTranslation(context: CodexTranslation.Context(
             model: session.model,
@@ -166,7 +174,8 @@ public actor CodexRunner: SessionRunner {
         let client = makeClient(CodexClient.Configuration(
             cwd: workspacePath,
             clientName: "Bloom",
-            clientVersion: Self.clientVersion
+            clientVersion: Self.clientVersion,
+            bridge: bridge
         ))
         self.client = client
         // Attached before the handshake, so nothing the server says between connecting and the

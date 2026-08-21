@@ -67,6 +67,14 @@ public actor AgentRunner {
     /// launched from Finder resolved the first while the same user's terminal resolved the
     /// second. The row that reported the crash could not say which one had crashed.
     private var launchedCommand = ""
+    /// The per-session MCP config naming the workspace bridge, or nil when there is no bridge to
+    /// register. Written once, by whoever built this runner, and read on every process start.
+    ///
+    /// A runner is built once per session per launch of the app, and the token inside that file is
+    /// minted per launch too, so the two have the same lifetime: a session resumed days later is a
+    /// new runner with a new file and a new token, which is exactly what a token held only in
+    /// memory needs.
+    private let mcpConfigPath: String?
     /// Whether the composer's Fast toggle is on for this session.
     ///
     /// Read from the store rather than passed in, because it is the one composer control with no
@@ -120,12 +128,14 @@ public actor AgentRunner {
         workspacePath: String,
         session: Session,
         store: Store,
+        mcpConfigPath: String? = nil,
         makeProcess: @escaping @Sendable (AgentLaunch) -> any AgentProcessing = AgentRunner.spawn
     ) {
         self.workspacePath = workspacePath
         self.sessionID = session.id
         self.session = session
         self.store = store
+        self.mcpConfigPath = mcpConfigPath
         self.makeProcess = makeProcess
     }
 
@@ -181,11 +191,19 @@ public actor AgentRunner {
     /// a malformed string is read as a filename and exits 1 with "Settings file not found". So the
     /// object is built by `JSONSerialization` rather than by interpolation, and anything else that
     /// ever needs a setting has to be added to that object rather than to a second flag.
+    ///
+    /// `mcpConfigPath` is the workspace bridge, registered per process start. A **file**, never
+    /// the inline JSON string the same flag also accepts, because argv is visible in `ps` and an
+    /// agent runs `ps` through its own Bash tool as ordinary behaviour. And never
+    /// `--strict-mcp-config` beside it: that flag shuts every other MCP configuration out, which
+    /// is right for `WorkspaceNamer` and wrong for a chat, where the user's own servers have to
+    /// survive. See `BridgeRegistration`.
     public static func argv(
         session: Session,
         resume: String?,
         isFastMode: Bool = false,
-        outputStyle: String? = nil
+        outputStyle: String? = nil,
+        mcpConfigPath: String? = nil
     ) -> [String] {
         var arguments = [
             "-p",
@@ -233,6 +251,9 @@ public actor AgentRunner {
         if let settings = settingsJSON(outputStyle: outputStyle) {
             arguments += ["--settings", settings]
         }
+        if let mcpConfigPath, !mcpConfigPath.isEmpty {
+            arguments += BridgeRegistration.claudeArguments(configPath: mcpConfigPath)
+        }
         if let resume, !resume.isEmpty {
             arguments += ["--resume", resume]
         }
@@ -261,7 +282,8 @@ public actor AgentRunner {
                 session: session,
                 resume: session.agentSessionID,
                 isFastMode: isFastMode,
-                outputStyle: outputStyle
+                outputStyle: outputStyle,
+                mcpConfigPath: mcpConfigPath
             ),
             cwd: workspacePath,
             environment: Shell.environment()

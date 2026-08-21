@@ -35,6 +35,12 @@ public actor CodexClient {
         public var clientName: String
         public var clientVersion: String
         public var environment: [String: String]
+        /// The workspace bridge this process should register, or nil for none.
+        ///
+        /// Per process, which here is per chat: Bloom runs one app-server for each one, so a
+        /// `-c` override at launch is a per-session registration exactly as Claude Code's
+        /// recomputed argv is. See `BridgeRegistration.codexArguments`.
+        public var bridge: BridgeAttachment?
 
         public init(
             executable: String = CodexClient.executable,
@@ -42,7 +48,8 @@ public actor CodexClient {
             codexHome: String? = nil,
             clientName: String = "Bloom",
             clientVersion: String = "0.0.0",
-            environment: [String: String] = Shell.environment()
+            environment: [String: String] = Shell.environment(),
+            bridge: BridgeAttachment? = nil
         ) {
             self.executable = executable
             self.cwd = cwd
@@ -50,6 +57,7 @@ public actor CodexClient {
             self.clientName = clientName
             self.clientVersion = clientVersion
             self.environment = environment
+            self.bridge = bridge
         }
     }
 
@@ -64,6 +72,14 @@ public actor CodexClient {
         var environment = configuration.environment
         if let home = configuration.codexHome, !home.isEmpty {
             environment["CODEX_HOME"] = home
+        }
+        // `-c` overrides belong to the `app-server` subcommand, so they follow it. Never
+        // `--strict-config` beside them: it is not Claude Code's `--strict-mcp-config` but it is
+        // the same trap, refusing to start on a user config holding anything this build of Codex
+        // does not recognise.
+        var arguments = Self.arguments
+        if let bridge = configuration.bridge {
+            arguments += BridgeRegistration.codexArguments(bridge)
         }
         return AgentLaunch(
             executable: configuration.executable,
