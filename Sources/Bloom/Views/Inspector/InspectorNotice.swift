@@ -98,7 +98,7 @@ struct InspectorNotice: View {
                     Button(isShowingDetails ? "Hide details" : "Show details") {
                         isShowingDetails.toggle()
                     }
-                    .buttonStyle(.link)
+                    .linkButton()
                     .font(Typo.micro)
                 }
 

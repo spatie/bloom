@@ -100,7 +100,7 @@ struct PendingTurnRowView: View {
             }
 
             Button("Cancel", action: onCancel)
-                .buttonStyle(.link)
+                .linkButton()
                 .help("Takes this message back out of the queue. It is not sent.")
                 .opacity(isHovered ? 1 : 0)
                 .accessibilityHidden(false)

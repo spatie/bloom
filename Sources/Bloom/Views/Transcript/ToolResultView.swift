@@ -31,7 +31,7 @@ struct ToolResultView: View {
 
             if capped.truncated, !showsAll {
                 Button("Show all output") { showsAll = true }
-                    .buttonStyle(.link)
+                    .linkButton()
                     .font(Typo.caption)
                     .padding(.leading, TranscriptLayout.block)
             }

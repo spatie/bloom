@@ -111,7 +111,7 @@ struct PullRequestCreator: View {
                     Button("Connect GitHub") {
                         GitHubSignIn.shared.present(directory: worktree)
                     }
-                    .buttonStyle(.link)
+                    .linkButton()
                     .font(Typo.caption)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -160,7 +160,7 @@ struct PullRequestCreator: View {
         // name has their pointer on this branch's name. `PullRequestSummary` puts its own copy
         // and share items on the strip for the same reason.
         .contextMenu {
-            Button("Copy branch name") { Clipboard.copy(branch) }
+            Button("Copy Branch Name") { Clipboard.copy(branch) }
         }
         // Optimistic while the probe runs, and silent about the answer either way. Learning that
         // gh is signed out is worth one quiet line here; it is never worth a dialog nobody asked

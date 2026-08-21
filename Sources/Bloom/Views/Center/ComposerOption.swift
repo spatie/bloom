@@ -16,7 +16,10 @@ struct ComposerOption: Identifiable, Hashable {
         ComposerOption(id: "low", label: "Low"),
         ComposerOption(id: "medium", label: "Medium"),
         ComposerOption(id: "high", label: "High"),
-        ComposerOption(id: "xhigh", label: "Xhigh"),
+        // "Extra high", not "Xhigh": the same value already reads that way in
+        // `CodexModelCatalog`, whose head says why, and one id spelled two ways in one window is
+        // two settings as far as anybody reading them is concerned.
+        ComposerOption(id: "xhigh", label: "Extra high"),
         ComposerOption(id: "max", label: "Max"),
     ]
 
@@ -55,21 +58,6 @@ struct ComposerOption: Identifiable, Hashable {
         return titleCased(id)
     }
 
-    /// `acceptEdits` and `claude-opus-5[1m]` both become something a person can read, without
-    /// capitalising the parts that are not words.
-    ///
-    /// The vendor prefix goes: inside Bloom every model is a Claude model, so the word carries no
-    /// information and only costs room in a chip.
-    static func titleCased(_ id: String) -> String {
-        let parts = id.split(whereSeparator: { $0 == "-" || $0 == "_" || $0 == "." })
-        // Unless the vendor name is all there is, in which case dropping it leaves nothing to read.
-        let named = parts.drop { $0.lowercased() == "claude" }
-        return (named.isEmpty ? parts[...] : named)
-            .map { part in
-                let bracketed = part.replacing("[", with: " (").replacing("]", with: ")")
-                guard let first = bracketed.first, first.isLetter else { return bracketed }
-                return first.uppercased() + bracketed.dropFirst()
-            }
-            .joined(separator: " ")
-    }
+    /// `ModelLabel.readable` in the core, where it can be tested. See its head for why it moved.
+    static func titleCased(_ id: String) -> String { ModelLabel.readable(id) }
 }

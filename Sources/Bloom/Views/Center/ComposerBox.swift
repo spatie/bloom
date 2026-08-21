@@ -6,6 +6,11 @@ import SwiftUI
 /// lands on the text view and only the padding acts as a focus target.
 struct ComposerBox: ViewModifier {
     @Binding var isFocused: Bool
+
+    /// AppKit draws a focus ring only in the key window, and this was drawing one in every window
+    /// at once. With five workspaces open, four of them wore a lit composer while the fifth was
+    /// the one actually taking the keys.
+    @Environment(\.controlActiveState) private var activeState
     /// A file is being dragged over the box. Said with the border rather than with a plate over
     /// the content, so the draft stays readable while the drop is being aimed.
     var isDropTarget: Bool = false
@@ -14,6 +19,9 @@ struct ComposerBox: ViewModifier {
     /// draws a focus ring and a three point line is the ring's definition rather than a spacing
     /// choice.
     private static let ringWidth: CGFloat = 3
+
+    /// Focused, and in the window the keys are going to.
+    private var isRingVisible: Bool { isFocused && activeState != .inactive }
 
     func body(content: Content) -> some View {
         content
@@ -43,7 +51,7 @@ struct ComposerBox: ViewModifier {
                 RoundedRectangle(cornerRadius: Metrics.corner + Self.ringWidth / 2)
                     .strokeBorder(Palette.focusRing, lineWidth: Self.ringWidth)
                     .padding(-Self.ringWidth / 2)
-                    .opacity(isFocused ? 1 : 0)
+                    .opacity(isRingVisible ? 1 : 0)
             }
     }
 }

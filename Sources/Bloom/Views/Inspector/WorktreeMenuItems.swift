@@ -19,13 +19,13 @@ struct WorktreeMenuItems: View {
     var pullRequest: PullRequest?
 
     var body: some View {
-        Button("Copy branch name") { Clipboard.copy(workspace.branch) }
-        Button("Reveal worktree in Finder") { Reveal.inFinder(workspace.path) }
+        Button("Copy Branch Name") { Clipboard.copy(workspace.branch) }
+        Button("Reveal Worktree in Finder") { Reveal.inFinder(workspace.path) }
         OpenInItems(target: .folder(workspace.path), noun: "Worktree")
 
         if let pullRequest {
             Divider()
-            Button("Open pull request") { GitHubBridge.open(pullRequest.url) }
+            Button("Open Pull Request") { GitHubBridge.open(pullRequest.url) }
             if let url = URL(string: pullRequest.url) {
                 // Here rather than in the pull request strip above. That strip already clips at
                 // the pane's narrow widths, and one more control in it buys discoverability with

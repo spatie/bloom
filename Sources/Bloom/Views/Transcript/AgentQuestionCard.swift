@@ -130,7 +130,7 @@ struct AgentQuestionCard: View {
                         .foregroundStyle(isChosen ? Palette.accent : Palette.textTertiary)
                         .accessibilityHidden(true)
 
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: Metrics.spacingTight) {
                         Text(option.label)
                             .font(Typo.label)
                             .foregroundStyle(Palette.textPrimary)

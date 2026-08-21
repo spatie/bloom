@@ -115,9 +115,9 @@ struct ArchivedWorkspaceView: View {
 
     private var controls: some View {
         HStack(spacing: Metrics.spacing) {
-            Button("Copy branch name") { Clipboard.copy(workspace.branch) }
+            Button("Copy Branch Name") { Clipboard.copy(workspace.branch) }
 
-            Button(isRestoring ? "Restoring" : "Restore workspace") {
+            Button(isRestoring ? "Restoring" : "Restore Workspace") {
                 Task { await app.restore(workspace) }
             }
             .buttonStyle(.borderedProminent)

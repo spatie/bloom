@@ -21,8 +21,43 @@ import SwiftUI
 extension View {
     func settingsForm() -> some View {
         formStyle(.grouped)
+            // Both settings windows set `Palette.windowBackground` and neither of them was
+            // showing it. A grouped Form paints its own opaque semantic ground over whatever is
+            // behind it, so in dark the two windows measured #23262D and #24283 against the main
+            // window's #0E1A24: the exact neutral greys the head of `Palette` says the blue ramp
+            // exists to replace. Light hid it, because everything there resolves to near-white.
+            //
+            // What gave it away was the repo settings window wearing both at once: its save bar
+            // uses `Palette.surface`, so one strip was the ramp's blue and the form above it was
+            // not.
+            .scrollContentBackground(.hidden)
+            // The sections need a fill of their own once the Form's is gone, or they dissolve
+            // into the window. Sunken and ruled, which is how the composer box sits on the
+            // transcript and the code block sits in a tool row.
+            .modifier(SettingsSectionSurface())
             .hidesScrollEdgeRule()
             .modifier(SettingsLabelColumn())
+    }
+}
+
+/// Gives every grouped section its card back, in the ramp's colours rather than the system's.
+///
+/// `listRowBackground` rather than a background on the section content: the grouped Form draws the
+/// card, and painting inside it leaves the card's own inset showing round the edge.
+private struct SettingsSectionSurface: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
+                    .fill(Palette.surfaceSunken)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
+                            .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                    )
+            )
+            // Every switch and checkbox in a settings pane. Untinted they follow the system accent,
+            // which on a Mac set to anything but Blue is another app's colour in Bloom's window.
+            .tint(Palette.accentFill)
     }
 }
 

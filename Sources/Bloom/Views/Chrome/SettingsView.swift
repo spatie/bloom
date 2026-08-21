@@ -73,6 +73,14 @@ struct SettingsView: View {
             }
         }
         .frame(minWidth: Self.minSize.width, minHeight: Self.minSize.height)
+        // No tint. The selected tab is the last system-accent control in this window, and
+        // `.tint(Palette.accent)` on this TabView was tried and measured: the label came out
+        // `#397CE1` with it and `#397CE1` without it, identical pixels in the same capture. The
+        // toolbar-style TabView is an `NSToolbar` whose selection colour nothing here can reach,
+        // and it is also the control in this window closest to being genuinely the system's
+        // chrome. So it is left alone, and this note is here so the next person does not spend
+        // the same hour discovering the same nothing. `InspectorToolbar` has the same story about
+        // a segmented control.
         .background(Palette.windowBackground)
         // RootView is the single presenter for `app.alert`. Binding it here too gave one alert
         // two presenters, and the loser leaves an empty dialog shell on screen.

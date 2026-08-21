@@ -113,7 +113,7 @@ struct AgentErrorRowView: View {
 
             if capped.truncated, !showsAll {
                 Button("Show everything the agent printed") { showsAll = true }
-                    .buttonStyle(.link)
+                    .linkButton()
                     .font(Typo.caption)
             }
         }

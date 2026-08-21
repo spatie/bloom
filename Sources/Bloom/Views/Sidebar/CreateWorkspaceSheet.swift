@@ -341,6 +341,9 @@ struct CreateWorkspaceSheet: View {
             // sheet that closed between them made it three trips to the sidebar.
             Toggle("Create more", isOn: $createMore)
                 .toggleStyle(.checkbox)
+                // Untinted it follows the system accent, which on a Mac set to anything but Blue
+                // is another app's colour in Bloom's sheet.
+                .tint(Palette.accentFill)
                 .font(Typo.caption)
                 .help("Keep this sheet open after creating, ready for the next one")
 

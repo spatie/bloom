@@ -306,7 +306,7 @@ struct RepoHeaderRow: View {
                 .allowsHitTesting(isHeaderHovered)
         }
         .frame(width: Metrics.repoIcon, height: Metrics.repoIcon)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.12), value: isHeaderHovered)
+        .animation(reduceMotion ? nil : Motion.hover, value: isHeaderHovered)
     }
 
     /// The gear itself.
@@ -380,7 +380,7 @@ struct RepoHeaderRow: View {
         .buttonStyle(.plain)
         // The turn is movement, so it goes when Reduce Motion is on. Without it the chevron still
         // changes direction, it just arrives there rather than travelling.
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: repo.collapsed)
+        .animation(reduceMotion ? nil : Motion.pane, value: repo.collapsed)
         .accessibilityLabel(repo.collapsed ? "Show workspaces in \(repo.name)" : "Hide workspaces in \(repo.name)")
         .accessibilityValue(repo.collapsed ? "Collapsed" : "Expanded")
         .help(repo.collapsed ? "Show workspaces" : "Hide workspaces")

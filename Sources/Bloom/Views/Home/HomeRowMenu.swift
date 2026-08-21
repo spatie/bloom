@@ -31,12 +31,12 @@ struct HomeRowMenu: View {
     var body: some View {
         if row.isArchived {
             Button("Open") { app.openArchived(workspace) }
-            Button("Restore workspace") {
+            Button("Restore Workspace") {
                 Task { await app.restore(workspace) }
             }
             .disabled(app.restoring.contains(workspace.id))
             Divider()
-            Button("Copy branch name") { Clipboard.copy(workspace.branch) }
+            Button("Copy Branch Name") { Clipboard.copy(workspace.branch) }
         } else {
             WorkspaceMenuItems(workspace: workspace, onRename: onRename)
         }

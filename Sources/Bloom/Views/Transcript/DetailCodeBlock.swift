@@ -24,7 +24,7 @@ struct DetailCodeBlock: View {
 
                 if capped.truncated, !showsAll {
                     Button("Show all") { showsAll = true }
-                        .buttonStyle(.link)
+                        .linkButton()
                         .font(Typo.caption)
                 }
             }

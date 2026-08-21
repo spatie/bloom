@@ -73,7 +73,7 @@ struct WorkspaceMenuItems: View {
     var body: some View {
         Button("Open in Editor") { Reveal.inEditor(workspace.path) }
         Button("Reveal in Finder") { Reveal.inFinder(workspace.path) }
-        Button("Copy branch name") { Clipboard.copy(workspace.branch) }
+        Button("Copy Branch Name") { Clipboard.copy(workspace.branch) }
         setupItem
         Divider()
         Button(workspace.pinned ? "Unpin" : "Pin") {

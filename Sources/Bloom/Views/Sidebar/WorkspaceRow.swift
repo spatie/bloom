@@ -184,7 +184,7 @@ struct WorkspaceRow: View {
             // either to be drawn at all, so this costs nothing real.
             .allowsHitTesting(isHovered)
         }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.12), value: isHovered)
+        .animation(reduceMotion ? nil : Motion.hover, value: isHovered)
     }
 
     /// Everything you can do to this workspace, one press away instead of one right click away.

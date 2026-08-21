@@ -131,10 +131,13 @@ struct FeedbackSheet: View {
         HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingWide) {
             Toggle(Feedback.Copy.logsToggle, isOn: $presenter.includesLogs)
                 .toggleStyle(.checkbox)
+                // Untinted it follows the system accent, which is another app's colour on a Mac
+                // set to anything but Blue.
+                .tint(Palette.accentFill)
                 .font(Typo.caption)
 
             Button(Feedback.Copy.logsView) { showLogs() }
-                .buttonStyle(.link)
+                .linkButton()
                 .font(Typo.caption)
                 .help("Read exactly what would be sent")
 

@@ -576,6 +576,14 @@ enum Metrics {
 enum Motion {
     static let pane: Animation = .easeOut(duration: 0.18)
 
+    /// A hover state fading in, and a disclosure settling. See the sidebar rows.
+    ///
+    /// Shorter than `pane`, and the only speed in this file that is: a hover has to be under way
+    /// before the cursor has finished arriving, or the row reads as lagging rather than as
+    /// responding. Named because five call sites had grown their own literals (0.12 twice, 0.15,
+    /// 0.2 once) and a file that argues one window has one speed cannot also hold four of them.
+    static let hover: Animation = .easeInOut(duration: 0.12)
+
     /// A row settling into a list it has just been added to. See `RowArrival`.
     ///
     /// The same curve and the same length as `pane`, deliberately and not by accident: a window
@@ -883,5 +891,22 @@ struct ActivityDot: View {
             .onChange(of: isActive, initial: true) { _, active in
                 pulse = active
             }
+    }
+}
+
+// MARK: - Link buttons
+
+extension View {
+    /// A `Button` that reads as a link, in Bloom's teal rather than the system accent.
+    ///
+    /// `.linkButton()` alone draws system blue: measured `#2B66D3` on this machine, and
+    /// whatever the user picked in Appearance on anyone else's. Several of these sit in the
+    /// transcript inches from prose links that `Palette.linkNSColor` already paints teal, so the
+    /// same word rendered two colours depending on whether it was markdown or a control.
+    ///
+    /// A modifier rather than a note in a review, because there are eleven call sites and the
+    /// twelfth is the one that would be missed.
+    func linkButton() -> some View {
+        buttonStyle(.link).tint(Palette.link)
     }
 }

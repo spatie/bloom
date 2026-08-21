@@ -149,7 +149,7 @@ struct GitHubSignInSheet: View {
                 Button(isShowingOptions ? "Fewer options" : "Other sign-in options") {
                     isShowingOptions.toggle()
                 }
-                .buttonStyle(.link)
+                .linkButton()
                 .font(Typo.label)
 
                 Spacer(minLength: Metrics.gutter)

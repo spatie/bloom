@@ -86,7 +86,7 @@ public struct CodeBlockView: View {
                 Button("Show all \(prepared.lines.count) lines") {
                     showsAllLines = true
                 }
-                .buttonStyle(.link)
+                .linkButton()
                 .font(Typo.caption)
                 .padding(.horizontal, MarkdownMetrics.blockGap)
                 .padding(.vertical, Metrics.spacing)

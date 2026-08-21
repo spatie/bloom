@@ -105,7 +105,7 @@ struct RootView: View {
                     .transition(.opacity)
             }
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: app.notice)
+        .animation(reduceMotion ? nil : Motion.pane, value: app.notice)
 
         .task { await app.bootstrap() }
         // The install ping. Started from here because this is the first moment there is a window

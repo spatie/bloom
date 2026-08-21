@@ -394,7 +394,7 @@ struct WorkspaceEventRow: View {
     /// printing a line every second gets a settle; one printing faster than the flusher gets a
     /// tail that reads as moving rather than one that stutters half a line behind itself. Ease
     /// out and no overshoot, which is the curve the panes already use.
-    private static let settle: Animation = .easeOut(duration: 0.12)
+    private static let settle: Animation = Motion.hover
 
     /// The same quoted block a tool result is drawn in, rule down the left and all, because it is
     /// the same thing: output from something that ran.
@@ -431,7 +431,7 @@ struct WorkspaceEventRow: View {
                 HStack(spacing: Metrics.gutter) {
                     if showsExpandLink {
                         Button(isExpanded ? "Show less" : "Show more of the log") { isExpanded.toggle() }
-                            .buttonStyle(.link)
+                            .linkButton()
                             .font(Typo.caption)
                             .help(isExpanded ? "Folds the log back to its last lines" : "Unfolds the log in this row")
                             // The caret above this row is the same control, already announced as
@@ -446,7 +446,7 @@ struct WorkspaceEventRow: View {
                     // row does what it does, so there is no second announcement of it to prefer.
                     if showsRunSetupAgain, let model {
                         Button("Run setup again") { model.runSetupAgain() }
-                            .buttonStyle(.link)
+                            .linkButton()
                             .font(Typo.caption)
                             .help("Runs this repository's setup script in this workspace again")
                     }
