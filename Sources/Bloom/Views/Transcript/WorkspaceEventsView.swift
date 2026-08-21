@@ -20,6 +20,18 @@ struct WorkspaceEventsView: View {
     /// Told whether anything is drawn here, so the pane does not put an empty state over the top
     /// of it. Only this view can answer: it is the one that reads the log.
     var onVisibilityChange: (@MainActor (Bool) -> Void)?
+    /// Asked to put the end of the setup log on screen: once when the reader unfolds the row, and
+    /// again on every flush for as long as it stays unfolded and the script keeps printing.
+    ///
+    /// The expanded log is not a scroll view of its own: it grows the row, the row grows the
+    /// transcript, and the transcript is therefore the only thing that can be moved to the end of
+    /// a log. What that takes depends on what else is in the list, which is `TranscriptListView`'s
+    /// business rather than this row's. See `WorkspaceEventRow.endID`.
+    ///
+    /// The flag says which of the two calls it is. They are answered differently: an unfold is the
+    /// reader asking to be taken there, and is obeyed wherever they are; a flush is the log moving
+    /// under them, and is obeyed only while they are still at the end of it.
+    var onShowLogEnd: (@MainActor (Bool) -> Void)?
 
     @Environment(AppModel.self) private var app
 
@@ -38,7 +50,12 @@ struct WorkspaceEventsView: View {
         // on, and the pane would never be told it may draw its empty state again.
         Group {
             ForEach(events) { event in
-                WorkspaceEventRow(event: event, isFirstThing: isFirstThing, model: model)
+                WorkspaceEventRow(
+                    event: event,
+                    isFirstThing: isFirstThing,
+                    model: model,
+                    onShowLogEnd: onShowLogEnd
+                )
             }
         }
         .onChange(of: events.isEmpty, initial: true) { _, isEmpty in
@@ -77,6 +94,8 @@ struct WorkspaceEventRow: View {
     var event: WorkspaceEvent
     var isFirstThing: Bool
     var model: WorkspaceModel?
+    /// See `endID`, and `WorkspaceEventsView.onShowLogEnd`.
+    var onShowLogEnd: (@MainActor (Bool) -> Void)?
 
     @State private var isExpanded = false
     @State private var isHovered = false
@@ -130,9 +149,63 @@ struct WorkspaceEventRow: View {
                     .padding(.trailing, TranscriptLayout.inset)
                     .padding(.bottom, TranscriptLayout.block)
             }
+
+            // Under the sentence rather than under the log, so unfolding lands with the sentence
+            // still on screen. Anchoring on the block itself put "You can ask for something now"
+            // exactly one line below the bottom edge of the pane, which is the one line of this
+            // row a reader who has never used Bloom before most needs.
+            if event.kind == .setup {
+                Color.clear.frame(height: 0).id(Self.endID)
+            }
         }
         .modifier(ExpandableRow(isHovered: isHovered))
         .onHover { isHovered = $0 }
+        .onChange(of: isExpanded) { _, isExpanded in
+            guard isExpanded, event.kind == .setup else { return }
+            showLogEnd(wasAsked: true)
+        }
+        // And again on every flush, so an unfolded log stays on its newest line rather than
+        // growing off the bottom of the pane. Watched by byte count rather than by comparing the
+        // text: the log runs to two hundred thousand characters, this fires several times a
+        // second, and a native Swift string knows its own UTF-8 count without walking itself.
+        //
+        // Stops on its own when the script does, because a run that is no longer `.running` is
+        // one the reader is reading rather than watching, and because nothing is arriving to
+        // move anyway.
+        .onChange(of: event.log.utf8.count) { _, _ in
+            guard isExpanded, event.isRunning, event.kind == .setup else { return }
+            showLogEnd(wasAsked: false)
+        }
+        .acceptsCaptureSetupLogExpansion {
+            guard event.kind == .setup, canExpand else { return }
+            isExpanded = true
+        }
+    }
+
+    /// Where the setup row ends, which is where unfolding its log has to leave the reader.
+    ///
+    /// **The expanded log is not a scroll view of its own.** It is one `Text` that grows the row,
+    /// and the row grows the transcript, so the transcript's scroller is the only thing that can
+    /// move to the end of a log. That is worth keeping: a second scroller inside the pane would
+    /// swallow the wheel for as long as the pointer was over it, and a reader could not get past
+    /// a block that is five hundred lines tall.
+    ///
+    /// Named here and used by `TranscriptListView`, because only that view holds the scroller.
+    /// Nothing else in the transcript carries an id that is not a row's sequence number, and this
+    /// one cannot collide with those: they are integers.
+    static let endID = "bloom.workspaceEvent.setupEnd"
+
+    /// Puts the newest line of the log on screen.
+    ///
+    /// A beat later rather than in this pass. `onChange` runs before the row has been laid out at
+    /// the height its unfolded log gives it, and a scroll resolved against the old layout lands
+    /// short of the end by however many lines just appeared: measured at 293 points of travel
+    /// where 301 was needed, which is half a line short of the newest one.
+    private func showLogEnd(wasAsked: Bool) {
+        Task { @MainActor in
+            await Task.yield()
+            onShowLogEnd?(wasAsked)
+        }
     }
 
     private var header: some View {

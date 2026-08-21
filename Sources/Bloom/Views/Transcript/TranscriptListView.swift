@@ -145,7 +145,10 @@ struct TranscriptListView: View {
                         workspaceID: transcript.workspace.id,
                         isRunning: isRunningSetup,
                         isFirstThing: transcript.rows.isEmpty,
-                        onVisibilityChange: { showsSetup = $0 }
+                        onVisibilityChange: { showsSetup = $0 },
+                        onShowLogEnd: { wasAsked in
+                            showSetupLogEnd(proxy, wasAsked: wasAsked)
+                        }
                     )
 
                     ForEach(visibleRows) { row in
@@ -361,6 +364,39 @@ struct TranscriptListView: View {
     }
 
     // MARK: Scrolling
+
+    /// Puts the newest line of the setup log on screen, and keeps it there while the script prints.
+    ///
+    /// **Unfolding a setup log grows this list rather than scrolling inside itself**, so this
+    /// scroller is the only thing that can reach the end of one, and what that takes depends on
+    /// what else is in the list.
+    ///
+    /// A setup script runs before the first turn, so the ordinary case is a session with no rows
+    /// in it at all, and there the end of the log IS the live end of the transcript. Saying so
+    /// through `scrollPosition` rather than by naming the row is the whole of why the view then
+    /// keeps up: an edge is a standing instruction and a row is a place. Measured, on a script
+    /// printing a line every 350ms into an unfolded row: naming the row landed on the newest line
+    /// and then sat there while the content grew under it, eight points behind after one flush
+    /// and a hundred and thirteen after eight, at which point the jump pill appeared over a log
+    /// the reader had just asked to be shown the end of. Naming the edge holds it at nought.
+    ///
+    /// A session that already has rows is the re-run case, and there the live end is the last
+    /// thing the agent said, which is not what a reader who pressed "Show more of the log" asked
+    /// to see. So that one is taken to the row and left there.
+    ///
+    /// `wasAsked` separates the reader's own request from the log moving under them. The request
+    /// is obeyed wherever they are. A flush is obeyed only while `isNearBottom` still says they
+    /// are following along, which is the same test, at the same `stickyThreshold`, that decides
+    /// whether a running turn is followed. There is one rule about dragging a reader in this
+    /// window, and this is not a second one.
+    private func showSetupLogEnd(_ proxy: ScrollViewProxy, wasAsked: Bool) {
+        guard transcript.rows.isEmpty else {
+            if wasAsked { proxy.scrollTo(WorkspaceEventRow.endID, anchor: .bottom) }
+            return
+        }
+        guard wasAsked || geometry.isNearBottom else { return }
+        scrollPosition.scrollTo(edge: .bottom)
+    }
 
     /// Where a session opens: on the first thing the user has not read, which is the whole point
     /// of leaving a session and coming back to it, and otherwise on its live end.
