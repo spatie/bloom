@@ -279,36 +279,127 @@ enum RepoIconFile {
         return Measurement(format: .layered, pixels: 0)
     }
 
-    /// The document's layers, bottom first, as absolute paths.
+    /// The document's layers, bottom first, each with the colour the document paints it in.
     ///
     /// `icon.json` lists its groups front to back, the way a layers panel does, so the order is
-    /// reversed here into the order they have to be drawn in. What the system adds on top of them
-    /// (the glass, the shadow and the specular pass) belongs to the compositor and is not
-    /// reproduced: this is the artwork, not the finished macOS 26 icon, which is why a flattened
-    /// `.icns` beside it outranks it.
-    static func layers(ofIconBundle path: String) -> [String] {
+    /// reversed here into the order they have to be drawn in.
+    ///
+    /// THE ARTWORK IS USUALLY A SILHOUETTE, AND THE COLOUR IS IN THIS FILE. A layer's `fill`
+    /// REPLACES the artwork's own colours, so an Icon Composer document written the ordinary way
+    /// holds five black shapes and five fills. Reading the paths and ignoring the fills, which is
+    /// what this used to do, drew a project's mark as a black tile: Bloom's own document does
+    /// exactly that, and it was only ever invisible because the flattened `.icns` beside it
+    /// outranked the document and was drawn instead.
+    ///
+    /// What the system adds on top of the layers (the glass, the shadow and the specular pass)
+    /// still belongs to the compositor and is still not reproduced. That is why a flattened
+    /// `.icns` beside a document goes on outranking it: this is the artwork in its own colours,
+    /// not the finished macOS 26 icon.
+    static func layers(ofIconBundle path: String) -> [RepoIconLayer] {
         let manifest = (path as NSString).appendingPathComponent("icon.json")
         guard let data = RepoIconDetector.boundedContents(ofFile: manifest, limit: 1024 * 1024),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let groups = object["groups"] as? [[String: Any]]
         else { return [] }
 
-        var names: [String] = []
+        var described: [(name: String, fill: RepoIconLayerFill, opacity: Double)] = []
         for group in groups {
             guard let layers = group["layers"] as? [[String: Any]] else { continue }
             for layer in layers {
                 guard let name = layer["image-name"] as? String, !name.isEmpty else { continue }
-                names.append(name)
+                // A hidden layer is one the author switched off in Icon Composer. It is still in
+                // the file, and drawing it would show something the finished icon does not.
+                if layer["hidden"] as? Bool == true { continue }
+                described.append((
+                    name,
+                    fill(from: layer["fill"]),
+                    (layer["opacity"] as? Double).map { max(0, min(1, $0)) } ?? 1
+                ))
             }
         }
 
-        return names.reversed().compactMap { name in
-            let assets = (path as NSString).appendingPathComponent("Assets/\(name)")
-            if FileManager.default.fileExists(atPath: assets) { return assets }
-            let loose = (path as NSString).appendingPathComponent(name)
-            if FileManager.default.fileExists(atPath: loose) { return loose }
+        return described.reversed().compactMap { layer in
+            let assets = (path as NSString).appendingPathComponent("Assets/\(layer.name)")
+            if FileManager.default.fileExists(atPath: assets) {
+                return RepoIconLayer(path: assets, fill: layer.fill, opacity: layer.opacity)
+            }
+            let loose = (path as NSString).appendingPathComponent(layer.name)
+            if FileManager.default.fileExists(atPath: loose) {
+                return RepoIconLayer(path: loose, fill: layer.fill, opacity: layer.opacity)
+            }
             return nil
         }
+    }
+
+    /// One layer's `fill` key, or `.artwork` when it has none and the SVG is a picture rather than
+    /// a silhouette.
+    ///
+    /// `blend-mode` and `specular` are read past on purpose. Both describe how the system's own
+    /// passes treat the layer, and neither of those passes happens here, so honouring half of the
+    /// pair would move a colour away from the artwork rather than towards the finished icon.
+    private static func fill(from value: Any?) -> RepoIconLayerFill {
+        if let text = value as? String {
+            return colour(text).map(RepoIconLayerFill.solid) ?? .artwork
+        }
+        guard let object = value as? [String: Any] else { return .artwork }
+
+        if let stops = object["linear-gradient"] as? [String], stops.count >= 2,
+           let from = colour(stops[0]), let to = colour(stops[1]) {
+            // Unit coordinates of the canvas, y running down from the top. Icon Composer omits the
+            // orientation for the plain vertical case, which is the default named here.
+            let orientation = object["orientation"] as? [String: Any]
+            return .linearGradient(
+                from: from,
+                to: to,
+                start: point(orientation?["start"], fallbackY: 0),
+                stop: point(orientation?["stop"], fallbackY: 1)
+            )
+        }
+
+        // Icon Composer's "automatic gradient" derives two stops from one colour by a rule Apple
+        // does not publish. One flat colour is wrong by a shade and right about the hue, which is
+        // the half that matters at 16 points.
+        if let single = object["automatic-gradient"] as? String, let only = colour(single) {
+            return .solid(only)
+        }
+        return .artwork
+    }
+
+    private static func point(_ value: Any?, fallbackY: Double) -> RepoIconLayerPoint {
+        guard let object = value as? [String: Any] else {
+            return RepoIconLayerPoint(x: 0.5, y: fallbackY)
+        }
+        return RepoIconLayerPoint(
+            x: object["x"] as? Double ?? 0.5,
+            y: object["y"] as? Double ?? fallbackY
+        )
+    }
+
+    /// `srgb:r,g,b,a` and its neighbours, or a hex string.
+    ///
+    /// The colour space prefix is read and discarded. Naming Display P3 and drawing it as sRGB is
+    /// a small error in saturation on a wide gamut display; refusing the colour is a black tile,
+    /// which is the failure this whole path exists to stop.
+    static func colour(_ text: String) -> RepoIconColour? {
+        if let hex = HexColor(hex: text) {
+            return RepoIconColour(
+                red: Double(hex.red) / 255,
+                green: Double(hex.green) / 255,
+                blue: Double(hex.blue) / 255,
+                alpha: 1
+            )
+        }
+        guard let separator = text.lastIndex(of: ":") else { return nil }
+        let channels = text[text.index(after: separator)...]
+            .split(separator: ",")
+            .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard channels.count >= 3 else { return nil }
+        return RepoIconColour(
+            red: channels[0],
+            green: channels[1],
+            blue: channels[2],
+            alpha: channels.count > 3 ? channels[3] : 1
+        )
     }
 
     // MARK: - Bytes
@@ -330,5 +421,73 @@ enum RepoIconFile {
 
     private static func le16(_ bytes: [UInt8], at index: Int) -> UInt16 {
         UInt16(bytes[index]) | UInt16(bytes[index + 1]) << 8
+    }
+}
+
+// MARK: - What a layered document says about one of its layers
+
+/// One layer of an Icon Composer document: where the artwork is, and what colour to paint it.
+///
+/// A separate type rather than a path, because the two halves are useless apart. The SVG is a
+/// silhouette in the ordinary case and the colour is the whole of the drawing.
+public struct RepoIconLayer: Sendable, Hashable {
+    /// Absolute path to the layer's artwork.
+    public var path: String
+    public var fill: RepoIconLayerFill
+    /// `icon.json`'s `opacity`, clamped, defaulting to fully opaque.
+    public var opacity: Double
+
+    public init(path: String, fill: RepoIconLayerFill = .artwork, opacity: Double = 1) {
+        self.path = path
+        self.fill = fill
+        self.opacity = opacity
+    }
+}
+
+/// What replaces a layer's own colours.
+public enum RepoIconLayerFill: Sendable, Hashable {
+    /// No `fill` key at all. The artwork is a picture and is drawn as it is, which is the case a
+    /// hand-written document or an exported one with baked colours lands in.
+    case artwork
+    case solid(RepoIconColour)
+    /// Two stops down a line, each end in unit coordinates of the canvas with y running down from
+    /// the top, which is how Icon Composer writes an `orientation`.
+    case linearGradient(
+        from: RepoIconColour,
+        to: RepoIconColour,
+        start: RepoIconLayerPoint,
+        stop: RepoIconLayerPoint
+    )
+}
+
+/// A colour a layered document names, as unit channels.
+///
+/// Doubles rather than `HexColor`'s bytes, because `icon.json` writes fractions and carries an
+/// alpha, and because nothing in the core has a colour type with either.
+public struct RepoIconColour: Sendable, Hashable {
+    public var red: Double
+    public var green: Double
+    public var blue: Double
+    public var alpha: Double
+
+    public init(red: Double, green: Double, blue: Double, alpha: Double = 1) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+        self.alpha = alpha
+    }
+}
+
+/// A point in unit coordinates of the icon's canvas, y running down from the top.
+///
+/// Not `CGPoint`, so that the detector goes on being a thing `./test-core.sh` can reach without
+/// any part of the drawing stack under it.
+public struct RepoIconLayerPoint: Sendable, Hashable {
+    public var x: Double
+    public var y: Double
+
+    public init(x: Double, y: Double) {
+        self.x = x
+        self.y = y
     }
 }

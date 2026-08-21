@@ -478,7 +478,8 @@ struct RepoIconDetectorTests {
         ])
 
         let bundle = (root as NSString).appendingPathComponent("Bloom.icon")
-        let layers = RepoIconFile.layers(ofIconBundle: bundle).map { ($0 as NSString).lastPathComponent }
+        let layers = RepoIconFile.layers(ofIconBundle: bundle)
+            .map { ($0.path as NSString).lastPathComponent }
         // icon.json lists the groups the way a layers panel does, topmost first.
         #expect(layers == ["ground.svg", "panel.svg", "mark.svg"])
         #expect(RepoIconDetector.detect(in: root)?.format == .layered)
@@ -490,6 +491,91 @@ struct RepoIconDetectorTests {
             """.utf8),
         ])
         #expect(RepoIconDetector.detect(in: empty) == nil)
+    }
+
+    @Test("a layer's colour comes from icon.json, because the artwork under it is a silhouette")
+    func iconBundleFills() throws {
+        let root = try repository([
+            "App.icon/icon.json": Data("""
+            {"fill": "automatic", "groups": [
+              {"layers": [
+                {"image-name": "mark.svg", "name": "Mark",
+                 "fill": {"linear-gradient": ["srgb:0.6627,0.9255,0.8824,1.000",
+                                              "srgb:0.5412,0.8118,0.7686,0.500"],
+                          "orientation": {"start": {"x": 0.25, "y": 0.4},
+                                          "stop": {"x": 0.75, "y": 0.7}}},
+                 "opacity": 0.5}
+              ]},
+              {"layers": [
+                {"image-name": "hidden.svg", "hidden": true},
+                {"image-name": "flat.svg", "fill": "#2196F3"}
+              ]},
+              {"layers": [{"image-name": "ground.svg"}]}
+            ]}
+            """.utf8),
+            "App.icon/Assets/mark.svg": svgData(),
+            "App.icon/Assets/hidden.svg": svgData(),
+            "App.icon/Assets/flat.svg": svgData(),
+            "App.icon/Assets/ground.svg": svgData(),
+        ])
+
+        let bundle = (root as NSString).appendingPathComponent("App.icon")
+        let layers = RepoIconFile.layers(ofIconBundle: bundle)
+
+        // Bottom first, and the layer the author switched off is not in the list at all: it is
+        // still in the file, and drawing it would show something the finished icon does not.
+        #expect(layers.map { ($0.path as NSString).lastPathComponent }
+                == ["ground.svg", "flat.svg", "mark.svg"])
+
+        // No fill key at all. The artwork is a picture rather than a silhouette and keeps its own
+        // colours, which is what a hand-written document looks like.
+        #expect(layers[0].fill == .artwork)
+        #expect(layers[0].opacity == 1)
+
+        #expect(layers[1].fill == .solid(RepoIconColour(red: 33 / 255, green: 150 / 255, blue: 243 / 255)))
+
+        #expect(layers[2].opacity == 0.5)
+        #expect(layers[2].fill == .linearGradient(
+            from: RepoIconColour(red: 0.6627, green: 0.9255, blue: 0.8824, alpha: 1),
+            to: RepoIconColour(red: 0.5412, green: 0.8118, blue: 0.7686, alpha: 0.5),
+            start: RepoIconLayerPoint(x: 0.25, y: 0.4),
+            stop: RepoIconLayerPoint(x: 0.75, y: 0.7)
+        ))
+    }
+
+    @Test("a gradient with no orientation runs down the canvas, which is the case the file omits")
+    func iconBundleDefaultOrientation() throws {
+        let root = try repository([
+            "App.icon/icon.json": Data("""
+            {"groups": [{"layers": [{"image-name": "a.svg",
+              "fill": {"linear-gradient": ["srgb:1,0,0,1", "srgb:0,0,1,1"]}}]}]}
+            """.utf8),
+            "App.icon/Assets/a.svg": svgData(),
+        ])
+
+        let bundle = (root as NSString).appendingPathComponent("App.icon")
+        #expect(RepoIconFile.layers(ofIconBundle: bundle)[0].fill == .linearGradient(
+            from: RepoIconColour(red: 1, green: 0, blue: 0, alpha: 1),
+            to: RepoIconColour(red: 0, green: 0, blue: 1, alpha: 1),
+            start: RepoIconLayerPoint(x: 0.5, y: 0),
+            stop: RepoIconLayerPoint(x: 0.5, y: 1)
+        ))
+    }
+
+    @Test("the colour space a fill names is read and dropped, and nonsense is refused")
+    func iconBundleColours() {
+        #expect(RepoIconFile.colour("srgb:0.5,0.25,0.125,0.75")
+                == RepoIconColour(red: 0.5, green: 0.25, blue: 0.125, alpha: 0.75))
+        // Wide gamut drawn as sRGB is a shade out on a wide gamut display. Refusing it is a black
+        // tile, which is the failure the whole path exists to stop.
+        #expect(RepoIconFile.colour("display-p3:1,0,0,1")
+                == RepoIconColour(red: 1, green: 0, blue: 0, alpha: 1))
+        // Three channels, no alpha stated.
+        #expect(RepoIconFile.colour("srgb:0,0,0")?.alpha == 1)
+        #expect(RepoIconFile.colour("#fff") == RepoIconColour(red: 1, green: 1, blue: 1, alpha: 1))
+        #expect(RepoIconFile.colour("automatic") == nil)
+        #expect(RepoIconFile.colour("srgb:1,2") == nil)
+        #expect(RepoIconFile.colour("") == nil)
     }
 
     @Test("an asset catalogue's app icon set is answered with its largest image")

@@ -84,24 +84,83 @@ enum RepoIconArt {
     /// the finished system icon belong to the compositor, and none of them can be reproduced here.
     /// What is left is the artwork itself, which at 16 points is all that survives anyway. It is
     /// also why `RepoIconFormat` ranks a flattened `.icns` above the document beside it.
+    ///
+    /// THE LAYERS ARE SILHOUETTES AND THE COLOUR IS IN `icon.json`. Drawing the SVGs as they are
+    /// drew a black tile, because a layer's fill replaces the artwork's own colours and every
+    /// shape underneath is `#000`. Bloom's own document is exactly that shape; the bug was hidden
+    /// for as long as a flattened `AppIcon.icns` sat beside it and outranked it, and it appeared
+    /// the moment the macOS 26 floor let that file be deleted.
+    ///
+    /// The system can do this properly. `QLThumbnailGenerator` renders a `.icon` document with
+    /// every pass applied, which is the finished icon rather than this approximation of it. It is
+    /// not used here because it is asynchronous and cross-process, and this is read straight out
+    /// of `body` on the main actor for a badge that is drawn dozens of times a second.
     private static func composite(iconBundle path: String) -> NSImage? {
-        let layers = RepoIconDetector.layers(ofIconBundle: path).compactMap(NSImage.init(contentsOfFile:))
+        let layers = RepoIconDetector.layers(ofIconBundle: path)
         guard !layers.isEmpty else { return nil }
 
         let side = compositeSide
+        let bounds = NSRect(x: 0, y: 0, width: side, height: side)
         let canvas = NSImage(size: NSSize(width: side, height: side))
         canvas.lockFocus()
         NSGraphicsContext.current?.imageInterpolation = .high
+        var drew = false
         for layer in layers {
-            layer.draw(
-                in: NSRect(x: 0, y: 0, width: side, height: side),
+            guard let artwork = NSImage(contentsOfFile: layer.path) else { continue }
+            painted(artwork, as: layer, in: bounds)?.draw(
+                in: bounds,
                 from: .zero,
                 operation: .sourceOver,
-                fraction: 1
+                fraction: layer.opacity
             )
+            drew = true
         }
         canvas.unlockFocus()
-        return canvas
+        return drew ? canvas : nil
+    }
+
+    /// One layer's artwork with its fill poured into it.
+    ///
+    /// Its own bitmap, not the shared canvas, because the fill is laid down over the whole layer
+    /// and then cut to the artwork with `.destinationIn`. Doing that on the canvas would cut every
+    /// layer already drawn underneath as well, which is a black tile by a different route.
+    private static func painted(_ artwork: NSImage, as layer: RepoIconLayer, in bounds: NSRect) -> NSImage? {
+        guard layer.fill != .artwork else { return artwork }
+
+        let tinted = NSImage(size: bounds.size)
+        tinted.lockFocus()
+        defer { tinted.unlockFocus() }
+        NSGraphicsContext.current?.imageInterpolation = .high
+
+        switch layer.fill {
+        case .artwork:
+            return artwork
+        case let .solid(colour):
+            nsColor(colour).setFill()
+            bounds.fill()
+        case let .linearGradient(from, to, start, stop):
+            let gradient = NSGradient(starting: nsColor(from), ending: nsColor(to))
+            // `icon.json` measures y downwards from the top of the canvas and AppKit measures it
+            // upwards from the bottom, so the two ends are flipped rather than swapped: swapping
+            // them would also mirror x and tilt a gradient that is not vertical.
+            gradient?.draw(
+                from: NSPoint(x: start.x * bounds.width, y: (1 - start.y) * bounds.height),
+                to: NSPoint(x: stop.x * bounds.width, y: (1 - stop.y) * bounds.height),
+                options: [.drawsBeforeStartingLocation, .drawsAfterEndingLocation]
+            )
+        }
+
+        artwork.draw(in: bounds, from: .zero, operation: .destinationIn, fraction: 1)
+        return tinted
+    }
+
+    private static func nsColor(_ colour: RepoIconColour) -> NSColor {
+        NSColor(
+            srgbRed: colour.red,
+            green: colour.green,
+            blue: colour.blue,
+            alpha: colour.alpha
+        )
     }
 
     // MARK: - Shape

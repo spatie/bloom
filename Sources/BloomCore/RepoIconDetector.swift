@@ -59,12 +59,12 @@ public enum RepoIconDetector {
         candidates(in: repo).first
     }
 
-    /// The layers of a macOS 26 Icon Composer document, bottom first, as absolute paths.
+    /// The layers of a macOS 26 Icon Composer document, bottom first, each with its fill.
     ///
     /// Public because a `.layered` candidate is a directory rather than a picture, so whatever
     /// draws it has to be told what is inside. Everything about reading the document itself, and
     /// about what Bloom can and cannot reproduce of it, is on `RepoIconFile.layers(ofIconBundle:)`.
-    public static func layers(ofIconBundle path: String) -> [String] {
+    public static func layers(ofIconBundle path: String) -> [RepoIconLayer] {
         RepoIconFile.layers(ofIconBundle: path)
     }
 
