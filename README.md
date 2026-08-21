@@ -110,8 +110,19 @@ Sources/Bloom/         SwiftUI.
   Views/                 Sidebar, Center, Transcript, Inspector, Terminal, Markdown, Chrome
 ```
 
-`PROTOCOL.md` documents the `claude` stream-json protocol as verified against the real CLI, with
-a captured session in `fixtures/`. Read that before touching anything agent related.
+## The documents under `docs/`
+
+Each of these was written by measuring something rather than by remembering it, so they are the
+answer to "has this already been worked out" rather than a tour of the code.
+
+- `docs/PROTOCOL.md` documents the `claude` stream-json protocol as verified against the real
+  CLI, with a captured session in `fixtures/`. Read it before touching anything agent related.
+- `docs/CODEX.md` is the same for Codex's JSON-RPC app-server, plus the decisions that shaped
+  the Codex backend and the work still outstanding on it.
+- `docs/AGENTS-INTEGRATION.md` is what the four agent CLIs actually put on disk, read off a real
+  machine, and the rule that none of it may be rendered.
+- `docs/PLAN.md` is the build order this was written to, kept for the bug reports in it: what
+  broke, why, and what now stops it.
 
 ## What it deliberately does not do
 

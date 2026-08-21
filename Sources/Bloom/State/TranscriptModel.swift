@@ -329,7 +329,7 @@ final class TranscriptModel {
     /// a chat that has started is on the backend it started on for as long as it lives. Changing
     /// the picker on a chat that has already spoken forks a new chat rather than turning this one
     /// into something else, because its rows, its thread and its context all belong to the backend
-    /// that made them. See `ComposerBackendChange` and CODEX.md.
+    /// that made them. See `ComposerBackendChange` and docs/CODEX.md.
     private func ensureRunner() -> any SessionRunner {
         let runner = self.runner ?? Self.makeRunner(
             session: session,

@@ -2,6 +2,11 @@
 
 A Swift/SwiftUI rebuild of Conductor: parallel Claude Code agents, one git worktree each.
 
+This is the plan the app was built to, kept as a record rather than maintained as a status page.
+The phases below are all done, and the figures in this section are the ones that were true when
+each was closed: the suite has grown a long way past the 188 tests named here. What is worth
+keeping is the two lists of bugs, because each one names a mistake that is cheap to make again.
+
 ## Status
 
 Every phase below is done and checked against its endgoal. The app builds with zero warnings,

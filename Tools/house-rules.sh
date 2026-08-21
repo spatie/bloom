@@ -53,19 +53,19 @@ echo "==> the app is called Bloom"
 # Every file that is allowed to say Baton, and why. This list should only ever
 # get shorter. A file not on it that mentions the old name is a new mistake.
 baton_allowed=(
-  'PROTOCOL.md'                                     # quotes a recorded session
-  'build.sh'                                        # BATON_CODESIGN_IDENTITY, kept working on purpose
-  'fixtures/'                                       # recorded sessions, byte for byte
-  'Sources/BloomCore/LegacyDatabase.swift'          # reads the old app's database
-  'Sources/BloomCore/LegacyDefaults.swift'          # reads the old app's preferences
-  'Sources/BloomCore/WorkspaceManager.swift'        # a comment about the old worktree home
-  'Tests/BloomCoreTests/AgentEventTests.swift'      # sample paths and recorded payloads
-  'Tests/BloomCoreTests/FilePathGuessTests.swift'   # sample paths
-  'Tests/BloomCoreTests/HomeListTests.swift'        # a sample repository name
-  'Tests/BloomCoreTests/InstallPingTests.swift'     # a sample path
-  'Tests/BloomCoreTests/LegacyMigrationTests.swift' # tests the migration off the old name
+  'docs/PROTOCOL.md'                                    # quotes a recorded session
+  'build.sh'                                            # BATON_CODESIGN_IDENTITY, kept working on purpose
+  'fixtures/'                                           # recorded sessions, byte for byte
+  'Sources/BloomCore/LegacyDatabase.swift'              # reads the old app's database
+  'Sources/BloomCore/LegacyDefaults.swift'              # reads the old app's preferences
+  'Sources/BloomCore/WorkspaceManager.swift'            # a comment about the old worktree home
+  'Tests/BloomCoreTests/AgentEventTests.swift'          # sample paths and recorded payloads
+  'Tests/BloomCoreTests/FilePathGuessTests.swift'       # sample paths
+  'Tests/BloomCoreTests/HomeListTests.swift'            # a sample repository name
+  'Tests/BloomCoreTests/InstallPingTests.swift'         # a sample path
+  'Tests/BloomCoreTests/LegacyMigrationTests.swift'     # tests the migration off the old name
   'Tests/BloomCoreTests/RepositoryStartPlanTests.swift' # sample folder names
-  'Tools/icon/lib9.py'                              # a sample path
+  'Tools/icon/lib9.py'                                  # a sample path
 )
 for file in $(git grep -l -I -i baton -- ':!.claude' ':!Tools/house-rules.sh' || true); do
   allowed=0

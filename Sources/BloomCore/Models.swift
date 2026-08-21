@@ -392,7 +392,7 @@ public struct PullRequest: Sendable, Hashable, Codable {
 /// screen can be honest about what is installed and what is not.
 ///
 /// **A chat picks one of these, not a workspace.** One worktree can hold a Claude Code
-/// conversation and a Codex one at the same time. See `Session.agentKind` and CODEX.md.
+/// conversation and a Codex one at the same time. See `Session.agentKind` and docs/CODEX.md.
 public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
     case claudeCode
     case codex
