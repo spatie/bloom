@@ -81,6 +81,10 @@ final class GitHubAvailability {
         let task = Task { State(await GitHubBridge.access()) }
         probe = task
         let answer = await task.value
+        // Only the probe still on duty writes back. A forced check cancels the one in flight,
+        // and cancellation makes `gh` read as signed out, so the original awaiter used to stamp
+        // a stale `.signedOut` over the forced probe's `.ready` and tear down its coalescing.
+        guard probe == task else { return answer }
         probe = nil
         answeredAt = .now
         state = answer

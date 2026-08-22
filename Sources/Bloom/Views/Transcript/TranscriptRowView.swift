@@ -36,6 +36,7 @@ struct TranscriptRowView: View, Equatable {
             && lhs.row.kind == rhs.row.kind
             && lhs.row.isError == rhs.row.isError
             && lhs.row.refusal == rhs.row.refusal
+            && lhs.row.refusalReason == rhs.row.refusalReason
             && lhs.row.durationMS == rhs.row.durationMS
             && lhs.row.resultPayload?.count == rhs.row.resultPayload?.count
             && lhs.row.parentToolUseID == rhs.row.parentToolUseID

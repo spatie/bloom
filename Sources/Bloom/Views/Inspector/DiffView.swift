@@ -117,12 +117,6 @@ struct DiffView: View {
                 commitDraft()
             }
         }
-        // Only the path, not the whole file: a refresh that changes nothing but the line counts
-        // must not throw the user out of the editor they are typing in. A path with unsaved text
-        // behind it stays in Edit for the reason the initialiser gives.
-        .onChange(of: file.path) { _, _ in
-            mode = session.isDirty(absolutePath) ? .edit : .diff
-        }
         .onChange(of: isEditable) { _, editable in
             if !editable { mode = .diff }
         }

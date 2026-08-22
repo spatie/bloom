@@ -389,8 +389,14 @@ final class WorkspaceModel {
         arrivalTask = nil
         fileTreeTask?.cancel()
         fileTreeTask = nil
+        // Nilled like the three above: a cancelled refresh returns through its
+        // `guard changesTask == task` without clearing the handle, and on the one path where
+        // the model survives its teardown (a failed archive restoring the row) a handle left
+        // behind made the quiet poll stand down until the workspace was next arrived at.
         changesTask?.cancel()
+        changesTask = nil
         pullRequestTask?.cancel()
+        pullRequestTask = nil
         // A cancelled refresh returns before it clears its own flag, so the spinner would spin
         // for the rest of the launch.
         isLoadingChanges = false
@@ -412,8 +418,14 @@ final class WorkspaceModel {
     func shutdown() async {
         setupTask?.cancel()
         setupTask = nil
+        // Nilled like the three above: a cancelled refresh returns through its
+        // `guard changesTask == task` without clearing the handle, and on the one path where
+        // the model survives its teardown (a failed archive restoring the row) a handle left
+        // behind made the quiet poll stand down until the workspace was next arrived at.
         changesTask?.cancel()
+        changesTask = nil
         pullRequestTask?.cancel()
+        pullRequestTask = nil
         for transcript in transcripts.values {
             await transcript.shutdown()
         }

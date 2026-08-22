@@ -56,8 +56,8 @@ struct DetailColumn: View {
     ///
     /// An id with no model is the same case it always was: the selection setter makes the model
     /// for every id that is in the list, so no model means no such workspace, and Home is where an
-    /// unresolvable selection lands everywhere else in this file. Before the store has answered
-    /// there is no list to be missing from, so that case waits instead.
+    /// unresolvable selection lands everywhere else in this file. Before the store has answered,
+    /// `body` has already shown `LoadingView` and this is never asked.
     @ViewBuilder
     private func workspace(_ id: WorkspaceID) -> some View {
         // `existingModel` rather than `model(for:)`: creating one here would mutate observable
@@ -68,10 +68,8 @@ struct DetailColumn: View {
             // probe run turned it on. See `SwitchTrace`.
             let _ = SwitchTrace.mark("column.body", workspace: id)
             CenterColumnView(model: model)
-        } else if app.isLoaded {
-            HomeView()
         } else {
-            LoadingView()
+            HomeView()
         }
     }
 }
