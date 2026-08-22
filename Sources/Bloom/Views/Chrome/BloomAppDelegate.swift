@@ -90,8 +90,7 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         guard let text = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
               let url = URL(string: text) else { return }
 
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.first?.makeKeyAndOrderFront(nil)
+        MainWindow.raise()
         NotificationCenter.default.post(name: .bloomHandleURL, object: url)
     }
 
@@ -205,16 +204,16 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
 
     @objc private func openWorkspaceFromDock(_ sender: NSMenuItem) {
         guard let id = sender.represented(WorkspaceID.self) else { return }
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.first?.makeKeyAndOrderFront(nil)
+        MainWindow.raise()
         OpenWorkspaceNotification.post(id)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
-            sender.windows.first?.makeKeyAndOrderFront(nil)
+            MainWindow.raise()
+        } else {
+            sender.activate(ignoringOtherApps: true)
         }
-        sender.activate(ignoringOtherApps: true)
         return true
     }
 
@@ -253,8 +252,7 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
                 return
             }
 
-            NSApp.activate(ignoringOtherApps: true)
-            NSApp.windows.first?.makeKeyAndOrderFront(nil)
+            MainWindow.raise()
             if let workspaceID {
                 OpenWorkspaceNotification.post(workspaceID)
             }

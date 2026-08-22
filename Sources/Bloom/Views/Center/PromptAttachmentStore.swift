@@ -76,27 +76,39 @@ final class PromptAttachmentStore {
         var taken = Set(existing.map(\.filename))
         // One slot per thing handed over, in order, so the sentence names them the way they were
         // dropped whether or not each one had to be copied.
-        enum Slot { case attached(String), fresh(AttachmentSource) }
+        enum Slot { case attached(String), fresh(AttachmentSource), duplicate(ofWanted: Int) }
         var slots: [Slot] = []
+        // Which wanted copy a repeat inside this batch points at. A repeat used to fall into the
+        // already-attached branch and read the "" the claim below had parked in `known`, so the
+        // sentence gained an empty backtick pair where the file's second mention should be.
+        var pending: [String: Int] = [:]
+        var freshCount = 0
 
         for source in sources {
             // The same file dropped twice is one copy. Checked before any copying, so a second
             // drop of a two hundred megabyte file costs nothing at all.
             if case .file(let url) = source {
                 let path = url.standardizedFileURL.path
+                if let index = pending[path] {
+                    slots.append(.duplicate(ofWanted: index))
+                    continue
+                }
                 if let already = known[path] {
                     slots.append(.attached(already))
                     continue
                 }
                 // Claimed now, so the same file named twice in one drop is copied once.
                 known[path] = ""
+                pending[path] = freshCount
                 taken.insert(url.lastPathComponent)
                 slots.append(.fresh(source))
+                freshCount += 1
                 continue
             }
             let name = PastedAttachment.uniqued(source.filename, avoiding: taken)
             taken.insert(name)
             slots.append(.fresh(source.named(name)))
+            freshCount += 1
         }
 
         let wanted = slots.compactMap { slot -> AttachmentSource? in
@@ -131,6 +143,10 @@ final class PromptAttachmentStore {
                 // A file that failed is reported rather than named.
                 guard let made = copied.0[fresh] else { continue }
                 result.made.append(made)
+                result.paths.append(made.path)
+            case .duplicate(let index):
+                // The repeat is named only if its one copy was actually made.
+                guard let made = copied.0[index] else { continue }
                 result.paths.append(made.path)
             }
         }

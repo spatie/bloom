@@ -1,25 +1,17 @@
 import SwiftUI
 
 /// Makes recoverable failures visible without forcing every caller to manage a separate alert.
+///
+/// Dismissal is the caller's, through `onDismiss` clearing whatever presents the banner. It used
+/// to be a private flag in here, re-raised by an onChange of the message, and a retry that failed
+/// with the identical sentence (the common case, since callers report fixed strings) changed
+/// nothing, so the second failure was reported once and then silently swallowed.
 struct ErrorBanner: View {
     let title: String
     let message: String
-
-    @State private var isVisible = true
+    let onDismiss: () -> Void
 
     var body: some View {
-        Group {
-            if isVisible {
-                banner
-            }
-        }
-        // A banner sitting in a fixed slot keeps its view identity, so a second failure after a
-        // dismissal never reappeared: the view was still mounted, still hidden. The handler has
-        // to sit outside the branch, or it is not attached while the banner is dismissed.
-        .onChange(of: message) { _, _ in isVisible = true }
-    }
-
-    private var banner: some View {
         HStack(alignment: .firstTextBaseline, spacing: Metrics.gutter) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Palette.negative)
@@ -38,9 +30,7 @@ struct ErrorBanner: View {
 
             Spacer(minLength: Metrics.gutter)
 
-            Button("Dismiss", systemImage: "xmark") {
-                isVisible = false
-            }
+            Button("Dismiss", systemImage: "xmark", action: onDismiss)
             .labelStyle(.iconOnly)
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)

@@ -48,7 +48,9 @@ struct AgentsSettingsView: View {
 
             if let saveFailure {
                 Section {
-                    ErrorBanner(title: "Could not save", message: saveFailure)
+                    ErrorBanner(title: "Could not save", message: saveFailure) {
+                        self.saveFailure = nil
+                    }
                 }
             }
 

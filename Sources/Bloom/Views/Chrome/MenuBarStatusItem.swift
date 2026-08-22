@@ -318,16 +318,11 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
 
     @objc private func select(_ sender: NSMenuItem) {
         guard let id = sender.represented(WorkspaceID.self) else { return }
-        raiseWindow()
+        MainWindow.raise()
         OpenWorkspaceNotification.post(id)
     }
 
     @objc private func openWindow() {
-        raiseWindow()
-    }
-
-    private func raiseWindow() {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.first { $0.canBecomeMain }?.makeKeyAndOrderFront(nil)
+        MainWindow.raise()
     }
 }
