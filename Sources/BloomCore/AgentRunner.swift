@@ -565,10 +565,7 @@ public actor AgentRunner {
         let message = "\(what): \(error)"
         persistenceFailures += 1
         lastFailure = message
-
-        let payload = (try? JSONEncoder().encode(StorageFailure(message: message)))
-            ?? Data(#"{"type":"error","subtype":"storage"}"#.utf8)
-        sink.yield(.error(AgentError(message: message, raw: payload)))
+        sink.yield(.error(.storage(message: message)))
     }
 
     // MARK: Permission asks
@@ -906,13 +903,6 @@ public actor AgentRunner {
         let command: String
     }
 
-    /// The payload of the `.error` event a failed write emits. It never reaches the database, for
-    /// the obvious reason, so it only ever exists in flight.
-    private struct StorageFailure: Encodable {
-        let type = "error"
-        let subtype = "storage"
-        let message: String
-    }
 }
 
 // MARK: - Errors

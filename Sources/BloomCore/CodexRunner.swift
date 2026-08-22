@@ -539,9 +539,17 @@ public actor CodexRunner: SessionRunner {
         }
     }
 
+    /// Say so when the store refuses a write, on the stream as well as on the runner.
+    ///
+    /// The sink rather than `emit`, twice over: persisting a row is exactly what just failed, and
+    /// `emit`'s `.error` arm ends the turn, which a database hiccup has no business doing. The
+    /// Claude Code side has emitted this event since its `try?` swallowed a whole transcript;
+    /// this backend used to keep the count and tell nobody who was looking at the window.
     private func report(_ what: String, _ error: Error) {
+        let message = "\(what): \(error.readableMessage)"
         persistenceFailures += 1
-        lastFailure = "\(what): \(error.readableMessage)"
+        lastFailure = message
+        sink.yield(.error(.storage(message: message)))
     }
 }
 

@@ -422,6 +422,25 @@ public struct AgentError: Sendable, Hashable {
     }
 }
 
+extension AgentError {
+    /// The `.error` event a runner emits when the store refuses a write.
+    ///
+    /// Its payload never reaches the database, for the obvious reason, so it only ever exists in
+    /// flight; and it goes straight to the sink rather than through the runner's ingest path,
+    /// because storing a row is exactly what just failed. Both runners emit it, so a failing
+    /// database looks the same in a Codex chat as in a Claude Code one.
+    static func storage(message: String) -> AgentError {
+        struct StorageFailure: Encodable {
+            let type = "error"
+            let subtype = "storage"
+            let message: String
+        }
+        let payload = (try? JSONEncoder().encode(StorageFailure(message: message)))
+            ?? Data(#"{"type":"error","subtype":"storage"}"#.utf8)
+        return AgentError(message: message, raw: payload)
+    }
+}
+
 /// Token accounting, filled from either the thin `assistant` usage object or the richer one on
 /// `result`. Cost and the context window only ever arrive on `result`.
 public struct AgentUsage: Sendable, Hashable {
