@@ -64,8 +64,19 @@ enum Snapshot {
     ///     Bloom --open-url "bloom://prompt=...&path=..."
     static func scheduleURLIfRequested() {
         let arguments = CommandLine.arguments
-        guard let index = arguments.firstIndex(of: "--open-url"), index + 1 < arguments.count,
-              let url = URL(string: arguments[index + 1]) else { return }
+        guard let index = arguments.firstIndex(of: "--open-url"), index + 1 < arguments.count else {
+            return
+        }
+        // Through `OpenURLArgument` rather than `URL(string:)` directly, which returned nil for
+        // any prompt holding a space or a colon and dropped the link without a word. And when even
+        // the repair cannot read it, say so: a harness that swallows its argument reads as the
+        // deep link machinery being broken rather than the argument being malformed.
+        guard let url = OpenURLArgument.url(from: arguments[index + 1]) else {
+            FileHandle.standardError.write(
+                Data("==> --open-url: not a URL, even repaired: \(arguments[index + 1])\n".utf8)
+            )
+            return
+        }
 
         Task { @MainActor in
             // After `bootstrap`, or the repo list it needs is not loaded yet.
