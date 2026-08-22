@@ -138,9 +138,11 @@ struct PermissionAskTests {
         #expect(ask.allowSuggestion == nil)
     }
 
-    /// Two allow suggestions has never been seen on the wire, and guessing which of them the user
-    /// meant is how a feature grants something nobody agreed to.
-    @Test("two allow suggestions means none is chosen")
+    /// Two allow suggestions for the ask's own tool, which is the pair that is genuinely
+    /// ambiguous: guessing which of them the user meant is how a feature grants something nobody
+    /// agreed to. Compare `companionRuleAsk`, where the second suggestion is for a different tool
+    /// and the choice needs no guess.
+    @Test("two allow suggestions for the same tool means none is chosen")
     func ambiguousSuggestions() {
         let ask = Self.ask(Self.realAsk.replacingOccurrences(
             of: #""behavior":"allow","destination":"localSettings"}]"#,
@@ -150,6 +152,52 @@ struct PermissionAskTests {
         #expect(ask.suggestions.count == 2)
         #expect(ask.allowSuggestion == nil)
         #expect(!ask.canWiden)
+    }
+
+    // MARK: The companion rule
+
+    /// Captured verbatim from `claude 2.1.239`. A Bash command whose subcommands touch paths
+    /// outside the working directory arrives with **two** allow suggestions: the Bash rule for
+    /// the command family, and a companion `Read` rule for the paths. The CLI's own UI offers
+    /// them as separate options; Bloom offers the one the ask is about.
+    static let companionRuleAsk = """
+    {"type":"control_request","request_id":"b54b23b7-618d-431a-a967-bfd916f2609d",\
+    "request":{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash",\
+    "input":{"command":"gh pr diff 61 > /tmp/pr61.diff && wc -l /tmp/pr61.diff && gh pr checks 61 2>&1 | head -30",\
+    "description":"Get PR diff, line count, and check status"},\
+    "description":"Get PR diff, line count, and check status",\
+    "permission_suggestions":[{"type":"addRules","rules":[{"toolName":"Bash",\
+    "ruleContent":"gh pr *"}],"behavior":"allow","destination":"localSettings"},\
+    {"type":"addRules","rules":[{"toolName":"Read","ruleContent":"//private/tmp/**"}],\
+    "behavior":"allow","destination":"session"}],\
+    "decision_reason_type":"subcommandResults",\
+    "tool_use_id":"toolu_01E3b8UL6KnXrx6828bX5NR1"}}
+    """
+
+    /// The bug this section exists for: both suggestions were dropped as ambiguous, the button
+    /// vanished, and the user was asked the same question every turn with no way to say always.
+    @Test("a companion Read rule does not cost the ask its button")
+    func companionRuleKeepsTheButton() {
+        let ask = Self.ask(Self.companionRuleAsk)
+
+        #expect(ask.suggestions.count == 2)
+        #expect(ask.rules == [PermissionRule(toolName: "Bash", ruleContent: "gh pr *")])
+        #expect(ask.ruleText == "Bash(gh pr *)")
+        #expect(ask.canWiden)
+    }
+
+    /// The companion widens a tool nobody was asked about, so granting the Bash rule must not
+    /// smuggle the Read rule out with it.
+    @Test("the companion rule is never sent back")
+    func companionRuleIsNotEchoed() throws {
+        let ask = Self.ask(Self.companionRuleAsk)
+        let answer = try PermissionAnswer.encode(ask: ask, decision: .allow(scope: .session))
+        let sent = Self.object(answer)["response"]?["response"]?["updatedPermissions"]
+
+        #expect(sent?.arrayValue?.count == 1)
+        #expect(sent?[0]?["rules"]?[0]?["toolName"]?.stringValue == "Bash")
+        #expect(sent?[0]?["destination"]?.stringValue == "session")
+        #expect(!answer.contains("//private/tmp/**"), "the Read companion went out with the grant")
     }
 
     @Test("a deny suggestion is never offered as an allow")

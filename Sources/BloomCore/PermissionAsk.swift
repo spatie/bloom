@@ -206,13 +206,27 @@ public struct PermissionAsk: Sendable, Hashable, Identifiable {
 
     /// The suggestion Bloom would act on, and the only one it ever offers as a button.
     ///
-    /// Exactly one, deliberately. An ask carrying two different allow suggestions is not something
-    /// the CLI has been seen to send, and if it ever does, guessing which of them the user meant is
-    /// how a feature grants something nobody agreed to. Two suggestions means no rule button and
-    /// an allow that lasts for this call only.
+    /// An earlier version of this treated two allow suggestions as unanswerable, on the grounds
+    /// that the CLI had never been seen to send them and guessing which one the user meant is how
+    /// a feature grants something nobody agreed to. Then the CLI was seen to send them, routinely:
+    /// measured against 2.1.239, a Bash command that touched a path outside the working directory
+    /// arrived with the Bash rule for the command itself and a companion `Read` rule for the paths
+    /// it touched, for example `Bash` + `gh pr *` beside `Read` + `//private/tmp/**`. Treating
+    /// that pair as ambiguous removed the rule button from exactly the asks people most wanted it
+    /// for.
+    ///
+    /// So the pair is resolved without guessing. The ask is about one tool, named in `toolName`,
+    /// and the suggestion whose rules are all for that tool is the one that answers it. The
+    /// companions widen tools Bloom was not asked about, so they are neither offered nor ever sent
+    /// back. Two suggestions for the ask's own tool is still ambiguous, and ambiguity still means
+    /// no button rather than a guess.
     public var allowSuggestion: PermissionSuggestion? {
         let allows = suggestions.filter(\.isAllowRules)
-        return allows.count == 1 ? allows[0] : nil
+        if allows.count == 1 { return allows[0] }
+        let ownTool = allows.filter { suggestion in
+            suggestion.rules.allSatisfy { $0.toolName == toolName }
+        }
+        return ownTool.count == 1 ? ownTool[0] : nil
     }
 
     /// The rules that would stop this question coming back, or empty when there is nothing to
