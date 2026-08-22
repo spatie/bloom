@@ -523,6 +523,7 @@ enum Snapshot {
             ("sidebar", AnyView(SidebarView().frame(width: 260, height: 620)), CGSize(width: 260, height: 620)),
             ("home", AnyView(HomeView().frame(width: 900, height: 620)), CGSize(width: 900, height: 620)),
             ("components", AnyView(ComponentGallery().frame(width: 640, height: 700)), CGSize(width: 640, height: 700)),
+            ("permission", AnyView(PermissionSnapshotGallery().frame(width: 720, height: 1180)), CGSize(width: 720, height: 1180)),
         ]
 
         for appearanceName in ["light", "dark"] {

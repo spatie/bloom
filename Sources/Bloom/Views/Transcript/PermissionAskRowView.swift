@@ -230,6 +230,11 @@ struct PermissionAskRowView: View {
     @ViewBuilder
     private var outcome: some View {
         let decision = decision ?? ""
+        // The extra air over and under the verdict, on the verdict rather than on the card. The
+        // stack's own spacing left the sentence 4 points off the command box and the card's inset
+        // left it 6 off the border, which read as a caption crammed under the box; the buttons
+        // the open card draws in this slot carry their own height and need neither. Doubling
+        // both here settles the sentence without loosening the ask.
         VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
             Text(outcomeText(decision))
                 .font(Typo.caption)
@@ -244,6 +249,8 @@ struct PermissionAskRowView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .padding(.top, TranscriptLayout.tight * 2)
+        .padding(.bottom, TranscriptLayout.tight)
     }
 
     // MARK: Copy
