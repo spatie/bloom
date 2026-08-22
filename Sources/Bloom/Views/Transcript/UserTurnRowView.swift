@@ -25,6 +25,10 @@ struct UserTurnRowView: View {
     var text: String
     /// The files this turn carried, worktree relative, in the order they were attached.
     var attachments: [String] = []
+    /// The review comments this turn carried, when `ReviewTurn.split` recognised it as one. The
+    /// bubble then shows `text` as the typed message and one chip per comment, the way the
+    /// composer showed them a moment before the send.
+    var reviewChips: [ReviewTurnRecord.Chip] = []
     /// Which worktree those paths are relative to, and which review the chips open into.
     var workspace: Workspace
     var maxWidth: CGFloat
@@ -139,6 +143,10 @@ struct UserTurnRowView: View {
                     selectionColor: NSColor(rgb: 0x466288),
                     actions: TranscriptLink.actions(for: app.existingModel(for: workspace.id))
                 )
+            }
+
+            if !reviewChips.isEmpty {
+                ReviewTurnChips(chips: reviewChips, workspace: workspace)
             }
 
             if !attachments.isEmpty {

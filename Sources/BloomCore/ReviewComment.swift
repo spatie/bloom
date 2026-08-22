@@ -64,12 +64,15 @@ public struct ReviewCommentAnchor: Sendable, Hashable, Codable {
             return ReviewCommentAnchor(line: line, text: "")
         }
         let start = max(0, index - radius)
-        let end = min(lines.count - 1, index + radius)
+        // Half open, not closed: a closed `(index + 1)...end` traps on the file's last line,
+        // where there is nothing after and the range runs backwards. Found by commenting on the
+        // final line of a two-line file, which is not an exotic thing to review.
+        let end = min(lines.count, index + 1 + radius)
         return ReviewCommentAnchor(
             line: line,
             text: lines[index],
             before: Array(lines[start..<index]),
-            after: Array(lines[(index + 1)...end])
+            after: Array(lines[(index + 1)..<end])
         )
     }
 
@@ -89,12 +92,14 @@ public struct ReviewCommentAnchor: Sendable, Hashable, Codable {
             return nil
         }
         let start = max(0, index - radius)
-        let end = min(sideLines.count - 1, index + radius)
+        // Half open for the reason the file-lines capture above is: closed, it trapped when the
+        // commented line was the hunk's last on its side.
+        let end = min(sideLines.count, index + 1 + radius)
         return ReviewCommentAnchor(
             line: line,
             text: sideLines[index].text,
             before: sideLines[start..<index].map(\.text),
-            after: sideLines[(index + 1)...end].map(\.text)
+            after: sideLines[(index + 1)..<end].map(\.text)
         )
     }
 

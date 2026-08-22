@@ -61,9 +61,19 @@ struct PendingTurnRowView: View {
         .onHover { isHovered = $0 }
     }
 
+    /// A queued review turn is drawn as what was asked rather than as the rendered prompt: the
+    /// typed words and a count. The full text goes to the agent untouched; only the drawing of
+    /// the wait is summarised, the same bargain the sent bubble makes with its chips.
+    private var displayText: String {
+        guard let review = ReviewTurn.split(delivery.body) else { return delivery.body }
+        let count = review.chips.count
+        let suffix = "\(count) review comment\(count == 1 ? "" : "s") attached"
+        return review.message.isEmpty ? suffix : "\(review.message)\n\(suffix)"
+    }
+
     private var bubble: some View {
         CappedWidth(width: maxWidth) {
-            Text(delivery.body)
+            Text(displayText)
                 .font(Typo.body)
                 .lineSpacing(TranscriptLayout.proseLeading)
                 .foregroundStyle(Palette.textSecondary)

@@ -41,6 +41,21 @@ struct ReviewCommentAnchorTests {
         #expect(anchor.after.count == 3)
     }
 
+    @Test("anchors to the last line of a file")
+    func anchorsToTheLastLine() {
+        // A closed range built this from `(index + 1)...end` and trapped whenever the commented
+        // line was the file's last, which a two-line file made unmissable.
+        let anchor = ReviewCommentAnchor.make(line: 2, in: ["def greet():", "    return 1"])
+
+        #expect(anchor.text == "    return 1")
+        #expect(anchor.before == ["def greet():"])
+        #expect(anchor.after.isEmpty)
+
+        let last = ReviewCommentAnchor.make(line: 11, in: Self.original)
+        #expect(last.text == "}")
+        #expect(last.after.isEmpty)
+    }
+
     @Test("a line number outside the file yields an empty anchor")
     func handlesOutOfRangeLine() {
         let anchor = ReviewCommentAnchor.make(line: 99, in: Self.original)
@@ -237,6 +252,30 @@ struct ReviewCommentAnchorTests {
 
         #expect(anchor.text == "two")
         #expect(anchor.after == ["three", "four"])
+    }
+
+    @Test("anchors to the last line of a hunk on either side")
+    func anchorsToTheLastHunkLine() throws {
+        let patch = """
+        diff --git a/Widget.swift b/Widget.swift
+        --- a/Widget.swift
+        +++ b/Widget.swift
+        @@ -1,2 +1,2 @@
+         one
+        -two
+        +TWO
+        """
+        let file = try #require(DiffParser.parse(patch).first)
+        let hunk = try #require(file.hunks.first)
+
+        // The same closed-range trap as the file capture, on the hunk path.
+        let new = try #require(ReviewCommentAnchor.make(line: 2, side: .new, in: hunk))
+        #expect(new.text == "TWO")
+        #expect(new.after.isEmpty)
+
+        let old = try #require(ReviewCommentAnchor.make(line: 2, side: .old, in: hunk))
+        #expect(old.text == "two")
+        #expect(old.after.isEmpty)
     }
 
     @Test("returns nothing for a line the hunk does not contain")

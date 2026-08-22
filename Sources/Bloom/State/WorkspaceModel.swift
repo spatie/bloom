@@ -72,6 +72,14 @@ final class WorkspaceModel {
     /// main" for as long as it took the refresh to start. That is a claim, it was made before
     /// anything had been read, and on a large worktree it was on screen for most of a second.
     private(set) var hasReadChanges = false
+    /// Counts refreshes that landed, whether or not the list moved. `changedFiles` is written
+    /// only when it differs, deliberately, so the six second poll cannot rerun the inspector for
+    /// nothing; but the diff open on one file needs to hear about the refreshes the list cannot
+    /// see. An agent rewording a line one for one leaves the file's counts, and with them the
+    /// whole `ChangedFile` value, exactly where they were, and the review bands must still
+    /// re-check their anchors against the worktree. Only that re-check reads this, so the tick
+    /// invalidates one small view and not the tree.
+    private(set) var changesGeneration = 0
     /// Why the last refresh could not answer. Non-nil means `changedFiles` is the last list git was
     /// able to produce, not what the worktree looks like now.
     var changesError: String?
@@ -708,6 +716,7 @@ final class WorkspaceModel {
 
         case .success(let answer):
             hasReadChanges = true
+            changesGeneration &+= 1
             // Only when it actually moved. `AppModel`'s poll lands here every six seconds, and a
             // write of an identical list is still a write as far as Observation is concerned,
             // which would rerun the inspector's body and rebuild the tree for nothing.
@@ -739,6 +748,64 @@ final class WorkspaceModel {
         } else if selectedFilePath == nil, reason == .requested {
             selectedFilePath = files.first?.path
         }
+    }
+
+    // MARK: - Review comments
+
+    /// The pending review: every comment written on this workspace's diffs and not yet sent.
+    ///
+    /// On the workspace rather than on a session, because a comment is about the worktree and the
+    /// worktree is the workspace's; whichever conversation sends the review, the notes are about
+    /// the same files. And in the store rather than only here, because half a review is exactly
+    /// the kind of typed work that must survive switching workspace, closing the file, or
+    /// quitting: the chips come back when the workspace does.
+    private(set) var reviewComments: [ReviewComment] = []
+    private(set) var hasReadReviewComments = false
+
+    func reloadReviewComments() async {
+        guard let store else { return }
+        let fresh = (try? await store.reviewComments(workspaceID: workspace.id)) ?? []
+        hasReadReviewComments = true
+        // Conditional for the reason every reload here is: an identical write still invalidates
+        // every view reading the list.
+        if reviewComments != fresh { reviewComments = fresh }
+    }
+
+    /// Writes one new comment. `upsert` is right here and only here: the value is built in this
+    /// call, so every column it writes is current, which is the one situation the store's
+    /// upsert-vs-update rule allows it.
+    func addReviewComment(
+        filePath: String,
+        spot: ReviewSpot,
+        anchor: ReviewCommentAnchor,
+        body: String
+    ) async {
+        guard let store else { return }
+        let comment = ReviewComment(
+            workspaceID: workspace.id,
+            filePath: filePath,
+            side: spot.side,
+            anchor: anchor,
+            body: body
+        )
+        guard let stored = try? await store.upsert(comment) else { return }
+        reviewComments = (reviewComments + [stored]).sortedForReview()
+    }
+
+    func removeReviewComment(id: ReviewCommentID) async {
+        guard let store else { return }
+        try? await store.deleteReviewComment(id: id)
+        reviewComments.removeAll { $0.id == id }
+    }
+
+    /// Takes exactly the sent comments out, by id rather than by wiping the workspace, so a
+    /// comment written in the moment between composing and this call is not silently thrown away
+    /// with them.
+    func removeReviewComments(ids: [ReviewCommentID]) async {
+        guard let store, !ids.isEmpty else { return }
+        for id in ids { try? await store.deleteReviewComment(id: id) }
+        let sent = Set(ids)
+        reviewComments.removeAll { sent.contains($0.id) }
     }
 
     // MARK: - The worktree listing
@@ -1014,6 +1081,10 @@ final class WorkspaceModel {
         arrivalTask = Task { [weak self] in
             guard let self else { return }
             if !isFirstVisit { await reloadSessions() }
+            guard !Task.isCancelled else { return }
+            // Once per launch: only this app writes review comments, so after the first read the
+            // in-memory list is the truth and re-reading it on every arrival buys nothing.
+            if !hasReadReviewComments { await reloadReviewComments() }
             guard !Task.isCancelled else { return }
             // Concurrently, because neither is waiting for anything the other knows. The read
             // mark used to be written after `git` had finished walking the worktree.

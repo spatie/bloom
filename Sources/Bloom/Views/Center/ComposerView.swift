@@ -73,6 +73,9 @@ struct ComposerView: View {
             mentionRoot: transcript.workspace.path,
             attachmentRoot: transcript.workspace.path,
             attachmentKey: transcript.session.id.rawValue,
+            reviewComments: reviewComments,
+            onRemoveReviewComment: remove(reviewComment:),
+            onOpenReviewComment: open(reviewComment:),
             editorHeight: editorHeight,
             onContentHeightChange: { contentHeight = $0 },
             onKey: handle(key:),
@@ -166,11 +169,20 @@ struct ComposerView: View {
         PromptAttachmentStore.shared.attachments(for: transcript.session.id.rawValue)
     }
 
+    /// The pending review, which rides with whatever is sent next from this workspace.
+    private var reviewComments: [ReviewComment] {
+        model?.reviewComments ?? []
+    }
+
     /// Attachments alone are a turn. Dropping a screenshot in and pressing send is a sentence, and
     /// making the user type a word to unlock the button would be asking them to talk to the guard
     /// rather than to the agent. It needs no clause of its own any more: a file is a word in the
     /// draft, so a prompt of nothing but one is a draft that is not empty.
-    private var canSend: Bool { hasBody }
+    ///
+    /// Review comments alone are a turn for the same reason: each one already says which file,
+    /// which line and what to do, and the payload spells out that the comments are the whole
+    /// request when nothing else was typed. See `ReviewPromptContext.noMessage`.
+    private var canSend: Bool { hasBody || !reviewComments.isEmpty }
 
     // MARK: - Keys
 
@@ -309,7 +321,32 @@ struct ComposerView: View {
         )
         caret = 0
         let transcript = transcript
-        Task { await transcript.submit(text) }
+        let comments = reviewComments
+        guard !comments.isEmpty else {
+            Task { await transcript.submit(text) }
+            return
+        }
+
+        // The pending review goes with the message, as one turn: what was typed, then every
+        // comment with its file, its line and the code around it, composed in the core where the
+        // suite can hold it still. Off the main actor because resolving re-reads every commented
+        // file. The comments are deleted only after the submit, by id, so a comment added in the
+        // gap is not swept out with the ones that went.
+        let model = model
+        let template = PromptOverrides().template(for: .review)
+        Task {
+            let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let composed = await Task.detached(priority: .userInitiated) {
+                ReviewTurn.compose(
+                    message: message,
+                    comments: comments,
+                    worktreePath: worktree,
+                    template: template
+                )
+            }.value
+            await transcript.submit(composed)
+            await model?.removeReviewComments(ids: comments.map(\.id))
+        }
     }
 
     /// Half a second is long enough that a fast typist writes one row instead of forty, and short
@@ -336,6 +373,17 @@ struct ComposerView: View {
     private func open(attachment: PromptAttachment) {
         guard let model else { return }
         FileReview.open(path: attachment.path, in: model)
+    }
+
+    /// A comment chip opens the diff it was written on, where its band is.
+    private func open(reviewComment comment: ReviewComment) {
+        guard let model else { return }
+        FileReview.open(path: comment.filePath, in: model)
+    }
+
+    private func remove(reviewComment id: ReviewCommentID) {
+        guard let model else { return }
+        Task { await model.removeReviewComment(id: id) }
     }
 
     // MARK: - First open
