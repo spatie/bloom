@@ -1,30 +1,40 @@
 import Foundation
+import Synchronization
 
 /// A long-lived subprocess whose output is consumed line by line while it runs, and whose stdin
 /// stays open so more input can be written later. This is what both setup scripts and the agent
 /// run on.
-public final class StreamingProcess: @unchecked Sendable {
+public final class StreamingProcess: Sendable {
     private let process = Process()
     private let stdinPipe = Pipe()
     private let stdoutPipe = Pipe()
     private let stderrPipe = Pipe()
 
-    private let lock = NSLock()
-    private var stdoutBuffer = Data()
-    private var stderrBuffer = Data()
-    private var exitWaiters: [CheckedContinuation<Int32, Never>] = []
-    private var status: Int32?
-    private var launchError: Error?
-    private var stdinClosed = false
-    private var started = false
-    /// Whether each pipe has reported end of file, which is the only trustworthy signal that the
-    /// child is done writing to it.
-    private var stdoutAtEOF = false
-    private var stderrAtEOF = false
-    /// When the last byte arrived on either pipe, used to tell "still flushing" from "finished".
-    private var lastOutputAt = DispatchTime.now()
-    /// When the child exited, recorded the first time `settle` runs for that exit.
-    private var exitedAt: DispatchTime?
+    /// Everything that moves after launch, in one value: what each pipe has delivered and
+    /// whether it has hit end of file, whether the child has started and exited, and who is
+    /// waiting on the exit status. One `Mutex` rather than one per concern because `settle` and
+    /// `finish` decide from several of these at once, and a decision assembled from separate
+    /// locks would describe no moment at all. `Mutex<State>` rather than `NSLock` plus
+    /// `@unchecked Sendable`, for the reason given on `EventSink` in `AgentRunner`.
+    private struct State {
+        var stdoutBuffer = Data()
+        var stderrBuffer = Data()
+        var exitWaiters: [CheckedContinuation<Int32, Never>] = []
+        var status: Int32?
+        var stdinClosed = false
+        var started = false
+        /// Whether each pipe has reported end of file, which is the only trustworthy signal that
+        /// the child is done writing to it.
+        var stdoutAtEOF = false
+        var stderrAtEOF = false
+        /// When the last byte arrived on either pipe, used to tell "still flushing" from
+        /// "finished".
+        var lastOutputAt = DispatchTime.now()
+        /// When the child exited, recorded the first time `settle` runs for that exit.
+        var exitedAt: DispatchTime?
+    }
+
+    private let state = Mutex(State())
 
     /// Both streams are built here rather than in a `lazy var`.
     ///
@@ -82,8 +92,7 @@ public final class StreamingProcess: @unchecked Sendable {
     }
 
     public var isRunning: Bool {
-        lock.lock(); defer { lock.unlock() }
-        return started && status == nil
+        state.withLock { $0.started && $0.status == nil }
     }
 
     public var processIdentifier: Int32 {
@@ -108,10 +117,12 @@ public final class StreamingProcess: @unchecked Sendable {
     // MARK: - Lifecycle
 
     public func start() throws {
-        lock.lock()
-        guard !started else { lock.unlock(); return }
-        started = true
-        lock.unlock()
+        let claimed = state.withLock { state -> Bool in
+            if state.started { return false }
+            state.started = true
+            return true
+        }
+        guard claimed else { return }
 
         guard let path = Shell.which(executable) else {
             let error = ShellError(command: executable, status: 127, stderr: "\(executable) not found on PATH")
@@ -135,10 +146,10 @@ public final class StreamingProcess: @unchecked Sendable {
                 self.drainStdout(final: true)
                 self.markEOF(stdout: true)
             } else {
-                self.lock.lock()
-                self.stdoutBuffer.append(data)
-                self.lastOutputAt = DispatchTime.now()
-                self.lock.unlock()
+                self.state.withLock { state in
+                    state.stdoutBuffer.append(data)
+                    state.lastOutputAt = DispatchTime.now()
+                }
                 self.drainStdout(final: false)
             }
         }
@@ -151,10 +162,10 @@ public final class StreamingProcess: @unchecked Sendable {
                 self.drainStderr(final: true)
                 self.markEOF(stdout: false)
             } else {
-                self.lock.lock()
-                self.stderrBuffer.append(data)
-                self.lastOutputAt = DispatchTime.now()
-                self.lock.unlock()
+                self.state.withLock { state in
+                    state.stderrBuffer.append(data)
+                    state.lastOutputAt = DispatchTime.now()
+                }
                 self.drainStderr(final: false)
             }
         }
@@ -172,10 +183,7 @@ public final class StreamingProcess: @unchecked Sendable {
     }
 
     public func write(_ text: String) {
-        lock.lock()
-        let closed = stdinClosed
-        lock.unlock()
-        guard !closed else { return }
+        guard !state.withLock(\.stdinClosed) else { return }
 
         let handle = stdinPipe.fileHandleForWriting
         let data = Data(text.utf8)
@@ -184,7 +192,7 @@ public final class StreamingProcess: @unchecked Sendable {
             try handle.write(contentsOf: data)
         } catch {
             // The process went away. Nothing useful to do beyond stopping further writes.
-            lock.lock(); stdinClosed = true; lock.unlock()
+            state.withLock { $0.stdinClosed = true }
         }
     }
 
@@ -193,10 +201,12 @@ public final class StreamingProcess: @unchecked Sendable {
     }
 
     public func closeStdin() {
-        lock.lock()
-        guard !stdinClosed else { lock.unlock(); return }
-        stdinClosed = true
-        lock.unlock()
+        let claimed = state.withLock { state -> Bool in
+            if state.stdinClosed { return false }
+            state.stdinClosed = true
+            return true
+        }
+        guard claimed else { return }
         try? stdinPipe.fileHandleForWriting.close()
     }
 
@@ -239,24 +249,25 @@ public final class StreamingProcess: @unchecked Sendable {
     }
 
     /// Resumes immediately if the process already exited, otherwise queues the waiter.
-    /// Synchronous on purpose: NSLock may not be held across an await.
+    /// Synchronous on purpose: a lock may not be held across an await, and the continuation is
+    /// resumed after it is released because resuming runs arbitrary code.
     private func register(_ continuation: CheckedContinuation<Int32, Never>) {
-        lock.lock()
-        if let status {
-            lock.unlock()
-            continuation.resume(returning: status)
-        } else {
-            exitWaiters.append(continuation)
-            lock.unlock()
+        let ready = state.withLock { state -> Int32? in
+            guard let status = state.status else {
+                state.exitWaiters.append(continuation)
+                return nil
+            }
+            return status
         }
+        if let ready { continuation.resume(returning: ready) }
     }
 
     // MARK: - Settling
 
     private func markEOF(stdout: Bool) {
-        lock.lock()
-        if stdout { stdoutAtEOF = true } else { stderrAtEOF = true }
-        lock.unlock()
+        state.withLock { state in
+            if stdout { state.stdoutAtEOF = true } else { state.stderrAtEOF = true }
+        }
     }
 
     /// Close the streams once the child's output is genuinely complete.
@@ -275,14 +286,13 @@ public final class StreamingProcess: @unchecked Sendable {
         let limit = deadline ?? DispatchTime.now() + Self.eofHardLimit
         let now = DispatchTime.now()
 
-        lock.lock()
-        let sawEOF = stdoutAtEOF && stderrAtEOF
-        let exited = exitedAt ?? now
-        exitedAt = exited
-        // Counted from the exit as well as from the last byte, so a process that fell silent
-        // before exiting still gets the full quiet period for its buffered output to land.
-        let since = max(lastOutputAt, exited)
-        lock.unlock()
+        let (sawEOF, since) = state.withLock { state -> (Bool, DispatchTime) in
+            let exited = state.exitedAt ?? now
+            state.exitedAt = exited
+            // Counted from the exit as well as from the last byte, so a process that fell silent
+            // before exiting still gets the full quiet period for its buffered output to land.
+            return (state.stdoutAtEOF && state.stderrAtEOF, max(state.lastOutputAt, exited))
+        }
 
         let quiet = now > since + Self.eofQuietPeriod
         guard sawEOF || quiet || now > limit else {
@@ -300,18 +310,16 @@ public final class StreamingProcess: @unchecked Sendable {
     // MARK: - Draining
 
     private func drainStdout(final: Bool) {
-        lock.lock()
-        let extracted = Self.extractLines(from: &stdoutBuffer, flushRemainder: final)
-        lock.unlock()
-
+        let extracted = state.withLock {
+            Self.extractLines(from: &$0.stdoutBuffer, flushRemainder: final)
+        }
         for line in extracted { linesContinuation.yield(line) }
     }
 
     private func drainStderr(final: Bool) {
-        lock.lock()
-        let extracted = Self.extractLines(from: &stderrBuffer, flushRemainder: final)
-        lock.unlock()
-
+        let extracted = state.withLock {
+            Self.extractLines(from: &$0.stderrBuffer, flushRemainder: final)
+        }
         for line in extracted {
             if mergeStderr {
                 linesContinuation.yield(line)
@@ -338,13 +346,14 @@ public final class StreamingProcess: @unchecked Sendable {
     }
 
     private func finish(status: Int32, error: Error?) {
-        lock.lock()
-        guard self.status == nil else { lock.unlock(); return }
-        self.status = status
-        launchError = error
-        let waiters = exitWaiters
-        exitWaiters = []
-        lock.unlock()
+        let waiters = state.withLock { state -> [CheckedContinuation<Int32, Never>]? in
+            guard state.status == nil else { return nil }
+            state.status = status
+            let waiters = state.exitWaiters
+            state.exitWaiters = []
+            return waiters
+        }
+        guard let waiters else { return }
 
         // Nothing will be read from these again, and a live dispatch source on a pipe nobody
         // drains is a slow leak for the rest of the launch.

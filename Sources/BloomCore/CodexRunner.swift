@@ -597,41 +597,42 @@ private final class LiveConnection: Sendable {
 /// The questions this chat is holding a turn open for. Identical in shape to the Claude Code
 /// side's, and separate because claiming one has to be atomic: a person answering while a stored
 /// grant is being looked up must not produce two answers to one request.
-private final class PendingCodexAsks: @unchecked Sendable {
-    private let lock = NSLock()
-    private var asks: [PermissionAsk] = []
+/// `Mutex` rather than `NSLock` plus `@unchecked Sendable`, for the reason given on `EventSink`
+/// in `AgentRunner`.
+private final class PendingCodexAsks: Sendable {
+    private let asks = Mutex<[PermissionAsk]>([])
 
-    var isEmpty: Bool {
-        lock.lock(); defer { lock.unlock() }
-        return asks.isEmpty
-    }
+    var isEmpty: Bool { asks.withLock(\.isEmpty) }
 
     func add(_ ask: PermissionAsk) {
-        lock.lock(); defer { lock.unlock() }
-        guard !asks.contains(where: { $0.requestID == ask.requestID }) else { return }
-        asks.append(ask)
+        asks.withLock { asks in
+            guard !asks.contains(where: { $0.requestID == ask.requestID }) else { return }
+            asks.append(ask)
+        }
     }
 
+    /// Claim one, so two answers racing the same question cannot both reach the wire.
     func take(_ requestID: String) -> PermissionAsk? {
-        lock.lock(); defer { lock.unlock() }
-        guard let index = asks.firstIndex(where: { $0.requestID == requestID }) else { return nil }
-        return asks.remove(at: index)
+        asks.withLock { asks -> PermissionAsk? in
+            guard let index = asks.firstIndex(where: { $0.requestID == requestID }) else { return nil }
+            return asks.remove(at: index)
+        }
     }
 
     func contains(_ requestID: String) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        return asks.contains { $0.requestID == requestID }
+        asks.withLock { asks in asks.contains { $0.requestID == requestID } }
     }
 
     func remove(_ requestID: String) {
-        lock.lock(); defer { lock.unlock() }
-        asks.removeAll { $0.requestID == requestID }
+        asks.withLock { $0.removeAll { $0.requestID == requestID } }
     }
 
+    /// Take the lot, in one step, so nothing can be answered twice on the way out.
     func drain() -> [PermissionAsk] {
-        lock.lock(); defer { lock.unlock() }
-        let all = asks
-        asks = []
-        return all
+        asks.withLock { asks in
+            let all = asks
+            asks = []
+            return all
+        }
     }
 }

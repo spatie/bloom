@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// What a Bloom session needs from whatever is driving its agent.
 ///
@@ -73,46 +74,64 @@ public protocol SessionRunner: Actor {
 ///
 /// A class rather than actor state, so `events` can be nonisolated and a view can attach without
 /// waiting for a turn on an actor that is busy.
-public final class EventFanout<Element: Sendable>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuations: [UUID: AsyncStream<Element>.Continuation] = [:]
-    private var finished = false
+///
+/// `Mutex<State>` rather than `NSLock` plus `@unchecked Sendable`, for the reason given on
+/// `EventSink` in `AgentRunner`, which is this same shape: the subscribers and the finished flag
+/// have to move together, so a stream cannot register after the fanout has already said goodbye.
+public final class EventFanout<Element: Sendable>: Sendable {
+    private struct State {
+        var continuations: [UUID: AsyncStream<Element>.Continuation] = [:]
+        var finished = false
+    }
+
+    private let state = Mutex(State())
 
     public init() {}
 
     public func stream() -> AsyncStream<Element> {
         let id = UUID()
         return AsyncStream(bufferingPolicy: .unbounded) { continuation in
-            lock.lock()
-            let alreadyFinished = finished
-            if !alreadyFinished { continuations[id] = continuation }
-            lock.unlock()
-
-            if alreadyFinished {
+            let registered = state.withLock { state -> Bool in
+                guard !state.finished else { return false }
+                state.continuations[id] = continuation
+                return true
+            }
+            guard registered else {
                 continuation.finish()
                 return
             }
             continuation.onTermination = { [weak self] _ in
-                guard let self else { return }
-                lock.lock(); continuations[id] = nil; lock.unlock()
+                self?.unregister(id)
             }
         }
     }
 
+    // The lock is only ever held across a dictionary access. Yielding happens after it is
+    // released, because a continuation can run arbitrary code and must never do so under a lock.
+
     public func yield(_ element: Element) {
-        lock.lock()
-        let targets = Array(continuations.values)
-        lock.unlock()
-        for target in targets { target.yield(element) }
+        for target in subscribers() { target.yield(element) }
     }
 
     public func finish() {
-        lock.lock()
-        finished = true
-        let targets = Array(continuations.values)
-        continuations.removeAll()
-        lock.unlock()
-        for target in targets { target.finish() }
+        for target in removeAll() { target.finish() }
+    }
+
+    private func unregister(_ id: UUID) {
+        state.withLock { $0.continuations[id] = nil }
+    }
+
+    private func subscribers() -> [AsyncStream<Element>.Continuation] {
+        state.withLock { Array($0.continuations.values) }
+    }
+
+    private func removeAll() -> [AsyncStream<Element>.Continuation] {
+        state.withLock { state in
+            state.finished = true
+            let all = Array(state.continuations.values)
+            state.continuations = [:]
+            return all
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// One `codex app-server` process, spoken to in JSON-RPC.
 ///
@@ -451,28 +452,34 @@ public actor CodexClient {
 /// Never cleared, only replaced: the quit path signals the process and then polls for it to be
 /// gone, and a box emptied by the bookkeeping running behind the signal would answer "gone" for a
 /// process that was still dying. That answer is the whole shape of the bug this exists for.
-private final class LiveProcess: @unchecked Sendable {
-    private let lock = NSLock()
-    private var process: (any AgentProcessing)?
-    private var signalled = false
-
-    var current: (any AgentProcessing)? {
-        lock.lock(); defer { lock.unlock() }
-        return process
+private final class LiveProcess: Sendable {
+    /// The process and whether it has been signalled, in one value so the signal can only ever
+    /// happen once and only to the process it was meant for, never to a replacement attached in
+    /// between. `Mutex<State>` rather than `NSLock` plus `@unchecked Sendable`, for the reason
+    /// given on `EventSink` in `AgentRunner`.
+    private struct State {
+        var process: (any AgentProcessing)?
+        var signalled = false
     }
 
+    private let state = Mutex(State())
+
+    var current: (any AgentProcessing)? { state.withLock(\.process) }
+
     func attach(_ process: any AgentProcessing) {
-        lock.lock(); defer { lock.unlock() }
-        self.process = process
-        signalled = false
+        state.withLock { state in
+            state.process = process
+            state.signalled = false
+        }
     }
 
     /// The process, once, so the terminate and the kill behind it happen a single time.
     func claimForSignal() -> (any AgentProcessing)? {
-        lock.lock(); defer { lock.unlock() }
-        guard !signalled, let process else { return nil }
-        signalled = true
-        return process
+        state.withLock { state -> (any AgentProcessing)? in
+            guard !state.signalled, let process = state.process else { return nil }
+            state.signalled = true
+            return process
+        }
     }
 }
 

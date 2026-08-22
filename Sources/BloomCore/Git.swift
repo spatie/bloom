@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 public struct ChangedFile: Identifiable, Sendable, Hashable {
     public enum Change: String, Sendable {
@@ -1457,10 +1458,17 @@ public enum Git {
 }
 
 /// Thread-safe accumulator for `runRaw`, which keeps stdout as bytes.
-private final class ByteCollector: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stdout = Data()
-    private var stderr = Data()
+///
+/// The two buffers share one `Mutex` because they are two halves of one result, read together
+/// once both streams have finished. `Mutex<State>` rather than `NSLock` plus
+/// `@unchecked Sendable`, for the reason given on `EventSink` in `AgentRunner`.
+private final class ByteCollector: Sendable {
+    private struct State {
+        var stdout = Data()
+        var stderr = Data()
+    }
+
+    private let state = Mutex(State())
     /// One count per stream, so a caller can wait until both have genuinely finished.
     private let eof = DispatchGroup()
 
@@ -1470,11 +1478,11 @@ private final class ByteCollector: @unchecked Sendable {
     }
 
     func appendOut(_ data: Data) {
-        lock.lock(); stdout.append(data); lock.unlock()
+        state.withLock { $0.stdout.append(data) }
     }
 
     func appendErr(_ data: Data) {
-        lock.lock(); stderr.append(data); lock.unlock()
+        state.withLock { $0.stderr.append(data) }
     }
 
     func finishOut() { eof.leave() }
@@ -1486,15 +1494,9 @@ private final class ByteCollector: @unchecked Sendable {
         }
     }
 
-    var out: Data {
-        lock.lock(); defer { lock.unlock() }
-        return stdout
-    }
+    var out: Data { state.withLock(\.stdout) }
 
-    var err: Data {
-        lock.lock(); defer { lock.unlock() }
-        return stderr
-    }
+    var err: Data { state.withLock(\.stderr) }
 }
 
 // MARK: - Starting a repository

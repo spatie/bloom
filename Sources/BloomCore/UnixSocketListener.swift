@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// A listening unix domain socket, handing each accepted connection to a callback.
 ///
@@ -6,12 +7,15 @@ import Foundation
 /// one per running agent process, so a thread each would work; a source costs nothing when nobody
 /// is connecting, which is almost always, and it cannot be left blocked on a descriptor that has
 /// been closed underneath it.
-public final class UnixSocketListener: @unchecked Sendable {
+public final class UnixSocketListener: Sendable {
     public let path: String
     private let descriptor: Int32
     private let source: any DispatchSourceRead
-    private let lock = NSLock()
-    private var stopped = false
+    /// Guards the once-ness of `stop`, which both the owner and `deinit` may reach: a second
+    /// cancel is harmless, but a second unlink could remove a socket file a successor has
+    /// already bound. `Mutex` rather than `NSLock` plus `@unchecked Sendable`, for the reason
+    /// given on `EventSink` in `AgentRunner`.
+    private let stopped = Mutex(false)
 
     /// Binds and starts accepting.
     ///
@@ -79,13 +83,12 @@ public final class UnixSocketListener: @unchecked Sendable {
     /// Stops listening and removes the socket file. Connections already accepted are not touched:
     /// they are owned by whoever took them.
     public func stop() {
-        lock.lock()
-        if stopped {
-            lock.unlock()
-            return
+        let claimed = stopped.withLock { stopped -> Bool in
+            if stopped { return false }
+            stopped = true
+            return true
         }
-        stopped = true
-        lock.unlock()
+        guard claimed else { return }
 
         source.cancel()
         unlink(path)

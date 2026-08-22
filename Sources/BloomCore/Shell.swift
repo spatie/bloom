@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Result of a finished subprocess.
 public struct ShellResult: Sendable {
@@ -210,10 +211,17 @@ public enum Shell {
 }
 
 /// Thread-safe accumulator for the two output streams, and the gate that says both are complete.
-private final class OutputCollector: @unchecked Sendable {
-    private let lock = NSLock()
-    private var out = Data()
-    private var err = Data()
+///
+/// The two buffers share one `Mutex` because they are two halves of one `ShellResult`, read
+/// together once both streams have finished. `Mutex<State>` rather than `NSLock` plus
+/// `@unchecked Sendable`, for the reason given on `EventSink` in `AgentRunner`.
+private final class OutputCollector: Sendable {
+    private struct State {
+        var out = Data()
+        var err = Data()
+    }
+
+    private let state = Mutex(State())
     /// One count per stream. Waiting on both is what guarantees nothing is still in flight.
     private let eof = DispatchGroup()
 
@@ -223,11 +231,11 @@ private final class OutputCollector: @unchecked Sendable {
     }
 
     func appendOut(_ data: Data) {
-        lock.lock(); out.append(data); lock.unlock()
+        state.withLock { $0.out.append(data) }
     }
 
     func appendErr(_ data: Data) {
-        lock.lock(); err.append(data); lock.unlock()
+        state.withLock { $0.err.append(data) }
     }
 
     func finishOut() { eof.leave() }
@@ -240,12 +248,10 @@ private final class OutputCollector: @unchecked Sendable {
     }
 
     var stdoutString: String {
-        lock.lock(); defer { lock.unlock() }
-        return String(decoding: out, as: UTF8.self)
+        state.withLock { String(decoding: $0.out, as: UTF8.self) }
     }
 
     var stderrString: String {
-        lock.lock(); defer { lock.unlock() }
-        return String(decoding: err, as: UTF8.self)
+        state.withLock { String(decoding: $0.err, as: UTF8.self) }
     }
 }

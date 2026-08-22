@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// One end of a connected unix domain socket, read as lines and written as lines.
 ///
@@ -9,12 +10,16 @@ import Foundation
 /// socket whose far end has gone raises SIGPIPE, whose default disposition kills the process, so
 /// without it Bloom would be taken down by an agent CLI exiting mid-call. With it the write
 /// returns EPIPE and the connection closes, which is what "the other side left" should look like.
-public final class UnixSocketConnection: @unchecked Sendable {
+public final class UnixSocketConnection: Sendable {
     private let descriptor: Int32
     private let handle: FileHandle
-    private let lock = NSLock()
     private let buffer = LineBuffer()
-    private var closed = false
+    /// Whether the descriptor has been given back to the kernel. Guarded by a `Mutex` rather
+    /// than `NSLock` plus `@unchecked Sendable`, for the reason given on `EventSink` in
+    /// `AgentRunner`, and every write happens under this same lock on purpose: `close` can only
+    /// mark the flag once no write is mid-flight, so the descriptor can never be reclaimed
+    /// underneath a writer.
+    private let closed = Mutex(false)
 
     /// Lines from the far end, ending when it closes. Unbounded, because every line is a request
     /// or a reply and dropping one strands whoever is waiting for it.
@@ -78,32 +83,32 @@ public final class UnixSocketConnection: @unchecked Sendable {
         var payload = Array(text.utf8)
         if payload.last != UInt8(ascii: "\n") { payload.append(UInt8(ascii: "\n")) }
 
-        lock.lock()
-        defer { lock.unlock() }
-        guard !closed else { return }
-        var offset = 0
-        while offset < payload.count {
-            let written = payload.withUnsafeBufferPointer { bytes in
-                Darwin.write(descriptor, bytes.baseAddress! + offset, bytes.count - offset)
+        closed.withLock { closed in
+            guard !closed else { return }
+            var offset = 0
+            while offset < payload.count {
+                let written = payload.withUnsafeBufferPointer { bytes in
+                    Darwin.write(descriptor, bytes.baseAddress! + offset, bytes.count - offset)
+                }
+                // EINTR is a signal landing mid-write and nothing else, so the same bytes are
+                // written again. Any other failure means the far end is gone and there is nothing
+                // to retry.
+                if written < 0 {
+                    if errno == EINTR { continue }
+                    return
+                }
+                offset += written
             }
-            // EINTR is a signal landing mid-write and nothing else, so the same bytes are written
-            // again. Any other failure means the far end is gone and there is nothing to retry.
-            if written < 0 {
-                if errno == EINTR { continue }
-                return
-            }
-            offset += written
         }
     }
 
     public func close() {
-        lock.lock()
-        if closed {
-            lock.unlock()
-            return
+        let claimed = closed.withLock { closed -> Bool in
+            if closed { return false }
+            closed = true
+            return true
         }
-        closed = true
-        lock.unlock()
+        guard claimed else { return }
 
         handle.readabilityHandler = nil
         continuation.finish()
