@@ -28,9 +28,9 @@ struct SessionTabsView: View {
     /// Where each tab is centred along the strip. Written continuously, read only as a snapshot at
     /// the start of a drag.
     @State private var centres: [PaneContent: Double] = [:]
-    /// Which workspace's strip has finished arriving, so the first draw of a workspace is not
-    /// animated. Switching workspace replaces every id in the strip at once, and without this the
-    /// selection would fly in from wherever the previous workspace happened to have it.
+    /// The namespace the selection fill matches across, so moving the selection slides one
+    /// capsule between tabs instead of fading one out and another in. See `TabItemView`, which
+    /// hangs its `matchedGeometryEffect` off this.
     @Namespace private var selection
 
     /// One tab being dragged, and everything needed to say where it has got to.

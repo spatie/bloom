@@ -43,7 +43,7 @@ final class FeedbackPresenter {
         didSet { Feedback.rememberIncludesLogs(includesLogs) }
     }
     /// The excerpt as it was read when the box was ticked or the View link was opened, which is
-    /// exactly what a send carries. See `FeedbackSheet.captureLogs`.
+    /// exactly what a send carries. See `FeedbackSheet.readLogs`.
     var logs = ""
     var images: [FeedbackImage] = []
 

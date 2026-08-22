@@ -311,12 +311,6 @@ final class AppModel {
         startProjectIconSearch()
     }
 
-    /// The socket an agent's MCP shim forwards to, listening for as long as the app runs.
-    ///
-    /// Failing to bind it is survivable and is not an alert. Everything the bridge serves is new,
-    /// so a chat without one behaves exactly as every chat did last week, and an alert on launch
-    /// about a feature nobody has used yet would be noise in front of somebody trying to work.
-    /// It is logged, because "the tool is not there" needs somewhere to be findable from.
     /// The tools the bridge serves, with the app-side half of `workspace_start` bound in.
     ///
     /// The closure is what crosses the boundary. A bridge handler runs off the main actor on a
@@ -384,6 +378,12 @@ final class AppModel {
         )
     }
 
+    /// The socket an agent's MCP shim forwards to, listening for as long as the app runs.
+    ///
+    /// Failing to bind it is survivable and is not an alert. Everything the bridge serves is new,
+    /// so a chat without one behaves exactly as every chat did last week, and an alert on launch
+    /// about a feature nobody has used yet would be noise in front of somebody trying to work.
+    /// It is logged, because "the tool is not there" needs somewhere to be findable from.
     private func startBridge(on store: Store) {
         do {
             let server = try BridgeServer(store: store, toolbox: bridgeToolbox()) { message in
@@ -685,14 +685,11 @@ final class AppModel {
         selectedWorkspace ?? selectedArchivedWorkspace
     }
 
-    /// The live model for a workspace, created on first use.
+    /// The live model for a workspace: created if needed, and handed the workspace value to
+    /// refresh the one it holds. The row is only pushed into the model when it differs, because
+    /// assigning an identical `Workspace` still counts as a mutation to the Observation runtime.
     ///
-    /// Called straight from view bodies, so it has to be free of observable writes on the hit path.
-    /// The row is only pushed into the model when it differs, because assigning an identical
-    /// `Workspace` still counts as a mutation to the Observation runtime.
-    /// Creates the model if needed and refreshes the workspace value it holds.
-    ///
-    /// Both are mutations, so this MUST NOT be called from a view body. Doing so crashed the app:
+    /// Both halves are mutations, so this MUST NOT be called from a view body. Doing so crashed the app:
     /// the toolbar reads the selected model several times per update, each read wrote
     /// `existing.workspace`, that invalidated the toolbar from inside its own update, and SwiftUI
     /// recursed through `setNeedsUpdateConstraints` until AppKit threw. Views use `selectedModel`

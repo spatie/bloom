@@ -593,7 +593,9 @@ struct SettingsDestinationLabel: View {
     private var help: String {
         guard isForking, let origin else { return text }
         return """
-            \(short(origin)) was written for Conductor. Bloom reads it but does not edit it, so             saving states this setting in \(short(destination)) as well. Bloom uses the new value;             Conductor keeps reading the old one until the line is removed by hand.
+            \(short(origin)) was written for Conductor. Bloom reads it but does not edit it, \
+            so saving states this setting in \(short(destination)) as well. Bloom uses the new \
+            value; Conductor keeps reading the old one until the line is removed by hand.
             """
     }
 

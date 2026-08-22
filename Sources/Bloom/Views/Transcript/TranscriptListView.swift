@@ -30,8 +30,9 @@ struct TranscriptListView: View {
     /// Nothing in `body` reads anything else off it.
     @Environment(AppModel.self) private var app
 
-    /// Only used to open a session on its end. An edge needs no identity, so this does not need
-    /// the sentinel row the `ScrollViewReader` used to be pointed at.
+    /// Every programmatic move to the live end goes through this: opening a session on its end,
+    /// the jump pill, history arriving, and the setup log's reveal. An edge needs no identity,
+    /// so none of them needs the sentinel row the `ScrollViewReader` used to be pointed at.
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
 
     /// Which rows have only just turned up, so they fade in rather than appear at full opacity in
@@ -146,8 +147,8 @@ struct TranscriptListView: View {
     private var maxBubbleWidth: CGFloat { geometry.bubbleCap }
 
     var body: some View {
-        // Read once for the pass rather than once per footer: a footer cannot see the row list it
-        // is in, and every realised one would otherwise walk it. See `TranscriptModel`.
+        // Read once for the pass rather than once per footer: resolving it walks the row list,
+        // and every realised footer would otherwise pay for its own walk. See `TranscriptModel`.
         let stoppedTurnSeq = transcript.stoppedTurnSeq
 
         ScrollViewReader { proxy in

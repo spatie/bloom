@@ -8,8 +8,10 @@ import BloomCore
 /// alone is enough; together there is nothing left to build on.
 ///
 /// 1. **The caret offset.** An `@mention` is completed by replacing the range around the insertion
-///    point, so the composer has to know where the insertion point is, in UTF-16 units. SwiftUI's
-///    `TextField` exposes no selection or caret at all, at any deployment target.
+///    point, so the composer has to know where the insertion point is, in UTF-16 units.
+///    `TextField` exposes no selection at all, and `TextEditor`'s `TextSelection` binding speaks
+///    `String.Index` into an `AttributedString`, where this file's chip layout needs the offset
+///    into the storage the chips are drawn in.
 /// 2. **Keys before the text system.** Return sends while Shift+Return inserts a newline, and the
 ///    arrow keys drive whichever completion menu is open while the field keeps first responder.
 ///    A focused `TextField` swallows Return and both arrows, so `onSubmit` and `onKeyPress` never

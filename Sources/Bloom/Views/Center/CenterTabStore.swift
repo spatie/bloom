@@ -199,8 +199,6 @@ final class CenterTabStore {
         return Int(title.dropFirst("Terminal ".count)) != nil
     }
 
-    /// Moves a tool tab to another place in the strip. Tool tabs keep their own run of the strip
-    /// after the conversations, so an index here is an index among tool tabs only.
     /// Puts a workspace's tool tabs in a given order.
     ///
     /// Ids rather than an offset, because the strip is derived rather than stored: a terminal or a

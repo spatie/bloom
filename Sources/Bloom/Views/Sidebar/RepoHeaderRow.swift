@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 import BloomCore
 
 /// One project, as a row of the source list that its workspaces hang under.

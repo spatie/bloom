@@ -82,8 +82,8 @@ struct RootView: View {
                     )
                 }
         }
-        // The window title is hidden in the toolbar (see BloomApp), but it still names the window
-        // in the Window menu and in Mission Control, so it is worth setting.
+        // As well as heading the toolbar (see BloomApp), the title names the window in the
+        // Window menu and in Mission Control, so it is worth setting.
         //
         // It takes an automatic rename straight, with no reveal. A window title is also its entry
         // in the Window menu and its label in Mission Control, and neither of those can be

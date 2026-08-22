@@ -55,14 +55,22 @@ enum Reveal {
     }
 
     static func inTerminal(_ path: String) {
-        let script = "tell application \"Terminal\" to do script \"cd \(path.replacingOccurrences(of: "\"", with: "\\\""))\""
+        // Backslash first, then the quote: escaping quotes alone left a trailing backslash
+        // in a path free to swallow the closing quote, and with it the rest of the line
+        // became part of a string handed to `do script`.
+        let escaped = path
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let script = "tell application \"Terminal\" to do script \"cd \(escaped)\""
         guard let apple = NSAppleScript(source: script) else { return }
         var error: NSDictionary?
         apple.executeAndReturnError(&error)
     }
 
-    /// Prefers whatever the user has associated with the folder, which for most developers is
-    /// their editor rather than Finder.
+    /// Walks a short, fixed list of editors and opens the folder in the first one installed,
+    /// falling back to Finder. Not the app the user has associated with folders: that
+    /// association is Finder on nearly every machine, so asking LaunchServices would answer
+    /// Finder for the people this menu item exists for.
     static func inEditor(_ path: String) {
         let url = URL(fileURLWithPath: path)
         for bundleID in ["com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92", "com.apple.dt.Xcode"] {

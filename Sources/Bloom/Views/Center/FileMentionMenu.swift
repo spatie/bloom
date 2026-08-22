@@ -32,15 +32,13 @@ struct FileMentionMenu: View {
                                     onPick: { onPick(match) },
                                     onHover: { onHighlight(index) }
                                 )
-                        // Each row's identity is the thing it names, never its position.
-                        // These rows carried `.id(index)` for the scroll target below, and that
-                        // pinned identity to a slot in a lazy stack: when the ranked list changed
-                        // under an open menu, the stack kept serving the views it had cached for
-                        // those slots, so typing `/re` showed the rows the bare `/` had ranked,
-                        // alphabetical, `compact` among them, while the real matches were only in
-                        // the model. The pick then honoured the model, and picked a command that
-                        // was not the row on screen. Identity by what the row shows makes a
-                        // changed list a changed row, which a lazy container does rebuild.
+                        // Each row's identity is the file it names, never its position.
+                        // `.id(index)` pins identity to a slot in a lazy stack, and a stack
+                        // serves the views it cached for those slots while the ranked list
+                        // changes under an open menu: the drawn rows lag the `@` query while the
+                        // keyboard picks from the real matches, choosing a file that is not the
+                        // row on screen. Sighted and written down in `SlashCommandMenu`; the
+                        // same lazy stack here has the same failure waiting.
                                 .id(match.id)
                             }
                         }

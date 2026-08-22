@@ -51,7 +51,7 @@ struct SidebarProjectsHeader: View {
             .foregroundStyle(isHovered ? Palette.textPrimary : Palette.textSecondary)
             // The shortcut hangs off the button rather than off `BloomCommands`, which is where a
             // menu bar item would carry it. Command Option A collides with nothing Bloom binds
-            // (Command Option I, B, Up and Down are the others) and with nothing macOS reserves.
+            // (I, F, J, K, Up and Down carry that pair today) and with nothing macOS reserves.
             .keyboardShortcut("a", modifiers: [.command, .option])
             .help("Add a project folder (⌥⌘A)")
         }
