@@ -24,6 +24,13 @@ public struct WorkspaceStartRequest: Sendable {
     public var baseBranch: String?
     public var branch: String?
     public var name: String?
+    /// An existing pull request or branch to open, instead of cutting a new branch.
+    ///
+    /// Nil is the route Bloom has always had: a branch named after the prompt, cut from
+    /// `baseBranch`. Non nil replaces all three of those decisions at once, because a checkout
+    /// brings its own branch, its own name and, in the case of a pull request, its own base. See
+    /// `WorkspaceCheckout`.
+    public var checkout: WorkspaceCheckout?
     public var controls: ComposerControls?
     /// Who asked. Stated by every caller, because the initialiser gives it no default: a route
     /// that an agent can reach and that forgot to say so would hand the workspace to the owner and
@@ -51,6 +58,7 @@ public struct WorkspaceStartRequest: Sendable {
         baseBranch: String? = nil,
         branch: String? = nil,
         name: String? = nil,
+        checkout: WorkspaceCheckout? = nil,
         controls: ComposerControls? = nil,
         opensSession: Bool = true,
         runsSetup: Bool = false
@@ -61,6 +69,7 @@ public struct WorkspaceStartRequest: Sendable {
         self.baseBranch = baseBranch
         self.branch = branch
         self.name = name
+        self.checkout = checkout
         self.controls = controls
         self.opensSession = opensSession
         self.runsSetup = runsSetup
@@ -135,8 +144,10 @@ extension WorkspaceManager {
         setupOutput: (@Sendable (String) -> Void)? = nil
     ) async throws -> StartedWorkspace {
         // Decided before the worktree exists, so the row never appears under one name and changes
-        // to another in the same breath.
-        let placeholder = request.name == nil ? await namer() : nil
+        // to another in the same breath. A checkout is never named by a model: a pull request and
+        // a branch each already have a name somebody chose, and a review workspace called after a
+        // sea would be one more thing to translate back.
+        let placeholder = request.name == nil && request.checkout == nil ? await namer() : nil
 
         let workspace = try await createWorkspace(
             repo: request.repo,
@@ -144,7 +155,8 @@ extension WorkspaceManager {
             name: request.name ?? placeholder,
             branch: request.branch,
             baseBranch: request.baseBranch,
-            origin: request.origin
+            origin: request.origin,
+            checkout: request.checkout
         )
 
         var session: Session?

@@ -967,12 +967,13 @@ final class AppModel {
         opensWith: WorkspaceStartMode = .chat,
         branch: String? = nil,
         controls: ComposerControls? = nil,
-        staged: StagedAttachments? = nil
+        staged: StagedAttachments? = nil,
+        checkout: WorkspaceCheckout? = nil
     ) async -> Workspace? {
         do {
             return try await startWorkspace(
                 in: repo, prompt: prompt, baseBranch: baseBranch, opensWith: opensWith,
-                branch: branch, controls: controls, staged: staged
+                branch: branch, controls: controls, staged: staged, checkout: checkout
             )
         } catch {
             alert = BloomAlert(title: "Could not create the workspace", message: error.readableMessage)
@@ -1001,7 +1002,10 @@ final class AppModel {
         origin: WorkspaceOrigin = .user,
         /// Overrides the name Bloom would derive. Only the bridge passes one; the sheet lets the
         /// namer do its job.
-        name: String? = nil
+        name: String? = nil,
+        /// An existing pull request or branch to open instead of cutting a branch. See
+        /// `WorkspaceCheckout`.
+        checkout: WorkspaceCheckout? = nil
     ) async throws -> Workspace {
         guard let manager else { throw AppNotReady.stillStartingUp }
         isCreatingWorkspace = true
@@ -1031,7 +1035,11 @@ final class AppModel {
         // Whether to ask a model for a name at all. Read here rather than inside the closure
         // below, because it is two facts about this machine that only the main actor holds: the
         // preference, and whether the CLI is installed.
-        let wantsAName = shouldNameAutomatically(name: nil, prompt: spoken, opensWith: opensWith)
+        // Never for a checkout. A pull request arrives with a title and a number, and a review
+        // workspace that renamed itself after the task typed into the sheet would hide which pull
+        // request it is.
+        let wantsAName = checkout == nil
+            && shouldNameAutomatically(name: nil, prompt: spoken, opensWith: opensWith)
 
         // The sea this workspace wears while the model thinks of a real name. Claimed here,
         // before `manager.start`, because its slug is about to be the branch and the branch has
@@ -1040,7 +1048,7 @@ final class AppModel {
         // back to the plant placeholder below, exactly as before.
         let pick: OceanPick?
         if OceanCatalog.shouldClaim(
-            userSuppliedName: name,
+            userSuppliedName: name ?? checkout?.workspaceName,
             userSuppliedBranch: branch,
             isChatWorkspace: opensWith == .chat,
             wantsAutomaticName: wantsAName
@@ -1081,6 +1089,7 @@ final class AppModel {
             // A terminal workspace is named after the branch the user typed, because there is no
             // task to derive a name from and nothing is going to be asked.
             name: name ?? (opensWith == .terminal ? branch : nil),
+            checkout: checkout,
             controls: effectiveControls,
             opensSession: opensWith == .chat,
             // The app runs setup itself, through `WorkspaceModel`, so the output streams into the
