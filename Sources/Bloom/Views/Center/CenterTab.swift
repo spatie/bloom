@@ -22,6 +22,10 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
         case browser
         /// The changed files of this workspace, read one at a time.
         case review
+        /// The workspace's scratch text. One per workspace, like the review, and for the same
+        /// reason: it is one piece of writing about this worktree, not a document you open copies
+        /// of. The TEXT is not here, it is a row in SQLite. See `WorkspaceNote`.
+        case notes
     }
 
     var id: String = newID()
@@ -44,12 +48,18 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
         case .terminal: "apple.terminal"
         case .browser: "globe"
         case .review: "doc.text"
+        case .notes: "note.text"
         }
     }
 
     /// What a review tab is called when it is empty or reading a file the agent changed. A file
     /// nobody changed is named by `CenterTabStore.displayTitle`, which can see the workspace.
     static let reviewTitle = "All changes"
+
+    /// What the notes tab is called. Fixed, and not renameable: a workspace has one of them and it
+    /// is always the same thing, so a name typed over it would only ever be a name for the
+    /// workspace, which the sidebar already carries.
+    static let notesTitle = "Notes"
 
     // MARK: - Decoding
 

@@ -62,6 +62,16 @@ struct ToolPaneView: View {
         case .review:
             ReviewPaneView(model: model, tab: tab)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+        // Keyed on the workspace rather than on the tab, because this one view is reused as the
+        // user moves between workspaces and the text in it belongs to whichever workspace it was
+        // loaded for. Without the key, walking to the next workspace would leave the previous
+        // one's note on screen until its load returned, and a save fired in that window would
+        // write one workspace's note over another's.
+        case .notes:
+            NotesPaneView(model: model)
+                .id(model.workspace.id)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
