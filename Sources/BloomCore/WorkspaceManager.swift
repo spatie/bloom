@@ -108,14 +108,18 @@ public struct WorkspaceManager: Sendable {
         name: String? = nil,
         branch: String? = nil,
         baseBranch: String? = nil,
-        origin: WorkspaceOrigin = .user
+        origin: WorkspaceOrigin = .user,
+        checkout: WorkspaceCheckout? = nil
     ) async throws -> Workspace {
         // Everything below reads the repository and then acts on what it read, so two creates
         // running at once in one project decide on the same branch and the same directory and the
         // second one loses. See `WorktreeCutQueue` for why this is serialised rather than
         // coalesced.
         try await WorktreeCutQueue.shared.cut(in: repo.path) {
-            try await cut(
+            if let checkout {
+                return try await open(checkout, repo: repo, name: name, origin: origin)
+            }
+            return try await cut(
                 repo: repo, prompt: prompt, name: name, branch: branch,
                 baseBranch: baseBranch, origin: origin
             )
@@ -162,6 +166,71 @@ public struct WorkspaceManager: Sendable {
             branch: finalBranch,
             path: worktreePath,
             baseBranch: base,
+            setupState: settings.setupScript == nil ? .skipped : .pending,
+            sortOrder: try await store.nextWorkspaceSortOrder(repoID: repo.id),
+            origin: origin
+        )
+        return try await store.upsert(workspace)
+    }
+
+    /// A worktree on a pull request or on a branch that already exists.
+    ///
+    /// The counterpart of `cut`, and everything different about it is in the first half. No branch
+    /// is invented, no base is chosen and no name is derived: the head being opened supplies all
+    /// three. Everything after the checkout is the same as for any other workspace, deliberately,
+    /// because the whole point is that a review workspace is not a special kind of workspace. It
+    /// gets the same copied files, the same setup script, the same row, and therefore the same
+    /// diff viewer, terminal, checks view and agent.
+    ///
+    /// A pull request is fetched by `gh pr checkout` running inside the new worktree rather than
+    /// by a fetch written here. See `GitHub.checkoutPullRequest` for why: a fork's head is not on
+    /// `origin` at all, and every hand rolled version of this gets that case wrong.
+    ///
+    /// The worktree is removed again if the checkout fails, because a directory holding a detached
+    /// HEAD and no pull request is worse than no directory: it would be registered with git,
+    /// counted by `git worktree list`, and attached to no row anybody could archive.
+    private func open(
+        _ checkout: WorkspaceCheckout, repo: Repo, name: String?, origin: WorkspaceOrigin
+    ) async throws -> Workspace {
+        let settings = SettingsLoader.load(repo: repo.path)
+        let existingBranches = Set(try await Git.branches(of: repo.path))
+        let branch = WorkspaceCheckoutPlan.localBranch(for: checkout, taken: existingBranches)
+
+        let directoryName = branch.replacingOccurrences(of: "/", with: "-")
+        let root = Self.workspacesRoot.appendingPathComponent(repo.name, isDirectory: true)
+        let worktreePath = WorktreePath.free(
+            preferred: root.appendingPathComponent(directoryName).path
+        ) { FileManager.default.fileExists(atPath: $0) }
+
+        switch checkout {
+        case .pullRequest(let request):
+            try await Git.addDetachedWorktree(repo: repo.path, path: worktreePath)
+            do {
+                try await GitHub.checkoutPullRequest(
+                    number: request.number, into: worktreePath, localBranch: branch
+                )
+            } catch {
+                try? await Git.removeWorktree(repo: repo.path, path: worktreePath, force: true)
+                throw error
+            }
+        case .branch(let existing) where existing.isLocal:
+            try await Git.addWorktree(
+                repo: repo.path, path: worktreePath, branch: existing.name, base: existing.name
+            )
+        case .branch(let existing):
+            try await Git.addTrackingWorktree(
+                repo: repo.path, path: worktreePath, branch: existing.name
+            )
+        }
+
+        try copyFiles(settings.filesToCopy, from: repo.path, to: worktreePath)
+
+        let workspace = Workspace(
+            repoID: repo.id,
+            name: name ?? checkout.workspaceName,
+            branch: branch,
+            path: worktreePath,
+            baseBranch: checkout.baseBranch(default: repo.defaultBranch),
             setupState: settings.setupScript == nil ? .skipped : .pending,
             sortOrder: try await store.nextWorkspaceSortOrder(repoID: repo.id),
             origin: origin

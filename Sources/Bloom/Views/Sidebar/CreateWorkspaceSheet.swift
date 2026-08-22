@@ -41,6 +41,19 @@ struct CreateWorkspaceSheet: View {
     @State private var mode: WorkspaceStartMode = .chat
     @State private var baseBranch = ""
     @State private var branches: [String] = []
+
+    /// The pull request or branch this workspace opens on, or nil for the route Bloom has always
+    /// had: a new branch cut from `baseBranch`. Choosing one takes over the name, the branch and,
+    /// for a pull request, the base the diff is measured against. See `WorkspaceCheckout`.
+    @State private var checkout: WorkspaceCheckout?
+    @State private var checkoutOptions = WorkspaceCheckoutOptions()
+    @State private var isLoadingCheckouts = false
+    /// A pull request number or URL typed into the sheet, for the ones the list does not offer:
+    /// somebody else's, a closed one, or one of the two hundred a busy repository has open.
+    @State private var reference = ""
+    @State private var isEnteringReference = false
+    @State private var referenceProblem: String?
+    @State private var isResolvingReference = false
     @State private var branchPrefix: String?
     @State private var isLoading = false
 
@@ -94,7 +107,12 @@ struct CreateWorkspaceSheet: View {
     /// workspace with nothing but a screenshot has no name, no branch and nothing for the namer to
     /// read, and `Git.slug` would call it `workspace`.
     private var canCreate: Bool {
-        repo != nil && !spokenPrompt.isEmpty && !app.isCreatingWorkspace
+        // A checkout needs no words. Opening a pull request to read it is a complete intention,
+        // and the name and branch come from the pull request rather than from a sentence, so the
+        // one reason the box is mandatory for a new branch does not apply.
+        repo != nil
+            && (checkout != nil || !spokenPrompt.isEmpty)
+            && !app.isCreatingWorkspace
     }
 
     var body: some View {
@@ -116,6 +134,10 @@ struct CreateWorkspaceSheet: View {
         // in flight when the project changed could land another project's branches on this one's
         // sheet. `.task(id:)` cancels the stale load; `load` checks before writing.
         .task(id: repoID) { await load() }
+        // A second task, and a second trip, because listing pull requests is a network call and
+        // the composer has to be typeable before it lands. The sheet opens on the branch route
+        // either way; the picker fills in behind it.
+        .task(id: repoID) { await loadCheckouts() }
         // The confirmation stands until there is something new to say, which is the moment the
         // next task starts being written. No timer, so it cannot vanish mid sentence.
         .onChange(of: prompt) { _, _ in lastCreated = nil }
@@ -133,7 +155,7 @@ struct CreateWorkspaceSheet: View {
             projectControl
 
             if repo != nil {
-                baseBranchControl
+                sourceControl
             }
 
             Spacer(minLength: 0)
@@ -217,21 +239,59 @@ struct CreateWorkspaceSheet: View {
         }
     }
 
-    /// The branch the worktree is cut from. Visible rather than filed under the overflow menu,
-    /// because it is the one setting here whose wrong value is expensive: work started from a
-    /// stale base is discovered at merge time.
-    private var baseBranchControl: some View {
+    /// Where the work comes from: a new branch cut from a base, an open pull request, or a branch
+    /// that already exists.
+    ///
+    /// One control rather than three, and it stays where the base branch picker was, because the
+    /// three are answers to the same question and only ever one of them is in force. Visible
+    /// rather than filed under the overflow menu for the reason the base branch always was: it is
+    /// the setting here whose wrong value is expensive.
+    private var sourceControl: some View {
         Menu {
-            Picker("Start from", selection: $baseBranch) {
+            Picker("Start from", selection: Binding(
+                get: { checkout == nil ? baseBranch : "" },
+                set: { branch in
+                    guard !branch.isEmpty else { return }
+                    checkout = nil
+                    baseBranch = branch
+                }
+            )) {
                 ForEach(branchOptions, id: \.self) { branch in
-                    Text(branch).tag(branch)
+                    Text("New branch from \(branch)").tag(branch)
                 }
             }
             .pickerStyle(.inline)
+
+            Section("Review a pull request") {
+                ForEach(checkoutOptions.pullRequests) { request in
+                    Button {
+                        choose(.pullRequest(request))
+                    } label: {
+                        Text(pullRequestLabel(request))
+                    }
+                }
+                if let sentence = pullRequestUnavailable {
+                    Text(sentence)
+                }
+                Button("Pull request by number or URL…") {
+                    referenceProblem = nil
+                    isEnteringReference = true
+                }
+            }
+
+            if !checkoutOptions.branches.isEmpty {
+                Section("Open an existing branch") {
+                    ForEach(checkoutOptions.branches) { branch in
+                        Button(branch.isLocal ? branch.name : "\(branch.name) (remote)") {
+                            choose(.branch(branch))
+                        }
+                    }
+                }
+            }
         } label: {
             ComposerControlLabel(
-                systemImage: "arrow.triangle.branch",
-                text: "from \(baseBranch.isEmpty ? (repo?.defaultBranch ?? "") : baseBranch)",
+                systemImage: sourceGlyph,
+                text: sourceLabel,
                 showsMenuIndicator: true
             )
         }
@@ -239,10 +299,72 @@ struct CreateWorkspaceSheet: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
-        .disabled(branchOptions.isEmpty)
-        .help("Cut the worktree from this branch")
+        .help("Cut a new branch, or open a pull request or an existing branch")
         .accessibilityLabel("Start from")
-        .accessibilityValue(baseBranch)
+        .accessibilityValue(sourceLabel)
+    }
+
+    private var sourceGlyph: String {
+        switch checkout {
+        case .pullRequest: "arrow.triangle.pull"
+        case .branch, .none: "arrow.triangle.branch"
+        }
+    }
+
+    private var sourceLabel: String {
+        switch checkout {
+        case .pullRequest(let request): "PR #\(request.number)"
+        case .branch(let branch): "on \(branch.name)"
+        case .none: "from \(baseBranch.isEmpty ? (repo?.defaultBranch ?? "") : baseBranch)"
+        }
+    }
+
+    private func pullRequestLabel(_ request: PullRequestListing) -> String {
+        let title = request.title.count > 52
+            ? String(request.title.prefix(52)) + "…"
+            : request.title
+        return "#\(request.number) \(title)" + (request.isDraft ? " (draft)" : "")
+    }
+
+    /// Why the pull request section is empty, when it is. The three reasons need different
+    /// sentences: gh missing is installed, gh signed out is signed in, and a repository with
+    /// nothing open is not a problem at all.
+    private var pullRequestUnavailable: String? {
+        guard checkoutOptions.pullRequests.isEmpty else { return nil }
+        if isLoadingCheckouts { return "Loading…" }
+        switch checkoutOptions.access {
+        case .notInstalled: return "Install the GitHub CLI to list pull requests"
+        case .signedOut: return "Sign in with gh to list pull requests"
+        case .ready: return checkoutOptions.failure ?? "No open pull requests"
+        }
+    }
+
+    /// The box for a pull request the list does not offer. Shown only when it is asked for, so the
+    /// ordinary case is still one control and a text box.
+    private var referenceField: some View {
+        HStack(spacing: Metrics.spacingSmall) {
+            TextField("Pull request number or URL", text: $reference)
+                .textFieldStyle(.roundedBorder)
+                .font(Typo.body)
+                .onSubmit { resolveReference() }
+                .disabled(isResolvingReference)
+
+            if isResolvingReference {
+                ProgressView().controlSize(.small)
+            } else {
+                Button("Open", action: resolveReference)
+                    .disabled(reference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            Button("Cancel", role: .cancel) {
+                isEnteringReference = false
+                reference = ""
+                referenceProblem = nil
+            }
+            .buttonStyle(.plain)
+            .font(Typo.caption)
+            .foregroundStyle(Palette.textTertiary)
+        }
     }
 
     /// Everything real but rarely changed. Conductor puts the same class of thing behind the same
@@ -277,7 +399,17 @@ struct CreateWorkspaceSheet: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
-            Text("What do you want to work on?")
+            if isEnteringReference {
+                referenceField
+            }
+
+            if let referenceProblem {
+                Text(referenceProblem)
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.negative)
+            }
+
+            Text(heading)
                 .font(Typo.heading)
                 .foregroundStyle(Palette.textPrimary)
 
@@ -317,6 +449,17 @@ struct CreateWorkspaceSheet: View {
             statusRow
         }
         .padding(Metrics.gutter)
+    }
+
+    /// What the box is asking for. A review workspace is opened to read something, so the task is
+    /// genuinely optional there and the question says so rather than demanding a sentence the
+    /// button no longer requires.
+    private var heading: String {
+        switch checkout {
+        case .pullRequest(let request): "What should happen to #\(request.number)?"
+        case .branch(let branch): "What should happen on \(branch.name)?"
+        case .none: "What do you want to work on?"
+        }
     }
 
     /// Grows with what is written, from five lines, and stops where the editor starts scrolling.
@@ -365,7 +508,26 @@ struct CreateWorkspaceSheet: View {
     /// monospaced font.
     @ViewBuilder
     private var hint: some View {
-        if let lastCreated {
+        if let checkout {
+            // The checkout says everything the branch preview would have: what is being opened,
+            // what the diff will be measured against, and the one sentence a merged or closed
+            // pull request deserves before it is opened and found to be empty.
+            HStack(spacing: Metrics.spacingSmall) {
+                Chip(
+                    text: "\(checkout.preferredLocalBranch) → \(checkout.baseBranch(default: repo?.defaultBranch ?? "main"))",
+                    systemImage: "arrow.triangle.pull",
+                    monospaced: true
+                )
+                .lineLimit(1)
+
+                if let sentence = checkoutNote {
+                    Text(sentence)
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                }
+            }
+        } else if let lastCreated {
             Label("Started \(lastCreated)", systemImage: "checkmark.circle")
                 .font(Typo.caption)
                 .foregroundStyle(Palette.accent)
@@ -382,6 +544,20 @@ struct CreateWorkspaceSheet: View {
             Chip(text: branchPreview, systemImage: "arrow.triangle.branch", monospaced: true)
                 .lineLimit(1)
         }
+    }
+
+    /// What is worth saying about the chosen checkout beyond its branch: that it has already been
+    /// merged or closed, or that a workspace on that branch is already open. Neither stops the
+    /// create, because both are things somebody does on purpose.
+    private var checkoutNote: String? {
+        guard let checkout else { return nil }
+        if let sentence = WorkspaceCheckoutPlan.warning(for: checkout) { return sentence }
+        if let held = WorkspaceCheckoutPlan.workspaceHolding(
+            branch: checkout.preferredLocalBranch, among: app.workspaces
+        ) {
+            return "Already open in \(held.name)"
+        }
+        return nil
     }
 
     private var noProjects: some View {
@@ -497,6 +673,54 @@ struct CreateWorkspaceSheet: View {
         )
     }
 
+    /// Takes a pull request or a branch as the source, and closes anything the choice answers.
+    private func choose(_ chosen: WorkspaceCheckout) {
+        checkout = chosen
+        isEnteringReference = false
+        referenceProblem = nil
+        reference = ""
+        isFocused = true
+    }
+
+    /// Resolves what was typed into the box. Everything but the drawing is in the core: the
+    /// parsing, the repository check and the gh call are `WorkspaceCheckoutResolver`.
+    private func resolveReference() {
+        guard let repo, !isResolvingReference else { return }
+        let text = reference
+        let path = repo.path
+        isResolvingReference = true
+        referenceProblem = nil
+        Task {
+            let resolution = await WorkspaceCheckoutResolver.resolve(text, repoPath: path)
+            isResolvingReference = false
+            switch resolution {
+            case .checkout(let resolved): choose(resolved)
+            case .failure(let sentence): referenceProblem = sentence
+            }
+        }
+    }
+
+    /// The pull requests and branches this project can be opened on.
+    ///
+    /// Runs after `load`, and reads the branch list it wrote, so the local half of the branch
+    /// section costs no second `git` call. Branches already checked out in a live workspace are
+    /// left out: git refuses to have one branch in two worktrees, so offering them would be
+    /// offering a create that cannot succeed.
+    private func loadCheckouts() async {
+        guard let repo else { return }
+        isLoadingCheckouts = true
+        let taken = Set(app.workspaces.filter { $0.state == .active }.map(\.branch))
+        let options = await WorkspaceCheckoutOptions.load(
+            repoPath: repo.path,
+            defaultBranch: repo.defaultBranch,
+            localBranches: branches,
+            takenBranches: taken
+        )
+        guard !Task.isCancelled else { return }
+        isLoadingCheckouts = false
+        checkoutOptions = options
+    }
+
     private func addProject() {
         Task { await app.addProjectByAsking() }
     }
@@ -513,6 +737,7 @@ struct CreateWorkspaceSheet: View {
         let text = trimmedPrompt
         let base = baseBranch.isEmpty ? repo.defaultBranch : baseBranch
         let chosen = mode
+        let source = checkout
         let chosenControls = controls
 
         // A file can be moved or deleted between being attached and Create being pressed, and
@@ -543,7 +768,8 @@ struct CreateWorkspaceSheet: View {
                 baseBranch: base,
                 opensWith: chosen,
                 controls: chosenControls,
-                staged: staged
+                staged: staged,
+                checkout: source
             )
             // Whatever survived is in the worktree now, and whatever did not was never going to be.
             AttachmentStaging.discard(draftID: handedOver)
@@ -558,6 +784,10 @@ struct CreateWorkspaceSheet: View {
     /// opens with and every choice in the footer are answers about this batch of work, and asking
     /// for them again three times in a row is what would make the toggle not worth having.
     private func resetDraft() {
+        // The checkout goes with the task. Everything else on the sheet is a setting for this
+        // batch of work; the pull request that was just opened is not, and a second workspace on
+        // the same pull request is never what anybody meant by "Create more".
+        checkout = nil
         prompt = ""
         caret = 0
         contentHeight = ComposerTextEditor.lineHeight

@@ -42,3 +42,60 @@ public struct WorkspaceStartContext: Sendable {
         return branches.first ?? defaultBranch
     }
 }
+
+/// What the create sheet can offer to open, as opposed to what it can cut a branch from.
+///
+/// Loaded separately from `WorkspaceStartContext` and after it, because listing pull requests is a
+/// network call: the sheet has to be typeable the moment it opens, and a project whose GitHub is
+/// slow or unreachable must delay the picker rather than the composer.
+public struct WorkspaceCheckoutOptions: Sendable {
+    public let pullRequests: [PullRequestListing]
+    public let branches: [ExistingBranch]
+    /// Why there are no pull requests, when gh is the reason. `ready` with an empty list means the
+    /// repository genuinely has none open, which is a different sentence.
+    public let access: GitHubAccess
+    /// What went wrong talking to GitHub, when something did. Shown rather than swallowed: a
+    /// picker that silently lists nothing is indistinguishable from a repository at peace.
+    public let failure: String?
+
+    public init(
+        pullRequests: [PullRequestListing] = [],
+        branches: [ExistingBranch] = [],
+        access: GitHubAccess = .ready,
+        failure: String? = nil
+    ) {
+        self.pullRequests = pullRequests
+        self.branches = branches
+        self.access = access
+        self.failure = failure
+    }
+
+    public static func load(
+        repoPath: String,
+        defaultBranch: String,
+        localBranches: [String],
+        takenBranches: Set<String> = []
+    ) async -> WorkspaceCheckoutOptions {
+        let remote = (try? await Git.remoteBranches(of: repoPath)) ?? []
+        let branches = WorkspaceCheckoutPlan.offeredBranches(
+            local: localBranches,
+            remote: remote,
+            defaultBranch: defaultBranch,
+            excluding: takenBranches
+        )
+
+        let access = await GitHub.access()
+        guard access == .ready else {
+            return WorkspaceCheckoutOptions(branches: branches, access: access)
+        }
+
+        do {
+            let requests = try await GitHub.openPullRequests(repoPath: repoPath)
+            return WorkspaceCheckoutOptions(pullRequests: requests, branches: branches)
+        } catch {
+            return WorkspaceCheckoutOptions(
+                branches: branches, failure: error.readableMessage
+            )
+        }
+    }
+}

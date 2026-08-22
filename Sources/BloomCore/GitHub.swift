@@ -480,6 +480,10 @@ public enum GitHub {
         )
         guard result.ok else {
             if indicatesNoPullRequest(stderr: result.stderr) {
+                if let fallback = try await snapshotOfCheckedOutBranch(branch, worktree: worktree) {
+                    await cache.store(fallback, for: key)
+                    return fallback
+                }
                 await cache.store(nil, for: key)
                 return nil
             }
@@ -488,6 +492,31 @@ public enum GitHub {
 
         let snapshot = try decodeSnapshot(from: Data(result.stdout.utf8))
         await cache.store(snapshot, for: key)
+        return snapshot
+    }
+
+    /// The pull request of the branch this worktree is actually on, asked without naming it.
+    ///
+    /// Named, a branch is looked up as `<this repository's owner>:<branch>`, and a pull request
+    /// from a fork has its head in the contributor's repository, so the named lookup answers "no
+    /// pull requests found" for a branch that plainly has one. Unnamed, gh resolves the pull
+    /// request from the checked out branch's own config, which `gh pr checkout` writes as
+    /// `refs/pull/N/head`, and finds it. That is the only route that works for a fork, and Bloom
+    /// now opens workspaces on other people's pull requests, so it is no longer an exotic case:
+    /// without this the review workspace showed "no pull request yet" beside its own review.
+    ///
+    /// The answer is only accepted when it is about the branch that was asked about. A worktree
+    /// somebody has switched to another branch would otherwise report that branch's pull request
+    /// under this one's name.
+    private static func snapshotOfCheckedOutBranch(
+        _ branch: String, worktree: String
+    ) async throws -> PullRequestSnapshot? {
+        guard let result = try? await Shell.run(
+            "gh", ["pr", "view", "--json", fields], cwd: worktree, timeout: .seconds(20)
+        ), result.ok else { return nil }
+
+        let snapshot = try decodeSnapshot(from: Data(result.stdout.utf8))
+        guard snapshot.pullRequest.branch == branch else { return nil }
         return snapshot
     }
 
