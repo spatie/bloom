@@ -705,18 +705,6 @@ public actor Store {
         return try db.query(sql, [.text(repoID)]).map(Self.workspace(from:))
     }
 
-    /// The workspaces an agent in this one asked Bloom to start.
-    ///
-    /// Read from the database rather than counted in memory, so it survives Bloom being reopened
-    /// while children are still running, and so two calls racing cannot both see the same stale
-    /// number. `parent_workspace_id` has had an index since the column was added.
-    public func workspacesStarted(byAgentIn workspaceID: WorkspaceID) throws -> [Workspace] {
-        try db.query(
-            "SELECT * FROM workspaces WHERE parent_workspace_id = ? ORDER BY created_at",
-            [.text(workspaceID)]
-        ).map(Self.workspace(from:))
-    }
-
     public func workspace(id: WorkspaceID) throws -> Workspace? {
         try db.query("SELECT * FROM workspaces WHERE id = ?", [.text(id)]).first.map(Self.workspace(from:))
     }
@@ -935,11 +923,13 @@ public actor Store {
 
     // MARK: - Workspaces an agent asked for
 
-    /// The workspaces started by the agent running in this one.
+    /// The workspaces started by the agent running in this one, read from the database rather
+    /// than counted in memory, so the answer survives Bloom being reopened while children are
+    /// still running. `parent_workspace_id` has had an index since the column was added.
     ///
     /// Archived ones are out by default, because this is the list a person or an agent is shown,
-    /// and an archived workspace is one that has been dealt with. `countWorkspaces(startedBy:)` is
-    /// the counting question and it does not have that default, for the reason written there.
+    /// and an archived workspace is one that has been dealt with. It is also what
+    /// `WorkspaceStartTool` counts against its limit, which is a limit on what is running.
     public func workspaces(startedBy parentWorkspaceID: WorkspaceID, includeArchived: Bool = false) throws -> [Workspace] {
         let sql = includeArchived
             ? "SELECT * FROM workspaces WHERE parent_workspace_id = ? ORDER BY created_at"
@@ -950,11 +940,13 @@ public actor Store {
     /// How many workspaces the agent in this one has ever started, archived ones included, and
     /// with no way to ask otherwise.
     ///
-    /// This is what a budget is counted against, and the count has to include the archived ones or
-    /// it is not a budget. An allowance that archiving hands back is an allowance an agent can
-    /// spend for ever: start a workspace, archive it, start another, and the ceiling is never
-    /// reached however many worktrees have been cut and however much has been spent getting them
-    /// there. So there is no `includeArchived` parameter to pass the wrong way by accident.
+    /// **Nothing in the app gates on this today, and that is a decision, not an accident.**
+    /// `WorkspaceStartTool` limits what is running, and its own tests pin that archiving frees
+    /// the allowance. This count answers the other question, how much has ever been spent, which
+    /// an ever-count budget would need: an allowance that archiving hands back is one an agent
+    /// can spend for ever, start, archive, start again. If that ceiling is ever wanted, this is
+    /// the number it is counted against, so there is no `includeArchived` parameter to pass the
+    /// wrong way by accident.
     public func countWorkspaces(startedBy parentWorkspaceID: WorkspaceID) throws -> Int {
         let rows = try db.query(
             "SELECT COUNT(*) AS n FROM workspaces WHERE parent_workspace_id = ?",

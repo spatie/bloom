@@ -271,8 +271,7 @@ public struct WorkspaceStartTool: BridgeToolHandling {
     /// while the children are still running, and so two calls racing cannot both see the same
     /// stale number. Archived ones do not count: the limit is on what is running.
     private func tooMany(for workspaceID: WorkspaceID, store: Store) async throws -> String? {
-        let children = try await store.workspacesStarted(byAgentIn: workspaceID)
-        let live = children.filter { $0.state != .archived }
+        let live = try await store.workspaces(startedBy: workspaceID)
 
         guard live.count >= Self.maximumChildren else { return nil }
 
