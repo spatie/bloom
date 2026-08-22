@@ -364,6 +364,11 @@ struct TranscriptListView: View {
                 // number of rows, and then nothing else would have told the tracker it is
                 // looking at a different list.
                 arrival.adopt(arrivalIDs)
+                // And where the session opens, for the same reason: `position` is otherwise
+                // driven by the row count's onChange, so a switch between two sessions holding
+                // the same number of rows never positioned and never marked the session read,
+                // and the unread badge stuck until the next row happened to land.
+                position(proxy)
 
                 // The rest of the session, once the frame carrying the tail has been drawn.
                 //
