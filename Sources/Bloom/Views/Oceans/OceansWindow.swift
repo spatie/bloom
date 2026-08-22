@@ -1,5 +1,4 @@
 import SwiftUI
-import MapKit
 import BloomCore
 
 /// The map of the seas workspaces have been named after.
@@ -22,53 +21,29 @@ struct OceansWindow: Scene {
     }
 }
 
-/// The map itself, and the two counts under it.
+/// The chart and the two counts under it.
 ///
 /// The one rule of this window: it never shows the name of a sea that has not been used. Which
 /// seas are left is meant to stay a small surprise, so the unused ones appear only as a count,
 /// the same rule `OceanPick.notice` keeps.
+///
+/// The chart is always the whole world, marks or none: `SeaChartView` draws the sheet itself,
+/// so there is no camera to fit and no empty placeholder standing in for the map. The empty
+/// state is written onto the water instead of replacing it, because a chart of unnamed seas is
+/// the invitation.
 private struct OceansMapView: View {
     @Environment(AppModel.self) private var app
 
     @State private var discovered: [Ocean] = []
     @State private var waitingCount = 0
     @State private var hasLoaded = false
-    @State private var position: MapCameraPosition = .automatic
 
     var body: some View {
         VStack(spacing: 0) {
-            if hasLoaded && discovered.isEmpty {
-                ContentUnavailableView(
-                    "No seas discovered yet",
-                    systemImage: "map",
-                    description: Text("Create a workspace and one will be named after the first.")
-                )
-            } else {
-                // `.automatic` fits the pins exactly, and a lone first pin fits into a
-                // featureless close-up: one dot, no coastline, no way to tell where on Earth
-                // it is. `OceanMapRegion` hands back a continent-scale frame for a cluster
-                // tighter than its floor, and nil for anything wider, which stays automatic:
-                // a hand-built world-spanning region ran into Mercator's pole limits and
-                // MapKit answered by cropping pins out. The maths lives in the core where the
-                // one-pin, antimeridian and scattered cases are tests rather than hopes.
-                Map(position: $position) {
-                    ForEach(discovered) { ocean in
-                        Annotation(ocean.name, coordinate: CLLocationCoordinate2D(
-                            latitude: ocean.latitude, longitude: ocean.longitude
-                        )) {
-                            // A small dot rather than a `Marker` balloon: with dozens of seas
-                            // discovered, full-size pins swallow the coastline the window is
-                            // for. The ring keeps the dot visible on both sea and land tiles,
-                            // and MapKit sets the label beside it.
-                            Circle()
-                                .fill(.tint)
-                                .stroke(.background, lineWidth: 1.5)
-                                .frame(width: 9, height: 9)
-                        }
-                    }
-                }
-            }
-
+            SeaChartView(
+                discovered: discovered,
+                showEmptyNotice: hasLoaded && discovered.isEmpty
+            )
             footer
         }
         .frame(minWidth: 480, minHeight: 360)
@@ -112,21 +87,17 @@ private struct OceansMapView: View {
 
     /// Reads the catalogue from the store. Reading is all this window ever does: seas are spent
     /// by `startWorkspace`, never from here.
+    ///
+    /// Sorted by discovery date because label placement is greedy in order: the first sea
+    /// found in a crowded corner keeps its name when later neighbours arrive, rather than the
+    /// names reshuffling under the user every time the catalogue grows.
     private func load() async {
         guard let store = app.store else { return }
         let all = (try? await store.oceans()) ?? []
-        discovered = all.filter { $0.usedAt != nil }
+        discovered = all
+            .filter { $0.usedAt != nil }
+            .sorted { ($0.usedAt ?? .distantPast, $0.slug) < ($1.usedAt ?? .distantPast, $1.slug) }
         waitingCount = (try? await store.unusedOceanCount()) ?? 0
-        if let region = OceanMapRegion.fitting(discovered.map { ($0.latitude, $0.longitude) }) {
-            position = .region(MKCoordinateRegion(
-                center: CLLocationCoordinate2D(
-                    latitude: region.centerLatitude, longitude: region.centerLongitude
-                ),
-                span: MKCoordinateSpan(
-                    latitudeDelta: region.latitudeDelta, longitudeDelta: region.longitudeDelta
-                )
-            ))
-        }
         hasLoaded = true
     }
 }
