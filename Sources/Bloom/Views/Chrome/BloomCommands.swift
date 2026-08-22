@@ -251,8 +251,10 @@ struct BloomCommands: Commands {
         }
 
         CommandGroup(replacing: .help) {
+            // The docs, not the repository. This pointed at github.com/spatie/Bloom#readme,
+            // which is not where Bloom lives and would have 404'd for everyone who pressed it.
             Button("Bloom Help") {
-                guard let url = URL(string: "https://github.com/spatie/Bloom#readme") else { return }
+                guard let url = URL(string: "https://runbloom.app/docs") else { return }
                 NSWorkspace.shared.open(url)
             }
             .keyboardShortcut("?", modifiers: .command)
