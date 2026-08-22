@@ -656,12 +656,10 @@ final class AppModel {
     }
 
     func workspaces(in repo: Repo) -> [Workspace] {
-        workspaces
-            .filter { $0.repoID == repo.id }
-            .sorted { lhs, rhs in
-                if lhs.pinned != rhs.pinned { return lhs.pinned }
-                return lhs.sortOrder < rhs.sortOrder
-            }
+        // `SidebarReorder.drawn` rather than a comparator written here: a restated rule dropped
+        // the `createdAt` tiebreak once already, and a drag computes its destination against
+        // `drawn`, so any daylight between the two lands the drop one row off.
+        SidebarReorder.drawn(workspaces.filter { $0.repoID == repo.id })
     }
 
     var selectedWorkspace: Workspace? {

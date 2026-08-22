@@ -19,7 +19,11 @@ struct SidebarRepoGroup: Identifiable {
 
     var id: RepoID { repo.id }
 
-    /// Pinned first, then the user's own order, matching `AppModel.workspaces(in:)`.
+    /// Drawn in `SidebarReorder.drawn`'s order, by calling it. This and `AppModel.workspaces(in:)`
+    /// each used to restate the rule as their own two-clause comparator, which dropped the
+    /// `createdAt` tiebreak, and Swift's sort is not stable: two rows tied on (pinned, sortOrder)
+    /// could draw in one order while `SidebarReorder.destination` computed the drop against the
+    /// other, landing a dragged row one off.
     static func build(
         repos: [Repo],
         workspaces: [Workspace],
@@ -32,10 +36,7 @@ struct SidebarRepoGroup: Identifiable {
 
         return repos.map { repo in
             let all = byRepo[repo.id] ?? []
-            let rows = all.filter(filter.accepts).sorted { lhs, rhs in
-                if lhs.pinned != rhs.pinned { return lhs.pinned }
-                return lhs.sortOrder < rhs.sortOrder
-            }
+            let rows = SidebarReorder.drawn(all.filter(filter.accepts))
             return SidebarRepoGroup(
                 repo: repo, workspaces: rows, hasUnreadWork: all.contains(where: \.unread)
             )
