@@ -657,6 +657,18 @@ public actor Store {
         return try db.query(sql, [.text(repoID)]).map(Self.workspace(from:))
     }
 
+    /// The workspaces an agent in this one asked Bloom to start.
+    ///
+    /// Read from the database rather than counted in memory, so it survives Bloom being reopened
+    /// while children are still running, and so two calls racing cannot both see the same stale
+    /// number. `parent_workspace_id` has had an index since the column was added.
+    public func workspacesStarted(byAgentIn workspaceID: WorkspaceID) throws -> [Workspace] {
+        try db.query(
+            "SELECT * FROM workspaces WHERE parent_workspace_id = ? ORDER BY created_at",
+            [.text(workspaceID)]
+        ).map(Self.workspace(from:))
+    }
+
     public func workspace(id: WorkspaceID) throws -> Workspace? {
         try db.query("SELECT * FROM workspaces WHERE id = ?", [.text(id)]).first.map(Self.workspace(from:))
     }

@@ -212,3 +212,144 @@ struct BridgeServerTests {
         caller.connection.close()
     }
 }
+
+/// `workspace_start` over the real socket, which is the only thing that proves an agent could
+/// reach it: the toolbox, the role gate, the dispatch's argument unwrapping and the handler all
+/// have to agree, and each of them is a separate place this could be wired up wrong.
+@Suite("BridgeServer: starting workspaces", .tags(.subprocess, .persistence), .scratchDirectory)
+struct BridgeWorkspaceStartTests {
+    private struct Caller {
+        let connection: UnixSocketConnection
+        var iterator: AsyncStream<String>.AsyncIterator
+
+        init(socketPath: String) throws {
+            connection = try UnixSocketConnection.connect(to: socketPath)
+            iterator = connection.lines.makeAsyncIterator()
+        }
+
+        mutating func hello(_ frame: BridgeHello) async throws -> BridgeWelcome {
+            connection.writeLine(String(decoding: try JSONEncoder().encode(frame), as: UTF8.self))
+            let reply = try #require(await iterator.next())
+            return try JSONDecoder().decode(BridgeWelcome.self, from: Data(reply.utf8))
+        }
+
+        mutating func call(_ request: String) async throws -> JSONValue {
+            connection.writeLine(request)
+            let reply = try #require(await iterator.next())
+            return try JSONDecoder().decode(JSONValue.self, from: Data(reply.utf8))
+        }
+    }
+
+    private final class Orders: @unchecked Sendable {
+        var prompts: [String] = []
+    }
+
+    private func makeBridge(
+        origin: WorkspaceOrigin = .user,
+        orders: Orders,
+        label: String
+    ) async throws -> (server: BridgeServer, token: String) {
+        let store = try makeTestStore(label)
+        let repo = try await store.upsert(Repo(name: "flare", path: "/tmp/flare", defaultBranch: "main"))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id,
+            name: "group occurrences",
+            branch: "claude/group-occurrences",
+            path: "/tmp/flare-group",
+            baseBranch: "main",
+            origin: origin
+        ))
+        let session = try await store.upsert(Session(workspaceID: workspace.id, title: "First chat"))
+
+        let toolbox = BridgeToolbox(handlers: [
+            WhoamiTool(),
+            WorkspaceStartTool { order, _ in
+                orders.prompts.append(order.prompt)
+                return StartedWorkspaceSummary(
+                    workspaceID: WorkspaceID(rawValue: "w-new"),
+                    name: "Sentry importer",
+                    branch: "claude/sentry-importer",
+                    path: "/tmp/worktrees/w-new"
+                )
+            },
+        ])
+
+        let server = try BridgeServer(store: store, toolbox: toolbox)
+        try server.start()
+        let attachment = server.attach(session: session, workspace: workspace, shimPath: "/tmp/bloom-bridge")
+        return (server, attachment.token)
+    }
+
+    @Test("a parent lists the tool and calling it starts a workspace")
+    func parentCanStartOne() async throws {
+        let orders = Orders()
+        let (server, token) = try await makeBridge(orders: orders, label: "bridge-start-parent")
+        defer { server.stop() }
+
+        var caller = try Caller(socketPath: server.socketPath)
+        #expect(try await caller.hello(BridgeHello(token: token, role: "parent", shim: "test")).accepted)
+
+        let listing = try await caller.call(#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
+        let names = (listing["result"]?["tools"]?.arrayValue ?? []).compactMap { $0["name"]?.stringValue }
+        #expect(names.contains("workspace_start"))
+
+        let call = try await caller.call(#"""
+            {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"workspace_start","arguments":{"prompt":"Import from Sentry"}}}
+            """#)
+
+        #expect(call["result"]?["isError"]?.boolValue == false)
+        #expect(orders.prompts == ["Import from Sentry"])
+
+        let text = call["result"]?["content"]?[0]?["text"]?.stringValue ?? ""
+        #expect(text.contains("w-new"))
+        #expect(text.contains("claude/sentry-importer"))
+    }
+
+    /// A child is told the tool does not exist, in the same words an unknown name gets. A refusal
+    /// that reads differently from "no such tool" tells the caller something is there.
+    @Test("a child cannot see the tool and cannot call it either")
+    func childIsRefusedTwice() async throws {
+        let orders = Orders()
+        let (server, token) = try await makeBridge(
+            origin: .agent(parentWorkspaceID: WorkspaceID(rawValue: "w-parent"), spawnToolUseID: "t1"),
+            orders: orders,
+            label: "bridge-start-child"
+        )
+        defer { server.stop() }
+
+        var caller = try Caller(socketPath: server.socketPath)
+        #expect(try await caller.hello(BridgeHello(token: token, role: "child", shim: "test")).accepted)
+
+        let listing = try await caller.call(#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
+        let names = (listing["result"]?["tools"]?.arrayValue ?? []).compactMap { $0["name"]?.stringValue }
+        #expect(!names.contains("workspace_start"))
+
+        let call = try await caller.call(#"""
+            {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"workspace_start","arguments":{"prompt":"Import from Sentry"}}}
+            """#)
+
+        #expect(call["error"]?["code"]?.intValue == MCPErrorCode.methodNotFound)
+        #expect(orders.prompts.isEmpty)
+    }
+
+    /// Three at once is the case the owner asked for by name, and the case a serial serve loop
+    /// plus `WorktreeCutQueue` exist to survive.
+    @Test("three starts in one turn all arrive, in order")
+    func threeInOneTurn() async throws {
+        let orders = Orders()
+        let (server, token) = try await makeBridge(orders: orders, label: "bridge-start-three")
+        defer { server.stop() }
+
+        var caller = try Caller(socketPath: server.socketPath)
+        #expect(try await caller.hello(BridgeHello(token: token, role: "parent", shim: "test")).accepted)
+
+        for (index, prompt) in ["Import from Sentry", "Group by release", "Faster search"].enumerated() {
+            let call = try await caller.call(#"""
+                {"jsonrpc":"2.0","id":\#(index + 2),"method":"tools/call","params":{"name":"workspace_start","arguments":{"prompt":"\#(prompt)"}}}
+                """#)
+            #expect(call["result"]?["isError"]?.boolValue == false)
+        }
+
+        #expect(orders.prompts == ["Import from Sentry", "Group by release", "Faster search"])
+    }
+}

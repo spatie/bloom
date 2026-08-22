@@ -317,9 +317,75 @@ final class AppModel {
     /// so a chat without one behaves exactly as every chat did last week, and an alert on launch
     /// about a feature nobody has used yet would be noise in front of somebody trying to work.
     /// It is logged, because "the tool is not there" needs somewhere to be findable from.
+    /// The tools the bridge serves, with the app-side half of `workspace_start` bound in.
+    ///
+    /// The closure is what crosses the boundary. A bridge handler runs off the main actor on a
+    /// background task per connection, and everything that makes a workspace actually run lives
+    /// here: the model that streams setup into the transcript and sends the opening turn. So the
+    /// tool cannot call `WorkspaceManager.start` itself; it hands an order to this, which hops
+    /// back and runs the same sequence the Create sheet runs.
+    ///
+    /// `select: false` is the one difference from the sheet, and it is the point. A workspace
+    /// appearing while somebody is typing in another one must not take the selection out from
+    /// under them.
+    private func bridgeToolbox() -> BridgeToolbox {
+        BridgeToolbox(handlers: [
+            WhoamiTool(),
+            WorkspaceStartTool { [weak self] order, identity in
+                guard let self else { throw AppNotReady.stillStartingUp }
+                return try await self.startWorkspaceForAgent(order, from: identity)
+            },
+        ])
+    }
+
+    /// Start a workspace because an agent asked for one, and answer with just enough to name it.
+    ///
+    /// Reached only from the bridge. It resolves the project from the caller's own workspace, so
+    /// an agent cannot start work in a repository it is not in: the only project it can name is
+    /// the one it is already sitting in, and it never names it at all.
+    private func startWorkspaceForAgent(
+        _ order: AgentWorkspaceOrder,
+        from identity: BridgeIdentity
+    ) async throws -> StartedWorkspaceSummary {
+        guard let store else { throw AppNotReady.stillStartingUp }
+        guard let caller = try await store.workspace(id: identity.workspaceID),
+              let repo = try await store.repo(id: caller.repoID)
+        else {
+            throw AppNotReady.stillStartingUp
+        }
+
+        // Whatever the calling session runs on, unless the tool was told otherwise. An agent
+        // asking for help wants help from the thing it already trusts.
+        var controls = ComposerControls()
+        if let session = try await store.session(id: identity.sessionID) {
+            controls = ComposerControls(session: session, isFastMode: false, outputStyle: OutputStyle.defaultName)
+        }
+        if let agent = order.agent {
+            controls.agentKind = agent
+        }
+
+        let workspace = try await startWorkspace(
+            in: repo,
+            prompt: order.prompt,
+            baseBranch: order.baseBranch,
+            branch: nil,
+            controls: controls,
+            select: false,
+            origin: .agent(parentWorkspaceID: identity.workspaceID, spawnToolUseID: UUID().uuidString),
+            name: order.name
+        )
+
+        return StartedWorkspaceSummary(
+            workspaceID: workspace.id,
+            name: workspace.name,
+            branch: workspace.branch,
+            path: workspace.path
+        )
+    }
+
     private func startBridge(on store: Store) {
         do {
-            let server = try BridgeServer(store: store) { message in
+            let server = try BridgeServer(store: store, toolbox: bridgeToolbox()) { message in
                 Log.bridge.info("\(message, privacy: .public)")
             }
             try server.start()
@@ -921,7 +987,13 @@ final class AppModel {
         branch: String? = nil,
         controls: ComposerControls? = nil,
         staged: StagedAttachments? = nil,
-        select: Bool = true
+        select: Bool = true,
+        /// Who asked. Defaulted to the owner because every caller but one is the owner, and
+        /// spelled out by the one that is not. See `WorkspaceOrigin`.
+        origin: WorkspaceOrigin = .user,
+        /// Overrides the name Bloom would derive. Only the bridge passes one; the sheet lets the
+        /// namer do its job.
+        name: String? = nil
     ) async throws -> Workspace {
         guard let manager else { throw AppNotReady.stillStartingUp }
         isCreatingWorkspace = true
@@ -938,15 +1010,15 @@ final class AppModel {
         let request = WorkspaceStartRequest(
             repo: repo,
             prompt: spoken,
-            // This method is the owner's, on the main actor, reached from the sheet, a `bloom://`
-            // link, the Services menu and a Shortcut. An agent asking for a workspace does not
-            // come through here: it has no window to select a row in.
-            origin: .user,
+            // Almost always the owner: the sheet, a `bloom://` link, the Services menu and a
+            // Shortcut all land here. The exception is the bridge, which passes `.agent` so the
+            // row records who asked and the sidebar can show the lineage.
+            origin: origin,
             baseBranch: baseBranch,
             branch: branch,
             // A terminal workspace is named after the branch the user typed, because there is no
             // task to derive a name from and nothing is going to be asked.
-            name: opensWith == .terminal ? branch : nil,
+            name: name ?? (opensWith == .terminal ? branch : nil),
             controls: controls,
             opensSession: opensWith == .chat,
             // The app runs setup itself, through `WorkspaceModel`, so the output streams into the

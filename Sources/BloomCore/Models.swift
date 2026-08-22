@@ -608,4 +608,10 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
         case .cursor, .openCode: false
         }
     }
+
+    /// The ones a workspace can actually be started on, in the order they are offered.
+    ///
+    /// Derived rather than listed, so an agent that grows a runner joins this by answering
+    /// `canRunWorkspaces` and nothing else has to be remembered.
+    public static var runnable: [AgentKind] { allCases.filter(\.canRunWorkspaces) }
 }
