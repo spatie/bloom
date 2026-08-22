@@ -355,9 +355,6 @@ subprocess_allowed_files=(
   'Sources/Bloom/Views/Inspector/FileRevert.swift'        # a helper type, not a view
   'Sources/Bloom/Views/Center/FileIndex.swift'            # a helper type, not a view
   'Sources/Bloom/Views/Terminal/TerminalPersistence.swift' # a helper type, not a view
-  # The exception CLAUDE.md names, and the one entry here that should come off:
-  # CreateWorkspaceSheet still asks Git for the branch list from its own .task.
-  'Sources/Bloom/Views/Sidebar/CreateWorkspaceSheet.swift'
 )
 while IFS= read -r hit; do
   [ -n "$hit" ] || continue
