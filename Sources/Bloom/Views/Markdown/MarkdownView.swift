@@ -536,11 +536,19 @@ private enum InlineAttributes {
                 if !intents.isEmpty { child.inlinePresentationIntent = intents }
                 output += child
             case let .link(text, url):
-                var child = render(text, font: font, code: code, color: Palette.link, intents: intents)
-                child.foregroundColor = Palette.link
-                child.underlineStyle = .single
-                if let target = URL(string: url) { child.link = target }
-                output += child
+                // The same `opens` gate as the AppKit twin above, styling included: without it a
+                // streaming row drew a scheme the app refuses as a live blue link that did
+                // nothing when clicked, then flipped to plain text as the row settled, which is
+                // the settle-jump this renderer pair exists to prevent.
+                if let target = URL(string: url), TranscriptLink.opens(target) {
+                    var child = render(text, font: font, code: code, color: Palette.link, intents: intents)
+                    child.foregroundColor = Palette.link
+                    child.underlineStyle = .single
+                    child.link = target
+                    output += child
+                } else {
+                    output += render(text, font: font, code: code, color: color, intents: intents)
+                }
             case .lineBreak:
                 output += run("\n", font: font, color: color, intents: intents)
             }
