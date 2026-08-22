@@ -1,10 +1,11 @@
 # Bloom
 
-A native macOS app for running Claude Code agents in parallel, each in its own git worktree.
+A native macOS app for running coding agents in parallel, each in its own git worktree.
 
 It is a rebuild of [Conductor](https://conductor.build) in Swift, so it can be changed to taste.
-Conductor itself is a Tauri app: Rust with a WebKit view. Bloom is SwiftUI with one dependency
-(SwiftTerm, for the embedded terminal) and everything else on the system frameworks.
+Conductor itself is a Tauri app: Rust with a WebKit view. Bloom is SwiftUI with two dependencies
+(SwiftTerm for the embedded terminal, Sparkle for updates) and everything else on the system
+frameworks.
 
 ## What it does
 
@@ -31,7 +32,7 @@ a one line call into that directory, so anything with an argument is run directl
 ```sh
 make run     # release build, assembled into .build/release/Bloom.app, launched
 make app     # debug build, which is what you want while changing things
-make test    # the core suite: 1582 tests in 146 suites, no app target needed
+make test    # the core suite, no app target needed
 make lint    # the house rules no off the shelf linter knows about
 ```
 
@@ -133,6 +134,5 @@ answer to "has this already been worked out" rather than a tour of the code.
 
 ## What it deliberately does not do
 
-No cloud workspaces, no accounts, no teams, no HTTP API, no agent backends other than Claude
-Code, no checkpointing. Those are most of Conductor's remaining surface area and none of them
-matter for one person on one machine.
+No cloud workspaces, no accounts, no teams, no HTTP API, no checkpointing. Those are most of
+Conductor's remaining surface area and none of them matter for one person on one machine.
