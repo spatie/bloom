@@ -632,4 +632,89 @@ struct FeedbackEmailTests {
         #expect(!Feedback.isAcceptableName("freek@spatie.be"))
         #expect(Feedback.nameProblem.contains("field of its own"))
     }
+
+    // MARK: - When the sheets may say any of that
+
+    /// The bug this section exists for: `freek@spatie.` marked wrong by the person who had typed
+    /// exactly half of it. Nothing is a problem until a send has been attempted, however wrong
+    /// the fields would be.
+    @Test("a half-typed field is unfinished, not wrong, until Send is pressed")
+    func nothingIsWrongBeforeASendIsAttempted() {
+        let problems = Feedback.sheetProblems(
+            name: "freek@spatie.be", email: "freek@spatie.", afterSendAttempt: false
+        )
+        #expect(problems.isEmpty)
+        #expect(problems.firstField == nil)
+    }
+
+    @Test("after a send is attempted, each field says what is wrong with it")
+    func problemsAfterAnAttempt() {
+        let problems = Feedback.sheetProblems(
+            name: "freek@spatie.be", email: "freek@spatie.", afterSendAttempt: true
+        )
+        #expect(problems.name == Feedback.nameProblem)
+        #expect(problems.email == Feedback.emailProblem)
+        #expect(problems.message(for: .name) == Feedback.nameProblem)
+        #expect(problems.message(for: .email) == Feedback.emailProblem)
+    }
+
+    /// Both fields are optional, and this is the case most likely to regress: an empty optional
+    /// field marked wrong turns "you may leave this" into a lie.
+    @Test("empty optional fields are never a problem, even on the way out")
+    func emptyIsNeverAProblem() {
+        let problems = Feedback.sheetProblems(name: "", email: "", afterSendAttempt: true)
+        #expect(problems.isEmpty)
+
+        let padded = Feedback.sheetProblems(name: "  ", email: "   ", afterSendAttempt: true)
+        #expect(padded.isEmpty)
+    }
+
+    @Test("a corrected field stops being a problem the moment it is corrected")
+    func correctionClears() {
+        let problems = Feedback.sheetProblems(
+            name: "Freek", email: "freek@spatie.be", afterSendAttempt: true
+        )
+        #expect(problems.isEmpty)
+    }
+
+    /// Focus after a blocked send goes to the first refused field in the sheet's own order, name
+    /// above email, which is why the order is pinned here.
+    @Test("the first refused field is the one focus should land in")
+    func focusOrder() {
+        let both = Feedback.sheetProblems(
+            name: "freek@spatie.be", email: "nope", afterSendAttempt: true
+        )
+        #expect(both.firstField == .name)
+
+        let emailOnly = Feedback.sheetProblems(
+            name: "Freek", email: "nope", afterSendAttempt: true
+        )
+        #expect(emailOnly.firstField == .email)
+    }
+
+    /// The feedback sheet has no name field and passes nil, which must never read as a problem.
+    @Test("a sheet without a name field can only be refused over its address")
+    func sheetWithoutANameField() {
+        let problems = Feedback.sheetProblems(email: "nope", afterSendAttempt: true)
+        #expect(problems.name == nil)
+        #expect(problems.firstField == .email)
+    }
+
+    // MARK: - The logs checkbox's memory
+
+    @Test("the logs checkbox starts ticked, and an untick is remembered over the default")
+    func logsCheckboxMemory() throws {
+        let suite = "be.spatie.bloom.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        #expect(Feedback.includesLogs(defaults) == Feedback.includesLogsByDefault)
+        #expect(Feedback.includesLogsByDefault)
+
+        Feedback.rememberIncludesLogs(false, in: defaults)
+        #expect(!Feedback.includesLogs(defaults))
+
+        Feedback.rememberIncludesLogs(true, in: defaults)
+        #expect(Feedback.includesLogs(defaults))
+    }
 }

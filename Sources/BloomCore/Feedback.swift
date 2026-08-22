@@ -516,6 +516,80 @@ public enum Feedback {
     /// What both sheets say under an address they cannot send.
     public static let emailProblem = "That does not look like an email address."
 
+    // MARK: - When a sheet may say any of that
+
+    /// A field on a submission sheet that can be refused, in the order the sheets lay them out,
+    /// which is also the order focus should fall in when a send is blocked.
+    public enum SheetField: Sendable, Hashable {
+        case name
+        case email
+    }
+
+    /// What a sheet has to say about its fields, field by field, with nil meaning nothing.
+    public struct SheetProblems: Sendable, Equatable {
+        public let name: String?
+        public let email: String?
+
+        public var isEmpty: Bool { name == nil && email == nil }
+
+        /// Where focus belongs when a send is blocked: the first field with a problem.
+        public var firstField: SheetField? {
+            if name != nil { return .name }
+            if email != nil { return .email }
+            return nil
+        }
+
+        public func message(for field: SheetField) -> String? {
+            switch field {
+            case .name: name
+            case .email: email
+            }
+        }
+    }
+
+    /// The problems a sheet may show, given what has been typed and whether a send has been
+    /// attempted yet.
+    ///
+    /// Nothing before the first attempt, because a half-typed `freek@spatie.` is not wrong, it is
+    /// unfinished, and a sheet that says otherwise is marking somebody's homework while they are
+    /// still writing it. Live from the first attempt on, because by then the person has been told
+    /// what is being asked of them, and a stale warning sitting beside an address that has since
+    /// been corrected would be the same bug the other way round.
+    ///
+    /// `name` is nil on the sheet that has no name field. Both fields are optional, so empty is
+    /// never a problem; `isAcceptableName` and `isAcceptableEmail` both say so.
+    public static func sheetProblems(
+        name: String? = nil, email: String, afterSendAttempt: Bool
+    ) -> SheetProblems {
+        guard afterSendAttempt else { return SheetProblems(name: nil, email: nil) }
+        return SheetProblems(
+            name: name.flatMap { isAcceptableName($0) ? nil : nameProblem },
+            email: isAcceptableEmail(email) ? nil : emailProblem
+        )
+    }
+
+    // MARK: - The logs checkbox's memory
+
+    /// Where the feedback sheet's logs checkbox remembers itself between openings.
+    ///
+    /// On by default, and remembered from then on. It used to start off every time, on the theory
+    /// that ticking it once was not agreeing to send the next excerpt too; the owner weighed that
+    /// against reports arriving without the one thing that explains them, and decided the box
+    /// starts ticked. The memory is the person's, though: somebody who unticks it has said no,
+    /// and a default that re-ticks itself over that answer is not a default, it is nagging. The
+    /// read pattern is `InstallPing`'s, so "never touched" stays distinguishable from "set back
+    /// to what the default happens to be".
+    public static let includesLogsKey = "feedback.includesLogs"
+    public static let includesLogsByDefault = true
+
+    public static func includesLogs(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: includesLogsKey) as? Bool ?? includesLogsByDefault
+    }
+
+    public static func rememberIncludesLogs(_ value: Bool, in defaults: UserDefaults = .standard) {
+        defaults.set(value, forKey: includesLogsKey)
+    }
+
     // MARK: - What is sent
 
     /// One picture attached to a submission.
