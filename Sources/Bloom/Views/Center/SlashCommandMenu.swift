@@ -31,7 +31,16 @@ struct SlashCommandMenu: View {
                                     onPick: { onPick(match.command) },
                                     onHover: { onHighlight(index) }
                                 )
-                                .id(index)
+                        // Each row's identity is the thing it names, never its position.
+                        // These rows carried `.id(index)` for the scroll target below, and that
+                        // pinned identity to a slot in a lazy stack: when the ranked list changed
+                        // under an open menu, the stack kept serving the views it had cached for
+                        // those slots, so typing `/re` showed the rows the bare `/` had ranked,
+                        // alphabetical, `compact` among them, while the real matches were only in
+                        // the model. The pick then honoured the model, and picked a command that
+                        // was not the row on screen. Identity by what the row shows makes a
+                        // changed list a changed row, which a lazy container does rebuild.
+                                .id(match.id)
                             }
                         }
                         .padding(Metrics.spacingSmall)
@@ -41,7 +50,8 @@ struct SlashCommandMenu: View {
                     // Pinning to the bottom threw the highlighted row to the far edge every time
                     // the user stepped upwards, which no Mac menu does.
                     .onChange(of: selectedIndex) { _, index in
-                        proxy.scrollTo(index)
+                        guard matches.indices.contains(index) else { return }
+                        proxy.scrollTo(matches[index].id)
                     }
                 }
             }

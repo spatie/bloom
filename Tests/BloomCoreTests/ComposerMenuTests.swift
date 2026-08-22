@@ -35,6 +35,26 @@ struct ComposerMenuTests {
         #expect(ComposerMenu.slashQuery(in: "run /review") == nil)
     }
 
+    // MARK: - Emptying the draft in one edit
+
+    @Test("select all then backspace empties the draft in one edit and every menu dies with it")
+    func oneEditEmptiesTheDraft() {
+        // The gesture the composer has to survive: not one deletion per character but the whole
+        // draft going in a single edit, which leaves any caret, token range or query measured
+        // against the old text pointing at something that no longer exists. Everything here is
+        // re-derived from the new text and the new caret, so the only correct answer is silence.
+        #expect(ComposerMenu.resolve(draft: "", caret: 0) == .none)
+        // A caret the view has not caught up with yet, still counting the old "/review-pr".
+        #expect(ComposerMenu.resolve(draft: "", caret: 10) == .none)
+        #expect(ComposerMenu.mentionToken(in: "", caret: 12) == nil)
+        #expect(ComposerMenu.slashQuery(in: "") == nil)
+        // And the same one edit on a draft that led with a command: the chip's text survives as
+        // the whole draft, and parsing it back is not a crash but a chip with an empty body.
+        let draft = SlashCommandDraft.parse("/review ")
+        #expect(draft.name == "review")
+        #expect(draft.body.isEmpty)
+    }
+
     // MARK: - The mention token
 
     @Test("an @ at the caret opens the mention menu with what follows it as the query")
