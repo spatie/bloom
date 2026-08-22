@@ -61,9 +61,17 @@ struct FeedbackStatus: View {
 /// One view rather than two, because the field, its rule and the sentence under a bad address are
 /// the same on both; only the label differs, and it differs because what will be done with the
 /// address differs.
+///
+/// The field does not decide whether its sentence shows. It used to, by checking the address on
+/// every keystroke, which meant `freek@spatie.` was marked wrong by someone who had typed exactly
+/// half of it. Whether to say anything is `Feedback.sheetProblems`' call, made by the sheet that
+/// owns the send; this view only draws the answer.
 struct FeedbackEmailField: View {
     var label: String
     @Binding var email: String
+    /// Non-nil once a blocked send has said so, nil again the moment the address is corrected.
+    var problem: String?
+    @FocusState.Binding var problemField: Feedback.SheetField?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
@@ -75,16 +83,32 @@ struct FeedbackEmailField: View {
             TextField(Feedback.Copy.emailPlaceholder, text: $email)
                 .textFieldStyle(.roundedBorder)
                 .font(Typo.body)
+                .focused($problemField, equals: .email)
 
-            // Checked here rather than only on the way out, because the alternative is a
-            // submission that comes back 422 for a field nobody had to fill in at all.
-            if !Feedback.isAcceptableEmail(email) {
-                Label(Feedback.emailProblem, systemImage: "exclamationmark.triangle.fill")
-                    .font(Typo.micro)
-                    .foregroundStyle(Palette.warning)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            FeedbackFieldProblem(message: Feedback.emailProblem, isShown: problem != nil)
         }
+    }
+}
+
+/// The sentence under a field that cannot be sent, in space that is reserved whether or not it is
+/// saying anything.
+///
+/// Hidden rather than conditional, because a conditional label pushes everything under it down at
+/// the exact moment the person has just been refused and is looking there. The hidden copy is the
+/// same text as the shown one, so the reserved height is the shown height even if the sentence
+/// wraps at the sheet's width, and nothing below this ever moves. Hidden from accessibility too,
+/// so a screen reader does not announce a warning nobody is being shown.
+struct FeedbackFieldProblem: View {
+    var message: String
+    var isShown: Bool
+
+    var body: some View {
+        Label(message, systemImage: "exclamationmark.triangle.fill")
+            .font(Typo.micro)
+            .foregroundStyle(Palette.warning)
+            .fixedSize(horizontal: false, vertical: true)
+            .opacity(isShown ? 1 : 0)
+            .accessibilityHidden(!isShown)
     }
 }
 
@@ -104,9 +128,12 @@ struct FeedbackSentCard: View {
 
     var body: some View {
         VStack(spacing: Metrics.gutter) {
+            // `accentFill`, the same token as the Done button under it, not `positive`. The two
+            // used to differ, teal circle over blue button, and two accents on a card this small
+            // read as a mistake. The tick is not carrying the news anyway; the heading is.
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 34, weight: .light))
-                .foregroundStyle(Palette.positive)
+                .foregroundStyle(Palette.accentFill)
 
             VStack(spacing: Metrics.spacingWide) {
                 Text(title)

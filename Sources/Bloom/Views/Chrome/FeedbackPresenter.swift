@@ -36,8 +36,12 @@ final class FeedbackPresenter {
     // MARK: - The feedback draft
 
     var message = ""
-    /// Off to start with, every time, and never remembered as on. See `FeedbackSheet`.
-    var includesLogs = false
+    /// On by default and remembered across launches, both decided in `Feedback.includesLogs` so
+    /// the rule has a test. The write on every flip costs nothing: it is a checkbox, not a
+    /// keystroke path.
+    var includesLogs = Feedback.includesLogs() {
+        didSet { Feedback.rememberIncludesLogs(includesLogs) }
+    }
     /// The excerpt as it was read when the box was ticked or the View link was opened, which is
     /// exactly what a send carries. See `FeedbackSheet.captureLogs`.
     var logs = ""
@@ -85,12 +89,33 @@ final class FeedbackPresenter {
             if message.isEmpty {
                 message = "The composer loses its place when a workspace finishes while I am typing in it."
             }
+            // A half-typed address, deliberately. This is the state the bug report was about, a
+            // person partway through typing their own address, and the clean capture has to show
+            // it standing unmarked.
+            if email.isEmpty { email = "freek@spatie." }
             open(.report)
         } else if arguments.contains("--prompt-sheet") {
             if prompt.isEmpty {
                 prompt = "Give the sidebar a way to group workspaces by the project they came from."
             }
+            if email.isEmpty { email = "freek@spatie." }
             open(.prompt)
+        } else if arguments.contains("--feedback-problems") {
+            // The refused state: a half-typed address and a Send already pressed, which is the
+            // pair of screenshots the no-layout-shift rule is checked against. The sheet reads
+            // the same flag to stand in for the press.
+            if message.isEmpty { message = "The composer loses its place while I am typing." }
+            email = "freek@spatie."
+            open(.report)
+        } else if arguments.contains("--prompt-problems") {
+            if prompt.isEmpty { prompt = "Group workspaces by the project they came from." }
+            name = "freek@spatie.be"
+            email = "freek@spatie."
+            open(.prompt)
+        } else if arguments.contains("--feedback-sent") {
+            open(.reportSent)
+        } else if arguments.contains("--prompt-sent") {
+            open(.promptSent)
         }
         #endif
     }
@@ -100,9 +125,12 @@ final class FeedbackPresenter {
     }
 
     /// Called only after a report the server took.
+    ///
+    /// The checkbox is deliberately not on this list any more. It is a remembered preference now,
+    /// and a successful send is not the person changing their mind about the next one; only their
+    /// own untick is. The excerpt itself goes, because it belonged to the report it travelled with.
     func clearReport() {
         message = ""
-        includesLogs = false
         logs = ""
         images = []
     }

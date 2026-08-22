@@ -15,10 +15,11 @@ import BloomCore
 /// a server that is down all leave the paragraph exactly where it was. Only a report the server
 /// actually took clears it.
 ///
-/// **The logs checkbox starts off, every time.** Not remembered as on, and not on by default:
-/// Bloom's log can name a workspace, a project and a branch, and the person who ticked it a week
-/// ago for one report did not agree to send the next one. What it would send is capped and scrubbed
-/// by `AppLogExcerpt`, and the View link beside it shows the result in full.
+/// **The logs checkbox starts on, and then remembers.** It used to start off every time, on the
+/// argument that ticking it once was not consent for the next excerpt; what that produced in
+/// practice was reports without the one thing that explains them. So it defaults to on, the log
+/// is capped and scrubbed by `AppLogExcerpt`, the View link shows exactly what would go, and an
+/// untick is remembered rather than overridden. See `Feedback.includesLogs`.
 struct FeedbackSheet: View {
     @Environment(AppModel.self) private var app
 
@@ -37,6 +38,11 @@ struct FeedbackSheet: View {
     /// The read of the log, held so a send can wait for the read the checkbox started rather than
     /// starting a second one that could differ from what the View link showed.
     @State private var logsRead: Task<Void, Never>?
+    /// Whether Send has been pressed on this opening of the sheet. All this view owns of the
+    /// validation story; what it means is `Feedback.sheetProblems`' business.
+    @State private var hasTriedToSend = false
+    /// Where focus lands when a send is blocked, which on this sheet can only be the address.
+    @FocusState private var problemField: Feedback.SheetField?
 
     /// Five lines to start with, which is a paragraph, and it grows from there.
     private static let minimumEditorLines: CGFloat = 5
@@ -62,7 +68,12 @@ struct FeedbackSheet: View {
 
             logsRow
 
-            FeedbackEmailField(label: Feedback.Copy.reportEmail, email: $presenter.email)
+            FeedbackEmailField(
+                label: Feedback.Copy.reportEmail,
+                email: $presenter.email,
+                problem: problems.email,
+                problemField: $problemField
+            )
 
             FeedbackEnvironmentNote()
 
@@ -76,15 +87,24 @@ struct FeedbackSheet: View {
             // The keyboard goes to the box, which is the only thing on this sheet anybody came
             // here to use.
             isFocused = true
+            // The checkbox can now arrive already ticked, and a tick whose read never started
+            // would send `logs` as the empty string it still is. The `onChange` below only fires
+            // on a change, so the opening state is this line's job.
+            if presenter.includesLogs { readLogs() }
         }
         .onDisappear {
             facts?.cancel()
             phase = .idle
+            // The next opening starts clean: a warning held over from last week's attempt would
+            // be about text nobody can see any more.
+            hasTriedToSend = false
         }
         // `--feedback-logs` opens the excerpt straight away on a capture run, which is the only
-        // way a sheet on top of a sheet can be looked at without a human at the keyboard.
+        // way a sheet on top of a sheet can be looked at without a human at the keyboard, and
+        // `--feedback-problems` stands in for the press of Send that makes the warnings visible.
         .task {
             #if DEBUG
+            if CommandLine.arguments.contains("--feedback-problems") { hasTriedToSend = true }
             guard CommandLine.arguments.contains("--feedback-logs") else { return }
             showLogs()
             #endif
@@ -307,17 +327,36 @@ struct FeedbackSheet: View {
         return await FeedbackEnvironment.current(app: app)
     }
 
+    /// Silent until Send has been pressed once, live from then on, so the address is never marked
+    /// wrong while it is still being typed for the first time. The policy and the check are
+    /// `Feedback.sheetProblems`, where they can be tested; this view only asks.
+    private var problems: Feedback.SheetProblems {
+        Feedback.sheetProblems(email: presenter.email, afterSendAttempt: hasTriedToSend)
+    }
+
     /// Everything that has to be true before the button does anything. Read by the button and
     /// again by `send`, because a keyboard shortcut reaches the action without going through the
     /// button's disabled state.
+    ///
+    /// The address is deliberately not in it. A button that goes grey over a field problem cannot
+    /// say which field or why; pressing it is what surfaces the sentence that can.
     private var canSend: Bool {
-        Feedback.canSend(message: presenter.message)
-            && Feedback.isAcceptableEmail(presenter.email)
-            && !phase.isSending
+        Feedback.canSend(message: presenter.message) && !phase.isSending
     }
 
     private func send() {
         guard canSend else { return }
+
+        // Checked on the way out rather than while somebody types, so a half-typed address is
+        // never marked wrong. A blocked send turns the warning on, live from here, and puts the
+        // keyboard in the field it names.
+        let problems = Feedback.sheetProblems(email: presenter.email, afterSendAttempt: true)
+        guard problems.isEmpty else {
+            hasTriedToSend = true
+            problemField = problems.firstField
+            return
+        }
+
         phase = .sending
 
         Task {

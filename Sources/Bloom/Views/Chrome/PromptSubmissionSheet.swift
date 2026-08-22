@@ -22,6 +22,11 @@ struct PromptSubmissionSheet: View {
     @State private var contentHeight = ComposerTextEditor.lineHeight
     @State private var phase: FeedbackPhase = .idle
     @State private var facts: Task<Feedback.Environment, Never>?
+    /// Whether Submit has been pressed on this opening of the sheet. All this view owns of the
+    /// validation story; what it means is `Feedback.sheetProblems`' business.
+    @State private var hasTriedToSend = false
+    /// Where focus lands when a send is blocked: the first field the block named.
+    @FocusState private var problemField: Feedback.SheetField?
 
     private static let minimumEditorLines: CGFloat = 6
     private static let maximumEditorLines: CGFloat = 14
@@ -35,7 +40,12 @@ struct PromptSubmissionSheet: View {
 
             nameField
 
-            FeedbackEmailField(label: Feedback.Copy.promptEmail, email: $presenter.email)
+            FeedbackEmailField(
+                label: Feedback.Copy.promptEmail,
+                email: $presenter.email,
+                problem: problems.email,
+                problemField: $problemField
+            )
 
             FeedbackEnvironmentNote()
 
@@ -51,6 +61,16 @@ struct PromptSubmissionSheet: View {
         .onDisappear {
             facts?.cancel()
             phase = .idle
+            // The next opening starts clean: a warning held over from last week's attempt would
+            // be about text nobody can see any more.
+            hasTriedToSend = false
+        }
+        .task {
+            // A capture run cannot press Submit, so the flag stands in for the press that makes
+            // the warnings visible. See `FeedbackPresenter.presentIfRequested`.
+            #if DEBUG
+            if CommandLine.arguments.contains("--prompt-problems") { hasTriedToSend = true }
+            #endif
         }
     }
 
@@ -91,20 +111,19 @@ struct PromptSubmissionSheet: View {
             TextField(Feedback.Copy.promptNamePlaceholder, text: $presenter.name)
                 .textFieldStyle(.roundedBorder)
                 .font(Typo.body)
+                .focused($problemField, equals: .name)
 
-            if !isNameAcceptable {
-                Label(Feedback.nameProblem, systemImage: "exclamationmark.triangle.fill")
-                    .font(Typo.micro)
-                    .foregroundStyle(Palette.warning)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            FeedbackFieldProblem(message: Feedback.nameProblem, isShown: problems.name != nil)
         }
     }
 
-    /// Checked here rather than only on the way out, because the alternative is a submission that
-    /// comes back 422 for a field nobody had to fill in at all.
-    private var isNameAcceptable: Bool {
-        Feedback.isAcceptableName(presenter.name)
+    /// Silent until Submit has been pressed once, live from then on, so a field is never marked
+    /// wrong while it is still being typed for the first time. The policy and the checks are
+    /// `Feedback.sheetProblems`, where they can be tested; this view only asks.
+    private var problems: Feedback.SheetProblems {
+        Feedback.sheetProblems(
+            name: presenter.name, email: presenter.email, afterSendAttempt: hasTriedToSend
+        )
     }
 
     // MARK: - The buttons
@@ -172,15 +191,27 @@ struct PromptSubmissionSheet: View {
     /// Everything that has to be true before the button does anything. Read by the button and
     /// again by `send`, because a keyboard shortcut reaches the action without going through the
     /// button's disabled state.
+    ///
+    /// The name and the address are deliberately not in it. A button that goes grey over a field
+    /// problem cannot say which field or why; pressing it is what surfaces the sentence that can.
     private var canSend: Bool {
-        Feedback.canSend(message: presenter.prompt)
-            && isNameAcceptable
-            && Feedback.isAcceptableEmail(presenter.email)
-            && !phase.isSending
+        Feedback.canSend(message: presenter.prompt) && !phase.isSending
     }
 
     private func send() {
         guard canSend else { return }
+
+        // Checked on the way out rather than while somebody types, so a half-typed address is
+        // never marked wrong. A blocked send turns the warnings on, live from here, and puts the
+        // keyboard in the first field that needs it.
+        let problems = Feedback.sheetProblems(
+            name: presenter.name, email: presenter.email, afterSendAttempt: true
+        )
+        guard problems.isEmpty else {
+            hasTriedToSend = true
+            problemField = problems.firstField
+            return
+        }
 
         phase = .sending
 
