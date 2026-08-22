@@ -32,14 +32,14 @@ struct DiffView: View {
     /// Where every pending comment on this file draws, recomputed by `rebuild` so the bands and
     /// the rows they sit under always come from the same pass. See `ReviewPlacements`.
     @State private var placements: [ReviewPlacement] = []
-    /// The line whose comment editor is open, and what has been typed into it. The text lives
-    /// here rather than in the editor row because that row sits in a lazy stack and is destroyed
-    /// when scrolled far enough away, which must not take a half-written comment with it.
-    @State private var draftSpot: ReviewSpot?
-    @State private var draftText = ""
-    /// The evidence for the comment being written, captured when the editor opened. See
-    /// `beginDraft` for why it is not captured at commit.
-    @State private var draftAnchor: ReviewCommentAnchor?
+    /// The comment being written on this file, read through the model rather than held as view
+    /// state, because everything that edits it outlives this view and this view does not: the
+    /// editor row sits in a lazy stack and is destroyed when scrolled away, and the whole view is
+    /// keyed by path in `ReviewPaneView` and destroyed by walking to another file. View state
+    /// answered the first death and not the second; see `WorkspaceModel.reviewDrafts` for the
+    /// fragment that committing on disappear minted instead.
+    private var draft: ReviewDraft? { model.reviewDrafts[file.path] }
+    private var draftSpot: ReviewSpot? { draft?.spot }
 
     /// The patch as git wrote it, kept so the whitespace toggle can refold it without going back
     /// to git for a diff it has already been given.
@@ -109,14 +109,12 @@ struct DiffView: View {
         .onChange(of: fileComments) { _, _ in rebuild() }
         .onChange(of: draftSpot) { _, _ in rebuild() }
         .onChange(of: model.changesGeneration) { _, _ in refreshWorktreeCopy() }
-        // Leaving the file with the editor open commits what was typed rather than dropping it:
-        // a comment chip appearing is visible and removable, a sentence silently gone is neither.
-        // Cancel and Escape remain the ways to discard on purpose.
-        .onDisappear {
-            if !draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                commitDraft()
-            }
-        }
+        // Nothing commits on disappear. Leaving the file used to commit whatever had been typed,
+        // on the argument that a visible chip beats a sentence silently gone, and it made chips
+        // out of fragments: a reviewer four words in glanced at the next file and "they" was
+        // already committed as a review comment. The draft lives on the model now, so leaving
+        // loses nothing and the editor reopens holding the text; only Return and the Comment
+        // button commit, and only Cancel and Escape discard.
         .onChange(of: isEditable) { _, editable in
             if !editable { mode = .diff }
         }
@@ -398,7 +396,10 @@ struct DiffView: View {
 
         case .commentEditor:
             ReviewCommentEditorView(
-                text: $draftText,
+                text: Binding(
+                    get: { model.reviewDrafts[file.path]?.text ?? "" },
+                    set: { model.reviewDrafts[file.path]?.text = $0 }
+                ),
                 width: width,
                 onCommit: commitDraft,
                 onCancel: cancelDraft
@@ -479,20 +480,23 @@ struct DiffView: View {
                 at: spot, hunks: document.file.hunks, fileLines: fileLines
               )
         else { return }
-        draftAnchor = anchor
-        draftSpot = spot
+        // A second press while text is pending moves the editor, and the text moves with it:
+        // clearing it here would be the same silent loss the model-held draft exists to prevent.
+        model.reviewDrafts[file.path] = ReviewDraft(
+            spot: spot,
+            anchor: anchor,
+            text: draft?.text ?? ""
+        )
     }
 
     private func cancelDraft() {
-        draftSpot = nil
-        draftText = ""
-        draftAnchor = nil
+        model.reviewDrafts[file.path] = nil
     }
 
-    /// Return, the Comment button, or leaving the file with text still in the editor.
+    /// Return or the Comment button, and nothing else.
     private func commitDraft() {
-        guard let spot = draftSpot, let anchor = draftAnchor else { return }
-        let body = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let draft else { return }
+        let body = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else {
             cancelDraft()
             return
@@ -501,7 +505,9 @@ struct DiffView: View {
         let model = model
         let path = file.path
         Task {
-            await model.addReviewComment(filePath: path, spot: spot, anchor: anchor, body: body)
+            await model.addReviewComment(
+                filePath: path, spot: draft.spot, anchor: draft.anchor, body: body
+            )
         }
     }
 

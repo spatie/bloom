@@ -798,6 +798,16 @@ final class WorkspaceModel {
     private(set) var reviewComments: [ReviewComment] = []
     private(set) var hasReadReviewComments = false
 
+    /// The comment being written on each file's diff, keyed by file path. Here rather than in
+    /// `DiffView`'s own state because `ReviewPaneView` keys that view by path, so walking to
+    /// another file, switching tab or the file leaving the changed list destroys it. The first
+    /// answer to that was committing whatever had been typed on disappear, and it minted
+    /// fragments: a reviewer four words into a sentence glanced at another file and came back to
+    /// find those four words already committed as a review comment. A draft only joins the
+    /// review through Return or the Comment button; until then it waits here, and the editor
+    /// reopens holding it when its file is opened again.
+    var reviewDrafts: [String: ReviewDraft] = [:]
+
     func reloadReviewComments() async {
         guard let store else { return }
         let fresh = (try? await store.reviewComments(workspaceID: workspace.id)) ?? []
@@ -1181,4 +1191,13 @@ final class LineBuffer: Sendable {
             return lines
         }
     }
+}
+
+/// A review comment mid-composition: where it will attach, the evidence captured when its
+/// editor opened, and the text so far. See `WorkspaceModel.reviewDrafts` for why it outlives
+/// the diff view that is editing it.
+struct ReviewDraft: Hashable {
+    var spot: ReviewSpot
+    var anchor: ReviewCommentAnchor
+    var text: String = ""
 }
