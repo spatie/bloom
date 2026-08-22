@@ -195,13 +195,14 @@ struct ComposerTextEditor: NSViewRepresentable {
         // character there and a whole path here, and it is the draft the two have to agree about.
         if refaced || ComposerChipText.draft(of: textView.attributedString()) != text {
             context.coordinator.write(text, into: textView, font: font)
-            let location = min(max(caret, 0), (text as NSString).length)
-            textView.setSelectedRange(NSRange(
-                location: ComposerChipText.storageOffset(
-                    forDraft: location, in: textView.attributedString()
-                ),
-                length: 0
-            ))
+            place(caretAt: caret, in: textView, coordinator: context.coordinator)
+        } else if caret != context.coordinator.lastReportedCaret {
+            // A caret the view did not report is a caret code moved without touching the text:
+            // restoring a saved draft puts the insertion point at its end while the string is
+            // already in place, so the branch above never runs. Left alone, the view kept
+            // {0,0} from its making and its first selection report wrote 0 back over the
+            // restored offset.
+            place(caretAt: caret, in: textView, coordinator: context.coordinator)
         }
 
         if isFocused, textView.window?.firstResponder !== textView {
@@ -213,9 +214,23 @@ struct ComposerTextEditor: NSViewRepresentable {
         context.coordinator.reportHeight(of: textView)
     }
 
+    private func place(caretAt caret: Int, in textView: ComposerTextView, coordinator: Coordinator) {
+        let location = min(max(caret, 0), (text as NSString).length)
+        textView.setSelectedRange(NSRange(
+            location: ComposerChipText.storageOffset(
+                forDraft: location, in: textView.attributedString()
+            ),
+            length: 0
+        ))
+        coordinator.lastReportedCaret = location
+    }
+
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ComposerTextEditor
+        /// The caret as the view last spoke it, so `updateNSView` can tell a binding echoing the
+        /// view back from a programmatic move it still has to apply.
+        var lastReportedCaret: Int?
         private var lastReportedHeight: CGFloat = 0
 
         init(_ parent: ComposerTextEditor) {
@@ -231,13 +246,16 @@ struct ComposerTextEditor: NSViewRepresentable {
                 .foregroundColor: NSColor.labelColor,
             ]
             parent.text = ComposerChipText.draft(of: textView.attributedString())
-            parent.caret = draftOffset(textView.selectedRange().location, in: textView)
+            let caret = draftOffset(textView.selectedRange().location, in: textView)
+            parent.caret = caret
+            lastReportedCaret = caret
             reportHeight(of: textView)
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? ComposerTextView else { return }
             let location = draftOffset(textView.selectedRange().location, in: textView)
+            lastReportedCaret = location
             if parent.caret != location { parent.caret = location }
         }
 

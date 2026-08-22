@@ -55,8 +55,17 @@ struct TranscriptRow: Identifiable, Hashable {
 @Observable
 final class TranscriptModel {
     var session: Session
+    /// The workspace as it was when this model was made. Its id and path are stable and are what
+    /// most of the file needs; its name is not, and anything said out loud reads `workspaceNow`.
     let workspace: Workspace
     private unowned let app: AppModel
+
+    /// The row as the app holds it now. The snapshot above goes stale the moment automatic
+    /// naming lands, minutes into the workspace's life, and every alert and notification from
+    /// this chat then called the workspace by its ocean placeholder for the rest of the launch.
+    private var workspaceNow: Workspace {
+        app.existingModel(for: workspace.id)?.workspace ?? workspace
+    }
 
     private(set) var rows: [TranscriptRow] = []
     /// Whether this session's agent is mid turn.
@@ -692,10 +701,10 @@ final class TranscriptModel {
             statusLabel = nil
             await refreshSession()
             app.alert = BloomAlert(
-                title: "The agent stopped in \(workspace.name)",
+                title: "The agent stopped in \(workspaceNow.name)",
                 message: failure.message.isEmpty ? "It exited without finishing the turn." : failure.message
             )
-            NotificationService.shared.agentFailed(workspace: workspace, message: failure.message)
+            NotificationService.shared.agentFailed(workspace: workspaceNow, message: failure.message)
 
         case .result(let result):
             clearStreaming()
@@ -719,7 +728,7 @@ final class TranscriptModel {
             statusLabel = "Waiting on you"
             refreshAwaitingPermission()
             await refreshSession()
-            NotificationService.shared.agentNeedsPermission(workspace: workspace)
+            NotificationService.shared.agentNeedsPermission(workspace: workspaceNow)
 
         case .permissionDecided(let resolution):
             settle(resolution)
@@ -739,7 +748,7 @@ final class TranscriptModel {
     /// What the project is called, for a permission row that has to say where a rule would apply.
     /// "Always allow ... in Bloom" is a promise about a place, and the place has to be named.
     var projectName: String {
-        app.repo(for: workspace)?.name ?? workspace.name
+        app.repo(for: workspace)?.name ?? workspaceNow.name
     }
 
     /// The questions this session is holding a turn open for, in the order they arrived.
@@ -800,11 +809,14 @@ final class TranscriptModel {
         guard let store else { return }
         try? await store.touch(workspaceID: workspace.id, unread: app.selection.workspaceID != workspace.id)
 
-        let model = app.model(for: workspace)
+        // `workspaceNow`, twice over: `model(for:)` pushes the value it is handed into the
+        // live model, so the stale snapshot did not just misname the notification, it reverted
+        // the model's row in memory (name, colour, unread) until the change feed repaired it.
+        let model = app.model(for: workspaceNow)
         await model.onTurnFinished()
 
         NotificationService.shared.turnFinished(
-            workspace: workspace, result: result, wasCancelled: session.state == .cancelled
+            workspace: workspaceNow, result: result, wasCancelled: session.state == .cancelled
         )
     }
 }
