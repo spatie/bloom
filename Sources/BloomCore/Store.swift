@@ -514,6 +514,38 @@ public actor Store {
             CREATE INDEX IF NOT EXISTS deliveries_pending
                 ON deliveries(target_session_id, delivered_at);
             """),
+
+            // The sea catalogue every new workspace is christened out of. A table rather than
+            // `OceanCatalog.all` read at pick time, because which seas have been spent is state
+            // the binary must not own: `used_at` has to survive an update that ships a corrected
+            // coordinate or an extra sea, so the catalogue seeds the table once and from then on
+            // the database is the truth about what has been used.
+            //
+            // Real code rather than SQL because seeding loops over the catalogue with bound
+            // parameters, and `INSERT OR IGNORE` is what keeps the step replayable: the store's
+            // own tests rewind `user_version` to reproduce an old schema, and a reseed over rows
+            // that already exist must leave every `used_at` exactly where it was rather than
+            // throw or put a discovery date back to null.
+            { db in
+                try db.execute("""
+                    CREATE TABLE IF NOT EXISTS oceans (
+                        slug TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        latitude REAL NOT NULL,
+                        longitude REAL NOT NULL,
+                        used_at REAL
+                    );
+                    """)
+                for ocean in OceanCatalog.all {
+                    try db.run(
+                        "INSERT OR IGNORE INTO oceans (slug, name, latitude, longitude) VALUES (?, ?, ?, ?)",
+                        [
+                            .text(ocean.slug), .text(ocean.name),
+                            .double(ocean.latitude), .double(ocean.longitude),
+                        ]
+                    )
+                }
+            },
         ]
 
         let current = Int(db.userVersion)
@@ -1629,6 +1661,43 @@ public actor Store {
         try db.run("DELETE FROM terminal_tabs WHERE id = ?", [.text(id)])
     }
 
+    // MARK: - Oceans
+
+    public func oceans() throws -> [Ocean] {
+        try db.query("SELECT * FROM oceans ORDER BY name").map(Self.ocean(from:))
+    }
+
+    public func unusedOceanCount() throws -> Int {
+        Int(try db.query("SELECT COUNT(*) AS n FROM oceans WHERE used_at IS NULL").first?.int("n") ?? 0)
+    }
+
+    /// Spends a sea, or repeats one once the catalogue has run dry.
+    ///
+    /// The random pick and the write happen inside the actor with no suspension between them, so
+    /// two workspaces created back to back cannot draw the same sea as a first use. A repeat
+    /// comes back with its stored `used_at` untouched, because that date records the discovery
+    /// and a repeat is not one. Nil only when the table is empty, which seeding makes impossible,
+    /// but a defensive nil beats a crash in the middle of creating a workspace.
+    public func claimOcean(now: Date = Date()) throws -> OceanPick? {
+        if let row = try db.query(
+            "SELECT * FROM oceans WHERE used_at IS NULL ORDER BY RANDOM() LIMIT 1"
+        ).first {
+            var ocean = Self.ocean(from: row)
+            ocean.usedAt = now
+            try db.run(
+                "UPDATE oceans SET used_at = ? WHERE slug = ?",
+                [.double(now.timeIntervalSince1970), .text(ocean.slug)]
+            )
+            return OceanPick(
+                ocean: ocean, isFirstUse: true, remainingUndiscovered: try unusedOceanCount()
+            )
+        }
+        guard let row = try db.query("SELECT * FROM oceans ORDER BY RANDOM() LIMIT 1").first else {
+            return nil
+        }
+        return OceanPick(ocean: Self.ocean(from: row), isFirstUse: false, remainingUndiscovered: 0)
+    }
+
     // MARK: - Row mapping
 
     private static func repo(from row: Row) -> Repo {
@@ -1789,6 +1858,16 @@ public actor Store {
             createdAt: row.date("created_at") ?? Date(),
             durationMS: row.int("duration_ms").map(Int.init),
             refID: row.string("ref_id")
+        )
+    }
+
+    private static func ocean(from row: Row) -> Ocean {
+        Ocean(
+            name: row.string("name") ?? "",
+            slug: row.string("slug") ?? "",
+            latitude: row.double("latitude") ?? 0,
+            longitude: row.double("longitude") ?? 0,
+            usedAt: row.date("used_at")
         )
     }
 }

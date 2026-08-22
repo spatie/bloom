@@ -18,6 +18,10 @@ struct BloomCommands: Commands {
     /// Nil in every scene but the main window. See `MainWindowFocusKey`.
     @FocusedValue(\.isMainWindowFocused) private var isMainWindowFocused: Bool?
 
+    /// Read the way `RepoSettingsCommands` reads it: a Commands body is not a view, but the
+    /// environment still reaches it, and this is the only way a menu item can open a scene.
+    @Environment(\.openWindow) private var openWindow
+
     init(model: AppModel) {
         self.model = model
     }
@@ -248,6 +252,18 @@ struct BloomCommands: Commands {
             }
             .keyboardShortcut(".", modifiers: .command)
             .disabled(model.selectedModel?.activeTranscript?.isRunning != true)
+        }
+
+        // At the head of the Window menu, above the list of open windows, because this item IS
+        // about a window rather than about the workspace or the view: the map is a thing to
+        // bring up, glance at and leave open. No shortcut, because it is a curiosity rather
+        // than a step in anyone's flow.
+        CommandGroup(before: .windowList) {
+            Button("Discovered Seas") {
+                openWindow(id: OceansWindow.id)
+            }
+
+            Divider()
         }
 
         CommandGroup(replacing: .help) {

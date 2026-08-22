@@ -1021,6 +1021,41 @@ final class AppModel {
             effectiveControls = try await resolvedControls(for: repo)
         }
 
+        // Whether to ask a model for a name at all. Read here rather than inside the closure
+        // below, because it is two facts about this machine that only the main actor holds: the
+        // preference, and whether the CLI is installed.
+        let wantsAName = shouldNameAutomatically(name: nil, prompt: spoken, opensWith: opensWith)
+
+        // The sea this workspace wears while the model thinks of a real name. Claimed here,
+        // before `manager.start`, because its slug is about to be the branch and the branch has
+        // to exist before the worktree is cut. Only a chat workspace that left both name and
+        // branch to Bloom gets one: a caller that chose either has already said what it wants,
+        // and claiming a sea it would never wear would spend it for nothing. A nil store or an
+        // exhausted claim falls back to the plant placeholder below, exactly as before.
+        let pick: OceanPick?
+        if wantsAName, name == nil, branch == nil, opensWith == .chat {
+            pick = try? await store?.claimOcean()
+        } else {
+            pick = nil
+        }
+
+        // The sea's slug under the project's branch prefix, by the same rule `nameAutomatically`
+        // applies to a suggested branch, so the two routes cannot disagree about what a prefix
+        // means. Checked again even though the catalogue validated the bare slug, because the
+        // prefix is the owner's own text and prefixing a valid ref does not always leave one.
+        // Nil hands the branch back to the mechanical slug of the prompt.
+        let seaBranch: String? = {
+            guard let ocean = pick?.ocean else { return nil }
+            let prefix = SettingsLoader.load(repo: repo.path).branchPrefix
+            let candidate: String
+            if let prefix, !prefix.isEmpty {
+                candidate = "\(prefix)/\(ocean.slug)"
+            } else {
+                candidate = ocean.slug
+            }
+            return Git.isValidBranchName(candidate) ? candidate : nil
+        }()
+
         let request = WorkspaceStartRequest(
             repo: repo,
             prompt: spoken,
@@ -1029,7 +1064,9 @@ final class AppModel {
             // row records who asked and the sidebar can show the lineage.
             origin: origin,
             baseBranch: baseBranch,
-            branch: branch,
+            // The claimed sea's slug when there is one, so the branch and the name tell the same
+            // story. `Git.uniqueBranch` still suffixes a collision with an earlier voyage.
+            branch: branch ?? seaBranch,
             // A terminal workspace is named after the branch the user typed, because there is no
             // task to derive a name from and nothing is going to be asked.
             name: name ?? (opensWith == .terminal ? branch : nil),
@@ -1041,18 +1078,22 @@ final class AppModel {
             runsSetup: false
         )
 
-        // Whether to ask a model for a name at all. Read here rather than inside the closure
-        // below, because it is two facts about this machine that only the main actor holds: the
-        // preference, and whether the CLI is installed.
-        let wantsAName = shouldNameAutomatically(name: nil, prompt: spoken, opensWith: opensWith)
-
         let started = try await manager.start(request) { [weak self] in
             // Nil declines, and the workspace keeps the title git would have given it.
             guard wantsAName, let self else { return nil }
+            // The AI rename compares against the exact placeholder this closure returns, so the
+            // sea's name goes through here rather than being written on the row afterwards.
+            if let pick { return pick.ocean.name }
             return await self.placeholderName()
         }
 
         await adopt(started, repo: repo, prompt: spoken, opensWith: opensWith, select: select)
+
+        // Only a first discovery says anything. `OceanPick.notice` is nil for a repeat voyage,
+        // which is deliberately not worth a banner.
+        if let notice = pick?.notice {
+            self.notice = BloomNotice(message: notice)
+        }
 
         // The agent gets the sentence as it was written, files and all, because the paths in it
         // are already the paths those files have in the worktree: staging lays a draft out under

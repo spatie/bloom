@@ -109,5 +109,9 @@ struct BloomApp: App {
 
         // One window per project, opened from the gear on its sidebar header. See the scene.
         RepoSettingsWindow(model: model)
+
+        // The map of the seas workspaces have been named after, opened from the Window menu.
+        // See the scene.
+        OceansWindow(model: model)
     }
 }
