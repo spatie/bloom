@@ -52,7 +52,8 @@ enum Snapshot {
     /// bitmap goes through the real AppKit rendering path, so materials, toolbars and lists all
     /// come out as the user sees them, and it needs no screen recording permission.
     ///
-    ///     Bloom --snapshot-window /tmp/shots/window.png [--window-size 900x700] [--appearance dark]
+    ///     Bloom --snapshot-window /tmp/shots/window.png [--window-size 900x700]
+    ///           [--sidebar-width 200] [--appearance dark]
     /// Opens a `bloom://` URL in THIS process, a few seconds after launch.
     ///
     /// `open bloom://...` from a shell goes through LaunchServices, which picks whichever copy of
@@ -163,6 +164,33 @@ enum Snapshot {
             }
         }
         #endif
+    }
+
+    /// Sidebar width in points from `--sidebar-width`, or nil when the flag is absent.
+    ///
+    /// `--window-size` reproduces a cramped WINDOW, but the sidebar keeps its own width across
+    /// that, so the two cases that matter for a sidebar row, the 200 point minimum a user can
+    /// drag it to and the 420 point maximum, could not be captured at all. The value is clamped
+    /// by the split view to the bounds `RootView` declares, so asking for something outside them
+    /// captures the nearest width a user can actually reach.
+    private static var requestedSidebarWidth: CGFloat? {
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: "--sidebar-width"), index + 1 < arguments.count,
+              let width = Double(arguments[index + 1])
+        else { return nil }
+
+        return width
+    }
+
+    /// The outermost split view under `view`, which is the one whose first divider stands
+    /// between the sidebar and everything else. Pre-order, so the sidebar's own ancestor is
+    /// found before the detail column's inner split is ever looked at.
+    private static func firstSplitView(under view: NSView) -> NSSplitView? {
+        if let split = view as? NSSplitView { return split }
+        for subview in view.subviews {
+            if let found = firstSplitView(under: subview) { return found }
+        }
+        return nil
     }
 
     /// `WIDTHxHEIGHT` in points, or nil when the flag is absent or malformed.
@@ -355,6 +383,16 @@ enum Snapshot {
                 // split controller and two hosting views, and a capture taken while that is still
                 // settling showed a sidebar whose rows had slid out of their own column: a
                 // transient that reads exactly like a layout bug and cost an hour to disbelieve.
+                try? await Task.sleep(for: .seconds(2))
+                window.layoutIfNeeded()
+                window.displayIfNeeded()
+            }
+
+            // After the window resize, because a resize renegotiates the columns and would undo
+            // a divider that had already been placed.
+            if let sidebarWidth = requestedSidebarWidth, let split = firstSplitView(under: content) {
+                split.setPosition(sidebarWidth, ofDividerAt: 0)
+                // The same settling wait the resize above needs, for the same measured reason.
                 try? await Task.sleep(for: .seconds(2))
                 window.layoutIfNeeded()
                 window.displayIfNeeded()

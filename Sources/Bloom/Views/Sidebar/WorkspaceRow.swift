@@ -101,9 +101,23 @@ struct WorkspaceRow: View {
                             .foregroundStyle(.tertiary)
                             .accessibilityLabel("Pinned")
                     }
-                    trailingSlot
+
+                    // In the layout, not overlaid, so a name shares the row with real counts
+                    // rather than running underneath them. Hidden while the pointer is here,
+                    // which is when the controls draw in their place.
+                    if workspace.hasDiff {
+                        DiffStatLabel(
+                            additions: workspace.additions,
+                            deletions: workspace.deletions,
+                            compact: true
+                        )
+                        .opacity(isHovered ? 0 : 1)
+                    }
                 }
             }
+            .mask { trailingYield }
+            .overlay(alignment: .trailing) { hoverControls }
+            .animation(reduceMotion ? nil : Motion.hover, value: isHovered)
         } icon: {
             WorkspaceStatusGlyph(status: status, isOnSelection: isEmphasized)
         }
@@ -129,28 +143,41 @@ struct WorkspaceRow: View {
 
     // MARK: - Trailing
 
-    /// What the trailing edge of the row shows: the diff counts at rest, the row's two controls
-    /// under the pointer.
+    /// Whether the two hover controls are being shown. Never while renaming: the field owns the
+    /// whole row, and controls drawn over its trailing edge would sit on the text being typed.
+    private var controlsShown: Bool { isHovered && !isRenaming }
+
+    /// The width the controls cover when they are shown: the two buttons, side by side.
+    private static let controlsWidth = SidebarMetrics.rowButton * 2
+
+    /// How far the content underneath fades before the controls begin, so a name that reaches
+    /// them is cut with a fade rather than a cliff.
+    private static let controlsFade: CGFloat = 12
+
+    /// The row's two controls, drawn over the trailing edge while the pointer is on the row.
     ///
-    /// Conductor swaps the two, the owner asked for the same, and a swap is the right shape here
-    /// because the two are never both worth reading: the counts say how much changed and the
-    /// controls are what you reach for when you have finished reading them.
+    /// Conductor swaps the counts for the controls under the pointer, the owner asked for the
+    /// same, and a swap is the right shape here because the two are never both worth reading: the
+    /// counts say how much changed and the controls are what you reach for when you have finished
+    /// reading them.
     ///
-    /// **The counts are what yields, and they are the only thing that does.** Everything else on
-    /// the row is content that has to survive the pointer arriving: the status mark says which
-    /// agent needs you, the name says which piece of work it is, the colour dot and the pin were
-    /// put there by hand. The counts are the one thing on the row that is still true a second
-    /// later when the pointer has gone, so covering them for as long as the pointer is here costs
-    /// nothing that cannot be had back by moving it away.
+    /// **An overlay, not a layout slot, and the difference is forty points of every name.** The
+    /// first build kept the controls in the row's layout at every moment, at opacity nought
+    /// inside a `ZStack` with the counts, so that nothing could move when the pointer landed. It
+    /// worked, and it charged every row the width of both buttons whether anything would ever
+    /// draw there or not: the owner measured names in his own sidebar truncating some seventy
+    /// points short of the row's edge and asked for the room back. So the guarantee is now kept
+    /// the other way round. The controls take no layout space at all, the name runs to the row's
+    /// edge, and when the pointer arrives the trailing region YIELDS instead of the name
+    /// reflowing: `trailingYield` fades out whatever the controls would land on and the controls
+    /// draw on the cleared ground. Nothing moves in either direction, because nothing's measured
+    /// size ever changes.
     ///
-    /// Stacked rather than switched, and both halves stay in the hierarchy at every moment with
-    /// only their opacity moving. That is what stops the name reflowing as the pointer crosses the
-    /// row: the slot is as wide as the wider of the two whether the pointer is there or not, so a
-    /// row with no counts at all reserves exactly the same space and its controls appear in
-    /// exactly the same place. It also keeps one view identity on each side of the hover rather
-    /// than building and tearing one down. The slot grew by one button's width when the menu
-    /// arrived, and it grew for EVERY row at rest as well as under the pointer, which is the whole
-    /// point: a name is truncated a little sooner, and nothing moves when the pointer lands.
+    /// What yields is whatever happens to live in the last fifty points: usually the counts,
+    /// sometimes the pin or the tail of a long name. The counts always yielded; the pin and the
+    /// tail are new to it, which is a real cost, and it is the right side of the trade because
+    /// hovering is the reading state of one row under the pointer while rest is the reading state
+    /// of the whole pane. Everything comes back the moment the pointer leaves.
     ///
     /// The reveal follows the project header's GEAR rather than its `+`: from nothing, not lit
     /// from a resting state. The `+` is present at rest because creating is the thing anyone does
@@ -161,30 +188,52 @@ struct WorkspaceRow: View {
     /// The menu leads and the archive follows, so the archive keeps the row's trailing edge it
     /// has always had. Moving a destructive control that people have already learned the position
     /// of, so that a habitual click lands on a menu instead, is a worse trade than either order is
-    /// worth; the new control goes in space that held nothing.
-    @ViewBuilder
-    private var trailingSlot: some View {
-        ZStack(alignment: .trailing) {
-            if workspace.hasDiff {
-                DiffStatLabel(
-                    additions: workspace.additions,
-                    deletions: workspace.deletions,
-                    compact: true
-                )
-                .opacity(isHovered ? 0 : 1)
-            }
-
-            HStack(spacing: 0) {
-                moreMenu
-                archiveButton
-            }
-            .opacity(isHovered ? 1 : 0)
-            // An invisible control still takes clicks, which at the trailing edge of a row would
-            // be the worst possible bug in a destructive one. The pointer has to be on the row for
-            // either to be drawn at all, so this costs nothing real.
-            .allowsHitTesting(isHovered)
+    /// worth.
+    private var hoverControls: some View {
+        HStack(spacing: 0) {
+            moreMenu
+            archiveButton
         }
-        .animation(reduceMotion ? nil : Motion.hover, value: isHovered)
+        .opacity(controlsShown ? 1 : 0)
+        // An invisible control still takes clicks, which over the trailing edge of a row would
+        // be the worst possible bug in a destructive one. The pointer has to be on the row for
+        // either to be drawn at all, so this costs nothing real.
+        .allowsHitTesting(controlsShown)
+    }
+
+    /// The mask that clears the ground under the controls while they are shown.
+    ///
+    /// A full rectangle at rest, so it changes nothing, with an eraser over the trailing edge
+    /// that fades in with the controls: opaque behind the buttons themselves, thinning to nothing
+    /// over `controlsFade` more points. `destinationOut` inside a `compositingGroup` is what
+    /// punches alpha OUT of a mask that is otherwise solid; the obvious alternative, two mask
+    /// shapes switched by the hover, cannot animate between its states.
+    ///
+    /// A mask on the content rather than a plate behind the controls, because the row does not
+    /// know what it is sitting on: the accent fill when selected with the keyboard, the quiet
+    /// grey when selected without it, bare sidebar material otherwise. Erasing the content shows
+    /// the true ground, whichever that is, so the buttons stand on the same fill as the rest of
+    /// the row.
+    private var trailingYield: some View {
+        Rectangle()
+            .overlay(alignment: .trailing) {
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(
+                            color: .black,
+                            location: Self.controlsFade / (Self.controlsFade + Self.controlsWidth)
+                        ),
+                        .init(color: .black, location: 1),
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: Self.controlsFade + Self.controlsWidth)
+                .blendMode(.destinationOut)
+                .opacity(controlsShown ? 1 : 0)
+            }
+            .compositingGroup()
     }
 
     /// Everything you can do to this workspace, one press away instead of one right click away.
