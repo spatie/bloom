@@ -130,20 +130,23 @@ struct SettingsPrecedenceTests {
         #expect(SettingsLoader.candidatePaths(repo: repo) == home + repoScoped)
     }
 
-    /// The resolution the composer performs, kept here so the order is pinned by a test rather
-    /// than only by the call site.
+    /// Drives the resolution the composer actually performs. This used to be a private copy of
+    /// the loop, which pinned nothing: the order could change in `ComposerDefaults.resolve` and
+    /// the test would have gone on agreeing with itself.
     private func resolve(
         repoValue: String?,
         storedValue: String?,
         homeValue: String?,
         fallback: String
     ) -> String {
-        for candidate in [repoValue, storedValue, homeValue] {
-            if let candidate, !candidate.trimmingCharacters(in: .whitespaces).isEmpty {
-                return candidate
-            }
-        }
-        return fallback
+        var repo = RepoSettings()
+        repo.defaultModel = repoValue
+        repo.homeDefaultModel = homeValue
+
+        var app = AppDefaults(model: fallback)
+        app.storedModel = storedValue
+
+        return ComposerDefaults.resolve(repo: repo, app: app).model
     }
 
     @Test("resolves the model from the highest layer that has one", arguments: [
