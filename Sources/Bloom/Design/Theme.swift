@@ -230,6 +230,19 @@ enum Palette {
     /// green one, and the reference collapses the same two the same way.
     static let positive = accent
 
+    /// The wash and the rule of the agent's question card while it is holding the turn open.
+    ///
+    /// A named pair rather than an opacity at each call site, because the card paints the same
+    /// tint twice, as its fill and as its border, and two literals in one view is how the two
+    /// drift apart. The wash is deliberately faint: the card sits in the transcript for as long
+    /// as the person thinks, so it has to mark itself out without shouting over the prose it
+    /// interrupted.
+    static let questionWash = accent.opacity(0.06)
+    static let questionBorder = accent.opacity(0.4)
+    /// The same card once the question is settled: barely off the page, behind the plain border,
+    /// so a finished question reads as part of the record rather than as something still waiting.
+    static let questionWashSettled = accent.opacity(0.03)
+
     /// Something went wrong: a failed check, an error row, a deletion count.
     ///
     /// Not `systemRed`. The system reds are tuned to be the one saturated thing on their screen,
@@ -466,6 +479,12 @@ enum Typo {
     /// 10, the floor, and the reason it is medium rather than regular. Only for something that is
     /// read off the thing beside it: a count, a duration, a unit.
     static let micro = ScaledFont(.footnote, weight: .medium)
+
+    /// The letterspacing an uppercased `micro` label is set with: the question card's header
+    /// chip. Capitals at ten points set nearly solid, and the scale carries no uppercase rung of
+    /// its own, so the air has to be given by hand. Named so the next uppercased label cannot
+    /// pick a second value.
+    static let microTracking: CGFloat = 0.6
 
     /// The same rungs in monospace, for anything whose columns have to line up: code, a path, a
     /// diff stat. They step with their proportional twins so a filename set beside a label does
