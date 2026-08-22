@@ -546,6 +546,22 @@ public actor Store {
                     )
                 }
             },
+
+            // The catalogue shipped with 268 islands mixed into what is meant to be a list of
+            // seas, and was trimmed to actual water after databases had already been seeded, so
+            // a seeded table still carries every removed row. The unclaimed ones go here: left
+            // in place they would keep handing out island names the wording cannot carry. The
+            // claimed ones stay, whether or not the catalogue still knows them, because used_at
+            // is history only this table owns and the map still has to pin a voyage that
+            // already happened. Replayable like the seed: deleting an already absent slug
+            // deletes nothing, and a claimed row is never touched.
+            { db in
+                let known = Set(OceanCatalog.all.map(\.slug))
+                for row in try db.query("SELECT slug FROM oceans WHERE used_at IS NULL") {
+                    guard let slug = row.string("slug"), !known.contains(slug) else { continue }
+                    try db.run("DELETE FROM oceans WHERE slug = ?", [.text(slug)])
+                }
+            },
         ]
 
         let current = Int(db.userVersion)

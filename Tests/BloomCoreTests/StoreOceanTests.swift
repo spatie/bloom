@@ -8,10 +8,10 @@ struct StoreOceanTests {
     func seedsFreshStore() async throws {
         let store = try makeTestStore("oceans")
         let oceans = try await store.oceans()
-        #expect(oceans.count == 400)
+        #expect(oceans.count == 132)
         #expect(oceans.allSatisfy { $0.usedAt == nil })
         #expect(oceans.map(\.name) == oceans.map(\.name).sorted())
-        #expect(try await store.unusedOceanCount() == 400)
+        #expect(try await store.unusedOceanCount() == 132)
     }
 
     @Test("a claim spends the sea and never hands it out again as a first use")
@@ -21,14 +21,14 @@ struct StoreOceanTests {
         let pick = try #require(try await store.claimOcean(now: now))
         #expect(pick.isFirstUse)
         #expect(pick.ocean.usedAt == now)
-        #expect(pick.remainingUndiscovered == 399)
-        #expect(try await store.unusedOceanCount() == 399)
+        #expect(pick.remainingUndiscovered == 131)
+        #expect(try await store.unusedOceanCount() == 131)
 
         var seen: Set<String> = [pick.ocean.slug]
         for claim in 1...20 {
             let next = try #require(try await store.claimOcean(now: now))
             #expect(next.isFirstUse)
-            #expect(next.remainingUndiscovered == 399 - claim)
+            #expect(next.remainingUndiscovered == 131 - claim)
             #expect(seen.insert(next.ocean.slug).inserted, "\(next.ocean.slug) was discovered twice")
         }
     }
@@ -43,7 +43,7 @@ struct StoreOceanTests {
             #expect(pick.isFirstUse)
             discovered.insert(pick.ocean.slug)
         }
-        #expect(discovered.count == 400)
+        #expect(discovered.count == 132)
 
         let later = Date(timeIntervalSince1970: 2_000_000)
         for _ in 0..<5 {
@@ -65,7 +65,7 @@ struct StoreOceanTests {
         let pick = try #require(try await first.claimOcean(now: now))
 
         let second = try Store(path: path)
-        #expect(try await second.unusedOceanCount() == 399)
+        #expect(try await second.unusedOceanCount() == 131)
         let stored = try #require(try await second.oceans().first { $0.slug == pick.ocean.slug })
         #expect(stored.usedAt == now)
     }
@@ -100,9 +100,38 @@ struct StoreOceanTests {
         raw.userVersion = 0
 
         let reopened = try Store(path: path)
-        #expect(try await reopened.oceans().count == 400)
-        #expect(try await reopened.unusedOceanCount() == 399)
+        #expect(try await reopened.oceans().count == 132)
+        #expect(try await reopened.unusedOceanCount() == 131)
         let stored = try #require(try await reopened.oceans().first { $0.slug == pick.ocean.slug })
         #expect(stored.usedAt == now)
+    }
+
+    /// The catalogue was trimmed to water after real databases had been seeded from the longer
+    /// list, so a table can hold rows no binary's catalogue knows any more. An unclaimed one is
+    /// pruned, because it must never be handed out as a name again; a claimed one keeps its row
+    /// and its date, because the map still has to pin the voyage that already happened.
+    @Test("migration prunes an unclaimed stranger and keeps a claimed one for the map")
+    func pruneKeepsClaimedStrangers() async throws {
+        let path = TestScratch.unique("oceans-prune") + ".sqlite"
+        _ = try Store(path: path)
+
+        let raw = try SQLiteDatabase(path: path)
+        try raw.run(
+            "INSERT INTO oceans (slug, name, latitude, longitude) VALUES (?, ?, ?, ?)",
+            [.text("greenland"), .text("Greenland"), .double(72), .double(-40)]
+        )
+        try raw.run(
+            "INSERT INTO oceans (slug, name, latitude, longitude, used_at) VALUES (?, ?, ?, ?, ?)",
+            [.text("borneo"), .text("Borneo"), .double(0.96), .double(114.55), .double(42)]
+        )
+        raw.userVersion = 0
+
+        let reopened = try Store(path: path)
+        let oceans = try await reopened.oceans()
+        #expect(!oceans.contains { $0.slug == "greenland" })
+        let kept = try #require(oceans.first { $0.slug == "borneo" })
+        #expect(kept.usedAt == Date(timeIntervalSince1970: 42))
+        #expect(oceans.count == 133)
+        #expect(try await reopened.unusedOceanCount() == 132)
     }
 }

@@ -4,15 +4,31 @@ import Foundation
 
 @Suite("OceanCatalog")
 struct OceanCatalogTests {
-    @Test("ships exactly 400 seas, every slug a unique valid branch name on a real coordinate")
+    @Test("ships exactly 132 seas, every slug a unique valid branch name on a real coordinate")
     func catalogueIsSound() {
         let all = OceanCatalog.all
-        #expect(all.count == 400)
+        #expect(all.count == 132)
         #expect(Set(all.map(\.slug)).count == all.count)
         for ocean in all {
             #expect(Git.isValidBranchName(ocean.slug), "\(ocean.slug)")
             #expect((-90.0...90.0).contains(ocean.latitude), "\(ocean.slug)")
             #expect((-180.0...180.0).contains(ocean.longitude), "\(ocean.slug)")
+        }
+    }
+
+    /// The catalogue's first release shipped 268 islands in what the notice calls a sea and
+    /// the window calls Discovered Seas, so "the first to sail the Greenland" was one claim
+    /// away. The words are the feature, so the data has to stay water, and this is that rule
+    /// written down where a regenerated catalogue cannot slip past it.
+    @Test("names only bodies of water, because the notice says the workspace sails them")
+    func namesOnlyWater() {
+        let waterWords: Set<String> = [
+            "sea", "ocean", "gulf", "bay", "strait", "straits", "channel",
+            "sound", "bight", "passage", "firth", "fjord", "lagoon", "estuary", "inlet",
+        ]
+        for ocean in OceanCatalog.all {
+            let words = ocean.name.lowercased().components(separatedBy: CharacterSet(charactersIn: " -"))
+            #expect(words.contains { waterWords.contains($0) }, "\(ocean.name) is not a body of water")
         }
     }
 

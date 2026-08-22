@@ -33,6 +33,7 @@ private struct OceansMapView: View {
     @State private var discovered: [Ocean] = []
     @State private var waitingCount = 0
     @State private var hasLoaded = false
+    @State private var position: MapCameraPosition = .automatic
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,7 +44,14 @@ private struct OceansMapView: View {
                     description: Text("Create a workspace and one will be named after the first.")
                 )
             } else {
-                Map {
+                // `.automatic` fits the pins exactly, and a lone first pin fits into a
+                // featureless close-up: one dot, no coastline, no way to tell where on Earth
+                // it is. `OceanMapRegion` hands back a continent-scale frame for a cluster
+                // tighter than its floor, and nil for anything wider, which stays automatic:
+                // a hand-built world-spanning region ran into Mercator's pole limits and
+                // MapKit answered by cropping pins out. The maths lives in the core where the
+                // one-pin, antimeridian and scattered cases are tests rather than hopes.
+                Map(position: $position) {
                     ForEach(discovered) { ocean in
                         Annotation(ocean.name, coordinate: CLLocationCoordinate2D(
                             latitude: ocean.latitude, longitude: ocean.longitude
@@ -109,6 +117,16 @@ private struct OceansMapView: View {
         let all = (try? await store.oceans()) ?? []
         discovered = all.filter { $0.usedAt != nil }
         waitingCount = (try? await store.unusedOceanCount()) ?? 0
+        if let region = OceanMapRegion.fitting(discovered.map { ($0.latitude, $0.longitude) }) {
+            position = .region(MKCoordinateRegion(
+                center: CLLocationCoordinate2D(
+                    latitude: region.centerLatitude, longitude: region.centerLongitude
+                ),
+                span: MKCoordinateSpan(
+                    latitudeDelta: region.latitudeDelta, longitudeDelta: region.longitudeDelta
+                )
+            ))
+        }
         hasLoaded = true
     }
 }
