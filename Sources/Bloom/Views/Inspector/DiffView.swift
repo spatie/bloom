@@ -366,19 +366,19 @@ struct DiffView: View {
         case let .header(_, text):
             DiffHunkHeaderView(text: text, width: width)
 
-        case let .runExpander(_, runID, hidden):
+        case let .runExpander(runID, hidden):
             DiffExpanderView(title: "Expand \(hidden) lines", width: width) {
                 expandedRuns.insert(runID)
                 rebuild()
             }
 
-        case let .gapExpander(_, gapID, hidden):
+        case let .gapExpander(gapID, hidden):
             DiffExpanderView(title: "Expand \(min(hidden, Self.gapStep)) lines", width: width) {
                 revealedGaps[gapID, default: 0] += min(hidden, Self.gapStep)
                 rebuild()
             }
 
-        case let .line(_, line):
+        case let .line(line):
             DiffLineView(
                 line: line,
                 language: document.language,
@@ -390,7 +390,7 @@ struct DiffView: View {
                 onComment: { beginDraft(at: $0) }
             )
 
-        case let .commentBand(_, placement):
+        case let .commentBand(placement):
             ReviewCommentBandView(placement: placement, width: width) {
                 let model = model
                 Task { await model.removeReviewComment(id: placement.comment.id) }
@@ -404,7 +404,7 @@ struct DiffView: View {
                 onCancel: cancelDraft
             )
 
-        case let .pair(_, pair):
+        case let .pair(pair):
             // The two panes split whatever the hairline between them leaves, so they stay the
             // same width as each other on any display.
             HStack(spacing: 0) {
@@ -506,22 +506,22 @@ struct DiffView: View {
     }
 
     /// Bands and the editor, appended directly under the row that answers for their spot.
-    private func appendAnnotations(_ builder: inout RowBuilder, spots rowSpots: [ReviewSpot]) {
+    private func appendAnnotations(_ rows: inout [DiffRow], spots rowSpots: [ReviewSpot]) {
         for spot in rowSpots {
             for placement in placements where placement.spot == spot {
-                builder.append { .commentBand(id: $0, placement: placement) }
+                rows.append(.commentBand(placement))
             }
             if draftSpot == spot {
-                builder.append { .commentEditor(id: $0, spot: spot) }
+                rows.append(.commentEditor(spot))
             }
         }
     }
 
     /// The comments the diff on screen cannot put under a line, said at the top rather than
     /// dropped: they are still attached and still going with the next message.
-    private func appendUnplacedComments(_ builder: inout RowBuilder) {
+    private func appendUnplacedComments(_ rows: inout [DiffRow]) {
         for placement in placements where placement.spot == nil {
-            builder.append { .commentBand(id: $0, placement: placement) }
+            rows.append(.commentBand(placement))
         }
     }
 
@@ -587,22 +587,21 @@ struct DiffView: View {
         // after the agent edits, or a whitespace refold dropping the expanded run the line sat
         // in. The editor then moves to the top of the diff, next to the unplaced bands, rather
         // than vanishing, because a vanished editor takes the half-typed comment with it and
-        // that is the one loss this feature is not allowed. The id is the one value the builder
-        // never handed out, so it collides with nothing.
+        // that is the one loss this feature is not allowed.
         if let draftSpot, !rows.contains(where: {
             if case .commentEditor = $0 { return true } else { return false }
         }) {
-            rows.insert(.commentEditor(id: rows.count, spot: draftSpot), at: 0)
+            rows.insert(.commentEditor(draftSpot), at: 0)
         }
     }
 
     private func unifiedRows(_ document: DiffDocument) -> [DiffRow] {
-        var builder = RowBuilder()
-        appendUnplacedComments(&builder)
+        var rows: [DiffRow] = []
+        appendUnplacedComments(&rows)
 
         for (hunkIndex, hunk) in document.file.hunks.enumerated() {
-            appendGap(&builder, document: document, hunkIndex: hunkIndex, hunk: hunk, split: false)
-            builder.append { .header(id: $0, text: Self.headerText(hunk)) }
+            appendGap(&rows, document: document, hunkIndex: hunkIndex, hunk: hunk, split: false)
+            rows.append(.header(hunk: hunkIndex, text: Self.headerText(hunk)))
 
             let lines = hunk.lines
             for chunk in Self.chunks(
@@ -614,24 +613,24 @@ struct DiffView: View {
                 switch chunk {
                 case let .visible(range):
                     for offset in range {
-                        builder.append { .line(id: $0, line: lines[offset]) }
-                        appendAnnotations(&builder, spots: spots(of: lines[offset], numbers: .both))
+                        rows.append(.line(lines[offset]))
+                        appendAnnotations(&rows, spots: spots(of: lines[offset], numbers: .both))
                     }
                 case let .hidden(runID, count):
-                    builder.append { .runExpander(id: $0, runID: runID, hidden: count) }
+                    rows.append(.runExpander(runID: runID, hidden: count))
                 }
             }
         }
-        return builder.rows
+        return rows
     }
 
     private func splitRows(_ document: DiffDocument) -> [DiffRow] {
-        var builder = RowBuilder()
-        appendUnplacedComments(&builder)
+        var rows: [DiffRow] = []
+        appendUnplacedComments(&rows)
 
         for (hunkIndex, hunk) in document.file.hunks.enumerated() {
-            appendGap(&builder, document: document, hunkIndex: hunkIndex, hunk: hunk, split: true)
-            builder.append { .header(id: $0, text: Self.headerText(hunk)) }
+            appendGap(&rows, document: document, hunkIndex: hunkIndex, hunk: hunk, split: true)
+            rows.append(.header(hunk: hunkIndex, text: Self.headerText(hunk)))
 
             // Folding one hunk at a time keeps the boundaries that `sideBySide()` flattens away.
             var single = document.file
@@ -647,7 +646,7 @@ struct DiffView: View {
                 switch chunk {
                 case let .visible(range):
                     for offset in range {
-                        builder.append { .pair(id: $0, row: pairs[offset]) }
+                        rows.append(.pair(pairs[offset]))
                         // Each half answers for its own side, the same split
                         // `DiffLineView.offeredSpot` makes, so a band lands once however the
                         // context line is mirrored across the panes.
@@ -658,19 +657,19 @@ struct DiffView: View {
                         if let right = pairs[offset].right {
                             rowSpots += spots(of: right, numbers: .new)
                         }
-                        appendAnnotations(&builder, spots: rowSpots)
+                        appendAnnotations(&rows, spots: rowSpots)
                     }
                 case let .hidden(runID, count):
-                    builder.append { .runExpander(id: $0, runID: runID, hidden: count) }
+                    rows.append(.runExpander(runID: runID, hidden: count))
                 }
             }
         }
-        return builder.rows
+        return rows
     }
 
     /// The unchanged region git never printed, between the previous hunk and this one.
     private func appendGap(
-        _ builder: inout RowBuilder,
+        _ rows: inout [DiffRow],
         document: DiffDocument,
         hunkIndex: Int,
         hunk: DiffHunk,
@@ -688,7 +687,7 @@ struct DiffView: View {
         let revealed = min(revealedGaps[hunkIndex] ?? 0, gap)
         let hidden = gap - revealed
         if hidden > 0 {
-            builder.append { .gapExpander(id: $0, gapID: hunkIndex, hidden: hidden) }
+            rows.append(.gapExpander(gapID: hunkIndex, hidden: hidden))
         }
         guard revealed > 0 else { return }
 
@@ -707,13 +706,13 @@ struct DiffView: View {
                 index: -number - 1
             )
             if split {
-                builder.append { .pair(id: $0, row: SideBySideRow(left: line, right: line)) }
+                rows.append(.pair(SideBySideRow(left: line, right: line, index: line.index)))
             } else {
-                builder.append { .line(id: $0, line: line) }
+                rows.append(.line(line))
             }
             // A revealed line is as commentable as a printed one, so its bands follow it. New
             // side only: the revealed copy comes from the worktree, which has no old side.
-            appendAnnotations(&builder, spots: spots(of: line, numbers: .new))
+            appendAnnotations(&rows, spots: spots(of: line, numbers: .new))
         }
     }
 
