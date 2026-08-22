@@ -34,6 +34,7 @@ enum InstalledApps {
     private static var scannedAt: Date?
     /// Keyed by file extension. See `systemDefault(forFile:)`.
     private static var systemDefaults: [String: DetectedApp?] = [:]
+    private static var defaultsScannedAt: Date?
 
     static var all: [DetectedApp] {
         if let scannedAt, Date.now.timeIntervalSince(scannedAt) < staleAfter { return cache }
@@ -88,6 +89,14 @@ enum InstalledApps {
     /// entry in that list somebody may have chosen deliberately, so an editor Bloom has never
     /// heard of still turns up in the menu of the person who uses it.
     static func systemDefault(forFile path: String) -> DetectedApp? {
+        // The same age `all` lives under. This half of the cache had none, so choosing a new
+        // default app for a file type kept showing the old one in every Open In menu until the
+        // app was relaunched.
+        if let defaultsScannedAt, Date.now.timeIntervalSince(defaultsScannedAt) >= staleAfter {
+            systemDefaults = [:]
+        }
+        if systemDefaults.isEmpty { defaultsScannedAt = .now }
+
         let key = (path as NSString).pathExtension.lowercased()
         if let cached = systemDefaults[key] { return cached }
 
