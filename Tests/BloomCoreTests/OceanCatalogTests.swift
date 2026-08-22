@@ -38,6 +38,49 @@ struct OceanCatalogTests {
     }
 }
 
+@Suite("Ocean claim gate")
+struct OceanClaimGateTests {
+    @Test("a plain chat workspace that left everything to Bloom spends a sea")
+    func plainChatClaims() {
+        #expect(OceanCatalog.shouldClaim(
+            userSuppliedName: nil, userSuppliedBranch: nil,
+            isChatWorkspace: true, wantsAutomaticName: true
+        ))
+    }
+
+    @Test("a caller that brings its own name spends no sea")
+    func ownNameSpendsNothing() {
+        #expect(!OceanCatalog.shouldClaim(
+            userSuppliedName: "Fix the login flow", userSuppliedBranch: nil,
+            isChatWorkspace: true, wantsAutomaticName: true
+        ))
+    }
+
+    @Test("a caller that brings its own branch spends no sea")
+    func ownBranchSpendsNothing() {
+        #expect(!OceanCatalog.shouldClaim(
+            userSuppliedName: nil, userSuppliedBranch: "fix/login",
+            isChatWorkspace: true, wantsAutomaticName: true
+        ))
+    }
+
+    @Test("a terminal workspace spends no sea")
+    func terminalSpendsNothing() {
+        #expect(!OceanCatalog.shouldClaim(
+            userSuppliedName: nil, userSuppliedBranch: nil,
+            isChatWorkspace: false, wantsAutomaticName: true
+        ))
+    }
+
+    @Test("no automatic rename coming means no sea, because nothing would ever replace it")
+    func noRenameSpendsNothing() {
+        #expect(!OceanCatalog.shouldClaim(
+            userSuppliedName: nil, userSuppliedBranch: nil,
+            isChatWorkspace: true, wantsAutomaticName: false
+        ))
+    }
+}
+
 @Suite("OceanPick notice")
 struct OceanPickNoticeTests {
     private let coral = Ocean(name: "Coral Sea", slug: "coral-sea", latitude: -18, longitude: 152)

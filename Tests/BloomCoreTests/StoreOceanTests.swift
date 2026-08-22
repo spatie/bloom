@@ -70,6 +70,22 @@ struct StoreOceanTests {
         #expect(stored.usedAt == now)
     }
 
+    /// Seeding makes an empty table impossible in practice, but `claimOcean` still promises nil
+    /// over a crash mid-creation, and nil is the cue that sends `startWorkspace` back to the
+    /// plant placeholder and the prompt-slug branch. Emptied behind the store's back because the
+    /// store itself has no way to unseed, which is the point of the seed.
+    @Test("an empty table declines the claim, which is the plant fallback's cue")
+    func emptyTableDeclines() async throws {
+        let path = TestScratch.unique("oceans-empty") + ".sqlite"
+        let store = try Store(path: path)
+        let raw = try SQLiteDatabase(path: path)
+        try raw.run("DELETE FROM oceans")
+
+        #expect(try await store.claimOcean() == nil)
+        #expect(try await store.unusedOceanCount() == 0)
+        #expect(try await store.oceans().isEmpty)
+    }
+
     /// The seed loops over the catalogue, and the store's own tests rewind `user_version` to
     /// reproduce an old schema, so a seed that could not be replayed would throw and take the
     /// whole migration transaction with it. `INSERT OR IGNORE` is the property under test here.

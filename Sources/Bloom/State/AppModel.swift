@@ -1028,12 +1028,16 @@ final class AppModel {
 
         // The sea this workspace wears while the model thinks of a real name. Claimed here,
         // before `manager.start`, because its slug is about to be the branch and the branch has
-        // to exist before the worktree is cut. Only a chat workspace that left both name and
-        // branch to Bloom gets one: a caller that chose either has already said what it wants,
-        // and claiming a sea it would never wear would spend it for nothing. A nil store or an
-        // exhausted claim falls back to the plant placeholder below, exactly as before.
+        // to exist before the worktree is cut. `OceanCatalog.shouldClaim` holds the rule about
+        // who gets one, in the core where it is tested. A nil store or an exhausted claim falls
+        // back to the plant placeholder below, exactly as before.
         let pick: OceanPick?
-        if wantsAName, name == nil, branch == nil, opensWith == .chat {
+        if OceanCatalog.shouldClaim(
+            userSuppliedName: name,
+            userSuppliedBranch: branch,
+            isChatWorkspace: opensWith == .chat,
+            wantsAutomaticName: wantsAName
+        ) {
             pick = try? await store?.claimOcean()
         } else {
             pick = nil

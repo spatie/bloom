@@ -70,6 +70,26 @@ public struct OceanPick: Sendable, Hashable {
 public enum OceanCatalog {
     public static let all: [Ocean] = parse(tsv: builtInTSV)
 
+    /// Whether creating this workspace should spend a sea from the catalogue.
+    ///
+    /// Only a chat workspace that left both name and branch to Bloom, and that is going to be
+    /// named automatically, gets one. A caller that chose either has already said what it wants,
+    /// so the bridge's explicitly named workspaces spend nothing; without an automatic rename
+    /// coming the sea would never be replaced by a real name, so it stays unspent there too.
+    /// A pure function here rather than a condition at the claim site, because the claim site is
+    /// `AppModel` and the test target depends on the core alone.
+    public static func shouldClaim(
+        userSuppliedName: String?,
+        userSuppliedBranch: String?,
+        isChatWorkspace: Bool,
+        wantsAutomaticName: Bool
+    ) -> Bool {
+        wantsAutomaticName
+            && userSuppliedName == nil
+            && userSuppliedBranch == nil
+            && isChatWorkspace
+    }
+
     /// One sea per line, tab separated: name, slug, latitude, longitude. The first line is the
     /// header and any line that does not scan is dropped rather than trusted, because this data
     /// came from a hand-kept file and a half-parsed row would become a branch name.
