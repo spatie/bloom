@@ -51,8 +51,18 @@ struct DiffLineView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHidden(line == nil)
-        .onHover { isHovered = $0 }
         .overlay(alignment: .leading) { commentButton }
+        // The whole row is the hover target, and it has to be said, because a view's hit region
+        // is only what it draws. Most of a diff row draws nothing: a context line paints no wash,
+        // and the frame is taller and wider than the type inside it, so the pointer found the row
+        // only along the band of pixels the glyphs themselves cover, and the `+` flickered in and
+        // out as the pointer crossed the ascenders. The shape is the frame set above, the sheet's
+        // width by `rowHeight`, so rows hand the hover to each other with no dead band between.
+        // Applied outside the button's overlay so the button sits inside the tracked region
+        // rather than cutting a hole in it at the leading edge, and after the accessibility
+        // collapse, which must stay directly above the overlay for the reason given there.
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
         // Over the diff wash, not instead of it: an addition under review stays an addition,
         // and the amber says "under discussion" on top of whatever the line already was.
         .background(isCommented ? Palette.reviewLine : .clear)
