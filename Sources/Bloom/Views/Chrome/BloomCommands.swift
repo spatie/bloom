@@ -15,7 +15,7 @@ struct BloomCommands: Commands {
     /// ungreys because an `@Observable` it reads has moved. See `SoftwareUpdater`.
     private let updater = SoftwareUpdater.shared
 
-    /// Nil in every scene but the main window. See `MainWindowFocusKey`.
+    /// Nil in every scene but the main window. See `MainWindowFocus`.
     @FocusedValue(\.isMainWindowFocused) private var isMainWindowFocused: Bool?
 
     /// Read the way `RepoSettingsCommands` reads it: a Commands body is not a view, but the
@@ -88,7 +88,7 @@ struct BloomCommands: Commands {
             }
             .keyboardShortcut("w", modifiers: .command)
             // Scoped to the main window as well as to there being a session, because this item
-            // holds Cmd+W for the whole app. See `MainWindowFocusKey`.
+            // holds Cmd+W for the whole app. See `MainWindowFocus`.
             .disabled(isMainWindowFocused != true || model.selectedModel?.activeSession == nil)
 
             Divider()

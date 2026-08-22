@@ -17,14 +17,7 @@ import SwiftUI
 /// focused scene. A disabled item does not consume its key equivalent: AppKit keeps looking, finds
 /// the standard Close underneath, and the Settings window closes the way every other window on the
 /// Mac does.
-struct MainWindowFocusKey: FocusedValueKey {
-    typealias Value = Bool
-}
-
 extension FocusedValues {
     /// True while the main window is the focused scene, nil in every other scene.
-    var isMainWindowFocused: Bool? {
-        get { self[MainWindowFocusKey.self] }
-        set { self[MainWindowFocusKey.self] = newValue }
-    }
+    @Entry var isMainWindowFocused: Bool?
 }

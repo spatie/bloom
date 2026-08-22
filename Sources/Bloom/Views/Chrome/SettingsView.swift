@@ -410,14 +410,23 @@ private struct ScriptValue: View {
 /// The agent CLIs themselves moved to the Agents tab, which detects far more about them than a
 /// path. What is left is the plumbing Bloom shells out to on its own behalf.
 private struct ToolSettingsView: View {
+    /// Resolved once when the tab opens. `which` walks the PATH, and a walk per render is work
+    /// the answer does not change fast enough to deserve; the empty section until it lands is
+    /// one frame, where rows built from nil would flash the missing-tool warning first.
+    @State private var paths: [(name: String, path: String?)] = []
+
     var body: some View {
         Form {
             Section("Command-line tools") {
-                ToolPathRow(name: "git", path: Shell.which("git"))
-                ToolPathRow(name: "gh", path: Shell.which("gh"))
+                ForEach(paths, id: \.name) { tool in
+                    ToolPathRow(name: tool.name, path: tool.path)
+                }
             }
         }
         .settingsForm()
+        .task {
+            paths = [("git", Shell.which("git")), ("gh", Shell.which("gh"))]
+        }
     }
 }
 

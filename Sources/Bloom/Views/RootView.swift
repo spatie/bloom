@@ -95,7 +95,7 @@ struct RootView: View {
         .navigationTitle(app.menuWorkspace?.name ?? "Bloom")
 
         // Marks this scene as the main window, so the menu items that act on a workspace grey out
-        // while Settings or a project settings window is key. See `MainWindowFocusKey`.
+        // while Settings or a project settings window is key. See `MainWindowFocus`.
         .focusedSceneValue(\.isMainWindowFocused, true)
 
         // Bottom trailing, out of the way of the sidebar and of the composer's send button.

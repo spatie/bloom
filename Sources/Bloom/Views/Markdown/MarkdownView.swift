@@ -64,14 +64,15 @@ public struct MarkdownView: View {
         // Which addresses may be opened, and which may not, is `LinkPolicy.opens`. It is not
         // a rule about this view: the user's own bubble is drawn by a different one and goes
         // through the same door.
+        let addresses = isStreaming ? [] : LinkPolicy.addresses(in: blocks)
         MarkdownBlocksView(blocks: blocks)
             .environment(\.markdownIsStreaming, isStreaming)
             .opensTranscriptLinks()
             // Not while it is still being written. A menu rebuilt on every token would be work
             // done for a reader who is not there yet, and there is nothing to copy until the
-            // sentence carrying the address has finished arriving.
-            .transcriptLinkMenu(isStreaming ? [] : LinkPolicy.addresses(in: blocks))
-            .transcriptLinkActions(isStreaming ? [] : LinkPolicy.addresses(in: blocks))
+            // sentence carrying the address has finished arriving. One walk for both takers.
+            .transcriptLinkMenu(addresses)
+            .transcriptLinkActions(addresses)
     }
 }
 
@@ -79,14 +80,6 @@ public struct MarkdownView: View {
 /// them. Both are the enclosing `MarkdownView`'s to know, and both are needed several levels down
 /// inside a quote, a list or a table cell, so they travel as environment rather than as arguments
 /// threaded through every recursion.
-private struct MarkdownStreamingKey: EnvironmentKey {
-    static let defaultValue = false
-}
-
-private struct MarkdownLinkActionsKey: EnvironmentKey {
-    static let defaultValue = TranscriptLinkActions()
-}
-
 extension View {
     /// What every markdown row below this point does with a link.
     ///
@@ -99,15 +92,8 @@ extension View {
 }
 
 extension EnvironmentValues {
-    fileprivate var markdownIsStreaming: Bool {
-        get { self[MarkdownStreamingKey.self] }
-        set { self[MarkdownStreamingKey.self] = newValue }
-    }
-
-    var markdownLinkActions: TranscriptLinkActions {
-        get { self[MarkdownLinkActionsKey.self] }
-        set { self[MarkdownLinkActionsKey.self] = newValue }
-    }
+    @Entry var markdownIsStreaming: Bool = false
+    @Entry var markdownLinkActions = TranscriptLinkActions()
 }
 
 private struct MarkdownBlocksView: View {

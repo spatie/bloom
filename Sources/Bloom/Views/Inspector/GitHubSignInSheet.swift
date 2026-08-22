@@ -64,6 +64,7 @@ struct GitHubSignInSheet: View {
         // process goes with it. A `gh auth login` waiting forever on a terminal nobody can see is
         // the failure this exists to avoid.
         .onDisappear { session?.stop() }
+        .task { canBrew = Shell.which("brew") != nil }
     }
 
     // MARK: - Parts
@@ -247,7 +248,9 @@ struct GitHubSignInSheet: View {
         access == .notInstalled ? "Run brew install gh" : "Run gh auth login"
     }
 
-    private var canBrew: Bool { Shell.which("brew") != nil }
+    /// Resolved once when the sheet opens rather than on every render: `which` walks the PATH,
+    /// and whether Homebrew is installed does not change while a sheet is up.
+    @State private var canBrew = false
 
     // MARK: - Actions
 
