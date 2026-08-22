@@ -15,7 +15,7 @@
 # tried to second-guess it would be wrong the first time a file moved.
 
 .DEFAULT_GOAL := help
-.PHONY: help build test app run lint master dev dev-db release
+.PHONY: help build test app run lint master dev dev-db release dmg
 
 help: ## Show this list
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -49,3 +49,6 @@ dev-db: ## Copy the real database into Bloom Dev's own container
 
 release: ## Build, sign, notarise and staple a zip you can send
 	./Tools/release.sh
+
+dmg: ## Wrap the newest built Bloom.app in the beach disk image
+	./Tools/dmg/build.sh
