@@ -14,14 +14,14 @@ enum BrowserTab {
     ///
     /// A `WKWebView` speaks http and https. A `mailto:` is a perfectly good link for a plain
     /// click and is not something to open a blank tab onto, so the menu item that would do that
-    /// is absent rather than present and useless. `BrowserSession.address` is asked the rest,
-    /// because it is what will actually be handed the string a moment later, and two rules about
-    /// what counts as an address would eventually disagree.
+    /// is absent rather than present and useless. `BrowserAddress` is asked the rest, because
+    /// it is what will actually be handed the string a moment later, and two rules about what
+    /// counts as an address would eventually disagree.
     static func canOpen(_ url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
             return false
         }
-        return BrowserSession.address(from: url.absoluteString) != nil
+        return BrowserAddress.url(from: url.absoluteString) != nil
     }
 
     /// Opens an address in the workspace's browser tab, in front.

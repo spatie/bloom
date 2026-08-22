@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Observation
 import WebKit
+import BloomCore
 
 /// One browser tab's live web view, and everything the address bar needs to know about it.
 ///
@@ -50,7 +51,7 @@ final class BrowserSession {
         navigation.owner = self
         webView.navigationDelegate = navigation
         // Shown in the address field from the first frame, before anything has been fetched.
-        currentURL = Self.address(from: url)
+        currentURL = BrowserAddress.url(from: url)
         load(url)
     }
 
@@ -58,7 +59,7 @@ final class BrowserSession {
     /// ignored rather than handed to a search engine: this field is for the dev server next door,
     /// and shipping a half-typed line off to a third party is not what it is for.
     func load(_ text: String) {
-        guard let url = Self.address(from: text) else { return }
+        guard let url = BrowserAddress.url(from: text) else { return }
         webView.load(URLRequest(url: url))
     }
 
@@ -161,21 +162,6 @@ final class BrowserSession {
         UserDefaults.standard.set(true, forKey: startsAttachedKey)
     }
 
-    /// Localhost first, because that is what a workspace's dev server is and what the tab opens on.
-    /// A bare host gets `http`, since a development server rarely has a certificate, and anything
-    /// with no dot and no scheme is not an address at all.
-    static func address(from text: String) -> URL? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !trimmed.contains(" ") else { return nil }
-
-        if trimmed.contains("://") { return URL(string: trimmed) }
-
-        let host = trimmed.split(separator: "/", maxSplits: 1).first.map(String.init) ?? trimmed
-        let isLocal = host.hasPrefix("localhost") || host.hasPrefix("127.0.0.1")
-            || host.hasPrefix("0.0.0.0") || host.hasSuffix(".localhost")
-        guard isLocal || host.contains(".") else { return nil }
-        return URL(string: (isLocal ? "http://" : "https://") + trimmed)
-    }
 }
 
 /// Kept off the session itself because `navigationDelegate` is the sort of reference that outlives
