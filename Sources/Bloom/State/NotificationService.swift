@@ -19,6 +19,21 @@ import BloomCore
 final class NotificationService {
     static let shared = NotificationService()
 
+    /// Whether this process has a Notification Center to talk to at all.
+    ///
+    /// `UNUserNotificationCenter.current()` does not fail politely for a process that is not a
+    /// registered app bundle: it raises `NSInternalInconsistencyException`
+    /// ("bundleProxyForCurrentProcess is nil") and the process aborts. That is the whole story of
+    /// a morning of crash reports named Bloom: `.build/debug/Bloom` run as a bare executable died
+    /// inside `applicationDidFinishLaunching` at the first touch of the centre, seconds after the
+    /// window appeared, and because the abort lands when the launch's own Apple Event is
+    /// processed it was mistaken for a crash in whatever the keyboard was doing at that moment.
+    /// `Store` promises that an unbundled binary starts empty rather than not starting, so the
+    /// centre is treated as absent here: no delegate, no categories, no banners, and the settings
+    /// pane reports the permission as undetermined. A bare executable has no Dock icon for a
+    /// banner to open anyway.
+    nonisolated static let isAvailable = Bundle.main.bundleIdentifier != nil
+
     /// The category carrying Reply and Open. Only ever set on a banner that names one workspace,
     /// because a reply box on "6 agents finished" would silently send to whichever of the six the
     /// digest happened to point at.
@@ -70,6 +85,7 @@ final class NotificationService {
     /// registration for the app rather than for a request: a category named by a notification that
     /// was never registered arrives as a plain banner with no buttons at all.
     func registerCategories() {
+        guard Self.isAvailable else { return }
         let reply = UNTextInputNotificationAction(
             identifier: Self.replyAction,
             title: "Reply",
@@ -100,6 +116,7 @@ final class NotificationService {
     // MARK: - Permission
 
     func refreshAuthorization() async {
+        guard Self.isAvailable else { return }
         authorization = await UNUserNotificationCenter.current().notificationSettings()
             .authorizationStatus
     }
@@ -114,6 +131,7 @@ final class NotificationService {
     /// is what makes the settings pane's blocked state reachable.
     @discardableResult
     func requestPermission() async -> Bool {
+        guard Self.isAvailable else { return false }
         guard !isRequestingPermission else { return authorization == .authorized }
         isRequestingPermission = true
         defer { isRequestingPermission = false }
@@ -236,6 +254,7 @@ final class NotificationService {
     }
 
     private func deliver(_ prepared: PreparedNotification) {
+        guard Self.isAvailable else { return }
         let content = UNMutableNotificationContent()
         content.title = prepared.title
         content.body = prepared.body

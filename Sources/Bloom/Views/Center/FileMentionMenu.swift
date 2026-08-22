@@ -1,6 +1,7 @@
 import SwiftUI
+import BloomCore
 
-/// The panel that drops above the composer while the user is typing an `@mention`.
+/// The panel that opens over the composer while the user is typing an `@mention`.
 ///
 /// It renders and nothing else. Selection and the arrow keys live in `ComposerView`, because the
 /// text view keeps first responder the whole time and is the only thing that sees the key events.
@@ -8,6 +9,9 @@ struct FileMentionMenu: View {
     var matches: [FileMatch]
     var query: String
     var selectedIndex: Int
+    /// What the room on the menu's side of the composer allows. The default is the cap a menu
+    /// keeps even with a whole transcript above it.
+    var maxHeight: CGFloat = MenuLayout.maxHeight
     var onPick: @MainActor (FileMatch) -> Void
     var onHighlight: @MainActor (Int) -> Void = { _ in }
 
@@ -28,17 +32,27 @@ struct FileMentionMenu: View {
                                     onPick: { onPick(match) },
                                     onHover: { onHighlight(index) }
                                 )
-                                .id(index)
+                        // Each row's identity is the thing it names, never its position.
+                        // These rows carried `.id(index)` for the scroll target below, and that
+                        // pinned identity to a slot in a lazy stack: when the ranked list changed
+                        // under an open menu, the stack kept serving the views it had cached for
+                        // those slots, so typing `/re` showed the rows the bare `/` had ranked,
+                        // alphabetical, `compact` among them, while the real matches were only in
+                        // the model. The pick then honoured the model, and picked a command that
+                        // was not the row on screen. Identity by what the row shows makes a
+                        // changed list a changed row, which a lazy container does rebuild.
+                                .id(match.id)
                             }
                         }
                         .padding(Metrics.spacingSmall)
                     }
-                    .frame(maxHeight: MenuLayout.maxHeight)
+                    .frame(maxHeight: maxHeight)
                     // No anchor, so the arrow keys scroll the least they can get away with.
                     // Pinning to the bottom threw the highlighted row to the far edge every time
                     // the user stepped upwards, which no Mac menu does.
                     .onChange(of: selectedIndex) { _, index in
-                        proxy.scrollTo(index)
+                        guard matches.indices.contains(index) else { return }
+                        proxy.scrollTo(matches[index].id)
                     }
                 }
             }

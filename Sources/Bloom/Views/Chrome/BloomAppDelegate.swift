@@ -62,8 +62,13 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        UNUserNotificationCenter.current().delegate = self
-        NotificationService.shared.registerCategories()
+        // Guarded because merely asking for the centre aborts a process that is not a registered
+        // bundle, which `swift run` and `.build/debug/Bloom` are not. See
+        // `NotificationService.isAvailable` for the crash this line was.
+        if NotificationService.isAvailable {
+            UNUserNotificationCenter.current().delegate = self
+            NotificationService.shared.registerCategories()
+        }
         // The provider is retained by this delegate, which lives for the process. AppKit only
         // holds it weakly, and a provider that has been deallocated is a Services entry that
         // silently does nothing.

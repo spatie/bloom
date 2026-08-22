@@ -61,6 +61,10 @@ struct ComposerPrompt<Footer: View>: View {
     /// How far the box is from the top of the window it is in, which is all the room a card that
     /// floats above it has. A sheet is its own window, so this is the sheet's own top edge there.
     @State private var boxTop: CGFloat = 0
+    /// How tall the window's content is, which with `boxTop` says how much room a menu that opens
+    /// downwards would have. Infinity until the probe reports, which resolves to the upward
+    /// placement every composer had before there was a choice to make.
+    @State private var windowHeight: CGFloat = .infinity
 
     /// The way into the text view for a file that has finished copying, so it arrives as an edit
     /// the text system can undo rather than as a draft replaced behind its back.
@@ -111,6 +115,9 @@ struct ComposerPrompt<Footer: View>: View {
             boxWidth = frame.width
             boxTop = frame.minY
         }
+        // Global space says where the box is in its window and nothing about where the window
+        // ends, and the completion menus need both. See the placement rule on `menuPlacement`.
+        .background { WindowHeightReader { windowHeight = $0 } }
         // The editor takes the drops that land on the text itself; this takes the ones that land
         // on the chips, the footer and the padding, which is most of the box.
         // A drop on the chrome has no character under it, so it goes to the end of the draft,
@@ -122,16 +129,15 @@ struct ComposerPrompt<Footer: View>: View {
             )
         } isTargeted: { isDropTarget = $0 }
         .overlay(alignment: .topLeading) {
-            // Above the composer, in the same place and the same card as the two completion
-            // menus, and never at the same time as one of them: they would sit on top of each
-            // other, and a menu the user is typing into outranks a preview they are only looking
-            // at.
+            // In the same place and the same card as the two completion menus, and never at the
+            // same time as one of them: they would sit on top of each other, and a menu the user
+            // is typing into outranks a preview they are only looking at.
             AttachmentCardOverlay(
                 attachment: activeMenu == .none ? hoveredAttachment : nil,
                 worktree: attachmentRoot,
                 availableWidth: boxWidth
             )
-            .alignmentGuide(.top) { $0[.bottom] + Metrics.spacing }
+            .alignmentGuide(.top, computeValue: floatingGuide)
         }
         .overlay(alignment: .topLeading) {
             // Same place, same card, same rule as the attachment preview: a menu the user is
@@ -140,9 +146,9 @@ struct ComposerPrompt<Footer: View>: View {
                 name: activeMenu == .none && isCommandPreviewed ? command.name : nil,
                 command: command.name.flatMap { slashCatalog.command(named: $0) },
                 availableWidth: boxWidth,
-                availableHeight: boxTop - Metrics.spacing * 2
+                availableHeight: menuPlacement.room
             )
-            .alignmentGuide(.top) { $0[.bottom] + Metrics.spacing }
+            .alignmentGuide(.top, computeValue: floatingGuide)
         }
         .overlay(alignment: .topLeading) {
             ComposerMenuOverlay(
@@ -151,11 +157,12 @@ struct ComposerPrompt<Footer: View>: View {
                 commandsAreLoaded: slashCatalog.isLoaded,
                 files: fileMatches,
                 selectedIndex: menuIndex,
+                maxHeight: menuPlacement.menuHeight,
                 onPickCommand: pick(command:),
                 onPickFile: pick(file:),
                 onHighlight: { menuIndex = $0 }
             )
-            .alignmentGuide(.top) { $0[.bottom] + Metrics.spacing }
+            .alignmentGuide(.top, computeValue: floatingGuide)
         }
         // Keyed on the session rather than run on first appearance, because this view is not built
         // again for each one. An unsplit centre column is now the same pane in every workspace, so
@@ -345,6 +352,46 @@ struct ComposerPrompt<Footer: View>: View {
         case .mention: fileMatches.count
         case .none: 0
         }
+    }
+
+    /// Which side of the box the floating panels open on, and how much room that side has.
+    ///
+    /// In a conversation the composer sits at the foot of the window and the room above it is the
+    /// whole transcript, so this resolves to `above` and nothing moves. In the create sheet the
+    /// box sits under one heading in a window sized exactly to its content, and a menu that
+    /// opened upwards there was clipped at the sheet's top edge: two arbitrary rows survived, the
+    /// ranked ones, the selected one among them, were cut off, and the header controls were
+    /// covered by what was left. See `MenuLayout.placement` for the rule.
+    private var menuPlacement: MenuLayout.Placement {
+        MenuLayout.placement(
+            above: boxTop - Metrics.spacing * 2,
+            below: windowHeight - boxTop - typedLineBottom - Metrics.spacing * 2
+        )
+    }
+
+    /// How far under the box's top edge the line being typed ends: the box's own padding, the
+    /// chip strip when the draft leads with a command, and one line of text. A panel that opens
+    /// downwards starts here, so the token being completed stays visible above it. A caret on a
+    /// later line of a long draft can end up under the panel; the slash menu never does, because
+    /// it only exists while the whole draft is one `/word`, and the file menu's own filtering is
+    /// the feedback for what is being typed.
+    private var typedLineBottom: CGFloat {
+        Metrics.gutter
+            + (command.name == nil ? 0 : AttachmentChip.height + Metrics.spacingWide)
+            + ComposerTextEditor.lineHeight
+    }
+
+    /// The one `.top` guide all three floating panels share, so the menus and the hover cards
+    /// cannot end up on different sides of the same box. Above: the panel's bottom hangs a step
+    /// over the box. Below: the panel's top hangs a step under the line being typed.
+    ///
+    /// A closure built here rather than a method passed by name, because `alignmentGuide` runs
+    /// its closure during layout, off the main actor, and a main actor method cannot go there.
+    /// The two numbers can: they are read while the body is being built.
+    private var floatingGuide: @Sendable (ViewDimensions) -> CGFloat {
+        let isBelow = menuPlacement.isBelow
+        let drop = typedLineBottom + Metrics.spacing
+        return { isBelow ? -drop : $0[.bottom] + Metrics.spacing }
     }
 
     // MARK: - Completion
