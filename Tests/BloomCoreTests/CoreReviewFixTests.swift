@@ -74,3 +74,25 @@ struct CodexRunnerPersistenceFailureTests {
         #expect(try await store.messageCount(sessionID: session.id) == 0)
     }
 }
+
+// MARK: - Git.runRaw cancellation
+
+@Suite("Git.runRaw cancellation", .scratchDirectory)
+struct GitRunRawCancellationTests {
+    /// `Shell.run` refuses a caller that has already given up, so spawning and terminating in the
+    /// same breath cannot happen; `runRaw` sat beside it without the same gate, so the refresh
+    /// loop's deadline cancelled a queue of raw git calls that all still forked.
+    @Test("a cancelled caller is refused before git is spawned")
+    func cancelledCallerThrows() async {
+        let task = Task { () -> GitOutput in
+            // Waits until the cancel below has landed, so the call is deterministic rather than a
+            // race between this task starting and the test cancelling it.
+            while !Task.isCancelled { await Task.yield() }
+            return try await Git.runRaw(["status", "--porcelain", "-z"], in: "/tmp")
+        }
+        task.cancel()
+        await #expect(throws: CancellationError.self) {
+            _ = try await task.value
+        }
+    }
+}

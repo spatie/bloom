@@ -367,6 +367,11 @@ public enum Git {
 
     /// Same contract as `run`, but stdout is not decoded. Used for the `-z` parsers.
     static func runRaw(_ arguments: [String], in directory: String) async throws -> GitOutput {
+        // The same gate `Shell.run` opens with, for the same caller: the refresh loop's deadline
+        // cancels a queue of these at once, and spawning git for a caller that has already given
+        // up would fork it and terminate it in the same breath.
+        try Task.checkCancellation()
+
         guard let executable = Shell.which("git") else {
             throw ShellError(command: "git", status: 127, stderr: "git not found on PATH")
         }
