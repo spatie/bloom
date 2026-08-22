@@ -23,6 +23,19 @@ enum TranscriptLayout {
     /// Between stacked blocks inside an expanded row.
     static let block = Metrics.spacingWide
 
+    /// What a held-open card keeps inside its border, and the gap between the groups inside it.
+    ///
+    /// Wider than `inset`, deliberately. The question card is the one form in the transcript,
+    /// and at the row inset its header, its question and its options all sat on each other and
+    /// the card read as a list that happened to have a border. One value for both the margin and
+    /// the group gap, so the air inside the card is the same air that separates it from its edge.
+    static let cardInset = Metrics.gutter
+
+    /// Where an option row's text column starts, measured from the card margin: the row plate's
+    /// own inset, then the mark column and its gap. The preview block under a chosen option
+    /// hangs at this indent so it reads as part of the option rather than as a row of its own.
+    static let optionTextIndent = Metrics.spacingWide + glyphWidth + glyphGap
+
     /// The air under a turn's footer, before the next question.
     ///
     /// Twice the rung the answer keeps above the footer's rule, and the asymmetry is the only

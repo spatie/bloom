@@ -31,13 +31,14 @@ struct AgentQuestionCard: View {
     /// Which questions have the Other row showing, per question. Separate from whether anything is
     /// typed in it, so an empty Other row stays open while somebody thinks.
     @State private var isWritingOther: Set<String> = []
+    @FocusState private var otherFocus: String?
 
     private var questions: [AgentQuestion] { AgentQuestionnaire.questions(in: ask.input) }
 
     private var isOpen: Bool { decision == nil }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: TranscriptLayout.inset) {
+        VStack(alignment: .leading, spacing: TranscriptLayout.cardInset) {
             header
 
             ForEach(questions) { question in
@@ -47,24 +48,25 @@ struct AgentQuestionCard: View {
             if isOpen {
                 actions
             } else {
-                answeredLine
+                settledLine
             }
         }
-        .padding(TranscriptLayout.inset)
+        .padding(TranscriptLayout.cardInset)
         .background(
             RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
-                .fill(Palette.accent.opacity(isOpen ? 0.06 : 0.03))
+                .fill(isOpen ? Palette.questionWash : Palette.questionWashSettled)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
                 .strokeBorder(
-                    isOpen ? Palette.accent.opacity(0.4) : Palette.border,
+                    isOpen ? Palette.questionBorder : Palette.border,
                     lineWidth: Metrics.hairline
                 )
         )
         .padding(.vertical, TranscriptLayout.tight)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(isOpen ? "The agent is asking a question" : "Question, answered")
+        .task { applyCaptureStates() }
     }
 
     // MARK: Parts
@@ -77,7 +79,7 @@ struct AgentQuestionCard: View {
                 .foregroundStyle(isOpen ? Palette.accent : Palette.textTertiary)
                 .accessibilityHidden(true)
 
-            Text(questions.count > 1 ? "The agent has \(questions.count) questions" : "The agent has a question")
+            Text(headerTitle)
                 .font(Typo.labelEmphasis)
                 .foregroundStyle(Palette.textPrimary)
 
@@ -85,28 +87,42 @@ struct AgentQuestionCard: View {
         }
     }
 
+    /// Past tense once settled, matching `PermissionAskRowView`: a card that still says "has a
+    /// question" over dead controls reads as a card that is waiting.
+    private var headerTitle: String {
+        if questions.count > 1 {
+            return isOpen
+                ? "The agent has \(questions.count) questions"
+                : "The agent asked \(questions.count) questions"
+        }
+        return isOpen ? "The agent has a question" : "The agent asked a question"
+    }
+
     private func questionBlock(_ question: AgentQuestion) -> some View {
-        VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
-            if !question.header.isEmpty {
-                Text(question.header.uppercased())
-                    .font(Typo.micro)
-                    .tracking(0.6)
-                    .foregroundStyle(Palette.textTertiary)
-            }
-
-            Text(question.question)
-                .font(Typo.bodyEmphasis)
-                .foregroundStyle(Palette.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-
-            if question.multiSelect {
-                Text("Choose as many as apply.")
-                    .font(Typo.micro)
-                    .foregroundStyle(Palette.textTertiary)
-            }
-
+        VStack(alignment: .leading, spacing: Metrics.spacingWide) {
             VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                if !question.header.isEmpty {
+                    Text(question.header.uppercased())
+                        .font(Typo.micro)
+                        .tracking(Typo.microTracking)
+                        .foregroundStyle(isOpen ? Palette.accent : Palette.textTertiary)
+                }
+
+                Text(question.question)
+                    .font(Typo.bodyEmphasis)
+                    .foregroundStyle(Palette.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+
+                // An instruction, so it goes when the controls it instructs go.
+                if question.multiSelect, isOpen {
+                    Text("Choose as many as apply.")
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: Metrics.spacingTight) {
                 ForEach(question.options) { option in
                     optionRow(question, option)
                 }
@@ -119,80 +135,106 @@ struct AgentQuestionCard: View {
     private func optionRow(_ question: AgentQuestion, _ option: AgentQuestion.Option) -> some View {
         let isChosen = chosen[question.id]?.contains(option.label) ?? false
 
-        return Button {
-            toggle(question, option.label)
-        } label: {
-            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                HStack(alignment: .firstTextBaseline, spacing: TranscriptLayout.glyphGap) {
-                    Image(systemName: mark(isChosen: isChosen, multiSelect: question.multiSelect))
-                        .font(Typo.label)
-                        .imageScale(.medium)
-                        .foregroundStyle(isChosen ? Palette.accent : Palette.textTertiary)
-                        .accessibilityHidden(true)
+        return VStack(alignment: .leading, spacing: Metrics.spacingTight) {
+            Button {
+                toggle(question, option.label)
+            } label: {
+                rowLabel(
+                    mark: markName(isChosen: isChosen, multiSelect: question.multiSelect),
+                    isChosen: isChosen,
+                    title: option.label,
+                    detail: option.description
+                )
+            }
+            .buttonStyle(
+                QuestionOptionStyle(
+                    isChosen: isChosen,
+                    isOpen: isOpen,
+                    forcesHover: forcesHover(question, option)
+                )
+            )
+            .disabled(!isOpen)
+            .accessibilityAddTraits(isChosen ? [.isSelected] : [])
 
-                    VStack(alignment: .leading, spacing: Metrics.spacingTight) {
-                        Text(option.label)
-                            .font(Typo.label)
-                            .foregroundStyle(Palette.textPrimary)
-                            .fixedSize(horizontal: false, vertical: true)
+            // Shown only for the option it belongs to, and only once that option is the one being
+            // considered: a column of mockups all at once is the thing a preview exists to avoid.
+            // Outside the button, because a block inside a button's label can be neither selected
+            // nor unfolded, and hanging at the option's own text column so it reads as part of it.
+            if let preview = option.preview, isChosen {
+                DetailCodeBlock(text: preview)
+                    .padding(.leading, TranscriptLayout.optionTextIndent)
+                    .padding(.trailing, Metrics.spacingWide)
+                    .padding(.bottom, Metrics.spacingSmall)
+            }
+        }
+    }
 
-                        if !option.description.isEmpty {
-                            Text(option.description)
-                                .font(Typo.caption)
-                                .foregroundStyle(Palette.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
+    /// One option as one object: the mark in its own column, the label carrying the weight, and
+    /// the description a clear step under it rather than a second line of the same voice.
+    private func rowLabel(mark: String, isChosen: Bool, title: String, detail: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: TranscriptLayout.glyphGap) {
+            markView(mark, isChosen: isChosen)
 
-                    Spacer(minLength: 0)
-                }
+            VStack(alignment: .leading, spacing: Metrics.spacingTight) {
+                Text(title)
+                    .font(Typo.labelEmphasis)
+                    .foregroundStyle(isOpen ? Palette.textPrimary : Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                // Shown only for the option it belongs to, and only once that option is the one
-                // being considered. A column of mockups all at once is the thing a preview exists
-                // to avoid.
-                if let preview = option.preview, isChosen {
-                    Text(preview)
-                        .font(Typo.codeSmall)
-                        .foregroundStyle(Palette.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(TranscriptLayout.glyphGap)
-                        .background(
-                            RoundedRectangle(cornerRadius: Metrics.cornerSmall, style: .continuous)
-                                .fill(Palette.surfaceSunken)
-                        )
-                        .textSelection(.enabled)
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(Typo.caption)
+                        .foregroundStyle(isOpen ? Palette.textSecondary : Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, Metrics.spacingSmall)
-            .padding(.horizontal, TranscriptLayout.glyphGap)
-            .background(
-                RoundedRectangle(cornerRadius: Metrics.cornerSmall, style: .continuous)
-                    .fill(isChosen ? Palette.accent.opacity(0.1) : Color.clear)
-            )
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .disabled(!isOpen)
-        .accessibilityAddTraits(isChosen ? [.isSelected] : [])
+    }
+
+    /// The mark in a fixed column, so the labels line up down the card whatever shape each mark
+    /// is, and at reading size rather than glyph size: it is the whole affordance of the row.
+    private func markView(_ name: String, isChosen: Bool) -> some View {
+        Image(systemName: name)
+            .font(Typo.body)
+            .foregroundStyle(markColour(isChosen: isChosen))
+            .frame(width: TranscriptLayout.glyphWidth)
+            .accessibilityHidden(true)
+    }
+
+    private func markColour(isChosen: Bool) -> Color {
+        if isChosen { return Palette.accent }
+        return isOpen ? Palette.textSecondary : Palette.textTertiary
     }
 
     /// The free text row every question gets. See the head of this file for why.
     @ViewBuilder
     private func otherRow(_ question: AgentQuestion) -> some View {
         if isWritingOther.contains(question.id) {
-            TextField(
-                "Say what you would rather do…",
-                text: Binding(
-                    get: { other[question.id] ?? "" },
-                    set: { other[question.id] = $0 }
-                ),
-                axis: .vertical
-            )
-            .textFieldStyle(.roundedBorder)
-            .font(Typo.label)
-            .lineLimit(1...4)
-            .disabled(!isOpen)
+            HStack(alignment: .firstTextBaseline, spacing: TranscriptLayout.glyphGap) {
+                // Drawn chosen: the words being typed are the selection.
+                markView(
+                    markName(isChosen: true, multiSelect: question.multiSelect),
+                    isChosen: true
+                )
+
+                TextField(
+                    "Say what you would rather do…",
+                    text: Binding(
+                        get: { other[question.id] ?? "" },
+                        set: { other[question.id] = $0 }
+                    ),
+                    axis: .vertical
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(Typo.label)
+                .lineLimit(1...4)
+                .focused($otherFocus, equals: question.id)
+                .disabled(!isOpen)
+                // Focus moves here when the row appears, which it only does by being asked for.
+                .task { otherFocus = question.id }
+            }
+            .padding(.vertical, Metrics.spacing)
+            .padding(.horizontal, Metrics.spacingWide)
         } else if isOpen {
             Button {
                 isWritingOther.insert(question.id)
@@ -200,24 +242,14 @@ struct AgentQuestionCard: View {
                 // joined together as one string, which says two things at once.
                 chosen[question.id] = []
             } label: {
-                HStack(alignment: .firstTextBaseline, spacing: TranscriptLayout.glyphGap) {
-                    Image(systemName: mark(isChosen: false, multiSelect: question.multiSelect))
-                        .font(Typo.label)
-                        .imageScale(.medium)
-                        .foregroundStyle(Palette.textTertiary)
-                        .accessibilityHidden(true)
-
-                    Text(AgentQuestionnaire.otherLabel)
-                        .font(Typo.label)
-                        .foregroundStyle(Palette.textSecondary)
-
-                    Spacer(minLength: 0)
-                }
-                .padding(.vertical, Metrics.spacingSmall)
-                .padding(.horizontal, TranscriptLayout.glyphGap)
-                .contentShape(Rectangle())
+                rowLabel(
+                    mark: markName(isChosen: false, multiSelect: question.multiSelect),
+                    isChosen: false,
+                    title: AgentQuestionnaire.otherLabel,
+                    detail: "Answer in your own words."
+                )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(QuestionOptionStyle(isChosen: false, isOpen: true))
         }
     }
 
@@ -240,10 +272,31 @@ struct AgentQuestionCard: View {
         .controlSize(.small)
     }
 
-    private var answeredLine: some View {
-        Text(decision == "answered" ? "Answered." : "The agent was asked to decide for itself.")
-            .font(Typo.caption)
-            .foregroundStyle(Palette.textTertiary)
+    /// What a settled card says instead of its buttons. The tick is the one accent left on it:
+    /// enough to say the question was really answered, without the card still asking for the eye.
+    private var settledLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: TranscriptLayout.glyphGap) {
+            if decision == "answered" {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.accent)
+                    .accessibilityHidden(true)
+            }
+
+            Text(settledText)
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var settledText: String {
+        let decision = decision ?? ""
+        // The three ways a question dies unanswered, in the words the permission card uses for
+        // them: a card that says "Answered." over a question nobody answered is a small lie.
+        let unanswered = PermissionAskOutcome.summary(decision)
+        if !unanswered.isEmpty { return unanswered }
+        return decision == "answered" ? "Answered." : "The agent was asked to decide for itself."
     }
 
     // MARK: Answering
@@ -307,10 +360,101 @@ struct AgentQuestionCard: View {
 
     /// A circle for one of many, a square for any of many. The shapes AppKit uses for a radio
     /// button and a checkbox, which is what these are.
-    private func mark(isChosen: Bool, multiSelect: Bool) -> String {
+    private func markName(isChosen: Bool, multiSelect: Bool) -> String {
         if multiSelect {
             return isChosen ? "checkmark.square.fill" : "square"
         }
         return isChosen ? "largecircle.fill.circle" : "circle"
+    }
+
+    // MARK: Capture states
+
+    /// Capture affordance: `--question-states` ticks the first option of every question and holds
+    /// a hover on the second, so the chosen and hovered plates can be photographed. The pointer
+    /// cannot be scripted across the user's own screen and `@State` cannot be seeded from the
+    /// database, so without this the two states that make the rows read as controls could only be
+    /// judged by asking a human to hover. Debug builds only, the same argument as `--running`.
+    #if DEBUG
+    private static let forcesStates = CommandLine.arguments.contains("--question-states")
+    #endif
+
+    private func applyCaptureStates() {
+        #if DEBUG
+        guard Self.forcesStates, isOpen else { return }
+        for question in questions {
+            if let first = question.options.first {
+                chosen[question.id] = [first.label]
+            }
+        }
+        #endif
+    }
+
+    private func forcesHover(_ question: AgentQuestion, _ option: AgentQuestion.Option) -> Bool {
+        #if DEBUG
+        return Self.forcesStates && isOpen && question.options.firstIndex(of: option) == 1
+        #else
+        return false
+        #endif
+    }
+}
+
+// MARK: - Row chrome
+
+/// The plate under an option row: hover, press, chosen, in the window's own vocabulary.
+///
+/// Selection is `Palette.selected`, the quiet grey every unfocused list in the window uses, with
+/// the accent kept for the mark: an accent-washed row here sat inches from the accent-washed card
+/// behind it and the two tints fought. A press paints the same plate the choice will leave, so
+/// the button announces its result rather than a darker version of itself.
+private struct QuestionOptionStyle: ButtonStyle {
+    var isChosen: Bool
+    var isOpen: Bool
+    var forcesHover: Bool = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        Plate(
+            configuration: configuration,
+            isChosen: isChosen,
+            isOpen: isOpen,
+            forcesHover: forcesHover
+        )
+    }
+
+    /// A view of its own rather than the style drawing directly, because hover is per row state
+    /// and a `ButtonStyle` has nowhere to keep any.
+    private struct Plate: View {
+        let configuration: Configuration
+        var isChosen: Bool
+        var isOpen: Bool
+
+        @State private var isHovered: Bool
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        init(configuration: Configuration, isChosen: Bool, isOpen: Bool, forcesHover: Bool) {
+            self.configuration = configuration
+            self.isChosen = isChosen
+            self.isOpen = isOpen
+            _isHovered = State(initialValue: forcesHover)
+        }
+
+        var body: some View {
+            configuration.label
+                .padding(.vertical, Metrics.spacing)
+                .padding(.horizontal, Metrics.spacingWide)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
+                        .fill(fill)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous))
+                .animation(reduceMotion ? nil : Motion.hover, value: isHovered)
+                .onHover { isHovered = $0 }
+        }
+
+        private var fill: Color {
+            if isChosen || (isOpen && configuration.isPressed) { return Palette.selected }
+            if isOpen, isHovered { return Palette.hover }
+            return .clear
+        }
     }
 }
