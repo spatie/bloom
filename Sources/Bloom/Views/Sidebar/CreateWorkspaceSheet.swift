@@ -111,10 +111,11 @@ struct CreateWorkspaceSheet: View {
         }
         .frame(width: Self.width)
         .background(Palette.surface)
-        .task { await load() }
-        .onChange(of: repoID) { _, _ in
-            Task { await load() }
-        }
+        // One task keyed on the project, not a task plus an onChange: the pair ran `load` twice on
+        // every open (the first pass writes `repoID`, which fired the onChange), and a load left
+        // in flight when the project changed could land another project's branches on this one's
+        // sheet. `.task(id:)` cancels the stale load; `load` checks before writing.
+        .task(id: repoID) { await load() }
         // The confirmation stands until there is something new to say, which is the moment the
         // next task starts being written. No timer, so it cannot vanish mid sentence.
         .onChange(of: prompt) { _, _ in lastCreated = nil }
@@ -451,15 +452,17 @@ struct CreateWorkspaceSheet: View {
 
     private func load() async {
         if repoID == nil {
+            // Writing `repoID` restarts this task for the resolved project, so the listing below
+            // runs once per project rather than once on open and again on the change.
             repoID = initialRepo?.id
                 ?? app.selectedWorkspace.flatMap { app.repo(for: $0) }?.id
                 ?? app.repos.first?.id
+            return
         }
         guard let repo else { return }
 
         isFocused = true
         isLoading = true
-        defer { isLoading = false }
 
         let path = repo.path
         var appDefaults = AppDefaults()
@@ -471,6 +474,12 @@ struct CreateWorkspaceSheet: View {
         // them, and where the subprocess rule wants them: this sheet was the last view on the
         // allow-list in `Tools/house-rules.sh` for calling `Git` itself.
         let context = await WorkspaceStartContext.load(repoPath: path)
+
+        // Cancelled means the project changed under this load, and these are the other
+        // project's branches. The task running for the new project owns the sheet now,
+        // spinner included.
+        guard !Task.isCancelled else { return }
+        isLoading = false
 
         branches = context.branches
         branchPrefix = context.settings.branchPrefix
