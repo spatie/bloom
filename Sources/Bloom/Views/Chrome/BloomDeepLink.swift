@@ -5,7 +5,26 @@ import BloomCore
 /// Preserves Conductor deep links so existing scripts can hand work to Bloom unchanged.
 @MainActor
 enum BloomDeepLink {
-    static let scheme = "bloom"
+    /// The schemes this copy actually answers to, read off its own bundle rather than written out.
+    ///
+    /// It was the literal `"bloom"`, and `Tools/dev-build.sh` rebrands the registered scheme to
+    /// `bloomdev` so the dev copy cannot swallow a link meant for the real one. The result was a
+    /// dev build that registered `bloomdev://`, received them, and then refused every one with
+    /// "The link must include a prompt and project path", which is not what was wrong with it.
+    /// Reading `CFBundleURLTypes` means the check can only ever disagree with LaunchServices if
+    /// the plist does.
+    static let schemes: Set<String> = {
+        let types = Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]]
+        let registered = (types ?? [])
+            .compactMap { $0["CFBundleURLSchemes"] as? [String] }
+            .flatMap { $0 }
+            .map { $0.lowercased() }
+
+        // A bundle with no URL types is `swift run` or a test host. Falling back to the shipped
+        // scheme keeps those working rather than making every link fail in a way that reads as a
+        // malformed link.
+        return registered.isEmpty ? ["bloom"] : Set(registered)
+    }()
 
     /// The Apple Event handler and SwiftUI's onOpenURL can both see the same link, and creating
     /// the same workspace twice is a lot more annoying than dropping a genuine duplicate that
@@ -18,7 +37,7 @@ enum BloomDeepLink {
         }
         lastHandled = (url, .now)
 
-        guard url.scheme?.lowercased() == Self.scheme,
+        guard let scheme = url.scheme?.lowercased(), Self.schemes.contains(scheme),
               let values = values(from: url),
               let prompt = values["prompt"]?.removingPercentEncoding,
               let path = values["path"]?.removingPercentEncoding,

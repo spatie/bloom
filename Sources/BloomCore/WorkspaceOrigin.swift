@@ -32,9 +32,16 @@ public enum WorkspaceOrigin: Sendable, Equatable, Hashable, Codable {
     ///   agent identified by the worktree it is running in. Keyed on a session id, the answer would
     ///   turn to no the moment the parent's chat was replaced, and an agent would be refused
     ///   permission over a workspace it genuinely made.
-    /// - Parameter spawnToolUseID: the single tool call that asked. Recorded because a tool call
-    ///   is retried by the model, by the transport and by a user pressing the button again, and a
-    ///   spawn with no way to recognise a repeat of itself cuts a second worktree every time.
+    /// - Parameter spawnToolUseID: a name for the single tool call that asked, which a repeat of
+    ///   that call produces again. Recorded because a tool call is retried by the model and by the
+    ///   transport, and a spawn with no way to recognise a repeat of itself cuts a second worktree
+    ///   every time.
+    ///
+    ///   **Not the model's own `tool_use` id.** MCP does not carry it to the server, so it is not
+    ///   available to record; a fresh UUID was recorded instead for a while, which meant two
+    ///   identical calls produced two ids and the dedup this field exists for could not happen.
+    ///   It is a digest of the call, which repeats exactly when the call repeats. See
+    ///   `AgentWorkspaceOrder.spawnID`.
     case agent(parentWorkspaceID: WorkspaceID, spawnToolUseID: String)
 
     /// The two columns, for the writer.

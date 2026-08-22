@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// What an agent asked Bloom to start, once the arguments have been read and checked.
@@ -41,6 +42,37 @@ public struct StartedWorkspaceSummary: Sendable, Hashable {
     }
 }
 
+extension AgentWorkspaceOrder {
+    /// A name for this call that a repeat of it would produce again.
+    ///
+    /// `WorkspaceOrigin.spawnToolUseID` is documented as the thing that stops a retried spawn
+    /// cutting a second worktree, and it could not do that job while it was a fresh UUID: two
+    /// identical calls produced two ids and therefore two worktrees. **MCP does not carry the
+    /// model's `tool_use` id to the server**, so the real one is not available to record and no
+    /// amount of plumbing inside Bloom will make it appear.
+    ///
+    /// What is available is the call itself, and a retry is by definition the same call. Digesting
+    /// it gives an id that repeats exactly when the thing it names repeats, which is the property
+    /// the column was added for. The parent is in the digest so two workspaces asking for the same
+    /// thing are two spawns, which they are.
+    ///
+    /// Truncated to sixteen hex characters. It is a dedup key inside one database, not a
+    /// cryptographic commitment, and sixty-four characters of hex in a debug print helps nobody.
+    func spawnID(parentWorkspaceID: WorkspaceID) -> String {
+        let material = [
+            parentWorkspaceID.rawValue,
+            prompt,
+            name ?? "",
+            baseBranch ?? "",
+            agent?.rawValue ?? "",
+        ].joined(separator: "\u{0}")
+
+        let digest = SHA256.hash(data: Data(material.utf8))
+
+        return digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
 /// Starting a workspace, as the app does it.
 ///
 /// Injected rather than called, because the tool runs off the main actor on a background task per
@@ -49,7 +81,7 @@ public struct StartedWorkspaceSummary: Sendable, Hashable {
 /// that called `WorkspaceManager.start` on its own would create a worktree on disk that no agent
 /// ever runs in, which is worse than refusing.
 public typealias WorkspaceStarting =
-    @Sendable (AgentWorkspaceOrder, BridgeIdentity) async throws -> StartedWorkspaceSummary
+    @Sendable (AgentWorkspaceOrder, BridgeIdentity, String) async throws -> StartedWorkspaceSummary
 
 /// `workspace_start`: an agent asking Bloom for another workspace in the same project.
 ///
@@ -194,8 +226,28 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             )
         }
 
+        // A retry of the same call is the same call. See `AgentWorkspaceOrder.spawnID`.
+        let spawnID = order.spawnID(parentWorkspaceID: identity.workspaceID)
+
         do {
-            let started = try await start(order, identity)
+            if let existing = try await alreadyStarted(spawnID: spawnID, store: store) {
+                return .json(.object([
+                    "workspace_id": .string(existing.id.rawValue),
+                    "name": .string(existing.name),
+                    "branch": .string(existing.branch),
+                    "path": .string(existing.path),
+                    "state": .string("already_started"),
+                    "note": .string(
+                        "You already asked for this one and it exists. Nothing new was created."
+                    ),
+                ]))
+            }
+        } catch {
+            return .failure("Bloom could not check for a repeat of this call: \(error.readableMessage)")
+        }
+
+        do {
+            let started = try await start(order, identity, spawnID)
 
             return .json(.object([
                 "workspace_id": .string(started.workspaceID.rawValue),
@@ -226,6 +278,12 @@ public struct WorkspaceStartTool: BridgeToolHandling {
 
         return "You already have \(live.count) workspaces running, which is Bloom's limit. "
             + "Wait for some to be reviewed and archived before starting more."
+    }
+
+    /// The workspace an earlier run of this same call produced, if there is one and it is still
+    /// here. An archived one does not count: asking again after archiving is asking again.
+    private func alreadyStarted(spawnID: String, store: Store) async throws -> Workspace? {
+        try await store.workspaces(spawnToolUseID: spawnID).first { $0.state != .archived }
     }
 
     private func filled(_ value: JSONValue?) -> String? {

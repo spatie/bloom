@@ -331,9 +331,9 @@ final class AppModel {
     private func bridgeToolbox() -> BridgeToolbox {
         BridgeToolbox(handlers: [
             WhoamiTool(),
-            WorkspaceStartTool { [weak self] order, identity in
+            WorkspaceStartTool { [weak self] order, identity, spawnID in
                 guard let self else { throw AppNotReady.stillStartingUp }
-                return try await self.startWorkspaceForAgent(order, from: identity)
+                return try await self.startWorkspaceForAgent(order, from: identity, spawnID: spawnID)
             },
         ])
     }
@@ -345,7 +345,8 @@ final class AppModel {
     /// the one it is already sitting in, and it never names it at all.
     private func startWorkspaceForAgent(
         _ order: AgentWorkspaceOrder,
-        from identity: BridgeIdentity
+        from identity: BridgeIdentity,
+        spawnID: String
     ) async throws -> StartedWorkspaceSummary {
         guard let store else { throw AppNotReady.stillStartingUp }
         guard let caller = try await store.workspace(id: identity.workspaceID),
@@ -371,7 +372,7 @@ final class AppModel {
             branch: nil,
             controls: controls,
             select: false,
-            origin: .agent(parentWorkspaceID: identity.workspaceID, spawnToolUseID: UUID().uuidString),
+            origin: .agent(parentWorkspaceID: identity.workspaceID, spawnToolUseID: spawnID),
             name: order.name
         )
 
@@ -1007,6 +1008,19 @@ final class AppModel {
             prompt, paths: staged?.attachments.map(\.path) ?? []
         )
 
+        // A caller with no controls gets the ones the owner actually chose, not the built-in
+        // fallback. The sheet and the bridge both pass controls; a `bloom://` link, the Services
+        // menu and a Shortcut do not, and those used to open a chat on `opus` whatever the Models
+        // screen said. `ComposerView.prepare` corrected it when the workspace was opened, which
+        // is a race the opening turn can win: a workspace created in the background and never
+        // looked at would run its first turn on a model nobody picked.
+        let effectiveControls: ComposerControls
+        if let controls {
+            effectiveControls = controls
+        } else {
+            effectiveControls = try await resolvedControls(for: repo)
+        }
+
         let request = WorkspaceStartRequest(
             repo: repo,
             prompt: spoken,
@@ -1019,7 +1033,7 @@ final class AppModel {
             // A terminal workspace is named after the branch the user typed, because there is no
             // task to derive a name from and nothing is going to be asked.
             name: name ?? (opensWith == .terminal ? branch : nil),
-            controls: controls,
+            controls: effectiveControls,
             opensSession: opensWith == .chat,
             // The app runs setup itself, through `WorkspaceModel`, so the output streams into the
             // transcript, a failure raises the one sentence every route says about a failed setup,
@@ -1061,6 +1075,34 @@ final class AppModel {
         // for a terminal workspace.
         await model(for: started.workspace).startSetupThenSend(prompt: opening, repo: repo)
         return started.workspace
+    }
+
+    /// The model, effort and permission mode the owner has actually chosen for this project.
+    ///
+    /// The same resolution the composer and the create sheet do, so a workspace created without a
+    /// window agrees with one created from the sheet rather than falling back to the built-in.
+    /// Repository settings first, then the Settings screen, then a machine-wide file. See
+    /// `ComposerDefaults.resolve`.
+    private func resolvedControls(for repo: Repo) async throws -> ComposerControls {
+        guard let store else { return ComposerControls() }
+
+        let appDefaults = await AppDefaults.load(from: store)
+        let repoSettings = await Task.detached(priority: .userInitiated) {
+            SettingsLoader.load(repo: repo.path)
+        }.value
+        let resolved = ComposerDefaults.resolve(repo: repoSettings, app: appDefaults)
+
+        // The backend is left at its default rather than derived from the model. Nothing in the
+        // tree maps one to the other: the composer takes it from the picker press, because
+        // choosing a model out of the Codex section IS choosing Codex, and there is no rule that
+        // reads it back off the name. Guessing here would be inventing that rule where the
+        // consequence of getting it wrong is a chat on a backend nobody chose.
+        return ComposerControls(
+            model: resolved.model,
+            effort: resolved.effort,
+            permissionMode: resolved.permissionMode,
+            isFastMode: appDefaults.fastMode
+        )
     }
 
     /// What this window does about a workspace that has just been started.

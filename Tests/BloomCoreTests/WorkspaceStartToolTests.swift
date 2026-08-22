@@ -13,12 +13,14 @@ struct WorkspaceStartToolTests {
     private final class Recorder: @unchecked Sendable {
         var orders: [AgentWorkspaceOrder] = []
         var identities: [BridgeIdentity] = []
+        var spawnIDs: [String] = []
         var failure: (any Error)?
 
         func tool() -> WorkspaceStartTool {
-            WorkspaceStartTool { [self] order, identity in
+            WorkspaceStartTool { [self] order, identity, spawnID in
                 orders.append(order)
                 identities.append(identity)
+                spawnIDs.append(spawnID)
                 if let failure { throw failure }
                 return StartedWorkspaceSummary(
                     workspaceID: WorkspaceID(rawValue: "w-new"),
@@ -309,5 +311,140 @@ struct WorkspaceStartToolTests {
         #expect(description.contains("cannot see this conversation"))
         #expect(description.contains("real money"))
         #expect(!description.lowercased().contains("subagent"))
+    }
+}
+
+/// The spawn id, which exists so a retried call does not cut a second worktree.
+///
+/// It was a fresh UUID, which meant two identical calls produced two ids and the dedup the column
+/// was added for could not happen. MCP does not carry the model's own tool-use id to the server,
+/// so the id is a digest of the call instead: it repeats exactly when the call repeats.
+@Suite("workspace_start: not twice", .tags(.persistence), .scratchDirectory)
+struct WorkspaceStartDedupTests {
+    /// A count a `@Sendable` closure may raise. The suite is serial, so no lock is needed and one
+    /// would only obscure what is being counted.
+    private final class Counter: @unchecked Sendable {
+        private(set) var value = 0
+        func bump() { value += 1 }
+    }
+
+    private func order(prompt: String = "Import the webhooks", name: String? = nil) -> AgentWorkspaceOrder {
+        AgentWorkspaceOrder(prompt: prompt, name: name)
+    }
+
+    private let parent = WorkspaceID(rawValue: "w-parent")
+
+    @Test("the same call names itself the same way twice")
+    func stableAcrossCalls() {
+        #expect(order().spawnID(parentWorkspaceID: parent) == order().spawnID(parentWorkspaceID: parent))
+    }
+
+    @Test("a different call, or a different parent, is a different spawn")
+    func differsWhereItShould() {
+        let base = order().spawnID(parentWorkspaceID: parent)
+
+        #expect(order(prompt: "Something else").spawnID(parentWorkspaceID: parent) != base)
+        #expect(order(name: "Named").spawnID(parentWorkspaceID: parent) != base)
+        #expect(order().spawnID(parentWorkspaceID: WorkspaceID(rawValue: "w-other")) != base)
+    }
+
+    @Test("it is short enough to read in a log")
+    func shortEnough() {
+        let id = order().spawnID(parentWorkspaceID: parent)
+
+        #expect(id.count == 16)
+        #expect(id.filter(\.isHexDigit).count == id.count)
+    }
+
+    @Test("a repeat of a call answers with the workspace the first one made, and cuts nothing")
+    func repeatIsRecognised() async throws {
+        let store = try makeTestStore("start-dedup")
+        let repo = try await store.upsert(Repo(name: "flare", path: "/tmp/flare", defaultBranch: "main"))
+        let caller = try await store.upsert(Workspace(
+            repoID: repo.id, name: "parent", branch: "main-work", path: "/tmp/parent",
+            baseBranch: "main", origin: .user
+        ))
+        let session = try await store.upsert(Session(workspaceID: caller.id, title: "chat"))
+        let identity = BridgeIdentity(sessionID: session.id, workspaceID: caller.id, role: .parent)
+
+        let starts = Counter()
+        let tool = WorkspaceStartTool { _, identity, spawnID in
+            starts.bump()
+            _ = try await store.upsert(Workspace(
+                repoID: repo.id,
+                name: "the child",
+                branch: "claude/the-child",
+                path: "/tmp/child",
+                baseBranch: "main",
+                origin: .agent(parentWorkspaceID: identity.workspaceID, spawnToolUseID: spawnID)
+            ))
+            return StartedWorkspaceSummary(
+                workspaceID: WorkspaceID(rawValue: "w-child"), name: "the child",
+                branch: "claude/the-child", path: "/tmp/child"
+            )
+        }
+
+        let request = MCPRequest(
+            id: .number(1), method: "workspace_start",
+            params: .object(["prompt": .string("Import the webhooks")])
+        )
+
+        let first = await tool.call(request, as: identity, store: store)
+        let second = await tool.call(request, as: identity, store: store)
+
+        #expect(!first.isError)
+        #expect(!second.isError)
+        #expect(starts.value == 1)
+        #expect(second.text.contains("already_started"))
+        #expect(second.text.contains("Nothing new was created"))
+    }
+}
+
+/// Bloom answering permission questions about its own tools.
+///
+/// Measured on a live run: the first `workspace_start` in a project stopped the parent's turn on
+/// an ask, and with nobody watching the turn sat waiting and died cancelled on quit, having
+/// started nothing. See `BridgeToolApproval` for why answering it is not a shortcut round consent.
+@Suite("Bloom's own tools")
+struct BridgeToolApprovalTests {
+    @Test("Bloom answers for the tools it wrote")
+    func ownToolsAreApproved() {
+        #expect(BridgeToolApproval.isSelfApproved(toolName: "mcp__bloom-workspace-bridge__whoami"))
+        #expect(BridgeToolApproval.isSelfApproved(toolName: "mcp__bloom-workspace-bridge__workspace_start"))
+    }
+
+    /// The tools the agent brings with it reach outside anything Bloom knows about. Nothing here
+    /// touches them, and this is the assertion that says so.
+    @Test("it answers for nothing else, whoever is asking")
+    func everythingElseStillAsks() {
+        for name in ["Bash", "Write", "Edit", "WebFetch", "mcp__figma__create_new_file"] {
+            #expect(!BridgeToolApproval.isSelfApproved(toolName: name))
+        }
+    }
+
+    /// A server whose name merely starts the same way is not ours, and a tool of ours reached
+    /// under somebody else's server name is not ours either.
+    @Test("a lookalike server name is not Bloom")
+    func lookalikesAreRefused() {
+        #expect(!BridgeToolApproval.isSelfApproved(toolName: "mcp__bloom-workspace-bridge-evil__workspace_start"))
+        #expect(!BridgeToolApproval.isSelfApproved(toolName: "mcp__other__workspace_start"))
+        #expect(!BridgeToolApproval.isSelfApproved(toolName: "workspace_start"))
+    }
+
+    /// Opting a tool in is a decision someone makes about that tool, not something it inherits by
+    /// being served from the same socket.
+    @Test("a tool of ours that is not on the list still asks")
+    func newToolsAreNotAutomaticallyIn() {
+        #expect(!BridgeToolApproval.isSelfApproved(toolName: "mcp__bloom-workspace-bridge__workspace_archive"))
+    }
+
+    @Test("the prefix follows the server's name rather than repeating it")
+    func prefixIsComposed() {
+        #expect(BridgeToolApproval.toolPrefix == "mcp__\(BridgeRegistration.serverName)__")
+    }
+
+    @Test("the transcript is told who let it through")
+    func theNoteSaysWhy() {
+        #expect(BridgeToolApproval.note.contains("Bloom's own tool"))
     }
 }

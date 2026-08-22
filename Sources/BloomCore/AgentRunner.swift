@@ -583,6 +583,15 @@ public actor AgentRunner {
             report("Could not store a permission question", error)
         }
 
+        // Bloom's own bridge tools answer themselves. Checked before the grant lookup because it
+        // needs no lookup: there is nothing stored to match and nothing for a person to weigh.
+        // See `BridgeToolApproval` for why this is not a shortcut round consent.
+        if BridgeToolApproval.isSelfApproved(toolName: ask.toolName), let claimed = pending.take(ask.requestID) {
+            await write(answerTo: claimed, decision: .allow(scope: .once))
+            await close(claimed, as: PermissionAskOutcome.auto, note: BridgeToolApproval.note)
+            return
+        }
+
         // Both awaits below are suspension points on this actor, and the question is already on
         // screen by the time they run, so a person can answer it while the grant lookup is still
         // in flight. `claim` is what stops the two of them both reaching the pipe: whoever gets
