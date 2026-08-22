@@ -363,6 +363,15 @@ enum Palette {
     /// The line number column, which is the sunken step and nothing else.
     static let diffGutter = surfaceSunken
 
+    /// A line under review, and the band holding its comment. The one amber wash in the window,
+    /// on `warning`'s hue, because the diff's own washes have already spent green and red: a
+    /// comment is neither an addition nor a problem, and either of those colours would claim it
+    /// is. Two steps of the same wash rather than two hues, so a commented line and its band read
+    /// as one annotation instead of a line with a strip stuck under it. Both are translucent for
+    /// the reason the diff washes are: the ground shows through, so neither needs a dark twin.
+    static let reviewLine = warning.opacity(0.14)
+    static let reviewBand = warning.opacity(0.07)
+
     // MARK: Syntax
 
     static let synKeyword = dynamic(light: 0x9B2393, dark: 0xD08EE0)

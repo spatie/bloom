@@ -29,6 +29,18 @@ struct DiffView: View {
     @State private var revealedGaps: [Int: Int] = [:]
     @State private var fileLines: [String]?
 
+    /// Where every pending comment on this file draws, recomputed by `rebuild` so the bands and
+    /// the rows they sit under always come from the same pass. See `ReviewPlacements`.
+    @State private var placements: [ReviewPlacement] = []
+    /// The line whose comment editor is open, and what has been typed into it. The text lives
+    /// here rather than in the editor row because that row sits in a lazy stack and is destroyed
+    /// when scrolled far enough away, which must not take a half-written comment with it.
+    @State private var draftSpot: ReviewSpot?
+    @State private var draftText = ""
+    /// The evidence for the comment being written, captured when the editor opened. See
+    /// `beginDraft` for why it is not captured at commit.
+    @State private var draftAnchor: ReviewCommentAnchor?
+
     /// The patch as git wrote it, kept so the whitespace toggle can refold it without going back
     /// to git for a diff it has already been given.
     @State private var source: FileDiff?
@@ -94,6 +106,17 @@ struct DiffView: View {
         .task(id: LoadID(workspaceID: model.workspace.id, file: file)) { await load() }
         .onChange(of: isSideBySide) { _, _ in rebuild() }
         .onChange(of: ignoresWhitespace) { _, _ in refold() }
+        .onChange(of: fileComments) { _, _ in rebuild() }
+        .onChange(of: draftSpot) { _, _ in rebuild() }
+        .onChange(of: model.changesGeneration) { _, _ in refreshWorktreeCopy() }
+        // Leaving the file with the editor open commits what was typed rather than dropping it:
+        // a comment chip appearing is visible and removable, a sentence silently gone is neither.
+        // Cancel and Escape remain the ways to discard on purpose.
+        .onDisappear {
+            if !draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                commitDraft()
+            }
+        }
         // Only the path, not the whole file: a refresh that changes nothing but the line counts
         // must not throw the user out of the editor they are typing in. A path with unsaved text
         // behind it stays in Edit for the reason the initialiser gives.
@@ -236,8 +259,12 @@ struct DiffView: View {
         guard !Task.isCancelled else { return }
 
         // The worktree copy is what the between-hunks expanders reveal. A file git deleted, or one
-        // that is not text, simply has no expanders.
-        fileLines = model.contents(of: path).map { $0.components(separatedBy: "\n") }
+        // that is not text, simply has no expanders. Split by the anchor's own rule rather than
+        // `components(separatedBy:)`, which counts a phantom last line on a file ending in a
+        // newline: the review payload resolves against `ReviewCommentAnchor.split`, and the bands
+        // resolve against these lines, so the two splits disagreeing at the end of the file is
+        // exactly the band-versus-payload disagreement `ReviewCommentRender` warns against.
+        fileLines = model.contents(of: path).map(ReviewCommentAnchor.split)
         phase = .ready(document)
         rebuild()
     }
@@ -364,7 +391,23 @@ struct DiffView: View {
                 carry: document.carries[line.index] ?? LexState(),
                 emphasis: document.emphasis[line.index] ?? [],
                 numbers: .both,
-                width: width
+                width: width,
+                isCommented: isCommented(line, numbers: .both),
+                onComment: { beginDraft(at: $0) }
+            )
+
+        case let .commentBand(_, placement):
+            ReviewCommentBandView(placement: placement, width: width) {
+                let model = model
+                Task { await model.removeReviewComment(id: placement.comment.id) }
+            }
+
+        case .commentEditor:
+            ReviewCommentEditorView(
+                text: $draftText,
+                width: width,
+                onCommit: commitDraft,
+                onCancel: cancelDraft
             )
 
         case let .pair(_, pair):
@@ -391,8 +434,141 @@ struct DiffView: View {
             carry: line.flatMap { document.carries[$0.index] } ?? LexState(),
             emphasis: line.flatMap { document.emphasis[$0.index] } ?? [],
             numbers: numbers,
-            width: width
+            width: width,
+            isCommented: isCommented(line, numbers: numbers),
+            onComment: { beginDraft(at: $0) }
         )
+    }
+
+    // MARK: - Review comments
+
+    /// The pending comments on this one file, which is all a diff of it can place.
+    private var fileComments: [ReviewComment] {
+        model.reviewComments.filter { $0.filePath == file.path }
+    }
+
+    /// Every printed line wearing a comment or the open editor, for the row tint.
+    private var commentedSpots: Set<ReviewSpot> {
+        var spots = Set(placements.compactMap(\.spot))
+        if let draftSpot { spots.insert(draftSpot) }
+        return spots
+    }
+
+    /// The spots one rendered row answers for, filtered the way `DiffLineView.offeredSpot` is,
+    /// so the band always lands under the pane that offered the `+`.
+    private func spots(of line: DiffLine, numbers: DiffLineView.Numbers) -> [ReviewSpot] {
+        var result: [ReviewSpot] = []
+        if numbers != .new, let old = line.oldNumber {
+            result.append(ReviewSpot(side: .old, line: old))
+        }
+        if numbers != .old, let new = line.newNumber {
+            result.append(ReviewSpot(side: .new, line: new))
+        }
+        return result
+    }
+
+    private func isCommented(_ line: DiffLine?, numbers: DiffLineView.Numbers) -> Bool {
+        guard let line else { return false }
+        return spots(of: line, numbers: numbers).contains { commentedSpots.contains($0) }
+    }
+
+    /// The anchor is captured here, when the editor opens, not at commit. The diff reloads
+    /// underneath an open editor (the six second poll re-keys the load task whenever the file's
+    /// counts move), and an anchor captured at commit would describe whatever text wears the
+    /// spot's number by then, which is not the line the reviewer pressed `+` on. Worse, a spot
+    /// the reloaded hunks no longer print made a commit-time capture fail outright, and the
+    /// failure path threw the typed comment away. Captured up front, the evidence is exactly
+    /// what was on screen when the comment was begun, and the commit can never lose the text.
+    private func beginDraft(at spot: ReviewSpot) {
+        guard case let .ready(document) = phase,
+              let anchor = ReviewCapture.anchor(
+                at: spot, hunks: document.file.hunks, fileLines: fileLines
+              )
+        else { return }
+        draftAnchor = anchor
+        draftSpot = spot
+    }
+
+    private func cancelDraft() {
+        draftSpot = nil
+        draftText = ""
+        draftAnchor = nil
+    }
+
+    /// Return, the Comment button, or leaving the file with text still in the editor.
+    private func commitDraft() {
+        guard let spot = draftSpot, let anchor = draftAnchor else { return }
+        let body = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else {
+            cancelDraft()
+            return
+        }
+        cancelDraft()
+        let model = model
+        let path = file.path
+        Task {
+            await model.addReviewComment(filePath: path, spot: spot, anchor: anchor, body: body)
+        }
+    }
+
+    /// Bands and the editor, appended directly under the row that answers for their spot.
+    private func appendAnnotations(_ builder: inout RowBuilder, spots rowSpots: [ReviewSpot]) {
+        for spot in rowSpots {
+            for placement in placements where placement.spot == spot {
+                builder.append { .commentBand(id: $0, placement: placement) }
+            }
+            if draftSpot == spot {
+                builder.append { .commentEditor(id: $0, spot: spot) }
+            }
+        }
+    }
+
+    /// The comments the diff on screen cannot put under a line, said at the top rather than
+    /// dropped: they are still attached and still going with the next message.
+    private func appendUnplacedComments(_ builder: inout RowBuilder) {
+        for placement in placements where placement.spot == nil {
+            builder.append { .commentBand(id: $0, placement: placement) }
+        }
+    }
+
+    /// Re-checks the pending comments against the worktree after the changes poll lands.
+    ///
+    /// When an edit moves the file's diff counts, the whole view reloads: the load task is keyed
+    /// on the `ChangedFile` value, and the poll writes a fresh one. This is the case that keying
+    /// cannot see, and the one the bands' honesty depends on: an edit that leaves the counts
+    /// where they were (rewording a line, one for one) changes nothing this view is keyed on,
+    /// and without this re-read the bands would go on vouching for lines the worktree no longer
+    /// holds. Only the worktree copy is re-read; the hunks on screen stay as they are, and a
+    /// comment the stale hunks can no longer vouch for is reported hidden or outdated by
+    /// `ReviewPlacements` rather than pinned to the wrong line. Refreshing the diff text itself
+    /// is the reload's job, not this one's. The read is synchronous on purpose: it only runs
+    /// while comments or an open editor are pending on this one file, and the load path already
+    /// reads the same file the same way.
+    private func refreshWorktreeCopy() {
+        guard case .ready = phase, !fileComments.isEmpty || draftSpot != nil else { return }
+        let fresh = model.contents(of: file.path).map(ReviewCommentAnchor.split)
+        guard fresh != fileLines else { return }
+        fileLines = fresh
+        rebuild()
+    }
+
+    /// The between-hunks context lines the reader has revealed, keyed by new-side number, which
+    /// `ReviewPlacements` needs because those lines are printed and the hunks do not know it.
+    private func revealedContextLines(_ document: DiffDocument) -> [Int: String] {
+        guard let fileLines else { return [:] }
+        var revealed: [Int: String] = [:]
+        let hunks = document.file.hunks
+        for (index, hunk) in hunks.enumerated() {
+            let previousEnd = index == 0 ? 1 : hunks[index - 1].newStart + hunks[index - 1].newCount
+            let gap = hunk.newStart - previousEnd
+            guard gap > 0 else { continue }
+            let count = min(revealedGaps[index] ?? 0, gap)
+            for number in (hunk.newStart - count)..<hunk.newStart
+            where number >= 1 && number - 1 < fileLines.count {
+                revealed[number] = fileLines[number - 1]
+            }
+        }
+        return revealed
     }
 
     // MARK: Row building
@@ -402,11 +578,33 @@ struct DiffView: View {
             rows = []
             return
         }
+        // Placed in the same pass that lays the rows out, so a band can never survive the row it
+        // was under: whatever moves them (a refresh, a removed comment, a whitespace refold)
+        // lands here and both are rebuilt from the same facts.
+        placements = ReviewPlacements.place(
+            fileComments,
+            in: document.file,
+            currentLines: fileLines,
+            revealedNewLines: revealedContextLines(document)
+        )
         rows = isSideBySide ? splitRows(document) : unifiedRows(document)
+
+        // The editor follows its line, and a rebuild can take that line off the screen: a reload
+        // after the agent edits, or a whitespace refold dropping the expanded run the line sat
+        // in. The editor then moves to the top of the diff, next to the unplaced bands, rather
+        // than vanishing, because a vanished editor takes the half-typed comment with it and
+        // that is the one loss this feature is not allowed. The id is the one value the builder
+        // never handed out, so it collides with nothing.
+        if let draftSpot, !rows.contains(where: {
+            if case .commentEditor = $0 { return true } else { return false }
+        }) {
+            rows.insert(.commentEditor(id: rows.count, spot: draftSpot), at: 0)
+        }
     }
 
     private func unifiedRows(_ document: DiffDocument) -> [DiffRow] {
         var builder = RowBuilder()
+        appendUnplacedComments(&builder)
 
         for (hunkIndex, hunk) in document.file.hunks.enumerated() {
             appendGap(&builder, document: document, hunkIndex: hunkIndex, hunk: hunk, split: false)
@@ -423,6 +621,7 @@ struct DiffView: View {
                 case let .visible(range):
                     for offset in range {
                         builder.append { .line(id: $0, line: lines[offset]) }
+                        appendAnnotations(&builder, spots: spots(of: lines[offset], numbers: .both))
                     }
                 case let .hidden(runID, count):
                     builder.append { .runExpander(id: $0, runID: runID, hidden: count) }
@@ -434,6 +633,7 @@ struct DiffView: View {
 
     private func splitRows(_ document: DiffDocument) -> [DiffRow] {
         var builder = RowBuilder()
+        appendUnplacedComments(&builder)
 
         for (hunkIndex, hunk) in document.file.hunks.enumerated() {
             appendGap(&builder, document: document, hunkIndex: hunkIndex, hunk: hunk, split: true)
@@ -454,6 +654,17 @@ struct DiffView: View {
                 case let .visible(range):
                     for offset in range {
                         builder.append { .pair(id: $0, row: pairs[offset]) }
+                        // Each half answers for its own side, the same split
+                        // `DiffLineView.offeredSpot` makes, so a band lands once however the
+                        // context line is mirrored across the panes.
+                        var rowSpots: [ReviewSpot] = []
+                        if let left = pairs[offset].left {
+                            rowSpots += spots(of: left, numbers: .old)
+                        }
+                        if let right = pairs[offset].right {
+                            rowSpots += spots(of: right, numbers: .new)
+                        }
+                        appendAnnotations(&builder, spots: rowSpots)
                     }
                 case let .hidden(runID, count):
                     builder.append { .runExpander(id: $0, runID: runID, hidden: count) }
@@ -506,6 +717,9 @@ struct DiffView: View {
             } else {
                 builder.append { .line(id: $0, line: line) }
             }
+            // A revealed line is as commentable as a printed one, so its bands follow it. New
+            // side only: the revealed copy comes from the worktree, which has no old side.
+            appendAnnotations(&builder, spots: spots(of: line, numbers: .new))
         }
     }
 

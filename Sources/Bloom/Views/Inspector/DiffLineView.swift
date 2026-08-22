@@ -21,6 +21,15 @@ struct DiffLineView: View {
     /// Total width of the row, including gutters. Fixed by the file's widest line so every row
     /// scrolls horizontally as one sheet rather than each row scrolling on its own.
     var width: CGFloat
+    /// Whether a pending review comment is anchored here, which tints the row as under
+    /// discussion the way the band under it is.
+    var isCommented: Bool = false
+    /// Opens the review comment editor at this line. Nil, the default, draws no `+` at all,
+    /// which is what every caller that is not the review's own diff wants.
+    var onComment: ((ReviewSpot) -> Void)? = nil
+
+    @State private var isHovered = false
+    @FocusState private var isPlusFocused: Bool
 
     var body: some View {
         HStack(spacing: 0) {
@@ -28,6 +37,25 @@ struct DiffLineView: View {
             content
         }
         .frame(width: width, height: CodeMetrics.rowHeight, alignment: .leading)
+        // One element per line, said as a sentence. Left as it was drawn, VoiceOver read a row as
+        // four unrelated fragments, "128", "129", "+", and then the code, and whether a line was
+        // added or removed reached the reader only as a background wash and a one-character
+        // marker that is a bare space on a context line. A colour is not a label.
+        //
+        // Collapsed HERE, before the comment button's overlay, and not at the foot of the body.
+        // `children: .ignore` swallows every descendant of whatever it is applied to, so applied
+        // after the overlay it removed the button from the accessibility tree, measured by the
+        // button vanishing from the AX hierarchy, and the claim in `commentButton`'s comment that
+        // a keyboard and VoiceOver can reach it was quietly false. In this order the row is one
+        // spoken sentence and the button is its sibling, which is both true and reachable.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHidden(line == nil)
+        .onHover { isHovered = $0 }
+        .overlay(alignment: .leading) { commentButton }
+        // Over the diff wash, not instead of it: an addition under review stays an addition,
+        // and the amber says "under discussion" on top of whatever the line already was.
+        .background(isCommented ? Palette.reviewLine : .clear)
         // Painted here, on the row, rather than on the gutter and the code separately, which is
         // what left a band of pane colour between a removed line and the added line under it.
         // `CodeMetrics.rowHeight` is a line of type plus three points of air, and an `HStack`
@@ -40,13 +68,6 @@ struct DiffLineView: View {
         // are affected, and they now meet. Behind the content rather than over it, so the word
         // level emphasis inside `CodeText` still sits on top and is neither moved nor clipped.
         .background(background)
-        // One element per line, said as a sentence. Left as it was drawn, VoiceOver read a row as
-        // four unrelated fragments, "128", "129", "+", and then the code, and whether a line was
-        // added or removed reached the reader only as a background wash and a one-character
-        // marker that is a bare space on a context line. A colour is not a label.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityHidden(line == nil)
     }
 
     /// What this line is, where it is, and what it says, in that order.
@@ -64,6 +85,56 @@ struct DiffLineView: View {
 
         let text = line.text.trimmingCharacters(in: .whitespaces)
         return text.isEmpty ? "\(state), empty" : "\(state), \(text)"
+    }
+
+    // MARK: - Commenting
+
+    /// The spot a comment left on this row would anchor to, filtered to the side this view is
+    /// drawing. In side by side a context line appears in both panes; only the new-side pane
+    /// offers it, so one line never grows two buttons meaning the same thing.
+    private var offeredSpot: ReviewSpot? {
+        guard onComment != nil, let spot = line?.reviewSpot else { return nil }
+        switch numbers {
+        case .both: return spot
+        case .old: return spot.side == .old ? spot : nil
+        case .new: return spot.side == .new ? spot : nil
+        }
+    }
+
+    /// The `+` in the gutter, sitting over the line number the way Conductor draws it.
+    ///
+    /// Always in the hierarchy and hidden by drawing in clear rather than built on hover or
+    /// faded with `.opacity`, so it is reachable by Tab under Full Keyboard Access and readable
+    /// by VoiceOver: a control that only exists while a pointer floats over it is a control a
+    /// keyboard can never reach. Not `.opacity(0)`, on the button or on its label, because
+    /// either took the element out of the accessibility tree entirely, measured by it vanishing
+    /// from the AX hierarchy, which silently broke the sentence before this one. Clear colours
+    /// draw the same nothing while the button keeps its hit region and its element, which is
+    /// also what makes the hover reveal feel instant.
+    @ViewBuilder
+    private var commentButton: some View {
+        if let spot = offeredSpot {
+            let shown = isHovered || isPlusFocused
+            Button {
+                onComment?(spot)
+            } label: {
+                Image(systemName: "plus")
+                    .font(Typo.micro)
+                    .fontWeight(.bold)
+                    .foregroundStyle(shown ? Palette.textInverted : .clear)
+                    .frame(width: 16, height: 16)
+                    .background(
+                        shown ? Palette.accentFill : .clear,
+                        in: RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focused($isPlusFocused)
+            .padding(.leading, Metrics.spacingTight)
+            .help("Comment on this line")
+            .accessibilityLabel("Comment on line \(spot.line)")
+        }
     }
 
     // MARK: - Gutter

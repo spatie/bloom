@@ -86,12 +86,24 @@ struct TranscriptRowView: View, Equatable {
     private var content: some View {
         switch row.kind {
         case .user:
-            UserTurnRowView(
-                text: userTurn.body,
-                attachments: userTurn.paths,
-                workspace: workspace,
-                maxWidth: maxBubbleWidth
-            )
+            // A review turn first: its message is mostly scaffolding the reader never typed, so
+            // it renders as the typed words plus a chip per comment. `split` is strict and
+            // returns nil for everything else, which falls through to the ordinary bubble.
+            if let review = ReviewTurn.split(userText) {
+                UserTurnRowView(
+                    text: review.message,
+                    reviewChips: review.chips,
+                    workspace: workspace,
+                    maxWidth: maxBubbleWidth
+                )
+            } else {
+                UserTurnRowView(
+                    text: userTurn.body,
+                    attachments: userTurn.paths,
+                    workspace: workspace,
+                    maxWidth: maxBubbleWidth
+                )
+            }
 
         case .assistantText:
             if let text = assistantText, !text.isEmpty {

@@ -230,15 +230,26 @@ struct TranscriptListView: View {
                     // see `TranscriptModel.sending`, and `fades` below, which is what stops the
                     // stored row fading in over the top of a bubble already on screen.
                     if let sending = transcript.sending {
-                        let turn = AttachmentTrailer.split(sending.body)
-                        UserTurnRowView(
-                            text: turn.body,
-                            attachments: turn.paths,
-                            workspace: transcript.workspace,
-                            maxWidth: maxBubbleWidth
-                        )
-                        .padding(.horizontal, TranscriptLayout.inset)
-                        .id(Self.sendingID)
+                        if let review = ReviewTurn.split(sending.body) {
+                            UserTurnRowView(
+                                text: review.message,
+                                reviewChips: review.chips,
+                                workspace: transcript.workspace,
+                                maxWidth: maxBubbleWidth
+                            )
+                            .padding(.horizontal, TranscriptLayout.inset)
+                            .id(Self.sendingID)
+                        } else {
+                            let turn = AttachmentTrailer.split(sending.body)
+                            UserTurnRowView(
+                                text: turn.body,
+                                attachments: turn.paths,
+                                workspace: transcript.workspace,
+                                maxWidth: maxBubbleWidth
+                            )
+                            .padding(.horizontal, TranscriptLayout.inset)
+                            .id(Self.sendingID)
+                        }
                     }
 
                     StreamingTailView(transcript: transcript)

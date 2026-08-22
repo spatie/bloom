@@ -34,6 +34,13 @@ struct ComposerPrompt<Footer: View>: View {
     /// conversation, a draft id in the create sheet.
     var attachmentKey: String
 
+    /// The review comments riding with the next message, drawn as chips above the text the way
+    /// the `/command` chip is. Only a conversation has any: the create sheet has no diff to have
+    /// commented on, so its default stays empty and nothing about the sheet changes.
+    var reviewComments: [ReviewComment] = []
+    var onRemoveReviewComment: @MainActor (ReviewCommentID) -> Void = { _ in }
+    var onOpenReviewComment: @MainActor (ReviewComment) -> Void = { _ in }
+
     var placeholder: String = ComposerEditor.chatPlaceholder
     /// What to draw the editor at, already clamped by the caller, which is the one place that can
     /// reconcile the text's own height with a divider the user may have dragged.
@@ -83,6 +90,18 @@ struct ComposerPrompt<Footer: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.spacingWide) {
+            if !reviewComments.isEmpty {
+                ChipFlow(spacing: Metrics.spacingSmall, lineSpacing: Metrics.spacingSmall) {
+                    ForEach(reviewComments) { comment in
+                        ReviewCommentChip(
+                            comment: comment,
+                            onRemove: { onRemoveReviewComment(comment.id) },
+                            onOpen: { onOpenReviewComment(comment) }
+                        )
+                    }
+                }
+            }
+
             if let name = command.name {
                 SlashCommandChip(
                     name: name,
