@@ -81,25 +81,47 @@ echo "==> rendering the background"
 "$CHROME" --headless --disable-gpu --hide-scrollbars \
   --screenshot="$WORK/bg-1320.png" --window-size=660,400 --force-device-scale-factor=2 \
   "file://$TOOLS/background.html" 2>/dev/null
+# stderr stays connected: a Chrome render that silently produced nothing shows
+# up here as tiffutil naming the missing file, which is the only clue there is.
 tiffutil -cathidpicheck "$WORK/bg-660.png" "$WORK/bg-1320.png" \
-  -out "$WORK/background.tiff" >/dev/null 2>&1
+  -out "$WORK/background.tiff" >/dev/null
 
 echo "==> laying out the volume"
 # A leftover mount with the same volume name would make hdiutil mount the new
 # one somewhere unexpected, and the postprocess step needs the real path.
 hdiutil detach /Volumes/Bloom >/dev/null 2>&1 || true
 rm -f "$WORK/Bloom.dmg" "$WORK/rw.dmg" "$OUT"
-"$VENV/bin/dmgbuild" \
+# Captured rather than discarded. These used to end in `>/dev/null 2>&1`, which
+# under `set -e` meant a dmgbuild failure stopped the script with four lines of
+# progress and no account of what went wrong, which is the mistake the head of
+# Tools/master.sh describes at length. Quiet when it works, printed whole when
+# it does not.
+if ! "$VENV/bin/dmgbuild" \
   -s "$TOOLS/settings.py" \
   -D app="$APP" -D background="$WORK/background.tiff" \
-  Bloom "$WORK/Bloom.dmg" >/dev/null 2>&1
+  Bloom "$WORK/Bloom.dmg" >"$WORK/dmgbuild.log" 2>&1; then
+  cat "$WORK/dmgbuild.log" >&2
+  echo "==> dmgbuild failed. The whole log is above, and in $WORK/dmgbuild.log" >&2
+  exit 1
+fi
 
 echo "==> hiding the background file"
-hdiutil convert "$WORK/Bloom.dmg" -format UDRW -o "$WORK/rw.dmg" >/dev/null 2>&1
-MOUNT="$(hdiutil attach "$WORK/rw.dmg" -nobrowse 2>/dev/null | tail -1 | awk -F'\t' '{print $NF}' | sed 's/^ *//')"
+# stdout is progress nobody reads; stderr is the only account of a failure and
+# stays connected.
+hdiutil convert "$WORK/Bloom.dmg" -format UDRW -o "$WORK/rw.dmg" >/dev/null
+MOUNT="$(hdiutil attach "$WORK/rw.dmg" -nobrowse | tail -1 | awk -F'\t' '{print $NF}' | sed 's/^ *//')"
+if [ -z "$MOUNT" ] || [ ! -d "$MOUNT" ]; then
+  echo "==> could not find where hdiutil mounted $WORK/rw.dmg" >&2
+  exit 1
+fi
+# Without this, a postprocess failure leaves the writable image mounted, and the
+# next run's detach-by-volume-name above can then grab the stale mount instead
+# of a fresh one.
+trap '[ -n "${MOUNT:-}" ] && hdiutil detach "$MOUNT" >/dev/null 2>&1 || true' EXIT
 "$VENV/bin/python" "$TOOLS/postprocess.py" "$MOUNT"
-hdiutil detach "$MOUNT" >/dev/null 2>&1
-hdiutil convert "$WORK/rw.dmg" -format UDZO -o "$OUT" >/dev/null 2>&1
+hdiutil detach "$MOUNT" >/dev/null
+MOUNT=""
+hdiutil convert "$WORK/rw.dmg" -format UDZO -o "$OUT" >/dev/null
 rm -f "$WORK/Bloom.dmg" "$WORK/rw.dmg"
 
 echo "==> $OUT"
