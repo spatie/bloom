@@ -82,10 +82,12 @@ final class ComposerOutputStyleCatalog {
         }
 
         let found = await task.value
-        if running == task {
-            running = nil
-            runningPath = nil
-        }
+        // Superseded means another project's scan replaced this one while its disk walk was
+        // out; its answer must not land. See `SlashCommandCatalog.scan` for the failure this
+        // guard closes.
+        guard running == task else { return }
+        running = nil
+        runningPath = nil
 
         loadedPath = project
         loadedAt = Date()

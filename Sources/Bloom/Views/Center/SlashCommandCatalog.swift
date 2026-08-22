@@ -81,10 +81,13 @@ final class SlashCommandCatalog {
         }
 
         let found = await task.value
-        if running == task {
-            running = nil
-            runningPath = nil
-        }
+        // Superseded means another checkout's scan replaced this one while its disk walk was
+        // out. Its answer must not land: `await` does not stop for cancellation on a
+        // non-throwing task, and a slow walk for workspace A that resumed after B's finished
+        // used to write A's commands, and `loadedPath = A`, over the list B had just built.
+        guard running == task else { return }
+        running = nil
+        runningPath = nil
 
         loadedPath = workspacePath
         loadedAt = Date()

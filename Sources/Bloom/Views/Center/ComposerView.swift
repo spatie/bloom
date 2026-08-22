@@ -397,12 +397,19 @@ struct ComposerView: View {
 
         guard let store = app.store else { return }
         let sessionID = transcript.session.id
-        isFastMode = (try? await store.setting(
+        let storedFastMode = (try? await store.setting(
             ComposerControls.fastModeKey(sessionID: sessionID)
         )) == "1"
-        outputStyle = (try? await store.setting(
+        let storedStyle = (try? await store.setting(
             ComposerControls.outputStyleKey(sessionID: sessionID)
         )) ?? OutputStyle.defaultName
+        // Checked before every write of the pane's state from here down. The pane is reused
+        // across sessions, and an actor call does not stop for cancellation, so a switch made
+        // while this task was reading used to let the OLD session's answers resume and land on
+        // the state the NEW session's own preparation had just written.
+        guard !Task.isCancelled else { return }
+        isFastMode = storedFastMode
+        outputStyle = storedStyle
 
         // The marker is what separates "never opened" from "opened and left alone", which the
         // column values cannot express: a session created with the built-in defaults looks exactly
@@ -432,6 +439,7 @@ struct ComposerView: View {
                 ComposerControls.fastModeKey(sessionID: sessionID),
                 appDefaults.fastMode ? "1" : nil
             )
+            guard !Task.isCancelled else { return }
         }
 
         // Same shape as fast mode, and for the same reason: neither is a column, so neither can be
@@ -445,6 +453,7 @@ struct ComposerView: View {
                 ComposerControls.outputStyleKey(sessionID: sessionID),
                 OutputStyle.isDefault(appDefaults.outputStyle) ? nil : appDefaults.outputStyle
             )
+            guard !Task.isCancelled else { return }
         }
 
         let session = transcript.session
