@@ -61,7 +61,7 @@ public struct MarkdownView: View {
         let blocks = isStreaming
             ? MarkdownParseCache.streamingBlocks(for: text)
             : MarkdownParseCache.blocks(for: text)
-        // Which addresses may be opened, and which may not, is `TranscriptLink.opens`. It is not
+        // Which addresses may be opened, and which may not, is `LinkPolicy.opens`. It is not
         // a rule about this view: the user's own bubble is drawn by a different one and goes
         // through the same door.
         MarkdownBlocksView(blocks: blocks)
@@ -70,8 +70,8 @@ public struct MarkdownView: View {
             // Not while it is still being written. A menu rebuilt on every token would be work
             // done for a reader who is not there yet, and there is nothing to copy until the
             // sentence carrying the address has finished arriving.
-            .transcriptLinkMenu(isStreaming ? [] : TranscriptLink.addresses(in: blocks))
-            .transcriptLinkActions(isStreaming ? [] : TranscriptLink.addresses(in: blocks))
+            .transcriptLinkMenu(isStreaming ? [] : LinkPolicy.addresses(in: blocks))
+            .transcriptLinkActions(isStreaming ? [] : LinkPolicy.addresses(in: blocks))
     }
 }
 
@@ -403,7 +403,7 @@ enum InlineNSAttributes {
             case let .link(text, url):
                 let start = output.length
                 render(text, font: font, code: code, color: color, traits: traits, into: output)
-                if let target = URL(string: url), TranscriptLink.opens(target) {
+                if let target = URL(string: url), LinkPolicy.opens(target) {
                     output.addAttribute(
                         .link, value: target,
                         range: NSRange(location: start, length: output.length - start)
@@ -540,7 +540,7 @@ private enum InlineAttributes {
                 // streaming row drew a scheme the app refuses as a live blue link that did
                 // nothing when clicked, then flipped to plain text as the row settled, which is
                 // the settle-jump this renderer pair exists to prevent.
-                if let target = URL(string: url), TranscriptLink.opens(target) {
+                if let target = URL(string: url), LinkPolicy.opens(target) {
                     var child = render(text, font: font, code: code, color: Palette.link, intents: intents)
                     child.foregroundColor = Palette.link
                     child.underlineStyle = .single
