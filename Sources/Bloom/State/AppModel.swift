@@ -198,6 +198,22 @@ final class AppModel {
     /// really is expendable. RootView presents the confirmation from this.
     var pendingArchive: ArchiveRequest?
     var searchQuery = ""
+    /// The transcript half of the search screen, one row per workspace. Held here rather than in
+    /// `SearchView` for the same reason `searchQuery` is: the screen is destroyed and rebuilt
+    /// every time the selection leaves it, and a result list that had to be fetched again on the
+    /// way back would flash empty.
+    var transcriptResults: [TranscriptWorkspaceMatches] = []
+    /// True while there is transcript history the index has not reached yet, so the search screen
+    /// can say that the answer is still filling in rather than quietly showing half of it.
+    var isTranscriptIndexIncomplete = false
+    /// Set by a transcript result on its way to a workspace, read once by the transcript that
+    /// arrives there. See `AppModel+TranscriptSearch`.
+    var pendingTranscriptTarget: TranscriptSearchTarget?
+
+    /// Both outside observation: nothing draws from a task handle, and a tracked write from a
+    /// keystroke handler is a mid-update mutation this file avoids everywhere else.
+    @ObservationIgnored var transcriptSearchTask: Task<Void, Never>?
+    @ObservationIgnored var transcriptBackfillTask: Task<Void, Never>?
     /// What Home's list is narrowed to.
     ///
     /// Here rather than in `HomeView`'s `@State` for the same reason `searchQuery` is: `HomeView`
@@ -321,6 +337,9 @@ final class AppModel {
         // every project it has anything to do is one that is drawing its initials meanwhile. See
         // `searchForMissingProjectIcons`.
         startProjectIconSearch()
+        // After that one, and for the same reason: this walks every message ever written and the
+        // window is already on screen. See `AppModel+TranscriptSearch`.
+        startTranscriptIndexBackfill()
     }
 
     /// The tools the bridge serves, with the app-side half of `workspace_start` bound in.

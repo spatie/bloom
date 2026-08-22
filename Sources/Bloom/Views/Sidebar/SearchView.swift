@@ -32,7 +32,7 @@ struct SearchView: View {
                     .foregroundStyle(Palette.textTertiary)
                     .accessibilityHidden(true)
 
-                TextField("Search workspaces, branches and projects", text: $app.searchQuery)
+                TextField("Search workspaces, branches and transcripts", text: $app.searchQuery)
                     .textFieldStyle(.plain)
                     .font(.title3)
                     .foregroundStyle(Palette.textPrimary)
@@ -83,13 +83,13 @@ struct SearchView: View {
             ContentUnavailableView(
                 "Type to search",
                 systemImage: "magnifyingglass",
-                description: Text("Names, branches and project names are all matched.")
+                description: Text("Names, branches, projects, and everything the agents said.")
             )
-        } else if hits.isEmpty {
+        } else if hits.isEmpty && app.transcriptResults.isEmpty {
             ContentUnavailableView.search(text: app.searchQuery)
         } else {
             ScrollView {
-                LazyVStack(spacing: Metrics.spacingTight) {
+                LazyVStack(alignment: .leading, spacing: Metrics.spacingTight) {
                     ForEach(hits) { hit in
                         SearchResultRow(
                             hit: hit,
@@ -99,6 +99,40 @@ struct SearchView: View {
                         .onHoverChange { inside in
                             hovered = inside ? hit.id : (hovered == hit.id ? nil : hovered)
                         }
+                    }
+
+                    if !app.transcriptResults.isEmpty {
+                        // A heading only over the second list. The first one needs none: what a
+                        // workspace is called is what everybody assumes a search field searches,
+                        // and labelling the obvious half made the screen read as a form.
+                        Text("In transcripts")
+                            .font(Typo.caption)
+                            .foregroundStyle(Palette.textTertiary)
+                            .padding(.horizontal, Metrics.inset)
+                            .padding(.top, hits.isEmpty ? 0 : Metrics.inset)
+
+                        ForEach(app.transcriptResults) { result in
+                            TranscriptResultRow(
+                                result: result,
+                                workspace: workspace(result.workspaceID),
+                                repo: workspace(result.workspaceID).flatMap { app.repo(for: $0) },
+                                isArchived: archived.contains { $0.id == result.workspaceID },
+                                openWorkspace: { open(result) },
+                                openMatch: { match in Task { await app.open(match) } }
+                            )
+                        }
+                    }
+
+                    if app.isTranscriptIndexIncomplete {
+                        // Said out loud rather than hidden, because a search of a half built index
+                        // is a search that can be wrong, and a wrong "No Results" about work the
+                        // user knows they did is the one answer this screen must never give
+                        // silently.
+                        Label("Still indexing older transcripts", systemImage: "clock")
+                            .font(Typo.caption)
+                            .foregroundStyle(Palette.textTertiary)
+                            .padding(.horizontal, Metrics.inset)
+                            .padding(.top, Metrics.spacingWide)
                     }
                 }
                 // Vertical only. A row carries its own horizontal inset, and adding a second one
@@ -113,6 +147,26 @@ struct SearchView: View {
 
     private func match() {
         hits = app.search(app.searchQuery, alsoSearching: archived)
+        // The two halves are started together and answer separately. This one is an array already
+        // in memory; the other is a hop onto the store actor, and making the names wait for the
+        // transcripts would have put a database query in front of the answer that is nearly always
+        // the one wanted.
+        app.searchTranscripts(app.searchQuery)
+    }
+
+    private func workspace(_ id: WorkspaceID) -> Workspace? {
+        app.workspaces.first { $0.id == id } ?? archived.first { $0.id == id }
+    }
+
+    /// The whole workspace, from the header of a transcript result. Same split as a name hit: a
+    /// live one opens the centre column, an archived one opens the reader.
+    private func open(_ result: TranscriptWorkspaceMatches) {
+        guard let workspace = workspace(result.workspaceID) else { return }
+        if archived.contains(where: { $0.id == workspace.id }) {
+            app.openArchived(workspace)
+        } else {
+            app.selection = .workspace(workspace.id)
+        }
     }
 
     private func clear() {

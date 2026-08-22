@@ -131,6 +131,14 @@ struct TranscriptListView: View {
         // row the list is drawing. Anything unread above the tail and there is no tail: opening in
         // the right place matters more than arriving quickly.
         if let unread = transcript.firstUnreadSeq, unread < rows[start].seq { return rows[...] }
+        // Same rule for a search result, and it is the case that needs it most: the row somebody
+        // searched for is nearly always old, and a scroll can only find a row the list is drawing.
+        // Read rather than taken here, because a view body must not mutate; `position` takes it.
+        if let target = app.pendingTranscriptTarget,
+           target.workspaceID == transcript.workspace.id,
+           target.seq < rows[start].seq {
+            return rows[...]
+        }
         return rows[start...]
     }
 
@@ -509,7 +517,13 @@ struct TranscriptListView: View {
         guard !transcript.rows.isEmpty, !didPosition else { return }
         didPosition = true
 
-        if let unread = transcript.firstUnreadSeq, unread != transcript.rows.first?.seq {
+        // A search result outranks both. Somebody who clicked a line of a transcript in the search
+        // screen asked for that line, and taking them to their unread mark or to the live end
+        // instead would be the app finding the answer and then hiding it again. Centred rather
+        // than at the top, because the sentence usually needs the turn around it to make sense.
+        if let target = app.takeTranscriptTarget(for: transcript.workspace.id) {
+            proxy.scrollTo(target.seq, anchor: .center)
+        } else if let unread = transcript.firstUnreadSeq, unread != transcript.rows.first?.seq {
             proxy.scrollTo(unread, anchor: .top)
         } else {
             scrollPosition.scrollTo(edge: .bottom)
