@@ -1,7 +1,7 @@
 import SwiftUI
 import BloomCore
 
-/// The panel that drops above the composer once the draft is a lone `/command`.
+/// The panel that opens over the composer once the draft is a lone `/command`.
 ///
 /// Rendering only. The composer owns the selection and the key handling, because its text view
 /// never gives up first responder while the menu is open.
@@ -10,6 +10,9 @@ struct SlashCommandMenu: View {
     var query: String
     var isLoaded: Bool
     var selectedIndex: Int
+    /// What the room on the menu's side of the composer allows. The default is the cap a menu
+    /// keeps even with a whole transcript above it.
+    var maxHeight: CGFloat = MenuLayout.maxHeight
     var onPick: @MainActor (SlashCommand) -> Void
     var onHighlight: @MainActor (Int) -> Void = { _ in }
 
@@ -33,7 +36,7 @@ struct SlashCommandMenu: View {
                         }
                         .padding(Metrics.spacingSmall)
                     }
-                    .frame(maxHeight: MenuLayout.maxHeight)
+                    .frame(maxHeight: maxHeight)
                     // No anchor, so the arrow keys scroll the least they can get away with.
                     // Pinning to the bottom threw the highlighted row to the far edge every time
                     // the user stepped upwards, which no Mac menu does.

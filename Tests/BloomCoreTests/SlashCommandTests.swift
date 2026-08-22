@@ -702,7 +702,7 @@ struct SlashCommandDraftTests {
         #expect(after.name == nil)
         // The caret lands at the end, so the next press eats a letter and the menu is open again.
         #expect(draft.caretAfterBackspace == 7)
-        #expect(ComposerMenuQuery.slashQuery(in: after.text) == "review")
+        #expect(ComposerMenu.slashQuery(in: after.text) == "review")
     }
 
     @Test("backspace on a chip with a prompt after it removes the chip and keeps the prompt")
@@ -731,16 +731,5 @@ struct SlashCommandDraftTests {
             #expect(SlashCommandIndex.sanitised(name) != nil, "\(name)")
             #expect(SlashCommandDraft.parse("/\(name) ").name == name, "\(name)")
         }
-    }
-}
-
-/// The slash token rule, copied out of the composer so the draft tests can hold it to the same
-/// answer. `ComposerMenu` lives in the app target and the core suite cannot see it.
-private enum ComposerMenuQuery {
-    static func slashQuery(in draft: String) -> String? {
-        guard draft.hasPrefix("/") else { return nil }
-        let rest = draft.dropFirst()
-        guard !rest.contains(where: { $0 == " " || $0 == "\n" || $0 == "\t" }) else { return nil }
-        return String(rest)
     }
 }

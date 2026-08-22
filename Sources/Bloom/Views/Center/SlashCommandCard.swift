@@ -38,9 +38,9 @@ struct SlashCommandCard: View {
     var command: SlashCommand?
     /// What the composer has to give, which is what the card may take.
     var availableWidth: CGFloat
-    /// The room between the top of the window and the top of the composer. A card taller than this
-    /// does not overflow, it is clipped, and what gets clipped is the top of it: the name and the
-    /// description, which is the half a reader looks at first. So the prose is cut to fit instead.
+    /// The room on whichever side of the composer the card opens on. A card taller than this does
+    /// not overflow, it is clipped, and what gets clipped is the name and the description, which
+    /// is the half a reader looks at first. So the prose is cut to fit instead.
     var availableHeight: CGFloat
 
     /// The same box `AttachmentCard` takes.
