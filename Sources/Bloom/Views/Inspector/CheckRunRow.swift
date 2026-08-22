@@ -7,6 +7,14 @@ import BloomCore
 /// that opens a URL gets the hover feedback that says it is clickable at all.
 struct CheckRunRow: View {
     var run: CheckRun
+    /// Whether the pointer is on this row, which is what puts the hand-off button up. Passed down
+    /// rather than sensed here, because `ChecksView` already tracks it to paint the fill and two
+    /// hover states on one row would disagree at the edges.
+    var isHovered = false
+    /// True while this row's own failure is being fetched. Nil hides the button altogether, which
+    /// is what a passing check and a workspace with no conversation both get.
+    var isSending = false
+    var onSend: (@MainActor () -> Void)?
 
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
 
@@ -24,6 +32,9 @@ struct CheckRunRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: Metrics.spacingSmall)
+                if let onSend, isHovered || isSending {
+                    send(onSend)
+                }
                 if let duration {
                     Text(duration)
                         .font(Typo.micro)
@@ -50,6 +61,35 @@ struct CheckRunRow: View {
         // nothing.
         .help(run.detailsURL ?? run.name)
         .accessibilityInputLabels([run.name])
+    }
+
+    /// The one action a failed check offers: start the next turn with this failure in it.
+    ///
+    /// On hover rather than always, for the reason the diff list's own row buttons are: a column
+    /// 380 points wide with a control on every row reads as a toolbar, and this is only ever
+    /// offered on the runs that failed, which is a minority of any healthy branch. The row it sits
+    /// in is itself a button, and a nested one is why this is `.plain` with its own content shape:
+    /// the press has to stop here rather than also opening the run in a browser.
+    private func send(_ action: @escaping @MainActor () -> Void) -> some View {
+        Button(action: action) {
+            Group {
+                if isSending {
+                    ProgressView()
+                        .controlSize(.mini)
+                } else {
+                    Image(systemName: "text.bubble")
+                        .font(Typo.micro)
+                        .imageScale(.medium)
+                        .foregroundStyle(isOnSelection ? Palette.selectedEmphasizedText : Palette.textSecondary)
+                }
+            }
+            .frame(width: Metrics.glyph, height: Metrics.glyph)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isSending)
+        .help("Start a turn with this failure and its log")
+        .accessibilityLabel("Send this failure to the agent")
     }
 
     /// Every state occupies the same box, so a list of mixed results does not shuffle its names

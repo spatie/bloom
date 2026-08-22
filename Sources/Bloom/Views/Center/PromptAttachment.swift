@@ -62,11 +62,19 @@ enum AttachmentSource: Hashable, Sendable {
     /// not arrive reading alike, and the format is carried rather than guessed back out of that
     /// name, so writing it can tell a picture worth rewriting from one that is already compressed.
     case image(Data, format: PastedImageFormat, named: String)
+    /// Words Bloom generated that the agent is meant to read as a file: a CI log fetched for a
+    /// failed check, and whatever follows it. A file rather than a paragraph pasted into the
+    /// prompt, because the useful part of a log is thousands of lines long, and a draft that
+    /// cannot be scrolled past is a draft nobody can edit before sending.
+    case text(String, named: String)
 
-    /// The same picture under another name, which is what happens when the first one is taken.
+    /// The same thing under another name, which is what happens when the first one is taken.
     func named(_ name: String) -> AttachmentSource {
-        guard case .image(let data, let format, _) = self else { return self }
-        return .image(data, format: format, named: name)
+        switch self {
+        case .file: self
+        case .image(let data, let format, _): .image(data, format: format, named: name)
+        case .text(let body, _): .text(body, named: name)
+        }
     }
 
     /// What this will be called once it is a file in the worktree.
@@ -74,6 +82,7 @@ enum AttachmentSource: Hashable, Sendable {
         switch self {
         case .file(let url): url.lastPathComponent
         case .image(_, _, let name): name
+        case .text(_, let name): name
         }
     }
 }

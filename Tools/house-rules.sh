@@ -314,6 +314,7 @@ id_type_allowed_lines=(
   'Sources/BloomCore/TerminalPaneCensus.swift'        # the same tab id, read back off the same bytes
   'Sources/Bloom/Views/Center/PromptAttachment.swift' # a draft key, which has no session yet
   'Sources/Bloom/State/TranscriptModel.swift'         # payload ids, read straight off an event
+  'Sources/BloomCore/CheckFailureHandoff.swift'       # a GitHub Actions run and job, read out of a URL gh gave us
 )
 # A stored property whose name ends in ID or Ids and whose type is a bare
 # String. Trailing `{` is excluded by the `$` anchor, which is what leaves

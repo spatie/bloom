@@ -19,6 +19,12 @@ struct ChecksView: View {
     /// Bumped to restart the poll at once, rather than waiting out the twenty seconds, when
     /// something has happened that would change the answer.
     @State private var reload = 0
+    /// The gh call behind the hand-off button, and the flag that stops a second press landing on
+    /// top of the first. One per pane rather than one per row, because only one check is ever
+    /// being fetched at a time.
+    @State private var sender = CheckFailureSender()
+
+    @Environment(AppModel.self) private var app
 
     var body: some View {
         VStack(spacing: 0) {
@@ -56,7 +62,19 @@ struct ChecksView: View {
     }
 
     private func row(_ run: CheckRun) -> some View {
-        CheckRunRow(run: run)
+        // Nil rather than a button that would explain itself: a check that passed has nothing to
+        // hand over, and a workspace with no conversation has nowhere to hand it.
+        var onSend: (@MainActor () -> Void)?
+        if CheckFailureSender.canSend(run), model.activeSession != nil {
+            onSend = { send(run) }
+        }
+
+        return CheckRunRow(
+            run: run,
+            isHovered: hovered == run.id,
+            isSending: sender.isSending(run),
+            onSend: onSend
+        )
             // Nothing here is selectable, but a row that opens a browser has to say so on hover,
             // which is what the rest of the inspector's lists do. The fill is inset from the pane
             // edge the way a source list's is, and the row pays the rest of the shared inset.
@@ -166,6 +184,17 @@ struct ChecksView: View {
         case .failing: Palette.negative
         case .pending: Palette.warning
         case .none: Palette.textTertiary
+        }
+    }
+
+    /// Fetches the failed run's log and puts it in the composer. See `CheckFailureSender`, which
+    /// is where the gh call and every decision about the log live; this is the press.
+    private func send(_ run: CheckRun) {
+        Task {
+            guard let failure = await sender.send(run, in: model) else { return }
+            app.alert = BloomAlert(
+                title: "That check was not sent to the agent", message: failure
+            )
         }
     }
 

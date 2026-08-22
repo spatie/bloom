@@ -76,6 +76,38 @@ final class BrowserSession {
         }
     }
 
+    /// A picture of the page as it is on screen right now, as PNG.
+    ///
+    /// **The visible viewport, not the whole page.** `takeSnapshot` with no rect captures what is
+    /// in the pane, which is the thing the user is pointing at when they press the button: the
+    /// complaint this feature exists for is "this button is misaligned, look", and what makes that
+    /// legible is that the picture is what they were looking at, scroll position and all. Capturing
+    /// the full page is possible, by giving `snapshotWidth` the document height, and it is worse in
+    /// every case that matters here. A page with a sticky header renders it once, halfway down. A
+    /// list that virtualises its rows captures the twenty rows that exist. And an infinite scroller
+    /// produces a forty megabyte image of a loading spinner. A viewport shot is always exactly what
+    /// was on screen, which is the only promise a screenshot button can keep.
+    ///
+    /// `afterScreenUpdates` is left at its default of true, so a page that has just been scrolled
+    /// or has just finished laying out is captured as it settled rather than a frame before.
+    ///
+    /// PNG rather than the `NSImage` WebKit hands back, because the attachment path takes bytes
+    /// and a format, and because PNG is what a screenshot on this machine already is.
+    func snapshot() async throws -> Data {
+        let configuration = WKSnapshotConfiguration()
+        // Points, not pixels, so the picture comes out at the retina size the pane is drawn at
+        // rather than at half of it. Nil would give the same, but only while the default holds.
+        configuration.snapshotWidth = NSNumber(value: Double(webView.bounds.width))
+
+        let image = try await webView.takeSnapshot(configuration: configuration)
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let png = NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
+        else {
+            throw BrowserSnapshotFailure()
+        }
+        return png
+    }
+
     func stop() {
         webView.stopLoading()
         webView.navigationDelegate = nil
@@ -192,4 +224,10 @@ private final class NavigationObserver: NSObject, WKNavigationDelegate {
     ) {
         owner?.refresh()
     }
+}
+
+/// The page was captured and the bytes could not be made into a PNG, which is the one failure
+/// `takeSnapshot` does not report itself.
+struct BrowserSnapshotFailure: LocalizedError {
+    var errorDescription: String? { "Bloom could not turn this page into an image." }
 }

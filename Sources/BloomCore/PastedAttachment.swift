@@ -161,7 +161,10 @@ public enum PastedAttachment {
         return "\(base) \(UUID().uuidString.prefix(6))\(suffix)"
     }
 
-    private static func timestamp(_ date: Date, in zone: TimeZone) -> String {
+    /// The date part of an attachment's name. Public because `BrowserSnapshot` names a file the
+    /// same way and the two must agree: a folder of screenshots is sorted by this string, so two
+    /// formats would interleave into an order that reads as random.
+    public static func timestamp(_ date: Date, in zone: TimeZone) -> String {
         let formatter = DateFormatter()
         // Fixed locale, because this is a filename rather than something being read aloud: a
         // Persian or Japanese calendar would name the same file differently on two machines and

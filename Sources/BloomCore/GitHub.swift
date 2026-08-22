@@ -284,6 +284,48 @@ public enum GitHub {
         return try decodePullRequest(from: Data(result.stdout.utf8))
     }
 
+    /// The log of a failed check run, as gh prints it.
+    ///
+    /// `--log-failed` rather than `--log`, because a workflow that ran twelve steps and failed on
+    /// one prints eleven steps of noise before the thing the user clicked on. It is asked for the
+    /// job wherever the check gave us one, so a matrix of eight jobs does not hand over the seven
+    /// that passed.
+    ///
+    /// Two attempts, not one. `--log-failed` prints nothing at all when GitHub considers the job
+    /// to have failed without any step failing, which is what a cancellation, a timeout and a
+    /// runner that died all look like, and an empty log is the case this feature exists to avoid.
+    /// So an empty answer falls back to the whole log, which is long but is at least the log.
+    ///
+    /// A generous timeout, because this is one archive download rather than a metadata call, and
+    /// because it is only ever run when somebody pressed a button and is waiting for it.
+    public static func checkRunLog(
+        _ target: CheckFailureHandoff.LogTarget,
+        worktree: String,
+        timeout: Duration = .seconds(90)
+    ) async throws -> String {
+        var selector = [target.runID]
+        if let jobID = target.jobID { selector = ["--job", jobID] }
+
+        let failed = try await Shell.run(
+            "gh", ["run", "view"] + selector + ["--log-failed"], cwd: worktree, timeout: timeout
+        )
+        let trimmed = failed.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        if failed.ok, !trimmed.isEmpty { return failed.stdout }
+
+        let whole = try await Shell.run(
+            "gh", ["run", "view"] + selector + ["--log"], cwd: worktree, timeout: timeout
+        )
+        guard whole.ok, !whole.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            // The first call's message where there is one: `--log-failed` is what was asked for
+            // and its complaint is the one that describes the request.
+            let reason = [failed.stderr, whole.stderr]
+                .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            throw GitHubError(reason.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                ?? "gh returned no log for this check run")
+        }
+        return whole.stdout
+    }
+
     /// Merges the pull request, and then tidies up the remote branch if asked to.
     ///
     /// `--delete-branch` is deliberately never passed, and this is the one thing about merging

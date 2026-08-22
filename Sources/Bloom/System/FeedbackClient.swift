@@ -98,6 +98,11 @@ enum FeedbackImages {
             // because the endpoint does not take TIFF at all.
             guard let (bytes, type) = readable(data) else { throw Failure.notAnImage(name) }
             return FeedbackImage(filename: name, contentType: type, data: bytes)
+        case .text(_, let name):
+            // Feedback is a screenshot and a sentence. Text Bloom generated for an agent to read,
+            // which is the only thing that arrives in this case, is not an image and there is
+            // nowhere in a feedback report to put it.
+            throw Failure.notAnImage(name)
         }
     }
 

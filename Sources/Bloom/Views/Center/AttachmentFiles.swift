@@ -72,7 +72,31 @@ enum AttachmentFiles {
             try attach(file: url, workspace: workspace)
         case .image(let data, let format, let name):
             try attach(image: data, format: format, named: name, workspace: workspace)
+        case .text(let body, let name):
+            try attach(bytes: Data(body.utf8), named: name, workspace: workspace)
         }
+    }
+
+    /// Bytes Bloom made itself, written straight out under the name it chose.
+    ///
+    /// No size ceiling of its own: everything that arrives here was trimmed to a budget before it
+    /// was handed over, by whoever decided what was worth keeping. See
+    /// `CheckFailureHandoff.excerpt` for the one caller there is.
+    private static func attach(
+        bytes: Data, named name: String, workspace: String
+    ) throws -> PromptAttachment {
+        let id = PromptAttachments.newShortID()
+        let relative = PromptAttachments.destination(filename: name, id: id)
+        let destination = URL(filePath: (workspace as NSString).appendingPathComponent(relative))
+
+        do {
+            try prepare(destination, in: workspace)
+            try bytes.write(to: destination, options: .atomic)
+        } catch {
+            throw Failure.copyFailed(name, error.localizedDescription)
+        }
+
+        return PromptAttachment(id: id, path: relative, isCopy: true, byteCount: bytes.count)
     }
 
     private static func attach(file url: URL, workspace: String) throws -> PromptAttachment {

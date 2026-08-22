@@ -1,10 +1,14 @@
 import SwiftUI
+import BloomCore
 
 /// A browser tab: an address bar over a page.
 ///
 /// It exists so the dev server a workspace is running can be looked at without leaving the window
 /// the agent is working in, which is the whole reason a workspace gets a port of its own.
 struct BrowserTabView: View {
+    /// Whose conversation a snapshot of this page is attached to, and whose worktree it is written
+    /// into. A browser tab belongs to a workspace, so there is never a question of which.
+    @Bindable var model: WorkspaceModel
     var tab: CenterTab
     /// The menu the pane this tab is filling offers, which the page puts under its own. Handed
     /// down rather than reached for, for the reason `ToolPaneView.splitColumn` is: only the pane
@@ -16,6 +20,14 @@ struct BrowserTabView: View {
     /// on submit.
     @State private var address = ""
     @FocusState private var isAddressFocused: Bool
+
+    /// True from the press until the picture is in the composer. It is normally a tenth of a
+    /// second, and it is not always: `takeSnapshot` waits for the page to finish laying out, and
+    /// then the file is written into the worktree off the main actor. A second press in the middle
+    /// of that would attach the same page twice, so the button goes quiet rather than counting.
+    @State private var isCapturing = false
+
+    @Environment(AppModel.self) private var app
 
     /// See `ControlActiveState.showsFocusRing`: a ring belongs in the key window only.
     @Environment(\.controlActiveState) private var activeState
@@ -77,6 +89,16 @@ struct BrowserTabView: View {
                 if session.isLoading { session.webView.stopLoading() } else { session.reload() }
             }
 
+            // Left of the address rather than right of it, with the other three: they are all
+            // things you do to the page, and the address field is where the page is. Its own group
+            // on the right would have read as belonging to the field.
+            control(
+                "camera",
+                title: "Send a Screenshot to the Agent",
+                enabled: !isCapturing,
+                action: capture
+            )
+
             TextField("Address", text: $address)
                 .textFieldStyle(.plain)
                 .font(Typo.label)
@@ -105,6 +127,49 @@ struct BrowserTabView: View {
         .padding(.horizontal, Metrics.inset)
         .frame(height: Metrics.barHeight)
         .background(Palette.surfaceSunken)
+    }
+
+    // MARK: - Screenshot
+
+    /// Takes the page as it is on screen and puts it in the composer, in one press.
+    ///
+    /// **One press, with no confirmation.** The alternative, a sheet asking where the picture
+    /// should go or whether to send it, would put two clicks and a decision in front of something
+    /// whose whole value is that it is faster than reaching for the screenshot key. It is also
+    /// undoable in the place that matters: the picture arrives as a word in the draft, so Command+Z
+    /// takes it back out and nothing has been sent to anybody.
+    ///
+    /// **It does not send the turn.** Nobody wants an agent handed a screenshot with no sentence
+    /// attached. What lands is an attachment and a caret, and the user writes what is wrong with it.
+    private func capture() {
+        guard !isCapturing else { return }
+        isCapturing = true
+        Task {
+            defer { isCapturing = false }
+            let session = self.session
+            let data: Data
+            do {
+                data = try await session.snapshot()
+            } catch {
+                app.alert = BloomAlert(
+                    title: "That page could not be captured",
+                    message: error.readableMessage
+                )
+                return
+            }
+
+            let taken = Set(
+                PromptAttachmentStore.shared
+                    .attachments(for: model.activeSession?.id.rawValue ?? "")
+                    .map(\.filename)
+            )
+            let name = BrowserSnapshot.filename(for: session.displayAddress, avoiding: taken)
+            let outcome = await ComposerHandoff.attach(
+                [.image(data, format: .png, named: name)], to: model
+            )
+            guard let failure = outcome.failure else { return }
+            app.alert = BloomAlert(title: "That screenshot was not attached", message: failure)
+        }
     }
 
     private func control(
