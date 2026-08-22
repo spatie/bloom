@@ -18,6 +18,9 @@ public struct CodeBlockView: View {
     /// into the code beside them. This was a `@ScaledMetric`, which on macOS never moves: there is
     /// no Dynamic Type for it to track.
     @Environment(\.fontScale) private var fontScale
+    /// Whether the answer this fence belongs to is still arriving, which decides which cache the
+    /// preparation goes through. See `CodeBlockPreparationCache`.
+    @Environment(\.markdownIsStreaming) private var isStreaming
 
     private var lineNumberWidth: CGFloat { MarkdownMetrics.lineNumberWidth * fontScale }
 
@@ -28,7 +31,9 @@ public struct CodeBlockView: View {
     }
 
     public var body: some View {
-        let prepared = CodeBlockPreparationCache.prepared(code: code, language: language)
+        let prepared = CodeBlockPreparationCache.prepared(
+            code: code, language: language, isStreaming: isStreaming
+        )
         let visibleCount = showsAllLines ? prepared.lines.count : min(prepared.lines.count, Self.lineCap)
 
         VStack(alignment: .leading, spacing: 0) {
@@ -178,16 +183,35 @@ private enum CodeBlockPreparationCache {
         return cache
     }()
 
-    static func prepared(code: String, language: Language) -> CodeBlockPreparation {
+    /// The live tail's fence gets a cache of exactly one entry rather than a share of the one
+    /// above, for the reason `MarkdownParseCache` wrote down for prose: a growing fence is one
+    /// new prefix per delta, each seen for milliseconds and never again, and put through
+    /// `values` a single streamed answer evicted every settled block's preparation, so the
+    /// visible finished fences re-split and re-ran `CarryPass` on their next redraw.
+    private static var streamed: (code: String, language: Language, value: CodeBlockPreparation)?
+
+    static func prepared(code: String, language: Language, isStreaming: Bool) -> CodeBlockPreparation {
+        if isStreaming {
+            if let streamed, streamed.code == code, streamed.language == language {
+                return streamed.value
+            }
+            let value = compute(code: code, language: language)
+            streamed = (code, language, value)
+            return value
+        }
+
         let key = CodeBlockPreparationKey(code: code, language: language)
         if let cached = values.object(forKey: key) { return cached }
+        let value = compute(code: code, language: language)
+        values.setObject(value, forKey: key, cost: code.utf8.count)
+        return value
+    }
 
+    private static func compute(code: String, language: Language) -> CodeBlockPreparation {
         let lines = code.components(separatedBy: "\n")
-        let value = CodeBlockPreparation(
+        return CodeBlockPreparation(
             lines: lines,
             carries: CarryPass.states(for: lines, language: language)
         )
-        values.setObject(value, forKey: key, cost: code.utf8.count)
-        return value
     }
 }
