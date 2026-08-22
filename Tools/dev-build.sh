@@ -328,7 +328,12 @@ if [ "$LAUNCH" -eq 1 ]; then
   if ps -E -p "$running" 2>/dev/null | grep -q "BLOOM_DB_PATH=$BLOOM_DEV_DB"; then
     echo "==> launched pid $running, on its own database"
   else
-    echo "==> pid $running has no BLOOM_DB_PATH and is on the REAL database. Quit it now." >&2
+    # Not "on the REAL database" any more: with no BLOOM_DB_PATH, Store derives the directory
+    # from the dev bundle id and lands on Bloom Dev anyway. But a missing key means
+    # LaunchServices served a stale plist or the executable was run by hand, and this build is
+    # down to one mechanism where two agreeing ones are the point, so it still stops.
+    echo "==> pid $running has no BLOOM_DB_PATH. The bundle id fallback is holding the" >&2
+    echo "    separation alone. Quit it, then start it again with: open \"$DEST\"" >&2
     exit 1
   fi
 fi
