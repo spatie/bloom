@@ -42,7 +42,9 @@ enum PaneDuplicate {
         case .browser:
             NewPane.open(.browser, in: model, url: tab.url, place: place)
 
-        case .review:
+        // Neither the review nor the notes have a second copy to make: a workspace has exactly one
+        // of each by design, and two panes onto the same note would be two carets in one text.
+        case .review, .notes:
             return
         }
     }

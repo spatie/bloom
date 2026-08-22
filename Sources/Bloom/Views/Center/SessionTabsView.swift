@@ -272,7 +272,7 @@ struct SessionTabsView: View {
             isRenaming: renamingID == tab.id,
             editableTitle: tab.title,
             canClose: true,
-            canRename: tab.kind != .review,
+            canRename: tab.kind != .review && tab.kind != .notes,
             closeTitle: closeTitle(for: tab),
             onSelect: { store.select(.tool(tab.id), in: model) },
             onStartRename: { renamingID = tab.id },
@@ -301,6 +301,7 @@ struct SessionTabsView: View {
         case .terminal: "Close terminal"
         case .browser: "Close browser"
         case .review: "Close the review"
+        case .notes: "Close the notes"
         }
     }
 
@@ -322,6 +323,9 @@ struct SessionTabsView: View {
             Button("Changes", systemImage: "doc.text") { FileReview.open(in: model) }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
                 .disabled(model.changedFiles.isEmpty)
+            // Never disabled, unlike Changes: an empty note is exactly what somebody opening this
+            // is about to fix, where an empty review has nothing to show.
+            Button(CenterTab.notesTitle, systemImage: "note.text") { WorkspaceNotes.open(in: model) }
         } label: {
             Label("New tab", systemImage: "plus")
                 .labelStyle(.iconOnly)
@@ -408,7 +412,8 @@ struct SessionTabsView: View {
 
     private func duplicable(_ content: PaneContent) -> Bool {
         guard case .tool(let id) = content else { return true }
-        return tabs.tabs(for: model.workspace.id).first { $0.id == id }?.kind != .review
+        let kind = tabs.tabs(for: model.workspace.id).first { $0.id == id }?.kind
+        return kind != .review && kind != .notes
     }
 
     /// Opens a tab beside the one the user asked from, rather than in place of it. The menu item

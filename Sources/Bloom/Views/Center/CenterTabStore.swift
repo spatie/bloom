@@ -59,6 +59,12 @@ final class CenterTabStore {
         tabs(for: workspaceID).first { $0.kind == .review }
     }
 
+    /// The workspace's one notes tab, if it has been opened. As with the review there is never a
+    /// second: one workspace, one note.
+    func notes(for workspaceID: WorkspaceID) -> CenterTab? {
+        tabs(for: workspaceID).first { $0.kind == .notes }
+    }
+
     /// What the strip calls a tab. Only a review tab needs asking: it is named after what it is
     /// showing rather than after itself, so that a file nobody changed is not filed under "All
     /// changes", and the answer moves as the reader walks the list.
@@ -245,6 +251,21 @@ final class CenterTabStore {
         return tab
     }
 
+    /// Opens the workspace's notes tab, or hands back the one it already has.
+    ///
+    /// No path and no url: the tab is a pointer at a row keyed by the workspace, and the text
+    /// itself is never in user defaults. What is remembered here is only that the pane was open,
+    /// which is the same thing this store remembers about every other kind of tab.
+    @discardableResult
+    func showNotes(workspaceID: WorkspaceID) -> CenterTab {
+        if let existing = notes(for: workspaceID) { return existing }
+        var tabs = tabs(for: workspaceID)
+        let tab = CenterTab(workspaceID: workspaceID, kind: .notes, title: CenterTab.notesTitle)
+        tabs.append(tab)
+        apply(tabs, to: workspaceID)
+        return tab
+    }
+
     /// Called as the page navigates, so the tab remembers where it got to.
     func setURL(_ url: String, for tab: CenterTab) {
         guard !url.isEmpty, url != tab.url else { return }
@@ -266,6 +287,11 @@ final class CenterTabStore {
         // A review holds nothing: the diff is re-read from git whenever it is drawn, and any
         // unsaved edit belongs to `FileEditSession`, which outlives every view that shows it.
         case .review:
+            break
+        // Neither does a note. The text is a row keyed by the workspace, so closing the pane is
+        // closing a window onto it, and the last keystroke was written before the tab went. See
+        // `NotesPaneView`, which saves on the way out.
+        case .notes:
             break
         }
     }
@@ -337,6 +363,7 @@ final class CenterTabStore {
         case .terminal: "Terminal"
         case .browser: "Browser"
         case .review: CenterTab.reviewTitle
+        case .notes: CenterTab.notesTitle
         }
         let taken = Set(tabs.filter { $0.kind == kind }.map(\.title))
         guard taken.contains(base) else { return base }
