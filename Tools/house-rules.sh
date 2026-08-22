@@ -3,7 +3,7 @@
 #
 #   ./Tools/house-rules.sh
 #
-# Seven rules, and every one of them is here because it has already been broken:
+# Eight rules, and every one of them is here because it has already been broken:
 #
 #   1. No em dashes and no en dashes. Anywhere. They arrive by the hundred from
 #      anything that writes prose for you, and once one is in a file the next
@@ -23,6 +23,9 @@
 #   7. An id has a type. Every id was a bare String until they were not, and a
 #      new one declared that way puts the hole back without the compiler having
 #      anything to say about it.
+#   8. A View does not run a subprocess. A decision taken inside a View is a
+#      decision nothing can test, and CLAUDE.md said so for weeks while nothing
+#      checked it; see the rule itself for the helper types that are the way out.
 #
 # Exit status is 1 if anything was found, and every finding is printed with the
 # file and line so it can be opened. The word lists are deliberately narrow:
