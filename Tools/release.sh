@@ -81,8 +81,18 @@ git worktree add --detach "$WORK" "$RESOLVED" >/dev/null
 # keeps it at the root, and a release cut from an older tag has to keep working.
 BUILD_SCRIPT=Tools/build.sh
 [ -x "$WORK/$BUILD_SCRIPT" ] || BUILD_SCRIPT=build.sh
-( cd "$WORK" && BLOOM_CODESIGN_IDENTITY="${BLOOM_CODESIGN_IDENTITY:-}" \
-    "./$BUILD_SCRIPT" -r >/dev/null )
+# Captured rather than sent to /dev/null, for the reason written at length in Tools/master.sh:
+# `swift build` reports compiler errors on stdout, so the old bare redirect threw away the only
+# account of a failed release build and left `set -e` stopping with nothing to read.
+BUILD_LOG=/tmp/bloom-release-build.log
+if ! ( cd "$WORK" && BLOOM_CODESIGN_IDENTITY="${BLOOM_CODESIGN_IDENTITY:-}" \
+    "./$BUILD_SCRIPT" -r ) >"$BUILD_LOG" 2>&1; then
+  cat "$BUILD_LOG" >&2
+  print -ru2 -- ""
+  print -ru2 -- "==> the release build failed. The whole log is above, and in $BUILD_LOG."
+  print -ru2 -- "    Nothing was signed or sent to Apple."
+  exit 1
+fi
 
 APP="$WORK/.build/release/Bloom.app"
 [ -d "$APP" ] || APP="$(cd "$WORK" && swift build -c release --show-bin-path)/Bloom.app"
