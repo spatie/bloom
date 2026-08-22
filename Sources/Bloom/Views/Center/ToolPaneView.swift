@@ -66,13 +66,11 @@ struct ToolPaneView: View {
     }
 
     /// The store a shell's environment is built from, and the workspace's port, which is the one
-    /// its setup and run scripts were told to bind. Probing for a free block opens sockets, so it
-    /// happens off the main thread.
+    /// its setup and run scripts were told to bind. Allocation lives on the model, where
+    /// concurrent callers get one block. See `WorkspaceModel.ensurePort`.
     private func prepareTerminal() async {
         TerminalSessionStore.shared.useStore(model.store)
-        if model.port == 0 {
-            model.port = await Task.detached { (try? PortAllocator.allocate(taken: [])) ?? 0 }.value
-        }
+        await model.ensurePort()
         readyTabID = tab.id
     }
 }

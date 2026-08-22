@@ -169,6 +169,8 @@ final class WorkspaceModel {
     // Layout.
 
     var port: Int = 0
+    /// The allocation in flight, so two callers arriving together get one block. See `ensurePort`.
+    @ObservationIgnored private var portTask: Task<Int, Never>?
 
     /// The in-flight refreshes, so a newer one can cancel the one it replaces. Two overlapping
     /// refreshes both claim `isLoadingChanges`, and the slower one finishing last would otherwise
@@ -520,6 +522,28 @@ final class WorkspaceModel {
         await transcript(for: session).drain()
     }
 
+    /// The workspace's own port block, allocated once however many callers ask at once.
+    ///
+    /// Setup, the terminal pane and the browser each used to run their own if-zero-allocate
+    /// dance, and two of them are reachable concurrently: opening a browser while a terminal
+    /// pane prepared had both see 0, allocate different blocks, and the last write won, so the
+    /// browser opened on one block while the shell exported the other's `BLOOM_PORT`. They also
+    /// passed `taken: []`, and the allocator probes live binds only, so a sibling workspace
+    /// whose dev server had not bound yet held a block the probe called free. The probe opens
+    /// sockets, which is why it runs off the main thread.
+    @discardableResult
+    func ensurePort() async -> Int {
+        if port != 0 { return port }
+        if let inFlight = portTask { return await inFlight.value }
+        let taken = app.takenPorts(excluding: workspace.id)
+        let task = Task.detached { (try? PortAllocator.allocate(taken: taken)) ?? 0 }
+        portTask = task
+        let allocated = await task.value
+        portTask = nil
+        if port == 0 { port = allocated }
+        return port
+    }
+
     /// One setup run: the state it resets, the output it streams, and what it leaves behind.
     ///
     /// Shared by the run a workspace opens with and by the re-run below, which differ only in what
@@ -535,7 +559,7 @@ final class WorkspaceModel {
         setupOutput = ""
         // A machine with no free block left is not a reason to refuse to run setup. The script
         // simply gets no port to bind, which it can decide for itself what to do about.
-        if port == 0 { port = (try? PortAllocator.allocate(taken: [])) ?? 0 }
+        await ensurePort()
 
         // Setup scripts are chatty: `composer install` and `bun install` together are thousands of
         // lines. Hopping to the main actor once per line, each time appending to a string that

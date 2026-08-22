@@ -452,12 +452,10 @@ struct SessionTabsView: View {
     }
 
     /// The workspace's own port, which is what its setup and run scripts were told to bind and so
-    /// what its dev server is answering on. Probing for a free block opens sockets, which is why
-    /// it happens off the main thread.
+    /// what its dev server is answering on. Allocation lives on the model, where concurrent
+    /// callers get one block. See `WorkspaceModel.ensurePort`.
     private func preparePort() async {
-        guard model.port == 0 else { return }
-        let port = await Task.detached { try? PortAllocator.allocate(taken: []) }.value
-        model.port = port ?? 0
+        await model.ensurePort()
     }
 
     // MARK: - Reordering
