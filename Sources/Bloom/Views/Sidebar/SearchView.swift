@@ -111,7 +111,15 @@ struct SearchView: View {
                             .padding(.horizontal, Metrics.inset)
                             .padding(.top, hits.isEmpty ? 0 : Metrics.inset)
 
-                        ForEach(app.transcriptResults) { result in
+                        // Keyed by the whole value, not by the workspace id, and that is the
+                        // whole of the bug it fixes. Both lists are one `LazyVStack`, and a
+                        // `SearchHit` is identified by its workspace id exactly as these are, so a
+                        // workspace that matched by NAME and in its TRANSCRIPT was the same id
+                        // twice in one lazy container and SwiftUI drew the first and dropped the
+                        // second, leaving a gap. The workspace with the most matches is the one
+                        // most likely to be in both lists, so the row being lost was reliably the
+                        // best answer on the screen.
+                        ForEach(app.transcriptResults, id: \.self) { result in
                             TranscriptResultRow(
                                 result: result,
                                 workspace: workspace(result.workspaceID),
