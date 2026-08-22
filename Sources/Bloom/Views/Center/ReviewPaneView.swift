@@ -31,11 +31,48 @@ struct ReviewPaneView: View {
             )
     }
 
+    /// How tall the whole pane is, which caps how far the composer's divider can be dragged.
+    @State private var paneHeight: CGFloat = 0
+
+    /// The conversation's text size and face, applied to the composer here exactly as
+    /// `ChatPaneView` applies them to its whole subtree. Without this the same composer would
+    /// change size as the reader moved between the conversation and the review, which reads as a
+    /// bug rather than a setting.
+    @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.standard
+    @AppStorage(ChatFont.defaultsKey) private var chatFont = ChatFont.standard
+
     var body: some View {
-        content
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Palette.surface)
-            .background { shortcuts }
+        VStack(spacing: 0) {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // The same composer the conversation shows, bound to the same transcript, so the
+            // chips a review has accumulated are visible from the diff they were written on and
+            // Return sends from here. It used to live only in the chat pane, which meant placing
+            // comments on this screen and then leaving it to send them. A second composer view
+            // was considered and rejected: one draft, one send path, nothing to keep in step.
+            if let transcript = composerTranscript {
+                ComposerView(transcript: transcript, model: model, availableHeight: paneHeight)
+                    .environment(\.fontScale, textSize.scale)
+                    .environment(\.chatFont, chatFont)
+            }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { paneHeight = $0 }
+        .background(Palette.surface)
+        .background { shortcuts }
+        // A pane can be pointed at a session this launch has never opened, so the transcript is
+        // built here rather than assumed, exactly as `CenterPaneView.prepare` does for a chat.
+        .task(id: model.activeSession?.id) {
+            guard let session = model.activeSession else { return }
+            model.prepareTranscript(for: session.id)
+        }
+    }
+
+    /// The conversation a turn sent from here joins: the active session's, which already falls
+    /// back to the first. Nil only when the workspace has no session at all, and then there is
+    /// nothing to send to and no composer is drawn.
+    private var composerTranscript: TranscriptModel? {
+        model.activeSession.flatMap { model.existingTranscript(for: $0.id) }
     }
 
     @ViewBuilder
