@@ -1,4 +1,5 @@
 import SwiftUI
+import BloomCore
 
 /// One file in the mention menu: the name people recognise, then the folder they only sometimes
 /// need, truncated from the front because the end of a path is the part that identifies it.

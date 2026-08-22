@@ -1,23 +1,24 @@
 import Foundation
-import BloomCore
 
 /// One candidate for an `@mention`.
 ///
 /// The directory is carried separately from the file name because the menu shows them with
 /// different weight: people recognise `Store.swift` first and only then care which folder it came
-/// from.
-struct FileMatch: Identifiable, Hashable, Sendable {
+/// from. It lived beside the completion menu, which put the ranking a keystroke rides on where
+/// no test could reach it; it is a pure function of the tracked paths and the query, so it lives
+/// with `FuzzyMatch` instead.
+public struct FileMatch: Identifiable, Hashable, Sendable {
     /// Path relative to the workspace root, which is exactly what gets inserted in the draft.
-    var path: String
-    var score: Int
+    public var path: String
+    public var score: Int
 
-    var id: String { path }
+    public var id: String { path }
 
-    var fileName: String {
+    public var fileName: String {
         (path as NSString).lastPathComponent
     }
 
-    var directory: String {
+    public var directory: String {
         (path as NSString).deletingLastPathComponent
     }
 
@@ -25,7 +26,7 @@ struct FileMatch: Identifiable, Hashable, Sendable {
     ///
     /// Pure and nonisolated so it can run off the main actor: a large repository has tens of
     /// thousands of tracked files and this is called on every keystroke.
-    nonisolated static func search(_ paths: [String], query: String, limit: Int) -> [FileMatch] {
+    public nonisolated static func search(_ paths: [String], query: String, limit: Int) -> [FileMatch] {
         guard !query.isEmpty else {
             return paths.prefix(limit).map { FileMatch(path: $0, score: 0) }
         }
