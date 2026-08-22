@@ -75,9 +75,12 @@ public protocol SessionRunner: Actor {
 /// A class rather than actor state, so `events` can be nonisolated and a view can attach without
 /// waiting for a turn on an actor that is busy.
 ///
-/// `Mutex<State>` rather than `NSLock` plus `@unchecked Sendable`, for the reason given on
-/// `EventSink` in `AgentRunner`, which is this same shape: the subscribers and the finished flag
+/// `Mutex<State>` rather than `NSLock` plus `@unchecked Sendable`, and this comment is the one
+/// every locked class in the core points at. The two arrangements generate the same code; the
+/// difference is that `@unchecked` is a promise the compiler cannot check, and `Mutex<State>`
+/// makes the state unreachable except under the lock. Here the subscribers and the finished flag
 /// have to move together, so a stream cannot register after the fanout has already said goodbye.
+/// `StoreChangeHub` is the same shape.
 public final class EventFanout<Element: Sendable>: Sendable {
     private struct State {
         var continuations: [UUID: AsyncStream<Element>.Continuation] = [:]

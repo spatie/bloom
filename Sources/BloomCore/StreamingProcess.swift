@@ -15,7 +15,7 @@ public final class StreamingProcess: Sendable {
     /// waiting on the exit status. One `Mutex` rather than one per concern because `settle` and
     /// `finish` decide from several of these at once, and a decision assembled from separate
     /// locks would describe no moment at all. `Mutex<State>` rather than `NSLock` plus
-    /// `@unchecked Sendable`, for the reason given on `EventSink` in `AgentRunner`.
+    /// `@unchecked Sendable`, for the reason given on `EventFanout` in `SessionRunner`.
     private struct State {
         var stdoutBuffer = Data()
         var stderrBuffer = Data()

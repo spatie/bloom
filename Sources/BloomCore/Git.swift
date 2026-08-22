@@ -385,7 +385,7 @@ public enum Git {
         process.standardOutput = outPipe
         process.standardError = errPipe
 
-        let collector = ByteCollector()
+        let collector = PipeCollector()
         // Both pipes have to be drained while the process runs, or a large diff fills the buffer
         // and git blocks forever on write. A reader thread per pipe rather than a
         // `readabilityHandler`, because clearing the handler once the process exits can discard
@@ -1455,48 +1455,6 @@ public enum Git {
         while taken.contains("\(desired)-\(suffix)") { suffix += 1 }
         return "\(desired)-\(suffix)"
     }
-}
-
-/// Thread-safe accumulator for `runRaw`, which keeps stdout as bytes.
-///
-/// The two buffers share one `Mutex` because they are two halves of one result, read together
-/// once both streams have finished. `Mutex<State>` rather than `NSLock` plus
-/// `@unchecked Sendable`, for the reason given on `EventSink` in `AgentRunner`.
-private final class ByteCollector: Sendable {
-    private struct State {
-        var stdout = Data()
-        var stderr = Data()
-    }
-
-    private let state = Mutex(State())
-    /// One count per stream, so a caller can wait until both have genuinely finished.
-    private let eof = DispatchGroup()
-
-    init() {
-        eof.enter()
-        eof.enter()
-    }
-
-    func appendOut(_ data: Data) {
-        state.withLock { $0.stdout.append(data) }
-    }
-
-    func appendErr(_ data: Data) {
-        state.withLock { $0.stderr.append(data) }
-    }
-
-    func finishOut() { eof.leave() }
-    func finishErr() { eof.leave() }
-
-    func waitForEOF() async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            eof.notify(queue: .global()) { continuation.resume() }
-        }
-    }
-
-    var out: Data { state.withLock(\.stdout) }
-
-    var err: Data { state.withLock(\.stderr) }
 }
 
 // MARK: - Starting a repository

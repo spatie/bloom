@@ -14,7 +14,7 @@ public final class UnixSocketListener: Sendable {
     /// Guards the once-ness of `stop`, which both the owner and `deinit` may reach: a second
     /// cancel is harmless, but a second unlink could remove a socket file a successor has
     /// already bound. `Mutex` rather than `NSLock` plus `@unchecked Sendable`, for the reason
-    /// given on `EventSink` in `AgentRunner`.
+    /// given on `EventFanout` in `SessionRunner`.
     private let stopped = Mutex(false)
 
     /// Binds and starts accepting.

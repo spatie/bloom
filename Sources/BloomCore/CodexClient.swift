@@ -456,7 +456,7 @@ private final class LiveProcess: Sendable {
     /// The process and whether it has been signalled, in one value so the signal can only ever
     /// happen once and only to the process it was meant for, never to a replacement attached in
     /// between. `Mutex<State>` rather than `NSLock` plus `@unchecked Sendable`, for the reason
-    /// given on `EventSink` in `AgentRunner`.
+    /// given on `EventFanout` in `SessionRunner`.
     private struct State {
         var process: (any AgentProcessing)?
         var signalled = false

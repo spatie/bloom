@@ -51,7 +51,7 @@ public actor AgentRunner {
 
     private let store: Store
     private let makeProcess: @Sendable (AgentLaunch) -> any AgentProcessing
-    private let sink = EventSink()
+    private let sink = EventFanout<AgentEvent>()
     /// Held outside the actor so `cancelNow()` can signal a process from synchronous main-actor
     /// code without waiting for a turn on the actor, which is exactly when it is least available.
     private let handle = ProcessHandle()
@@ -313,7 +313,7 @@ public actor AgentRunner {
     /// away take the session with it: cancelling the task that iterates an `AsyncStream` finishes
     /// that stream for good, so pressing Stop once left the UI staring at a runner that was still
     /// working and still writing rows nobody would ever see.
-    public nonisolated var events: AsyncStream<AgentEvent> { sink.stream }
+    public nonisolated var events: AsyncStream<AgentEvent> { sink.stream() }
 
     public func setPersistsStreamDeltas(_ value: Bool) {
         persistsStreamDeltas = value
@@ -326,7 +326,7 @@ public actor AgentRunner {
         try await waitForCancelledRunToExit()
         await refreshFastMode()
         await refreshOutputStyle()
-        try start()
+        start()
 
         let line = try Self.encodeTurn(text)
         handle.current?.writeLine(line)
@@ -384,7 +384,7 @@ public actor AgentRunner {
     private static let shutdownPolls = 200
     private static let shutdownPollInterval = Duration.milliseconds(25)
 
-    private func start() throws {
+    private func start() {
         guard handle.current == nil else { return }
 
         cancelled = false
@@ -931,85 +931,13 @@ public enum AgentRunnerError: Error, Equatable, CustomStringConvertible, Sendabl
 
 // MARK: - Boxes
 
-/// Fans the runner's events out to every subscriber, outside the actor so the `events` accessor
-/// can stay nonisolated.
-///
-/// One shared `AsyncStream` cannot do this job. A stream is finished by its consumer going away,
-/// so the first view to cancel its iteration (pressing Stop does exactly that) took the only
-/// channel the session had with it, and every later event was yielded into nothing. Each
-/// subscriber gets its own stream and its own continuation instead, registered on access and
-/// dropped again by `onTermination`, so one consumer leaving is invisible to the rest.
-///
-/// `Mutex<State>` rather than `NSLock` plus `@unchecked Sendable`. The two arrangements generate
-/// the same code; the difference is that `@unchecked` is a promise the compiler cannot check, and
-/// this one makes the state unreachable except under the lock. `StoreChangeHub` is the same shape.
-private final class EventSink: Sendable {
-    private struct State {
-        var continuations: [Int: AsyncStream<AgentEvent>.Continuation] = [:]
-        var nextToken = 0
-        var closed = false
-    }
-
-    private let state = Mutex(State())
-
-    var stream: AsyncStream<AgentEvent> {
-        AsyncStream(bufferingPolicy: .unbounded) { continuation in
-            guard let token = register(continuation) else {
-                continuation.finish()
-                return
-            }
-            continuation.onTermination = { [weak self] _ in
-                self?.unregister(token)
-            }
-        }
-    }
-
-    func yield(_ event: AgentEvent) {
-        for continuation in subscribers() { continuation.yield(event) }
-    }
-
-    func finish() {
-        for continuation in removeAll() { continuation.finish() }
-    }
-
-    // The lock is only ever held across a dictionary access. Yielding happens after it is
-    // released, because a continuation can run arbitrary code and must never do so under a lock,
-    // which is why every one of these returns the continuations rather than calling them.
-
-    private func register(_ continuation: AsyncStream<AgentEvent>.Continuation) -> Int? {
-        state.withLock { state -> Int? in
-            guard !state.closed else { return nil }
-            state.nextToken += 1
-            state.continuations[state.nextToken] = continuation
-            return state.nextToken
-        }
-    }
-
-    private func unregister(_ token: Int) {
-        state.withLock { $0.continuations[token] = nil }
-    }
-
-    private func subscribers() -> [AsyncStream<AgentEvent>.Continuation] {
-        state.withLock { Array($0.continuations.values) }
-    }
-
-    private func removeAll() -> [AsyncStream<AgentEvent>.Continuation] {
-        state.withLock { state in
-            state.closed = true
-            let all = Array(state.continuations.values)
-            state.continuations = [:]
-            return all
-        }
-    }
-}
-
 /// The live process, reachable without actor isolation so a signal can be sent from anywhere.
 /// The lock is only ever held across the pointer swap, never across an await.
 ///
 /// `Mutex<State>` rather than `NSLock` plus `@unchecked Sendable`, for the reason given on
-/// `EventSink`: the three fields below have to be read together to describe a moment, and putting
-/// them in one value the compiler will not let anything reach outside the lock is stronger than a
-/// promise that nothing does.
+/// `EventFanout` in `SessionRunner`: the three fields below have to be read together to describe
+/// a moment, and putting them in one value the compiler will not let anything reach outside the
+/// lock is stronger than a promise that nothing does.
 private final class ProcessHandle: Sendable {
     private struct State {
         var process: (any AgentProcessing)?
@@ -1088,49 +1016,3 @@ public extension PermissionMode {
 }
 
 
-/// The questions one run is blocked on, reachable without actor isolation.
-///
-/// It has to be readable from `denyPendingAsks`, which runs on the way out of the app and on Stop,
-/// and neither of those can wait for a turn on the actor. The lock is only ever held across an
-/// array access.
-/// `Mutex` rather than `NSLock` plus `@unchecked Sendable`, for the reason given on `EventSink`.
-private final class PendingAsks: Sendable {
-    private let asks = Mutex<[PermissionAsk]>([])
-
-    var all: [PermissionAsk] { asks.withLock { $0 } }
-
-    var isEmpty: Bool { asks.withLock(\.isEmpty) }
-
-    func add(_ ask: PermissionAsk) {
-        asks.withLock { asks in
-            // The request id is the identity. A replayed line is the same question, not a second.
-            guard !asks.contains(where: { $0.requestID == ask.requestID }) else { return }
-            asks.append(ask)
-        }
-    }
-
-    /// Claim one, so two answers racing the same question cannot both reach the pipe.
-    func take(_ requestID: String) -> PermissionAsk? {
-        asks.withLock { asks -> PermissionAsk? in
-            guard let index = asks.firstIndex(where: { $0.requestID == requestID }) else { return nil }
-            return asks.remove(at: index)
-        }
-    }
-
-    func contains(_ requestID: String) -> Bool {
-        asks.withLock { asks in asks.contains { $0.requestID == requestID } }
-    }
-
-    func remove(_ requestID: String) {
-        asks.withLock { $0.removeAll { $0.requestID == requestID } }
-    }
-
-    /// Take the lot, in one step, so nothing can be answered twice on the way out.
-    func drain() -> [PermissionAsk] {
-        asks.withLock { asks in
-            let all = asks
-            asks = []
-            return all
-        }
-    }
-}

@@ -115,7 +115,7 @@ public enum Shell {
         let inPipe: Pipe? = stdin == nil ? nil : Pipe()
         if let inPipe { process.standardInput = inPipe }
 
-        let collector = OutputCollector()
+        let collector = PipeCollector()
 
         // Read each pipe to EOF on its own thread rather than through `readabilityHandler`.
         //
@@ -172,8 +172,8 @@ public enum Shell {
 
         return ShellResult(
             status: process.terminationStatus,
-            stdout: collector.stdoutString,
-            stderr: collector.stderrString
+            stdout: String(decoding: collector.out, as: UTF8.self),
+            stderr: String(decoding: collector.err, as: UTF8.self)
         )
     }
 
@@ -210,12 +210,14 @@ public enum Shell {
     }
 }
 
-/// Thread-safe accumulator for the two output streams, and the gate that says both are complete.
+/// Thread-safe accumulator for a subprocess's two output streams, and the gate that says both are
+/// complete. `Shell.run` and `Git.runRaw` share it, because it was two identical classes whose
+/// only difference was whether the caller decoded stdout afterwards.
 ///
-/// The two buffers share one `Mutex` because they are two halves of one `ShellResult`, read
-/// together once both streams have finished. `Mutex<State>` rather than `NSLock` plus
-/// `@unchecked Sendable`, for the reason given on `EventSink` in `AgentRunner`.
-private final class OutputCollector: Sendable {
+/// The two buffers share one `Mutex` because they are two halves of one result, read together
+/// once both streams have finished. `Mutex<State>` rather than `NSLock` plus
+/// `@unchecked Sendable`, for the reason given on `EventFanout` in `SessionRunner`.
+final class PipeCollector: Sendable {
     private struct State {
         var out = Data()
         var err = Data()
@@ -247,11 +249,9 @@ private final class OutputCollector: Sendable {
         }
     }
 
-    var stdoutString: String {
-        state.withLock { String(decoding: $0.out, as: UTF8.self) }
-    }
+    /// Bytes, undecoded, because git's `-z` output is byte strings that a `String` round trip
+    /// would silently rewrite. `Shell.run` decodes at the call site instead.
+    var out: Data { state.withLock(\.out) }
 
-    var stderrString: String {
-        state.withLock { String(decoding: $0.err, as: UTF8.self) }
-    }
+    var err: Data { state.withLock(\.err) }
 }

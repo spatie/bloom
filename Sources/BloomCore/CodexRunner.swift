@@ -46,7 +46,7 @@ public actor CodexRunner: SessionRunner {
     /// behind the signal would answer "gone" for a process that was still dying.
     private let connection = LiveConnection()
 
-    private let pending = PendingCodexAsks()
+    private let pending = PendingAsks()
     private let handle = TurnHandle()
     private let sink = EventFanout<AgentEvent>()
 
@@ -553,8 +553,8 @@ public actor CodexRunner: SessionRunner {
 /// the thing being stopped. The intent has to be recorded where it can be read without waiting.
 ///
 /// `Mutex<State>` rather than `NSLock` plus `@unchecked Sendable`, for the reason given on
-/// `EventSink` in `AgentRunner`: `@unchecked` is a promise the compiler cannot check, and the two
-/// fields below have to move together.
+/// `EventFanout` in `SessionRunner`: `@unchecked` is a promise the compiler cannot check, and
+/// the two fields below have to move together.
 private final class TurnHandle: Sendable {
     private struct State {
         var current: String?
@@ -594,45 +594,3 @@ private final class LiveConnection: Sendable {
     }
 }
 
-/// The questions this chat is holding a turn open for. Identical in shape to the Claude Code
-/// side's, and separate because claiming one has to be atomic: a person answering while a stored
-/// grant is being looked up must not produce two answers to one request.
-/// `Mutex` rather than `NSLock` plus `@unchecked Sendable`, for the reason given on `EventSink`
-/// in `AgentRunner`.
-private final class PendingCodexAsks: Sendable {
-    private let asks = Mutex<[PermissionAsk]>([])
-
-    var isEmpty: Bool { asks.withLock(\.isEmpty) }
-
-    func add(_ ask: PermissionAsk) {
-        asks.withLock { asks in
-            guard !asks.contains(where: { $0.requestID == ask.requestID }) else { return }
-            asks.append(ask)
-        }
-    }
-
-    /// Claim one, so two answers racing the same question cannot both reach the wire.
-    func take(_ requestID: String) -> PermissionAsk? {
-        asks.withLock { asks -> PermissionAsk? in
-            guard let index = asks.firstIndex(where: { $0.requestID == requestID }) else { return nil }
-            return asks.remove(at: index)
-        }
-    }
-
-    func contains(_ requestID: String) -> Bool {
-        asks.withLock { asks in asks.contains { $0.requestID == requestID } }
-    }
-
-    func remove(_ requestID: String) {
-        asks.withLock { $0.removeAll { $0.requestID == requestID } }
-    }
-
-    /// Take the lot, in one step, so nothing can be answered twice on the way out.
-    func drain() -> [PermissionAsk] {
-        asks.withLock { asks in
-            let all = asks
-            asks = []
-            return all
-        }
-    }
-}

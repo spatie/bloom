@@ -15,8 +15,8 @@ public final class UnixSocketConnection: Sendable {
     private let handle: FileHandle
     private let buffer = LineBuffer()
     /// Whether the descriptor has been given back to the kernel. Guarded by a `Mutex` rather
-    /// than `NSLock` plus `@unchecked Sendable`, for the reason given on `EventSink` in
-    /// `AgentRunner`, and every write happens under this same lock on purpose: `close` can only
+    /// than `NSLock` plus `@unchecked Sendable`, for the reason given on `EventFanout` in
+    /// `SessionRunner`, and every write happens under this same lock on purpose: `close` can only
     /// mark the flag once no write is mid-flight, so the descriptor can never be reclaimed
     /// underneath a writer.
     private let closed = Mutex(false)
