@@ -13,6 +13,12 @@ struct BloomApp: App {
         // is how a migration that runs one step too late destroys the thing it came to save.
         LegacyDefaults.migrate()
 
+        // The stored appearance, applied while the process is still faceless. It used to be a
+        // side effect of `SettingsView.init`, which made a dark preference's arrival at launch
+        // depend on SwiftUI choosing to construct the Settings scene's content eagerly, an
+        // implementation detail that owed nothing to the first window drawn.
+        AppearancePreference.apply(UserDefaults.standard.string(forKey: "appearance") ?? "system")
+
         // A development affordance: `Bloom --snapshot <dir>` draws the interface straight to PNG
         // and exits, so it can be looked at without a screen recording permission. It has to run
         // before any scene exists, which is why it lives in the initialiser.

@@ -30,6 +30,17 @@ enum Snapshot {
     /// Blocks the main thread on purpose. This runs before any scene exists, and the process is
     /// going to exit at the end of it either way.
     static func runAndExit() -> Never {
+        // Refused rather than trusted: `seededModel` runs a full `bootstrap`, whose recovery
+        // writes (resetting running sessions, abandoning pending asks) belong nowhere near a
+        // real database, and `--snapshot` is not DEBUG-gated, so the installed binary run by
+        // hand with no environment used to aim them at the user's own store, possibly while
+        // the real app was mid-turn.
+        guard ProcessInfo.processInfo.environment["BLOOM_DB_PATH"] != nil else {
+            FileHandle.standardError.write(Data(
+                "--snapshot renders against a database named by BLOOM_DB_PATH, and refuses to run without one.\n".utf8
+            ))
+            exit(1)
+        }
         let semaphore = DispatchSemaphore(value: 0)
         Task { @MainActor in
             await render()
@@ -573,8 +584,9 @@ enum Snapshot {
         }
     }
 
-    /// A model holding enough to make the views show something. The database path is overridden
-    /// through the environment, so this can never touch the user's real workspaces.
+    /// A model holding enough to make the views show something. `runAndExit` has already refused
+    /// to start without `BLOOM_DB_PATH`, so the `bootstrap` here can never touch the user's real
+    /// workspaces.
     private static func seededModel() async -> AppModel {
         let model = AppModel()
         await model.bootstrap()

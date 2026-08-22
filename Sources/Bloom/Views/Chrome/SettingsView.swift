@@ -2,11 +2,14 @@ import AppKit
 import SwiftUI
 import BloomCore
 
-/// Shared with the Appearance pane, which owns the picker that writes the preference.
+/// Shared between `BloomApp`, which applies the stored choice at launch, and the Appearance
+/// pane, which owns the picker that writes it.
 @MainActor
 enum AppearancePreference {
     static func apply(_ value: String) {
-        NSApp.appearance = switch value {
+        // `shared` rather than `NSApp`: the launch call runs in `BloomApp.init`, before SwiftUI
+        // has necessarily made the application object, and `NSApp` is nil until something does.
+        NSApplication.shared.appearance = switch value {
         case "light": NSAppearance(named: .aqua)
         case "dark": NSAppearance(named: .darkAqua)
         default: nil
@@ -23,10 +26,6 @@ struct SettingsView: View {
 
     /// Which tab is showing. An enum rather than an index, so the value says what it selects.
     @State private var tab: SettingsTab = .general
-
-    init() {
-        AppearancePreference.apply(UserDefaults.standard.string(forKey: "appearance") ?? "system")
-    }
 
     var body: some View {
         TabView(selection: $tab) {

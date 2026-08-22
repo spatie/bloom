@@ -34,6 +34,10 @@ struct UserTurnRowView: View {
     var maxWidth: CGFloat
 
     @Environment(AppModel.self) private var app
+    /// The list's one value, set in `TranscriptListView`, rather than actions built per bubble:
+    /// a fresh pair of closures on every pass is churn the row's AppKit text view then has to
+    /// swallow on each update.
+    @Environment(\.markdownLinkActions) private var linkActions
     /// What the conversation is set at and which face it is in, because the bubble now resolves a
     /// real `NSFont` rather than handing SwiftUI a rung to resolve for itself.
     @Environment(\.fontScale) private var fontScale
@@ -141,7 +145,7 @@ struct UserTurnRowView: View {
                     // muted slate that sits clearly on Spatie Blue and leaves white text alone.
                     // AppKit cannot read the `colorScheme` this bubble sets, so it is named.
                     selectionColor: NSColor(rgb: 0x466288),
-                    actions: TranscriptLink.actions(for: app.existingModel(for: workspace.id))
+                    actions: linkActions
                 )
             }
 
