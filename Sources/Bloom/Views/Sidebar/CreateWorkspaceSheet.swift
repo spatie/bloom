@@ -402,8 +402,7 @@ struct CreateWorkspaceSheet: View {
 
     private var branchOptions: [String] {
         guard let repo else { return branches }
-        if branches.isEmpty { return [repo.defaultBranch] }
-        return branches
+        return WorkspaceStartContext.branchOptions(branches: branches, defaultBranch: repo.defaultBranch)
     }
 
     /// The same question `AppModel` will ask a moment from now, so the hint and what happens cannot
@@ -468,28 +467,25 @@ struct CreateWorkspaceSheet: View {
             appDefaults = await AppDefaults.load(from: store)
         }
 
-        // One hop off the main actor for all three: a branch listing, a settings file chain and a
-        // PATH lookup, none of which belongs on the actor drawing the sheet.
-        let loaded = await Task.detached(priority: .userInitiated) {
-            let names = (try? await Git.branches(of: path)) ?? []
-            let settings = SettingsLoader.load(repo: path)
-            return (names, settings, WorkspaceNamer.isAvailable)
-        }.value
+        // The gathering and both branch decisions live in the core, where the suite can reach
+        // them, and where the subprocess rule wants them: this sheet was the last view on the
+        // allow-list in `Tools/house-rules.sh` for calling `Git` itself.
+        let context = await WorkspaceStartContext.load(repoPath: path)
 
-        branches = loaded.0
-        branchPrefix = loaded.1.branchPrefix
-        isNamingAvailable = loaded.2
+        branches = context.branches
+        branchPrefix = context.settings.branchPrefix
+        isNamingAvailable = context.isNamingAvailable
         controls = ComposerControls(
-            defaults: ComposerDefaults.resolve(repo: loaded.1, app: appDefaults),
+            defaults: ComposerDefaults.resolve(repo: context.settings, app: appDefaults),
             isFastMode: appDefaults.fastMode,
             outputStyle: appDefaults.outputStyle
         )
 
-        if !branches.contains(baseBranch) {
-            baseBranch = branches.contains(repo.defaultBranch)
-                ? repo.defaultBranch
-                : (branches.first ?? repo.defaultBranch)
-        }
+        baseBranch = WorkspaceStartContext.resolvedBaseBranch(
+            current: baseBranch,
+            branches: branches,
+            defaultBranch: repo.defaultBranch
+        )
     }
 
     private func addProject() {

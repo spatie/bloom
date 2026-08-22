@@ -84,9 +84,10 @@ a model or a helper type beside the view (`FileRevert`, `FileIndex`, `TerminalPe
 looking for `await Git.` and `await Shell.` under `Sources/Bloom/Views/`: the subprocess calls are
 all async and the pure helpers on the same types are not, so the test costs no exception list of
 its own. The three helper types above are named in the allow-list because they are what a view
-calls **instead** of reaching for a process itself. `CreateWorkspaceSheet` still calls
-`Git.branches` from a `.task` and is in that list too; that is the exception left over, not the
-pattern to copy, and it is the one entry that should come off.
+calls **instead** of reaching for a process itself. `CreateWorkspaceSheet` was the last exception,
+calling `Git.branches` from its own `.task`; that loading and both branch decisions it fed are
+`WorkspaceStartContext` in the core now, tested, so the sheet's entry in the allow-list in
+`Tools/house-rules.sh` is dead and can come off.
 
 ## Comments
 
