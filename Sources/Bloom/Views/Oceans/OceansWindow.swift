@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import BloomCore
 
 /// The map of the seas workspaces have been named after.
@@ -17,8 +18,34 @@ struct OceansWindow: Scene {
             OceansMapView()
                 .environment(model)
         }
-        .defaultSize(width: 760, height: 560)
+        .defaultSize(width: Self.openingSize.width, height: Self.openingSize.height)
     }
+
+    /// The size the window opens at the first time, and only then.
+    ///
+    /// It used to be a flat 760 by 560, which on anything larger than a laptop panel opened a
+    /// postage stamp of a chart with names too small to read. Four fifths of the screen is the
+    /// size a chart wants; `defaultWindowSize` turns that budget into a window cut exactly to
+    /// the two by one sheet, so a very wide or very tall display does not open with a band of
+    /// blank paper that no content will ever reach.
+    ///
+    /// **A frame the user has set wins.** `.defaultSize` is only consulted when the scene has no
+    /// restored frame of its own, and a `Window` scene saves its frame the moment it is moved or
+    /// resized, so this value is a starting position rather than a rule reapplied on every open.
+    /// Nothing here reaches for the window afterwards to enforce it, which was the tempting
+    /// version and would have thrown away a size the user had chosen every time the window was
+    /// reopened.
+    ///
+    /// The screen is `NSScreen.main` read once as the scene is built, because a default size has
+    /// to exist before there is a window to ask which display it landed on. On a two screen desk
+    /// that is the screen the app was frontmost on, which is where the window will open.
+    static let openingSize: (width: Double, height: Double) = {
+        let screen = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1440, height: 900)
+        return SeaChartProjection.defaultWindowSize(
+            screenWidth: screen.width, screenHeight: screen.height,
+            margin: SeaChartView.margin, footerHeight: 38
+        )
+    }()
 }
 
 /// The chart and the two counts under it.
@@ -60,6 +87,11 @@ private struct OceansMapView: View {
                 .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
             Spacer()
+            // The gestures written down, because a chart shows no controls on purpose and a
+            // gesture nobody is told about is a gesture nobody uses.
+            Text("Pinch to zoom, scroll to pan, double click for the whole world")
+                .font(Typo.label)
+                .foregroundStyle(Palette.textTertiary)
         }
         .padding(.horizontal, Metrics.gutter)
         .padding(.vertical, Metrics.spacingWide)
