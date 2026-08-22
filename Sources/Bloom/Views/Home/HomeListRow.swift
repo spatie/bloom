@@ -145,11 +145,13 @@ struct HomeListRow: View {
         // long before anyone works out why.
         .contentShape(Rectangle())
         // Merged into one sentence. Left as separate elements, VoiceOver reads a name, a repeated
-        // project name, two bare numbers and "1d", in that order, which says nothing.
-        .accessibilityElement(children: .ignore)
+        // project name, two bare numbers and "1d", in that order, which says nothing. Not while
+        // renaming, though: the merge swallowed the rename field, so Rename from this row's own
+        // context menu handed a VoiceOver user a field they could not reach.
+        .accessibilityElement(children: isRenaming ? .contain : .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityInputLabels([workspace.name])
-        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(isRenaming ? [] : .isButton)
         .help(help)
     }
 
