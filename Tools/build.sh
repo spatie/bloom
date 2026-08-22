@@ -74,6 +74,20 @@ else
   plist_set BloomBuildChannel string local
 fi
 
+# The year in the copyright line, refreshed at assembly so nobody has to remember January.
+#
+# NSHumanReadableCopyright has two readers, the About window and Finder's Get Info, and both read
+# the bundle's plist. That rules out computing the year in the view: the window would be right and
+# Get Info would still show whatever year was committed, two answers to one key. So the wording
+# stays in Resources/Info.plist, where a fallback should live, and only the four digit year in it
+# is replaced with the year this bundle was assembled. A build made some other way ships the
+# committed value, which is a real year rather than a placeholder, so the failure mode is a date
+# that ages rather than a template that leaks.
+copyright="$(/usr/libexec/PlistBuddy -c 'Print :NSHumanReadableCopyright' "$APP/Contents/Info.plist" 2>/dev/null || true)"
+if [[ -n "$copyright" ]]; then
+  plist_set NSHumanReadableCopyright string "$(printf '%s' "$copyright" | sed -E "s/[0-9]{4}/$(date +%Y)/")"
+fi
+
 # The appcast and the key its signatures are checked against. Resources/Info.plist ships
 # placeholders for both, and a build that leaves either of them in place never starts the updater,
 # so an unconfigured build cannot reach for a host nobody owns.
@@ -185,12 +199,16 @@ compile_layered_icon() {
 
 compile_layered_icon
 
-# What the app looks up in its own bundle by name: the Spatie logos the About pane draws, and the
-# menu bar mark. PDFs rather than bitmaps, because AppKit redraws a PDF as vector art at whatever
-# scale the display asks for, so one file is right on a Retina display and on a 1x monitor. The
-# .svg beside each logo is the source it was generated from and is not needed at runtime; the menu
-# bar mark's source is Tools/icon/menubar.py.
-for art in Resources/Spatie*.pdf(N) Resources/BloomMenuBar.pdf(N); do
+# What the app looks up in its own bundle by name: the Spatie logos the About pane draws, the
+# menu bar mark, and the product marks the About window's makers section shows. The logos and the
+# mark are PDFs rather than bitmaps, because AppKit redraws a PDF as vector art at whatever scale
+# the display asks for, so one file is right on a Retina display and on a 1x monitor. The .svg
+# beside each logo is the source it was generated from and is not needed at runtime; the menu bar
+# mark's source is Tools/icon/menubar.py. The Maker*.png files are the exception to the PDF rule:
+# they are the exact bitmaps the download email on runbloom.app renders, copied from that
+# repository's public/mail/ rather than redrawn, because a product's own mark is not ours to
+# approximate. At 192 pixels for a mark drawn about twenty points wide they stay sharp on Retina.
+for art in Resources/Spatie*.pdf(N) Resources/BloomMenuBar.pdf(N) Resources/Maker*.png(N); do
   cp "$art" "$APP/Contents/Resources/"
 done
 

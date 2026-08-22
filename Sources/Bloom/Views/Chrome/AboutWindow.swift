@@ -11,8 +11,9 @@ import BloomCore
 ///
 /// Bloom has a site at runbloom.app built on one ramp and one pair of typefaces, and an About
 /// window is the one window small enough to be that site and still be a Mac window. So this is the
-/// site's own furniture: the Depth plinth, the mark on it, the name set in a serif, a mono spec
-/// line under it, and the footer's credit strip below the rule. `public/brand/PALETTE.md` and
+/// site's own furniture: the Depth plinth with the site's water drifting in it, the mark on it,
+/// the name set in a serif, a mono spec line under it, and below the rule the site's makers
+/// section, ending in the footer's credit strip. `public/brand/PALETTE.md` and
 /// `resources/css/app.css` in the runbloom.app repository are where each of those numbers is from.
 ///
 /// One instance, kept here. `isReleasedWhenClosed` defaults to true for a window built in code, so
@@ -70,13 +71,16 @@ enum AboutWindow {
     }
 }
 
-/// What that window draws. Every number and every sentence in it lives here.
+/// What that window draws. Every number in it lives here; every sentence and every address lives
+/// in `Maker` and `BuildIdentity`, because a string typed into this file is a string nothing in
+/// `Tests/BloomCoreTests` can hold still.
 private struct AboutView: View {
-    /// Narrow, and the reason is the credit line: "Made by Spatie in Antwerp, Belgium" set in mono
-    /// at eleven points is the widest thing in the window, and the window is the width that holds
-    /// it on one line with the site's gutter either side. Everything above it is centred and would
-    /// be happy at any width.
-    private static let width: CGFloat = 360
+    /// Wide enough that the product summaries set beside their marks without an orphaned line,
+    /// and no wider: the window is a column of centred things and a short list, and surplus width
+    /// reads as a dialog that forgot its content. 360 was the width before the makers section
+    /// arrived and every summary broke mid-phrase at it; 420 held until the marks arrived and
+    /// their column pushed Flare's summary into a two word second line.
+    private static let width: CGFloat = 460
 
     /// The app's own icon at the size the site's closing section draws the mark at, scaled for a
     /// window rather than a page. Read out of the running bundle rather than shipped a second time
@@ -91,12 +95,18 @@ private struct AboutView: View {
     var body: some View {
         VStack(spacing: 0) {
             plinth
-            Rectangle()
-                .fill(Palette.border)
-                .frame(height: Metrics.hairline)
+            rule
+            makers
+            rule
             credit
         }
         .frame(width: Self.width)
+    }
+
+    private var rule: some View {
+        Rectangle()
+            .fill(Palette.border)
+            .frame(height: Metrics.hairline)
     }
 
     // MARK: The plinth
@@ -127,11 +137,38 @@ private struct AboutView: View {
                 .font(Typo.codeSmall)
                 .foregroundStyle(Self.mistDim)
                 .padding(.top, Metrics.spacing)
+
+            // The app's own address, up here rather than in the footer, and in exactly one of
+            // the two. This is the identity block, and the person most likely to want this link
+            // is hunting for the site, the changelog or the release notes, which is a hunt that
+            // starts at the version line and stops when an address appears under it. The footer
+            // is Spatie's signature, and a second address beside spatie.be would turn the
+            // signature into a link list. `linkInverted` because the plinth is fixed dark
+            // artwork in both appearances and the ramp's link colours are picked against the
+            // window surfaces, not against Abyss.
+            Link(AppSite.host, destination: AppSite.url)
+                .font(Typo.codeSmall)
+                .foregroundStyle(Palette.linkInverted)
+                .underline()
+                .padding(.top, Metrics.spacingWide + Metrics.spacingSmall)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 38)
         .padding(.bottom, 26)
-        .background(Self.depth)
+        .background {
+            // `.ignoresSafeArea` because this is the view builder overload of `background`,
+            // which respects the safe area that the ShapeStyle overload ignores by default.
+            // Without it the plinth stops at the title bar and leaves a strip of flat window
+            // background above the gradient, which is exactly the seam `.fullSizeContentView`
+            // exists to prevent. The clip is for the water, which is painted larger than the
+            // plinth so its drift never shows an edge.
+            ZStack {
+                Self.depth
+                PlinthWater()
+            }
+            .clipped()
+            .ignoresSafeArea(edges: .top)
+        }
     }
 
     /// What the AppKit panel used to print under the name, except honest about which build it is.
@@ -144,39 +181,121 @@ private struct AboutView: View {
         BuildIdentity.read(from: .main).line
     }
 
-    // MARK: The credit strip
+    // MARK: The makers
 
-    private var credit: some View {
-        VStack(spacing: Metrics.spacingWide) {
-            // The site's footer, in the site's words and the site's order. The mark rather than
-            // the name, because that is how Spatie signs the page it made.
+    /// The site's makers section at a window's scale: who Spatie is, then the products, the same
+    /// three in the same order as the download email the site sends. On the reading ground rather
+    /// than the chrome, because this is the part of the window that is read rather than read off,
+    /// and the strip below keeps the chrome colour so the two still divide the way a content pane
+    /// and a status bar do.
+    private var makers: some View {
+        VStack(spacing: 0) {
+            // The site's footer credit, in the site's words and the site's order. The mark rather
+            // than the name, because that is how Spatie signs the page it made.
             HStack(spacing: Metrics.spacing) {
                 Text("Made by")
                 badge
                 Text("in Antwerp, Belgium")
             }
+            .font(Typo.codeSmall)
             .foregroundStyle(Palette.textSecondary)
 
+            // Two paragraphs with the list's own gap between them, so they read as two thoughts
+            // in the panel's rhythm rather than as one paragraph that broke.
+            VStack(spacing: Metrics.inset) {
+                ForEach(Maker.identityParagraphs, id: \.self) { paragraph in
+                    Text(paragraph)
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.top, Metrics.spacingWide + Metrics.spacingSmall)
+
+            VStack(spacing: Metrics.inset) {
+                ForEach(Maker.products, id: \.host) { product in
+                    productRow(product)
+                }
+            }
+            .padding(.top, Metrics.pane - Metrics.spacingSmall)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(Metrics.pane)
+        .background(Palette.surface)
+    }
+
+    /// One product: its mark, then the name carrying the weight, the address carrying the link,
+    /// and the sentence under both. The address is the link rather than the name, because a
+    /// printed host says where the click goes before it is clicked, which is what makes three
+    /// outbound links in an About window read as a reference list rather than as an
+    /// advertisement. A row whose mark fails to load sets its text from the leading edge instead,
+    /// because an empty box holding a column open for a missing image is the one way to make the
+    /// absence louder than the mark.
+    private func productRow(_ product: MakerProduct) -> some View {
+        HStack(alignment: .top, spacing: Metrics.inset) {
+            if let mark = Self.mark(named: product.logoResource) {
+                Image(nsImage: mark)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: Self.productMark, height: Self.productMark)
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: Metrics.spacingTight) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(product.name)
+                        .font(Typo.captionEmphasis)
+                        .foregroundStyle(Palette.textPrimary)
+                    Spacer(minLength: Metrics.spacing)
+                    Link(product.host, destination: product.url)
+                        .font(Typo.codeTiny)
+                        .foregroundStyle(Palette.link)
+                        .underline()
+                }
+                Text(product.summary)
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The box every product mark occupies, so the three text columns start on one line. One box
+    /// for all three, which is how the download email sets them, and not an optical correction
+    /// per mark: Flare's bare glyph was tried two points smaller on the theory that art filling
+    /// its file to the edge reads larger than a tile's inset art, and it read lighter instead,
+    /// because an open glyph carries less mass than a solid tile, not more.
+    private static let productMark: CGFloat = 22
+
+    /// The email's own bitmaps, read out of the bundle; see `MakerProduct.logoResource`.
+    private static func mark(named resource: String) -> NSImage? {
+        guard let url = Bundle.main.url(forResource: resource, withExtension: "png")
+        else { return nil }
+        return NSImage(contentsOf: url)
+    }
+
+    // MARK: The credit strip
+
+    private var credit: some View {
+        VStack(spacing: Metrics.spacingSmall) {
             // Underlined, which `Palette.link` is explicit is not decoration: it is what makes a
             // link findable without colour vision.
-            Link(Self.host, destination: Self.spatie)
+            Link(Maker.host, destination: Maker.url)
                 .foregroundStyle(Palette.link)
                 .underline()
+                .font(Typo.codeSmall)
 
             if let copyright {
                 Text(copyright)
                     .font(Typo.codeTiny)
                     .foregroundStyle(Palette.textTertiary)
-                    .padding(.top, Metrics.spacingSmall)
             }
         }
-        // Mono for the whole strip, which is what `.footer` on the site is set in. A credit line,
-        // an address and a copyright are all things read off the thing above them rather than
-        // prose, and setting the three in one face is what makes them read as one footer instead
-        // of as three separate remarks.
-        .font(Typo.codeSmall)
         .frame(maxWidth: .infinity)
-        .padding(Metrics.pane)
+        .padding(.vertical, Metrics.inset + Metrics.spacingTight)
+        .padding(.horizontal, Metrics.pane)
         // The chrome colour, which is what every strip of small print in this app stands on. Not
         // `surfaceSunken`: in dark that is two units off Abyss and the footer disappeared into the
         // bottom of the plinth with only the rule left to say there were two things.
@@ -187,11 +306,9 @@ private struct AboutView: View {
     ///
     /// One cut in both appearances, and deliberately not the pair `SpatieCredit` swaps between in
     /// the settings window. Two reasons, and they agree. This window is the site's footer, and the
-    /// site signs every page with the blue badge on a dark ground, in the nav and in the footer
-    /// both; and Spatie Blue `#197593` is the one colour the ramp calls safe on either ground,
-    /// which is the whole reason `Palette.accentFill` is a single value. The white cut on the dark
-    /// strip was tried and it is the brightest thing in the window, which is not what a signature
-    /// at the foot of an About box should be.
+    /// site signs every page with the blue badge, in the nav and in the footer both; and Spatie
+    /// Blue `#197593` is the one colour the ramp calls safe on either ground, which is the whole
+    /// reason `Palette.accentFill` is a single value.
     @ViewBuilder
     private var badge: some View {
         if let logo = Self.logo {
@@ -216,22 +333,12 @@ private struct AboutView: View {
 
     /// `NSHumanReadableCopyright`, which is where macOS reads it from too: the Finder's Get Info
     /// panel shows that key, and so did the panel this window replaces. One string, in the plist,
-    /// rather than a second copy here that would drift from it.
+    /// rather than a second copy here that would drift from it. `Tools/build.sh` re-stamps the
+    /// year when it assembles the bundle, so the value read here is current without anyone
+    /// remembering January; see the comment there.
     private var copyright: String? {
         Bundle.main.object(forInfoDictionaryKey: "NSHumanReadableCopyright") as? String
     }
-
-    // MARK: The words and the addresses
-
-    /// Shown without a scheme, because that is how the site prints it: the ghost button at the
-    /// foot of the makers section says `spatie.be` and points at `https://spatie.be`, which is
-    /// `config('bloom.maker_url')` there.
-    private static let host = "spatie.be"
-
-    /// Force unwrapped, as the other two spatie.be links in this app are. It is a literal with a
-    /// scheme and a host and nothing in it that can fail to parse, so a fallback here would be an
-    /// unreachable branch dressed up as a safety net.
-    private static let spatie = URL(string: "https://\(host)")!
 
     // MARK: The site's plinth, which is artwork and not a window surface
 
@@ -243,8 +350,8 @@ private struct AboutView: View {
     // mark was drawn for a deep ground and the wordmark set on one, so a plinth that turned white
     // in light mode would be showing a Bloom that exists nowhere else.
     //
-    // Nothing below the rule does this. The credit strip is `Palette` throughout and follows the
-    // appearance like every other window in the app.
+    // Nothing below the rule does this. The makers section and the credit strip are `Palette`
+    // throughout and follow the appearance like every other window in the app.
 
     /// Depth, the site's plinth gradient: Fathom `#123B57` at the top to Abyss `#061420` at the
     /// bottom. One of exactly two gradients the brand has, and the one that reads as looking down
@@ -264,4 +371,127 @@ private struct AboutView: View {
     /// The site's `--mist-dim` `#8AA0AB`, which is what it sets a mono spec line in. 6.0 to 1 on
     /// Abyss, so the version stays readable rather than merely present.
     private static let mistDim = Color(nsColor: NSColor(rgb: 0x8AA0AB))
+}
+
+/// The water in the plinth: two soft pools of light drifting a few percent over most of a minute,
+/// which is `.gate__panel::before` on the site brought over as layers rather than as CSS.
+///
+/// The register is atmosphere, not effect. The site paints the pools at seven and nine percent
+/// opacity, moves the whole painting two and a half percent on a diagonal over thirty eight
+/// seconds, and lets `alternate` carry it back, so there is no loop point to notice; anything
+/// stronger than that has already been rejected on this project as too much. The pools are Shallow
+/// `#9BE9DC` and Current `#2AA3B4` from the palette, fixed in both appearances because the plinth
+/// they sit in is.
+///
+/// Core Animation rather than a SwiftUI animation, deliberately. A `TimelineView` or a
+/// `repeatForever` offset animation re-renders in the app's process at display refresh for the
+/// whole life of a window that is often left open. A `CABasicAnimation` on a layer's position is
+/// handed to the render server once and costs this process nothing afterwards, which is the only
+/// honest way to run an animation for forty seconds at a time. Measured over thirty five one
+/// second samples with the window open, front and animating: 0.03 percent of one core against
+/// 0.06 with the window closed, both the sampler's noise floor, and no measurable change in
+/// WindowServer either way.
+private struct PlinthWater: NSViewRepresentable {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeNSView(context: Context) -> PlinthWaterView { PlinthWaterView() }
+
+    func updateNSView(_ view: PlinthWaterView, context: Context) {
+        // Removed, not slowed: Reduce Motion means the water holds still, and the pools stay,
+        // because the setting is about movement and the light is not moving anywhere when it is
+        // on. The same rule `Motion`'s call sites follow.
+        view.setDrifting(!reduceMotion)
+    }
+}
+
+private final class PlinthWaterView: NSView {
+    /// The painting, larger than the view so the drift never shows an edge. The site does the
+    /// same with `inset: -35%`.
+    private let canvas = CALayer()
+    private var drifting = false
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        canvas.addSublayer(Self.pool(rgb: 0x9BE9DC, alpha: 0.07))
+        canvas.addSublayer(Self.pool(rgb: 0x2AA3B4, alpha: 0.09))
+        layer?.addSublayer(canvas)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    /// One pool: a radial falloff from a palette colour to nothing by seventy percent of the
+    /// radius, which is the site's `radial-gradient(..., transparent 70%)`.
+    private static func pool(rgb: UInt32, alpha: CGFloat) -> CAGradientLayer {
+        let pool = CAGradientLayer()
+        pool.type = .radial
+        pool.colors = [
+            NSColor(rgb: rgb).withAlphaComponent(alpha).cgColor,
+            NSColor(rgb: rgb).withAlphaComponent(0).cgColor,
+            NSColor(rgb: rgb).withAlphaComponent(0).cgColor,
+        ]
+        pool.locations = [0, 0.7, 1]
+        pool.startPoint = CGPoint(x: 0.5, y: 0.5)
+        pool.endPoint = CGPoint(x: 1, y: 1)
+        return pool
+    }
+
+    func setDrifting(_ wanted: Bool) {
+        drifting = wanted
+        applyDrift()
+    }
+
+    override func layout() {
+        super.layout()
+        // Everything is laid out fractionally off the view's size, inside a transaction with
+        // actions disabled so a resize is a placement rather than an animation of its own. The
+        // window is fixed size, so in practice this runs once.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        canvas.frame = bounds.insetBy(dx: -bounds.width * 0.35, dy: -bounds.height * 0.35)
+        let size = canvas.bounds.size
+        let pools = canvas.sublayers ?? []
+        // The site's two pools: 38% by 30% at 26%, 24% from the top left, and 34% by 28% at 76%,
+        // 72%. Layer geometry is bottom up, so the vertical fractions are flipped.
+        if pools.count == 2 {
+            pools[0].frame = CGRect(
+                x: size.width * 0.26 - size.width * 0.19,
+                y: size.height * 0.76 - size.height * 0.15,
+                width: size.width * 0.38,
+                height: size.height * 0.30
+            )
+            pools[1].frame = CGRect(
+                x: size.width * 0.76 - size.width * 0.17,
+                y: size.height * 0.28 - size.height * 0.14,
+                width: size.width * 0.34,
+                height: size.height * 0.28
+            )
+        }
+        CATransaction.commit()
+        applyDrift()
+    }
+
+    /// The site's `gate-drift`: two and a half percent across, two percent down, thirty eight
+    /// seconds each way, eased at both ends, autoreversing forever. Applied to the canvas rather
+    /// than to each pool, exactly as the CSS transforms the one `::before`, so the two pools move
+    /// as one body of water rather than as two lights.
+    private func applyDrift() {
+        canvas.removeAnimation(forKey: "drift")
+        guard drifting, canvas.bounds.width > 0 else { return }
+        let base = canvas.position
+        let drift = CABasicAnimation(keyPath: "position")
+        drift.fromValue = CGPoint(
+            x: base.x - canvas.bounds.width * 0.025, y: base.y + canvas.bounds.height * 0.02
+        )
+        drift.toValue = CGPoint(
+            x: base.x + canvas.bounds.width * 0.025, y: base.y - canvas.bounds.height * 0.02
+        )
+        drift.duration = 38
+        drift.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        drift.autoreverses = true
+        drift.repeatCount = .infinity
+        canvas.add(drift, forKey: "drift")
+    }
 }
