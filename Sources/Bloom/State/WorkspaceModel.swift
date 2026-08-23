@@ -821,6 +821,17 @@ final class WorkspaceModel {
     /// reopens holding it when its file is opened again.
     var reviewDrafts: [String: ReviewDraft] = [:]
 
+    /// The text of every comment currently being edited in place, keyed by the comment it belongs
+    /// to. Here for the same reason `reviewDrafts` is, and the reason is not hypothetical for an
+    /// edit either: the band being edited sits in the same lazy stack, so scrolling it out of
+    /// sight destroys it, and `ReviewPaneView` keys the whole diff by path, so glancing at another
+    /// file destroys it again. An edit held as view state would lose the rewritten sentence to
+    /// either, without a keystroke from the person who typed it.
+    ///
+    /// Keyed by id rather than by path because two comments on one file can be open at once, and
+    /// closing one must not take the other's text with it.
+    var reviewEdits: [ReviewCommentID: String] = [:]
+
     func reloadReviewComments() async {
         guard let store else { return }
         let fresh = (try? await store.reviewComments(workspaceID: workspace.id)) ?? []
@@ -851,10 +862,28 @@ final class WorkspaceModel {
         reviewComments = (reviewComments + [stored]).sortedForReview()
     }
 
+    /// Rewrites one comment's text. `update` and not `upsert`, and the difference is not
+    /// tidiness: the value this call would have to hand `upsert` is a copy the view has been
+    /// holding while somebody typed, and its anchor is the one column here that another writer
+    /// moves. The comment's line is re-checked against the worktree every few seconds, so a
+    /// whole-value write would carry a stale anchor back over a fresh one and pin the note to a
+    /// line it has already left. The store's rule says the same in one sentence: an edit changes
+    /// the column it names and no others.
+    func editReviewComment(id: ReviewCommentID, body: String) async {
+        guard let store else { return }
+        try? await store.updateReviewCommentBody(id: id, body: body)
+        guard let index = reviewComments.firstIndex(where: { $0.id == id }) else { return }
+        reviewComments[index].body = body
+    }
+
     func removeReviewComment(id: ReviewCommentID) async {
         guard let store else { return }
         try? await store.deleteReviewComment(id: id)
         reviewComments.removeAll { $0.id == id }
+        // A comment that no longer exists cannot be being edited. Left behind, the buffer would
+        // be a dictionary that grows for the life of the workspace and, worse, would put the old
+        // text back into an editor if the same id were ever seen again.
+        reviewEdits[id] = nil
     }
 
     /// Takes exactly the sent comments out, by id rather than by wiping the workspace, so a
@@ -865,6 +894,7 @@ final class WorkspaceModel {
         for id in ids { try? await store.deleteReviewComment(id: id) }
         let sent = Set(ids)
         reviewComments.removeAll { sent.contains($0.id) }
+        for id in ids { reviewEdits[id] = nil }
     }
 
     // MARK: - The worktree listing

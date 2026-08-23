@@ -389,10 +389,18 @@ struct DiffView: View {
             )
 
         case let .commentBand(placement):
-            ReviewCommentBandView(placement: placement, width: width) {
-                let model = model
-                Task { await model.removeReviewComment(id: placement.comment.id) }
-            }
+            ReviewCommentBandView(
+                placement: placement,
+                width: width,
+                editing: editBinding(for: placement.comment.id),
+                onBeginEdit: { beginEdit(of: placement.comment) },
+                onCommitEdit: { commitEdit(of: placement.comment) },
+                onCancelEdit: { cancelEdit(of: placement.comment.id) },
+                onRemove: {
+                    let model = model
+                    Task { await model.removeReviewComment(id: placement.comment.id) }
+                }
+            )
 
         case .commentEditor:
             ReviewCommentEditorView(
@@ -508,6 +516,52 @@ struct DiffView: View {
             await model.addReviewComment(
                 filePath: path, spot: draft.spot, anchor: draft.anchor, body: body
             )
+        }
+    }
+
+    // MARK: Editing one in place
+
+    /// The text of an open in-place edit, or nil for a band at rest. Through the model for the
+    /// same reason the draft is (see `WorkspaceModel.reviewEdits`): this row is destroyed by
+    /// scrolling away from it and by walking to another file, and neither is a reason to lose a
+    /// rewritten sentence.
+    private func editBinding(for id: ReviewCommentID) -> Binding<String>? {
+        guard model.reviewEdits[id] != nil else { return nil }
+        return Binding(
+            get: { model.reviewEdits[id] ?? "" },
+            set: { model.reviewEdits[id] = $0 }
+        )
+    }
+
+    /// Opens the editor on the body as it stands. Reopening one that is already open keeps what
+    /// is in it: the pencil is a point away from the text, and a stray click on it must not be
+    /// the thing that resets a paragraph somebody has been rewriting.
+    private func beginEdit(of comment: ReviewComment) {
+        guard model.reviewEdits[comment.id] == nil else { return }
+        model.reviewEdits[comment.id] = comment.body
+    }
+
+    /// Escape and Cancel. The typed text goes; the comment keeps the body it had. Discarding is
+    /// safe here in a way it is not on a click elsewhere, because this is somebody saying so.
+    private func cancelEdit(of id: ReviewCommentID) {
+        model.reviewEdits[id] = nil
+    }
+
+    /// Return and Save. What the three answers mean is `ReviewCommentEdit`'s, and a refusal
+    /// leaves the editor open holding what is in it, which is the whole of what "refused" buys:
+    /// an emptied field is a mistake far more often than it is a request to delete, and the
+    /// remove control is right there for when it is not.
+    private func commitEdit(of comment: ReviewComment) {
+        guard let typed = model.reviewEdits[comment.id] else { return }
+        switch ReviewCommentEdit.outcome(typed: typed, replacing: comment.body) {
+        case .refused:
+            return
+        case .unchanged:
+            cancelEdit(of: comment.id)
+        case let .save(body):
+            cancelEdit(of: comment.id)
+            let model = model
+            Task { await model.editReviewComment(id: comment.id, body: body) }
         }
     }
 

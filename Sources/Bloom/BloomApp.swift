@@ -24,6 +24,7 @@ struct BloomApp: App {
         // before any scene exists, which is why it lives in the initialiser.
         if Snapshot.isRequested { Snapshot.runAndExit() }
         if Snapshot.isWindowCaptureRequested { Snapshot.scheduleWindowCapture() }
+        if Snapshot.isGalleryCaptureRequested { Snapshot.scheduleGalleryCapture() }
         Snapshot.scheduleURLIfRequested()
         Snapshot.scheduleRunningStateIfRequested()
         Snapshot.scheduleSetupLogExpansionIfRequested()

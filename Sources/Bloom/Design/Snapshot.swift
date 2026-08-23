@@ -522,6 +522,81 @@ enum Snapshot {
     }
 
 
+    // MARK: - Gallery capture
+
+    /// Photographs a design gallery in a window of its own.
+    ///
+    ///     Bloom --snapshot-gallery /tmp/shots
+    ///
+    /// `--snapshot` cannot photograph this one. `ImageRenderer` paints SwiftUI's yellow
+    /// "unsupported" placeholder wherever an `NSViewRepresentable` sits, and the box a review
+    /// comment is written in is one: it is the composer's own text view, which is what lets
+    /// Shift+Return insert a line break the text system can undo. Rendered offscreen, the gallery
+    /// that exists to show that box came out as a yellow bar with a red circle on it, and the two
+    /// states worth reviewing (a comment being written across two lines, and one being rewritten)
+    /// were exactly the two the picture could not show.
+    ///
+    /// So the gallery gets a real window and the window server is asked for it, the same way
+    /// `--snapshot-window` asks for the app's own. The window is made by this process, ordered
+    /// front by this process and captured by number, so nothing else on the desktop can reach the
+    /// file.
+    static var isGalleryCaptureRequested: Bool {
+        CommandLine.arguments.contains("--snapshot-gallery")
+    }
+
+    static func scheduleGalleryCapture() {
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: "--snapshot-gallery"),
+              index + 1 < arguments.count else { return }
+        let output = arguments[index + 1]
+
+        Task { @MainActor in
+            try? FileManager.default.createDirectory(
+                atPath: output, withIntermediateDirectories: true
+            )
+            // Long enough for the app's own window to have finished opening, so the two are not
+            // laying themselves out at the same moment.
+            try? await Task.sleep(for: .seconds(3))
+
+            let size = CGSize(width: 820, height: 900)
+            for name in ["light", "dark"] {
+                let window = NSWindow(
+                    contentRect: NSRect(origin: .zero, size: size),
+                    styleMask: [.titled, .closable],
+                    backing: .buffered,
+                    defer: false
+                )
+                window.title = "Review comments"
+                window.appearance = NSAppearance(named: name == "dark" ? .darkAqua : .aqua)
+                window.contentView = NSHostingView(
+                    rootView: ReviewCommentSnapshotGallery()
+                        .frame(width: size.width, height: size.height)
+                        .background(Palette.windowBackground)
+                )
+                window.center()
+                // Key, because a field draws its focus ring only in the window the keys are going
+                // to, and the state being photographed is a field somebody is typing in.
+                window.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+                // A hosting view lays out, the text view measures its own wrapped height and
+                // reports it back, and the box grows on the pass after that. Captured sooner, a
+                // two-line comment was photographed in a one-line box.
+                try? await Task.sleep(for: .seconds(2))
+
+                let path = "\(output)/review-comments-\(name).png"
+                if captureWindowServerImage(windowNumber: window.windowNumber, to: path) {
+                    print(path)
+                } else {
+                    FileHandle.standardError.write(Data(
+                        "screencapture failed for \(path); screen recording may not be granted\n".utf8
+                    ))
+                }
+                window.orderOut(nil)
+            }
+            exit(0)
+        }
+    }
+
     /// Asks the window server for one window, by number, as a PNG on disk.
     ///
     /// Returns false when the file did not appear, which is what a run without screen recording
@@ -595,6 +670,7 @@ enum Snapshot {
             ("components", AnyView(ComponentGallery().frame(width: 640, height: 700)), CGSize(width: 640, height: 700)),
             ("permission", AnyView(PermissionSnapshotGallery().frame(width: 720, height: 1560)), CGSize(width: 720, height: 1560)),
             ("tool-rows", AnyView(ToolRowSnapshotGallery().frame(width: 800, height: 720)), CGSize(width: 800, height: 720)),
+            ("review-comments", AnyView(ReviewCommentSnapshotGallery().frame(width: 800, height: 900)), CGSize(width: 800, height: 900)),
         ]
 
         for appearanceName in ["light", "dark"] {
