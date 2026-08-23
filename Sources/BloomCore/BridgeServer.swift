@@ -60,11 +60,30 @@ public final class BridgeServer: Sendable {
         )
     }
 
+    /// `[weak self]` rather than `[self]`, and it is the difference between a server that can be
+    /// let go of and one that can only be told to `stop()`.
+    ///
+    /// The accept handler is held by the `DispatchSource`, the source by the listener and the
+    /// listener by this server, so a strong capture here closed the ring and nothing in it was
+    /// ever released. A server dropped out of scope went on listening, and its socket file stayed
+    /// on disk because the listener's `deinit`, which is what removes it, could not run. On a real
+    /// installation only one server is ever built and the socket name is derived from the database
+    /// path, so a successor unlinks it before binding and nobody notices; in a test suite that
+    /// builds one per case it left 44 sockets and 19 config directories behind.
+    ///
+    /// A connection already being served does hold the server, through the `Task` below, for as
+    /// long as that agent is talking. That is not the cycle: it ends when the conversation does.
     public func start() throws {
         try listener.withLock { held in
             guard held == nil else { return }
-            held = try UnixSocketListener(path: socketPath) { [self] connection in
-                Task { await serve(connection) }
+            held = try UnixSocketListener(path: socketPath) { [weak self] connection in
+                guard let self else {
+                    // The server this socket belonged to is gone, so nothing will ever answer.
+                    // Closing beats leaving the caller waiting on a hello that is not coming.
+                    connection.close()
+                    return
+                }
+                Task { await self.serve(connection) }
             }
         }
         note("bridge listening on \(socketPath)")

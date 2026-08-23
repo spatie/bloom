@@ -211,6 +211,29 @@ struct BridgeServerTests {
         #expect(reply["result"] != nil)
         caller.connection.close()
     }
+
+    /// The accept handler is held by the dispatch source, the source by the listener and the
+    /// listener by the server, so a strong capture of the server in the handler closed the ring
+    /// and only `stop()` could ever break it. A server let go of went on listening for the rest of
+    /// the process, and its socket file stayed on disk because the `deinit` that removes it could
+    /// not run.
+    @Test("a server let go of is released, and its socket goes with it")
+    func droppedServerIsReleased() async throws {
+        let store = try makeTestStore("bridge-release")
+        let socketPath = NSTemporaryDirectory() + "bloom-drop-\(UUID().uuidString.prefix(8)).sock"
+
+        weak var released: BridgeServer?
+        do {
+            let server = BridgeServer(store: store, socketPath: socketPath)
+            try server.start()
+            released = server
+            #expect(released != nil)
+            #expect(FileManager.default.fileExists(atPath: socketPath))
+        }
+
+        #expect(released == nil)
+        #expect(!FileManager.default.fileExists(atPath: socketPath))
+    }
 }
 
 /// `workspace_start` over the real socket, which is the only thing that proves an agent could
