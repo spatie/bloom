@@ -41,17 +41,6 @@ struct BloomAlert: Identifiable {
     var message: String
 }
 
-/// Something the app did that the user did not ask for and should still know about.
-///
-/// Not an alert. An alert stops the window and demands a click, which is far too much for "the
-/// name moved and the branch did not"; and staying silent about it is the one thing that would
-/// leave somebody believing their branch had been renamed when it had not. So: one sentence, in
-/// the corner, that goes away by itself.
-struct BloomNotice: Identifiable, Equatable {
-    let id = UUID()
-    var message: String
-}
-
 /// An archive the app refused to carry out, waiting on the user.
 ///
 /// It carries the report rather than a yes or no question, because "are you sure?" tells the user
@@ -207,6 +196,12 @@ final class AppModel {
 
     var alert: BloomAlert?
     /// The corner notice. See `BloomNotice`. Set from anywhere, drawn once by `RootView`.
+    ///
+    /// One slot, so a second notice takes the first one's place and the clock starts again. Not a
+    /// queue on purpose: these arrive seconds apart at worst, and a queue would hold a fact about
+    /// what is happening now behind a sentence about something that already finished. The banner
+    /// keys its countdown on the notice's id, so the replacement gets its own full reading time
+    /// rather than whatever was left of its predecessor's.
     var notice: BloomNotice?
     /// Non-nil while an archive is waiting for the user to confirm that the work it would destroy
     /// really is expendable. RootView presents the confirmation from this.
@@ -1922,9 +1917,14 @@ final class AppModel {
             Log.archive.info("restored \(workspace.name, privacy: .public)")
 
             if let from = outcome.relocatedFrom {
+                // The one notice that waits. Everything else here is news about something
+                // that is now settled; this is a path the user has to go and look at, and it is
+                // the only sentence anywhere that says where their worktree actually is.
                 notice = BloomNotice(
-                    message: "Something else is at \(from), so the worktree was rebuilt at "
-                        + "\(outcome.workspace.path)."
+                    message: "\(outcome.workspace.name) came back to a different place. "
+                        + "Something else is at `\(from)`, so the worktree was rebuilt at "
+                        + "`\(outcome.workspace.path)`.",
+                    dismissal: .untilDismissed
                 )
             }
         } catch {

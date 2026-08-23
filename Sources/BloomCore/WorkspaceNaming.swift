@@ -288,7 +288,7 @@ public enum WorkspaceNaming {
         refusal: BranchRenameRefusal
     ) -> String? {
         guard refusal.isWorthReporting else { return nil }
-        return "Bloom named this workspace \(name). Its branch is still \(branch), because "
+        return "Bloom named this workspace \(name). Its branch is still `\(branch)`, because "
             + refusal.reason + "."
     }
 }

@@ -175,6 +175,10 @@ enum Palette {
     /// `accentFill`, which is a different member of the ramp for exactly that reason.
     static let accent = dynamic(light: 0x0C7A6E, dark: 0x4FD8C4)
 
+    /// The same pair as an `NSColor`, for the layers that hold a `CGColor` and therefore have to be
+    /// handed a colour already resolved against the window's appearance.
+    static let accentNSColor = dynamicNSColor(light: 0x0C7A6E, dark: 0x4FD8C4)
+
     /// The accent as a fill with light text on it: a selected row, a prominent button.
     ///
     /// Spatie Blue, the ramp's anchor and the only colour in it that works on both grounds. White
@@ -199,7 +203,7 @@ enum Palette {
     /// The same ink as an `NSFont`-side colour, for the transcript's text views. Built from the
     /// same pair rather than converted from `link`, so the two can never drift apart and the
     /// dynamic pair survives: an `NSTextView` resolves it against the window it is in.
-    static let linkNSColor = dynamicNSColor(light: 0x0C7A6E, dark: 0x4FD8C4)
+    static let linkNSColor = accentNSColor
 
     /// An address inside a filled bubble, which in practice means the user's own turn.
     ///

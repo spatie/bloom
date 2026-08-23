@@ -150,6 +150,53 @@ enum Snapshot {
         #endif
     }
 
+    /// Raises the corner notice, so it can be filmed.
+    ///
+    ///     Bloom --notice 4 "Bloom named this workspace X. Its branch is still `y`, because ..."
+    ///
+    /// The banner is a countdown with a draining bar in it, which is three things a still frame
+    /// cannot show: that it goes on its own, how long it has left, and that the pointer stops it.
+    /// Waiting for a real automatic rename to refuse a real branch is not a way to look at any of
+    /// them. The message is passed in whole rather than composed here, so the run is filming the
+    /// same sentence the core produces rather than a hand written approximation of it.
+    ///
+    /// Debug builds only, for the reason `--running` is: a shipped copy has no business claiming
+    /// Bloom did something it did not do.
+    static func scheduleNoticeIfRequested() {
+        #if DEBUG
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: "--notice"),
+              index + 1 < arguments.count,
+              let delay = Double(arguments[index + 1]) else { return }
+        let message = index + 2 < arguments.count && !arguments[index + 2].hasPrefix("--")
+            ? arguments[index + 2]
+            : "Bloom named this workspace Describe fade-in animation feel. Its branch is still "
+                + "`freekmurze/iyo-sea`, because `freekmurze/fade-animation-feel` is already taken "
+                + "by another branch."
+
+        // `--notice-hold <after>,<for>` puts the countdown on hold and takes it off again, which
+        // is what the pointer resting on the banner does. Filming the real thing would mean moving
+        // the owner's cursor across the owner's screen while he is working, so this drives the
+        // banner's own hold and release instead, through the same state the pointer sets.
+        let hold = arguments.firstIndex(of: "--notice-hold")
+            .flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
+            .map { $0.split(separator: ",").compactMap { Double($0) } }
+            .flatMap { $0.count == 2 ? ($0[0], $0[1]) : nil }
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(delay))
+            applyRequestedAppearance()
+            NotificationCenter.default.post(name: .bloomShowNotice, object: message)
+
+            guard let hold else { return }
+            try? await Task.sleep(for: .seconds(hold.0))
+            NotificationCenter.default.post(name: .bloomHoldNotice, object: true)
+            try? await Task.sleep(for: .seconds(hold.1))
+            NotificationCenter.default.post(name: .bloomHoldNotice, object: false)
+        }
+        #endif
+    }
+
     static func scheduleRunningStateIfRequested() {
         #if DEBUG
         let arguments = CommandLine.arguments
@@ -846,6 +893,16 @@ extension Notification.Name {
     /// `Snapshot.scheduleSetupLogExpansionIfRequested`, and only in a debug build. See
     /// `View.acceptsCaptureSetupLogExpansion`.
     static let bloomExpandSetupLog = Notification.Name("bloom.expandSetupLog")
+
+    /// Carries the sentence a capture run wants in the corner notice. Posted only by
+    /// `Snapshot.scheduleNoticeIfRequested`, and only in a debug build. See
+    /// `View.acceptsCaptureNotice`.
+    static let bloomShowNotice = Notification.Name("bloom.showNotice")
+
+    /// Carries a `Bool` saying whether the corner notice's countdown is on hold. Posted only by
+    /// `Snapshot.scheduleNoticeIfRequested`, and only in a debug build. See
+    /// `View.acceptsCaptureNoticeHold`.
+    static let bloomHoldNotice = Notification.Name("bloom.holdNotice")
 }
 
 extension View {
@@ -879,6 +936,38 @@ extension View {
         #if DEBUG
         return onReceive(NotificationCenter.default.publisher(for: .bloomExpandSetupLog)) { _ in
             expand()
+        }
+        #else
+        return self
+        #endif
+    }
+
+    /// Lets a debug build put a notice in the corner for a camera.
+    ///
+    /// It goes through `AppModel.notice`, the one slot every real notice is written to, so what is
+    /// filmed is the banner exactly as a real automatic rename raises it: same reading time, same
+    /// drain, same replacement rule. Compiled out of a release build entirely.
+    func acceptsCaptureNotice(_ app: AppModel) -> some View {
+        #if DEBUG
+        return onReceive(NotificationCenter.default.publisher(for: .bloomShowNotice)) { note in
+            guard let message = note.object as? String else { return }
+            app.notice = BloomNotice(message: message)
+        }
+        #else
+        return self
+        #endif
+    }
+
+    /// Lets a debug build put the corner notice's countdown on hold for a camera.
+    ///
+    /// It sets the same state the pointer sets, so the pause, the banked time and the resume are
+    /// the ones a real hover produces. It exists because the alternative is warping the owner's
+    /// cursor across the owner's screen while he is working in the app next door.
+    func acceptsCaptureNoticeHold(_ hold: @escaping @MainActor (Bool) -> Void) -> some View {
+        #if DEBUG
+        return onReceive(NotificationCenter.default.publisher(for: .bloomHoldNotice)) { note in
+            guard let held = note.object as? Bool else { return }
+            hold(held)
         }
         #else
         return self
