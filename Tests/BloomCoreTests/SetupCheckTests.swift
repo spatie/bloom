@@ -125,6 +125,11 @@ struct SetupCopyTests {
         #expect(report(codex: .missing).sentence.contains("Codex"))
     }
 
+    @Test("a sentence naming the one tool with an article still starts with a capital")
+    func capitalisesTheArticle() {
+        #expect(report(gitHub: .missing).sentence.contains("The GitHub CLI is not set up"))
+    }
+
     @Test("two quiet tools are joined with and, not with a comma")
     func joinsTwo() {
         let sentence = report(codex: .missing, gitHub: .missing).sentence

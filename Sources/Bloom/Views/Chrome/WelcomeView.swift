@@ -138,7 +138,11 @@ struct WelcomeView: View {
 
     private func row(_ check: SetupCheck, in report: SetupReport, isLast: Bool) -> some View {
         let severity = report.severity(for: check.tool)
-        let isOpen = expanded == check.tool
+        // A row that is in the way shows its command without being asked, and a row that is only
+        // a note keeps it behind the button. That is proportional rather than uniform: the thing
+        // stopping you gets the whole answer on the first frame, and the thing that costs you
+        // nothing does not put a wall of shell in front of somebody who was fine.
+        let isOpen = expanded == check.tool || severity == .problem
 
         return HStack(alignment: .top, spacing: Metrics.spacingWide + Metrics.spacingTight) {
             soundingLine(check, severity: severity, isLast: isLast)
@@ -164,11 +168,11 @@ struct WelcomeView: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     if let fix = check.fix {
-                        fixStrip(check, fix: fix, isOpen: isOpen)
+                        fixStrip(check, fix: fix, severity: severity, isOpen: isOpen)
                     }
                 }
             }
-            .padding(.bottom, isLast ? 0 : Metrics.inset + Metrics.spacingTight)
+            .padding(.bottom, isLast ? 0 : Metrics.gutter + Metrics.spacingSmall)
         }
         .contentShape(.rect)
     }
@@ -219,7 +223,10 @@ struct WelcomeView: View {
     private func soundingLine(_ check: SetupCheck, severity: SetupSeverity, isLast: Bool) -> some View {
         VStack(spacing: 0) {
             glyph(check, severity: severity)
-                .frame(width: Self.gutter, height: 20)
+                // The glyph's own size and no more, so the hairline under it is the longer of the
+                // two and the column reads as a line with marks on it rather than as marks with
+                // ticks between them.
+                .frame(width: Self.gutter, height: 17)
 
             if !isLast {
                 Rectangle()
@@ -228,7 +235,10 @@ struct WelcomeView: View {
                     .frame(maxHeight: .infinity)
             }
         }
-        .frame(width: Self.gutter)
+        .frame(width: Self.gutter, alignment: .top)
+        // Top, not centre. Without the alignment the last row, which has no hairline under it,
+        // centred its glyph in the whole row and sat visibly lower than the three above it.
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     @ViewBuilder
@@ -264,15 +274,27 @@ struct WelcomeView: View {
     /// Check again, because Bloom cannot install Homebrew packages on somebody's behalf and
     /// pretending otherwise would be worse than the extra step.
     @ViewBuilder
-    private func fixStrip(_ check: SetupCheck, fix: SetupFix, isOpen: Bool) -> some View {
+    private func fixStrip(
+        _ check: SetupCheck,
+        fix: SetupFix,
+        severity: SetupSeverity,
+        isOpen: Bool
+    ) -> some View {
         if let running = login, running.tool == check.tool {
             loginTerminal(check, session: running.session)
         } else {
             VStack(alignment: .leading, spacing: Metrics.spacingWide) {
-                HStack(spacing: Metrics.spacingWide) {
+                HStack(spacing: Metrics.inset) {
                     if fix.isInteractive {
                         Button(fix.summary) { startLogin(check, fix: fix) }
                             .controlSize(.small)
+                    } else if severity == .problem {
+                        // The command is already below, so there is nothing left for a button to
+                        // reveal. What is left is the sentence naming what the command does, which
+                        // is worth more as a label than as a control that does nothing new.
+                        Text(fix.summary)
+                            .font(Typo.caption)
+                            .foregroundStyle(Palette.textSecondary)
                     } else {
                         Button(isOpen ? "Hide the command" : fix.summary) {
                             withAnimation(reduceMotion ? nil : Motion.pane) {
@@ -283,8 +305,13 @@ struct WelcomeView: View {
                     }
 
                     if let url = fix.url {
+                        // The app's teal rather than the system accent, which is what a bare
+                        // `Link` draws and what would have put a blue word three inches from the
+                        // teal one in the footer. See `linkButton()`, which fixes the same thing
+                        // for controls.
                         Link("Instructions", destination: url)
                             .font(Typo.caption)
+                            .foregroundStyle(Palette.link)
                     }
 
                     Spacer(minLength: 0)
@@ -317,8 +344,9 @@ struct WelcomeView: View {
                     if copied == check.tool { copied = nil }
                 }
             }
-            .buttonStyle(.link)
+            .buttonStyle(.plain)
             .font(Typo.caption)
+            .foregroundStyle(Palette.link)
         }
         .padding(.horizontal, Metrics.inset)
         .padding(.vertical, Metrics.spacingWide)
@@ -403,12 +431,14 @@ struct WelcomeView: View {
         HStack(spacing: Metrics.inset) {
             if inspection.truth.verdict == .blocked {
                 Button("Skip for now") { finish() }
-                    .buttonStyle(.link)
+                    .buttonStyle(.plain)
                     .font(Typo.label)
+                    .foregroundStyle(Palette.link)
             } else {
                 Button("Check again") { inspection.start() }
-                    .buttonStyle(.link)
+                    .buttonStyle(.plain)
                     .font(Typo.label)
+                    .foregroundStyle(inspection.isRunning ? Palette.textTertiary : Palette.link)
                     .disabled(inspection.isRunning)
             }
 
@@ -422,6 +452,12 @@ struct WelcomeView: View {
                 }
             }
             .keyboardShortcut(.defaultAction)
+            .buttonStyle(.borderedProminent)
+            // Bloom's own fill rather than whatever the user picked in Appearance, which is what
+            // every other prominent button in the app already does. A system blue button two
+            // inches under a teal wordmark is the one place this window could have looked like
+            // somebody else's.
+            .tint(Palette.accentFill)
             .controlSize(.large)
         }
         .padding(.horizontal, Metrics.pane)

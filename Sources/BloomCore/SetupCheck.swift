@@ -368,7 +368,10 @@ public extension SetupReport {
         guard !quiet.isEmpty else {
             return "Bloom has what it needs. Describe a task and it will build the worktree for you."
         }
-        return "Bloom has what it needs. \(list(quiet)) \(quiet.count == 1 ? "is" : "are") not set up, which only turns off the parts below."
+        // Capitalised, because the only tool whose name carries an article is the one most likely
+        // to be alone in this list, and "Bloom has what it needs. the GitHub CLI is not set up"
+        // is what the uncapitalised version actually printed.
+        return "Bloom has what it needs. \(list(quiet).capitalizedFirst) \(quiet.count == 1 ? "is" : "are") not set up, which only turns off the parts below."
     }
 
     private var blockedSentence: String {

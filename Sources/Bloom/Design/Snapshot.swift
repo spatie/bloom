@@ -403,6 +403,16 @@ enum Snapshot {
                 candidate = candidate?.attachedSheet ?? candidate
             }
 
+            // `--capture-delay <seconds>` holds the shutter open. Everything else here photographs
+            // a window as soon as it exists, which is the right answer for a layout and the wrong
+            // one for anything that settles: the welcome window's checks resolve over about a
+            // second, so the default capture always caught it halfway. Two runs at two delays are
+            // also the only way a still can say anything about motion.
+            if let index = arguments.firstIndex(of: "--capture-delay"), index + 1 < arguments.count,
+               let seconds = Double(arguments[index + 1]) {
+                try? await Task.sleep(for: .seconds(seconds))
+            }
+
             guard let window = candidate, let contentView = window.contentView else {
                 FileHandle.standardError.write(Data("no window to capture\n".utf8))
                 exit(1)
