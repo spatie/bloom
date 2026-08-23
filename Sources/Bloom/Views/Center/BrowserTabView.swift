@@ -48,7 +48,7 @@ struct BrowserTabView: View {
         VStack(spacing: 0) {
             toolbar(session)
             Hairline()
-            BrowserWebView(session: session, paneMenu: paneMenu)
+            BrowserWebView(session: session, paneMenu: pageMenu)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Palette.surface)
@@ -172,6 +172,40 @@ struct BrowserTabView: View {
         }
     }
 
+    /// The pane's own menu with the screenshot on top of it, which is what a right click on the
+    /// page ends up showing under WebKit's Reload and Inspect Element.
+    ///
+    /// The camera in the toolbar was the only way to reach this. A toolbar glyph with no word next
+    /// to it is discoverable by hovering it and reading the help tag, which is to say discoverable
+    /// by accident, and the right click is where a Mac user asks what can be done with the thing
+    /// under the pointer. It is not a menu bar item because it acts on one page in one pane, and
+    /// the menu bar cannot say which page.
+    ///
+    /// Built fresh on every click, like the pane menu it wraps, and dropped while a capture is
+    /// already running for the reason the toolbar button goes quiet: a second press in the middle
+    /// of the first would attach the same page twice.
+    ///
+    /// The target is hung off the item's `representedObject` as well as its `target`, because
+    /// `NSMenuItem` holds its target weakly and represented objects strongly, and the menu is the
+    /// only thing alive by the time the item is clicked. See `BrowserPageWebView` for what happens
+    /// to these items next.
+    private func pageMenu() -> NSMenu {
+        let menu = paneMenu?() ?? NSMenu()
+        guard !isCapturing else { return menu }
+
+        let title = "Send a Screenshot to the Agent"
+        let target = SnapshotMenuTarget(perform: capture)
+        let item = NSMenuItem(
+            title: title, action: #selector(SnapshotMenuTarget.fire), keyEquivalent: ""
+        )
+        item.target = target
+        item.representedObject = target
+
+        if !menu.items.isEmpty { menu.insertItem(.separator(), at: 0) }
+        menu.insertItem(item, at: 0)
+        return menu
+    }
+
     private func control(
         _ symbol: String,
         title: String,
@@ -189,5 +223,20 @@ struct BrowserTabView: View {
         .buttonStyle(.borderless)
         .disabled(!enabled)
         .help(title)
+    }
+}
+
+/// What answers the page menu's screenshot item. A closure cannot be an `NSMenuItem` action, and
+/// the view that built the item is a struct that will not be there when the item is clicked.
+@MainActor
+final class SnapshotMenuTarget: NSObject {
+    private let perform: @MainActor () -> Void
+
+    init(perform: @escaping @MainActor () -> Void) {
+        self.perform = perform
+    }
+
+    @objc func fire() {
+        perform()
     }
 }

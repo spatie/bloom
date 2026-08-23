@@ -26,6 +26,8 @@ struct RootView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isCreateSheetPresented = false
     @State private var createTargetRepo: Repo?
+    /// Set by the File menu's pull request item and by nothing else. See `CreateWorkspaceSheet`.
+    @State private var createStartsOnPullRequest = false
 
     var body: some View {
         @Bindable var app = app
@@ -118,7 +120,9 @@ struct RootView: View {
         // Help menu sheets so a capture run can look at it. See `FeedbackPresenter`.
         .task { FeedbackPresenter.shared.presentIfRequested() }
         .sheet(isPresented: $isCreateSheetPresented) {
-            CreateWorkspaceSheet(initialRepo: createTargetRepo)
+            CreateWorkspaceSheet(
+                initialRepo: createTargetRepo, startsOnPullRequest: createStartsOnPullRequest
+            )
         }
         // Send Feedback and Submit a Prompt, raised from the Help menu. Here rather than at the
         // menu item, because a `Commands` body is not a view and cannot present anything, and
@@ -243,6 +247,7 @@ struct RootView: View {
         .acceptsCaptureRunningState(app)
         .onReceive(NotificationCenter.default.publisher(for: .bloomNewWorkspace)) { note in
             createTargetRepo = note.object as? Repo ?? app.selectedWorkspace.flatMap(app.repo(for:))
+            createStartsOnPullRequest = note.userInfo?[Notification.bloomPullRequestKey] as? Bool == true
             isCreateSheetPresented = true
         }
     }
@@ -312,4 +317,10 @@ extension Notification.Name {
     // are only ever posted by views, so they live here.
     static let bloomToggleSidebar = Notification.Name("bloom.toggleSidebar")
     static let bloomNewWorkspace = Notification.Name("bloom.newWorkspace")
+}
+
+extension Notification {
+    /// Whether a `bloomNewWorkspace` post wants the sheet opened on the pull request route. Absent
+    /// on every other post, which is the ordinary new branch opening.
+    static let bloomPullRequestKey = "bloom.newWorkspace.pullRequest"
 }

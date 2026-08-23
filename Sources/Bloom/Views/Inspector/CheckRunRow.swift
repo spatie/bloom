@@ -61,6 +61,19 @@ struct CheckRunRow: View {
         // nothing.
         .help(run.detailsURL ?? run.name)
         .accessibilityInputLabels([run.name])
+        // The hover button's action, offered again where a Mac user goes looking for what a row
+        // can do. `onSend` is nil on a check that passed and on a workspace with no conversation
+        // to send anything to, and this offers nothing in either case, exactly as the button does,
+        // so the two cannot disagree about when it is available.
+        //
+        // Not in the menu bar: this acts on one check run out of a list of them, and a menu bar
+        // item would have to guess which. The row's own menu is where the answer is already known.
+        .contextMenu {
+            if let onSend {
+                Button("Send This Failure to the Agent", action: onSend)
+                    .disabled(isSending)
+            }
+        }
     }
 
     /// The one action a failed check offers: start the next turn with this failure in it.

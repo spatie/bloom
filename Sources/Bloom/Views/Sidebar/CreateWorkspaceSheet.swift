@@ -24,6 +24,18 @@ struct CreateWorkspaceSheet: View {
     /// for it never asks a question: it reports, and opens only if you want to change your mind.
     var initialRepo: Repo?
 
+    /// Whether the sheet opens with the pull request box already up. The File menu's "New
+    /// Workspace from Pull Request…" is the only caller that sets it, and it exists because the
+    /// pull request route was two levels inside the "Start from" menu and so invisible to anybody
+    /// who had not already been told it was there.
+    ///
+    /// It raises the box for a number or a URL rather than the list of open ones, because that is
+    /// the half a menu item can actually put in front of somebody: the list is a network call that
+    /// has not landed when the sheet opens, and it cannot offer a closed pull request, somebody
+    /// else's, or the hundred and first of a busy repository. The list is still one click away in
+    /// the "Start from" control the sheet opens with.
+    var startsOnPullRequest = false
+
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
 
@@ -52,6 +64,7 @@ struct CreateWorkspaceSheet: View {
     /// somebody else's, a closed one, or one of the two hundred a busy repository has open.
     @State private var reference = ""
     @State private var isEnteringReference = false
+    @FocusState private var isReferenceFocused: Bool
     @State private var referenceProblem: String?
     @State private var isResolvingReference = false
     @State private var branchPrefix: String?
@@ -134,6 +147,14 @@ struct CreateWorkspaceSheet: View {
         // in flight when the project changed could land another project's branches on this one's
         // sheet. `.task(id:)` cancels the stale load; `load` checks before writing.
         .task(id: repoID) { await load() }
+        // The keyboard goes to the pull request box rather than to the task, when the sheet was
+        // opened to open a pull request. `load` puts it in the task unconditionally, so this has
+        // to come after it rather than beside it.
+        .task {
+            guard startsOnPullRequest else { return }
+            isEnteringReference = true
+            isReferenceFocused = true
+        }
         // A second task, and a second trip, because listing pull requests is a network call and
         // the composer has to be typeable before it lands. The sheet opens on the branch route
         // either way; the picker fills in behind it.
@@ -346,6 +367,7 @@ struct CreateWorkspaceSheet: View {
             TextField("Pull request number or URL", text: $reference)
                 .textFieldStyle(.roundedBorder)
                 .font(Typo.body)
+                .focused($isReferenceFocused)
                 .onSubmit { resolveReference() }
                 .disabled(isResolvingReference)
 

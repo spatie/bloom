@@ -63,6 +63,22 @@ struct BloomCommands: Commands {
             .keyboardShortcut("n", modifiers: .command)
             .disabled(model.repos.isEmpty)
 
+            // Directly under New Workspace, because it starts one, and at the top level of File
+            // rather than nowhere. Opening a workspace on somebody else's pull request was a whole
+            // feature that could only be found by opening the create sheet, opening its "Start
+            // from" control and reading down past a list of branches: two levels in, behind a
+            // control most people never press, which is the same as not shipping it.
+            //
+            // No key equivalent. It is the rarer of the two ways to start a workspace and the item
+            // alone is what was missing.
+            Button("New Workspace from Pull Request…") {
+                NotificationCenter.default.post(
+                    name: .bloomNewWorkspace, object: nil,
+                    userInfo: [Notification.bloomPullRequestKey: true]
+                )
+            }
+            .disabled(model.repos.isEmpty)
+
             Button("New Session") {
                 guard let workspace = model.selectedModel else { return }
                 Task { await workspace.createSession() }

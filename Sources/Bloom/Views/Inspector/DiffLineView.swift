@@ -78,6 +78,23 @@ struct DiffLineView: View {
         // are affected, and they now meet. Behind the content rather than over it, so the word
         // level emphasis inside `CodeText` still sits on top and is neither moved nor clipped.
         .background(background)
+        // The same action the `+` in the gutter carries, on the right click as well.
+        //
+        // A control that only appears under the pointer is a control most people never learn is
+        // there, and this one is the whole of inline review commenting: nothing else in the app
+        // starts a comment. The right click is where a Mac user asks "what can I do with this
+        // line", and a context menu item is a real answer rather than a consolation for not having
+        // put it in the menu bar: a comment is about one line, and the menu bar has no way to say
+        // which line.
+        //
+        // Attached to the row and not to the gutter, because the right click lands wherever the
+        // pointer is and the code is most of the row. Absent, rather than greyed, on a row with no
+        // spot to anchor to, which is what every caller outside the review's own diff gets.
+        .contextMenu {
+            if let spot = offeredSpot {
+                Button("Comment on This Line") { onComment?(spot) }
+            }
+        }
     }
 
     /// What this line is, where it is, and what it says, in that order.
