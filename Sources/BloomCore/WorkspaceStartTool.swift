@@ -91,8 +91,15 @@ extension AgentWorkspaceOrder {
 /// graph: the model that streams setup into the transcript and sends the opening turn. A handler
 /// that called `WorkspaceManager.start` on its own would create a worktree on disk that no agent
 /// ever runs in, which is worse than refusing.
+///
+/// The project and the origin are worked out here and passed in rather than derived on the far
+/// side. They used to be read from the caller's own workspace row by the app, which was possible
+/// only while every caller had one; the owner's standalone client has no workspace, names its
+/// project out loud, and produces a workspace of `.user` origin. Deciding both in one place keeps
+/// the two callers from drifting into two answers.
 public typealias WorkspaceStarting =
-    @Sendable (AgentWorkspaceOrder, BridgeIdentity, String) async throws -> StartedWorkspaceSummary
+    @Sendable (AgentWorkspaceOrder, Repo, BridgeIdentity, WorkspaceOrigin) async throws
+        -> StartedWorkspaceSummary
 
 /// `workspace_start`: an agent asking Bloom for another workspace in the same project.
 ///
@@ -109,13 +116,30 @@ public typealias WorkspaceStarting =
 /// caller's turn open for as long as the work took, and would hold this connection's serve loop
 /// with it, so every later bridge call from that session would queue behind it.
 ///
-/// ## Only a parent may call it
+/// ## A child may not call it, and the two who may are not alike
 ///
 /// The role gate is the first lock and it hides the tool from a child's `tools/list` entirely, so
 /// a child is never tempted by a tool it cannot use. The second lock is below: a caller whose own
 /// workspace was started by an agent is refused even if it speaks raw MCP at the socket. One level
 /// of nesting is the limit, and "has a parent" is the whole test, which is why there is no depth
 /// counter to drift.
+///
+/// The two roles that may call it differ in three ways, and all three follow from one fact: a
+/// parent is a workspace and the owner's client is not.
+///
+/// A parent cannot name a project, because its own is the only one it may act in, and `project` is
+/// refused rather than ignored if it names one. The owner's client must name a project, because
+/// nothing else says which, and it may only name one Bloom already has.
+///
+/// A parent's workspaces are `.agent` origin, carry its id and are capped at eight, because an
+/// agent looping on its own instructions is the failure that cap exists for. The owner's are
+/// `.user` origin, indistinguishable from one made in the Create sheet, and are not capped, because
+/// they are the owner asking, and the sheet is not capped either.
+///
+/// A parent's calls are deduplicated by a digest of the call, because a model retries and a
+/// retried spawn used to cut a second worktree. The owner's are not, for the same reason the sheet
+/// is not: `.user` has nowhere to record the key, and two identical asks a minute apart from a
+/// person are two asks.
 public struct WorkspaceStartTool: BridgeToolHandling {
     /// How many a single caller may have running at once.
     ///
@@ -131,14 +155,19 @@ public struct WorkspaceStartTool: BridgeToolHandling {
         self.start = start
     }
 
-    public let roles: Set<BridgeRole> = [.parent]
+    public let roles: Set<BridgeRole> = [.parent, .owner]
 
     public let tool = BridgeTool(
         name: "workspace_start",
         description: """
-            Start another workspace in this project and give it a task. It is a real git worktree \
-            on its own branch with its own agent, exactly like the one you are in, and it appears \
-            in Bloom's sidebar for the owner to watch and review.
+            Start a workspace and give it a task. It is a real git worktree on its own branch with \
+            its own agent, and it appears in Bloom's sidebar for the owner to watch and review.
+
+            Name the project to start it in with 'project', giving the name or the path that \
+            project_list reports. Bloom only starts workspaces in repositories it already has, so \
+            register one with project_add first if it is not on that list. If you are yourself \
+            running inside a Bloom workspace, leave 'project' out: you can only start work in the \
+            project you are already in.
 
             Use it when a task splits into parts that do not need to see each other's edits, and \
             you want them worked on at the same time rather than one after another.
@@ -152,12 +181,19 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             prompt as if to someone who has just opened the project for the first time.
 
             This costs real money and real disk. Start one because the work genuinely divides, \
-            not to parallelise something you could do in a single pass. Only a workspace the owner \
-            created can start others; a workspace that was itself started this way cannot.
+            not to parallelise something you could do in a single pass. A workspace that was \
+            itself started this way cannot start others.
             """,
         inputSchema: .object([
             "type": .string("object"),
             "properties": .object([
+                "project": .object([
+                    "type": .string("string"),
+                    "description": .string(
+                        "Which project to start it in, by the name or the path project_list "
+                            + "reports. Leave it out if you are running inside a Bloom workspace."
+                    ),
+                ]),
                 "prompt": .object([
                     "type": .string("string"),
                     "description": .string(
@@ -180,7 +216,8 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                     "type": .string("string"),
                     "enum": .array(AgentKind.runnable.map { .string($0.rawValue) }),
                     "description": .string(
-                        "Which agent runs it. Leave it out to use the same one you are running on."
+                        "Which agent runs it. Leave it out for the one you are running on, or "
+                            + "for Bloom's own default if you are not running in Bloom."
                     ),
                 ]),
             ]),
@@ -201,36 +238,6 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             return .failure("workspace_start needs a prompt saying what the new workspace should do.")
         }
 
-        // The second lock. The role gate already hid this tool from a child, so reaching here as
-        // one means something spoke MCP at the socket directly.
-        //
-        // The project is read here rather than only on the happy path, because it is what makes a
-        // failed start explicable: `WorkspaceStartTrouble` needs the repository's name, its path
-        // and the branch a call that named none would have been cut from.
-        let project: Repo
-        do {
-            guard let caller = try await store.workspace(id: identity.workspaceID) else {
-                return .failure("This workspace is no longer in Bloom's database.")
-            }
-            guard let repo = try await store.repo(id: caller.repoID) else {
-                return .failure("This workspace's project is no longer in Bloom's database.")
-            }
-            project = repo
-
-            if caller.origin.isAgentSpawned {
-                return .failure(
-                    "This workspace was itself started by an agent, and those cannot start more. "
-                        + "Do the work here, or report back and let the owner decide."
-                )
-            }
-
-            if let refusal = try await tooMany(for: identity.workspaceID, store: store) {
-                return .failure(refusal)
-            }
-        } catch {
-            return .failure("Bloom could not read this workspace: \(error.readableMessage)")
-        }
-
         let order = AgentWorkspaceOrder(
             prompt: prompt,
             name: filled(request.param("name")),
@@ -246,28 +253,41 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             )
         }
 
-        // A retry of the same call is the same call. See `AgentWorkspaceOrder.spawnID`.
-        let spawnID = order.spawnID(parentWorkspaceID: identity.workspaceID)
+        // The project is resolved here rather than only on the happy path, because it is what
+        // makes a failed start explicable: `WorkspaceStartTrouble` needs the repository's name,
+        // its path and the branch a call that named none would have been cut from.
+        let project: Repo
+        let origin: WorkspaceOrigin
+        switch await resolve(request, order: order, as: identity, store: store) {
+        case .refused(let sentence): return .failure(sentence)
+        case let .resolved(repo, resolvedOrigin):
+            project = repo
+            origin = resolvedOrigin
+        }
 
-        do {
-            if let existing = try await alreadyStarted(spawnID: spawnID, store: store) {
-                return .json(.object([
-                    "workspace_id": .string(existing.id.rawValue),
-                    "name": .string(existing.name),
-                    "branch": .string(existing.branch),
-                    "path": .string(existing.path),
-                    "state": .string("already_started"),
-                    "note": .string(
-                        "You already asked for this one and it exists. Nothing new was created."
-                    ),
-                ]))
+        if let spawnID = origin.spawnToolUseID {
+            do {
+                if let existing = try await alreadyStarted(spawnID: spawnID, store: store) {
+                    return .json(.object([
+                        "workspace_id": .string(existing.id.rawValue),
+                        "name": .string(existing.name),
+                        "branch": .string(existing.branch),
+                        "path": .string(existing.path),
+                        "state": .string("already_started"),
+                        "note": .string(
+                            "You already asked for this one and it exists. Nothing new was created."
+                        ),
+                    ]))
+                }
+            } catch {
+                return .failure(
+                    "Bloom could not check for a repeat of this call: \(error.readableMessage)"
+                )
             }
-        } catch {
-            return .failure("Bloom could not check for a repeat of this call: \(error.readableMessage)")
         }
 
         do {
-            let started = try await start(order, identity, spawnID)
+            let started = try await start(order, project, identity, origin)
 
             return .json(.object([
                 "workspace_id": .string(started.workspaceID.rawValue),
@@ -289,6 +309,90 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                 wasRequested: order.baseBranch != nil
             )
             return .failure(trouble.sentence)
+        }
+    }
+
+    /// Which project this workspace goes in and who is recorded as having asked for it, or the
+    /// sentence saying why neither can be answered.
+    ///
+    /// One function for both roles, because the two answers have to stay opposite: a caller with a
+    /// workspace may not name a project and a caller without one must. Split across two call sites
+    /// that would eventually become one that does neither.
+    enum Resolution {
+        case resolved(Repo, WorkspaceOrigin)
+        case refused(String)
+    }
+
+    func resolve(
+        _ request: MCPRequest,
+        order: AgentWorkspaceOrder,
+        as identity: BridgeIdentity,
+        store: Store
+    ) async -> Resolution {
+        let named = filled(request.param("project"))
+
+        do {
+            guard let workspaceID = identity.workspaceID else {
+                // The owner's own client. It has no workspace, so the project is the one thing it
+                // cannot be excused from saying.
+                guard let named else {
+                    return .refused(
+                        "workspace_start needs a project, because this connection is not running "
+                            + "inside a Bloom workspace and nothing else says where the work "
+                            + "should go. Call project_list to see what Bloom has."
+                    )
+                }
+                let projects = try await store.repos()
+                let outcome = BridgeProjectLookup.find(named, in: projects)
+                if let refusal = BridgeProjectLookup.refusal(
+                    for: named, outcome: outcome, projects: projects
+                ) {
+                    return .refused(refusal)
+                }
+                guard case .found(let project) = outcome else {
+                    return .refused("Bloom has no project called '\(named)'.")
+                }
+                return .resolved(project, .user)
+            }
+
+            // A caller that is a workspace. Its project is decided for it, so naming one is a
+            // misunderstanding worth correcting rather than an argument to drop on the floor: a
+            // call that named another project and quietly got this one would look like it worked.
+            if let named {
+                return .refused(
+                    "workspace_start does not take a project here. You are running inside a Bloom "
+                        + "workspace, so the new one goes in the project you are already in, and "
+                        + "'\(named)' is not something this call can change. Ask again without it."
+                )
+            }
+
+            guard let caller = try await store.workspace(id: workspaceID) else {
+                return .refused("This workspace is no longer in Bloom's database.")
+            }
+            guard let project = try await store.repo(id: caller.repoID) else {
+                return .refused("This workspace's project is no longer in Bloom's database.")
+            }
+
+            // The second lock. The role gate already hid this tool from a child, so reaching here
+            // as one means something spoke MCP at the socket directly.
+            if caller.origin.isAgentSpawned {
+                return .refused(
+                    "This workspace was itself started by an agent, and those cannot start more. "
+                        + "Do the work here, or report back and let the owner decide."
+                )
+            }
+
+            if let refusal = try await tooMany(for: workspaceID, store: store) {
+                return .refused(refusal)
+            }
+
+            // A retry of the same call is the same call. See `AgentWorkspaceOrder.spawnID`.
+            return .resolved(project, .agent(
+                parentWorkspaceID: workspaceID,
+                spawnToolUseID: order.spawnID(parentWorkspaceID: workspaceID)
+            ))
+        } catch {
+            return .refused("Bloom could not read its projects: \(error.readableMessage)")
         }
     }
 

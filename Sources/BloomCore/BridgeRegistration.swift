@@ -45,6 +45,54 @@ public enum BridgeRegistration {
     /// so a shared name is a name that can be taken.
     public static let serverName = "bloom-workspace-bridge"
 
+    /// The name the owner's own client registers Bloom under, and it is **deliberately not
+    /// `serverName`**.
+    ///
+    /// A standalone registration lives in `~/.claude.json` at user scope, which Claude Code
+    /// applies to every session on the machine, and Bloom's own `--mcp-config` is documented above
+    /// as additive over exactly that file rather than replacing it. So an agent Bloom launches
+    /// inside a workspace would meet two entries called the same thing: its own session token and
+    /// the owner's standalone one, in one client, in one `tools/list`. Whichever won, the loser
+    /// would be a server that silently stopped being what it said it was, and the winning case is
+    /// the worse one, because a workspace agent holding the owner's token would have the owner's
+    /// tools.
+    ///
+    /// Two names cost nothing and the collision cannot then happen at all, which is worth more
+    /// than knowing which of them Claude Code would have picked.
+    public static let ownerServerName = "bloom-owner-bridge"
+
+    // MARK: The owner's own client
+
+    /// The single line a person copies out of Settings and runs in a terminal.
+    ///
+    /// One command rather than a paragraph about where JSON goes, because the whole of this
+    /// feature's onboarding is getting this arrangement into a config file, and an instruction
+    /// that can be pasted is an instruction that cannot be got wrong.
+    ///
+    /// `--scope user` is the load-bearing flag. Claude Code's three scopes are `local` (this
+    /// project, this machine, in `~/.claude.json` under the project's own key), `project` (a
+    /// `.mcp.json` file in the working directory, which is meant to be committed and shared with
+    /// everyone who clones the repository) and `user` (`~/.claude.json` at the top level, every
+    /// project on this machine). The owner's coupling belongs to the owner and to no repository,
+    /// so `user` is the only correct one, and it is also the only one that cannot end up in a
+    /// commit. See `BridgeToolApproval` and the Settings pane for the other half of that warning.
+    ///
+    /// Every value is single quoted because a path can hold a space, and Bloom Dev's does.
+    public static func ownerAddCommand(_ attachment: BridgeAttachment) -> String {
+        let environment = attachment.environment
+            .sorted { $0.key < $1.key }
+            .map { "-e \(shellQuoted("\($0.key)=\($0.value)"))" }
+            .joined(separator: " ")
+        return "claude mcp add --scope user \(ownerServerName) \(environment) -- "
+            + shellQuoted(attachment.shimPath)
+    }
+
+    /// A POSIX single quoted word. The one character that cannot appear inside single quotes is a
+    /// single quote, which is closed, escaped and reopened in the usual way.
+    static func shellQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
+    }
+
     // MARK: Claude Code
 
     /// The file `--mcp-config` is pointed at.

@@ -63,8 +63,20 @@ struct SettingsView: View {
                 ApprovalSettingsView()
             }
 
-            Tab("Tools", systemImage: "wrench.and.screwdriver", value: SettingsTab.tools) {
-                ToolSettingsView()
+            // Grouped only to get under `TabView`'s builder limit, which is ten children and was
+            // exactly reached before the Terminal pane arrived. `Group` conforms to `TabContent`,
+            // so this changes the tab bar not at all.
+            Group {
+                Tab("Tools", systemImage: "wrench.and.screwdriver", value: SettingsTab.tools) {
+                    ToolSettingsView()
+                }
+
+                // After Tools rather than beside Agents: the Agents pane is about the CLIs Bloom
+                // launches, and this is the one arrangement where a CLI Bloom did not launch
+                // reaches in the other way round.
+                Tab("Terminal", systemImage: "terminal", value: SettingsTab.terminal) {
+                    TerminalSettingsView()
+                }
             }
 
             Tab("About", systemImage: "info.circle", value: SettingsTab.about) {

@@ -345,7 +345,7 @@ struct BridgeWorkspaceStartTests {
 
         let toolbox = BridgeToolbox(handlers: [
             WhoamiTool(),
-            WorkspaceStartTool { order, _, _ in
+            WorkspaceStartTool { order, _, _, _ in
                 orders.prompts.append(order.prompt)
                 return StartedWorkspaceSummary(
                     workspaceID: WorkspaceID(rawValue: "w-new"),

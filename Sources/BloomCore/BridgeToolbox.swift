@@ -26,7 +26,15 @@ public struct BridgeToolbox: Sendable {
     /// the permission machinery; being an MCP tool does not exempt it. A child that has to file
     /// `workspace_report` unattended therefore needs an answer of its own, either a grant Bloom
     /// makes for its own tools or an allow rule in the child's settings. See `LiveBridgeTests`.
-    public static let standard = BridgeToolbox(handlers: [WhoamiTool()])
+    /// Everything that needs no seam back into the app. `workspace_start` is the exception and is
+    /// added by `AppModel`, because starting a workspace has to reach the main-actor graph that
+    /// runs one; see `WorkspaceStarting`. So this is what a `BridgeServer` built without the app
+    /// serves, which is every test that did not ask for more.
+    public static let standard = BridgeToolbox(handlers: [
+        WhoamiTool(),
+        ProjectListTool(),
+        ProjectAddTool(),
+    ])
 
     /// The tools a caller may see. Sorted by name so `tools/list` is stable between calls, which
     /// is one fewer thing to wonder about when a transcript is read back.

@@ -12,5 +12,7 @@ enum SettingsTab: Hashable {
     case prompts
     case approvals
     case tools
+    /// Coupling a client the owner runs themselves. See `TerminalSettingsView`.
+    case terminal
     case about
 }

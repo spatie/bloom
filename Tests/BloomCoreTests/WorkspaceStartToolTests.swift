@@ -13,14 +13,21 @@ struct WorkspaceStartToolTests {
     private final class Recorder: @unchecked Sendable {
         var orders: [AgentWorkspaceOrder] = []
         var identities: [BridgeIdentity] = []
-        var spawnIDs: [String] = []
+        var projects: [Repo] = []
+        var origins: [WorkspaceOrigin] = []
         var failure: (any Error)?
 
+        /// The spawn keys the tool actually decided, read back off the origins it handed over. The
+        /// tool used to be given one whoever called it; now only a caller that is itself a
+        /// workspace produces one, so the origin is where the answer lives.
+        var spawnIDs: [String] { origins.compactMap(\.spawnToolUseID) }
+
         func tool() -> WorkspaceStartTool {
-            WorkspaceStartTool { [self] order, identity, spawnID in
+            WorkspaceStartTool { [self] order, project, identity, origin in
                 orders.append(order)
                 identities.append(identity)
-                spawnIDs.append(spawnID)
+                projects.append(project)
+                origins.append(origin)
                 if let failure { throw failure }
                 return StartedWorkspaceSummary(
                     workspaceID: WorkspaceID(rawValue: "w-new"),
@@ -68,13 +75,14 @@ struct WorkspaceStartToolTests {
 
     // MARK: Who may call it
 
-    @Test("only a parent can see it, so a child never has a tool it cannot use")
+    @Test("a child never sees it, and the two roles that do are both there")
     func roleGate() {
         let tool = Recorder().tool()
 
-        #expect(tool.roles == [.parent])
+        #expect(tool.roles == [.parent, .owner])
         #expect(BridgeToolbox(handlers: [tool]).tools(for: .child).isEmpty)
         #expect(BridgeToolbox(handlers: [tool]).tools(for: .parent).map(\.name) == ["workspace_start"])
+        #expect(BridgeToolbox(handlers: [tool]).tools(for: .owner).map(\.name) == ["workspace_start"])
     }
 
     /// The role gate already hides it. This is the second lock, for something speaking raw MCP at
@@ -201,7 +209,7 @@ struct WorkspaceStartToolTests {
         let result = await recorder.tool().call(
             request(["prompt": .string("do a thing")]),
             as: BridgeIdentity(
-                sessionID: fixture.identity.sessionID,
+                sessionID: fixture.identity.sessionID ?? SessionID(rawValue: "s-gone"),
                 workspaceID: WorkspaceID(rawValue: "w-vanished"),
                 role: .parent
             ),
@@ -406,7 +414,7 @@ struct WorkspaceStartDedupTests {
         let identity = BridgeIdentity(sessionID: session.id, workspaceID: caller.id, role: .parent)
 
         let starts = Counter()
-        let tool = WorkspaceStartTool { _, identity, spawnID in
+        let tool = WorkspaceStartTool { _, _, _, origin in
             starts.bump()
             _ = try await store.upsert(Workspace(
                 repoID: repo.id,
@@ -414,7 +422,7 @@ struct WorkspaceStartDedupTests {
                 branch: "claude/the-child",
                 path: "/tmp/child",
                 baseBranch: "main",
-                origin: .agent(parentWorkspaceID: identity.workspaceID, spawnToolUseID: spawnID)
+                origin: origin
             ))
             return StartedWorkspaceSummary(
                 workspaceID: WorkspaceID(rawValue: "w-child"), name: "the child",

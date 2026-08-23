@@ -30,6 +30,10 @@ public final class BridgeServer: Sendable {
 
     private let listener = Mutex<UnixSocketListener?>(nil)
 
+    /// The owner's standalone token, on disk beside the database. See `BridgeOwnerToken` for why
+    /// this one persists when no session token does.
+    public let ownerToken: BridgeOwnerToken
+
     public init(
         store: Store,
         socketPath: String,
@@ -42,6 +46,7 @@ public final class BridgeServer: Sendable {
         self.registry = registry
         self.toolbox = toolbox
         self.note = note
+        self.ownerToken = BridgeOwnerToken.beside(databasePath: store.path)
     }
 
     /// The socket for the instance holding this store's database.
@@ -87,7 +92,56 @@ public final class BridgeServer: Sendable {
             }
         }
         sweepConfigDirectory()
+        admitOwner()
         note("bridge listening on \(socketPath)")
+    }
+
+    // MARK: The owner's own client
+
+    /// Reads the standalone token off disk, minting one the first time, and lets it through the
+    /// handshake.
+    ///
+    /// Done at start rather than when the Settings pane is opened, because the configuration the
+    /// owner pasted months ago has to work on this launch without anybody visiting a settings
+    /// window first. A failure is survivable and is not an alert: everything else on this socket
+    /// still works, and the only thing lost is a door nobody may be using.
+    private func admitOwner() {
+        do {
+            registry.admit(ownerToken: try ownerToken.load())
+        } catch {
+            note("could not read the standalone bridge token: \(error.readableMessage)")
+        }
+    }
+
+    /// What the owner pastes into their own MCP configuration, or nil when this build has no shim
+    /// to point at, which is a bundle assembled without one and every test that did not ask for a
+    /// bridge.
+    ///
+    /// The role in it is `owner`, and like every other role in an attachment it is carried for
+    /// diagnostics only: the server resolves the real one from the token. See
+    /// `BridgeProtocol.roleVariable`.
+    public func ownerAttachment() -> BridgeAttachment? {
+        guard let shimPath = BridgeRegistration.shimPath() else { return nil }
+        guard let token = try? ownerToken.load() else { return nil }
+        registry.admit(ownerToken: token)
+        return BridgeAttachment(
+            shimPath: shimPath,
+            socketPath: socketPath,
+            token: token,
+            role: .owner
+        )
+    }
+
+    /// Revokes the standalone token and issues its replacement.
+    ///
+    /// The old one stops being answered the moment this returns, so whatever the owner pasted
+    /// somewhere goes dead. That is the point of the button, and the pane offering it says so.
+    @discardableResult
+    public func regenerateOwnerToken() throws -> String {
+        let token = try ownerToken.regenerate()
+        registry.admit(ownerToken: token)
+        note("the standalone bridge token was regenerated")
+        return token
     }
 
     public func stop() {

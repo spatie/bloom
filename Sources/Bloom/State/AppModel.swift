@@ -360,34 +360,38 @@ final class AppModel {
     private func bridgeToolbox() -> BridgeToolbox {
         BridgeToolbox(handlers: [
             WhoamiTool(),
-            WorkspaceStartTool { [weak self] order, identity, spawnID in
+            ProjectListTool(),
+            ProjectAddTool(),
+            WorkspaceStartTool { [weak self] order, project, identity, origin in
                 guard let self else { throw AppNotReady.stillStartingUp }
-                return try await self.startWorkspaceForAgent(order, from: identity, spawnID: spawnID)
+                return try await self.startWorkspaceForBridge(
+                    order, in: project, from: identity, origin: origin
+                )
             },
         ])
     }
 
-    /// Start a workspace because an agent asked for one, and answer with just enough to name it.
+    /// Start a workspace because something on the bridge asked for one, and answer with just
+    /// enough to name it.
     ///
-    /// Reached only from the bridge. It resolves the project from the caller's own workspace, so
-    /// an agent cannot start work in a repository it is not in: the only project it can name is
-    /// the one it is already sitting in, and it never names it at all.
-    private func startWorkspaceForAgent(
+    /// Neither the project nor the origin is worked out here any more. `WorkspaceStartTool`
+    /// decides both, because it is the half that knows which caller is which: an agent may only
+    /// ever be given the project its own workspace is in, and the owner's standalone client names
+    /// one out loud from the list Bloom already has. Two callers, one answer, decided once. This
+    /// side runs the same sequence the Create sheet runs and nothing else.
+    private func startWorkspaceForBridge(
         _ order: AgentWorkspaceOrder,
+        in repo: Repo,
         from identity: BridgeIdentity,
-        spawnID: String
+        origin: WorkspaceOrigin
     ) async throws -> StartedWorkspaceSummary {
         guard let store else { throw AppNotReady.stillStartingUp }
-        guard let caller = try await store.workspace(id: identity.workspaceID),
-              let repo = try await store.repo(id: caller.repoID)
-        else {
-            throw AppNotReady.stillStartingUp
-        }
 
         // Whatever the calling session runs on, unless the tool was told otherwise. An agent
-        // asking for help wants help from the thing it already trusts.
+        // asking for help wants help from the thing it already trusts. A caller with no session is
+        // the owner's own client, which has nothing to inherit and gets Bloom's defaults.
         var controls = ComposerControls()
-        if let session = try await store.session(id: identity.sessionID) {
+        if let sessionID = identity.sessionID, let session = try await store.session(id: sessionID) {
             controls = ComposerControls(session: session, isFastMode: false, outputStyle: OutputStyle.defaultName)
         }
         if let agent = order.agent {
@@ -401,7 +405,7 @@ final class AppModel {
             branch: nil,
             controls: controls,
             select: false,
-            origin: .agent(parentWorkspaceID: identity.workspaceID, spawnToolUseID: spawnID),
+            origin: origin,
             name: order.name
         )
 

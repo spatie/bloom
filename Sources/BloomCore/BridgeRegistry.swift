@@ -23,6 +23,10 @@ public final class BridgeRegistry: Sendable {
         /// So a re-mint for the same session retires the token it replaces, rather than leaving
         /// every token this launch ever made valid until the app quits.
         var tokens: [SessionID: String] = [:]
+        /// The owner's, kept apart from `tokens` because it belongs to no session and because the
+        /// config sweep asks `tokens` what is still live. An owner token in there would look like
+        /// a session whose config file is missing, every launch, for ever.
+        var ownerToken: String?
     }
 
     private let state = Mutex(State())
@@ -55,6 +59,24 @@ public final class BridgeRegistry: Sendable {
             )
         }
         return token
+    }
+
+    /// Lets the owner's own client in, on a token this launch did not mint.
+    ///
+    /// The one door into this table that is not `mint`, and it is here rather than in `mint`
+    /// because it is a different kind of act. `mint` invents a token for a process Bloom is about
+    /// to start; this accepts one Bloom stored the first time somebody asked to couple a client of
+    /// their own, and it is called once at launch with whatever `BridgeOwnerToken` read off disk.
+    /// See that type for why the standalone token persists when no other one does.
+    ///
+    /// Any earlier owner token is dropped, so regenerating really is revoking: the value in the
+    /// file is the only value the socket will answer.
+    public func admit(ownerToken token: String) {
+        state.withLock { state in
+            if let previous = state.ownerToken { state.identities[previous] = nil }
+            state.ownerToken = token
+            state.identities[token] = .owner
+        }
     }
 
     public func identity(forToken token: String) -> BridgeIdentity? {
