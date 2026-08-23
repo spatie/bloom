@@ -171,6 +171,38 @@ struct BridgeOwnerCommandTests {
         #expect(BridgeRegistration.ownerServerName != BridgeRegistration.serverName)
     }
 
+    /// The name is derived per copy of the app rather than fixed, and that is a defect fixed
+    /// rather than a preference. `claude mcp add` replaces an existing entry of the same name
+    /// without saying so, and `--scope user` is one file for the whole machine, so a constant name
+    /// meant Bloom Dev's command silently evicted the owner's real registration. The table is
+    /// `Store.databaseDirectoryName`, so a shared name now implies a shared database.
+    @Test("each copy of Bloom registers under a name of its own")
+    func namePerInstance() {
+        #expect(
+            BridgeRegistration.ownerServerName(forBundleIdentifier: Store.primaryBundleIdentifier)
+                == "bloom"
+        )
+        #expect(
+            BridgeRegistration.ownerServerName(forBundleIdentifier: Store.devBundleIdentifier)
+                == "bloom-dev"
+        )
+        #expect(
+            BridgeRegistration.ownerServerName(forBundleIdentifier: "be.spatie.bloom.beta")
+                == "bloom-be-spatie-bloom-beta"
+        )
+        #expect(BridgeRegistration.ownerServerName(forBundleIdentifier: nil) == "bloom-unbundled")
+    }
+
+    @Test("a name is lower case, hyphenated, and never empty")
+    func slugs() {
+        #expect(BridgeRegistration.slugified("Bloom Dev") == "bloom-dev")
+        #expect(BridgeRegistration.slugified("  Bloom (caf\u{e9} 2) ") == "bloom-caf-2")
+        #expect(BridgeRegistration.slugified("...") == "")
+        // Nothing survives the slug, so the fallback answers instead of handing `claude mcp add`
+        // an empty name and letting it read the shim path as one.
+        #expect(BridgeRegistration.ownerServerName(forBundleIdentifier: nil).isEmpty == false)
+    }
+
     @Test("a path with a space in it survives the shell")
     func quotesPaths() {
         let command = BridgeRegistration.ownerAddCommand(

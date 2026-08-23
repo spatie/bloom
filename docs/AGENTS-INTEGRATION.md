@@ -91,11 +91,25 @@ clones the repository. `user` is the top level of `~/.claude.json` and applies t
 the machine. Bloom's coupling belongs to the owner and to no repository, so it is `user`, and that
 is also the only one of the three that cannot end up in a commit carrying a live token.
 
-The server is registered as `bloom-owner-bridge` and deliberately not as `bloom-workspace-bridge`,
-which is the name Bloom's own per-session `--mcp-config` uses. That file is additive over
-`~/.claude.json` rather than replacing it, so a shared name would put two entries called the same
-thing in one client: an agent Bloom launched inside a workspace would meet its own session token
-and the owner's standalone token under one name. Two names cost nothing and the collision cannot
-then happen at all.
+The server is registered under a name derived from the running copy of Bloom: `bloom` from the
+owner's install, `bloom-dev` from `Tools/dev-build.sh`, and anything else from the same table that
+decides which Application Support directory a build may open, slugified. See
+`BridgeRegistration.ownerServerName`.
+
+It is deliberately not `bloom-workspace-bridge`, the name Bloom's own per-session `--mcp-config`
+uses. That file is additive over `~/.claude.json` rather than replacing it, so a shared name would
+put two entries called the same thing in one client: an agent Bloom launched inside a workspace
+would meet its own session token and the owner's standalone token under one name.
+
+It is also deliberately not one constant for every copy of Bloom, which is what it was until the
+name was derived. `claude mcp add` replaces an existing entry of the same name and says nothing
+about it, and `--scope user` is one file for the whole machine, so Bloom and Bloom Dev both handed
+out a command claiming the same entry: pasting one silently evicted the other. Deriving the name
+from the same table as the database directory means two builds can only collide here if they were
+already sharing a database, in which case they share the token beside it too.
+
+Nothing rewrites an entry left over from before that change. Somebody who ran the older command
+still has `bloom-owner-bridge` in `~/.claude.json`, and Bloom does not edit that file. The Settings
+pane says so and offers `claude mcp remove --scope user bloom-owner-bridge`.
 
 A session already running does not pick the server up. Start a new one.

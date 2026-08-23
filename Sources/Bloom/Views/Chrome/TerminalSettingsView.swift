@@ -57,11 +57,14 @@ struct TerminalSettingsView: View {
 
             Text(
                 "Sessions already running will not see it. Start a new one, then ask it what it is "
-                    + "connected to."
+                    + "connected to. It appears in your client as "
+                    + BridgeRegistration.ownerServerName + "."
             )
             .font(Typo.caption)
             .foregroundStyle(Palette.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
+
+            legacyEntryNote
         } header: {
             Text("Use Bloom from your own terminal")
         } footer: {
@@ -80,6 +83,38 @@ struct TerminalSettingsView: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.top, Metrics.spacingSmall)
         }
+    }
+
+    /// The one thing this rename leaves behind, said once and left to the reader.
+    ///
+    /// Every copy of Bloom used to register as `bloom-owner-bridge`, so anybody who ran the
+    /// earlier command has that entry in `~/.claude.json` still, and nothing here will take it
+    /// out: Bloom does not edit a person's own configuration file, which is the whole reason this
+    /// feature is a command to copy rather than a write. The entry is not harmless enough to leave
+    /// unmentioned either. If it names this same copy of Bloom it still works, and the owner gets
+    /// two of every tool in one client under two names; if it names a copy that has gone, Claude
+    /// Code reports a failed server at the start of every session with nothing to say why.
+    ///
+    /// So: one sentence and the line that removes it, in the pane the refusal message already
+    /// sends people to. It will read as noise to somebody installing Bloom for the first time,
+    /// which is the price of not silently leaving a stranger with a broken entry.
+    private var legacyEntryNote: some View {
+        VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+            Text(
+                "Earlier versions registered as bloom-owner-bridge, whatever copy of Bloom they "
+                    + "came from. If you ran that command, remove the old entry:"
+            )
+            .fixedSize(horizontal: false, vertical: true)
+
+            Text("claude mcp remove --scope user bloom-owner-bridge")
+                .font(Typo.codeSmall)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(Typo.caption)
+        .foregroundStyle(Palette.textSecondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, Metrics.spacingSmall)
     }
 
     private func commandBox(_ command: String) -> some View {

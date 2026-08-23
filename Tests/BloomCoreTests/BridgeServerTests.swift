@@ -198,6 +198,13 @@ struct BridgeServerTests {
         let owner = BridgeProtocol.unrecognisedToken(claiming: BridgeRole.owner.rawValue)
         #expect(owner.contains("standalone registration"))
         #expect(!owner.lowercased().contains("quit and reopen"))
+        // The two causes that are left once the name is derived per copy of the app.
+        #expect(owner.contains("regenerated in Bloom's Settings"))
+        #expect(owner.contains("a different copy of Bloom"))
+        // And not the one that is not. The sentence used to blame another copy for registering
+        // under the same name and taking the entry over; `BridgeRegistration.ownerServerName` is
+        // derived per copy now, so that failure no longer happens and must not still be described.
+        #expect(!owner.lowercased().contains("same name"))
 
         // Every role that is not the owner's is a session token, including one this build does not
         // know, because a claim is a string off the shim's environment and not an enum.

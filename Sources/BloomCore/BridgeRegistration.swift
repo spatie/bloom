@@ -45,21 +45,73 @@ public enum BridgeRegistration {
     /// so a shared name is a name that can be taken.
     public static let serverName = "bloom-workspace-bridge"
 
-    /// The name the owner's own client registers Bloom under, and it is **deliberately not
-    /// `serverName`**.
+    /// The name the owner's own client registers Bloom under, **derived per copy of the app** and
+    /// deliberately not `serverName`.
     ///
-    /// A standalone registration lives in `~/.claude.json` at user scope, which Claude Code
-    /// applies to every session on the machine, and Bloom's own `--mcp-config` is documented above
-    /// as additive over exactly that file rather than replacing it. So an agent Bloom launches
-    /// inside a workspace would meet two entries called the same thing: its own session token and
-    /// the owner's standalone one, in one client, in one `tools/list`. Whichever won, the loser
-    /// would be a server that silently stopped being what it said it was, and the winning case is
-    /// the worse one, because a workspace agent holding the owner's token would have the owner's
-    /// tools.
+    /// Two separate collisions are being avoided and they are not the same one.
     ///
-    /// Two names cost nothing and the collision cannot then happen at all, which is worth more
-    /// than knowing which of them Claude Code would have picked.
-    public static let ownerServerName = "bloom-owner-bridge"
+    /// It is not `serverName` because a standalone registration lives in `~/.claude.json` at user
+    /// scope, which Claude Code applies to every session on the machine, and Bloom's own
+    /// `--mcp-config` is documented above as additive over exactly that file rather than replacing
+    /// it. So an agent Bloom launched inside a workspace would meet two entries called the same
+    /// thing: its own session token and the owner's standalone one, in one client, in one
+    /// `tools/list`. Whichever won, the loser would be a server that silently stopped being what
+    /// it said it was, and the winning case is the worse one, because a workspace agent holding
+    /// the owner's token would have the owner's tools.
+    ///
+    /// It is derived rather than a constant because the constant it used to be was
+    /// `bloom-owner-bridge` for every copy of the app at once, and `claude mcp add` replaces an
+    /// existing entry of the same name **without saying so**. User scope is one file for the whole
+    /// machine, so Bloom and Bloom Dev each offered a command claiming that one entry and whichever
+    /// was pasted last silently evicted the other, with nothing on screen to say it had happened.
+    /// `BridgeSocketPath` and `BridgeOwnerToken` both set out at length why those two copies must
+    /// never share per-instance state. The registered name is per-instance state, and it was the
+    /// last piece of it still shared.
+    ///
+    /// The derivation is `Store.databaseDirectoryName`, slugified, and reusing that table is the
+    /// point rather than a shortcut: it is already the one rule that decides which copy of Bloom a
+    /// process is, so two builds can only collide on a name here if they were already sharing a
+    /// database, and copies sharing a database share the token beside it and have nothing to
+    /// evict. The owner's copy gets `bloom`, which is also the plain name the pane is asked to
+    /// show; the dev copy gets `bloom-dev`; anything else gets a name that says what it is instead
+    /// of impersonating one of those two.
+    public static var ownerServerName: String {
+        ownerServerName(forBundleIdentifier: Bundle.main.bundleIdentifier)
+    }
+
+    /// A pure function of the identifier, for the same reason `Store.databaseDirectoryName` is
+    /// one: `Bundle.main` cannot be varied inside a process, and this rule is worth a test.
+    public static func ownerServerName(forBundleIdentifier identifier: String?) -> String {
+        let slug = slugified(Store.databaseDirectoryName(forBundleIdentifier: identifier))
+        // A directory name that slugified to nothing would be handed to `claude mcp add` as an
+        // empty argument, which makes it read the shim path as the server name. No identifier
+        // reaches that today, since every arm of the table above begins with "Bloom"; this is the
+        // answer for the day one does.
+        return slug.isEmpty ? "bloom" : slug
+    }
+
+    /// Lowercased, every run of anything else collapsed to a single hyphen, the ends trimmed.
+    ///
+    /// Hyphens survive intact in a server name, measured rather than assumed: the live turn
+    /// documented on `claudeArguments` saw `bloom-workspace-bridge` reach the model as
+    /// `mcp__bloom-workspace-bridge__whoami`. Nothing else in a directory name is worth finding
+    /// out about the hard way, which is why this keeps ASCII letters and digits and drops
+    /// everything else, rather than listing the characters seen so far and hoping.
+    static func slugified(_ value: String) -> String {
+        var slug = ""
+        var pendingHyphen = false
+        for scalar in value.lowercased().unicodeScalars {
+            switch scalar {
+            case "a"..."z", "0"..."9":
+                if pendingHyphen, !slug.isEmpty { slug.unicodeScalars.append("-") }
+                pendingHyphen = false
+                slug.unicodeScalars.append(scalar)
+            default:
+                pendingHyphen = true
+            }
+        }
+        return slug
+    }
 
     // MARK: The owner's own client
 

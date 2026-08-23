@@ -94,12 +94,12 @@ public enum BridgeProtocol {
         return """
             Bloom does not recognise this token. It came from a standalone registration, and that \
             kind of token is meant to outlive a quit, so restarting Bloom will not bring it back \
-            and no retry with this token will connect. Either another copy of Bloom, Bloom Dev \
-            included, has registered itself under the same name and taken the entry over, or the \
-            token was regenerated in Bloom's Settings, which revokes the one it replaced, or the \
-            configuration was copied from an installation whose token was never this one's. All \
-            three are put right the same way: open Bloom's Settings and run the registration \
-            command it offers there again.
+            and no retry with this token will connect. Either the token was regenerated in Bloom's \
+            Settings, which revokes the one it replaced, or this entry belongs to a different copy \
+            of Bloom: each copy registers under its own name and keeps its own token beside its \
+            own database, so an entry written against a copy that has since been removed, replaced \
+            or pointed at other data outlives the token that made it work. Both are put right the \
+            same way: open Bloom's Settings and run the registration command it offers there again.
             """
     }
 }
