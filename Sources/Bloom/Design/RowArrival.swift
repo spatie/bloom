@@ -1,3 +1,4 @@
+import BloomCore
 import SwiftUI
 
 /// Which rows in a list have only just turned up, so the list can fade them in rather than
@@ -92,6 +93,29 @@ struct RowArrival<ID: Hashable>: Equatable {
     func isArriving(_ id: ID) -> Bool {
         arriving.contains(id)
     }
+
+    /// Whether this id was absent from the list the last time the tracker was shown it.
+    ///
+    /// **What a row asks when it is built in the same pass that made it exist.** `arriving` is an
+    /// answer the tracker can only give once it has been shown the new list, and whatever shows it
+    /// runs after the pass that drew the row: a `List` gets away with that because the table builds
+    /// its cell later, and a `LazyVStack` does not, because the row is realised in the pass that
+    /// created it. Filmed against a real turn, twenty-three rows of a transcript were built and
+    /// every one of them read `arriving` as empty. One row faded in that turn, and it was the only
+    /// one not asking this question.
+    ///
+    /// So this asks the other way round: not "have you been told this is new", which needs the
+    /// tracker to have been told, but "is this absent from what you were last told", which does
+    /// not. It stops being true the moment `absorb` takes the new list in, a fraction of a frame
+    /// later, so a row realised at any point after that latches at full opacity. That is the same
+    /// rule `isArriving` gives, arrived at without needing to be first.
+    ///
+    /// The three rules above still hold, because both answers read the same bookkeeping: nothing
+    /// is new to a tracker that has never been filled, and `adopt` replaces `known` wholesale, so
+    /// a session's history and a widened filter are as silent here as they are there.
+    func isNew(_ id: ID) -> Bool {
+        hasFilled && !known.contains(id)
+    }
 }
 
 // MARK: - Drawing it
@@ -146,19 +170,33 @@ extension View {
 private struct ArrivingRow: ViewModifier {
     let isArriving: Bool
 
-    /// Read here rather than at the two call sites, which is a departure from the rest of the
-    /// app and is the point of putting this in one place: `Motion` is a set of constants that a
-    /// caller picks up or drops, and this is a whole mechanism. A caller that dropped the curve
-    /// but kept the zero opacity would hide the row and never bring it back.
+    /// Read here rather than at the four call sites, which is a departure from the rest of the
+    /// app and is the point of putting this in one place: this is a whole mechanism rather than a
+    /// constant a caller picks up or drops. `TranscriptMotion.arrival` answers with the settle or
+    /// with nothing, so there is no way to keep half of it.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Whether this row has done its arriving. Latched, and never unlatched: a row fades in once
     /// in its life, and if it leaves the list and comes back it is a new view with new state.
     @State private var hasLanded = false
 
+    /// The settle this row is owed, or nothing: a row that was already here, or a reader who has
+    /// asked for less movement.
+    private var settle: TranscriptMotion.Arrival? {
+        isArriving ? TranscriptMotion.arrival(reduceMotion: reduceMotion) : nil
+    }
+
     func body(content: Content) -> some View {
+        let owed = settle
         content
-            .opacity(hasLanded || !isArriving || reduceMotion ? 1 : 0)
+            .opacity(hasLanded || owed == nil ? 1 : 0)
+            // `offset` rather than `padding` or a `frame`, and that is the whole reason a rise is
+            // affordable here: it is applied when the row is drawn and not when it is laid out, so
+            // the row still occupies exactly the height it always did, nothing under it moves, and
+            // the scroll view's own idea of where the end of the content is never changes. A row
+            // that grew into place would fight the anchor that keeps a running turn at the live
+            // end; this cannot.
+            .offset(y: hasLanded || owed == nil ? 0 : (owed?.rise ?? 0))
             // The cell exists by the time this runs, which is the whole difference between this
             // working and the two approaches above it that do not.
             //
@@ -170,11 +208,14 @@ private struct ArrivingRow: ViewModifier {
                 // Dropped rather than slowed under Reduce Motion, matching every other call site
                 // in the app: the setting is about movement, not about speed, and there is no
                 // slower version of this worth having.
-                guard isArriving, !reduceMotion else {
+                guard let owed else {
                     hasLanded = true
                     return
                 }
-                withAnimation(Motion.arrival) { hasLanded = true }
+                // One animation, two attributes. `easeOut` is what makes the short length carry:
+                // it puts most of both the opacity and the travel in the first third and spends
+                // the rest arriving.
+                withAnimation(.easeOut(duration: owed.seconds)) { hasLanded = true }
             }
     }
 }

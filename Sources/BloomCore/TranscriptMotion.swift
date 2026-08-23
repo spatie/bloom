@@ -43,6 +43,45 @@ public enum TranscriptMotion {
         }
     }
 
+    // MARK: - Settling onto the screen
+
+    /// How something that has only just turned up settles onto the screen.
+    ///
+    /// **Opacity paired with a small rise, rather than opacity alone.** Opacity on its own was
+    /// filmed at 58 frames a second against a real streaming turn, and it is there and it is
+    /// correct: eleven frames of monotonic ease out over 172ms. It is also 0.27 of one luminance
+    /// level deep across the strip it lands in, against 8.65 for the ordinary stream delta that
+    /// lands in the same strip half a second later. A settle a thirtieth the weight of the thing
+    /// beside it is not a settle anybody sees. A few points of travel costs nothing per frame, it
+    /// animates one more attribute of the same one-shot rather than adding a second animation,
+    /// and it is what carries the sense of having arrived from somewhere.
+    ///
+    /// The rise is drawn rather than laid out: nothing below the row moves, nothing reflows, and
+    /// the list never learns that anything happened. See `ArrivingRow`.
+    ///
+    /// Short, and only a little longer than the opacity-only settle it replaces. What is being
+    /// marked is a row landing, which is a smaller event than a pane travelling, and a fifth of a
+    /// second of it is the difference between reading as a settle and reading as an effect.
+    public struct Arrival: Equatable, Sendable {
+        /// How long the settle takes.
+        public let seconds: Double
+
+        /// How far below its resting place the content starts, in points.
+        public let rise: Double
+    }
+
+    /// The settle a row or a block gets when it turns up, or nothing at all.
+    ///
+    /// Reduce Motion drops it rather than slowing it, which is what every other call site in this
+    /// app does: the setting is about movement, and there is no slower version of this worth
+    /// having. An absence rather than a zero, so that a caller cannot honour half of it. A caller
+    /// that kept the zero opacity and dropped the curve would hide the row and never bring it
+    /// back, which is exactly the bug the shape of this answer rules out.
+    public static func arrival(reduceMotion: Bool) -> Arrival? {
+        guard !reduceMotion else { return nil }
+        return Arrival(seconds: 0.22, rise: 5)
+    }
+
     // MARK: - Going back to the live end
 
     /// How the transcript travels when the reader asks to be taken back to the newest row.

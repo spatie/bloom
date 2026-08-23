@@ -619,7 +619,13 @@ enum Motion {
     /// 0.2 once) and a file that argues one window has one speed cannot also hold four of them.
     static let hover: Animation = .easeInOut(duration: 0.12)
 
-    /// A row settling into a list it has just been added to. See `RowArrival`.
+    /// A pane's own length, borrowed by anything that settles at the same speed.
+    ///
+    /// It used to be the row settle, and `RowArrival` no longer reads it: what a row arriving is
+    /// owed is opacity paired with a small rise, which is two numbers rather than a curve, and two
+    /// numbers describing what the transcript is allowed to animate belong in `TranscriptMotion`
+    /// where there is something to test them. What is left here are the three call sites that
+    /// wanted the length alone.
     ///
     /// The same curve and the same length as `pane`, deliberately and not by accident: a window
     /// with one speed is the whole argument above, and a row arriving is if anything a smaller

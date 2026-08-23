@@ -37,8 +37,12 @@ struct TranscriptListView: View {
 
     /// Which rows have only just turned up, so they fade in rather than appear at full opacity in
     /// a single frame. The rules for what counts as "just turned up" are `RowArrival`'s, which is
-    /// the same mechanism and the same 180ms the sidebar and Home settle their rows on.
-    @State private var arrival = RowArrival<String>()
+    /// the same mechanism and the same settle the sidebar and Home give their rows.
+    ///
+    /// Keyed on the sequence number itself rather than on a string of it. A row now asks the
+    /// tracker a question on every pass rather than only when the tracker has something to say
+    /// (see `isArriving`), and a question asked that often must not allocate to be asked.
+    @State private var arrival = RowArrival<Int>()
 
     /// The scroll view a glide to the live end is driven through, and the travel along it.
     ///
@@ -349,7 +353,10 @@ struct TranscriptListView: View {
                 // scroll, and each of them is a correction the transition form could not make.
                 onScrolledUpChange?(!new.isNearBottom)
             }
-            .settlesArrivals($arrival)
+            // No `settlesArrivals` here, unlike the two lists. That modifier bounds how long
+            // `arriving` keeps saying yes, and the transcript no longer asks `arriving` anything:
+            // it asks `isNew`, which stops being true the moment `trackArrivals` takes the new
+            // rows in and needs nothing to close a window for it. See `isArriving` below.
             .onChange(of: transcript.rows.count, initial: true) { _, _ in
                 position(proxy)
                 trackArrivals()
@@ -633,8 +640,8 @@ struct TranscriptListView: View {
     /// Plain sequence numbers rather than anything session scoped, because `adopt` replaces the
     /// tracker's whole idea of the list every time a session loads. A seq that means one row in
     /// one session and a different row in the next can never be compared against the wrong one.
-    private var arrivalIDs: [String] {
-        transcript.rows.suffix(Self.arrivalWindow).map { String($0.seq) }
+    private var arrivalIDs: [Int] {
+        transcript.rows.suffix(Self.arrivalWindow).map(\.seq)
     }
 
     /// Takes the list in and works out what is new about it, unless the session is still arriving.
@@ -646,13 +653,20 @@ struct TranscriptListView: View {
         arrival.absorb(arrivalIDs)
     }
 
-    /// Whether this row should fade rather than appear.
+    /// Whether this row should settle rather than appear.
     ///
-    /// The set is almost always empty, and it is checked first so that a pass over a long session
-    /// does not build a string per realised row to ask a question whose answer is already no.
+    /// `isNew` rather than `isArriving`, and that is not a tidy-up. A row of this list is realised
+    /// in the same pass that created it, and `trackArrivals` runs after that pass, so a row asking
+    /// whether it had been announced as arriving was asking before anything could have announced
+    /// it. Filmed against a real turn: twenty-three rows built, twenty-three of them told they
+    /// were not arriving, and no row in the transcript had ever settled. `isNew` asks whether the
+    /// tracker has yet to see this row, which is answerable on the frame the row is built.
+    ///
+    /// The kind is checked first, because it is free and it is no for the two kinds that make up
+    /// most of a long session, and what follows it is a set lookup on an integer.
     private func isArriving(_ row: TranscriptRow) -> Bool {
-        guard !arrival.arriving.isEmpty, TranscriptMotion.fadesOnArrival(row.kind) else { return false }
-        return arrival.isArriving(String(row.seq))
+        guard TranscriptMotion.fadesOnArrival(row.kind) else { return false }
+        return arrival.isNew(row.seq)
     }
 
     private func toggle(_ seq: Int) {

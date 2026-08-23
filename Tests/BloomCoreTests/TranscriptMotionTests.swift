@@ -99,4 +99,26 @@ struct TranscriptMotionTests {
         case .glide(let seconds): seconds
         }
     }
+
+    // MARK: - Settling onto the screen
+
+    /// Shape rather than literals: what matters is that there is travel under the opacity and
+    /// that the whole thing is over quickly. Opacity alone was filmed and measured at a thirtieth
+    /// the weight of an ordinary stream delta landing beside it, which is why a rise of zero is
+    /// the one value this must never come back to.
+    @Test("a settle has both a length and some travel, and neither is an effect")
+    func settleShape() throws {
+        let settle = try #require(TranscriptMotion.arrival(reduceMotion: false))
+        #expect(settle.rise > 0)
+        #expect(settle.rise < 12)
+        #expect(settle.seconds > 0.1)
+        #expect(settle.seconds < 0.4)
+    }
+
+    /// Dropped rather than slowed, like every other call site in the app, and absent rather than
+    /// zeroed so that a caller cannot honour half of it and leave a row hidden.
+    @Test("Reduce Motion is owed no settle at all")
+    func settleUnderReduceMotion() {
+        #expect(TranscriptMotion.arrival(reduceMotion: true) == nil)
+    }
 }
