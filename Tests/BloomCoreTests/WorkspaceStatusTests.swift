@@ -257,35 +257,42 @@ struct WorkspaceStatusTests {
         ).branch.isEmpty)
     }
 
-    @Test("the merge confirmation names what it is about to do")
+    /// The title is the one line a reader reliably reads, so it is the line that has to say who
+    /// merges. Bloom does not: the request goes to the workspace's agent as an ordinary turn.
+    @Test("the merge confirmation says who is going to do it")
     func mergeConfirmationNamesEverything() throws {
         let pullRequest = try decode(json(
             state: "OPEN",
             checks: #"{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"FAILURE","isRequired":true}"#
         ))
 
-        #expect(pullRequest.mergeConfirmationTitle(base: "main") == "Merge #42 into main?")
+        #expect(pullRequest.mergeConfirmationTitle(base: "main")
+            == "Ask the agent to merge #42 into main?")
 
         let text = pullRequest.mergeConfirmation(base: "main", deletesBranch: true)
         #expect(text.contains("feature/glyphs"))
         // A red check is repeated here rather than being hidden behind the button.
         #expect(text.contains("1 required check failed"))
-        #expect(text.contains("Bloom cannot undo this."))
+        #expect(text.contains("agent"))
+        // The app no longer runs the merge, so it no longer claims to be the thing that cannot
+        // take it back.
+        #expect(!text.contains("Bloom cannot undo this."))
         // The number, the title and the method are on the title line and on the button, and were
-        // said a second time here for no gain. The dialog is the two facts that change the answer.
+        // said a second time here for no gain.
         #expect(!text.contains("Better glyphs"))
         #expect(!text.contains("Squash and merge"))
     }
 
-    /// Four paragraphs became one, and the worktree reassurance became the clause that keeps the
-    /// branch deletion from reading as a threat to the copy on this machine.
+    /// One paragraph still, and both halves of what confirming actually does: a turn goes into the
+    /// chat, and the branch on the server goes after the merge lands.
     @Test("a clean merge confirmation is one short paragraph")
     func mergeConfirmationIsShort() throws {
         let text = try decode(json(state: "OPEN")).mergeConfirmation(
             base: "main", deletesBranch: true
         )
-        #expect(text == "The branch feature/glyphs is deleted on GitHub, not here. "
-            + "Bloom cannot undo this.")
+        #expect(text == "This workspace's agent is asked to merge it, in the chat, so you see "
+            + "every command it runs and it can tell you if GitHub refuses. Once the merge lands "
+            + "it deletes feature/glyphs on GitHub, not here.")
         #expect(!text.contains("\n"))
     }
 
@@ -295,7 +302,7 @@ struct WorkspaceStatusTests {
             base: "main", deletesBranch: false
         )
         #expect(!text.contains("is deleted on GitHub"))
-        #expect(text == "Bloom cannot undo this.")
+        #expect(text.contains("asked to merge it, in the chat"))
     }
 
     // MARK: - Fixtures

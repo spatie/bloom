@@ -137,8 +137,8 @@ struct PullRequestBar: View {
 
     /// Creation is the agent's job: it pushes, writes the description and calls `gh` with the
     /// project's own conventions in context. Bloom only composes the turn. Reading the pull
-    /// request's status afterwards, and merging it, still go through `gh` from here, because those
-    /// are questions with one right answer rather than work that needs judgement.
+    /// request's status is the one thing left that still goes through `gh` from here, because it
+    /// is a question with one right answer rather than work that needs judgement.
     private func createPullRequest() {
         isWorking = true
         report = nil
@@ -239,40 +239,29 @@ struct PullRequestBar: View {
         Task { await app.archive(model.workspace) }
     }
 
-    /// Merging is two things happening in order, and they are reported separately.
+    /// Hands the merge to the agent, the same way Create pull request and Commit and push do.
     ///
-    /// The pull request lands over the network, and only then is there any tidying up. A merge
-    /// that worked is never announced as a failure, and a leftover is described as a leftover.
+    /// Nothing here runs `gh`, and that is the change this whole file was rewritten for. Bloom used
+    /// to merge over the network from this function and report the outcome into a notice, which
+    /// left it with one thing to say about the case that happens most: GitHub refused, and the
+    /// person needed a conversation rather than a red box. Now the request goes down the composer's
+    /// own path, the commands run in the transcript under the permission mode the person set, and
+    /// the strip notices the merge on its next refresh like any other change on GitHub.
+    ///
+    /// So there is nothing to report here on success. What used to be a `WorkspaceEvent` row is
+    /// now the turn itself, a few points to the left, said in the agent's own words.
     private func merge(_ method: GitHub.MergeMethod) {
         guard let pullRequest = model.pullRequest else { return }
         isWorking = true
         report = nil
-        let worktree = model.workspace.path
 
         Task {
             defer { isWorking = false }
-            do {
-                let outcome = try await GitHubBridge.merge(
-                    pullRequest, worktree: worktree, method: method
-                )
-                // The durable record of it goes in the transcript, which is where "what happened
-                // to this workspace" lives now. The strip says the rest by turning purple and
-                // saying Merged a second later.
-                model.record(.merged(pullRequest: pullRequest.number, outcome: outcome))
-            } catch {
-                let reason = GitHub.mergeFailureSentence(error)
-                model.record(.mergeFailed(pullRequest: pullRequest.number, reason: reason))
-                // And here as well, because this one means the button the user just pressed did
-                // nothing, and they are looking at the button. The command that failed is behind
-                // the disclosure rather than in the sentence.
+            if let refusal = await model.requestMerge(pullRequest, method: method) {
                 report = PullRequestNotice(
-                    tone: .failure,
-                    title: "#\(pullRequest.number) was not merged",
-                    message: reason + " Nothing on this machine was changed.",
-                    details: "\(error)"
+                    tone: .info, title: "Nothing was sent", message: refusal
                 )
             }
-            await model.refreshPullRequest()
         }
     }
 }

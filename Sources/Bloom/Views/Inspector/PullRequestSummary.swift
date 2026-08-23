@@ -38,9 +38,10 @@ struct PullRequestSummary: View {
     /// what presents the dialog, so there is no way to reach `onMerge` without passing through it.
     @State private var pendingMerge: GitHub.MergeMethod?
 
-    /// Merging deletes the branch on GitHub and nothing on this machine. It is named in the
-    /// confirmation rather than left as a surprise. See `GitHub.merge` for why the local half of
-    /// gh's own clean up is never asked for.
+    /// The merge instructions ask for the branch to be deleted on GitHub, and for nothing on this
+    /// machine to be touched. It is named in the confirmation rather than left as a surprise. See
+    /// `MergeInstructions.defaultMarkdown`, which is what the agent actually follows, and which is
+    /// where the reason gh's own `--delete-branch` is never used is written down.
     private static let deletesBranch = true
 
     private var status: PullRequestStatus { pullRequest.status(local: localWork) }
@@ -404,7 +405,8 @@ struct PullRequestSummary: View {
     /// this strip: a grey Merge button means the screenshot was taken with another app in front.
     ///
     /// Every path through it opens the confirmation. The button proposes a squash merge because
-    /// that is what it says; nothing here ever performs one.
+    /// that is what it says; nothing here ever performs one, and since merging moved onto the
+    /// agent nothing anywhere in this target does either.
     private var mergeButton: some View {
         Button("Merge", systemImage: "arrow.triangle.merge") { propose(.squash) }
             .buttonStyle(.borderedProminent)
@@ -434,9 +436,11 @@ struct PullRequestSummary: View {
 
     // MARK: - Actions
 
-    /// Merging is the one thing in this strip that genuinely needs `gh`, so it is the one thing
-    /// gated on it. Opening the page, copying the link and sharing it are ordinary URL handling
-    /// and work signed out.
+    /// The sign in gate stays, even though this app no longer runs `gh` itself. The agent does,
+    /// with the same credentials on the same machine, so a signed out user gets the same failure
+    /// one turn later and with a wasted turn in front of it. Catching it here is the cheaper half
+    /// of the same answer. Opening the page, copying the link and sharing it are ordinary URL
+    /// handling and work signed out.
     ///
     /// What is handed to the gate is "open the confirmation", never "merge". A sign in that
     /// succeeds re-raises the dialog the user was heading for and they still have to say yes to

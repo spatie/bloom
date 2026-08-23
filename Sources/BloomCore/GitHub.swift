@@ -50,51 +50,6 @@ public enum GitHubAccess: Sendable, Equatable {
     case signedOut
 }
 
-/// What merging did, and what it could not finish afterwards.
-///
-/// Merging is two things happening in order: a network call that lands the pull request, and some
-/// tidying up that does not. They fail separately, so they are reported separately. Anything this
-/// value describes has already merged, which is why there is no `merged` flag on it: a merge that
-/// did not happen throws instead.
-public struct MergeOutcome: Sendable, Equatable {
-    /// What was left behind, when something was.
-    public enum Leftover: Sendable, Equatable {
-        /// The branch is still on GitHub.
-        case remoteBranch(String)
-        /// gh merged and then failed to tidy up the local repository. See `GitHub.merge`.
-        case localTidyUp
-    }
-
-    public var leftover: Leftover?
-
-    public init(leftover: Leftover? = nil) {
-        self.leftover = leftover
-    }
-}
-
-public extension MergeOutcome.Leftover {
-    /// What to put in front of a person, given that the merge itself worked.
-    ///
-    /// It says the merge succeeded first, because that is the part they were waiting for, and
-    /// describes the rest as a leftover rather than as a failure. No command line and no git
-    /// output: neither is a sentence, and the state they describe is visible on GitHub.
-    var sentence: String {
-        switch self {
-        case .remoteBranch(let branch):
-            """
-            The pull request is merged. The branch \(branch) could not be deleted on GitHub, so it \
-            is still there. The worktree on this machine is untouched.
-            """
-        case .localTidyUp:
-            """
-            The pull request is merged. The GitHub CLI could not tidy up afterwards, because a \
-            worktree cannot check out a branch that your main copy already has. Nothing on this \
-            machine was changed.
-            """
-        }
-    }
-}
-
 /// GitHub failures retain command context or invalid output without exposing unbounded output.
 public struct GitHubError: Error, Sendable, CustomStringConvertible {
     public let message: String
@@ -326,130 +281,15 @@ public enum GitHub {
         return whole.stdout
     }
 
-    /// Merges the pull request, and then tidies up the remote branch if asked to.
-    ///
-    /// `--delete-branch` is deliberately never passed, and this is the one thing about merging
-    /// from Bloom that has to be understood. That flag does two unrelated jobs: it deletes the
-    /// branch on GitHub, which is a network call, and it then tidies up locally by checking out
-    /// the base branch and deleting the merged branch. The local half runs `git` in the current
-    /// directory, and Bloom's current directory is always a worktree. Git refuses to check out a
-    /// branch that another checkout already holds, so from a worktree whose base is checked out in
-    /// the main copy, which is every worktree this app makes, the local half fails with
-    ///
-    ///     failed to run git: fatal: 'main' is already used by worktree at '/path/to/repo'
-    ///
-    /// after the pull request has already merged. gh exits non-zero, and a caller that only looks
-    /// at the exit status reports a merge that worked as a failure.
-    ///
-    /// So the merge is asked for on its own, and the remote branch is deleted afterwards with an
-    /// explicit push, which touches no checkout at all. The local branch is left alone: the
-    /// worktree is still standing on it, and archiving the workspace is what removes it, under
-    /// the repository's own `delete_branch_on_archive` setting.
-    @discardableResult
-    public static func merge(
-        number: Int,
-        branch: String,
-        worktree: String,
-        method: MergeMethod,
-        deleteRemoteBranch: Bool
-    ) async throws -> MergeOutcome {
-        let arguments = ["pr", "merge", String(number), "--\(method.rawValue)"]
-        let result = try await Shell.run("gh", arguments, cwd: worktree, timeout: .seconds(20))
-
-        guard result.ok else {
-            let stderr = result.stderr.isEmpty ? result.stdout : result.stderr
-            // gh merges first and tidies up second, so a failure whose message is about the local
-            // repository is a failure that happened after the pull request had already merged.
-            // Reporting that as "could not merge" is a lie the user can check on GitHub.
-            guard mergeFailedAfterMerging(stderr: stderr) else {
-                throw shellError(arguments: arguments, result: result)
-            }
-            return MergeOutcome(leftover: .localTidyUp)
-        }
-
-        guard deleteRemoteBranch, !branch.isEmpty else { return MergeOutcome() }
-
-        do {
-            // Qualified, because the parameter of the same name shadows it here.
-            try await Self.deleteRemoteBranch(branch, worktree: worktree)
-            return MergeOutcome()
-        } catch {
-            return MergeOutcome(leftover: .remoteBranch(branch))
-        }
-    }
-
-    /// Deletes `branch` on origin and nothing else. No checkout is touched, which is what makes
-    /// this safe to run from a worktree.
-    ///
-    /// The branch travels as a fully qualified ref after `--`, for the reason spelled out on
-    /// `push`: a branch named like a flag would otherwise rewrite the command.
-    public static func deleteRemoteBranch(_ branch: String, worktree: String) async throws {
-        guard Git.isValidBranchName(branch) else {
-            throw GitHubError("refusing to delete '\(branch)' on origin: not a valid branch name")
-        }
-
-        let arguments = ["push", "--delete", "--", "origin", "refs/heads/\(branch)"]
-        let result = try await Shell.run("git", arguments, cwd: worktree, timeout: .seconds(20))
-        guard !result.ok else { return }
-
-        // A repository set to delete head branches on merge has already removed it by the time we
-        // ask, so the branch being gone is the outcome we wanted rather than a failure.
-        guard !indicatesRemoteBranchGone(stderr: result.stderr + result.stdout) else { return }
-
-        throw ShellError(
-            command: "git " + arguments.joined(separator: " "),
-            status: result.status,
-            stderr: result.stderr.isEmpty ? result.stdout : result.stderr
-        )
-    }
-
-    /// What to say about a merge that did not happen.
-    ///
-    /// The command line is not part of it. `gh pr merge 363 --squash` in front of somebody who
-    /// pressed a button tells them nothing they can act on, and the interesting half is always
-    /// what GitHub said back, so that is what is kept. Trimmed, because gh follows an error with
-    /// its own usage hints often enough that the sentence would otherwise arrive with a paragraph
-    /// attached.
-    public static func mergeFailureSentence(_ error: Error) -> String {
-        guard let shell = error as? ShellError else { return error.readableMessage }
-
-        let stderr = shell.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let first = stderr.split(separator: "\n").first.map(String.init), !first.isEmpty else {
-            return "GitHub refused the merge."
-        }
-        var sentence = first
-        if let start = sentence.first, start.isLowercase, start.isLetter {
-            sentence.replaceSubrange(
-                sentence.startIndex...sentence.startIndex, with: start.uppercased()
-            )
-        }
-        if let last = sentence.last, !".!?".contains(last) { sentence.append(".") }
-        return sentence
-    }
-
-    /// git has no exit code for "there was nothing to delete".
-    public static func indicatesRemoteBranchGone(stderr: String) -> Bool {
-        stderr.localizedCaseInsensitiveContains("remote ref does not exist")
-    }
-
-    /// git refuses to check out a branch that another worktree already holds.
-    ///
-    /// Load bearing for this whole app: every workspace is a worktree of a repository whose base
-    /// branch is checked out in the main copy, so nothing Bloom runs may ever try to check out
-    /// that base branch.
-    public static func indicatesBranchCheckedOutElsewhere(stderr: String) -> Bool {
-        stderr.localizedCaseInsensitiveContains("is already used by worktree")
-            || stderr.localizedCaseInsensitiveContains("is already checked out at")
-    }
-
-    /// Whether a failed `gh pr merge` failed after the pull request had already merged.
-    ///
-    /// gh prefixes anything it could not do with git with `failed to run git`, and everything it
-    /// does with git during a merge happens after the network call.
-    public static func mergeFailedAfterMerging(stderr: String) -> Bool {
-        indicatesBranchCheckedOutElsewhere(stderr: stderr)
-            || stderr.localizedCaseInsensitiveContains("failed to run git")
-    }
+    // Merging is not here, and its absence is the point.
+    //
+    // `gh pr merge` used to run from this file, followed by an explicit
+    // `git push --delete -- origin refs/heads/<branch>`, because `--delete-branch` makes gh check
+    // out the base branch and a worktree cannot check out the branch the main copy is standing on.
+    // Both commands now live in `MergeInstructions`, a file in the repository that the workspace's
+    // agent is asked to follow, and everything that was known about them here is written down
+    // there in the words the agent reads. There is one way to merge a pull request in this app and
+    // it goes through the transcript.
 
     /// Pushes the current HEAD to `branch` on origin.
     ///

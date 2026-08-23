@@ -1088,6 +1088,68 @@ final class WorkspaceModel {
         return nil
     }
 
+    /// Asks the workspace's agent to merge the pull request, instead of running `gh` from here.
+    ///
+    /// The last of the three buttons in the strip to move, and the one with the most riding on it.
+    /// Bloom used to run `gh pr merge` and then `git push --delete` behind it, catch a `ShellError`
+    /// and put a sentence in a notice. That arrangement had no answer for the case that actually
+    /// happens: GitHub refuses, because a required check has not finished or a review is missing,
+    /// and what the person needed was a conversation rather than a red box. An agent gets the same
+    /// refusal in words, in the transcript, with the command it ran above it, and can say what to
+    /// do next.
+    ///
+    /// It also puts the merge behind the permission mode the person already chose. A button
+    /// running `gh pr merge` is outside all of that by construction; a turn is not.
+    ///
+    /// The same guard and the same route as `requestPullRequest` and `requestPush`, so all three
+    /// buttons in the strip behave identically.
+    ///
+    /// Returns nil on success, or the sentence to put in front of the user.
+    func requestMerge(
+        _ pullRequest: PullRequest,
+        method: GitHub.MergeMethod,
+        overrides: PromptOverrides = PromptOverrides()
+    ) async -> String? {
+        guard !isRunning else {
+            return "\(workspace.name) is still working. Wait for the turn to finish, then press "
+                + "Merge again."
+        }
+
+        guard let session = await sessionForPullRequest(titledIfNew: "Merge") else {
+            return "Could not open a session in \(workspace.name) to send the request to."
+        }
+
+        let context = MergePromptContext(
+            workspaceName: workspace.name,
+            number: pullRequest.number,
+            title: pullRequest.title,
+            branch: pullRequest.branch,
+            baseBranch: workspace.baseBranch,
+            method: method
+        )
+        let render = context.render(template: overrides.template(for: .mergePullRequest))
+
+        activeSessionID = session.id
+        await transcript(for: session).submit(mergeTurn(text: render.text))
+        return nil
+    }
+
+    /// The merge turn, with the instructions named in it.
+    ///
+    /// Synchronous where `pullRequestTurn` is not, because `MergeInstructions` has no reclaim step
+    /// to await. See the note on that type for why it does not have one.
+    ///
+    /// When the file cannot be written the instructions go into the message itself, which matters
+    /// more here than it does for creating a pull request: this is the turn whose instructions say
+    /// what not to do to somebody's repository, and a read-only checkout is not a reason to send
+    /// it without them.
+    private func mergeTurn(text: String) -> String {
+        if let path = MergeInstructions.ensure(in: workspace.path) {
+            return MergeInstructions.asking(text, toFollow: path)
+        }
+        return text + "\n\n" + MergeInstructions.defaultMarkdown
+    }
+
     /// The turn that goes down the wire, with the instructions named in it.
     ///
     /// The path goes in the sentence that asks for it, which is where every other file Bloom sends
@@ -1106,11 +1168,15 @@ final class WorkspaceModel {
 
     /// A workspace whose agent was never started still has a button to press. Rather than doing
     /// nothing, it gets the session it would have got the first time somebody typed into it.
-    private func sessionForPullRequest() async -> Session? {
+    ///
+    /// - Parameter title: what a session created here is called. Named by the caller because the
+    ///   three buttons in the strip all land here and a merge that opens a chat called "Create
+    ///   pull request" is a lie in the sidebar for as long as that session lives.
+    private func sessionForPullRequest(titledIfNew title: String = "Create pull request") async -> Session? {
         if let activeSession { return activeSession }
         await reloadSessions()
         if let activeSession { return activeSession }
-        return await createSession(title: "Create pull request")
+        return await createSession(title: title)
     }
 
     /// What this workspace was created to do, read back out of the oldest session's first user

@@ -4,6 +4,10 @@ import BloomCore
 
 /// The one place the app layer touches `GitHub`. Keeping it behind a single adapter means a
 /// change to the gh wrapper's signature is a one-file fix rather than a sweep through views.
+///
+/// It asks GitHub questions and nothing else. Opening a pull request, pushing a branch and merging
+/// are all turns sent to the workspace's agent now, so the only `gh` this app runs is the reading
+/// half.
 enum GitHubBridge {
     /// - Parameter maxAge: how old an answer from the last `gh pr view` may be and still be used.
     ///   Zero always asks GitHub.
@@ -25,20 +29,6 @@ enum GitHubBridge {
 
     static func checks(branch: String, worktree: String) async -> [CheckRun] {
         (try? await GitHub.checks(forBranch: branch, worktree: worktree)) ?? []
-    }
-
-    /// The branch is deleted on GitHub and nowhere else. See `GitHub.merge` for why the local half
-    /// of gh's own clean up can never be used from a worktree.
-    static func merge(
-        _ pullRequest: PullRequest, worktree: String, method: GitHub.MergeMethod
-    ) async throws -> MergeOutcome {
-        try await GitHub.merge(
-            number: pullRequest.number,
-            branch: pullRequest.branch,
-            worktree: worktree,
-            method: method,
-            deleteRemoteBranch: true
-        )
     }
 
     static func open(_ url: String) {

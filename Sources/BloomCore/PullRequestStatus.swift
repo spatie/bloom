@@ -229,18 +229,29 @@ public extension PullRequest {
     }
 
     /// The title of the confirmation, which is the one line a user reliably reads.
+    ///
+    /// It says who does it, and that is the whole of the change from the version that read "Merge
+    /// #42 into main?". Bloom no longer runs `gh pr merge`: the request goes to this workspace's
+    /// agent as an ordinary turn, and a title that implies the app is about to do it is the one
+    /// line most likely to be believed.
     func mergeConfirmationTitle(base: String) -> String {
-        "Merge #\(number) into \(base)?"
+        "Ask the agent to merge #\(number) into \(base)?"
     }
 
-    /// What merging does, said as consequences rather than as a question.
+    /// What confirming does, said as consequences rather than as a question.
     ///
-    /// Two facts change the answer: the branch does not survive it, and nothing here can put it
-    /// back. Everything else that used to be in here was true and none of it was decisive. The
-    /// opening sentence restated the method, the number and the title, and the title line above
-    /// already carries the number while the button below carries the method. The worktree stayed,
-    /// because in an app built on worktrees "the branch is deleted" reads as a threat to the one
-    /// on this machine unless it is answered, but it is worth a clause, not a sentence.
+    /// Rewritten when the merge moved onto the agent, and the closing paragraph is the part that
+    /// changed meaning rather than wording. It used to end "Bloom cannot undo this", which was the
+    /// honest thing to say about an app that was about to call `gh pr merge` itself and had no
+    /// answer for what came back. Bloom does not call it any more. What the reader is agreeing to
+    /// is a message going into the chat, and the two facts that follow from that are worth more
+    /// than an undo warning: the commands happen in front of them, under whatever permission mode
+    /// they set, and a refusal from GitHub comes back as words instead of as a failed button.
+    ///
+    /// What did NOT change is the first paragraph. A squash merge still lands what GitHub has,
+    /// not what is on this disk, and moving the work to an agent does not put an uncommitted file
+    /// into the merge. The strip lets the button stay live over local work rather than disabling
+    /// it, so this is still where that trade is paid back.
     ///
     /// The two conditional paragraphs are not compression candidates. Each of them only appears
     /// when it is the most important thing on screen.
@@ -251,12 +262,13 @@ public extension PullRequest {
     ) -> String {
         var paragraphs: [String] = []
         // First, above the rest, because it is the one line here that says the merge will land
-        // something OTHER than what the reader is looking at. The strip lets the button stay live
-        // over local work rather than disabling it, so this is where that trade is paid back.
+        // something OTHER than what the reader is looking at.
         if let local, local.isAhead {
             paragraphs.append(
                 "GitHub does not have everything in this worktree: "
-                    + Self.localDetail(local) + ". None of that is part of what is merged."
+                    + Self.localDetail(local)
+                    + ". None of that is part of what is merged, and the agent is told to leave it"
+                    + " alone rather than commit it first."
             )
         }
         if checks == .failing || hasConflicts {
@@ -265,12 +277,14 @@ public extension PullRequest {
             )
         }
         // An older gh does not report the head branch, and naming a branch we are guessing at
-        // would be worse than not naming one.
-        var closing = ""
+        // would be worse than not naming one. The instructions this turn carries say the same
+        // thing: without a name, the branch on the server is left standing.
+        var closing = "This workspace's agent is asked to merge it, in the chat, so you see every "
+            + "command it runs and it can tell you if GitHub refuses."
         if deletesBranch, !branch.isEmpty {
-            closing = "The branch \(branch) is deleted on GitHub, not here. "
+            closing += " Once the merge lands it deletes \(branch) on GitHub, not here."
         }
-        paragraphs.append(closing + "Bloom cannot undo this.")
+        paragraphs.append(closing)
         return paragraphs.joined(separator: "\n\n")
     }
 

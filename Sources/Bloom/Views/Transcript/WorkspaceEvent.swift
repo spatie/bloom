@@ -22,19 +22,19 @@ import BloomCore
 /// transcript's own directory, rather than in `BloomCore` next to the stored model, because being
 /// presentation and nothing else is the whole of its contract.
 struct WorkspaceEvent: Identifiable, Equatable {
+    /// Setup is the only one left. Merge was the other, until merging became a turn in the
+    /// transcript rather than something Bloom did to a workspace behind its back: an agent
+    /// running `gh pr merge` in front of the reader needs no row from Bloom saying it happened.
     enum Kind: String, Equatable {
         case setup
-        case merge
     }
 
-    /// Three endings and a beginning. `partial` is not a nicety: `gh pr merge --delete-branch`
-    /// merges on GitHub and can still fail to delete the local branch, because a worktree cannot
-    /// check out a base branch that the main checkout has. Saying only "merged" would hide the
-    /// half that needs the user, and saying "failed" would be a lie about the half that worked.
+    /// Three endings and a beginning. There was a fourth, `partial`, for a merge that landed on
+    /// GitHub and then failed to tidy up afterwards. Nothing here merges any more, so nothing here
+    /// can end half way.
     enum Outcome: Equatable {
         case running
         case succeeded
-        case partial
         case failed
         /// Nothing ran, and why is worth a line: a settings file naming a script that is not there.
         case skipped
@@ -75,10 +75,6 @@ struct WorkspaceEvent: Identifiable, Equatable {
         case (.setup, .succeeded): "checkmark.seal"
         case (.setup, .skipped): "gearshape.2"
         case (.setup, _): "exclamationmark.triangle"
-        case (.merge, .running): "arrow.triangle.merge"
-        case (.merge, .succeeded): "checkmark.seal"
-        case (.merge, .partial): "exclamationmark.circle"
-        case (.merge, _): "exclamationmark.triangle"
         }
     }
 
@@ -86,7 +82,6 @@ struct WorkspaceEvent: Identifiable, Equatable {
         switch outcome {
         case .running: Palette.accent
         case .succeeded: Palette.positive
-        case .partial: Palette.warning
         case .failed: Palette.negative
         case .skipped: Palette.textSecondary
         }
@@ -162,38 +157,6 @@ struct WorkspaceEvent: Identifiable, Equatable {
                 title: "Setup skipped", detail: LogTail.lastLine(log)
             )
         }
-    }
-
-    // MARK: - Merge
-
-    /// A pull request that went in.
-    ///
-    /// Takes `MergeOutcome` whole rather than a boolean, because the interesting case is the one
-    /// with something left over: `gh pr merge --delete-branch` merges on GitHub and can still fail
-    /// to tidy up locally, since a worktree cannot check out a branch the main copy already has.
-    /// That is neither a success to report plainly nor a failure, and `Leftover.sentence` is
-    /// already the right words for it, so the row borrows them instead of writing a second set
-    /// that would drift from the ones the inspector shows.
-    static func merged(pullRequest: Int, outcome: MergeOutcome) -> WorkspaceEvent {
-        WorkspaceEvent(
-            kind: .merge,
-            outcome: outcome.leftover == nil ? .succeeded : .partial,
-            title: "Merged #\(pullRequest)",
-            detail: outcome.leftover == nil ? "" : "Something was left over",
-            note: outcome.leftover?.sentence ?? ""
-        )
-    }
-
-    /// A merge that did not happen. The reason is whatever GitHub said, which is more useful than
-    /// any wording chosen in advance.
-    static func mergeFailed(pullRequest: Int, reason: String) -> WorkspaceEvent {
-        WorkspaceEvent(
-            kind: .merge,
-            outcome: .failed,
-            title: "Merge failed",
-            detail: "#\(pullRequest)",
-            note: reason
-        )
     }
 }
 

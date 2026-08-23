@@ -7,6 +7,7 @@ import Foundation
 public enum PromptID: String, Sendable, Hashable, CaseIterable, Codable {
     case createPullRequest
     case pushLocalWork
+    case mergePullRequest
     case continueAfterMerge
     case review
     case nameWorkspace
@@ -59,7 +60,8 @@ public struct PromptDefinition: Sendable, Hashable, Identifiable {
 /// none of that and can only fail.
 public enum PromptRegistry {
     public static let all: [PromptDefinition] = [
-        createPullRequest, pushLocalWork, continueAfterMerge, review, nameWorkspace,
+        createPullRequest, pushLocalWork, mergePullRequest, continueAfterMerge, review,
+        nameWorkspace,
     ]
 
     public static func definition(for id: PromptID) -> PromptDefinition {
@@ -83,6 +85,21 @@ public enum PromptRegistry {
         public static let branch = "branch"
         public static let baseBranch = "base_branch"
         public static let changes = "changes"
+    }
+
+    /// The names the merge prompt may use.
+    public enum MergePullRequest {
+        public static let workspace = "workspace"
+        public static let number = "number"
+        public static let title = "title"
+        public static let branch = "branch"
+        public static let baseBranch = "base_branch"
+        /// The method in words, as GitHub's own buttons say it: "squash merge".
+        public static let method = "method"
+        /// The same method as the flag that performs it: `--squash`. Both, because the sentence
+        /// is read by a person editing it in Settings and then by an agent typing a command, and
+        /// neither form is the right one for both readers.
+        public static let methodFlag = "method_flag"
     }
 
     /// The names the continue-after-merge prompt may use.
@@ -222,6 +239,53 @@ public enum PromptRegistry {
 
         Do not redo what the pull request landed, and do not start anything new yet. Say in one \
         line that you are ready, then wait for what I ask next.
+        """
+    )
+
+    /// Sent when the merge confirmation is accepted.
+    ///
+    /// Bloom used to run `gh pr merge` itself and then `git push --delete` behind it. It does not
+    /// any more, and this prompt is the whole of the replacement. Merging is the one destructive,
+    /// off-machine thing this app offers: run from a button it produced a shell error in a notice
+    /// and no way to answer GitHub back, where an agent doing it in the transcript shows the
+    /// command, goes through the permission mode the user already set, and can say in words that
+    /// a required check is missing rather than throwing.
+    ///
+    /// The steps are not here. They are in `.bloom/merge-instructions.md`, or in Bloom's own copy
+    /// of it, for the same reason the pull request steps are in a file: they belong to the project
+    /// and not to this app. This is only the sentence that carries it, and the three facts the
+    /// file cannot know, which are the pull request, the branch and the method.
+    static let mergePullRequest = PromptDefinition(
+        id: .mergePullRequest,
+        title: "Merge a pull request",
+        summary: """
+        Sent to the workspace's agent when you confirm Merge, with the project's \
+        `.bloom/merge-instructions.md` attached, or Bloom's own copy of it when the project has \
+        none. Bloom never runs `gh pr merge` itself: the agent runs it in front of you, under the \
+        permission mode you set, and can tell you what GitHub said when it refuses. How the merge \
+        is done lives in that file rather than here, because it belongs to the project.
+        """,
+        variables: [
+            PromptVariable(name: MergePullRequest.workspace, summary: "The workspace's name."),
+            PromptVariable(name: MergePullRequest.number, summary: "The pull request's number."),
+            PromptVariable(name: MergePullRequest.title, summary: "The pull request's title."),
+            PromptVariable(name: MergePullRequest.branch, summary: "The branch it is on."),
+            PromptVariable(
+                name: MergePullRequest.baseBranch,
+                summary: "The branch it is merged into."
+            ),
+            PromptVariable(
+                name: MergePullRequest.method,
+                summary: "The method you chose, in words: squash merge, merge commit, rebase merge."
+            ),
+            PromptVariable(
+                name: MergePullRequest.methodFlag,
+                summary: "The same method as the gh flag that performs it, such as --squash."
+            ),
+        ],
+        defaultTemplate: """
+        Merge pull request #{{number}} into {{base_branch}} as a {{method}}, which is \
+        `{{method_flag}}`. It is on the branch {{branch}}.
         """
     )
 
