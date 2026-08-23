@@ -489,7 +489,12 @@ struct WelcomeView: View {
                 // were setup assistants. It is drawn quietly and it never carries the return key:
                 // the one thing the keyboard does on this screen is the primary button, and a
                 // wizard where Return walks backwards is a wizard nobody can get out of.
-                Button(title, systemImage: "chevron.left") { move { flow.goBack() } }
+                //
+                // It stops a running login on the way out rather than leaving it behind. Walking
+                // off this step would otherwise leave a `gh auth login` waiting on a pty with
+                // nothing on screen, which is the orphan `GitHubLoginSession.stop` exists to
+                // prevent, and it would be waiting for an answer nobody could give it.
+                Button(title, systemImage: "chevron.left") { move { stopLogin(); flow.goBack() } }
                     .buttonStyle(.plain)
                     .font(Typo.label)
                     .foregroundStyle(Palette.link)
