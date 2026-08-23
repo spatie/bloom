@@ -153,9 +153,23 @@ struct PermissionAskRowView: View {
 
                 Spacer(minLength: 0)
 
+                // No key equivalent, and that is the point. This carried Command+Delete, which
+                // the menu bar's Archive Workspace also carries, and both are live the moment an
+                // ask row is drawn. Measured on a reduction of exactly those two registrations, a
+                // button in the window's view hierarchy and a `CommandMenu` item: the button wins
+                // and the menu item never fires. So the hazard ran the harmless way round, with
+                // Archive Workspace quietly doing nothing while a question was open rather than a
+                // deny archiving a worktree, but the arbitration is AppKit's rather than anything
+                // Bloom asked for and it should not be trusted to keep pointing that way.
+                //
+                // Archive keeps the key because it is the discoverable one and Command+Delete is
+                // the system's delete idiom. Deny is one of two buttons the reader is already
+                // looking at. Escape was considered and refused: it already means Back inside
+                // this same row once "Deny and say why" is open, and a window-wide Escape that
+                // denied a tool call would fire every time somebody pressed it for anything else
+                // while an ask was on screen.
                 Button("Deny") { onAnswer(.deny(message: "", endsTurn: false)) }
                     .buttonStyle(.bordered)
-                    .keyboardShortcut(.delete, modifiers: .command)
 
                 Button("Deny and say why") {
                     isWritingReason = true
