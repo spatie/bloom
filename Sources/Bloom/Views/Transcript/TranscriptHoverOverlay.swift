@@ -134,8 +134,10 @@ struct TranscriptHoverOverlay: View {
             AttachmentCard(
                 attachment: attachment, worktree: worktree, availableWidth: availableWidth
             )
-        case .row(let title, let detail):
-            ToolRowCard(title: title, detail: detail, availableWidth: availableWidth)
+        case .row(let title, let detail, let isCode):
+            ToolRowCard(
+                title: title, detail: detail, isCode: isCode, availableWidth: availableWidth
+            )
         }
     }
 

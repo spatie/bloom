@@ -6,15 +6,44 @@ import BloomCore
 /// the card reads as fixed when the card is photographed on its own and wrong the moment it is
 /// back in a list, so the picture has to include the neighbours the spacing is negotiated with.
 ///
-/// One padding serves all four states, which is why all four are on the page: a value tuned to
-/// the resolved line alone can crowd the buttons, and one tuned to the buttons can strand the
-/// line. `Snapshot.render` picks this up as the "permission" scene, light and dark.
+/// One padding serves every state, which is why the settled ones are on the page too: a value
+/// tuned to the resolved line alone can crowd the buttons, and one tuned to the buttons can strand
+/// the line. The open panel is drawn at three command lengths for the same reason, because the
+/// rhythm has to hold at all of them. `Snapshot.render` picks this up as the "permission" scene,
+/// light and dark.
 struct PermissionSnapshotGallery: View {
-    private var ask: PermissionAsk {
+    /// Three lengths, because the panel's spacing has to hold at all of them. A one line command is
+    /// where too much padding shows as a panel of empty ground; a wrapped one is where too little
+    /// shows as a box crushed against its own border; and a very long one is the only way to see
+    /// what the panel costs in height when nothing about the command is hidden, which is the
+    /// deliberate choice made here.
+    enum Length: String, CaseIterable {
+        case short
+        case moderate
+        case long
+
+        var command: String {
+            switch self {
+            case .short:
+                "./vendor/bin/pest --parallel"
+            case .moderate:
+                "gh api repos/spatie/laravel-webhook-server/commits/"
+                    + "$(gh pr view 168 --json headRefOid -q .headRefOid)/check-runs "
+                    + "--jq '.check_runs[] | {name, conclusion}'"
+            case .long:
+                (1...12).map {
+                    "git log --oneline --since='\($0) days ago' --author='freek' "
+                        + "--pretty=format:'%h %s' -- Sources/BloomCore/File\($0).swift"
+                }.joined(separator: " && ")
+            }
+        }
+    }
+
+    private func ask(_ length: Length) -> PermissionAsk {
         PermissionAsk(
-            requestID: "req-1",
+            requestID: "req-\(length.rawValue)",
             toolName: "Bash",
-            input: .object(["command": .string("./vendor/bin/pest --parallel")]),
+            input: .object(["command": .string(length.command)]),
             reason: "This command requires approval",
             suggestions: [
                 PermissionSuggestion(
@@ -49,7 +78,12 @@ struct PermissionSnapshotGallery: View {
         )
     }
 
-    private func slice(_ title: String, decision: String?, note: String = "") -> some View {
+    private func slice(
+        _ title: String,
+        length: Length = .short,
+        decision: String?,
+        note: String = ""
+    ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title.uppercased())
                 .font(Typo.micro)
@@ -58,7 +92,7 @@ struct PermissionSnapshotGallery: View {
             VStack(alignment: .leading, spacing: 0) {
                 toolRow("t1-\(title)", name: "Read", file: "/tmp/app/tests/PassTest.php")
                 PermissionAskRowView(
-                    ask: ask,
+                    ask: ask(length),
                     decision: decision,
                     note: note,
                     projectName: "laravel-mobile-pass"
@@ -71,9 +105,10 @@ struct PermissionSnapshotGallery: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            slice("Unresolved", decision: nil)
+            slice("One line", length: .short, decision: nil)
+            slice("Wrapped", length: .moderate, decision: nil)
+            slice("Long and wrapped", length: .long, decision: nil)
             slice("Always allowed", decision: "allow-project")
-            slice("Allowed once", decision: "allow-once")
             slice("Denied", decision: "deny")
         }
         .padding(20)

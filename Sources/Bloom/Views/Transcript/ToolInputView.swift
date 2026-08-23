@@ -13,7 +13,7 @@ struct ToolInputView: View {
     var body: some View {
         switch name {
         case "Bash":
-            DetailCodeBlock(text: input["command"]?.stringValue ?? "")
+            DetailCodeBlock(text: input["command"]?.stringValue ?? "", copyTitle: "Copy command")
             DetailChips(values: [
                 input["timeout"]?.intValue.map { "timeout \(TurnDuration.short($0))" },
                 input["run_in_background"]?.boolValue == true ? "runs in the background" : nil,

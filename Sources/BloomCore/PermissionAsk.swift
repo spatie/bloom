@@ -264,12 +264,26 @@ public struct PermissionAsk: Sendable, Hashable, Identifiable {
 
     /// The one thing worth putting beside the tool name in a collapsed row: the command for a
     /// shell call, the path for a file one, and the CLI's own description otherwise.
+    ///
+    /// The first three cases were spelled out here and are `ToolLiteral` now, which is the same
+    /// three plus every other tool that carries a literal: a glob, a regular expression, a shell
+    /// handle. The transcript row above this panel reads the same type, so the two cannot go on
+    /// disagreeing about what the call is about.
     public var subject: String {
-        if let command = input["command"]?.stringValue { return command }
-        if let path = input["file_path"]?.stringValue { return path }
-        if let url = input["url"]?.stringValue { return url }
-        if let blockedPath { return blockedPath }
-        return summary
+        ToolLiteral.of(name: toolName, input: input) ?? blockedPath ?? summary
+    }
+
+    /// Whether `subject` is something a machine will run rather than a sentence about it.
+    ///
+    /// False is a real case and it is the reason this is a separate question. When the CLI offers
+    /// no literal at all, `subject` falls through to the CLI's own English description, and that
+    /// was being drawn in the panel's monospace block: prose set as code, which is the mistake in
+    /// the opposite direction from the one the tool row had.
+    ///
+    /// A blocked path is code. It is a path, and it is the one string in the panel the reader is
+    /// most likely to want to compare character by character with a directory they know.
+    public var subjectIsCode: Bool {
+        ToolLiteral.isCode(name: toolName, input: input) || blockedPath != nil
     }
 
     // MARK: Decoding

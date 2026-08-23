@@ -13,8 +13,9 @@ import SwiftUI
 ///
 /// Text, not a picture of text, and not a tooltip. `.help` is what the row used to offer for this,
 /// and a tooltip is the system's yellow strip: one line, no face of its own, and it arrives after
-/// a delay macOS owns. The command is code and is set as code here, on the rung the transcript
-/// sets code at everywhere else.
+/// a delay macOS owns. A command is code and is set as code here, on the rung the transcript sets
+/// code at everywhere else, and a detail that is a sentence rather than a literal stays in the
+/// proportional face: the card repeats the row, so it has to agree with it.
 struct ToolRowCard: View {
     /// What the row said it did, which is the label a row leads with.
     var title: String
@@ -22,6 +23,8 @@ struct ToolRowCard: View {
     /// three hundred characters by `ToolPresenter.oneLine`, so nothing here can be asked to lay
     /// out a megabyte.
     var detail: String
+    /// Whether that detail is a literal, decided by `ToolLiteral` and carried here from the row.
+    var isCode: Bool
     /// What the pane has to give, which is what the card may take.
     var availableWidth: CGFloat
 
@@ -40,7 +43,7 @@ struct ToolRowCard: View {
 
                 if !detail.isEmpty, detail != title {
                     Text(detail)
-                        .font(Typo.codeSmall)
+                        .font(isCode ? Typo.codeSmall : Typo.label)
                         .foregroundStyle(Palette.textSecondary)
                         // Wrapped, and that is the difference between this card and `SourceLines`.
                         // That one refuses to wrap because a line of a FILE that soft wraps reads

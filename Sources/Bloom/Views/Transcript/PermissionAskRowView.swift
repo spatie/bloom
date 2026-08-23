@@ -41,7 +41,20 @@ struct PermissionAskRowView: View {
     private var isOpen: Bool { decision == nil }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: TranscriptLayout.tight * 2) {
+        // `cardInset` for both the margin and the gap between the groups, which is the bargain
+        // `AgentQuestionCard` already struck and wrote down: the air inside a held-open card is the
+        // same air that separates it from its edge. This panel is the other form in the transcript
+        // and it had never been given that treatment. It stood on `inset`, the rung a one line ROW
+        // keeps from the edge of a pane, with four points between its groups and two inside the
+        // command box, so the header, the command and the buttons all sat on each other and the
+        // whole thing read as a list that happened to have a border. That is, word for word, the
+        // note on `cardInset` explaining why the question card stopped using `inset`.
+        //
+        // Two rungs, not five numbers. Twelve between the groups and twelve to the border; six and
+        // eight inside the command block and six under the buttons, which is the nested rhythm the
+        // question card's own preview block uses. A box inside a card keeps less air than the card
+        // does, or the nesting stops reading as nesting.
+        VStack(alignment: .leading, spacing: TranscriptLayout.cardInset) {
             header
             command
             if isOpen {
@@ -50,7 +63,7 @@ struct PermissionAskRowView: View {
                 outcome
             }
         }
-        .padding(TranscriptLayout.inset)
+        .padding(TranscriptLayout.cardInset)
         .background(
             RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
                 .fill(Palette.warning.opacity(isOpen ? 0.07 : 0.03))
@@ -95,88 +108,162 @@ struct PermissionAskRowView: View {
         }
     }
 
-    /// What is actually being asked for. Selectable, because the first thing anybody does with an
-    /// unfamiliar command is copy it somewhere to read it.
+    /// What is actually being asked for, with the button that puts it on the pasteboard.
+    ///
+    /// This is the strongest case in the window for a copy button and the reason there is one. The
+    /// command is long, it is wrapped over several lines, and it is the thing a person most wants
+    /// to paste into a terminal and try by hand before deciding whether to let an agent run it. It
+    /// is also whole here: unlike the collapsed row above, nothing has been cut, so what is copied
+    /// is what is on screen.
+    ///
+    /// Always drawn rather than revealed on hover. The panel is a question waiting for an answer
+    /// rather than one of four hundred rows being scrolled past, so there is no column of these to
+    /// quieten, and a control somebody has to discover by waving the pointer at a box is a control
+    /// most people never find.
+    ///
+    /// Its own column in the row rather than an overlay over the text, because the text wraps: an
+    /// overlaid button sat on top of the first line of any command long enough to need it.
+    ///
+    /// The face follows `subjectIsCode`. When the CLI offers no literal at all the subject falls
+    /// through to its own English description, and that was being set in this monospace block:
+    /// prose drawn as code, which is the same mistake as the row above had, pointing the other way.
+    ///
+    /// **No cap and no fold, however long the command is.** Every other long block in this window
+    /// is cut at a line count and hidden behind "Show all", and this is the one place that must not
+    /// be. The oldest trick against a confirmation is a harmless looking first line with the damage
+    /// past the fold, and a scroller inside the box is the same hiding with a thinner excuse: a
+    /// panel is a thing people learn to answer without reading, and every point of the command has
+    /// to be in front of somebody who is about to allow it. So the panel grows with the command,
+    /// and the pane it sits in already scrolls. Measured on a twelve statement command: the panel
+    /// is about 500 points tall, which is high but is a height a scroll wheel already handles, and
+    /// is the price of never having hidden anything.
+    ///
+    /// The leading is a separate decision from the gaps around the block, and taken on its own:
+    /// see `TranscriptLayout.codeLeading`. It costs nothing here, because nothing is capped.
     @ViewBuilder
     private var command: some View {
         if !ask.subject.isEmpty {
-            Text(ask.subject)
-                .font(Typo.codeSmall)
-                .foregroundStyle(Palette.textPrimary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, TranscriptLayout.glyphGap)
-                .padding(.vertical, TranscriptLayout.tight)
-                .background(
-                    RoundedRectangle(cornerRadius: Metrics.cornerSmall, style: .continuous)
-                        .fill(Palette.surfaceSunken)
+            HStack(alignment: .top, spacing: TranscriptLayout.glyphGap) {
+                Text(ask.subject)
+                    .font(ask.subjectIsCode ? Typo.codeSmall : Typo.label)
+                    .foregroundStyle(Palette.textPrimary)
+                    .lineSpacing(ask.subjectIsCode ? TranscriptLayout.codeLeading : 0)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                CopyButton(
+                    text: ask.subject,
+                    title: ask.toolName == "Bash" ? "Copy command" : "Copy"
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Metrics.cornerSmall, style: .continuous)
-                        .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
-                )
-                // SwiftUI's selectable Text is a private NSTextField subclass whose own context
-                // menu comes back empty, so a copy item has to be put here by hand.
-                .contextMenu {
-                    Button("Copy") { Clipboard.copy(ask.subject) }
-                }
+            }
+            .padding(.horizontal, Metrics.spacingWide)
+            .padding(.vertical, Metrics.spacing)
+            .background(
+                RoundedRectangle(cornerRadius: Metrics.cornerSmall, style: .continuous)
+                    .fill(Palette.surfaceSunken)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Metrics.cornerSmall, style: .continuous)
+                    .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+            )
+            // SwiftUI's selectable Text is a private NSTextField subclass whose own context
+            // menu comes back empty, so a copy item has to be put here by hand. Kept alongside
+            // the button: a right click is where somebody who has selected part of the command
+            // looks, and the button is what somebody who wants all of it presses.
+            .contextMenu {
+                Button("Copy") { Clipboard.copy(ask.subject) }
+            }
         }
     }
 
     private var actions: some View {
-        VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
-            HStack(spacing: TranscriptLayout.tight) {
-                if ask.canWiden {
-                    // The prominent one, and deliberately the widest rather than the narrowest.
-                    // See the note at the top of this file: the ask rate is what decides whether
-                    // this feature is kept or switched off, and "Allow once" as the default answer
-                    // is what makes a long turn ask thirty times.
-                    Button("Always allow") { onAnswer(.allow(scope: .project)) }
-                        .buttonStyle(.borderedProminent)
-                        .keyboardShortcut(.return, modifiers: .command)
+        // The scope line is the consequence of the buttons above it and belongs to them, so it is
+        // set at the rung between controls in a row rather than at the twelve that separates one
+        // group of the panel from the next. At two points it read as a caption crammed under them.
+        VStack(alignment: .leading, spacing: Metrics.spacing) {
+            // One decision, so one group, at the leading edge with everything else in the panel.
+            //
+            // The allows and the denies used to be pushed to opposite ends of the panel by a
+            // `Spacer` between them, and on a wide window that is most of a screen of travel
+            // between the two halves of one choice. Worse, it stopped reading as a choice at all:
+            // a control at the far left and a control at the far right read as two unrelated
+            // things, the way a toolbar's ends do.
+            //
+            // Leading rather than trailing, which is the other honest option and is what a macOS
+            // dialog would do. This is not a dialog. It is a block inside a scrolling transcript,
+            // its header, its command and its scope sentence are all set against the left edge,
+            // and an action row pinned to the right would be the one element in the panel that was
+            // not. It also puts the affirmative button directly under the question, which is where
+            // the eye already is, and it stops the buttons moving as the window is resized.
+            //
+            // Two gaps rather than one, and that is the whole grouping: six between controls that
+            // do the same kind of thing, twelve between the allows and the denies. Adjacent
+            // affirmative and destructive buttons want the wider gap so a slipped click lands on
+            // nothing, and twelve is the same rung that separates one group of this panel from the
+            // next, so the row is spaced the way the panel is.
+            //
+            // Nothing about the weights changes: the widest allow is still the filled one, deny is
+            // still bordered and the one that asks for a sentence is still borderless.
+            HStack(spacing: Metrics.gutter) {
+                HStack(spacing: Metrics.spacing) {
+                    if ask.canWiden {
+                        // The prominent one, and deliberately the widest rather than the
+                        // narrowest. See the note at the top of this file: the ask rate is what
+                        // decides whether this feature is kept or switched off, and "Allow once"
+                        // as the default answer is what makes a long turn ask thirty times.
+                        Button("Always allow") { onAnswer(.allow(scope: .project)) }
+                            .buttonStyle(.borderedProminent)
+                            .keyboardShortcut(.return, modifiers: .command)
 
-                    Button("This session") { onAnswer(.allow(scope: .session)) }
-                        .buttonStyle(.bordered)
+                        Button("This session") { onAnswer(.allow(scope: .session)) }
+                            .buttonStyle(.bordered)
+                    }
+
+                    // When there is a rule to grant, the once button is the quiet one and the rule
+                    // is prominent. When there is not, once is the only allow there is, so it takes
+                    // the emphasis and the return key rather than leaving the row with no default.
+                    if ask.canWiden {
+                        Button("Once") { onAnswer(.allow(scope: .once)) }
+                            .buttonStyle(.bordered)
+                    } else {
+                        Button("Allow once") { onAnswer(.allow(scope: .once)) }
+                            .buttonStyle(.borderedProminent)
+                            .keyboardShortcut(.defaultAction)
+                    }
                 }
 
-                // When there is a rule to grant, the once button is the quiet one and the rule is
-                // prominent. When there is not, once is the only allow there is, so it takes the
-                // emphasis and the return key rather than leaving the row with no default.
-                if ask.canWiden {
-                    Button("Once") { onAnswer(.allow(scope: .once)) }
+                HStack(spacing: Metrics.spacing) {
+                    // No key equivalent, and that is the point. This carried Command+Delete, which
+                    // the menu bar's Archive Workspace also carries, and both are live the moment
+                    // an ask row is drawn. Measured on a reduction of exactly those two
+                    // registrations, a button in the window's view hierarchy and a `CommandMenu`
+                    // item: the button wins and the menu item never fires. So the hazard ran the
+                    // harmless way round, with Archive Workspace quietly doing nothing while a
+                    // question was open rather than a deny archiving a worktree, but the
+                    // arbitration is AppKit's rather than anything Bloom asked for and it should
+                    // not be trusted to keep pointing that way.
+                    //
+                    // Archive keeps the key because it is the discoverable one and Command+Delete
+                    // is the system's delete idiom. Deny is one of two buttons the reader is
+                    // already looking at. Escape was considered and refused: it already means Back
+                    // inside this same row once "Deny and say why" is open, and a window-wide
+                    // Escape that denied a tool call would fire every time somebody pressed it for
+                    // anything else while an ask was on screen.
+                    Button("Deny") { onAnswer(.deny(message: "", endsTurn: false)) }
                         .buttonStyle(.bordered)
-                } else {
-                    Button("Allow once") { onAnswer(.allow(scope: .once)) }
-                        .buttonStyle(.borderedProminent)
-                        .keyboardShortcut(.defaultAction)
+
+                    Button("Deny and say why") {
+                        isWritingReason = true
+                        isReasonFocused = true
+                    }
+                    .buttonStyle(.borderless)
+                    .font(Typo.caption)
                 }
 
+                // Holds the group against the leading edge instead of letting it stretch across a
+                // wide pane. Last rather than in the middle, which is where it used to be and is
+                // what pushed the two halves of the choice apart.
                 Spacer(minLength: 0)
-
-                // No key equivalent, and that is the point. This carried Command+Delete, which
-                // the menu bar's Archive Workspace also carries, and both are live the moment an
-                // ask row is drawn. Measured on a reduction of exactly those two registrations, a
-                // button in the window's view hierarchy and a `CommandMenu` item: the button wins
-                // and the menu item never fires. So the hazard ran the harmless way round, with
-                // Archive Workspace quietly doing nothing while a question was open rather than a
-                // deny archiving a worktree, but the arbitration is AppKit's rather than anything
-                // Bloom asked for and it should not be trusted to keep pointing that way.
-                //
-                // Archive keeps the key because it is the discoverable one and Command+Delete is
-                // the system's delete idiom. Deny is one of two buttons the reader is already
-                // looking at. Escape was considered and refused: it already means Back inside
-                // this same row once "Deny and say why" is open, and a window-wide Escape that
-                // denied a tool call would fire every time somebody pressed it for anything else
-                // while an ask was on screen.
-                Button("Deny") { onAnswer(.deny(message: "", endsTurn: false)) }
-                    .buttonStyle(.bordered)
-
-                Button("Deny and say why") {
-                    isWritingReason = true
-                    isReasonFocused = true
-                }
-                .buttonStyle(.borderless)
-                .font(Typo.caption)
             }
             .controlSize(.small)
 
@@ -210,7 +297,7 @@ struct PermissionAskRowView: View {
     /// The deny sentence goes to the model as the tool result, so it is worth typing: "not on this
     /// machine, use the docker one" is an instruction, where a bare refusal is a dead end.
     private var reasonBox: some View {
-        VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
+        VStack(alignment: .leading, spacing: Metrics.spacing) {
             TextField("Why not? The agent reads this.", text: $reason, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .font(Typo.label)
@@ -218,22 +305,27 @@ struct PermissionAskRowView: View {
                 .focused($isReasonFocused)
                 .onSubmit { onAnswer(.deny(message: reason, endsTurn: false)) }
 
-            HStack(spacing: TranscriptLayout.tight) {
-                Button("Deny") { onAnswer(.deny(message: reason, endsTurn: false)) }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.return, modifiers: .command)
+            // The same two gaps as the row this replaces, for the same reason: the two denials do
+            // the same kind of thing and sit six apart, and the way back out of the box is a
+            // different kind of thing and sits twelve away from them.
+            HStack(spacing: Metrics.gutter) {
+                HStack(spacing: Metrics.spacing) {
+                    Button("Deny") { onAnswer(.deny(message: reason, endsTurn: false)) }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.return, modifiers: .command)
 
-                Button("Deny and stop the turn") {
-                    onAnswer(.deny(message: reason, endsTurn: true))
+                    Button("Deny and stop the turn") {
+                        onAnswer(.deny(message: reason, endsTurn: true))
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.bordered)
-
-                Spacer(minLength: 0)
 
                 Button("Back") { isWritingReason = false }
                     .buttonStyle(.borderless)
                     .font(Typo.caption)
                     .keyboardShortcut(.cancelAction)
+
+                Spacer(minLength: 0)
             }
             .controlSize(.small)
         }
@@ -244,12 +336,12 @@ struct PermissionAskRowView: View {
     @ViewBuilder
     private var outcome: some View {
         let decision = decision ?? ""
-        // The extra air over and under the verdict, on the verdict rather than on the card. The
-        // stack's own spacing left the sentence 4 points off the command box and the card's inset
-        // left it 6 off the border, which read as a caption crammed under the box; the buttons
-        // the open card draws in this slot carry their own height and need neither. Doubling
-        // both here settles the sentence without loosening the ask.
-        VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
+        // No padding of its own any more. This carried four points on top and two underneath,
+        // added because the card's own spacing put the sentence 4 points off the command box and
+        // its inset left it 6 off the border. Both of those numbers are twelve now, so the
+        // compensation is what would read as wrong: a settled panel would have sat lower in its
+        // border than an open one, for a reason that no longer exists.
+        VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
             Text(outcomeText(decision))
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textSecondary)
@@ -263,8 +355,6 @@ struct PermissionAskRowView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.top, TranscriptLayout.tight * 2)
-        .padding(.bottom, TranscriptLayout.tight)
     }
 
     // MARK: Copy

@@ -24,7 +24,16 @@ enum CodexItemPresenter {
         return present(item)
     }
 
+    /// The row, and then the same core question a Claude row asks: what the argument literally is.
+    /// A Codex command must read as a command in exactly the face a Claude one does, or the two
+    /// backends stop looking like one transcript.
     static func present(_ item: CodexItem) -> ToolPresentation {
+        var presentation = shape(item)
+        presentation.literal = ToolLiteral.of(codex: item)
+        return presentation
+    }
+
+    private static func shape(_ item: CodexItem) -> ToolPresentation {
         switch item {
         case .commandExecution(let run): command(run)
         case .fileChange(let change): fileChange(change)
@@ -52,7 +61,7 @@ enum CodexItemPresenter {
     /// `/bin/zsh -lc 'git status'`. What the user asked for is inside the quotes, and that is what
     /// the row shows: the wrapper is the same on every line and says nothing.
     private static func command(_ run: CodexCommandExecution) -> ToolPresentation {
-        let command = ToolPresenter.oneLine(unwrapShell(run.command))
+        let command = ToolPresenter.oneLine(ToolLiteral.unwrapShell(run.command))
 
         var chips: [ToolChip] = []
         if let code = run.exitCode, code != 0 { chips.append(.code("exit \(code)")) }
@@ -65,25 +74,6 @@ enum CodexItemPresenter {
             tint: run.status == .failed ? Palette.negative : Palette.textSecondary,
             chips: chips
         )
-    }
-
-    /// `/bin/zsh -lc 'ls -la'` becomes `ls -la`. Only when the whole tail is one quoted argument,
-    /// because anything else is a command that genuinely contains a shell invocation and rewriting
-    /// it would be showing a line that was never run.
-    static func unwrapShell(_ command: String) -> String {
-        let markers = [" -lc ", " -c "]
-        for marker in markers {
-            guard let range = command.range(of: marker) else { continue }
-            let tail = command[range.upperBound...].trimmingCharacters(in: .whitespaces)
-            guard tail.count >= 2 else { continue }
-            let first = tail.first!
-            guard first == "'" || first == "\"", tail.last == first else { continue }
-            let inner = String(tail.dropFirst().dropLast())
-            // A quote inside means the tail was more than one argument, and the split is a guess.
-            guard !inner.contains(first) else { continue }
-            return inner
-        }
-        return command
     }
 
     /// A patch, which for a person is one of three verbs rather than the word "fileChange". One

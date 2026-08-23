@@ -11,7 +11,16 @@ enum ToolPresenter {
         present(name: use.name, input: use.input)
     }
 
+    /// The row, and then the one thing about it that is decided in the core: what the argument
+    /// literally is. `ToolLiteral` is asked once here rather than per case, so the presenter cannot
+    /// answer differently from the permission panel below it, which reads the same type.
     static func present(name: String, input: JSONValue) -> ToolPresentation {
+        var presentation = shape(name: name, input: input)
+        presentation.literal = ToolLiteral.of(name: name, input: input)
+        return presentation
+    }
+
+    private static func shape(name: String, input: JSONValue) -> ToolPresentation {
         if name.hasPrefix("mcp__") { return mcp(name: name, input: input) }
 
         switch name {
@@ -380,8 +389,8 @@ enum ToolPresenter {
 
         // An MCP server can name a file as plainly as a built in tool does, and one that does gets
         // the same chip. Nothing here knows the server's schema, so the value has to survive the
-        // guess before it is believed.
-        if let path = namedFile(in: input) {
+        // guess before it is believed, which is what `ToolLiteral` does with it.
+        if let path = ToolLiteral.of(name: name, input: input) {
             return ToolPresentation(
                 glyph: "puzzlepiece.extension",
                 label: label,
@@ -402,7 +411,7 @@ enum ToolPresenter {
     /// A tool Bloom has never heard of still has to read as a sentence, so the name goes in the
     /// label and the most likely looking argument goes in the detail. Never the JSON itself.
     private static func fallback(name: String, input: JSONValue) -> ToolPresentation {
-        if let path = namedFile(in: input) {
+        if let path = ToolLiteral.of(name: name, input: input) {
             return ToolPresentation(
                 glyph: "wrench.and.screwdriver",
                 label: name,
@@ -441,21 +450,6 @@ enum ToolPresenter {
     /// `Grep`'s `path` and nothing else. Guessed at, and the guess says no unless it is sure.
     private static func guessedFile(_ path: String) -> ToolChip {
         FilePathGuess.looksLikeAFile(path) ? .file(path: path) : .code(basename(path))
-    }
-
-    /// The file an unknown tool is about, if it names one plainly enough to be sure.
-    ///
-    /// Keys in a fixed order rather than the input's own, so a tool that carries two of them always
-    /// shows the same one, and only keys whose name says "file". Every value still has to pass the
-    /// guess: an MCP server is free to put a glob in something called `path`, and this is exactly
-    /// the case where nothing but the string is known.
-    private static func namedFile(in input: JSONValue) -> String? {
-        for key in ["file_path", "notebook_path", "filename", "path", "file"] {
-            guard let value = input[key]?.stringValue else { continue }
-            guard FilePathGuess.looksLikeAFile(value) else { continue }
-            return value
-        }
-        return nil
     }
 
     // MARK: Text helpers

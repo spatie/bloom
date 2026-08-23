@@ -13,6 +13,21 @@ struct ToolPresentation: Equatable {
     var detail: String
     var tint: Color
     var chips: [ToolChip] = []
+    /// The whole of what `detail` was cut down from, and nil when the row's argument is prose.
+    ///
+    /// One field answering both of the questions a row asks about its own argument, because they
+    /// are the same question. It is `ToolLiteral` that answers it, in the core, where it can be
+    /// tested: whether the detail is set in the monospace face, and what a copy would put on the
+    /// pasteboard. `detail` is a basename, or a command collapsed to one line and cut at the
+    /// pane's edge; this is the path and the command themselves.
+    var literal: String?
+
+    /// Whether the detail is something a machine will run or a machine named.
+    ///
+    /// The rule this window states everywhere else: mono is for what a machine said or what a
+    /// machine will run, and English set in mono reads as data. A row with no literal keeps the
+    /// proportional face, which is most of them.
+    var detailIsCode: Bool { literal != nil }
 }
 
 /// One of the small labels a collapsed tool row carries after its detail.

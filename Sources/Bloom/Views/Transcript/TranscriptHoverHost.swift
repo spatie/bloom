@@ -14,17 +14,19 @@ enum TranscriptHoverCard: Equatable {
     /// A file a chip names, drawn by Quick Look. `worktree` is empty for a file outside it, whose
     /// path is already absolute.
     case file(attachment: PromptAttachment, worktree: String)
-    /// A tool row's own line, put back whole. Both strings are already in hand: they are the
+    /// A tool row's own line, put back whole. Everything here is already in hand: it is the
     /// `ToolPresentation` the row is drawn from, so the card asks nothing of the row it belongs to
-    /// and nothing of the disk.
-    case row(title: String, detail: String)
+    /// and nothing of the disk. `isCode` travels with the detail so the card sets the line in the
+    /// face the row set it in, rather than deciding a second time and disagreeing.
+    case row(title: String, detail: String, isCode: Bool)
 
     /// What a measurement of this card was taken FOR, so a size left over from the last one is
     /// never handed to the next. See `TranscriptHoverOverlay.Measurement`.
     var identity: String {
         switch self {
         case .file(let attachment, _): "file:" + attachment.path
-        case .row(let title, let detail): "row:" + title + "\u{0}" + detail
+        case .row(let title, let detail, let isCode):
+            "row:" + title + "\u{0}" + detail + "\u{0}" + (isCode ? "code" : "prose")
         }
     }
 }

@@ -58,6 +58,31 @@ struct ToolRowHeader: View {
             && !presentation.chips.contains { $0.text == presentation.detail }
     }
 
+    /// The face the detail is set in.
+    ///
+    /// A shell command was set in the proportional face while the permission panel four points
+    /// below it set the same command in mono, and the panel is the one that was right: a command is
+    /// read character by character, and `-rf` beside `-r f` is exactly the difference a
+    /// proportional face hides. So anything `ToolLiteral` calls a literal is code here, and
+    /// anything it does not (the sentence a subagent was given, a phrase somebody would say out
+    /// loud, a count of todos) stays proportional, because English set in mono reads as data.
+    ///
+    /// A rung DOWN from the label beside it, not the same rung, and the difference is characters on
+    /// the row. Mono is the wider face at a given size, so the preview shows fewer of them however
+    /// this is done. Measured on the 154 character `gh api ... --jq` command from the screenshot
+    /// that prompted this, at a 480 point detail column: 81 characters in the proportional face it
+    /// used to be set in, 70 at `codeSmall`, 64 at `code`. Losing a fifth of the line to make it
+    /// legible is a bad trade; losing an eighth is not, and what is left is a line whose characters
+    /// can be told apart, which is the whole reason for the change. `codeTiny` fits 77, near enough
+    /// to break even, and is refused: ten points is the floor of the scale and is documented for a
+    /// count or a duration read off the thing beside it, not for the longest string on the row.
+    ///
+    /// It is also exactly the pairing `ToolRowCard` already used, so the row and the card that puts
+    /// the cut line back are now set the same way rather than two ways.
+    private var detailFont: ScaledFont {
+        presentation.detailIsCode ? Typo.codeSmall : Typo.label
+    }
+
     /// What the row says happened, in the slot where a failure says "error".
     ///
     /// A refusal is drawn in the caution colour rather than the alarm one, and it keeps the
@@ -110,14 +135,14 @@ struct ToolRowHeader: View {
 
             if showsDetail {
                 Text(presentation.detail)
-                    .font(Typo.label)
+                    .font(detailFont)
                     .foregroundStyle(Palette.textTertiary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .layoutPriority(1)
                     .reportsTruncation(
                         of: presentation.detail,
-                        font: Typo.label,
+                        font: detailFont,
                         isActive: wantsMeasuring,
                         into: $detailIsCut
                     )
@@ -208,7 +233,11 @@ struct ToolRowHeader: View {
     }
 
     private var card: TranscriptHoverCard {
-        .row(title: presentation.label, detail: showsDetail ? presentation.detail : "")
+        .row(
+            title: presentation.label,
+            detail: showsDetail ? presentation.detail : "",
+            isCode: presentation.detailIsCode
+        )
     }
 
     /// Takes the card down, and only this row's own.

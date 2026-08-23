@@ -74,6 +74,16 @@ enum TranscriptLayout {
     static let chipInset = Metrics.chipInsetH
     /// Extra leading for the two places that render real prose rather than one line.
     static let proseLeading: CGFloat = 3
+    /// Extra leading for a block of code that wraps, which is the permission panel's command.
+    ///
+    /// A point more than prose gets, and decided on its own rather than borrowed from it. A
+    /// wrapped shell command is the hardest thing in the window to read: it has no sentence shape
+    /// to fall back on, the eye has to find the start of the next line by position alone, and set
+    /// solid at eleven points a continuation line sat as close to its own predecessor as two
+    /// separate commands would. Four points on a thirteen point line box is a line height of about
+    /// 1.3, which is the ratio code is set at in every editor and is a rung of the spacing scale
+    /// rather than a number invented here.
+    static let codeLeading: CGFloat = Metrics.spacingSmall
     /// How wide a paragraph is allowed to get.
     ///
     /// Nothing else in the window is read a line at a time, so nothing else needs a measure. With
