@@ -25,7 +25,12 @@ struct SettingsView: View {
     private static let minSize = CGSize(width: 640, height: 420)
 
     /// Which tab is showing. An enum rather than an index, so the value says what it selects.
-    @State private var tab: SettingsTab = .general
+    ///
+    /// Seeded from the capture harness, which is otherwise stuck on General: the selection lives
+    /// here in `@State`, so `--settings` could only ever photograph the first pane and every
+    /// other one went in unverified. `Snapshot.requestedSettingsTab` is nil in every ordinary
+    /// launch.
+    @State private var tab: SettingsTab = Snapshot.requestedSettingsTab ?? .general
 
     var body: some View {
         TabView(selection: $tab) {

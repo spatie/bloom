@@ -354,11 +354,18 @@ public struct AppDefaults: Sendable, Hashable {
         public static let outputStyle = "defaults.outputStyle"
     }
 
-    /// The built-in fallbacks, which match `Session`'s own initialiser. Nothing else may invent a
-    /// second set of hard-coded defaults.
+    /// The built-in fallbacks, which `Session`'s own initialiser now reads rather than restates.
+    /// Nothing else may invent a second set of hard-coded defaults.
     public static let fallbackModel = "opus"
     public static let fallbackEffort = "high"
-    public static let fallbackPermissionMode = PermissionMode.acceptEdits
+    /// Full access, because that is what the owner asked a new session to start on: a session
+    /// that stops to ask before its first command is a session somebody has to sit and watch,
+    /// and Bloom exists to run several at once.
+    ///
+    /// This is a fallback, not an override. The moment `defaults.permissionMode` holds anything
+    /// at all, the Settings, Models picker wins, which is why a copy of Bloom whose Models tab
+    /// has ever been saved keeps whatever that tab last wrote. See `AppDefaults.load`.
+    public static let fallbackPermissionMode = PermissionMode.bypassPermissions
 
     public var model: String
     public var effort: String

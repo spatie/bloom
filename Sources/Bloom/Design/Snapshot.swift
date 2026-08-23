@@ -251,6 +251,18 @@ enum Snapshot {
         return arguments[index + 1]
     }
 
+    /// Which Settings pane `--settings` opens on, from `--settings-tab models`.
+    ///
+    /// Nil in every launch that did not ask, which is every launch that is not a capture run, and
+    /// nil again for a name no tab answers to. `SettingsView` reads it once when it builds.
+    static var requestedSettingsTab: SettingsTab? {
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: "--settings-tab"), index + 1 < arguments.count else {
+            return nil
+        }
+        return SettingsTab(rawValue: arguments[index + 1])
+    }
+
     /// Which appearance to capture in, from `--appearance light|dark`.
     ///
     /// Nothing else forces one. The app follows the system unless the Settings window has been

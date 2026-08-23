@@ -2,7 +2,7 @@
 ///
 /// A named value rather than the position a tab happens to sit in, so a reordering cannot silently
 /// change which pane the window opens on.
-enum SettingsTab: Hashable {
+enum SettingsTab: String, Hashable {
     case general
     case appearance
     case notifications
