@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// The whole of `bloom-bridge`, the stdio shim Bloom ships in its own bundle.
 ///
@@ -64,13 +65,28 @@ public enum BridgeShim {
             return Exit.refused
         }
 
-        relayStandardInput(to: connection)
+        // Whether the CLI has closed its end of stdin. Read once the socket has gone quiet, and
+        // it is the whole difference between the two ways this loop can end. See below.
+        let shutdownAsked = ShutdownFlag()
+        relayStandardInput(to: connection, shutdownAsked: shutdownAsked)
         // The same iterator the welcome came out of. An `AsyncStream` has one consumer, and a
         // second `for await` over `lines` would be a second iterator racing this one for frames.
         while let line = await iterator.next() {
             write(line + "\n", to: STDOUT_FILENO)
         }
         connection.close()
+
+        // Two things end that loop and they mean opposite things. Either the CLI closed stdin and
+        // the handler below closed the socket, which is an ordinary shutdown, or Bloom went away
+        // while the CLI was still talking to it. The shim could not tell them apart and reported
+        // both as success, so a `tools/call` sent to a Bloom that quit mid-answer left the CLI
+        // with a server that exited 0 having written nothing at all: no reply, no complaint, no
+        // status. The model waits on a tool result that is never coming, and the one thing that
+        // could have told it otherwise stayed silent. A wrong answer is recoverable; that is not.
+        guard shutdownAsked.wasAsked else {
+            complain("Bloom closed the bridge before answering. Quit and reopen Bloom, then try again.")
+            return Exit.cannotReachBloom
+        }
         return Exit.ok
     }
 
@@ -79,13 +95,17 @@ public enum BridgeShim {
     /// The CLI closing its end of stdin is how an MCP server is told to shut down, so end of file
     /// closes the socket, which ends the loop above and exits the process. Without that the shim
     /// would outlive every agent that ever launched it.
-    private static func relayStandardInput(to connection: UnixSocketConnection) {
+    private static func relayStandardInput(
+        to connection: UnixSocketConnection,
+        shutdownAsked: ShutdownFlag
+    ) {
         let input = FileHandle.standardInput
         let buffer = LineBuffer()
         input.readabilityHandler = { handle in
             let data = handle.availableData
             if data.isEmpty {
                 input.readabilityHandler = nil
+                shutdownAsked.ask()
                 connection.close()
                 return
             }
@@ -112,6 +132,17 @@ public enum BridgeShim {
             \(BridgeProtocol.tokenVariable) from its environment. \(absent), so there is \
             nothing to connect to.
             """
+    }
+
+    /// Set on the file handle's own queue and read from the task that outlives it, so it is
+    /// shared state and needs a lock. A class, because `Mutex` is noncopyable and an escaping
+    /// closure has to capture something it can hold.
+    private final class ShutdownFlag: Sendable {
+        private let asked = Mutex(false)
+
+        func ask() { asked.withLock { $0 = true } }
+
+        var wasAsked: Bool { asked.withLock { $0 } }
     }
 
     private static func complain(_ sentence: String) {

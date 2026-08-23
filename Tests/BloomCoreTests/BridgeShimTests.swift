@@ -161,6 +161,45 @@ struct BridgeShimTests {
         #expect(complaints.joined(separator: " ").contains(socketPath))
     }
 
+    /// Bloom quitting with a call in flight. The shim used to exit 0 and write nothing anywhere,
+    /// which is the same thing it does when the CLI asks it to shut down, so the CLI was told the
+    /// server had finished normally while the answer it was waiting for never arrived. A tool call
+    /// that never answers and never complains is a turn that cannot end.
+    @Test("says so and fails when Bloom goes away with a call in flight", .timeLimit(.minutes(1)))
+    func bloomQuitsMidCall() async throws {
+        let socketPath = scratchSocket()
+        let welcome = String(
+            decoding: try JSONEncoder().encode(BridgeWelcome.accepting()),
+            as: UTF8.self
+        )
+        let listener = try UnixSocketListener(path: socketPath) { connection in
+            Task {
+                var incoming = connection.lines.makeAsyncIterator()
+                _ = await incoming.next()
+                connection.writeLine(welcome)
+                // The call arrives, and then Bloom is gone without having answered it.
+                _ = await incoming.next()
+                connection.close()
+            }
+        }
+        defer { listener.stop() }
+
+        let process = try launch([
+            BridgeProtocol.socketVariable: socketPath,
+            BridgeProtocol.tokenVariable: "t",
+            BridgeProtocol.roleVariable: "parent",
+        ])
+        defer { process.terminate() }
+        process.writeLine(#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"whoami"}}"#)
+
+        var complaints: [String] = []
+        for await line in process.errorLines { complaints.append(line) }
+
+        // stdin is still open here, which is what tells the shim this was not a shutdown.
+        #expect(await process.exitStatus == BridgeShim.Exit.cannotReachBloom)
+        #expect(complaints.joined(separator: " ").contains("before answering"))
+    }
+
     /// The Sparkle case, from the shim's side: the bundle was replaced underneath a running Bloom,
     /// the CLI launched the new binary, and the app on the socket does not speak its protocol. The
     /// requirement is a sentence and an exit, never a hang, because a tool call that never answers
