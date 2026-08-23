@@ -84,7 +84,62 @@ meanings, so a script written for Conductor runs unchanged:
 
 Supported settings keys: `scripts.setup`, `scripts.archive`, `scripts.run` (a string, or a table
 of named scripts with a `command`), `scripts.run_mode`, `files_to_copy`, `git.branch_prefix`,
-`git.branch_prefix_type`, `git.delete_branch_on_archive`, `models.default`.
+`git.branch_prefix_type`, `git.delete_branch_on_archive`, `models.default`. A key ending in
+`_file` (`scripts.setup_file`, `scripts.archive_file`) names an executable file relative to the
+repository instead of an inline command.
+
+### A database per worktree
+
+`scripts.setup` and `scripts.archive` are a pair, and together they are the whole answer to what a
+worktree does about its database. Setup makes one; archive drops it. Nothing else has to reap
+anything, because Bloom will not remove the worktree unless the archive script succeeded.
+
+```toml
+[scripts]
+setup_file = ".bloom/setup.sh"
+archive_file = ".bloom/archive.sh"
+```
+
+```sh
+#!/usr/bin/env bash
+# .bloom/setup.sh, committed and chmod +x. Without the shebang and the executable bit, the file's
+# contents are run through zsh instead, which is fine too.
+set -euo pipefail
+
+# Both halves: the project, because a branch called main exists in every repository you own, and
+# the branch, because you want one database per worktree. Underscores because MySQL will take
+# hyphens only in backticks, and 64 characters because that is where it stops taking anything.
+database="${BLOOM_PROJECT_NAME}_${BLOOM_WORKSPACE_NAME//-/_}"
+database="${database:0:64}"
+
+cp "$BLOOM_ROOT_PATH/.env" .env
+sed -i '' "s/^DB_DATABASE=.*/DB_DATABASE=$database/" .env
+sed -i '' "s#^APP_URL=.*#APP_URL=http://localhost:$BLOOM_PORT#" .env
+
+mysql -u root -e "CREATE DATABASE IF NOT EXISTS \`$database\`"
+
+composer install --quiet
+npm ci --silent
+php artisan migrate --force
+php artisan db:seed --force
+```
+
+```sh
+#!/usr/bin/env bash
+# .bloom/archive.sh
+set -euo pipefail
+
+database="${BLOOM_PROJECT_NAME}_${BLOOM_WORKSPACE_NAME//-/_}"
+database="${database:0:64}"
+
+# IF EXISTS, because a failing archive script stops the archive, and a workspace whose setup never
+# got as far as creating the database would otherwise be one nobody can ever get rid of.
+mysql -u root -e "DROP DATABASE IF EXISTS \`$database\`"
+```
+
+`$BLOOM_PORT` is the same number in both, and it is the same number after a restart, so the
+archive script can also bring down whatever the setup script started on it (`docker compose down
+-v`, or killing what is listening). It gets ten minutes to do so.
 
 ## Deep links
 
