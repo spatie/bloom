@@ -76,6 +76,9 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         // Tells macOS the app is here and what it offers, so the entry shows up in other apps'
         // Services menus without waiting for the periodic rescan.
         NSUpdateDynamicServices()
+        // Cmd+W is Close Session, so the window's own Close needs the key every Mac app gives it
+        // when that happens. See `WindowCloseShortcut`.
+        WindowCloseShortcut.apply()
 
         // Last, and after the main window exists, so the welcome window opens in front of Bloom
         // rather than in front of nothing. Every capture and probe flag in `Snapshot` drives this
