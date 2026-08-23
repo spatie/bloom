@@ -102,6 +102,54 @@ struct WorkspaceArchiveTests {
         #expect(try await manager.store.workspace(id: workspace.id)?.state != .archived)
     }
 
+    /// The archive script used to be handed `BLOOM_PORT=0`, whatever block the workspace was
+    /// actually holding. A teardown script's job is to undo what the setup script did, and half
+    /// of what a setup script does is bound to that port: the container publishing it, the
+    /// process listening on it, the site pointed at it. With zero there was nothing to look for,
+    /// and a `docker compose down` reading the port out of its own file brought down a stack that
+    /// did not exist.
+    @Test("the archive script is handed the same port the setup script was")
+    func theArchiveScriptSeesTheWorkspacePort() async throws {
+        let (repo, registered, manager, workspace) = try await makeWorkspace(settings: """
+        [scripts]
+        archive = 'printf %s "$BLOOM_PORT" > "$BLOOM_ROOT_PATH/archived-on-port"; printf %s "$CONDUCTOR_PORT" > "$BLOOM_ROOT_PATH/archived-on-alias"'
+        """)
+        defer { repo.cleanUp() }
+
+        // What the setup script would have been given, and written into a .env by now.
+        let port = await manager.ensurePort(for: workspace)
+        #expect(port != 0)
+
+        try await manager.archive(workspace: workspace, repo: registered, deleteBranch: false)
+
+        // Written outside the worktree on purpose: the worktree is gone by the time this reads it.
+        let written = try String(contentsOfFile: repo.path + "/archived-on-port", encoding: .utf8)
+        #expect(written == String(port))
+        let alias = try String(contentsOfFile: repo.path + "/archived-on-alias", encoding: .utf8)
+        #expect(alias == String(port))
+    }
+
+    /// The value the caller is holding can predate the allocation: the sidebar reads a row, the
+    /// workspace is opened, a terminal asks for a block, and then the archive runs against the
+    /// row as it was read.
+    @Test("the archive reads the port from the row rather than from the value handed to it")
+    func theArchivePortComesFromTheRow() async throws {
+        let (repo, registered, manager, workspace) = try await makeWorkspace(settings: """
+        [scripts]
+        archive = 'printf %s "$BLOOM_PORT" > "$BLOOM_ROOT_PATH/archived-on-port"'
+        """)
+        defer { repo.cleanUp() }
+
+        // `workspace` here is the value from before the block was allocated, and still says 0.
+        let port = await manager.ensurePort(for: workspace)
+        #expect(workspace.port == 0)
+
+        try await manager.archive(workspace: workspace, repo: registered, deleteBranch: false)
+
+        let written = try String(contentsOfFile: repo.path + "/archived-on-port", encoding: .utf8)
+        #expect(written == String(port))
+    }
+
     /// The budget a real teardown gets. Two minutes covered `DROP DATABASE` and nothing else:
     /// `docker compose down -v` over a handful of services, each with its own stop grace period
     /// before the kill and then the volumes to remove, runs past it on a loaded machine, and the

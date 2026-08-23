@@ -562,7 +562,16 @@ public struct WorkspaceManager: Sendable {
         }
         if let archiveLaunch, archiveRuns,
            FileManager.default.fileExists(atPath: workspace.path) {
-            let env = environment(for: workspace, repo: repo, port: 0)
+            // The workspace's real block, not zero. A teardown script's whole job is to undo what
+            // the setup script did, and half of what the setup script did was bound to
+            // `$BLOOM_PORT`: the container publishing it, the process still listening on it, the
+            // site pointed at it. Handing the archive a zero meant a script that wanted to kill
+            // whatever holds the port had nothing to look for, and one that runs `docker compose
+            // down` with the port in its file brought down a stack that did not exist. Read from
+            // the row rather than from the value passed in, which the caller may have been
+            // holding since before the block was allocated.
+            let stored = try? await store.workspace(id: workspace.id)
+            let env = environment(for: workspace, repo: repo, port: stored?.port ?? workspace.port)
             let result = try await Shell.run(
                 archiveLaunch.executable, archiveLaunch.arguments,
                 cwd: workspace.path, env: env, timeout: archiveScriptTimeout

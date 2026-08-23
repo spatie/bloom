@@ -69,9 +69,10 @@ struct ScriptEnvironmentTests {
 
     @Test("a workspace with no port yet still gets the variable, set to zero")
     func aPortlessWorkspaceStillBindsThePort() throws {
-        // The archive path passes 0 rather than allocating one. A script that reads `$BLOOM_PORT`
-        // should see an empty-ish value rather than an unbound variable, which under `set -u` is
-        // a hard failure in the middle of tearing a workspace down.
+        // A workspace whose repository has no script that wants a block never asks for one, and
+        // an archive does not allocate one just to tear a workspace down. A script that reads
+        // `$BLOOM_PORT` should see an empty-ish value rather than an unbound variable, which
+        // under `set -u` is a hard failure in the middle of tearing a workspace down.
         let env = try makeEnvironment(port: 0)
         #expect(env["BLOOM_PORT"] == "0")
         #expect(env["CONDUCTOR_PORT"] == "0")
