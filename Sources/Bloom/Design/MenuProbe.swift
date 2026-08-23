@@ -5,7 +5,7 @@ import BloomCore
 
 /// Photographs the centre pane's contextual menu, or the items one of its split submenus offers.
 ///
-///     Bloom --menu-probe /tmp/menu.png [--menu-part menu|kinds|terminal|terminalKinds|browser|row|colour|style|worktree|project|projectHidden|filter] [--menu-project <path>]
+///     Bloom --menu-probe /tmp/menu.png [--menu-part menu|kinds|terminal|terminalKinds|browser|row|colour|style|worktree|project|projectHidden|filter|diffScope] [--menu-project <path>] [--menu-base <branch>]
 ///
 /// It exists because a menu is the one part of this interface that cannot be captured any other
 /// way. `ImageRenderer` draws SwiftUI's yellow placeholder for one, a menu only exists while it is
@@ -111,6 +111,8 @@ enum MenuProbe {
         /// The sidebar's filter control, which narrows the workspaces and decides whether hidden
         /// projects are listed.
         case filter
+        /// The Changes tab's scope menu: what the file list is measured from.
+        case diffScope
     }
 
     private static var part: Part {
@@ -148,6 +150,13 @@ enum MenuProbe {
             // walk of two directories. An empty catalogue would photograph as the built in list.
             if part == .style {
                 await outputStyles.refreshIfStale(project: value(for: "--menu-project"))
+            }
+            // The commits in this menu are read out of a real repository with `git log`, so the
+            // rows are commits that exist rather than rows written down here. `--menu-project`
+            // points at the checkout: a scratch clone, never the owner's own, since this reads a
+            // worktree and a worktree is a thing somebody may be working in.
+            if part == .diffScope {
+                scopeModel = await preparedScopeModel()
             }
             if part == .browser {
                 await runBrowser()
@@ -264,6 +273,8 @@ enum MenuProbe {
             NSHostingMenu(rootView: outputStyleItems)
         case .worktree:
             NSHostingMenu(rootView: worktreeItems)
+        case .diffScope:
+            NSHostingMenu(rootView: DiffScopeMenuItems(model: requiredScopeModel))
         }
     }
 
@@ -388,6 +399,44 @@ enum MenuProbe {
     /// Nothing is read and nothing is written: the only fields this menu touches are the branch it
     /// copies and the path it offers, and a path that exists is what makes the Open Worktree in
     /// submenu answer with the applications a real checkout would be offered.
+    /// The workspace the scope menu is built from, prepared before the menu is, because building
+    /// a menu is synchronous and a `git log` is not. Nil until `schedule` has filled it in.
+    private static var scopeModel: WorkspaceModel?
+
+    /// The same, as a value rather than an optional. Every case of `build` is an expression, and
+    /// a `guard` in one of them turns the whole switch into a statement whose other cases then
+    /// return nothing at all.
+    private static var requiredScopeModel: WorkspaceModel {
+        guard let scopeModel else { fail("no worktree to read commits from") }
+        return scopeModel
+    }
+
+    /// A workspace pointed at a real checkout, with one refresh already landed.
+    ///
+    /// The refresh is awaited rather than fired off. `refreshChanges` is what reads the branch's
+    /// commits, and a menu built before it lands photographs as the two rows a branch with no
+    /// history has, which is a picture of the wrong thing.
+    private static func preparedScopeModel() async -> WorkspaceModel {
+        let path = value(for: "--menu-project") ?? FileManager.default.currentDirectoryPath
+        let app = AppModel()
+        let model = WorkspaceModel(
+            workspace: Workspace(
+                repoID: .new(),
+                name: "Probe",
+                branch: "probe/menu",
+                path: path,
+                baseBranch: value(for: "--menu-base") ?? "main"
+            ),
+            app: app
+        )
+        scopeApp = app
+        await model.refreshChanges()
+        return model
+    }
+
+    /// Held for as long as the probe runs: a `WorkspaceModel` keeps its `AppModel` unowned.
+    private static var scopeApp: AppModel?
+
     private static var worktreeItems: WorktreeMenuItems {
         let path = value(for: "--menu-project") ?? FileManager.default.currentDirectoryPath
         return WorktreeMenuItems(

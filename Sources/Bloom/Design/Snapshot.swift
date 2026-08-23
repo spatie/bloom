@@ -576,7 +576,7 @@ enum Snapshot {
 
     /// Photographs a design gallery in a window of its own.
     ///
-    ///     Bloom --snapshot-gallery /tmp/shots [--gallery review-comments|inspector-tabs]
+    ///     Bloom --snapshot-gallery /tmp/shots [--gallery review-comments|inspector-tabs|diff-scope]
     ///
     /// `--snapshot` cannot photograph this one. `ImageRenderer` paints SwiftUI's yellow
     /// "unsupported" placeholder wherever an `NSViewRepresentable` sits, and the box a review
@@ -604,11 +604,13 @@ enum Snapshot {
     private enum GalleryChoice: String {
         case reviewComments = "review-comments"
         case inspectorTabs = "inspector-tabs"
+        case diffScope = "diff-scope"
 
         var title: String {
             switch self {
             case .reviewComments: "Review comments"
             case .inspectorTabs: "Inspector tabs"
+            case .diffScope: "Diff scope"
             }
         }
 
@@ -616,6 +618,7 @@ enum Snapshot {
             switch self {
             case .reviewComments: CGSize(width: 820, height: 900)
             case .inspectorTabs: CGSize(width: 460, height: 470)
+            case .diffScope: CGSize(width: 460, height: 700)
             }
         }
 
@@ -640,6 +643,7 @@ enum Snapshot {
         switch choice {
         case .reviewComments: ReviewCommentSnapshotGallery()
         case .inspectorTabs: InspectorTabStripGallery(app: app)
+        case .diffScope: DiffScopeGallery(app: app)
         }
     }
 

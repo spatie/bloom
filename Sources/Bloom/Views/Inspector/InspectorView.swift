@@ -50,6 +50,24 @@ struct InspectorView: View {
                 .overlay(alignment: .bottom) { Hairline() }
                 .overlay { RuleSweep(segment: .inspector) }
 
+            // What the list below is measured from, when it is not measured from everything.
+            //
+            // Under the tab row because it is a fact about the pane beneath it. On both file tabs
+            // rather than only on Changes: the All files tree marks the files that differ, and it
+            // marks them off the same list, so a narrowed scope quietly takes marks off that tree
+            // too. A tab where the scope has an effect is a tab where it has to be explained. The
+            // checks list is GitHub's and owes nothing to any of this.
+            if model.inspectorTab != .checks, model.diffScope.isNarrowed {
+                DiffScopeBand(
+                    scope: model.diffScope,
+                    fileCount: model.changedFiles.count,
+                    note: model.scopeNote
+                ) {
+                    model.setDiffScope(.all)
+                }
+                Hairline()
+            }
+
             content
         }
         // Pinned to the top of whatever the column gives it, and filling the rest.

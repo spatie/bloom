@@ -135,10 +135,13 @@ struct ChangedFileList: View {
                 action: refresh
             )
         } else {
+            // The sentence follows the scope. "Nothing in this worktree differs from main" under
+            // a list narrowed to uncommitted work is a claim about the wrong comparison, and it
+            // is the claim most likely to be believed.
             EmptyStateView(
                 glyph: "checkmark.circle",
                 title: "No changes yet",
-                message: "Nothing in this worktree differs from \(model.workspace.baseBranch)."
+                message: model.diffScope.emptyMessage(base: model.workspace.baseBranch)
             )
         }
     }

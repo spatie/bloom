@@ -713,8 +713,13 @@ public enum Git {
 
     // MARK: - Diffs
 
-    /// Files changed on this worktree relative to where it diverged from `base`, including
+    /// Files changed on this worktree relative to whatever the scope measures from, including
     /// uncommitted work and untracked files.
+    ///
+    /// The default scope is the whole of this workspace's work, measured from where the branch
+    /// diverged from `base`, which is what every caller but the Changes tab wants. Untracked files
+    /// belong to every scope: a file git has never seen is uncommitted whichever commit you are
+    /// measuring from.
     ///
     /// Everything here runs with `-z` and is parsed from bytes. Git's default output C-quotes any
     /// path that is not plain ASCII and separates fields with tab and newline, both of which a
@@ -723,8 +728,10 @@ public enum Git {
     ///
     /// Throws if any of the git calls fail, because an empty list has to mean "nothing changed"
     /// and never "we could not find out".
-    public static func changedFiles(worktree: String, base: String) async throws -> [ChangedFile] {
-        let mergeBase = try await baseline(base, in: worktree)
+    public static func changedFiles(
+        worktree: String, base: String, scope: DiffScope = .all
+    ) async throws -> [ChangedFile] {
+        let mergeBase = try await revision(for: scope, base: base, in: worktree)
 
         let nameStatus = try await checkRaw(
             ["diff", "--name-status", "-M", "-z", mergeBase, "--"], in: worktree
@@ -855,8 +862,14 @@ public enum Git {
         )
     }
 
-    /// The unified patch for one file, in the same "since we diverged" sense as `changedFiles`.
-    public static func patch(worktree: String, base: String, file: ChangedFile) async throws -> String {
+    /// The unified patch for one file, measured from the same place as `changedFiles`.
+    ///
+    /// The scope has to be passed through here too, or a narrowed list opens files whose diff is
+    /// the whole branch: the list would say seven files and the pane would show a patch containing
+    /// hunks that are not part of what the reader asked to see.
+    public static func patch(
+        worktree: String, base: String, file: ChangedFile, scope: DiffScope = .all
+    ) async throws -> String {
         if file.change == .untracked {
             let result = try await run(
                 ["diff", "--no-index", "--no-color", "--", "/dev/null", file.path], in: worktree
@@ -864,10 +877,82 @@ public enum Git {
             // --no-index exits 1 whenever there is a difference, which is the normal case here.
             return result.stdout
         }
-        let mergeBase = try await baseline(base, in: worktree)
+        let mergeBase = try await revision(for: scope, base: base, in: worktree)
         return try await check(
             ["diff", "--no-color", "-M", mergeBase, "--", file.path], in: worktree
         ).stdout
+    }
+
+    /// What a scope diffs against, resolved against this worktree.
+    ///
+    /// `baseline` is asked for only where the answer is used: a scope measuring from `HEAD` or
+    /// from a named commit does not need two ref lookups and a `merge-base` to say so, and the
+    /// changed file list runs this on a six second poll.
+    private static func revision(
+        for scope: DiffScope, base: String, in worktree: String
+    ) async throws -> String {
+        guard scope != .all else { return try await baseline(base, in: worktree) }
+        let revision = scope.revision(baseline: "")
+        try validate(ref: revision, label: "revision")
+        return revision
+    }
+
+    /// The commits this workspace put on its own branch, newest first.
+    ///
+    /// Bounded by `BranchCommitList.limit` and asked for one more than that, so the caller can say
+    /// the list is short without a second `rev-list --count`.
+    ///
+    /// **Merges are left out.** A merge commit on a workspace branch is almost always the base
+    /// branch being pulled in, which is the one thing on the branch the reader did not write; its
+    /// subject is `Merge remote-tracking branch 'origin/main'`, and measuring a diff from it is
+    /// measuring from somebody else's work. Nothing is hidden by this: a merge's own changes are
+    /// still in every scope that spans it, because a scope is a revision the worktree is compared
+    /// against and not a list of commits to add up.
+    ///
+    /// Everything is parsed from bytes with `-z`, for the reason `changedFiles` documents: a
+    /// commit subject and an author name may both contain anything at all, newlines included.
+    public static func branchCommits(
+        worktree: String, base: String, limit: Int = BranchCommitList.limit
+    ) async throws -> BranchCommitList {
+        let mergeBase = try await baseline(base, in: worktree)
+        // A unit separator between the fields. It is the one byte in this format that a subject,
+        // an author name and an ISO date can all be relied on not to contain.
+        let format = "--pretty=format:%H\u{1f}%s\u{1f}%an\u{1f}%aI"
+        let output = try await checkRaw(
+            [
+                "log", "--no-merges", "-z", "--max-count=\(limit + 1)", format,
+                "\(mergeBase)..HEAD", "--",
+            ],
+            in: worktree
+        )
+        let parsed = parseBranchCommits(output.stdout)
+        return BranchCommitList(
+            commits: Array(parsed.prefix(limit)), isTruncated: parsed.count > limit
+        )
+    }
+
+    /// The records of `log -z --pretty=format:%H<US>%s<US>%an<US>%aI`.
+    ///
+    /// A record with the wrong number of fields is dropped rather than guessed at. There is no
+    /// such thing as a commit worth listing that we could not read, and a menu row naming the
+    /// wrong sha would scope a diff to the wrong place.
+    static func parseBranchCommits(_ data: Data) -> [BranchCommit] {
+        nulRecords(data).compactMap { record in
+            let fields = record.split(separator: 0x1f, omittingEmptySubsequences: false)
+            guard fields.count == 4 else { return nil }
+            let sha = String(decoding: fields[0], as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !sha.isEmpty else { return nil }
+            guard let date = try? Date.ISO8601FormatStyle().parse(
+                String(decoding: fields[3], as: UTF8.self)
+            ) else { return nil }
+            return BranchCommit(
+                sha: sha,
+                subject: String(decoding: fields[1], as: UTF8.self),
+                author: String(decoding: fields[2], as: UTF8.self),
+                date: date
+            )
+        }
     }
 
     /// What this worktree is holding that the remote has not got, in one `git` call.

@@ -51,6 +51,26 @@ final class WorkspaceModel {
     private var transcripts: [SessionID: TranscriptModel] = [:]
 
     // Inspector.
+    /// How much of this workspace's work the Changes tab is showing.
+    ///
+    /// Read through the getter, which drops a scope this branch can no longer offer. A commit is
+    /// not a stable thing to hold on to: an amend, a rebase or a squash rewrites it, and a scope
+    /// pointing at a sha that resolves nowhere is a refresh that fails rather than a list that
+    /// narrows. Written through `setDiffScope`, because changing it has to send the pane back to
+    /// git and a property that quietly starts a subprocess is a property nobody expects.
+    private var storedDiffScope: DiffScope = .all
+
+    var diffScope: DiffScope {
+        // Only once git has answered. An empty list from a branch that genuinely has no commits
+        // of its own is a real answer and correctly drops a stale scope; the same empty list
+        // before anything has been asked is not, and would drop the reader's choice on arrival.
+        hasReadBranchCommits ? branchCommits.resolve(storedDiffScope) : storedDiffScope
+    }
+
+    /// The commits this branch put on top of its base, for the scope menu to offer.
+    private(set) var branchCommits = BranchCommitList()
+    private(set) var hasReadBranchCommits = false
+
     /// What the reader last picked in the tab strip, which is not always what is on screen.
     ///
     /// Kept whole rather than clamped to what is currently on offer, because the Checks tab comes
@@ -721,10 +741,15 @@ final class WorkspaceModel {
         changesTask?.cancel()
         let path = workspace.path
         let base = workspace.baseBranch
+        let scope = diffScope
+        // Only on a refresh somebody asked for, which is an arrival, a finished turn or a press.
+        // Those are exactly the moments a commit can have appeared, and the six second poll is
+        // already four git calls without adding a `log` for a menu nobody has opened.
+        let wantsCommits = reason == .requested
 
         let task = Task.detached(priority: .userInitiated) { () -> Result<ChangesAnswer, GitFailure> in
             do {
-                let files = try await Git.changedFiles(worktree: path, base: base)
+                let files = try await Git.changedFiles(worktree: path, base: base, scope: scope)
                 // In the same task as the file list rather than on a cadence of its own. The one
                 // extra command is `status --porcelain -z --branch`, which answers uncommitted,
                 // untracked and unpushed at once, so the poll that already runs three git calls
@@ -735,7 +760,12 @@ final class WorkspaceModel {
                 // reader asked for; a missing local count means the strip says nothing extra,
                 // which is the right answer when we do not know.
                 let local = try? await Git.localWork(worktree: path)
-                return .success(ChangesAnswer(files: files, local: local))
+                // Same forgiveness as the local counts: failing to list the commits costs the
+                // menu its rows, not the reader their file list.
+                let commits = wantsCommits
+                    ? try? await Git.branchCommits(worktree: path, base: base)
+                    : nil
+                return .success(ChangesAnswer(files: files, local: local, commits: commits))
             } catch {
                 return .failure(GitFailure(message: error.readableMessage))
             }
@@ -779,6 +809,10 @@ final class WorkspaceModel {
             // Only when git actually answered. A failed count leaves the last known one standing
             // rather than replacing it with "nothing local", which is a claim.
             if let local = answer.local, localWork != local { localWork = local }
+            if let commits = answer.commits {
+                if branchCommits != commits { branchCommits = commits }
+                hasReadBranchCommits = true
+            }
             adoptSelection(among: answer.files, reason: reason)
         }
     }
@@ -788,6 +822,30 @@ final class WorkspaceModel {
     struct ChangesAnswer: Sendable {
         var files: [ChangedFile]
         var local: LocalWork?
+        /// Nil when this refresh did not ask, which is every quiet poll.
+        var commits: BranchCommitList?
+    }
+
+    /// Narrows or widens what the Changes tab is showing, and sends the pane back to git for it.
+    ///
+    /// The list has to be re-read rather than filtered: a scope is a revision the worktree is
+    /// compared against, so which files differ, and by how many lines, is a different question for
+    /// each one and only git can answer it.
+    func setDiffScope(_ scope: DiffScope) {
+        guard scope != storedDiffScope else { return }
+        storedDiffScope = scope
+        Task { await refreshChanges(.requested) }
+    }
+
+    /// Review comments sitting on files the current scope leaves out.
+    ///
+    /// Nothing here is at risk: comments live in the store keyed by workspace and path, nothing
+    /// prunes them against the file list, and every one of them still goes with the next message.
+    /// What they lose while a scope is narrowed is the diff they are drawn on, and a comment the
+    /// reader cannot find reads as a comment that has been thrown away. So the band counts them
+    /// and says so.
+    var scopeNote: String? {
+        diffScope.strandedNote(reviewComments, among: changedFiles)
     }
 
     /// A refresh can drop the file the reader had open, and the first one arrives with nothing
@@ -952,8 +1010,11 @@ final class WorkspaceModel {
     func patch(for file: ChangedFile) async -> String {
         let path = workspace.path
         let base = workspace.baseBranch
+        // The same scope the list was built with, or the pane opens a file the list narrowed and
+        // shows it in full.
+        let scope = diffScope
         return await Task.detached(priority: .userInitiated) {
-            (try? await Git.patch(worktree: path, base: base, file: file)) ?? ""
+            (try? await Git.patch(worktree: path, base: base, file: file, scope: scope)) ?? ""
         }.value
     }
 
