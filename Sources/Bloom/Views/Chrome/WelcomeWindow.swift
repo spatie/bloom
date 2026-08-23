@@ -49,26 +49,37 @@ enum WelcomeWindow {
         // first run is greeted, and the Help menu and a later broken launch open straight onto the
         // checks, because somebody who came back came back for the checks. Back is offered from
         // there either way, so the greeting is never a screen that has been taken away.
-        let host = NSHostingView(rootView: WelcomeView(
+        // A CONTROLLER, not a bare `NSHostingView`, and that is the whole of the sizing.
+        //
+        // This was a hosting view with `.preferredContentSize` and one `setContentSize` at the
+        // foot of this function, which is a one way ratchet: the call happens once, so the only
+        // thing that could move the window afterwards was the hosting view's minimum size growing
+        // underneath it. Opening the GitHub login grew the window from 534 points to 747 to make
+        // room for the terminal, and pressing "Back to the checks" took the terminal out and left
+        // the window at 747, with the four check rows spread down 180 points of dead space. It
+        // never came back, not on a re-probe and not on a second visit, because nothing was left
+        // that could make a window smaller. Calling `setContentSize` again on the way back would
+        // only have been a second ratchet pointing the other way, and wrong for every size change
+        // nobody had thought to name.
+        //
+        // A view controller's `preferredContentSize` is a value AppKit tracks for itself, and a
+        // window that is not resizable follows it in both directions. The size is a consequence of
+        // the content on every frame now, rather than of the two moments somebody measured it.
+        let host = NSHostingController(rootView: WelcomeView(
             inspection: model,
             start: OnboardingFlow.firstStep(trigger: trigger),
             onFinish: { close() }
         ))
-        // The window grows and shrinks as rows open and close, so the hosting view drives its
-        // size rather than a number written down here.
         host.sizingOptions = [.preferredContentSize]
-        let size = host.fittingSize
 
-        let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: size),
-            // No `.resizable`: this is a column of fixed width whose height follows its content,
-            // and a drag handle on it would only ever produce a worse version of it.
-            // `.fullSizeContentView` is what lets the plinth run up behind the title bar, the
-            // alternative being a strip of flat window background above the gradient.
-            styleMask: [.titled, .closable, .fullSizeContentView],
-            backing: .buffered,
-            defer: false
-        )
+        let window = NSWindow(contentViewController: host)
+        // No `.resizable`: this is a column of fixed width whose height follows its content, and a
+        // drag handle on it would only ever produce a worse version of it. `.fullSizeContentView`
+        // is what lets the plinth run up behind the title bar, the alternative being a strip of
+        // flat window background above the gradient. Assigned rather than passed, because the
+        // initialiser that installs the tracking above is the one that takes a view controller and
+        // it picks the standard mask for itself.
+        window.styleMask = [.titled, .closable, .fullSizeContentView]
         window.isReleasedWhenClosed = false
         window.title = "Welcome to Bloom"
         window.titleVisibility = .hidden
@@ -76,8 +87,6 @@ enum WelcomeWindow {
         window.isMovableByWindowBackground = true
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
-        window.contentView = host
-        window.setContentSize(size)
         window.center()
         return window
     }
