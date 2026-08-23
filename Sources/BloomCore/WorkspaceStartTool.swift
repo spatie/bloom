@@ -70,8 +70,25 @@ extension AgentWorkspaceOrder {
     /// Truncated to sixteen hex characters. It is a dedup key inside one database, not a
     /// cryptographic commitment, and sixty-four characters of hex in a debug print helps nobody.
     func spawnID(parentWorkspaceID: WorkspaceID) -> String {
+        spawnID(scope: parentWorkspaceID.rawValue)
+    }
+
+    /// The same name, for the owner's own client, which has no workspace to scope it by.
+    ///
+    /// The project takes the parent's place in the digest, and it has to: the owner names one out
+    /// loud, so the same prompt against two projects is two asks, and a key that ignored the
+    /// project would answer the second with the first one's workspace.
+    ///
+    /// Nothing else stands in for the caller, because there is only one owner. Two terminals on
+    /// the same machine asking for the same thing in the same project is the case this is meant
+    /// to collapse, not one it should tell apart.
+    func spawnID(ownerProject: RepoID) -> String {
+        spawnID(scope: "owner\u{0}" + ownerProject.rawValue)
+    }
+
+    private func spawnID(scope: String) -> String {
         let material = [
-            parentWorkspaceID.rawValue,
+            scope,
             prompt,
             name ?? "",
             baseBranch ?? "",
@@ -124,22 +141,24 @@ public typealias WorkspaceStarting =
 /// of nesting is the limit, and "has a parent" is the whole test, which is why there is no depth
 /// counter to drift.
 ///
-/// The two roles that may call it differ in three ways, and all three follow from one fact: a
-/// parent is a workspace and the owner's client is not.
+/// The two roles that may call it differ in two ways, and both follow from one fact: a parent is
+/// a workspace and the owner's client is not. They used to differ in a third, which was that only
+/// a parent's calls were deduplicated, and that one was a gap rather than a distinction.
 ///
 /// A parent cannot name a project, because its own is the only one it may act in, and `project` is
 /// refused rather than ignored if it names one. The owner's client must name a project, because
 /// nothing else says which, and it may only name one Bloom already has.
 ///
-/// A parent's workspaces are `.agent` origin, carry its id and are capped at eight, because an
-/// agent looping on its own instructions is the failure that cap exists for. The owner's are
-/// `.user` origin, indistinguishable from one made in the Create sheet, and are not capped, because
-/// they are the owner asking, and the sheet is not capped either.
+/// A parent's workspaces are `.agent` origin, carry its id and are capped at eight running at
+/// once, because an agent looping on its own instructions is the failure that cap exists for. The
+/// owner's are `.ownerClient` origin and are capped on rate instead, which is a different brake
+/// for a different failure: see `maximumOwnerStarts`.
 ///
-/// A parent's calls are deduplicated by a digest of the call, because a model retries and a
-/// retried spawn used to cut a second worktree. The owner's are not, for the same reason the sheet
-/// is not: `.user` has nowhere to record the key, and two identical asks a minute apart from a
-/// person are two asks.
+/// Both roles are deduplicated by a digest of the call, because a model retries and a retried
+/// spawn cuts a second worktree. The owner's used to be exempt on the grounds that `.user` had
+/// nowhere to record the key, which was true of `.user` and is the reason `.ownerClient` exists.
+/// The argument that two identical asks a minute apart from a person are two asks is an argument
+/// about the Create sheet, where each of them is a press; here neither of them is.
 public struct WorkspaceStartTool: BridgeToolHandling {
     /// How many a single caller may have running at once.
     ///
@@ -148,6 +167,36 @@ public struct WorkspaceStartTool: BridgeToolHandling {
     /// is more than anyone has wanted and small enough that a runaway is noticed rather than
     /// discovered on the next bill.
     public static let maximumChildren = 8
+
+    /// How many the owner's own client may start inside `ownerWindow`.
+    ///
+    /// **Why the owner is capped at all.** It was not, and the reason given was that Bloom's own
+    /// Create sheet is not capped either. That does not hold: the sheet needs one human gesture
+    /// per workspace and this tool needs none. The caller here is a model acting on an instruction
+    /// it interpreted, and "start a workspace for each failing test" against a suite with forty of
+    /// them used to cut forty worktrees with nothing in the system saying no.
+    ///
+    /// **Why a rolling window and not a ceiling.** The parent's eight is a ceiling on what is
+    /// running, and it is right for a parent because a parent's children are work it is waiting
+    /// on. The owner is a person, their workspaces accumulate over weeks, and a ceiling on how
+    /// many they may have would refuse the eleventh workspace of a busy fortnight, which is
+    /// ordinary use rather than a runaway. What is not ordinary is the rate. So the brake is on
+    /// how fast, not how many.
+    ///
+    /// **Why six, and why fifteen minutes.** The largest deliberate fan-out anybody has asked for
+    /// in one sitting is a handful, and six leaves room above that; a loop, whose calls are
+    /// seconds apart, hits it inside a minute, having cut six worktrees rather than forty. Fifteen
+    /// minutes is long enough that no loop can outrun it and short enough that a person who
+    /// genuinely wanted a seventh is inconvenienced rather than blocked. Neither number is a
+    /// safety limit: six worktrees and six agents is already real money, and the point is that
+    /// somebody notices at six instead of at forty.
+    ///
+    /// Counted from the database, like the parent's, so two calls racing cannot both read the same
+    /// stale number and so a restart does not hand out a fresh allowance.
+    public static let maximumOwnerStarts = 6
+
+    /// The window `maximumOwnerStarts` is counted over.
+    public static let ownerWindow: TimeInterval = 15 * 60
 
     private let start: WorkspaceStarting
 
@@ -286,6 +335,17 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             }
         }
 
+        if origin.isOwnerClient {
+            do {
+                if let refusal = try await startedTooFast(store: store) { return .failure(refusal) }
+            } catch {
+                return .failure(
+                    "Bloom could not check how many workspaces it has started for you recently: "
+                        + error.readableMessage
+                )
+            }
+        }
+
         do {
             let started = try await start(order, project, identity, origin)
 
@@ -295,10 +355,7 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                 "branch": .string(started.branch),
                 "path": .string(started.path),
                 "state": .string("starting"),
-                "note": .string(
-                    "It is setting up and will start on its own. It does not report back, and you "
-                        + "cannot wait for it from here. Carry on with your own work."
-                ),
+                "note": .string(startedNote(for: identity.role)),
             ]))
         } catch {
             let trouble = await WorkspaceStartTrouble.diagnose(
@@ -352,7 +409,12 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                 guard case .found(let project) = outcome else {
                     return .refused("Bloom has no project called '\(named)'.")
                 }
-                return .resolved(project, .user)
+                // The rate is not checked here. A retry of a call that already cut a worktree is
+                // not another start, and `call` answers that before it counts anything, or a
+                // duplicate would come back looking like a limit.
+                return .resolved(project, .ownerClient(
+                    spawnToolUseID: order.spawnID(ownerProject: project.id)
+                ))
             }
 
             // A caller that is a workspace. Its project is decided for it, so naming one is a
@@ -408,6 +470,57 @@ public struct WorkspaceStartTool: BridgeToolHandling {
 
         return "You already have \(live.count) workspaces running, which is Bloom's limit. "
             + "Wait for some to be reviewed and archived before starting more."
+    }
+
+    /// Whether the owner's client has been starting workspaces faster than a person would, and
+    /// the sentence saying so.
+    ///
+    /// `now` is a parameter so the window can be tested without waiting a quarter of an hour.
+    func startedTooFast(store: Store, now: Date = Date()) async throws -> String? {
+        let recent = try await store.workspacesStartedByOwnerClient(
+            since: now.addingTimeInterval(-Self.ownerWindow)
+        )
+
+        guard recent.count >= Self.maximumOwnerStarts else { return nil }
+
+        return Self.startedTooFastSentence(count: recent.count)
+    }
+
+    /// What a caller that has hit the window is told.
+    ///
+    /// Written to the standard `WorkspaceStartTrouble` sets, and against one particular misreading.
+    /// A model that has just been refused reads any mention of a window as a timer to wait out,
+    /// and a model that waits and retries has turned a brake into a slower loop. So the sentence
+    /// says plainly that retrying is refused, that nothing the caller does shortens the window,
+    /// and what to do instead, which is to stop and say what it has already started.
+    ///
+    /// It names no path and no command, and it does not tell the caller to ask the owner to raise
+    /// a limit, because there is nothing the owner can raise from here.
+    static func startedTooFastSentence(count: Int) -> String {
+        let minutes = Int(ownerWindow / 60)
+        return """
+            Bloom has already started \(count) workspaces for you in the last \(minutes) minutes, \
+            which is as many as it will start from a client outside the app. Each one is a real \
+            git worktree, a real agent process and real spend, and this many in this short a time \
+            is what a misread instruction looks like rather than a plan. Calling again will be \
+            refused for the same reason, and nothing you can do here shortens the \(minutes) \
+            minutes, so do not retry and do not wait for it. Tell the owner what you have already \
+            started and what is left over, and leave the rest to them: Bloom's own window starts \
+            workspaces with no limit, one deliberate press at a time.
+            """
+    }
+
+    /// The note on a workspace that has just been started, which differs by who is being told.
+    ///
+    /// The owner's client gets a sentence naming `workspace_list`, because it can call it and
+    /// because without it "you cannot wait for it from here" means "and there is nothing else to
+    /// call either". A parent does not, because `workspace_list` is not in its `tools/list` and
+    /// naming a tool a caller cannot reach is worse than naming none.
+    private func startedNote(for role: BridgeRole) -> String {
+        let opening = "It is setting up and will start on its own. It does not report back, and "
+            + "you cannot wait for it from here. Carry on with your own work."
+        guard role == .owner else { return opening }
+        return opening + " When you want to know what became of it, call workspace_list."
     }
 
     /// The workspace an earlier run of this same call produced, if there is one and it is still

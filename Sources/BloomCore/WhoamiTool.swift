@@ -81,6 +81,11 @@ public struct WhoamiTool: BridgeToolHandling {
                     "agent_in_workspace": .string(parentWorkspaceID.rawValue),
                     "spawn_tool_use_id": .string(spawnToolUseID),
                 ])
+            case .ownerClient:
+                // The owner, through a tool rather than through the sheet. "owner" and not
+                // something finer, because who asked is the question and the answer is the same
+                // person; which door they came through is Bloom's business, not the agent's.
+                answer["created_by"] = .string("owner")
             }
             return .json(.object(answer))
         } catch {

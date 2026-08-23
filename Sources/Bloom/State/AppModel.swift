@@ -366,6 +366,7 @@ final class AppModel {
             ProjectAddTool(),
             ProjectHideTool(),
             ProjectUnhideTool(),
+            WorkspaceListTool(),
             WorkspaceStartTool { [weak self] order, project, identity, origin in
                 guard let self else { throw AppNotReady.stillStartingUp }
                 return try await self.startWorkspaceForBridge(

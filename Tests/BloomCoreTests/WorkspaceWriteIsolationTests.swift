@@ -368,12 +368,28 @@ struct WorkspaceParentageTests {
     @Test("a parent id with no tool call beside it grants nothing")
     func halfARecordGrantsNothing() async throws {
         #expect(WorkspaceOrigin(parentWorkspaceID: "w1", spawnToolUseID: nil) == .user)
-        #expect(WorkspaceOrigin(parentWorkspaceID: nil, spawnToolUseID: "toolu_e") == .user)
-        #expect(WorkspaceOrigin(parentWorkspaceID: "", spawnToolUseID: "toolu_e") == .user)
         #expect(
             WorkspaceOrigin(parentWorkspaceID: "w1", spawnToolUseID: "toolu_e")
                 == .agent(parentWorkspaceID: WorkspaceID("w1"), spawnToolUseID: "toolu_e")
         )
+    }
+
+    /// The other half of the same pair of columns. A tool call with no parent beside it is not a
+    /// broken agent spawn, it is the owner's own client, which has no workspace to be a parent.
+    /// It used to read as `.user` because nothing could write it; `workspace_start` writes it now.
+    @Test("a tool call with no parent is the owner's own client, and still not an agent's")
+    func aToolCallWithNoParentIsTheOwners() async throws {
+        #expect(
+            WorkspaceOrigin(parentWorkspaceID: nil, spawnToolUseID: "toolu_e")
+                == .ownerClient(spawnToolUseID: "toolu_e")
+        )
+        #expect(
+            WorkspaceOrigin(parentWorkspaceID: "", spawnToolUseID: "toolu_e")
+                == .ownerClient(spawnToolUseID: "toolu_e")
+        )
+        // The line that matters: it grants nothing an agent could use, exactly as `.user` does.
+        #expect(WorkspaceOrigin.ownerClient(spawnToolUseID: "toolu_e").isAgentSpawned == false)
+        #expect(BridgeRole(origin: .ownerClient(spawnToolUseID: "toolu_e")) == .parent)
     }
 }
 

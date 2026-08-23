@@ -1294,6 +1294,29 @@ public actor Store {
         return Int(rows.first?.int("n") ?? 0)
     }
 
+    /// The workspaces the owner's own client cut through `workspace_start` since a moment in
+    /// time, oldest first.
+    ///
+    /// The rows are the ones with a spawn id and no parent, which is exactly `.ownerClient`. A
+    /// workspace made in the Create sheet has neither column and is not here, and that separation
+    /// is the whole reason the case exists: a person who made six workspaces by hand this morning
+    /// must not find the tool refusing them a seventh.
+    ///
+    /// **Archived ones count**, which is the opposite of `workspaces(startedBy:)` and deliberate.
+    /// That one limits how many are running, and archiving deals with one. This one asks how many
+    /// worktrees were cut in a window, and archiving one does not un-cut it.
+    public func workspacesStartedByOwnerClient(since: Date) throws -> [Workspace] {
+        try db.query(
+            """
+            SELECT * FROM workspaces
+            WHERE parent_workspace_id IS NULL AND spawn_tool_use_id IS NOT NULL
+              AND created_at >= ?
+            ORDER BY created_at
+            """,
+            [.double(since.timeIntervalSince1970)]
+        ).map(Self.workspace(from:))
+    }
+
     /// The workspaces one spawn tool call has already made, archived ones included.
     ///
     /// A tool call is retried: by the model, by the transport, and by whatever is driving both.

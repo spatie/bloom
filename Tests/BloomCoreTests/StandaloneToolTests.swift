@@ -272,9 +272,12 @@ struct OwnerWorkspaceStartTests {
 
         #expect(!result.isError)
         #expect(recorder.projects.map(\.id) == [repo.id])
-        // `.user`, and not `.agent`: this is the owner asking, so it is indistinguishable from a
-        // workspace made in the Create sheet, which is what it is.
-        #expect(recorder.origins == [.user])
+        // `.ownerClient`, and not `.agent`: this is the owner asking, so nothing about it is
+        // penned in. It is not `.user` either, because a tool asked rather than a hand, and the
+        // call that asked has to be nameable so a retry of it does not cut a second worktree.
+        #expect(recorder.origins.count == 1)
+        #expect(recorder.origins.first?.isOwnerClient == true)
+        #expect(recorder.origins.first?.isAgentSpawned == false)
     }
 
     @Test("a call with no project is refused, because nothing else says where the work goes")
@@ -333,10 +336,12 @@ struct OwnerWorkspaceStartTests {
         #expect(recorder.projects.isEmpty)
     }
 
-    /// The eight is a cap on what one agent can ask for on its own initiative. The owner is not
-    /// an agent and the Create sheet is not capped either.
-    @Test("the owner is not capped the way a parent's workspaces are")
-    func notCapped() async throws {
+    /// The eight is a cap on how many children one agent may have RUNNING, and it is the wrong
+    /// shape for the owner: their workspaces accumulate over weeks, and a ceiling on how many
+    /// they may have would refuse the eleventh workspace of a busy fortnight. What the owner's
+    /// client is held to is a rate, and that is `OwnerStartRateTests` below.
+    @Test("the parent's ceiling on running children does not apply to the owner")
+    func notCappedTheParentsWay() async throws {
         let store = try makeTestStore("owner-uncapped")
         let repo = try await store.upsert(Repo(name: "flare", path: "/tmp/flare", defaultBranch: "main"))
         for index in 0...WorkspaceStartTool.maximumChildren {
@@ -354,7 +359,233 @@ struct OwnerWorkspaceStartTests {
         )
 
         #expect(!result.isError)
-        #expect(recorder.origins == [.user])
+        #expect(recorder.origins.first?.isOwnerClient == true)
+    }
+
+    /// The answer a parent gets names no tool a parent cannot call. The owner's names the one
+    /// that answers the question `workspace_start` deliberately leaves open.
+    @Test("the owner is told where to look next, and a parent is not told about a tool it lacks")
+    func theOwnerIsPointedAtTheListing() async throws {
+        let store = try makeTestStore("owner-note")
+        _ = try await store.upsert(Repo(name: "flare", path: "/tmp/flare", defaultBranch: "main"))
+
+        let result = await Recorder().tool().call(
+            request(["prompt": .string("Import the webhooks"), "project": .string("flare")]),
+            as: .owner,
+            store: store
+        )
+
+        #expect(!result.isError)
+        #expect(result.text.contains("cannot wait for it from here"))
+        #expect(result.text.contains("workspace_list"))
+    }
+}
+
+/// The brake on the owner's own client, which had none.
+///
+/// `workspace_start` was uncapped for the owner and deduplicated for nobody but a parent, on the
+/// reasoning that the Create sheet is not capped either. The sheet needs one human gesture per
+/// workspace and this tool needs none, so an owner-role client that misread "start a workspace
+/// for each failing test" against a suite with forty of them cut forty worktrees and nothing said
+/// no.
+@Suite("workspace_start: not too fast", .tags(.persistence), .scratchDirectory)
+struct OwnerStartRateTests {
+    private final class Recorder: @unchecked Sendable {
+        var origins: [WorkspaceOrigin] = []
+
+        func tool() -> WorkspaceStartTool {
+            WorkspaceStartTool { [self] order, _, _, origin in
+                origins.append(origin)
+                return StartedWorkspaceSummary(
+                    workspaceID: WorkspaceID(rawValue: "w-\(origins.count)"),
+                    name: order.name ?? "Named by Bloom",
+                    branch: "claude/named-by-bloom",
+                    path: "/tmp/worktrees/w-new"
+                )
+            }
+        }
+    }
+
+    private func request(_ prompt: String) -> MCPRequest {
+        MCPRequest(
+            id: .number(1),
+            method: "workspace_start",
+            params: .object(["prompt": .string(prompt), "project": .string("flare")])
+        )
+    }
+
+    /// Rows written the way the tool's own workspaces are written: a spawn id, and no parent.
+    @discardableResult
+    private func alreadyStarted(
+        _ count: Int, in repo: Repo, store: Store, ago: TimeInterval = 60
+    ) async throws -> [Workspace] {
+        var written: [Workspace] = []
+        for index in 0..<count {
+            written.append(try await store.upsert(Workspace(
+                repoID: repo.id,
+                name: "earlier \(index)",
+                branch: "claude/earlier-\(index)",
+                path: "/tmp/earlier-\(index)",
+                baseBranch: "main",
+                createdAt: Date().addingTimeInterval(-ago),
+                origin: .ownerClient(spawnToolUseID: "earlier-\(index)")
+            )))
+        }
+        return written
+    }
+
+    private func fixture(_ label: String) async throws -> (Store, Repo) {
+        let store = try makeTestStore(label)
+        let repo = try await store.upsert(
+            Repo(name: "flare", path: "/tmp/flare", defaultBranch: "main")
+        )
+        return (store, repo)
+    }
+
+    @Test("one short of the limit still starts")
+    func underTheLimit() async throws {
+        let (store, repo) = try await fixture("owner-rate-under")
+        try await alreadyStarted(WorkspaceStartTool.maximumOwnerStarts - 1, in: repo, store: store)
+        let recorder = Recorder()
+
+        let result = await recorder.tool().call(request("one more"), as: .owner, store: store)
+
+        #expect(!result.isError)
+        #expect(recorder.origins.count == 1)
+    }
+
+    @Test("at the limit it is refused, and nothing is cut")
+    func atTheLimit() async throws {
+        let (store, repo) = try await fixture("owner-rate-at")
+        try await alreadyStarted(WorkspaceStartTool.maximumOwnerStarts, in: repo, store: store)
+        let recorder = Recorder()
+
+        let result = await recorder.tool().call(request("one more"), as: .owner, store: store)
+
+        #expect(result.isError)
+        #expect(recorder.origins.isEmpty)
+    }
+
+    /// A model that has just been refused reads any mention of a window as a timer to wait out,
+    /// and a model that waits and retries has turned a brake into a slower loop.
+    @Test("the refusal says retrying will not help and says what to do instead")
+    func theRefusalDoesNotInviteARetry() async throws {
+        let (store, repo) = try await fixture("owner-rate-words")
+        try await alreadyStarted(WorkspaceStartTool.maximumOwnerStarts, in: repo, store: store)
+
+        let result = await Recorder().tool().call(request("one more"), as: .owner, store: store)
+
+        #expect(result.text.contains("Calling again will be refused"))
+        #expect(result.text.contains("do not retry and do not wait for it"))
+        #expect(result.text.contains("Tell the owner what you have already started"))
+        #expect(result.text.contains("15 minutes"))
+        // No path inside Bloom, and no command line. See `WorkspaceStartTrouble`.
+        #expect(!result.text.contains("/tmp/"))
+        #expect(!result.text.contains("worktree add"))
+    }
+
+    /// Rolling, and not a ceiling. The workspaces of a busy fortnight are not a runaway.
+    @Test("workspaces started before the window do not count")
+    func theWindowRolls() async throws {
+        let (store, repo) = try await fixture("owner-rate-rolls")
+        try await alreadyStarted(
+            WorkspaceStartTool.maximumOwnerStarts * 3,
+            in: repo,
+            store: store,
+            ago: WorkspaceStartTool.ownerWindow + 60
+        )
+        let recorder = Recorder()
+
+        let result = await recorder.tool().call(request("one more"), as: .owner, store: store)
+
+        #expect(!result.isError)
+        #expect(recorder.origins.count == 1)
+    }
+
+    /// The Create sheet needs a gesture per workspace, so its rows are not what this counts. A
+    /// person who made a dozen by hand this morning must not find the tool refusing them one.
+    @Test("workspaces made in Bloom's own window do not count against the tool")
+    func handMadeWorkspacesDoNotCount() async throws {
+        let (store, repo) = try await fixture("owner-rate-sheet")
+        for index in 0..<(WorkspaceStartTool.maximumOwnerStarts * 2) {
+            _ = try await store.upsert(Workspace(
+                repoID: repo.id,
+                name: "by hand \(index)",
+                branch: "b\(index)",
+                path: "/tmp/hand-\(index)",
+                baseBranch: "main"
+            ))
+        }
+        let recorder = Recorder()
+
+        let result = await recorder.tool().call(request("one more"), as: .owner, store: store)
+
+        #expect(!result.isError)
+        #expect(recorder.origins.count == 1)
+    }
+
+    /// Archiving frees a parent's allowance, because that limit is on what is running. It does
+    /// not free this one, because a worktree that was cut was cut.
+    @Test("archiving one does not hand the allowance back")
+    func archivingDoesNotFreeTheWindow() async throws {
+        let (store, repo) = try await fixture("owner-rate-archived")
+        let earlier = try await alreadyStarted(
+            WorkspaceStartTool.maximumOwnerStarts, in: repo, store: store
+        )
+        for var workspace in earlier {
+            workspace.state = .archived
+            _ = try await store.upsert(workspace)
+        }
+
+        let result = await Recorder().tool().call(request("one more"), as: .owner, store: store)
+
+        #expect(result.isError)
+    }
+
+    /// A retried call is the same call. It must answer with the workspace the first one made,
+    /// and it must not be told it has hit a limit: a duplicate that looked like a refusal would
+    /// send a model looking for a problem that is not there.
+    @Test("a repeat of the same call answers with what it already made, and cuts nothing")
+    func aRetryIsNotASecondStart() async throws {
+        let (store, repo) = try await fixture("owner-rate-retry")
+        let recorder = Recorder()
+        _ = await recorder.tool().call(request("Import the webhooks"), as: .owner, store: store)
+        let spawnID = try #require(recorder.origins.first?.spawnToolUseID)
+        // What the app writes once the start has happened, which is what the second call finds.
+        _ = try await store.upsert(Workspace(
+            repoID: repo.id,
+            name: "Import the webhooks",
+            branch: "claude/import-the-webhooks",
+            path: "/tmp/import",
+            baseBranch: "main",
+            origin: .ownerClient(spawnToolUseID: spawnID)
+        ))
+
+        let again = await recorder.tool().call(
+            request("Import the webhooks"), as: .owner, store: store
+        )
+
+        #expect(!again.isError)
+        #expect(again.text.contains("already_started"))
+        #expect(again.text.contains("Nothing new was created"))
+        #expect(recorder.origins.count == 1)
+    }
+
+    /// The digest has to answer for the project too. The owner names one out loud, so the same
+    /// prompt against two projects is two asks, and a key that ignored it would answer the second
+    /// with the first one's workspace.
+    @Test("the same prompt in another project is another call")
+    func theProjectIsInTheKey() throws {
+        let order = AgentWorkspaceOrder(prompt: "Import the webhooks")
+
+        #expect(
+            order.spawnID(ownerProject: RepoID("r1")) == order.spawnID(ownerProject: RepoID("r1"))
+        )
+        #expect(order.spawnID(ownerProject: RepoID("r1")) != order.spawnID(ownerProject: RepoID("r2")))
+        #expect(
+            order.spawnID(ownerProject: RepoID("r1"))
+                != order.spawnID(parentWorkspaceID: WorkspaceID("r1"))
+        )
     }
 }
 
