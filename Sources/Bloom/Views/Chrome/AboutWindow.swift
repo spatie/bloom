@@ -240,6 +240,8 @@ private struct AboutView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: Self.productMark, height: Self.productMark)
+                    .background(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: Self.productMarkRadius, style: .continuous))
                     .accessibilityHidden(true)
             }
             VStack(alignment: .leading, spacing: Metrics.spacingTight) {
@@ -268,6 +270,32 @@ private struct AboutView: View {
     /// its file to the edge reads larger than a tile's inset art, and it read lighter instead,
     /// because an open glyph carries less mass than a solid tile, not more.
     private static let productMark: CGFloat = 22
+
+    /// The corner the three marks share, and the reason they sit on white.
+    ///
+    /// THE GROUND. Mailcoach's mark is not a drawing on a tile, it is a tile with the drawing cut
+    /// out of it: the glyph is a hole in the navy, alpha zero, so whatever is behind the mark is
+    /// what the glyph shows. On the email's white page that reads as a white glyph. In dark
+    /// appearance the panel behind it is `Palette.surface`, which is 0A1A25, and 142D6F against
+    /// 0A1A25 is a contrast ratio of 1.4 to 1 for both the tile against the panel and the glyph
+    /// against the tile, so the whole mark collapsed into one navy smudge. It drew perfectly and
+    /// said nothing, which is why checking that three images appeared is not the same test as
+    /// reading them. The white behind every mark is the ground that mark was cut for.
+    ///
+    /// WHY ALL THREE AND NOT ONLY THE ONE THAT BROKE. Painting the hole white in the bitmap
+    /// would have fixed Mailcoach alone and left the row as it was: a tile, a tile with a
+    /// different corner, and a bare glyph, which is three products presented three ways. On one
+    /// white ground clipped to one corner the row is a set. Flare's glyph is the only one the
+    /// white is visible behind, and it is the ground Flare's own app icon is drawn on, not a
+    /// background invented for it here. In light appearance the panel is white already, so this
+    /// shows as nothing at all and only the shared corner is doing work.
+    ///
+    /// THE RADIUS. 6 points at 22, which is the corner Mailcoach's own tile already carries.
+    /// Clipping takes material away and cannot put it back, so a smaller number would have left
+    /// Mailcoach round and squared There There off against it, and a larger one would have cut a
+    /// white sliver out of Mailcoach's corners. Matching the roundest of the three is the only
+    /// value that lands both tiles on the same silhouette.
+    private static let productMarkRadius: CGFloat = 6
 
     /// The email's own bitmaps, read out of the bundle; see `MakerProduct.logoResource`.
     private static func mark(named resource: String) -> NSImage? {
