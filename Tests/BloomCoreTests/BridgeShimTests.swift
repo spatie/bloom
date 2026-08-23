@@ -120,6 +120,32 @@ struct BridgeShimTests {
         #expect(complaints.joined(separator: " ").contains(BridgeProtocol.socketVariable))
     }
 
+    /// The complaint used to say "Neither was set" whichever of the two was missing, which sent
+    /// the reader to check the one variable that was already right.
+    @Test("it names the variable that is missing rather than blaming both")
+    func namesTheMissingVariable() {
+        #expect(BridgeShim.missingEnvironment([
+            BridgeProtocol.socketVariable: "/tmp/a.sock",
+            BridgeProtocol.tokenVariable: "t",
+        ]) == nil)
+
+        let noToken = try! #require(BridgeShim.missingEnvironment([BridgeProtocol.socketVariable: "/tmp/a.sock"]))
+        #expect(noToken.contains("\(BridgeProtocol.tokenVariable) was not set"))
+        #expect(!noToken.contains("Neither"))
+
+        let noSocket = try! #require(BridgeShim.missingEnvironment([BridgeProtocol.tokenVariable: "t"]))
+        #expect(noSocket.contains("\(BridgeProtocol.socketVariable) was not set"))
+
+        // An empty value is not a value, and it is what an unset variable in a plist looks like.
+        let blank = try! #require(BridgeShim.missingEnvironment([
+            BridgeProtocol.socketVariable: "",
+            BridgeProtocol.tokenVariable: "t",
+        ]))
+        #expect(blank.contains("\(BridgeProtocol.socketVariable) was not set"))
+
+        #expect(BridgeShim.missingEnvironment([:])?.contains("Neither was set") == true)
+    }
+
     @Test("names the socket it could not reach, rather than hanging", .timeLimit(.minutes(1)))
     func withoutAnApp() async throws {
         let socketPath = scratchSocket()

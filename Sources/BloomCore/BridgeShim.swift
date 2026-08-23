@@ -26,16 +26,12 @@ public enum BridgeShim {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         shim: String? = CommandLine.arguments.first
     ) async -> Int32 {
-        guard let socketPath = environment[BridgeProtocol.socketVariable], !socketPath.isEmpty,
-              let token = environment[BridgeProtocol.tokenVariable], !token.isEmpty
-        else {
-            complain("""
-                bloom-bridge is launched by Bloom and takes \(BridgeProtocol.socketVariable) and \
-                \(BridgeProtocol.tokenVariable) from its environment. Neither was set, so there \
-                is nothing to connect to.
-                """)
+        if let complaint = missingEnvironment(environment) {
+            complain(complaint)
             return Exit.notConfigured
         }
+        let socketPath = environment[BridgeProtocol.socketVariable] ?? ""
+        let token = environment[BridgeProtocol.tokenVariable] ?? ""
         let role = environment[BridgeProtocol.roleVariable] ?? BridgeRole.parent.rawValue
 
         let connection: UnixSocketConnection
@@ -95,6 +91,27 @@ public enum BridgeShim {
             }
             for line in buffer.take(data) { connection.writeLine(line) }
         }
+    }
+
+    /// What is missing from the environment, as the sentence to print, or nil when nothing is.
+    ///
+    /// It names the variables that are actually absent. The sentence used to say "Neither was
+    /// set" whichever of the two was missing, so somebody who had set the socket and lost the
+    /// token was told to go and look at both, and the one thing the message could have told them
+    /// was the one thing it did not.
+    static func missingEnvironment(_ environment: [String: String]) -> String? {
+        let missing = [BridgeProtocol.socketVariable, BridgeProtocol.tokenVariable]
+            .filter { (environment[$0] ?? "").isEmpty }
+        guard !missing.isEmpty else { return nil }
+
+        let absent = missing.count == 2
+            ? "Neither was set"
+            : "\(missing[0]) was not set"
+        return """
+            bloom-bridge is launched by Bloom and takes \(BridgeProtocol.socketVariable) and \
+            \(BridgeProtocol.tokenVariable) from its environment. \(absent), so there is \
+            nothing to connect to.
+            """
     }
 
     private static func complain(_ sentence: String) {
