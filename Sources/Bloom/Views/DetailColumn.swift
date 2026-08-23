@@ -23,6 +23,8 @@ struct DetailColumn: View {
                 workspace(id)
             case .archived(let id):
                 archived(id)
+            case .archive:
+                ArchiveView()
             }
         }
     }

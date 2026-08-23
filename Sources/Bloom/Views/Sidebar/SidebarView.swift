@@ -78,6 +78,11 @@ struct SidebarView: View {
             Section {
                 navRow(.home, title: "Home", icon: "house")
                 navRow(.search, title: "Search", icon: "magnifyingglass")
+                // Third rather than second, and permanent rather than appearing once something has
+                // been archived. A row that comes and goes is a row nobody learns the position of,
+                // and this one is worth finding when a database has grown rather than only when
+                // somebody happens to remember it exists.
+                navRow(.archive, title: "Archive", icon: "archivebox")
             }
 
             // A plain row rather than a `Section` header, because the things it heads are

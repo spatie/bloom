@@ -17,6 +17,12 @@ enum SidebarSelection: Hashable {
     /// hides itself, the menu items grey, the background refresh skips it and nothing tries to
     /// reopen it on the next launch.
     case archived(WorkspaceID)
+    /// The list of everything that has been archived, with what each row still costs.
+    ///
+    /// A screen beside Home and Search rather than a settings pane, because it is a list of
+    /// workspaces and the sidebar is where this app keeps those. Settings holds preferences, and
+    /// which transcripts to destroy is not one.
+    case archive
 
     var workspaceID: WorkspaceID? {
         if case .workspace(let id) = self { return id }
@@ -672,6 +678,67 @@ final class AppModel {
     private func invalidateArchived() {
         cachedArchived = nil
         archivedRevision &+= 1
+    }
+
+    // MARK: - Clearing out the archive
+
+    /// Every archived workspace with what it still holds, and whether its branch is still here.
+    ///
+    /// The branch question is asked once per project rather than once per workspace: `branchExists`
+    /// is a `git show-ref` per call, and a list of forty archived workspaces across three projects
+    /// would be forty processes to answer a question three `for-each-ref` calls answer completely.
+    ///
+    /// Only the local half of the question is asked. `RestoreSource` is the full answer and needs a
+    /// fetch per workspace, which is a network round trip a list cannot afford; a branch that is
+    /// not here may still be on a remote, and `ArchiveDeletion.branchStanding` is careful to say
+    /// that rather than claim the work is gone.
+    func archiveCleanup() async -> ArchiveCleanup {
+        guard let store, var footprints = try? await store.archivedFootprints() else {
+            return ArchiveCleanup(footprints: [])
+        }
+
+        var localBranches: [RepoID: Set<String>] = [:]
+        for repo in repos where footprints.contains(where: { $0.workspace.repoID == repo.id }) {
+            guard let branches = try? await Git.branches(of: repo.path) else { continue }
+            localBranches[repo.id] = Set(branches)
+        }
+        for index in footprints.indices {
+            let workspace = footprints[index].workspace
+            footprints[index].branchIsLocal = localBranches[workspace.repoID]?.contains(workspace.branch)
+        }
+        return ArchiveCleanup(footprints: footprints)
+    }
+
+    func databaseSize() async -> DatabaseSize? {
+        guard let store else { return nil }
+        return try? await store.databaseSize()
+    }
+
+    /// Destroys the records for archived workspaces, and forgets everything the window was holding
+    /// about them.
+    ///
+    /// The selection is moved first. A window sitting on `.archived(id)` whose row has just been
+    /// deleted would fall through `DetailColumn` to Home, which is the right answer to an
+    /// impossible state and the wrong thing to do to somebody who is halfway through tidying up.
+    @discardableResult
+    func deleteArchived(_ ids: [WorkspaceID]) async -> Int {
+        guard let store, !ids.isEmpty else { return 0 }
+        let removed = (try? await store.deleteArchivedWorkspaces(ids: ids)) ?? 0
+        guard removed > 0 else { return 0 }
+
+        if let open = selection.archivedWorkspaceID, ids.contains(open) {
+            selection = .archive
+        }
+        for id in ids { workspaceModels[id] = nil }
+        invalidateArchived()
+        return removed
+    }
+
+    /// Rewrites the database so the pages a delete freed go back to the filesystem. Slow on a
+    /// large file and deliberately never automatic. See `Store.compactDatabase`.
+    func compactDatabase() async {
+        guard let store else { return }
+        try? await store.compactDatabase()
     }
 
     func workspaces(in repo: Repo) -> [Workspace] {
