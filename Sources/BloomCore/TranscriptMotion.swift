@@ -1,6 +1,6 @@
 import Foundation
 
-/// What the transcript is allowed to fade in.
+/// What the transcript is allowed to animate, and for how long.
 ///
 /// Three different things get called "text appearing in the chat window" and they do not want the
 /// same treatment, so the rules for telling them apart live here rather than inside a view where
@@ -40,6 +40,82 @@ public enum TranscriptMotion {
         switch kind {
         case .assistantText, .thinking, .user: false
         default: true
+        }
+    }
+
+    // MARK: - Going back to the live end
+
+    /// How the transcript travels when the reader asks to be taken back to the newest row.
+    public enum LiveEndMove: Equatable, Sendable {
+        /// There instantly, with no travel to watch. What Reduce Motion gets, and what a reader
+        /// who is already at the end gets, since there is nowhere to go.
+        case jump
+        /// A short scroll, so the transcript arrives rather than teleports.
+        case glide(seconds: Double)
+    }
+
+    /// The shortest a glide can be, which is what a small hop gets.
+    ///
+    /// The same fifth of a second the rest of the window answers a press in. See `Motion.pane`.
+    public static let glideFloor: Double = 0.16
+
+    /// The longest a glide can be, whatever the distance.
+    ///
+    /// **Nearly constant, and deliberately not proportional to the distance.** A reader who is
+    /// five thousand points up is not asking for a tour of the conversation they scrolled past,
+    /// they are asking to be at the end of it, and a scroll that took a second and a half to cover
+    /// that would be an effect rather than a movement. What the travel is for is the sense of
+    /// which way you went, and a quarter of a second of it carries that whether the distance was
+    /// two hundred points or twenty thousand.
+    public static let glideCeiling: Double = 0.26
+
+    /// The distance at which a glide is already as long as it will ever be.
+    ///
+    /// Roughly two panes of a full height window. Past this the answer stops moving, which is the
+    /// whole of the paragraph above.
+    public static let glideRamp: Double = 1400
+
+    /// Below this there is nothing worth animating: the reader is at the end already, or close
+    /// enough to it that a curve would be a flicker rather than a movement. The same threshold
+    /// `ScrollEnd` uses to decide whether the reader is following along, and for the same reason:
+    /// there is one rule about how near the end counts as being at it, and this is not a second.
+    public static let glideFloorDistance: Double = ScrollEnd.threshold
+
+    /// How to travel to the live end.
+    ///
+    /// `distance` is how far below the viewport the end of the content is, and it is allowed to be
+    /// a coarse number: the answer moves by a tenth of a second across the whole of its useful
+    /// range, so the caller can quantise it hard enough that reporting it costs a scroll nothing.
+    /// See `TranscriptGeometry`.
+    ///
+    /// Reduce Motion drops the movement rather than slowing it, which is what every other call
+    /// site in this app does: the setting is about movement, and there is no slower version of
+    /// this worth having.
+    public static func liveEndMove(distance: Double, reduceMotion: Bool) -> LiveEndMove {
+        guard !reduceMotion else { return .jump }
+        guard distance >= glideFloorDistance else { return .jump }
+        let ramp = min(1, max(0, distance) / glideRamp)
+        return .glide(seconds: glideFloor + (glideCeiling - glideFloor) * ramp)
+    }
+
+    /// Whether arriving at the end has to be said a second time once the glide has finished.
+    ///
+    /// **Yes while a turn is streaming, and this is the one place the two mechanisms meet.** The
+    /// end of the content is where it was when the glide was aimed at it, and a running turn moves
+    /// it down by a line every few hundred milliseconds. So a glide during a turn lands a little
+    /// short of the end it was pointed at, and short of the end is exactly the state in which the
+    /// transcript does NOT follow the tail: the size-change anchor is only in force while the
+    /// reader is near the bottom. Left alone, pressing the pill mid turn takes you to where the
+    /// answer was and then leaves you behind again.
+    ///
+    /// Saying the edge again on arrival closes that gap and re-attaches the follow in one move.
+    /// Not animated, because it is covering the two lines that arrived during the glide.
+    ///
+    /// A finished turn needs none of this. Nothing is growing, so the glide lands on the end.
+    public static func reassertsLiveEnd(after move: LiveEndMove, isStreaming: Bool) -> Bool {
+        switch move {
+        case .jump: false
+        case .glide: isStreaming
         }
     }
 }

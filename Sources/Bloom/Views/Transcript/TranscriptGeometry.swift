@@ -2,7 +2,7 @@ import Foundation
 
 /// What the transcript needs to know about the space it is being drawn in.
 ///
-/// Both values come from one `onScrollGeometryChange` subscription rather than from a
+/// Every value here comes from one `onScrollGeometryChange` subscription rather than from a
 /// `GeometryReader` and a preference key: the scroll view already knows its container size, its
 /// content size and where it sits between them, and asking it directly is both cheaper and immune
 /// to the "the probe stopped being built" edge cases a preference-based measurement has.
@@ -28,6 +28,15 @@ struct TranscriptGeometry: Equatable {
     var paneHeight: CGFloat = 0
     /// Whether the user is close enough to the newest row to count as following along.
     var isNearBottom = true
+    /// How far below the viewport the end of the conversation is, already rounded, and read for
+    /// one thing only: how long the jump pill's scroll back to the live end should run for.
+    ///
+    /// Rounded hard, and it can afford to be. `TranscriptMotion.liveEndMove` moves its answer by
+    /// a tenth of a second across the whole of its range and stops moving it at all past
+    /// `glideRamp`, so a step of a quarter of a pane is finer than the answer, and a reader
+    /// dragging the scroller crosses a handful of steps rather than writing this state once a
+    /// frame. See `bubbleCap` for the same decision made for the same reason.
+    var reachToEnd: Double = 0
 
     /// The quantum the cap is rounded to. Eight points is invisible on a bubble that is several
     /// hundred wide, and small enough that a pane resized by hand still ends up with a bubble that
@@ -36,6 +45,10 @@ struct TranscriptGeometry: Equatable {
     /// Rounded DOWN rather than to nearest, so the cap can never come out wider than the share of
     /// the pane it is meant to be.
     static let step: CGFloat = 8
+
+    /// The quantum the reach is rounded to. See `reachToEnd`: two hundred points is about a
+    /// quarter of a full height pane, and buys under a hundredth of a second of glide.
+    static let reachStep: Double = 200
 
     /// The quantum the pane height is rounded to. See `paneHeight`: about two lines of the face
     /// the setup tail is set in, which is what it takes to change the answer by one line.
@@ -53,5 +66,15 @@ struct TranscriptGeometry: Equatable {
     static func height(_ height: CGFloat) -> CGFloat {
         guard height > 0 else { return 0 }
         return max(heightStep, (height / heightStep).rounded(.down) * heightStep)
+    }
+
+    /// How far below the viewport the content still runs, rounded to `reachStep`.
+    ///
+    /// Rounded DOWN, so a reader who is a whisker over a step's worth from the end is described as
+    /// being on the near side of it. Never negative: a bounce past the end, or a top content
+    /// inset, is nought left to travel rather than a distance behind you.
+    static func reach(contentHeight: Double, viewportHeight: Double, offset: Double) -> Double {
+        let raw = max(0, contentHeight - offset - viewportHeight)
+        return (raw / reachStep).rounded(.down) * reachStep
     }
 }

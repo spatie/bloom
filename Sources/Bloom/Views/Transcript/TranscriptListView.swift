@@ -40,6 +40,13 @@ struct TranscriptListView: View {
     /// the same mechanism and the same 180ms the sidebar and Home settle their rows on.
     @State private var arrival = RowArrival<String>()
 
+    /// The unanimated second half of a glide to the live end, if one is owed. See `goToLiveEnd`.
+    @State private var catchUp: Task<Void, Never>?
+
+    /// Read here rather than inside `TranscriptMotion`, which is in a target that has never heard
+    /// of AppKit. The core decides what the setting means and the view is where the setting is.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     /// The session the tracker above is following.
     ///
     /// Nothing fades until a session has finished arriving. Switching workspaces hands this list
@@ -339,13 +346,13 @@ struct TranscriptListView: View {
                 trackArrivals()
             }
             // Asked for by the jump pill, and an edge rather than a row on purpose: the list is
-            // drawing the end of the session and may not be holding the row a seq names yet. Not
-            // animated, because the distance being covered is usually thousands of points and a
-            // fifth of a second of that is a blur rather than a sense of where you went.
+            // drawing the end of the session and may not be holding the row a seq names yet.
             .onChange(of: transcript.liveEndRequests) { _, _ in
-                scrollPosition.scrollTo(edge: .bottom)
+                goToLiveEnd()
             }
             .onChange(of: transcript.session.id) { _, _ in
+                // Nothing owed to a conversation the pane has left.
+                catchUp?.cancel()
                 didPosition = false
                 expanded.removeAll()
                 // A session opens at its live end whatever the one being left was scrolled to,
@@ -435,6 +442,11 @@ struct TranscriptListView: View {
             // begins and ends, not on every frame of one.
             .onScrollPhaseChange { _, phase in
                 if phase != .idle { hoverHost.request = nil }
+                // A hand on the wheel outranks anything this view asked for. `.animating` is our
+                // own glide and is not a reason to drop it; the other two are the reader taking
+                // hold, and a view that goes on dragging somebody somewhere after they have
+                // grabbed it is the worst thing in this file.
+                if phase == .tracking || phase == .interacting { catchUp?.cancel() }
             }
             .overlay {
                 if showsPlaceholder {
@@ -465,6 +477,11 @@ struct TranscriptListView: View {
             ),
             paneHeight: TranscriptGeometry.height(scroll.containerSize.height),
             isNearBottom: ScrollEnd.isAtEnd(
+                contentHeight: scroll.contentSize.height,
+                viewportHeight: scroll.containerSize.height,
+                offset: scroll.contentOffset.y
+            ),
+            reachToEnd: TranscriptGeometry.reach(
                 contentHeight: scroll.contentSize.height,
                 viewportHeight: scroll.containerSize.height,
                 offset: scroll.contentOffset.y
@@ -505,6 +522,47 @@ struct TranscriptListView: View {
         }
         guard wasAsked || geometry.isNearBottom else { return }
         scrollPosition.scrollTo(edge: .bottom)
+    }
+
+    /// Takes the reader back to the newest row, which is what the jump pill asks for.
+    ///
+    /// **A scroll rather than a jump, and the length of it is nearly the same however far it has
+    /// to go.** See `TranscriptMotion.liveEndMove` for that argument; what belongs here is why it
+    /// is safe. Every one of these names an EDGE, which resolves without the list having to build
+    /// or measure a single row between here and there, and that is the difference between this and
+    /// the per-row `scrollTo` that following a turn used to be. An animated scroll to a named row
+    /// thousands of points down a `LazyVStack` would realise every row it passed, one per frame of
+    /// the curve, which is the shape of the bug this file already carries two comments about.
+    ///
+    /// **The second scroll is for a turn that is still running.** The end of the content moves
+    /// down while the glide is in the air, so it lands a little short, and short of the end is
+    /// exactly the state in which `defaultScrollAnchor(for: .sizeChanges)` is dropped and the
+    /// transcript stops following the tail. Saying the edge again on arrival closes the gap the
+    /// glide could not see and re-attaches the follow in one move. Not animated: it is covering
+    /// the two lines that arrived during the glide, not travelling anywhere.
+    ///
+    /// It is cancelled by a hand on the wheel, by leaving the session, and by a second press of
+    /// the pill, which is the whole of what `catchUp` is for.
+    private func goToLiveEnd() {
+        catchUp?.cancel()
+
+        let move = TranscriptMotion.liveEndMove(distance: geometry.reachToEnd, reduceMotion: reduceMotion)
+        switch move {
+        case .jump:
+            scrollPosition.scrollTo(edge: .bottom)
+        case .glide(let seconds):
+            withAnimation(.easeOut(duration: seconds)) {
+                scrollPosition.scrollTo(edge: .bottom)
+            }
+        }
+
+        guard TranscriptMotion.reassertsLiveEnd(after: move, isStreaming: transcript.isStreaming),
+              case .glide(let seconds) = move else { return }
+        catchUp = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            scrollPosition.scrollTo(edge: .bottom)
+        }
     }
 
     /// Where a session opens: on the first thing the user has not read, which is the whole point
