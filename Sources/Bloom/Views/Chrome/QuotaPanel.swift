@@ -25,10 +25,13 @@ struct QuotaPanel: View {
     var now: Date = Date()
 
     /// The menu sizes itself to its widest item, so this is what decides how wide the whole menu
-    /// is. Wide enough for "Claude Code" and a window label on one line with the lane and the
-    /// countdown beside them, and no wider: a menu that reaches a third of the way across the
-    /// screen to hold two percentages is worse than one that wraps nothing.
-    static let width: CGFloat = 268
+    /// is, and it is a measurement rather than a taste. A ledger line is a provider name, a window
+    /// label, a forty eight point lane and a countdown, and at 268 the longest pair Bloom can
+    /// produce today, "Claude Code" beside "5 hours", truncated to "Claude Code . 5...". This is
+    /// the width that holds it with the columns still lining up, and no more: a menu that reaches
+    /// a third of the way across the screen to carry two percentages is worse than one that wraps
+    /// nothing.
+    static let width: CGFloat = 300
 
     private var ledger: [AgentQuota] {
         let headline = board.headline?.id
@@ -50,7 +53,10 @@ struct QuotaPanel: View {
                         .frame(height: Metrics.hairline)
                         .padding(.vertical, Metrics.spacingWide)
                 }
-                VStack(alignment: .leading, spacing: Metrics.spacing) {
+                // A grid rather than a stack of rows, so the lanes start on one edge and the
+                // countdowns end on one edge whatever the provider is called. Three loose rows
+                // was the first version and the lanes wandered by twenty points down the column.
+                Grid(alignment: .leading, horizontalSpacing: Metrics.spacing, verticalSpacing: Metrics.spacing) {
                     ForEach(ledger) { quota in
                         ledgerRow(quota)
                     }
@@ -85,16 +91,16 @@ struct QuotaPanel: View {
         VStack(alignment: .leading, spacing: Metrics.spacing) {
             HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
                 Text(title(for: quota))
-                    .font(Typo.labelEmphasis)
+                    .font(Typo.title)
                     .foregroundStyle(Palette.textPrimary)
                 Spacer(minLength: Metrics.spacingWide)
                 Text(percentage(quota) ?? "")
-                    .font(Typo.labelEmphasis)
+                    .font(Typo.title)
                     .monospacedDigit()
                     .foregroundStyle(tint(for: quota))
             }
 
-            lane(for: quota, height: 6)
+            lane(for: quota, height: 4)
 
             if let resetsAt = quota.resetsAt {
                 Text("Lifts \(QuotaCountdown.phrase(until: resetsAt, from: now))")
@@ -110,27 +116,45 @@ struct QuotaPanel: View {
     /// percentage is deliberately absent here. Three numbers on a line is a table, and the lane
     /// already says the thing the number would, to the precision anybody reads a menu for.
     private func ledgerRow(_ quota: AgentQuota) -> some View {
-        HStack(spacing: Metrics.spacingWide) {
+        GridRow {
             Text(title(for: quota))
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textSecondary)
                 .lineLimit(1)
-            Spacer(minLength: Metrics.spacingSmall)
-            if quota.fraction != nil {
-                lane(for: quota, height: 3)
-                    .frame(width: 42)
-            } else {
-                Text("not reported")
-                    .font(Typo.micro)
-                    .foregroundStyle(Palette.textTertiary)
+                // The row is wide enough for this and SwiftUI still truncated it, because the two
+                // fixed columns beside it are asked for their width first and the name is left
+                // whatever is over. Nothing here may be shortened: a menu that says
+                // "Claude Code . 5 ho..." has failed at the one job it has.
+                .fixedSize()
+                .gridColumnAlignment(.leading)
+            Group {
+                if quota.fraction != nil {
+                    lane(for: quota, height: 3)
+                } else {
+                    // Not an empty track. An empty track is a claim about how much has gone, and
+                    // the whole point of this case is that nobody made one.
+                    Text("not reported")
+                        .font(Typo.micro)
+                        .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                }
             }
-            if let resetsAt = quota.resetsAt {
-                Text(QuotaCountdown.phrase(until: resetsAt, from: now))
-                    .font(Typo.micro)
-                    .monospacedDigit()
-                    .foregroundStyle(Palette.textTertiary)
-                    .frame(width: 54, alignment: .trailing)
-            }
+            // Sized to the words rather than to the lane, because the lane would happily be
+            // half this and "not reported" would not, and a column that changes width depending
+            // on which of the two a row is showing is not a column.
+            .frame(width: 66, alignment: .leading)
+            .gridColumnAlignment(.leading)
+            Text(quota.resetsAt.map { QuotaCountdown.phrase(until: $0, from: now) } ?? "")
+                .font(Typo.micro)
+                .monospacedDigit()
+                .foregroundStyle(Palette.textTertiary)
+                .lineLimit(1)
+                // Pushed to the panel's own edge rather than to the grid's natural width, so the
+                // countdowns end where the headline lane ends. Sized to the longest phrase this
+                // can produce, which lets the column hold still as the numbers count down instead
+                // of the whole menu breathing in and out under the pointer.
+                .frame(minWidth: 62, maxWidth: .infinity, alignment: .trailing)
+                .gridColumnAlignment(.trailing)
         }
     }
 
@@ -157,12 +181,23 @@ struct QuotaPanel: View {
                 Rectangle().fill(Palette.border)
                 Rectangle()
                     .fill(tint(for: quota))
-                    // Clamped, because a provider reporting 103 percent of an overage allowance is
-                    // a thing that happens and a lane wider than its track draws over the text.
-                    .frame(width: proxy.size.width * min(max(quota.fraction ?? 0, 0), 1))
+                    // Clamped at both ends. A provider reporting 103 percent of an overage
+                    // allowance is a thing that happens and a lane wider than its track draws over
+                    // the text; and at the other end the ledger's lane is forty eight points long,
+                    // so six percent of it rounds to nothing at all and a window that has been used
+                    // reads as one that has not.
+                    .frame(width: laneFill(quota.fraction, of: proxy.size.width, thickness: height))
             }
         }
         .frame(height: height)
+    }
+
+    /// Never wider than the track, and never narrower than the lane is thick, so the shortest
+    /// honest fill is a square rather than a hairline nobody can see.
+    private func laneFill(_ fraction: Double?, of width: CGFloat, thickness: CGFloat) -> CGFloat {
+        let share = min(max(fraction ?? 0, 0), 1)
+        guard share > 0 else { return 0 }
+        return min(max(width * share, thickness), width)
     }
 
     private func title(for quota: AgentQuota) -> String {
