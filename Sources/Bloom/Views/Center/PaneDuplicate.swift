@@ -28,24 +28,38 @@ enum PaneDuplicate {
         in model: WorkspaceModel,
         place: @escaping @MainActor (PaneContent) -> Void
     ) {
-        guard case .tool(let tabID) = content else { return place(content) }
-        guard let tab = CenterTabStore.shared.tabs(for: model.workspace.id)
-            .first(where: { $0.id == tabID }) else { return }
+        let tab = tab(for: content, in: model)
+        switch PaneSplit.duplicating(content, tabKind: tab?.kind) {
+        case .sameContent:
+            place(content)
 
-        switch tab.kind {
-        case .terminal:
+        case .freshTerminal:
             NewPane.open(.terminal, in: model, place: place)
 
         // On the page it is already showing, rather than on the empty address a split browser
         // normally opens with. This is the one route that means "the same again", and the same
         // again is the same page.
-        case .browser:
-            NewPane.open(.browser, in: model, url: tab.url, place: place)
+        case .freshBrowser:
+            NewPane.open(.browser, in: model, url: tab?.url ?? "", place: place)
 
-        // Neither the review nor the notes have a second copy to make: a workspace has exactly one
-        // of each by design, and two panes onto the same note would be two carets in one text.
-        case .review, .notes:
+        case .nothing:
             return
         }
+    }
+
+    /// Whether a split would open anything, asked by the View menu before it enables Split Right
+    /// and Split Down.
+    ///
+    /// It goes through the same `PaneSplit.duplicating` the split itself goes through, because the
+    /// two used to be written separately and disagreed: the menu enabled its items on nothing more
+    /// than a workspace being selected, so Split Right on the review or the Notes tab read as
+    /// available and then did nothing, with no split and no feedback.
+    static func canOpen(_ content: PaneContent, in model: WorkspaceModel) -> Bool {
+        PaneSplit.duplicating(content, tabKind: tab(for: content, in: model)?.kind).opensAPane
+    }
+
+    private static func tab(for content: PaneContent, in model: WorkspaceModel) -> CenterTab? {
+        guard case .tool(let tabID) = content else { return nil }
+        return CenterTabStore.shared.tabs(for: model.workspace.id).first { $0.id == tabID }
     }
 }

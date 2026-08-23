@@ -192,13 +192,18 @@ struct BloomCommands: Commands {
         // owns it for splitting shells, and one keystroke that splits two different things
         // depending on where the pointer last was is worse than two that each mean one thing.
         CommandGroup(after: .sidebar) {
+            // Greyed on a tab that cannot be split rather than on no workspace at all. The
+            // review and the notes have exactly one copy each by design, so `PaneDuplicate` has
+            // always refused them, and these two items said nothing about it: on the Notes tab
+            // Split Right read as available and then did nothing when it was pressed. See
+            // `PaneSplit` in the core, which is the rule both sides read now.
             Button("Split Right", systemImage: PaneSymbol.splitRight) { splitCentre(.horizontal) }
                 .keyboardShortcut("\\", modifiers: .command)
-                .disabled(model.selectedModel == nil)
+                .disabled(!canSplitCentre)
 
             Button("Split Down", systemImage: PaneSymbol.splitDown) { splitCentre(.vertical) }
                 .keyboardShortcut("\\", modifiers: [.command, .shift])
-                .disabled(model.selectedModel == nil)
+                .disabled(!canSplitCentre)
 
             Button("Close Pane", systemImage: PaneSymbol.closePane) { closeCentrePane() }
                 .keyboardShortcut("w", modifiers: [.command, .control])
@@ -449,6 +454,16 @@ struct BloomCommands: Commands {
     /// A shell or a page cannot actually be shown twice, and asking for it has been possible here
     /// since panes existed. `PaneDuplicate` is where that is refused and a fresh one of the same
     /// kind offered instead; it is the same door the strip's own split items use.
+    /// Whether Split Right and Split Down would actually open a pane, read on every rebuild of
+    /// this body. `WorkspaceTabsStore` and `CenterTabStore` are both `@Observable`, so selecting
+    /// another tab greys and ungreys the two items on its own, the way `zoom` does above.
+    private var canSplitCentre: Bool {
+        guard let workspace = model.selectedModel else { return false }
+        let tabs = WorkspaceTabsStore.shared
+        guard let tab = tabs.selectedTab(in: workspace) else { return false }
+        return PaneDuplicate.canOpen(tabs.content(of: tabs.focusedPane(of: tab), in: tab), in: workspace)
+    }
+
     private func splitCentre(_ axis: SplitAxis) {
         guard let workspace = model.selectedModel else { return }
         let tabs = WorkspaceTabsStore.shared

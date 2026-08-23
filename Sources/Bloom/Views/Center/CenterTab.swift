@@ -17,16 +17,13 @@ import BloomCore
 /// one activity that walks over many files, so it is one tab, and a strip that grew a tab per file
 /// would bury the conversations the strip is mostly for.
 struct CenterTab: Identifiable, Hashable, Codable, Sendable {
-    enum Kind: String, Codable, Sendable {
-        case terminal
-        case browser
-        /// The changed files of this workspace, read one at a time.
-        case review
-        /// The workspace's scratch text. One per workspace, like the review, and for the same
-        /// reason: it is one piece of writing about this worktree, not a document you open copies
-        /// of. The TEXT is not here, it is a row in SQLite. See `WorkspaceNote`.
-        case notes
-    }
+    /// The kinds themselves are `CenterTabKind` in the core, because whether a kind can be split
+    /// is a rule the View menu and `PaneDuplicate` both have to read and the test target cannot
+    /// see this file. The alias keeps every `CenterTab.Kind` in the app reading as it always did.
+    /// Notes and the review are one per workspace, like each other and unlike the other two: they
+    /// are one piece of writing and one reading of a change, not documents you open copies of.
+    /// The notes TEXT is not here, it is a row in SQLite. See `WorkspaceNote`.
+    typealias Kind = CenterTabKind
 
     var id: String = newID()
     var workspaceID: WorkspaceID
