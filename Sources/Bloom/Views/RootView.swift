@@ -226,6 +226,11 @@ struct RootView: View {
             // explanation. See `AppModel.open(workspaceID:)`.
             Task { await app.open(workspaceID: id) }
         }
+        // The Archive screen is otherwise reached only by clicking its sidebar row, and a capture
+        // run has no pointer. Same shape as the toggle below it.
+        .onReceive(NotificationCenter.default.publisher(for: .bloomShowArchive)) { _ in
+            app.selection = .archive
+        }
         .onReceive(NotificationCenter.default.publisher(for: .bloomToggleSidebar)) { _ in
             columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
         }
@@ -316,6 +321,7 @@ extension Notification.Name {
     // its own name private so nothing can post an id down it untyped. These two carry no id and
     // are only ever posted by views, so they live here.
     static let bloomToggleSidebar = Notification.Name("bloom.toggleSidebar")
+    static let bloomShowArchive = Notification.Name("bloom.showArchive")
     static let bloomNewWorkspace = Notification.Name("bloom.newWorkspace")
 }
 

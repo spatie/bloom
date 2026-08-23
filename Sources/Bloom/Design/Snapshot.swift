@@ -294,6 +294,13 @@ enum Snapshot {
                 try? await Task.sleep(for: .seconds(3))
             }
 
+            // `--archive` moves the sidebar onto the Archive screen, which is otherwise reached
+            // only by clicking its row.
+            if arguments.contains("--archive") {
+                NotificationCenter.default.post(name: .bloomShowArchive, object: nil)
+                try? await Task.sleep(for: .seconds(2))
+            }
+
             // `--create-sheet` opens the New Workspace sheet and captures the sheet rather than
             // the window behind it. Without it that sheet could only be looked at by asking a
             // human for a screenshot, which is why it went years without one. Pass it LAST, for

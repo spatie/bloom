@@ -32,10 +32,16 @@ struct ArchiveView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            bar
-            Hairline()
+            // No strip over an empty screen. The order control has nothing to order and the total
+            // has nothing to total, and a bar of dead controls above a "nothing here yet" is the
+            // reason empty states so often read as a broken screen rather than a new one.
+            if !cleanup.isEmpty {
+                bar
+                Hairline()
+            }
             content
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.windowBackground)
         .task(id: app.archivedRevision) { await load() }
         .confirmation($confirming) { deletion in
@@ -64,7 +70,6 @@ struct ArchiveView: View {
             .labelsHidden()
             .controlSize(.small)
             .fixedSize()
-            .disabled(cleanup.isEmpty)
 
             Spacer(minLength: Metrics.spacing)
 
@@ -114,6 +119,7 @@ struct ArchiveView: View {
                     + "When there is something here, this is where you can see what that costs."
                 )
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 0) {
                 list
