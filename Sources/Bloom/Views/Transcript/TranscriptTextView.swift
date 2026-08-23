@@ -120,7 +120,31 @@ struct TranscriptTextView: NSViewRepresentable {
         // back, which is what makes a one word turn a one word bubble. Returning the proposal
         // here would report every turn as the full measure and put "yes" in a bubble seventy
         // percent of the pane wide, which is the exact failure that layout was written to fix.
-        return CGSize(width: min(ceil(used.width), width), height: ceil(used.height))
+        return CGSize(width: min(ceil(widestLine(layout, in: container)), width), height: ceil(used.height))
+    }
+
+    /// How wide the widest line actually came out.
+    ///
+    /// **Not `usedRect(for:)`, which answers the container's width for every string there is.**
+    /// That was the bug: "continue" reported the full cap and came out in a bubble several hundred
+    /// points wide with one word at the left of it, and so did every other turn, so a measure that
+    /// existed to make a short bubble short never made one. Measured on this exact stack: at a
+    /// container of 456, "continue" and a four line paragraph both said 456.
+    ///
+    /// The rectangle a line fragment is ALLOTTED does span the container, because that is what a
+    /// line fragment is, and `usedRect` is the union of those. The rectangle a line fragment USES
+    /// is the ink in it, and the widest of those is the width the bubble should hug: 52 for
+    /// "continue", 186 for the wider of two short lines, 452 for the paragraph that wraps.
+    ///
+    /// The height still comes from `usedRect`, which is right about it (16, 32, 64 for those
+    /// three) and which counts the extra line fragment a trailing newline leaves behind.
+    private func widestLine(_ layout: NSLayoutManager, in container: NSTextContainer) -> CGFloat {
+        var widest: CGFloat = 0
+        layout.enumerateLineFragments(forGlyphRange: layout.glyphRange(for: container)) {
+            _, usedRect, _, _, _ in
+            widest = max(widest, usedRect.maxX)
+        }
+        return widest
     }
 
     /// Only the link click. Everything else a text view does is its own.

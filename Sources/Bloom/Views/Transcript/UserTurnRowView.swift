@@ -220,6 +220,12 @@ struct UserTurnRowView: View {
 /// Measuring once at the capped width answers both questions with the same number: a short turn
 /// comes out short, a long one comes out at the cap and wraps inside it, and the height is the
 /// height of the text as it will actually be drawn.
+///
+/// **It is only ever as honest as what it measures.** For a year it measured a bubble whose text
+/// is drawn by AppKit and which answered the width it had been offered for every string there was,
+/// so "continue" came out in a bubble the full measure of the cap with one word at the left of it:
+/// the exact failure described above, from the other end. Nothing was wrong here. See
+/// `TranscriptTextView.widestLine`, which is where a view drawn by AppKit says how wide it is.
 struct CappedWidth: Layout {
     var width: CGFloat
 
