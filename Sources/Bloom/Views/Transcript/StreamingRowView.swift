@@ -25,6 +25,22 @@ import SwiftUI
 /// end of the input and hands back a code block whether the closing marker has arrived or not, so
 /// the block appears the moment the opening marker does and then grows. Nothing swaps layout when
 /// the fence completes. `MarkdownParserTests` holds that property down.
+///
+/// ## What fades here, and what must never
+///
+/// **The block fades in once, when it first has anything in it. The text inside it never does.**
+/// A delta is a handful of characters arriving many times a second, so an animation started per
+/// delta is a new implicit animation per token, all of them fighting over the same layout, and
+/// what that looks like is a shimmer running down the tail of the answer. That is a good deal
+/// worse than the pop it would be replacing, which is why `.transaction { $0.animation = nil }`
+/// is still on every piece below and why it has been pushed onto the pieces rather than left on
+/// the stack around them.
+///
+/// What was actually popping is the moment the answer starts: the turn shows "Working", and then
+/// a paragraph of prose is on screen in one frame where a status line was. That is a block
+/// arriving in front of the reader in exactly the sense `RowArrival` was written for, so it gets
+/// the same settle a tool row gets, at the same length, honouring the same Reduce Motion setting.
+/// Once per block, which is once or twice a turn, and nothing per delta.
 struct StreamingRowView: View {
     let transcript: TranscriptModel
 
@@ -41,6 +57,8 @@ struct StreamingRowView: View {
                     text: transcript.streamingThinking,
                     tokens: transcript.thinkingTokens
                 )
+                .transaction { $0.animation = nil }
+                .arrivingRow(true)
             }
 
             if !transcript.streamingText.isEmpty {
@@ -54,16 +72,24 @@ struct StreamingRowView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, TranscriptLayout.inset)
                     .padding(.vertical, TranscriptLayout.inset)
+                    // Streamed text arrives many times a second, and every one of those deltas
+                    // runs through here. Nothing inside this block may carry an animation: see
+                    // the note under `body`.
+                    .transaction { $0.animation = nil }
+                    // Outside the transaction above, and that is the whole of why it works. The
+                    // modifier clears the animation for what it wraps, and the opacity this adds
+                    // sits above it, so the block's own settle survives while the text under it
+                    // stays as sudden as it was.
+                    .arrivingRow(true)
             }
 
             if let tool = transcript.streamingToolName {
                 StreamingStatusView(glyph: "gearshape", text: "Running \(tool)")
+                    .transaction { $0.animation = nil }
             } else if transcript.isRunning, !hasVisibleStream {
                 StreamingStatusView(glyph: nil, text: transcript.statusLabel ?? "Working")
+                    .transaction { $0.animation = nil }
             }
         }
-        // Streamed text arrives many times a second. Animating it would mean a new implicit
-        // animation per token, all of them fighting over the same layout.
-        .transaction { $0.animation = nil }
     }
 }

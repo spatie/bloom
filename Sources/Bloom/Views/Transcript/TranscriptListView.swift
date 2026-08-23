@@ -556,31 +556,8 @@ struct TranscriptListView: View {
     /// The set is almost always empty, and it is checked first so that a pass over a long session
     /// does not build a string per realised row to ask a question whose answer is already no.
     private func isArriving(_ row: TranscriptRow) -> Bool {
-        guard !arrival.arriving.isEmpty, Self.fades(row.kind) else { return false }
+        guard !arrival.arriving.isEmpty, TranscriptMotion.fadesOnArrival(row.kind) else { return false }
         return arrival.isArriving(String(row.seq))
-    }
-
-    /// Whether a row of this kind is new on the frame it lands.
-    ///
-    /// Prose and thinking are not. Both are streamed live first and stored afterwards, and
-    /// `StreamingRowView` is lined up column for column with their stored twins precisely so that
-    /// nothing moves when one replaces the other. Fading the stored row in would undo exactly
-    /// that: the answer the reader is halfway through would go out and come back over a fifth of
-    /// a second, which is the jump those columns exist to avoid.
-    ///
-    /// Nor is a user turn, and that changed when the echo did. The sentence is drawn from the
-    /// queue the instant Return is pressed and the stored row replaces it in the same place at the
-    /// same measure, so fading it in would take the owner's own message away and bring it back
-    /// over a fifth of a second, which is the flicker the echo exists to remove. See
-    /// `TranscriptModel.sending`.
-    ///
-    /// Everything else genuinely arrives. A tool row lands where a "Running Bash" line was, and a
-    /// turn footer lands where the status was.
-    private static func fades(_ kind: MessageKind) -> Bool {
-        switch kind {
-        case .assistantText, .thinking, .user: false
-        default: true
-        }
     }
 
     private func toggle(_ seq: Int) {
