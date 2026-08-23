@@ -327,6 +327,10 @@ final class WorkspaceModel {
         // runner has been writing the state, the counters and the agent session id into it all
         // the while.
         _ = try? await store.update(sessionID: session.id) { $0.archivedAt = Date() }
+        // The chat is over, so its bridge token is a token nothing may use again and the config
+        // file carrying it is a dead letter. Nothing used to remove either, and the files are one
+        // per session rather than one per instance, so they only ever grew.
+        app.bridge?.retire(sessionID: session.id)
         await reloadSessions()
     }
 

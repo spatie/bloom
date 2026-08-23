@@ -70,6 +70,13 @@ public final class BridgeRegistry: Sendable {
         }
     }
 
+    /// The sessions holding a token this launch minted. What the config sweep asks, because a
+    /// file for a session not in here can no longer be used by anything: its token was either
+    /// retired or minted by a launch that has ended.
+    public var liveSessions: Set<SessionID> {
+        state.withLock { Set($0.tokens.keys) }
+    }
+
     public var count: Int {
         state.withLock { $0.identities.count }
     }

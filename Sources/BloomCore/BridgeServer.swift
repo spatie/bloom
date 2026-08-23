@@ -86,6 +86,7 @@ public final class BridgeServer: Sendable {
                 Task { await self.serve(connection) }
             }
         }
+        sweepConfigDirectory()
         note("bridge listening on \(socketPath)")
     }
 
@@ -135,6 +136,7 @@ public final class BridgeServer: Sendable {
                     sessionID: session.id,
                     directory: configDirectory
                 )
+                sweepConfigDirectory()
                 return BridgeHandle(attachment: attachment, mcpConfigPath: path)
             } catch {
                 // A chat with no bridge is a chat as it was last week. A chat that refused to
@@ -145,6 +147,45 @@ public final class BridgeServer: Sendable {
         case .codex:
             return BridgeHandle(attachment: attachment, mcpConfigPath: nil)
         }
+    }
+
+    /// Drops a session's token and the config file that carried it.
+    ///
+    /// The token is refused at the handshake from this moment, so the file is a dead letter: it
+    /// names a shim binary and a socket that will answer it with "Bloom does not recognise this
+    /// token". Leaving it behind is what filled the config directory with 63 of them.
+    public func retire(sessionID: SessionID) {
+        registry.retire(sessionID: sessionID)
+        try? FileManager.default.removeItem(atPath: configPath(for: sessionID))
+    }
+
+    /// Removes every config file whose token nothing could still use.
+    ///
+    /// Nothing removed these, and unlike the socket beside them they are one per session rather
+    /// than one per instance, so they only ever grew. Tokens live in memory for one launch, which
+    /// makes the test cheap and exact: a file whose session is not currently minted is a file no
+    /// handshake can ever accept again, whether its session was retired a minute ago or its whole
+    /// launch ended last week. Run when the server starts, which clears out everything a previous
+    /// launch left, and after each registration, so a long-running app does not accumulate the
+    /// sessions it has finished with.
+    ///
+    /// Failures are ignored on purpose. A chat must not fail to start because a scratch file in a
+    /// temporary directory could not be deleted.
+    public func sweepConfigDirectory() {
+        let live = registry.liveSessions
+        let manager = FileManager.default
+        guard let names = try? manager.contentsOfDirectory(atPath: configDirectory) else { return }
+        for name in names where name.hasSuffix(Self.configSuffix) {
+            let session = SessionID(rawValue: String(name.dropLast(Self.configSuffix.count)))
+            guard !live.contains(session) else { continue }
+            try? manager.removeItem(atPath: (configDirectory as NSString).appendingPathComponent(name))
+        }
+    }
+
+    static let configSuffix = ".mcp.json"
+
+    public func configPath(for sessionID: SessionID) -> String {
+        (configDirectory as NSString).appendingPathComponent("\(sessionID)\(Self.configSuffix)")
     }
 
     /// Where the per-session Claude Code config files live: one directory per instance, named from

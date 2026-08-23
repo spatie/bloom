@@ -234,6 +234,65 @@ struct BridgeServerTests {
         #expect(released == nil)
         #expect(!FileManager.default.fileExists(atPath: socketPath))
     }
+
+    /// Nothing ever removed these. The socket beside them is one per instance and a successor
+    /// unlinks it before binding, so that pile stayed at one; the config files are one per session
+    /// and 63 of them had accumulated, every one holding a token that had been dead since the
+    /// launch that minted it ended.
+    @Test("a config file whose token is retired does not outlive the chat that used it")
+    func retiringASessionRemovesItsConfig() async throws {
+        let store = try makeTestStore("bridge-retire")
+        let socketPath = NSTemporaryDirectory() + "bloom-retire-\(UUID().uuidString.prefix(8)).sock"
+        let server = BridgeServer(store: store, socketPath: socketPath)
+        defer { server.stop() }
+        try server.start()
+
+        let repo = try await store.upsert(Repo(name: "billing", path: "/tmp/billing"))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id,
+            name: "w",
+            branch: "b",
+            path: "/tmp/w",
+            baseBranch: "main",
+            origin: .user
+        ))
+        let session = try await store.upsert(Session(workspaceID: workspace.id))
+        let attachment = server.attach(session: session, workspace: workspace, shimPath: "/tmp/bloom-bridge")
+        _ = try BridgeRegistration.writeClaudeConfig(
+            attachment, sessionID: session.id, directory: server.configDirectory
+        )
+        #expect(FileManager.default.fileExists(atPath: server.configPath(for: session.id)))
+
+        server.retire(sessionID: session.id)
+
+        #expect(!FileManager.default.fileExists(atPath: server.configPath(for: session.id)))
+        #expect(server.registry.identity(forToken: attachment.token) == nil)
+    }
+
+    /// Every token lives in memory for one launch, so every file a previous launch wrote is a file
+    /// no handshake can accept. Starting is where they go.
+    @Test("starting sweeps up the config files a previous launch left behind")
+    func startingSweepsTheDirectory() async throws {
+        let store = try makeTestStore("bridge-sweep")
+        let socketPath = NSTemporaryDirectory() + "bloom-sweep-\(UUID().uuidString.prefix(8)).sock"
+        let server = BridgeServer(store: store, socketPath: socketPath)
+        defer { server.stop() }
+
+        let manager = FileManager.default
+        try manager.createDirectory(
+            atPath: server.configDirectory, withIntermediateDirectories: true
+        )
+        let stale = server.configPath(for: SessionID(rawValue: "from-a-previous-launch"))
+        let keep = (server.configDirectory as NSString).appendingPathComponent("notes.txt")
+        try Data("{}".utf8).write(to: URL(fileURLWithPath: stale))
+        try Data("not ours".utf8).write(to: URL(fileURLWithPath: keep))
+
+        try server.start()
+
+        #expect(!manager.fileExists(atPath: stale))
+        // Only the files this writes are this server's to remove.
+        #expect(manager.fileExists(atPath: keep))
+    }
 }
 
 /// `workspace_start` over the real socket, which is the only thing that proves an agent could
