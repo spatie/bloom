@@ -9,6 +9,17 @@ import Foundation
 public struct AgentWorkspaceOrder: Sendable, Hashable {
     public let prompt: String
     /// Nil lets Bloom name it the way it names any other workspace.
+    ///
+    /// Not made unique, and that is a decision rather than an omission. Two `workspace_start`
+    /// calls naming the same thing do produce two rows with the same label, which was raised as a
+    /// defect; suffixing it would be worse in three ways. The name is the sentence the agent has
+    /// already said out loud to the owner ("I started Sentry importer"), and quietly turning it
+    /// into "Sentry importer 2" makes that report wrong. Nothing resolves a workspace by name: the
+    /// id, the branch and the path are all unique, and the branch is what the sidebar shows
+    /// beneath the label, so the rows are told apart on screen. And the owner may already name two
+    /// workspaces the same from the sheet, which does not dedupe either, so a rule that applied
+    /// only to the tool would make the two doors behave differently for no reason visible from
+    /// either. The accidental duplicate, a retried call, is already handled by `spawnID`.
     public let name: String?
     public let baseBranch: String?
     /// Nil inherits whatever the calling session is using, which is almost always what is wanted:
