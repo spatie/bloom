@@ -201,13 +201,19 @@ public struct ArchiveDeletion: Sendable, Hashable {
     }
 
     /// The sentence above the list: what state this leaves things in.
+    ///
+    /// The apostrophe is the typographic one, and that is the whole of a small fix. This dialogue
+    /// puts a quoted workspace name in its title and a possessive in its body, and it was the one
+    /// place in the app where a curly pair and a straight tick were read in the same breath. The
+    /// quotation marks were already typographic and deliberately so (see `HomeView`, which says
+    /// why), so the mark that had to move was this one.
     public var summary: String {
         let subject = footprints.count == 1 ? "This workspace" : "These workspaces"
         let pronoun = footprints.count == 1 ? "its" : "their"
         return """
         \(subject) already lost \(pronoun) worktree when \(footprints.count == 1 ? "it was" : "they were") \
         archived, and that could be undone as long as the branch survived. This cannot. It removes \
-        the record from Bloom's database, and there is nothing anywhere else that holds a copy.
+        the record from Bloom\u{2019}s database, and there is nothing anywhere else that holds a copy.
         """
     }
 

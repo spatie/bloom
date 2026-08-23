@@ -281,10 +281,10 @@ struct ArchiveView: View {
 
     private func databaseLine(_ size: DatabaseSize) -> String {
         guard size.isWorthCompacting else {
-            return "Bloom's database is \(ArchiveDeletion.bytes(size.totalBytes))."
+            return "Bloom\u{2019}s database is \(ArchiveDeletion.bytes(size.totalBytes))."
         }
         return """
-        Bloom's database is \(ArchiveDeletion.bytes(size.totalBytes)), of which \
+        Bloom\u{2019}s database is \(ArchiveDeletion.bytes(size.totalBytes)), of which \
         \(ArchiveDeletion.bytes(size.freeBytes)) is space nothing is using. Deleting frees pages \
         inside the file; compacting rewrites the file and hands them back to the disk, which takes \
         a while and stops everything else while it runs.
