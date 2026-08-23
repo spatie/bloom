@@ -278,8 +278,8 @@ struct AgentQuotaStoreTests {
     }
 }
 
-@Suite("Allowance sentence")
-struct AllowanceSentenceTests {
+@Suite("Limit sentence")
+struct LimitSentenceTests {
     private func board(_ quotas: [AgentQuota]) -> QuotaBoard { QuotaBoard.make(from: quotas, at: now) }
 
     private func quota(_ provider: AgentKind, _ key: String, _ fraction: Double?) -> AgentQuota {
@@ -293,7 +293,7 @@ struct AllowanceSentenceTests {
     }
 
     @Test func namesTheWindowNearestItsWallAndCountsTheRest() {
-        let sentence = MenuBarSummary.allowanceSentence(
+        let sentence = MenuBarSummary.limitSentence(
             for: board([
                 quota(.claudeCode, "five_hour", 0.42),
                 quota(.claudeCode, "seven_day", 0.77),
@@ -301,14 +301,14 @@ struct AllowanceSentenceTests {
             ]),
             at: now
         )
-        #expect(sentence == "Claude Code, week allowance 77 percent used, lifts in 2h 15m. 2 other windows")
+        #expect(sentence == "Claude Code, week limit 77 percent used, lifts in 2h 15m. 2 other windows")
     }
 
     @Test func saysSoWhenThereIsNothingToSay() {
-        #expect(MenuBarSummary.allowanceSentence(for: board([]), at: now) == "No allowance reported yet")
+        #expect(MenuBarSummary.limitSentence(for: board([]), at: now) == "No limit reported yet")
         #expect(
-            MenuBarSummary.allowanceSentence(for: board([quota(.claudeCode, "five_hour", nil)]), at: now)
-                == "Allowances reported, none of them measured yet"
+            MenuBarSummary.limitSentence(for: board([quota(.claudeCode, "five_hour", nil)]), at: now)
+                == "Limits reported, none of them measured yet"
         )
     }
 }

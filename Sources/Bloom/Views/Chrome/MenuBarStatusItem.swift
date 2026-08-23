@@ -245,8 +245,8 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
 
         // First, because it is the one thing in here nowhere else in the app says, and because a
         // person opening this menu at four in the afternoon is usually asking exactly this. The
-        // workspace lists below it are also on screen in the window; the allowance is not.
-        menu.addItem(allowances())
+        // workspace lists below it are also on screen in the window; the limits are not.
+        menu.addItem(limits())
         menu.addItem(.separator())
 
         // Then the machine, which is the other row here that is not about a workspace.
@@ -283,7 +283,7 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         menu.addItem(open)
     }
 
-    /// The allowance panel, hosted in a menu item.
+    /// The limits panel, hosted in a menu item.
     ///
     /// A custom view rather than rows of text, because the one thing worth knowing here is a
     /// proportion and a menu item's title cannot draw one. `QuotaPanel` is the whole of the
@@ -302,7 +302,7 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
     /// The view is measured with `fittingSize` and pinned. An `NSHostingView` inside a menu item
     /// is given no layout pass by the menu, so a view left to size itself lands with a zero height
     /// frame and the row collapses to nothing.
-    private func allowances() -> NSMenuItem {
+    private func limits() -> NSMenuItem {
         let board = QuotaBoard.make(from: app?.quotas ?? [])
         let host = NSHostingView(rootView: QuotaPanel(board: board))
         host.frame = CGRect(origin: .zero, size: host.fittingSize)
@@ -310,14 +310,14 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         let item = NSMenuItem()
         item.view = host
         item.isEnabled = false
-        item.toolTip = Self.allowanceCaveat
-        item.setAccessibilityLabel(MenuBarSummary.allowanceSentence(for: board))
+        item.toolTip = Self.limitCaveat
+        item.setAccessibilityLabel(MenuBarSummary.limitSentence(for: board))
         return item
     }
 
     /// Said once, in the tooltip, because it explains a blank that would otherwise look broken:
     /// a Claude window with no figure beside it has not been measured rather than gone unused.
-    private static let allowanceCaveat =
+    private static let limitCaveat =
         "Claude Code publishes a usage figure only once a window passes its warning threshold. "
         + "Codex publishes one after every turn."
 

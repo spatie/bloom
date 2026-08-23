@@ -79,21 +79,25 @@ public enum MenuBarSummary {
         return lines.isEmpty ? idleTooltip : lines.joined(separator: ", ")
     }
 
-    /// The allowance panel read out loud.
+    /// The limits panel read out loud.
     ///
     /// A disabled menu item carrying a custom view has no title for VoiceOver to speak and a
     /// hosted SwiftUI subtree is a stack of unlabelled shapes, so the whole row is labelled with
     /// one sentence instead. Here rather than beside the panel because it is the only version of
     /// that panel anything in `Tests/BloomCoreTests` can hold still.
-    public static func allowanceSentence(for board: QuotaBoard, at now: Date = Date()) -> String {
+    ///
+    /// It says limit rather than allowance because the panel does, and the two have to agree: a
+    /// heading a sighted reader sees as LIMITS and a screen reader announces as an allowance is
+    /// two names for one row.
+    public static func limitSentence(for board: QuotaBoard, at now: Date = Date()) -> String {
         guard let headline = board.headline, let fraction = headline.fraction else {
             return board.isEmpty
-                ? "No allowance reported yet"
-                : "Allowances reported, none of them measured yet"
+                ? "No limit reported yet"
+                : "Limits reported, none of them measured yet"
         }
         let percentage = Int((min(max(fraction, 0), 1) * 100).rounded(.down))
         var sentence = "\(headline.provider.label), \(headline.window.label.lowercased()) "
-            + "allowance \(percentage) percent used"
+            + "limit \(percentage) percent used"
         if let resetsAt = headline.resetsAt {
             sentence += ", lifts \(QuotaCountdown.phrase(until: resetsAt, from: now))"
         }
