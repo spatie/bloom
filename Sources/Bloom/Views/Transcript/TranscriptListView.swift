@@ -40,6 +40,12 @@ struct TranscriptListView: View {
     /// the same mechanism and the same 180ms the sidebar and Home settle their rows on.
     @State private var arrival = RowArrival<String>()
 
+    /// The scroll view a glide to the live end is driven through, and the travel along it.
+    ///
+    /// See `TranscriptLiveEndScroller`, which carries the frame timings that put an AppKit level
+    /// scroll there in place of the `withAnimation` this used to be one line of.
+    @State private var scroller = TranscriptLiveEndScroller()
+
     /// The unanimated second half of a glide to the live end, if one is owed. See `goToLiveEnd`.
     @State private var catchUp: Task<Void, Never>?
 
@@ -293,6 +299,9 @@ struct TranscriptListView: View {
                 }
                 .padding(.vertical, TranscriptLayout.block)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // Inside the content, so the scroll view behind the transcript can be found by
+                // walking up from it. See `TranscriptScrollBridge`.
+                .background(TranscriptScrollBridge(scroller: scroller).frame(width: 0, height: 0))
             }
             // A conversation shorter than the pane starts at the top of it, and only once there is
             // more of it than fits does the view sit at the live end.
@@ -352,6 +361,7 @@ struct TranscriptListView: View {
             }
             .onChange(of: transcript.session.id) { _, _ in
                 // Nothing owed to a conversation the pane has left.
+                scroller.stop()
                 catchUp?.cancel()
                 didPosition = false
                 expanded.removeAll()
@@ -446,7 +456,10 @@ struct TranscriptListView: View {
                 // own glide and is not a reason to drop it; the other two are the reader taking
                 // hold, and a view that goes on dragging somebody somewhere after they have
                 // grabbed it is the worst thing in this file.
-                if phase == .tracking || phase == .interacting { catchUp?.cancel() }
+                if phase == .tracking || phase == .interacting {
+                    scroller.stop()
+                    catchUp?.cancel()
+                }
             }
             .overlay {
                 if showsPlaceholder {
@@ -551,18 +564,42 @@ struct TranscriptListView: View {
         case .jump:
             scrollPosition.scrollTo(edge: .bottom)
         case .glide(let seconds):
-            withAnimation(.easeOut(duration: seconds)) {
+            // AppKit rather than `withAnimation`, and `TranscriptLiveEndScroller` carries the
+            // frame timings that settled that. A scroll view it cannot reach is not worth a
+            // message: the press arrives instantly, which is what it did before any of this.
+            guard scroller.glide(seconds: seconds, completion: settleAtLiveEnd) else {
                 scrollPosition.scrollTo(edge: .bottom)
+                return
             }
         }
 
         guard TranscriptMotion.reassertsLiveEnd(after: move, isStreaming: transcript.isStreaming),
               case .glide(let seconds) = move else { return }
+        // Belt to the arrival handler's braces, and only a running turn is given one. The travel
+        // ends by settling at the live end whatever happens; what a turn adds is that the end has
+        // moved again since, so the same thing is worth saying once more a beat later.
         catchUp = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(seconds))
+            try? await Task.sleep(for: .seconds(seconds + 0.05))
             guard !Task.isCancelled else { return }
-            scrollPosition.scrollTo(edge: .bottom)
+            settleAtLiveEnd()
         }
+    }
+
+    /// Puts SwiftUI's own idea of where the list is back at the live end, without moving anything
+    /// the reader can see.
+    ///
+    /// **Every completed travel owes this, because the travel happened underneath SwiftUI rather
+    /// than through it.** `ScrollPosition` still believes the list is where the press started, and
+    /// the next thing to read it would take the reader back there. Saying the edge unanimated
+    /// costs one edge resolution, which realises nothing.
+    ///
+    /// It is also what the streaming case needed. The end of the content moves down while the
+    /// travel is in the air, so the travel lands a little short of the end it was aimed at, and
+    /// short of the end is exactly the state in which `defaultScrollAnchor(for: .sizeChanges)` is
+    /// dropped and the transcript stops following the tail. This closes that gap and re-attaches
+    /// the follow in one move. A travel that was stopped never reaches it, which is the point.
+    private func settleAtLiveEnd() {
+        scrollPosition.scrollTo(edge: .bottom)
     }
 
     /// Where a session opens: on the first thing the user has not read, which is the whole point
