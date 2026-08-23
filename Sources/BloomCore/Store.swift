@@ -936,6 +936,166 @@ public actor Store {
         try db.run("DELETE FROM workspaces WHERE id = ?", [.text(id)])
     }
 
+    /// Every archived workspace, with what it still holds measured out of the database.
+    ///
+    /// Six aggregates rather than one join. A workspace with three chats and eight thousand
+    /// messages would appear eight thousand times in a single joined row set, and every count
+    /// taken from it would be wrong by a factor nobody would notice until a review comment was
+    /// multiplied by a transcript. Each query here groups on its own table and the results are
+    /// merged in Swift, so a workspace with no messages, no comments and no note is still a row.
+    ///
+    /// `LENGTH()` on a blob column costs nothing: SQLite reads the size out of the record header
+    /// and never touches the overflow pages the payload actually lives on. That is what makes
+    /// measuring a 500 MB transcript table cheap enough to do every time the screen opens, rather
+    /// than a number cached somewhere and quietly wrong.
+    public func archivedFootprints() throws -> [ArchivedWorkspaceFootprint] {
+        let rows = try db.query("""
+            SELECT w.*, r.name AS repo_name
+            FROM workspaces w
+            JOIN repos r ON r.id = w.repo_id
+            WHERE w.state = 'archived'
+            """)
+        guard !rows.isEmpty else { return [] }
+
+        var sessions: [String: Int] = [:]
+        for row in try db.query("SELECT workspace_id, COUNT(*) AS n FROM sessions GROUP BY workspace_id") {
+            sessions[row.string("workspace_id") ?? ""] = Int(row.int("n") ?? 0)
+        }
+
+        var messages: [String: (count: Int, bytes: Int)] = [:]
+        for row in try db.query("""
+            SELECT s.workspace_id AS wid, COUNT(m.id) AS n,
+                   COALESCE(SUM(LENGTH(m.payload)), 0) AS bytes
+            FROM messages m JOIN sessions s ON s.id = m.session_id
+            GROUP BY s.workspace_id
+            """) {
+            messages[row.string("wid") ?? ""] = (Int(row.int("n") ?? 0), Int(row.int("bytes") ?? 0))
+        }
+
+        var comments: [String: (count: Int, bytes: Int)] = [:]
+        for row in try db.query("""
+            SELECT workspace_id, COUNT(*) AS n,
+                   COALESCE(SUM(LENGTH(body) + LENGTH(line_text) + LENGTH(context_before)
+                                 + LENGTH(context_after) + LENGTH(file_path)), 0) AS bytes
+            FROM review_comments GROUP BY workspace_id
+            """) {
+            comments[row.string("workspace_id") ?? ""] = (Int(row.int("n") ?? 0), Int(row.int("bytes") ?? 0))
+        }
+
+        var notes: [String: Int] = [:]
+        for row in try db.query("SELECT workspace_id, LENGTH(body) AS bytes FROM workspace_notes") {
+            notes[row.string("workspace_id") ?? ""] = Int(row.int("bytes") ?? 0)
+        }
+
+        var asks: [String: Int] = [:]
+        for row in try db.query("""
+            SELECT s.workspace_id AS wid, COALESCE(SUM(LENGTH(p.payload)), 0) AS bytes
+            FROM permission_asks p JOIN sessions s ON s.id = p.session_id
+            GROUP BY s.workspace_id
+            """) {
+            asks[row.string("wid") ?? ""] = Int(row.int("bytes") ?? 0)
+        }
+
+        return rows.map { row in
+            let workspace = Self.workspace(from: row)
+            let key = workspace.id.rawValue
+            let comment = comments[key] ?? (0, 0)
+            let note = notes[key] ?? 0
+            return ArchivedWorkspaceFootprint(
+                workspace: workspace,
+                repoName: row.string("repo_name") ?? "",
+                sessionCount: sessions[key] ?? 0,
+                messageCount: messages[key]?.count ?? 0,
+                transcriptBytes: messages[key]?.bytes ?? 0,
+                otherBytes: comment.1 + note + (asks[key] ?? 0) + workspace.setupLog.utf8.count,
+                reviewCommentCount: comment.0,
+                hasNote: note > 0
+            )
+        }
+    }
+
+    /// Deletes archived workspaces and everything hanging off them, permanently.
+    ///
+    /// Almost all of it is the declared cascades doing their job: sessions, messages and with them
+    /// their `message_search` rows through the delete trigger, terminal tabs, review comments and
+    /// the note. Two tables carry no foreign key on purpose and would be left behind, so they are
+    /// named here. `drafts` is keyed by session id with no reference at all, and `deliveries`
+    /// deliberately outlives the session it was addressed to (see the schema), which is right
+    /// while the workspace exists and wrong once it does not.
+    ///
+    /// **Archived only, checked in SQL rather than by the caller.** This is the one call in the
+    /// app that destroys a transcript, and a caller that had gone stale between building a list
+    /// and confirming it must not be able to take a live workspace's history with it.
+    ///
+    /// Returns how many workspaces were actually removed, which is not necessarily how many were
+    /// asked for.
+    @discardableResult
+    public func deleteArchivedWorkspaces(ids: [WorkspaceID]) throws -> Int {
+        guard !ids.isEmpty else { return 0 }
+        return try db.transaction {
+            var deleted = 0
+            for id in ids {
+                let isArchived = try db.query(
+                    "SELECT 1 AS ok FROM workspaces WHERE id = ? AND state = 'archived'", [.text(id)]
+                ).first != nil
+                guard isArchived else { continue }
+
+                try db.run(
+                    "DELETE FROM drafts WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)",
+                    [.text(id)]
+                )
+                try db.run(
+                    """
+                    DELETE FROM deliveries
+                    WHERE source_workspace_id = ?
+                       OR target_session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)
+                    """,
+                    [.text(id), .text(id)]
+                )
+                try db.run("DELETE FROM workspaces WHERE id = ?", [.text(id)])
+                deleted += 1
+            }
+            return deleted
+        }
+    }
+
+    /// How big the database file is, and how much of it is space nothing is using.
+    ///
+    /// `page_count` rather than the file's size on disk, because in WAL mode the file on disk is
+    /// three files and the two beside `bloom.sqlite` are a log that gets checkpointed away. The
+    /// page count is what the database will settle at, which is the number a person deciding
+    /// whether to compact needs.
+    public func databaseSize() throws -> DatabaseSize {
+        let pageSize = Int(try db.query("PRAGMA page_size;").first?.int("page_size") ?? 0)
+        let pages = Int(try db.query("PRAGMA page_count;").first?.int("page_count") ?? 0)
+        let free = Int(try db.query("PRAGMA freelist_count;").first?.int("freelist_count") ?? 0)
+        return DatabaseSize(pageSize: pageSize, pageCount: pages, freePageCount: free)
+    }
+
+    /// Rewrites the database so the pages a delete freed go back to the filesystem.
+    ///
+    /// **Deleting rows does not shrink the file.** SQLite puts the pages on a free list and reuses
+    /// them for the next thing written, which is the right default and the reason a delete of half
+    /// a gigabyte of transcript changes nothing anybody can see in Finder. `VACUUM` is what
+    /// actually hands the space back, and it does it by copying the whole database, so it costs
+    /// roughly the current file size in temporary space and takes as long as reading and writing
+    /// that much. On a 500 MB database that is seconds, during which this actor answers nothing.
+    ///
+    /// So it is a separate call with its own button rather than something a delete does on its
+    /// own. A delete that silently froze the app for ten seconds would be a bug report, and a
+    /// screen that reported freed space it had not actually freed would be a lie. This is the
+    /// third option: say how much is sitting in the free list, and let the person spend the time
+    /// when they want to.
+    public func compactDatabase() throws {
+        try db.execute("VACUUM;")
+        // And then the log, because in WAL mode `VACUUM` writes the rebuilt database into
+        // `bloom.sqlite-wal` and the main file only shrinks when a checkpoint moves it across.
+        // Without this the pages are genuinely reclaimed, `page_count` says so, and the file in
+        // Finder is still the size it was, which is the one number the person who pressed the
+        // button can check. `TRUNCATE` rather than `PASSIVE` so the log itself is handed back too.
+        try db.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+    }
+
     /// Writes the three counts, and only when one of them has actually moved.
     ///
     /// This runs every six seconds for every active workspace, and on an idle machine it writes
