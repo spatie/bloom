@@ -102,9 +102,9 @@ struct SeaChartView: View {
         min(max(typeSize(sheet: sheet) * 0.55, 5.5), 9)
     }
 
-    /// The figures printed on the chart fade out as it is zoomed into. A serpent is a decoration
-    /// on a sheet held at arm's length; once the chart is being read for names, a serpent four
-    /// times life size is in the way of the thing the zoom was for.
+    /// The ornament printed on the chart fades out as it is zoomed into. A rose and a cartouche
+    /// are decoration on a sheet held at arm's length; once the chart is being read for names,
+    /// a title panel four times life size is in the way of the thing the zoom was for.
     private func figureOpacity() -> Double {
         let fade = (2.6 - camera.scale) / 1.2
         return min(max(fade, 0), 1)
@@ -127,8 +127,6 @@ struct SeaChartView: View {
         drawLand(chart, in: world, ink: ink)
         if figures > 0.01 {
             drawRose(chart, in: world, ink: ink, opacity: figures)
-            drawShip(chart, in: world, ink: ink, opacity: figures)
-            drawSerpent(chart, in: world, ink: ink, opacity: figures)
             drawCartouche(chart, in: world, ink: ink, opacity: figures)
         }
         drawMarks(chart, in: world, sheet: sheet, ink: ink)
@@ -475,146 +473,6 @@ struct SeaChartView: View {
                 y: centre.y + sin(angle) * radius * 1.16
             ))
         }
-    }
-
-    /// A caravel under sail in the north Pacific. Charts of this kind were sold partly as
-    /// pictures, and the empty quarter of an ocean was where the engraver showed off.
-    private func drawShip(
-        _ context: GraphicsContext, in world: CGRect, ink: ChartInk, opacity: Double
-    ) {
-        let centre = unit(0.098, 0.30, in: world)
-        let scale = min(world.width * 0.032, 50)
-        guard scale > 9 else { return }
-        let line = ink.ink.opacity(0.62 * opacity)
-
-        var hull = Path()
-        hull.move(to: CGPoint(x: centre.x - scale, y: centre.y + scale * 0.18))
-        hull.addQuadCurve(
-            to: CGPoint(x: centre.x + scale * 0.95, y: centre.y + scale * 0.18),
-            control: CGPoint(x: centre.x, y: centre.y + scale * 0.72)
-        )
-        hull.addLine(to: CGPoint(x: centre.x + scale * 1.05, y: centre.y - scale * 0.06))
-        hull.addLine(to: CGPoint(x: centre.x - scale * 1.02, y: centre.y - scale * 0.06))
-        hull.closeSubpath()
-        context.fill(hull, with: .color(ink.ink.opacity(0.2 * opacity)))
-        context.stroke(hull, with: .color(line), lineWidth: 0.9)
-
-        var rig = Path()
-        for (offset, height) in [(-0.5, 1.1), (0.05, 1.45), (0.6, 1.0)] {
-            let mast = CGPoint(x: centre.x + scale * offset, y: centre.y - scale * 0.06)
-            rig.move(to: mast)
-            rig.addLine(to: CGPoint(x: mast.x, y: mast.y - scale * height))
-            var sail = Path()
-            let top = CGPoint(x: mast.x, y: mast.y - scale * height * 0.92)
-            sail.move(to: CGPoint(x: mast.x - scale * 0.28, y: top.y + scale * 0.06))
-            sail.addQuadCurve(
-                to: CGPoint(x: mast.x + scale * 0.3, y: top.y + scale * 0.06),
-                control: CGPoint(x: mast.x + scale * 0.02, y: top.y - scale * 0.06)
-            )
-            sail.addQuadCurve(
-                to: CGPoint(x: mast.x + scale * 0.36, y: mast.y - scale * 0.16),
-                control: CGPoint(x: mast.x + scale * 0.46, y: top.y + scale * 0.5)
-            )
-            sail.addQuadCurve(
-                to: CGPoint(x: mast.x - scale * 0.24, y: mast.y - scale * 0.16),
-                control: CGPoint(x: mast.x + scale * 0.06, y: mast.y - scale * 0.04)
-            )
-            sail.closeSubpath()
-            context.fill(sail, with: .color(ink.paper.opacity(0.55 * opacity)))
-            context.stroke(sail, with: .color(line), lineWidth: 0.7)
-        }
-        context.stroke(rig, with: .color(line), lineWidth: 0.7)
-
-        var pennant = Path()
-        pennant.move(to: CGPoint(x: centre.x + scale * 0.05, y: centre.y - scale * 1.51))
-        pennant.addLine(to: CGPoint(x: centre.x + scale * 0.48, y: centre.y - scale * 1.42))
-        pennant.addLine(to: CGPoint(x: centre.x + scale * 0.05, y: centre.y - scale * 1.32))
-        pennant.closeSubpath()
-        context.fill(pennant, with: .color(ink.mark.opacity(0.7 * opacity)))
-    }
-
-    /// A sea serpent in the southern Indian Ocean, and the four words that belong beside one.
-    /// This is the ornament that was cut from the first version for being kitsch, put back
-    /// because a chart without one is a diagram rather than an object.
-    ///
-    /// Drawn as one continuous body rather than as three arcs out of the water, which was the
-    /// first attempt and read as a row of mountains: an arc needs the water line to explain it,
-    /// and at chart scale the water line is not there to be drawn.
-    private func drawSerpent(
-        _ context: GraphicsContext, in world: CGRect, ink: ChartInk, opacity: Double
-    ) {
-        let centre = unit(0.70, 0.735, in: world)
-        let scale = min(world.width * 0.05, 76)
-        guard scale > 12 else { return }
-        let line = ink.ink.opacity(0.62 * opacity)
-
-        func at(_ x: Double, _ y: Double) -> CGPoint {
-            CGPoint(x: centre.x + scale * x, y: centre.y + scale * y)
-        }
-
-        // The body, a long S from a coiled tail to the base of the neck, stroked in three
-        // passes of falling width so it tapers the way an eel does.
-        var body = Path()
-        body.move(to: at(-1.45, 0.30))
-        body.addCurve(to: at(-0.45, 0.16), control1: at(-1.15, 0.62), control2: at(-0.7, 0.5))
-        body.addCurve(to: at(0.45, 0.16), control1: at(-0.2, -0.14), control2: at(0.2, 0.46))
-        body.addCurve(to: at(1.0, -0.34), control1: at(0.72, -0.06), control2: at(0.86, -0.24))
-        context.stroke(body, with: .color(line), style: StrokeStyle(lineWidth: scale * 0.11, lineCap: .round))
-
-        var taper = Path()
-        taper.move(to: at(-1.45, 0.30))
-        taper.addCurve(to: at(-0.9, 0.34), control1: at(-1.3, 0.5), control2: at(-1.05, 0.46))
-        context.stroke(taper, with: .color(ink.paper.opacity(0.5 * opacity)), style: StrokeStyle(lineWidth: scale * 0.06, lineCap: .round))
-
-        // A dorsal fin along the first crest, which is what tells a serpent from a rope.
-        var fin = Path()
-        fin.move(to: at(-0.62, 0.24))
-        for spike in 0..<4 {
-            let x = -0.5 + Double(spike) * 0.24
-            fin.addLine(to: at(x + 0.06, 0.24 - 0.2 - Double(3 - spike) * 0.02))
-            fin.addLine(to: at(x + 0.2, 0.2))
-        }
-        context.fill(fin, with: .color(ink.ink.opacity(0.34 * opacity)))
-        context.stroke(fin, with: .color(line), lineWidth: 0.7)
-
-        // The head: a wedge with the jaw open, an eye left in paper, and a forked tongue.
-        let head = at(1.05, -0.4)
-        var jaw = Path()
-        jaw.move(to: CGPoint(x: head.x - scale * 0.12, y: head.y + scale * 0.12))
-        jaw.addQuadCurve(
-            to: CGPoint(x: head.x + scale * 0.52, y: head.y - scale * 0.14),
-            control: CGPoint(x: head.x + scale * 0.24, y: head.y - scale * 0.24)
-        )
-        jaw.addLine(to: CGPoint(x: head.x + scale * 0.16, y: head.y + scale * 0.02))
-        jaw.addLine(to: CGPoint(x: head.x + scale * 0.5, y: head.y + scale * 0.22))
-        jaw.addQuadCurve(
-            to: CGPoint(x: head.x - scale * 0.12, y: head.y + scale * 0.12),
-            control: CGPoint(x: head.x + scale * 0.1, y: head.y + scale * 0.28)
-        )
-        context.fill(jaw, with: .color(ink.ink.opacity(0.4 * opacity)))
-        context.stroke(jaw, with: .color(line), lineWidth: 0.8)
-        context.fill(
-            Path(ellipseIn: CGRect(
-                x: head.x + scale * 0.04, y: head.y - scale * 0.08,
-                width: scale * 0.08, height: scale * 0.08
-            )),
-            with: .color(ink.paper.opacity(0.95 * opacity))
-        )
-
-        var horns = Path()
-        horns.move(to: CGPoint(x: head.x - scale * 0.02, y: head.y - scale * 0.1))
-        horns.addLine(to: CGPoint(x: head.x - scale * 0.22, y: head.y - scale * 0.42))
-        horns.move(to: CGPoint(x: head.x - scale * 0.1, y: head.y + scale * 0.02))
-        horns.addLine(to: CGPoint(x: head.x - scale * 0.36, y: head.y - scale * 0.24))
-        context.stroke(horns, with: .color(line), style: StrokeStyle(lineWidth: 0.9, lineCap: .round))
-
-        var motto = context.resolve(
-            Text("hic svnt dracones")
-                .font(.system(size: max(7.5, scale * 0.2), design: .serif).italic())
-                .kerning(0.8)
-        )
-        motto.shading = .color(ink.ink.opacity(0.62 * opacity))
-        context.draw(motto, at: at(-0.55, 0.78))
     }
 
     /// The cartouche in the south Atlantic: the title panel a chart carries instead of a caption
