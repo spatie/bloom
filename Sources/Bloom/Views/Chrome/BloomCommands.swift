@@ -265,6 +265,15 @@ struct BloomCommands: Commands {
             }
             .keyboardShortcut("?", modifiers: .command)
 
+            // The first run window, on demand. A real item rather than a debug flag: somebody who
+            // waved the welcome away and wants it back has exactly the same need as somebody who
+            // has never seen it, and "was anything wrong with my setup" is a Help menu question
+            // in every Mac app that can answer it. It re-checks on every visit, so it is also the
+            // shortest way to find out whether the CLI you just installed was found.
+            Button("Welcome to Bloom…") {
+                WelcomeWindow.show()
+            }
+
             Divider()
 
             // The two ways to say something back. In the Help menu because that is where a Mac

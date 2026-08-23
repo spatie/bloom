@@ -76,6 +76,12 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         // Tells macOS the app is here and what it offers, so the entry shows up in other apps'
         // Services menus without waiting for the periodic rescan.
         NSUpdateDynamicServices()
+
+        // Last, and after the main window exists, so the welcome window opens in front of Bloom
+        // rather than in front of nothing. Every capture and probe flag in `Snapshot` drives this
+        // process from the outside and would be photographing a window it did not ask for, so a
+        // run that is taking a picture of something else is left alone. See `WelcomeLaunch`.
+        if !Snapshot.isDrivingTheWindow { WelcomeLaunch.presentIfNeeded() }
     }
 
     /// Required on macOS 14 and later. Without it AppKit logs "Secure coding is not enabled for

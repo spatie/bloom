@@ -228,6 +228,17 @@ enum Snapshot {
         return CGSize(width: width, height: height)
     }
 
+    /// True when this process was started to photograph or measure something rather than to be
+    /// used.
+    ///
+    /// The welcome window is the reason this exists. It opens on first launch, and a capture run
+    /// starts against an empty defaults domain by design, so every screenshot of the sidebar
+    /// would have arrived with a welcome window sitting on top of it. Asked once, here, rather
+    /// than by each flag remembering to say so.
+    static var isDrivingTheWindow: Bool {
+        isRequested || isWindowCaptureRequested || FrameProbe.isRequested || SwitchProbe.isRequested
+    }
+
     static var isWindowCaptureRequested: Bool {
         CommandLine.arguments.contains("--snapshot-window")
     }
@@ -332,6 +343,12 @@ enum Snapshot {
             // appearances worth a picture. Same caveat about flag order as above.
             let wantsAbout = arguments.contains("--about")
 
+            // And `--welcome` for the first run window, which is otherwise reachable only by
+            // wiping a defaults domain or by a menu item. Same caveat about flag order as above.
+            // `--setup-rehearsal <name>` decides what that window will have found; see
+            // `SetupRehearsal`.
+            let wantsWelcome = arguments.contains("--welcome")
+
             // Polled rather than slept through, and the settings action is re-sent each time round.
             // How long the first window takes depends on how much the store has to read, and a
             // fixed wait that is long enough on a small database is a coin toss on a real one.
@@ -347,7 +364,7 @@ enum Snapshot {
             // showing, and it titles the MAIN window after the selected workspace, so a title
             // comparison against "Bloom" matched neither and every settings capture silently
             // returned a picture of the main window instead.
-            if wantsSettings || wantsRepoSettings || wantsAbout {
+            if wantsSettings || wantsRepoSettings || wantsAbout || wantsWelcome {
                 let main = candidate
                 candidate = nil
                 for _ in 0..<40 {
@@ -359,6 +376,8 @@ enum Snapshot {
                         )
                     } else if wantsAbout {
                         openAppMenuItem(titled: "About")
+                    } else if wantsWelcome {
+                        WelcomeWindow.show()
                     } else {
                         openSettingsWindow()
                     }
