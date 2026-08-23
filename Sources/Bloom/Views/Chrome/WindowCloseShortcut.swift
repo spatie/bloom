@@ -16,31 +16,37 @@ import AppKit
 /// group. Adding a second Close of Bloom's own would have meant two items called Close in one
 /// menu, which is the fault the audit before this one had just finished removing from Window.
 ///
-/// Retried on a clock rather than done once, and re-applied whenever a menu opens.
+/// **Two halves, because the menu row and the keystroke are two different problems.** An earlier
+/// version of this file had only the first half and claimed both, and the key did nothing at all
+/// in a shipped build.
 ///
-/// The first attempt was a plain chain of `DispatchQueue.main.async`, which is wrong in a way that
-/// is easy to miss: ten async hops all run in the same handful of milliseconds, long before
-/// SwiftUI has built the main menu, so all ten found nothing and the item shipped with no key.
-/// Measured, by photographing the File menu of a build that had it. The retries are spaced now,
-/// and the observer under them is the belt: SwiftUI rebuilds the main menu when the commands body
-/// is re-evaluated, and a rebuilt Close arrives with AppKit's own key equivalent back on it.
+/// The first half is the row somebody reads. AppKit takes the key back off the standard Close
+/// whenever the File menu is rebuilt, and SwiftUI rebuilds that whole menu every time the commands
+/// body is re-evaluated, which on this app is several times a second while anything is moving. So
+/// a chain of `DispatchQueue.main.async` at launch set the key onto an item that was replaced
+/// milliseconds later, and stopped at the first success so it never noticed. Re-applying when the
+/// menu begins tracking is what makes the row right, queued into the tracking runloop mode because
+/// the strip happens after tracking has begun, and it was measured working: dumping the item over
+/// accessibility before and after one opening of File shows it go from no key equivalent to `w`
+/// with command and shift.
+///
+/// The second half is the keystroke, and it is why the first half is not enough on its own.
+/// Opening a menu is the only thing that posts `didBeginTracking`, so until the user had pulled
+/// File down once in that launch the item genuinely had no key and Shift+Cmd+W did nothing.
+/// Measured the same way: on a fresh launch the key press was swallowed, and after one opening of
+/// the File menu the same key press closed the front window. Nobody opens a menu to find out
+/// whether its shortcut works, so the keystroke is caught before the menu is consulted at all. A
+/// local monitor runs ahead of key equivalent dispatch, so once the row has its key back the two
+/// cannot both fire: this one takes the event and returns nothing.
 @MainActor
 enum WindowCloseShortcut {
     private static let attempts = 40
     private static let spacing: TimeInterval = 0.1
+    private static var monitor: Any?
 
     static func apply() {
+        watchForTheKey()
         apply(remaining: attempts)
-        // AppKit takes the key back off this item every time the File menu updates. Measured, by
-        // dumping the item before and after one opening: it goes from `w` with command and shift
-        // to no key equivalent at all. That is AppKit's own management of the standard Close, and
-        // it is the reason the item had no key to begin with, so setting it once at launch is not
-        // enough and re-applying on `didBeginTracking` is not either: the strip happens after
-        // tracking has begun.
-        //
-        // So the re-apply is queued into the tracking runloop mode, which is the earliest moment
-        // that runs AFTER the update, and the menu is told the item changed so the row it has
-        // already laid out is drawn again.
         NotificationCenter.default.addObserver(
             forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil
         ) { _ in
@@ -53,6 +59,36 @@ enum WindowCloseShortcut {
                 }
             }
         }
+    }
+
+    /// The keystroke itself, independent of what any menu currently says.
+    ///
+    /// It sends `performClose(_:)` rather than `close()`, so a window that has something to ask
+    /// before it goes still gets to ask, and a window that refuses still gets to refuse with the
+    /// same shudder Cmd+W would have drawn. A sheet is left alone: the key window while a sheet is
+    /// up is the sheet, and closing one from underneath its host is not what anybody meant.
+    private static func watchForTheKey() {
+        guard monitor == nil else { return }
+        // The event never crosses into the main actor closure below, only the answer does. An
+        // `NSEvent` is not `Sendable`, and a local monitor's handler is already called on the main
+        // thread, so what is asserted is where this is running rather than that an event may move.
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard modifiers == [.command, .shift],
+                  event.charactersIgnoringModifiers?.lowercased() == "w"
+            else { return event }
+
+            return MainActor.assumeIsolated { closeKeyWindow() } ? nil : event
+        }
+    }
+
+    /// True when the key press was spent on a window, so the caller knows to swallow it.
+    private static func closeKeyWindow() -> Bool {
+        guard let window = NSApp.keyWindow, !window.isSheet,
+              window.styleMask.contains(.closable)
+        else { return false }
+        window.performClose(nil)
+        return true
     }
 
     private static func apply(remaining: Int) {
