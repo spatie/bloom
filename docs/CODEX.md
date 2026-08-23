@@ -506,9 +506,16 @@ stays zero for a Codex chat, forever.
   report a window twice as full as it is.
 - Anywhere the UI says "$0.00" it should say the token count instead for a Codex chat, not a zero
   price. A zero that means "we do not know" reads as "this was free".
-- `account/rateLimits/updated` arrives unprompted after every turn, with a used percentage and a
-  reset time. Bloom draws a rate limit row for Claude Code already; this is the same row with a
-  different payload, and it is genuinely better information than Claude's.
+- `account/rateLimits/updated` arrives unprompted after every turn, in `primary` and `secondary`
+  slots, and it is genuinely better information than Claude Code's in two ways: the used percentage
+  is always there rather than only near the wall, and the window comes as a **length in minutes**
+  rather than as a name, so nothing has to be inferred. It is worse in one: the slots are called
+  `primary` and `secondary` and nothing more, so the label has to come from the duration. The
+  account measured had `secondary` null and `primary` at 10080 minutes, which is a week. There is
+  no monthly window here either. `credits`, `planType` and `spendControlReached` are read and
+  deliberately dropped: a balance is not a window, it has no reset time, and a panel about how close
+  you are to a wall is the wrong place for a wallet. `CodexQuotaAdapter` is the reader, and both
+  backends land in the same `agent_quotas` table.
 
 ---
 

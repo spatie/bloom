@@ -145,7 +145,27 @@ Last line of a turn.
 
 ### `rate_limit_event`
 
-Occasional. Carries rate limit state. Surface it quietly, never as an error.
+One per turn, and it carries **one window**, never a set:
+
+```json
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1787508600,
+ "rateLimitType":"five_hour","overageStatus":"rejected",
+ "overageDisabledReason":"org_level_disabled","isUsingOverage":false},"uuid":"...","session_id":"..."}
+```
+
+Measured on 23 August 2026 against the installed binary, and recorded with a second payload from a
+busier account in `Tests/fixtures/rate-limits.jsonl`. Three facts, all of which shaped `AgentQuota`:
+
+1. `rateLimitType` names a single window. `five_hour` and `seven_day` are the values observed, there
+   is no array, and there is no way to ask for the rest, so what Bloom knows about an account
+   accumulates over turns.
+2. **`utilization` is absent below a warning threshold.** The payload above has no usage figure at
+   all. The one that does carries `"status":"allowed_warning"` and `"surpassedThreshold":0.75`
+   beside it, so the number arrives only once the account is near the wall. Store that as unknown,
+   never as zero: an empty bar is a claim, and it is a claim this protocol never made.
+3. **There is no monthly window.** Bloom shows the two it is given and says nothing about a third.
+
+Surface it quietly, never as an error. `AgentQuotaAdapters` is the reader.
 
 ## Rules for the decoder
 
