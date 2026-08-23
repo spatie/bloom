@@ -117,7 +117,7 @@ public enum ProjectAddTrouble: Sendable, Equatable {
         if isInside(root, of: workspacesRoot) {
             return .insideBloomsWorkspaces(path: root)
         }
-        if BridgeProjectLookup.standardised(root) == BridgeProjectLookup.standardised(home) {
+        if resolved(root) == resolved(home) {
             return .tooBroad(path: root, what: "your whole home folder")
         }
         if root == "/" {
@@ -128,9 +128,20 @@ public enum ProjectAddTrouble: Sendable, Equatable {
 
     /// Whether `path` is `root` or sits under it. Compared as path components rather than as a
     /// string prefix, so `~/bloom/workspaces-old` is not read as being inside `~/bloom/workspaces`.
+    ///
+    /// Symlinks are resolved on both sides first, and that is not tidiness. `git rev-parse
+    /// --show-toplevel` answers with the resolved path, so the top level of a worktree under a
+    /// symlinked workspaces root comes back pointing at the real directory and matched nothing at
+    /// all against the unresolved root. On this machine `/tmp` is a symlink to `/private/tmp`,
+    /// which is where the test suite works, so the check passed everywhere except where it had to
+    /// hold.
     static func isInside(_ path: String, of root: String) -> Bool {
-        let one = BridgeProjectLookup.standardised(path)
-        let other = BridgeProjectLookup.standardised(root)
+        let one = resolved(path)
+        let other = resolved(root)
         return one == other || one.hasPrefix(other + "/")
+    }
+
+    static func resolved(_ path: String) -> String {
+        URL(fileURLWithPath: BridgeProjectLookup.standardised(path)).resolvingSymlinksInPath().path
     }
 }
