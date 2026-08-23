@@ -12,6 +12,18 @@ public struct Repo: Identifiable, Sendable, Hashable, Codable {
     public var accent: String
     public var sortOrder: Int
     public var collapsed: Bool
+    /// Whether the sidebar leaves this project out of the list unless it is asked to show the
+    /// hidden ones. See `ProjectVisibility`, which is the rule, and note what it is NOT: a
+    /// hidden project keeps every workspace it has, and those workspaces keep running, keep
+    /// notifying, and keep turning up on Home, in search, in the menu bar and in Shortcuts. This
+    /// column narrows one list.
+    ///
+    /// On the project rather than on the project and the machine, which is the same choice
+    /// `collapsed` and `sortOrder` already made. Bloom's database is per machine already: there
+    /// is one row per project per copy of Bloom, so a per-machine view preference and a
+    /// per-project one are stored in exactly the same place, and a second key would only be
+    /// worth its weight if the rows were ever synced between machines. They are not.
+    public var hidden: Bool
     public var createdAt: Date
     /// Artwork the project already has on disk, absolute. Nil whenever the mark is the monogram.
     public var iconPath: String?
@@ -26,6 +38,7 @@ public struct Repo: Identifiable, Sendable, Hashable, Codable {
         accent: String = Accent.all[0],
         sortOrder: Int = 0,
         collapsed: Bool = false,
+        hidden: Bool = false,
         createdAt: Date = Date(),
         iconPath: String? = nil,
         iconSource: RepoIconSource = .undetected
@@ -37,6 +50,7 @@ public struct Repo: Identifiable, Sendable, Hashable, Codable {
         self.accent = accent
         self.sortOrder = sortOrder
         self.collapsed = collapsed
+        self.hidden = hidden
         self.createdAt = createdAt
         self.iconPath = iconPath
         self.iconSource = iconSource

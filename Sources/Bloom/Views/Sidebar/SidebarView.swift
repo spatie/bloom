@@ -31,6 +31,16 @@ struct SidebarView: View {
     @State private var renaming: WorkspaceID?
     @State private var filter: SidebarFilter = .all
 
+    /// Whether the projects the owner has hidden are in the list.
+    ///
+    /// A preference and not this window's state, which is the difference between it and `filter`
+    /// above. The filter is a question you ask of the pane for a moment; hiding a project is a
+    /// decision about what you want to see from now on, and a switch that undid it on every launch
+    /// would make hiding something you have to keep doing. It is also the one route back to a
+    /// hidden project. See `ProjectVisibility.showsHiddenKey`, which the status bar's own menu
+    /// binds to the same key, so the two views cannot disagree.
+    @AppStorage(ProjectVisibility.showsHiddenKey) private var showsHiddenProjects = false
+
     /// What the list itself thinks is selected. See the `onChange` pair below for why this is not
     /// bound straight to the model.
     @State private var listSelection: SidebarSelection?
@@ -200,6 +210,9 @@ struct SidebarView: View {
         .onChange(of: app.workspaces) { _, _ in regroup() }
         // Rescoped, so widening the filter is not forty rows fading in at once. See `RowArrival`.
         .onChange(of: filter) { _, _ in regroup(rescoped: true) }
+        // Rescoped for the same reason the filter is: turning hidden projects on is a whole
+        // project's worth of rows arriving at once, and none of them is work that just landed.
+        .onChange(of: showsHiddenProjects) { _, _ in regroup(rescoped: true) }
         .onChange(of: listSelection) { _, _ in commitSelection() }
         // Moving off a row has to close whatever field was open on it, or the rename would carry
         // on editing a workspace that is no longer on screen.
@@ -236,7 +249,10 @@ struct SidebarView: View {
     ///   case nothing in it counts as having arrived.
     private func regroup(rescoped: Bool = false) {
         groups = SidebarRepoGroup.build(
-            repos: app.repos, workspaces: app.workspaces, filter: filter
+            repos: app.repos,
+            workspaces: app.workspaces,
+            filter: filter,
+            showingHidden: showsHiddenProjects
         )
         paneRows = SidebarPaneRow.rows(groups)
         // Every workspace the groups hold, a folded project's included. A fold hides rows rather

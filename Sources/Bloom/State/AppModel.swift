@@ -369,6 +369,8 @@ final class AppModel {
             WhoamiTool(),
             ProjectListTool(),
             ProjectAddTool(),
+            ProjectHideTool(),
+            ProjectUnhideTool(),
             WorkspaceStartTool { [weak self] order, project, identity, origin in
                 guard let self else { throw AppNotReady.stillStartingUp }
                 return try await self.startWorkspaceForBridge(
@@ -1110,6 +1112,25 @@ final class AppModel {
         // Toggled against the stored row rather than against the copy the sidebar was drawn
         // from, so the disclosure cannot also write back a project's name, colour or icon.
         _ = try? await store.update(repoID: repo.id) { $0.collapsed.toggle() }
+    }
+
+    /// Takes a project out of the sidebar's list, or puts it back.
+    ///
+    /// Nothing else happens, and that is the whole design. The selection is not moved, no chat is
+    /// closed, no agent is stopped, and every workspace this project has goes on running and goes
+    /// on appearing on Home, in search, in the menu bar and in Shortcuts. See `ProjectVisibility`.
+    ///
+    /// Hiding the project of the workspace on screen therefore leaves that workspace exactly where
+    /// it was, with its row simply not drawn. That is not a new state for this pane to be in: the
+    /// workspace filter has always been able to hide the selected row, and the list has always
+    /// carried on showing what is selected regardless.
+    ///
+    /// Toggled against the stored row rather than against the copy the sidebar was drawn from, so
+    /// this cannot also write back a project's name, colour or icon. Same reason as
+    /// `toggleCollapsed` above, and the bug is in `Store.update(repoID:)`.
+    func toggleHidden(_ repo: Repo) async {
+        guard let store else { return }
+        _ = try? await store.update(repoID: repo.id) { $0.hidden.toggle() }
     }
 
     func rename(_ repo: Repo, to name: String) async {

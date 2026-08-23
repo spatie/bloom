@@ -5,7 +5,7 @@ import BloomCore
 
 /// Photographs the centre pane's contextual menu, or the items one of its split submenus offers.
 ///
-///     Bloom --menu-probe /tmp/menu.png [--menu-part menu|kinds|terminal|terminalKinds|browser|row|colour|style|worktree] [--menu-project <path>]
+///     Bloom --menu-probe /tmp/menu.png [--menu-part menu|kinds|terminal|terminalKinds|browser|row|colour|style|worktree|project|projectHidden|filter] [--menu-project <path>]
 ///
 /// It exists because a menu is the one part of this interface that cannot be captured any other
 /// way. `ImageRenderer` draws SwiftUI's yellow placeholder for one, a menu only exists while it is
@@ -38,6 +38,11 @@ import BloomCore
 /// `row` and `colour` are a workspace row's menu and the colour submenu inside it. They need a
 /// workspace, so they read one out of the database this instance was pointed at, which means they
 /// want `BLOOM_DB_PATH` set at a seeded scratch copy rather than the owner's.
+///
+/// `project` and `projectHidden` are a project header's own menu, in both of the wordings it has,
+/// and they read a project out of that same database: `projectHidden` wants one that really is
+/// hidden. `filter` is the sidebar's filter control, which needs nothing at all, since both of its
+/// halves are handed to it.
 ///
 /// `worktree` is the inspector's "More for this worktree" menu. It takes a `Workspace` rather than
 /// a `WorkspaceModel`, so it needs no database and no window state at all: the branch and the path
@@ -98,6 +103,14 @@ enum MenuProbe {
         case style
         /// The inspector's overflow menu for the worktree it is looking at.
         case worktree
+        /// A project header's context menu, for a project that is showing.
+        case project
+        /// The same menu for a project that is hidden, which is one item's wording apart and is
+        /// the half nobody would otherwise look at.
+        case projectHidden
+        /// The sidebar's filter control, which narrows the workspaces and decides whether hidden
+        /// projects are listed.
+        case filter
     }
 
     private static var part: Part {
@@ -106,6 +119,10 @@ enum MenuProbe {
 
     static func schedule() {
         Task { @MainActor in
+            // `--appearance light|dark` reaches a menu the same way it reaches a window capture.
+            // Without this a menu could only ever be photographed in whichever appearance the
+            // machine happened to be in, and half of every colour decision in one went unlooked at.
+            Snapshot.applyRequestedAppearance()
             // The same beat the window capture waits for, and for the same reason: the window has
             // to exist before a menu can be opened over it.
             try? await Task.sleep(for: .seconds(3))
@@ -113,7 +130,7 @@ enum MenuProbe {
             // no static can reach. It reads the same database, so the workspace it finds is a
             // workspace the sidebar is showing.
             var model: AppModel?
-            if part == .row || part == .colour {
+            if part == .row || part == .colour || part == .project || part == .projectHidden {
                 let fresh = AppModel()
                 await fresh.bootstrap()
                 // The row menu's setup item is drawn only for a workspace that has a live
@@ -237,6 +254,12 @@ enum MenuProbe {
             NSMenu()
         case .row, .colour:
             workspaceMenu(model: model)
+        case .project, .projectHidden:
+            projectMenu(model: model)
+        case .filter:
+            NSHostingMenu(rootView: SidebarFilterMenuItems(
+                filter: .constant(.all), showsHiddenProjects: .constant(true), hiddenCount: 2
+            ))
         case .style:
             NSHostingMenu(rootView: outputStyleItems)
         case .worktree:
@@ -377,6 +400,23 @@ enum MenuProbe {
             ),
             pullRequest: nil
         )
+    }
+
+    /// A project header's menu, for a project read out of the database this instance was pointed
+    /// at. The hidden half asks for a project that really is hidden rather than flipping a copy's
+    /// flag, so the picture is of a menu the app would actually draw for a row it would actually
+    /// list.
+    private static func projectMenu(model: AppModel?) -> NSMenu {
+        guard let model else { fail("no model to read a project out of") }
+        let wantsHidden = part == .projectHidden
+        guard let repo = model.repos.first(where: { $0.hidden == wantsHidden }) else {
+            fail(wantsHidden
+                ? "no hidden project in this database to draw a header menu for"
+                : "no showing project in this database to draw a header menu for")
+        }
+        return NSHostingMenu(rootView: ProjectMenuItems(
+            repo: repo, onCreateWorkspace: { _ in }, onRename: {}, onRemove: {}
+        ).environment(model))
     }
 
     private static func workspaceMenu(model: AppModel?) -> NSMenu {

@@ -80,6 +80,19 @@ enum SidebarMetrics {
     /// reaching towards the name.
     static let rowButton: CGFloat = 20
 
+    /// How far a hidden project's header is played down when the owner has asked to see the
+    /// hidden ones.
+    ///
+    /// One opacity over the whole header, so the tile and the name step back together. Conductor
+    /// draws its hidden repositories at the same size and in the same place as the rest, in less
+    /// contrast, and that restraint is the whole point: a hidden project is still a project.
+    ///
+    /// A little under half, which is the step this pane already uses between something that is
+    /// there and something that is barely there. Lower and the tile's own colour goes muddy
+    /// against the sidebar material in dark mode; higher and the two ranks are not tellable apart
+    /// at a glance, which is the one thing this has to do.
+    static let hiddenDim: Double = 0.45
+
     /// How large the chevron itself is drawn. Roughly a five point mark: the smallest thing in
     /// the pane, because it is furniture rather than content.
     static let caretSize: CGFloat = 9

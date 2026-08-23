@@ -717,6 +717,26 @@ public actor Store {
                 PRIMARY KEY (provider, window_key)
             );
             """),
+
+            // Whether a project is left out of the sidebar's list.
+            //
+            // Zero rather than NULL and no backfill, because nobody has hidden anything yet: every
+            // row that existed before this is a project the owner can see, which is what zero
+            // says. See `ProjectVisibility` for what the column means and `Repo.hidden` for what
+            // it deliberately does not touch.
+            //
+            // Real code rather than SQL for the reason every step above gives: `ADD COLUMN` has no
+            // `IF NOT EXISTS`, and the store's own tests rewind `user_version` to reproduce an old
+            // schema, so a step that could not be replayed would throw and take the whole
+            // migration transaction with it.
+            { db in
+                let existing = Set(
+                    try db.query("PRAGMA table_info(repos);").compactMap { $0.string("name") }
+                )
+                if !existing.contains("hidden") {
+                    try db.execute("ALTER TABLE repos ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;")
+                }
+            },
         ]
 
         let current = Int(db.userVersion)
@@ -757,10 +777,10 @@ public actor Store {
         try db.run(
             """
             INSERT INTO repos (
-                id, name, path, default_branch, accent, sort_order, collapsed, created_at,
+                id, name, path, default_branch, accent, sort_order, collapsed, hidden, created_at,
                 icon_path, icon_source
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 path = excluded.path,
@@ -768,12 +788,14 @@ public actor Store {
                 accent = excluded.accent,
                 sort_order = excluded.sort_order,
                 collapsed = excluded.collapsed,
+                hidden = excluded.hidden,
                 icon_path = excluded.icon_path,
                 icon_source = excluded.icon_source
             """,
             [
                 .text(repo.id), .text(repo.name), .text(repo.path), .text(repo.defaultBranch),
                 .text(repo.accent), .int(Int64(repo.sortOrder)), .int(repo.collapsed ? 1 : 0),
+                .int(repo.hidden ? 1 : 0),
                 .double(repo.createdAt.timeIntervalSince1970),
                 repo.iconPath.map { SQLValue.text($0) } ?? .null,
                 .text(repo.iconSource.rawValue),
@@ -2377,6 +2399,7 @@ public actor Store {
             accent: row.string("accent") ?? Accent.all[0],
             sortOrder: Int(row.int("sort_order") ?? 0),
             collapsed: row.bool("collapsed"),
+            hidden: row.bool("hidden"),
             createdAt: row.date("created_at") ?? Date(),
             iconPath: row.string("icon_path"),
             iconSource: RepoIconSource(rawValue: row.string("icon_source") ?? "") ?? .undetected

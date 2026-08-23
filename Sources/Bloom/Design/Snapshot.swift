@@ -235,8 +235,11 @@ enum Snapshot {
     /// starts against an empty defaults domain by design, so every screenshot of the sidebar
     /// would have arrived with a welcome window sitting on top of it. Asked once, here, rather
     /// than by each flag remembering to say so.
+    /// `--menu-probe` is named by its flag rather than through `MenuProbe.isRequested`, because
+    /// that type is compiled into debug builds only and this property is not.
     static var isDrivingTheWindow: Bool {
         isRequested || isWindowCaptureRequested || FrameProbe.isRequested || SwitchProbe.isRequested
+            || CommandLine.arguments.contains("--menu-probe")
     }
 
     static var isWindowCaptureRequested: Bool {

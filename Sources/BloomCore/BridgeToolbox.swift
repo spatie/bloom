@@ -34,6 +34,8 @@ public struct BridgeToolbox: Sendable {
         WhoamiTool(),
         ProjectListTool(),
         ProjectAddTool(),
+        ProjectHideTool(),
+        ProjectUnhideTool(),
     ])
 
     /// The tools a caller may see. Sorted by name so `tools/list` is stable between calls, which

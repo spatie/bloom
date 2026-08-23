@@ -1,4 +1,5 @@
 import SwiftUI
+import BloomCore
 
 /// The strip pinned to the bottom of the sidebar: what is running, and the three controls that
 /// narrow or explain the list.
@@ -9,6 +10,10 @@ struct SidebarStatusBar: View {
     @Environment(AppModel.self) private var app
 
     @Binding var filter: SidebarFilter
+    /// Whether the projects the owner has hidden are in the list. A preference rather than this
+    /// window's state, which is why it is `@AppStorage` here and in `SidebarView` rather than a
+    /// second `@State` passed down. See `ProjectVisibility.showsHiddenKey`.
+    @AppStorage(ProjectVisibility.showsHiddenKey) private var showsHiddenProjects = false
     /// Something the pane has to say about itself, for a moment, in place of the running count.
     /// The sidebar owns both the sentence and how long it lasts. See `SidebarView.move(from:to:)`.
     var note: String?
@@ -30,28 +35,30 @@ struct SidebarStatusBar: View {
                 // `.borderlessButton` menu sized each control to its own glyph and left the gaps
                 // between them uneven.
                 Menu {
-                    Picker("Filter", selection: $filter) {
-                        ForEach(SidebarFilter.allCases, id: \.self) { option in
-                            Label(option.rawValue, systemImage: option.icon).tag(option)
-                        }
-                    }
-                    .pickerStyle(.inline)
+                    SidebarFilterMenuItems(
+                        filter: $filter,
+                        showsHiddenProjects: $showsHiddenProjects,
+                        hiddenCount: ProjectVisibility.hiddenCount(app.repos)
+                    )
                 } label: {
                     Label(
-                        "Filter workspaces",
+                        "Filter the sidebar",
                         systemImage: filter == .all ? "line.3.horizontal.decrease" : filter.icon
                     )
                 }
                 // Icon only visually, but the label is still there for VoiceOver and Voice
-                // Control, and the tint says whether a filter is in force.
+                // Control, and the tint says whether the pane is showing something other than its
+                // default set. Showing hidden projects lights it as much as narrowing the
+                // workspaces does, because both answer the question somebody asks when the pane
+                // is not what they expected: is this control doing something.
                 .labelStyle(.iconOnly)
                 .menuStyle(.button)
                 .buttonStyle(.accessoryBar)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .tint(filter == .all ? Palette.textSecondary : Palette.accent)
-                .help("Filter workspaces")
-                .accessibilityValue(filter.rawValue)
+                .tint(isDefaultView ? Palette.textSecondary : Palette.accent)
+                .help("Filter the sidebar")
+                .accessibilityValue(filterValue)
 
                 Button("What the sidebar glyphs mean", systemImage: "questionmark.circle") {
                     isShowingLegend.toggle()
@@ -74,6 +81,16 @@ struct SidebarStatusBar: View {
             .frame(height: Metrics.barHeight)
         }
         .background(.bar)
+    }
+
+    /// Whether the pane is showing what it shows when nothing has been asked of it.
+    private var isDefaultView: Bool {
+        filter == .all && !showsHiddenProjects
+    }
+
+    /// Both halves of the control, in words, since the glyph can only show one of them.
+    private var filterValue: String {
+        showsHiddenProjects ? "\(filter.rawValue), hidden projects showing" : filter.rawValue
     }
 
     /// A readout, so it is set as text rather than as the filled `Chip` it used to be. A pill in a

@@ -20,10 +20,13 @@ public struct ProjectListTool: BridgeToolHandling {
         description: """
             The projects Bloom knows about: the name and the path of each git repository \
             registered in the sidebar, its default branch, how many workspaces it has running, \
-            and whether it is still where Bloom recorded it.
+            whether it is still where Bloom recorded it, and whether the owner has hidden it \
+            from the sidebar.
 
             Call it before naming a project in any other tool, because Bloom will only act on \
-            repositories it already has and this is the list of them. Takes no arguments, reads \
+            repositories it already has and this is the list of them. Every project here can be \
+            worked in, hidden or not: hidden is a view preference of the owner's sidebar and \
+            says nothing about whether the project is finished with. Takes no arguments, reads \
             nothing but Bloom's own database, changes nothing and costs nothing.
             """,
         inputSchema: BridgeTool.noArguments
@@ -60,9 +63,27 @@ public struct ProjectListTool: BridgeToolHandling {
                     // has been moved still has a row, and a caller that starts a workspace in it
                     // gets a failure it could have been warned about here for nothing.
                     "on_disk": .bool(FileManager.default.fileExists(atPath: project.path)),
+                    // Reported per project rather than by leaving the hidden ones out, because a
+                    // client that could not see them would name one, be refused, and add it again
+                    // as a duplicate. It is stated as the state it is (`hidden`) with the tool
+                    // that reverses it named in the note below, so an agent asked to tidy or to
+                    // restore has something to act on rather than a flag to guess at.
+                    "hidden": .bool(project.hidden),
                 ]))
             }
-            return .json(.object(["projects": .array(rows)]))
+
+            let hidden = ProjectVisibility.hiddenCount(projects)
+            guard hidden > 0 else { return .json(.object(["projects": .array(rows)])) }
+            return .json(.object([
+                "projects": .array(rows),
+                "hidden_projects": .integer(hidden),
+                "note": .string(
+                    "\(hidden == 1 ? "One project is" : "\(hidden) projects are") hidden from "
+                        + "Bloom's sidebar. That is a view preference and nothing else: they are "
+                        + "still projects, their workspaces still run, and project_unhide puts "
+                        + "one back in the list."
+                ),
+            ]))
         } catch {
             return .failure("Bloom could not read its projects: \(error.readableMessage)")
         }

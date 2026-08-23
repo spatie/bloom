@@ -69,7 +69,24 @@ struct RepoHeaderRow: View {
     /// row and carries the same frame, stands at 479. What is left is the difference between two
     /// glyphs inside one frame, not a difference in the column.
     var body: some View {
-        header.padding(.top, SidebarMetrics.headerLead)
+        header
+            .padding(.top, SidebarMetrics.headerLead)
+            // A hidden project the owner has asked to see is drawn exactly where it would be, at
+            // exactly the size it would be, in less ink. Nothing else: no badge, no italic, no
+            // section of its own. The list has one job at a glance, which is to be scannable, and
+            // a project that is only here because a switch is on should be the quietest thing in
+            // the column rather than the most decorated.
+            //
+            // On the whole header rather than on the icon and the name separately, because it is
+            // one dimming and two opacities that have to agree are two opacities that will not.
+            // The `+` and the settings gear are inside it and dim with it, which is right: they
+            // are furniture of a row that is being played down, and they are drawn only under the
+            // pointer anyway.
+            //
+            // The workspace rows underneath are NOT dimmed. They are real work, running or
+            // waiting to be read, and greying out a turn that has finished because its project is
+            // tidied away would be the one thing hiding is not allowed to do.
+            .opacity(repo.hidden ? SidebarMetrics.hiddenDim : 1)
     }
 
     // MARK: - Header
@@ -127,46 +144,15 @@ struct RepoHeaderRow: View {
         }
         .contentShape(Rectangle())
         .onHoverChange { isHeaderHovered = $0 }
-        // Three groups, and the rule is what each one acts ON.
-        //
-        // The first two items are about the WORKSPACES under this header: one makes another, one
-        // decides whether they are drawn. The next three are about the PROJECT itself: what it is
-        // called, how it is set up, where it lives on disk. The last destroys it, and a
-        // destructive item at the foot of a menu behind a rule of its own is the one grouping this
-        // menu already had.
-        //
-        // Three and not four. The obvious fourth rule would fence Reveal in Finder off as "goes
-        // somewhere else", and that leaves a menu of six items whose bottom half carries a rule
-        // between every item, which says exactly as much as no rules at all. Three is also the
-        // shape the workspace row's menu already has, at the same rhythm: six items in three
-        // groups there, six in three here.
-        //
-        // Ask Siri, which the owner sees at the top of this menu, is not in this list and is not
-        // ours to move. macOS 27 puts it on context menus itself for a user who has Apple
-        // Intelligence on, and developers report it arriving on every context menu in every app.
-        // The menu was read back as AppKit displayed it and carried these six items and nothing
-        // else, so nothing here contributes it. There is also no switch to reach it with:
-        // `NSMenu.allowsContextMenuPlugIns` covers Services and contextual menu plug-ins, Ask Siri
-        // is registered as neither, and a SwiftUI `contextMenu` hands out no `NSMenu` to set it on
-        // in any case. Giving up the App Intents in `Sources/Bloom/Intents` would cost Spotlight
-        // and Shortcuts a real feature and is not known to remove it. So it stays.
+        // Every item and the reasoning for the shape is `ProjectMenuItems`, beside the workspace
+        // row's own menu, so a menu can be photographed rather than only read.
         .contextMenu {
-            Button("New workspace") { onCreateWorkspace(repo) }
-            Button(repo.collapsed ? "Show workspaces" : "Hide workspaces") {
-                Task { await app.toggleCollapsed(repo) }
-            }
-            Divider()
-            Button("Rename", action: beginRepoRename)
-            // The route to this project's settings that needs no pointer on the gear, which is
-            // drawn only while the pointer is on the header. File's own Project Settings item
-            // opens the selected workspace's project; this one opens the project it was raised
-            // from, which is not always the same thing.
-            Button("Project settings…") {
-                openWindow(id: RepoSettingsWindow.id, value: repo.id)
-            }
-            Button("Reveal in Finder") { Reveal.inFinder(repo.path) }
-            Divider()
-            Button("Remove project", role: .destructive) { isConfirmingRemove = true }
+            ProjectMenuItems(
+                repo: repo,
+                onCreateWorkspace: onCreateWorkspace,
+                onRename: beginRepoRename,
+                onRemove: { isConfirmingRemove = true }
+            )
         }
         .confirmationDialog(
             "Remove \(repo.name)?",
@@ -199,10 +185,14 @@ struct RepoHeaderRow: View {
     private static let unreadTitle = ScaledFont(.headline, weight: .heavy)
 
     /// The project's name with what is under it, for VoiceOver only.
+    ///
+    /// A hidden project says so here, because the only other thing that says it is an opacity and
+    /// a screen reader cannot see one. Same reasoning as the unread weight two properties down.
     private var countedName: String {
-        workspaceCount == 1
+        let counted = workspaceCount == 1
             ? "\(repo.name), 1 workspace"
             : "\(repo.name), \(workspaceCount) workspaces"
+        return repo.hidden ? counted + ", hidden" : counted
     }
 
     @ViewBuilder

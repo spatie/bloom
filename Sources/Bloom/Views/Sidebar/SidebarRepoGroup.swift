@@ -24,17 +24,22 @@ struct SidebarRepoGroup: Identifiable {
     /// `createdAt` tiebreak, and Swift's sort is not stable: two rows tied on (pinned, sortOrder)
     /// could draw in one order while `SidebarReorder.destination` computed the drop against the
     /// other, landing a dragged row one off.
+    /// - Parameter showingHidden: whether the projects the owner has hidden are in the list. The
+    ///   rule and everything it means are `ProjectVisibility`, in the core, where the suite can
+    ///   reach them; this only asks. Hidden projects keep their place in the order rather than
+    ///   sinking to the bottom, so turning the switch on inserts rows and moves nothing.
     static func build(
         repos: [Repo],
         workspaces: [Workspace],
-        filter: SidebarFilter
+        filter: SidebarFilter,
+        showingHidden: Bool
     ) -> [SidebarRepoGroup] {
         var byRepo: [RepoID: [Workspace]] = [:]
         for workspace in workspaces {
             byRepo[workspace.repoID, default: []].append(workspace)
         }
 
-        return repos.map { repo in
+        return ProjectVisibility.listed(repos, showingHidden: showingHidden).map { repo in
             let all = byRepo[repo.id] ?? []
             let rows = SidebarReorder.drawn(all.filter(filter.accepts))
             return SidebarRepoGroup(
