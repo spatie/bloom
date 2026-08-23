@@ -59,8 +59,12 @@ public enum WorkspaceStartTrouble: Sendable, Equatable {
                 return opening + " It has no branches at all, so there is nothing to cut from. "
                     + "Do not retry with another name. Say so and carry on with your own work."
             }
-            return opening + " Its branches are \(whichBranches). Call workspace_start again with "
-                + "one of those as base_branch."
+            let hasOne = branches.count == 1
+            return opening
+                + (hasOne ? " Its only branch is \(whichBranches)." : " Its branches are \(whichBranches).")
+                + (hasOne
+                    ? " Call workspace_start again with that as base_branch."
+                    : " Call workspace_start again with one of those as base_branch.")
 
         case let .unexplained(message):
             return "Bloom could not start that workspace: \(message)"
