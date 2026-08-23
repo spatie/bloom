@@ -173,10 +173,19 @@ struct WelcomeGreeting: View {
             // that says that has raised the question it is answering; being specific about what
             // is looked for does the same work without the flinch.
             //
-            // Left where it is, below the lede in both size and weight, which is the whole of its
-            // job: it is the footnote to a button, not a second lede.
+            // `Typo.caption`, which is the rung for supporting text that still has to be read:
+            // two below the lede, so it is plainly subordinate to it rather than competing with
+            // it, and one above the floor it used to sit on.
+            //
+            // It was mono, for the same wrong reason the lede was, and it outlasted the lede's
+            // fix by a commit. Git and the GitHub CLI being proper nouns does not make the
+            // sentence data: mono here is reserved for what a machine said, and this is Bloom
+            // saying what it is about to go and look for. It was also the last line on the screen
+            // still set at the bottom of the scale, which is the complaint that started all of
+            // this, so leaving it there would have fixed the sentence above it and left the
+            // smallest text in the window exactly as small as it was.
             Text("Bloom looks for Git, a coding agent and the GitHub CLI")
-                .font(Typo.codeTiny)
+                .font(Typo.caption)
                 .foregroundStyle(Brand.mistDim)
                 .multilineTextAlignment(.center)
                 .padding(.top, Metrics.inset + Metrics.spacingSmall)
