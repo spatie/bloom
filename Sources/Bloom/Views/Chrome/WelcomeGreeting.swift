@@ -43,8 +43,9 @@ struct WelcomeGreeting: View {
     /// this screen. The first version worked it out from the constants (`pane + inset` down, plus
     /// half the mark) and put the spine 59 points too high, because the content is a `VStack` with
     /// no height of its own inside a 424 point `ZStack`, so it is CENTRED, and where the mark ends
-    /// up therefore depends on the height of a serif line, a mono line and a button. Any of those
-    /// three changing moves the mark and would leave a line drawn through empty water above it.
+    /// up therefore depends on the height of a serif line, a prose line and a button. Any of
+    /// those three changing moves the mark and would leave a line drawn through empty water
+    /// above it.
     ///
     /// The line through the mark is the point of the whole figure. Every branch on this screen
     /// leaves the thing the app is, and the mark hides the middle of the spine, so what is seen is
@@ -131,15 +132,21 @@ struct WelcomeGreeting: View {
                 .padding(.top, Metrics.pane + Metrics.spacingWide)
                 .modifier(Rise(entered: entered, animation: step(0.16)))
 
-            // The only sentence on the screen that says what the app is, and it was set in the
-            // smallest mono size in the theme, which is the size a timestamp is set in. Between a
-            // thirty eight point serif line and a large button it read as a caption to the
-            // wordmark rather than as the thing to read, and Freek could not comfortably read it
-            // at all. Up one step to the size the app uses for a line of prose in mono, which is
-            // where it should have been: the mono face is deliberate, because that is this app's
-            // voice for naming what it does, but the smallest cut of it was not.
+            // The only sentence on the screen that says what the app is, so it is set in the face
+            // and at the size the app sets a sentence in: `Typo.body`, the same rung as the
+            // verdict line on the checks screen. The two screens are one window and the sentence
+            // that introduces Bloom and the sentence that reports on your Mac should not read as
+            // two different kinds of text.
+            //
+            // It was mono, and going up a rung within mono did not fix it, because the size was
+            // never the whole fault. Mono is this app's voice for what a machine said: a version,
+            // a path, a command, an account. This sentence is English, and English set in mono
+            // reads as data, which is the same mistake the checks column's state words used to
+            // make. Between a thirty eight point serif line and a large button, at the floor of
+            // the scale in a face that is wider and greyer per word than the text around it, the
+            // one line explaining the product was the hardest thing in the window to read.
             Text("A worktree, an agent and a branch for every task you describe")
-                .font(Typo.codeSmall)
+                .font(Typo.body)
                 .foregroundStyle(Brand.mistDim)
                 .multilineTextAlignment(.center)
                 .padding(.top, Metrics.inset + Metrics.spacingSmall)
@@ -166,8 +173,8 @@ struct WelcomeGreeting: View {
             // that says that has raised the question it is answering; being specific about what
             // is looked for does the same work without the flinch.
             //
-            // It takes the mono size the lede has just left, so the two lines of mono on the
-            // screen are still a step apart and the hierarchy did not move, it just shifted up.
+            // Left where it is, below the lede in both size and weight, which is the whole of its
+            // job: it is the footnote to a button, not a second lede.
             Text("Bloom looks for Git, a coding agent and the GitHub CLI")
                 .font(Typo.codeTiny)
                 .foregroundStyle(Brand.mistDim)
