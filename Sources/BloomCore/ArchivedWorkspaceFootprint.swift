@@ -140,6 +140,34 @@ public struct ArchiveCleanup: Sendable, Hashable {
     ) -> [ArchivedWorkspaceFootprint] {
         ordered(by: order).filter { ids.contains($0.id) }
     }
+
+    /// The rows a command aimed at one row acts on: the whole selection when that row is inside
+    /// it, and that row on its own when it is not.
+    ///
+    /// **This is the rule the row context menu did not have, and the bug was destructive.** The
+    /// menu passed the row it had been opened on and nothing else, so somebody who had selected
+    /// three workspaces, watched the strip count them and total their bytes, and then right
+    /// clicked one of the three to reach "Delete Permanently" was shown a confirmation naming one
+    /// workspace and had one workspace deleted. Two numbers about an irreversible delete, on
+    /// screen at the same time, disagreeing: the strip said three and 356 kB, the dialogue said
+    /// one and 121 kB. Read one way that is a delete that took too little, which is the safe
+    /// direction and is why nothing was lost. Read the other way it is a person who has been told
+    /// the wrong thing at the only moment it mattered, and the next time they trust the dialogue
+    /// they will believe the two they still see are gone.
+    ///
+    /// So the decision lives here rather than in the button, both because it is the same rule
+    /// Finder applies to a right click and because a decision taken inside a view is a decision
+    /// nothing can test. It is built on `selected` so the strip, the Delete button and this menu
+    /// read one list through one path and cannot drift apart again.
+    ///
+    /// It can never widen a delete beyond what was already on screen: the answer is either the
+    /// selection the strip was counting, or the single row that was clicked.
+    public func target(
+        _ id: WorkspaceID, selection: Set<WorkspaceID>, order: ArchiveCleanupOrder
+    ) -> [ArchivedWorkspaceFootprint] {
+        if selection.contains(id) { return selected(selection, order: order) }
+        return footprints.filter { $0.id == id }
+    }
 }
 
 /// The size of the database file, in the two numbers that matter after a delete.

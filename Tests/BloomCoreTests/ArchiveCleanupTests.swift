@@ -153,6 +153,56 @@ struct ArchiveCleanupTests {
         #expect(try await store.workspace(id: live.id) != nil)
     }
 
+    /// The whole path the Archive screen takes, from a selection of several to the rows that are
+    /// actually gone, with the one row nobody picked still standing.
+    ///
+    /// Written because the screen had a route that lost three quarters of a delete between the
+    /// list and the confirmation, and because the two halves that route runs through, the
+    /// composition and the delete, were each correct on their own. This joins them: the ids that
+    /// reach `deleteArchivedWorkspaces` are the ids `ArchiveCleanup.target` produced, the
+    /// confirmation's totals are read off the same list, and what the database holds afterwards is
+    /// checked row by row rather than by counting.
+    @Test("deleting a selection of several takes exactly those rows and no others")
+    func deletesExactlyTheSelection() async throws {
+        let store = try makeTestStore("archive-selection")
+        let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r"))
+        let alpha = try await archive(store, repo: repo, name: "alpha", branch: "b1")
+        let bravo = try await archive(store, repo: repo, name: "bravo", branch: "b2")
+        let charlie = try await archive(store, repo: repo, name: "charlie", branch: "b3")
+        let delta = try await archive(store, repo: repo, name: "delta", branch: "b4")
+
+        var sessions: [WorkspaceID: SessionID] = [:]
+        for workspace in [alpha, bravo, charlie, delta] {
+            let session = try await store.upsert(
+                Session(workspaceID: workspace.id, title: "S", model: "opus")
+            )
+            sessions[workspace.id] = session.id
+            try await store.appendNext(
+                sessionID: session.id, kind: .assistantText,
+                payload: Data("{\"text\":\"\(workspace.name)\"}".utf8)
+            )
+        }
+
+        let cleanup = ArchiveCleanup(footprints: try await store.archivedFootprints())
+        let selection: Set<WorkspaceID> = [alpha.id, bravo.id, charlie.id]
+
+        // As the row menu now asks: aimed at one row, answered with the selection it sits in.
+        let target = cleanup.target(bravo.id, selection: selection, order: .largest)
+        #expect(Set(target.map(\.id)) == selection)
+        #expect(ArchiveDeletion(target).title == "Delete everything Bloom kept about 3 archived workspaces?")
+
+        let removed = try await store.deleteArchivedWorkspaces(ids: target.map(\.id))
+        #expect(removed == 3)
+
+        for id in selection {
+            #expect(try await store.workspace(id: id) == nil)
+            #expect(try await store.messages(sessionID: sessions[id]!).isEmpty)
+        }
+        #expect(try await store.workspace(id: delta.id) != nil)
+        #expect(try await store.messages(sessionID: sessions[delta.id]!).count == 1)
+        #expect(try await store.archivedFootprints().map(\.workspace.name) == ["delta"])
+    }
+
     /// The whole reason this feature reports a number: a delete alone changes nothing on the
     /// filesystem, and only a compaction makes the saving real.
     @Test("the pages a delete frees come back to the file only after a compaction")
@@ -226,6 +276,66 @@ struct ArchiveCleanupTests {
         ])
         let selected = cleanup.selected([WorkspaceID("s"), WorkspaceID("h")], order: .largest)
         #expect(selected.map(\.workspace.name) == ["huge", "small"])
+    }
+
+    /// The regression this file was reopened for.
+    ///
+    /// The Archive screen's row menu passed the row it had been opened on and nothing else, so a
+    /// right click on one of three selected workspaces confirmed one and deleted one while the
+    /// strip above it went on counting three. The core was already plural and already refused
+    /// anything that was not archived; what was missing was the rule saying which rows a command
+    /// aimed at one row is actually aimed at, and it was missing because it was written inside a
+    /// button where nothing could reach it. These two cases are that rule, and they fail on the
+    /// composition rather than on the delete, because the delete was never wrong.
+    @Test("a command on a row inside the selection is a command on the whole selection")
+    func targetsTheWholeSelection() {
+        let cleanup = ArchiveCleanup(footprints: [
+            footprint(name: "small", bytes: 10, archivedAt: 100, id: "s"),
+            footprint(name: "huge", bytes: 10_000, archivedAt: 300, id: "h"),
+            footprint(name: "middling", bytes: 500, archivedAt: 200, id: "m"),
+        ])
+        let selection: Set<WorkspaceID> = [WorkspaceID("s"), WorkspaceID("h")]
+
+        let target = cleanup.target(WorkspaceID("s"), selection: selection, order: .largest)
+        #expect(target.map(\.workspace.name) == ["huge", "small"])
+        // The number the strip shows and the number the confirmation shows, from one list.
+        #expect(ArchiveDeletion(target).totalBytes == cleanup.selected(selection, order: .largest)
+            .reduce(0) { $0 + $1.totalBytes })
+        #expect(ArchiveDeletion(target).title == "Delete everything Bloom kept about 2 archived workspaces?")
+    }
+
+    /// The other half, and the half that keeps this safe: a row outside the selection takes itself
+    /// and nothing else. Widening a delete to rows the person never pointed at would be a worse
+    /// bug than the one being fixed, so this asserts the answer is exactly one row and that the
+    /// singular wording, which is good copy, still arrives.
+    @Test("a command on a row outside the selection takes that row alone")
+    func targetsOnlyTheRowClicked() {
+        let cleanup = ArchiveCleanup(footprints: [
+            footprint(name: "small", bytes: 10, archivedAt: 100, id: "s", messages: 2, sessions: 1),
+            footprint(name: "huge", bytes: 10_000, archivedAt: 300, id: "h"),
+            footprint(name: "middling", bytes: 500, archivedAt: 200, id: "m"),
+        ])
+
+        let target = cleanup.target(
+            WorkspaceID("s"), selection: [WorkspaceID("h"), WorkspaceID("m")], order: .largest
+        )
+        #expect(target.map(\.workspace.name) == ["small"])
+        #expect(ArchiveDeletion(target).title == "Delete everything Bloom kept about \u{201C}small\u{201D}?")
+        #expect(ArchiveDeletion(target).cancelLabel == "Keep the record")
+
+        // And with nothing selected at all, which is the ordinary way the menu is used.
+        let alone = cleanup.target(WorkspaceID("m"), selection: [], order: .largest)
+        #expect(alone.map(\.workspace.name) == ["middling"])
+    }
+
+    /// A selection built from a list one refresh out of date. The id is not there any more, so
+    /// there is nothing to delete and nothing is invented to stand in for it.
+    @Test("a row that is no longer in the list targets nothing")
+    func targetsNothingForAVanishedRow() {
+        let cleanup = ArchiveCleanup(footprints: [
+            footprint(name: "small", bytes: 10, archivedAt: 100, id: "s"),
+        ])
+        #expect(cleanup.target(WorkspaceID("gone"), selection: [], order: .largest).isEmpty)
     }
 
     // MARK: - What the confirmation says
