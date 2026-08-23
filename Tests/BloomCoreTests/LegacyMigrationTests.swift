@@ -30,7 +30,7 @@ struct LegacyDefaultsTests {
         legacy.set("w-work", forKey: "sidebar.lastWorkspaceID")
         legacy.set(false, forKey: "terminal.ghosttyTheme")
 
-        let outcome = LegacyDefaults.migrate(from: old, into: defaults)
+        let outcome = LegacyDefaults.migrate(from: old, into: defaults, runningAs: Store.primaryBundleIdentifier)
 
         #expect(outcome.ran)
         #expect(outcome.copied == 4)
@@ -50,7 +50,7 @@ struct LegacyDefaultsTests {
         legacy.set("old", forKey: "prompts.pullRequest")
         defaults.set(20.0, forKey: "chat.textSize")
 
-        let outcome = LegacyDefaults.migrate(from: old, into: defaults)
+        let outcome = LegacyDefaults.migrate(from: old, into: defaults, runningAs: Store.primaryBundleIdentifier)
 
         #expect(outcome.copied == 1)
         #expect(outcome.skipped == 1)
@@ -66,10 +66,10 @@ struct LegacyDefaultsTests {
         let legacy = try #require(UserDefaults(suiteName: old))
         legacy.set(11.0, forKey: "chat.textSize")
 
-        #expect(LegacyDefaults.migrate(from: old, into: defaults).copied == 1)
+        #expect(LegacyDefaults.migrate(from: old, into: defaults, runningAs: Store.primaryBundleIdentifier).copied == 1)
         defaults.set(20.0, forKey: "chat.textSize")
 
-        let second = LegacyDefaults.migrate(from: old, into: defaults)
+        let second = LegacyDefaults.migrate(from: old, into: defaults, runningAs: Store.primaryBundleIdentifier)
         #expect(!second.ran)
         #expect(defaults.double(forKey: "chat.textSize") == 20.0)
     }
@@ -79,11 +79,11 @@ struct LegacyDefaultsTests {
         let (old, new, defaults) = domains()
         defer { clean(old, new) }
 
-        let outcome = LegacyDefaults.migrate(from: old, into: defaults)
+        let outcome = LegacyDefaults.migrate(from: old, into: defaults, runningAs: Store.primaryBundleIdentifier)
         #expect(outcome.ran)
         #expect(outcome.copied == 0)
         #expect(defaults.bool(forKey: LegacyDefaults.completionKey))
-        #expect(!LegacyDefaults.migrate(from: old, into: defaults).ran)
+        #expect(!LegacyDefaults.migrate(from: old, into: defaults, runningAs: Store.primaryBundleIdentifier).ran)
     }
 
     @Test("the flag itself is not carried across, so the new domain decides for itself")
@@ -95,8 +95,32 @@ struct LegacyDefaultsTests {
         legacy.set(true, forKey: LegacyDefaults.completionKey)
         legacy.set(9.0, forKey: "chat.textSize")
 
-        #expect(LegacyDefaults.migrate(from: old, into: defaults).copied == 1)
+        #expect(LegacyDefaults.migrate(from: old, into: defaults, runningAs: Store.primaryBundleIdentifier).copied == 1)
         #expect(defaults.double(forKey: "chat.textSize") == 9.0)
+    }
+
+    @Test("only the shipping app inherits the old domain, so a dev or test copy starts empty")
+    func onlyTheRealBundle() throws {
+        let (old, new, defaults) = domains()
+        defer { clean(old, new) }
+
+        let legacy = try #require(UserDefaults(suiteName: old))
+        legacy.set("w-someone-elses", forKey: "sidebar.lastWorkspaceID")
+
+        for identifier in [Store.devBundleIdentifier, "be.spatie.bloom.test", nil] {
+            let outcome = LegacyDefaults.migrate(from: old, into: defaults, runningAs: identifier)
+            #expect(!outcome.ran)
+            #expect(outcome.copied == 0)
+            #expect(defaults.object(forKey: "sidebar.lastWorkspaceID") == nil)
+            // Declining is not finishing: the real app must still be able to migrate afterwards.
+            #expect(!defaults.bool(forKey: LegacyDefaults.completionKey))
+        }
+
+        #expect(LegacyDefaults.shouldMigrate(runningAs: Store.primaryBundleIdentifier))
+        let real = LegacyDefaults.migrate(
+            from: old, into: defaults, runningAs: Store.primaryBundleIdentifier
+        )
+        #expect(real.copied == 1)
     }
 }
 

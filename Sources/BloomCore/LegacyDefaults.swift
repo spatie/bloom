@@ -26,14 +26,34 @@ public enum LegacyDefaults {
         public let ran: Bool
     }
 
+    /// Only the shipping app inherits the old domain, which is the same rule `Store.defaultPath`
+    /// already applies to the database from before the rename rather than a second one.
+    ///
+    /// The copy is read only and harmless in the app it was written for, but it copies the WHOLE
+    /// domain, so any other binary that called it came up wearing somebody else's window frames,
+    /// terminal splits and `sidebar.lastWorkspaceID`. That made a genuinely empty defaults domain
+    /// unreachable for a dev copy or a test bundle, and a first run is exactly the path those are
+    /// used to look at: the state being tested was inherited rather than fresh. A dev copy has
+    /// never wanted the settings of an app under another name either.
+    public static func shouldMigrate(runningAs bundleIdentifier: String?) -> Bool {
+        bundleIdentifier == Store.primaryBundleIdentifier
+    }
+
     /// Called before anything can read a setting. A key already present in `defaults` is left
     /// alone: the only way one can exist before this runs is that the user set it under the new
     /// identifier, and their newer choice outranks whatever the old domain remembers.
     @discardableResult
     public static func migrate(
         from domain: String = legacyDomain,
-        into defaults: UserDefaults = .standard
+        into defaults: UserDefaults = .standard,
+        runningAs bundleIdentifier: String? = Bundle.main.bundleIdentifier
     ) -> Outcome {
+        guard shouldMigrate(runningAs: bundleIdentifier) else {
+            // No flag written, because nothing was decided. A bundle that is not the app has not
+            // finished a migration, it has declined to start one.
+            return Outcome(copied: 0, skipped: 0, ran: false)
+        }
+
         guard !defaults.bool(forKey: completionKey) else {
             return Outcome(copied: 0, skipped: 0, ran: false)
         }
