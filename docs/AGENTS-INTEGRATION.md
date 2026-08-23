@@ -73,3 +73,29 @@ Only Claude Code. The stream-json protocol in `PROTOCOL.md` is the Claude Code o
 `AgentRunner` speaks it. Codex, Cursor and OpenCode are detected and configurable, and a
 workspace cannot yet be driven by them. The UI must say so plainly rather than implying a
 connected CLI is a usable backend.
+
+## Registering Bloom in a client the owner runs themselves
+
+Measured on claude 2.1.241 on 2026-08-23, by running the commands.
+
+`claude mcp add [options] <name> <commandOrUrl> [args...]` takes `-e KEY=value` repeatedly and
+`-s, --scope <local|user|project>`. `claude mcp add-json <name> <json>` exists as well and takes
+the whole server object as one JSON string, so both shapes are a single copyable line. Bloom uses
+`add` rather than `add-json`, because the JSON has to be quoted for the shell as well as escaped
+for JSON and the result is unreadable in a settings pane, while the `add` form reads as a sentence.
+
+The three scopes are not interchangeable and only one of them is right here. `local` is this
+project on this machine, kept in `~/.claude.json` under the project's own key. `project` writes a
+`.mcp.json` in the working directory, which is meant to be committed and shared with everyone who
+clones the repository. `user` is the top level of `~/.claude.json` and applies to every project on
+the machine. Bloom's coupling belongs to the owner and to no repository, so it is `user`, and that
+is also the only one of the three that cannot end up in a commit carrying a live token.
+
+The server is registered as `bloom-owner-bridge` and deliberately not as `bloom-workspace-bridge`,
+which is the name Bloom's own per-session `--mcp-config` uses. That file is additive over
+`~/.claude.json` rather than replacing it, so a shared name would put two entries called the same
+thing in one client: an agent Bloom launched inside a workspace would meet its own session token
+and the owner's standalone token under one name. Two names cost nothing and the collision cannot
+then happen at all.
+
+A session already running does not pick the server up. Start a new one.
