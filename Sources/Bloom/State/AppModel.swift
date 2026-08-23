@@ -124,6 +124,14 @@ final class AppModel {
     private(set) var repos: [Repo] = []
     private(set) var workspaces: [Workspace] = []
     private(set) var isLoaded = false
+    /// What every provider has said about its own allowances, as last read from the store.
+    ///
+    /// The raw rows rather than a built `QuotaBoard`, because a board is a snapshot taken at an
+    /// instant: it drops the windows that have turned over and every countdown in it is measured
+    /// from one clock reading. The menu is built at the moment it opens, so it takes that reading
+    /// itself and this stays the durable half.
+    private(set) var quotas: [AgentQuota] = []
+
 
     /// Selecting a workspace is the moment its live model should come into existence, rather than
     /// the moment some view body happens to ask for it. Doing it here keeps model creation out of
@@ -253,6 +261,7 @@ final class AppModel {
 
     private var refreshTask: Task<Void, Never>?
     private var storeObservationTask: Task<Void, Never>?
+    private var quotaObservationTask: Task<Void, Never>?
     private var identityTask: Task<Void, Never>?
     /// The launch sweep for project icons. Not private, because the work it does is in
     /// `AppModel+ProjectIcons.swift`, and outside observation because nothing draws from it.
@@ -327,6 +336,7 @@ final class AppModel {
         identityTask = Task { await GitHubIdentity.resolve() }
         startBackgroundRefresh()
         startObservingStore()
+        startObservingQuotas()
         // Last, and nothing waits for it: the window is already drawn by the time this runs, and
         // every project it has anything to do is one that is drawing its initials meanwhile. See
         // `searchForMissingProjectIcons`.
@@ -445,6 +455,8 @@ final class AppModel {
         refreshTask = nil
         storeObservationTask?.cancel()
         storeObservationTask = nil
+        quotaObservationTask?.cancel()
+        quotaObservationTask = nil
         identityTask?.cancel()
         identityTask = nil
         iconSearchTask?.cancel()
@@ -519,6 +531,31 @@ final class AppModel {
         repos[index].iconSource = source
     }
 
+    // MARK: - Agent allowances
+
+    /// Writes what a backend has just reported about its own limits.
+    ///
+    /// Called from a transcript, which is the only place the event arrives, but the value written
+    /// is account wide rather than per workspace: two chats on the same login describe the same
+    /// five hour window, and the store keys on provider and window so the two land on one row.
+    /// The reload is left to the store's own change feed below rather than done here, so a write
+    /// from anywhere reaches the menu the same way.
+    func recordQuotas(_ quotas: [AgentQuota]) async {
+        guard let store, !quotas.isEmpty else { return }
+        do {
+            try await store.recordQuotas(quotas)
+        } catch {
+            // Nothing to say to anybody. A missed allowance reading is a menu that is a few
+            // minutes out of date, and the next turn on either backend reports again.
+        }
+    }
+
+    func reloadQuotas() async {
+        guard let store else { return }
+        let loaded = (try? await store.quotas()) ?? []
+        if quotas != loaded { quotas = loaded }
+    }
+
     /// Follows the store, so a write anybody makes is a window that has already redrawn.
     ///
     /// `reload()` used to be called by hand from twenty one places, every one of them a writer
@@ -553,6 +590,26 @@ final class AppModel {
             for await _ in store.changes(of: [.repos, .workspaces]) {
                 guard let self else { return }
                 await self.reload()
+            }
+        }
+    }
+
+    /// The allowance rows, on a feed of their own.
+    ///
+    /// Separate from the one above because `reload` reads neither table and a rate limit event
+    /// arriving after every turn on every workspace must not drag a full workspace reload behind
+    /// it. `Store.quotas` deletes the rows that have turned over, which is a write on a read and
+    /// therefore the one thing `StoreChangeHub` warns about: it is safe because the delete only
+    /// happens when there is something stale to delete, so the loop it could start converges after
+    /// one extra pass and cannot run on.
+    private func startObservingQuotas() {
+        guard let store else { return }
+        quotaObservationTask?.cancel()
+        quotaObservationTask = Task { [weak self] in
+            await self?.reloadQuotas()
+            for await _ in store.changes(of: [.agentQuotas]) {
+                guard let self else { return }
+                await self.reloadQuotas()
             }
         }
     }

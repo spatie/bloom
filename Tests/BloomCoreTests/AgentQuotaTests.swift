@@ -277,3 +277,38 @@ struct AgentQuotaStoreTests {
         #expect(try await store.quotas(at: now.addingTimeInterval(-3600)).map(\.window.key) == ["seven_day"])
     }
 }
+
+@Suite("Allowance sentence")
+struct AllowanceSentenceTests {
+    private func board(_ quotas: [AgentQuota]) -> QuotaBoard { QuotaBoard.make(from: quotas, at: now) }
+
+    private func quota(_ provider: AgentKind, _ key: String, _ fraction: Double?) -> AgentQuota {
+        AgentQuota(
+            provider: provider,
+            window: .named(key),
+            measure: fraction.map { .fraction($0) } ?? .unknown,
+            resetsAt: now.addingTimeInterval(8100),
+            observedAt: now
+        )
+    }
+
+    @Test func namesTheWindowNearestItsWallAndCountsTheRest() {
+        let sentence = MenuBarSummary.allowanceSentence(
+            for: board([
+                quota(.claudeCode, "five_hour", 0.42),
+                quota(.claudeCode, "seven_day", 0.77),
+                quota(.codex, "seven_day", 0.06),
+            ]),
+            at: now
+        )
+        #expect(sentence == "Claude Code, week allowance 77 percent used, lifts in 2h 15m. 2 other windows")
+    }
+
+    @Test func saysSoWhenThereIsNothingToSay() {
+        #expect(MenuBarSummary.allowanceSentence(for: board([]), at: now) == "No allowance reported yet")
+        #expect(
+            MenuBarSummary.allowanceSentence(for: board([quota(.claudeCode, "five_hour", nil)]), at: now)
+                == "Allowances reported, none of them measured yet"
+        )
+    }
+}

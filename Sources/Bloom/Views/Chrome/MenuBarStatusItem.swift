@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import BloomCore
 
 /// The menu bar item: which agents are blocked on a question, which are running, which finished
@@ -242,8 +243,13 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
-        // First, because that is where it was asked for, and because it is the one row here that
-        // is about the machine rather than about a workspace.
+        // First, because it is the one thing in here nowhere else in the app says, and because a
+        // person opening this menu at four in the afternoon is usually asking exactly this. The
+        // workspace lists below it are also on screen in the window; the allowance is not.
+        menu.addItem(allowances())
+        menu.addItem(.separator())
+
+        // Then the machine, which is the other row here that is not about a workspace.
         menu.addItem(sleepToggle())
         menu.addItem(.separator())
 
@@ -276,6 +282,44 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         open.target = self
         menu.addItem(open)
     }
+
+    /// The allowance panel, hosted in a menu item.
+    ///
+    /// A custom view rather than rows of text, because the one thing worth knowing here is a
+    /// proportion and a menu item's title cannot draw one. `QuotaPanel` is the whole of the
+    /// drawing and the whole of the layout; this only decides where it hangs.
+    ///
+    /// The item is disabled on purpose. AppKit highlights a custom view's item under the pointer
+    /// exactly as it would a real command, and an item that lights up when you cross it and then
+    /// does nothing when you click reads as a bug. Disabling it costs the accessibility label,
+    /// which is why one is set by hand.
+    ///
+    /// The board is built here rather than held on `AppModel` because two of its three decisions
+    /// are about the current instant: which windows have already turned over, and how long every
+    /// countdown in one drawing has left. The menu is built at the moment it opens, which is the
+    /// only moment those are worth deciding.
+    ///
+    /// The view is measured with `fittingSize` and pinned. An `NSHostingView` inside a menu item
+    /// is given no layout pass by the menu, so a view left to size itself lands with a zero height
+    /// frame and the row collapses to nothing.
+    private func allowances() -> NSMenuItem {
+        let board = QuotaBoard.make(from: app?.quotas ?? [])
+        let host = NSHostingView(rootView: QuotaPanel(board: board))
+        host.frame = CGRect(origin: .zero, size: host.fittingSize)
+
+        let item = NSMenuItem()
+        item.view = host
+        item.isEnabled = false
+        item.toolTip = Self.allowanceCaveat
+        item.setAccessibilityLabel(MenuBarSummary.allowanceSentence(for: board))
+        return item
+    }
+
+    /// Said once, in the tooltip, because it explains a blank that would otherwise look broken:
+    /// a Claude window with no figure beside it has not been measured rather than gone unused.
+    private static let allowanceCaveat =
+        "Claude Code publishes a usage figure only once a window passes its warning threshold. "
+        + "Codex publishes one after every turn."
 
     /// One fixed phrase with a checkmark, not a label that rewrites itself. See `SleepPrevention`.
     ///

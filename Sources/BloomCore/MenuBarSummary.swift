@@ -79,6 +79,31 @@ public enum MenuBarSummary {
         return lines.isEmpty ? idleTooltip : lines.joined(separator: ", ")
     }
 
+    /// The allowance panel read out loud.
+    ///
+    /// A disabled menu item carrying a custom view has no title for VoiceOver to speak and a
+    /// hosted SwiftUI subtree is a stack of unlabelled shapes, so the whole row is labelled with
+    /// one sentence instead. Here rather than beside the panel because it is the only version of
+    /// that panel anything in `Tests/BloomCoreTests` can hold still.
+    public static func allowanceSentence(for board: QuotaBoard, at now: Date = Date()) -> String {
+        guard let headline = board.headline, let fraction = headline.fraction else {
+            return board.isEmpty
+                ? "No allowance reported yet"
+                : "Allowances reported, none of them measured yet"
+        }
+        let percentage = Int((min(max(fraction, 0), 1) * 100).rounded(.down))
+        var sentence = "\(headline.provider.label), \(headline.window.label.lowercased()) "
+            + "allowance \(percentage) percent used"
+        if let resetsAt = headline.resetsAt {
+            sentence += ", lifts \(QuotaCountdown.phrase(until: resetsAt, from: now))"
+        }
+        let others = board.all.count - 1
+        if others > 0 {
+            sentence += others == 1 ? ". 1 other window" : ". \(others) other windows"
+        }
+        return sentence
+    }
+
     /// The hover text over a bare strip, and it is not `emptyTitle`.
     ///
     /// The strip no longer counts running agents, so it is blank with three of them mid turn, and

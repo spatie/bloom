@@ -738,7 +738,13 @@ final class TranscriptModel {
             }
             await refreshSession()
 
-        case .hook, .rateLimit, .unknown:
+        case .rateLimit(let raw):
+            // Both backends converge on this one event, and until now it landed here and stopped.
+            // The adapters recognise their own payload and decline the rest, so this one line
+            // serves every backend that publishes an allowance and every backend that does not.
+            await app.recordQuotas(AgentQuotaAdapters.quotas(fromRateLimitEvent: raw))
+
+        case .hook, .unknown:
             break
         }
     }
