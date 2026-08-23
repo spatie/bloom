@@ -18,10 +18,6 @@ struct BloomCommands: Commands {
     /// Nil in every scene but the main window. See `MainWindowFocus`.
     @FocusedValue(\.isMainWindowFocused) private var isMainWindowFocused: Bool?
 
-    /// Read the way `RepoSettingsCommands` reads it: a Commands body is not a view, but the
-    /// environment still reaches it, and this is the only way a menu item can open a scene.
-    @Environment(\.openWindow) private var openWindow
-
     init(model: AppModel) {
         self.model = model
     }
@@ -58,9 +54,10 @@ struct BloomCommands: Commands {
         }
 
         CommandGroup(replacing: .newItem) {
-            Button("New Workspace") {
-                // The sheet lives in RootView, and the sidebar and Home already open it this way.
-                // Setting a flag on the model instead would leave it stuck true with no sheet.
+            Button("New Workspace…") {
+                // The sheet lives in RootView, and the sidebar and Home already open it this
+                // way. Setting a flag on the model instead would leave it stuck true with no
+                // sheet.
                 NotificationCenter.default.post(name: .bloomNewWorkspace, object: nil)
             }
             .keyboardShortcut("n", modifiers: .command)
@@ -77,8 +74,8 @@ struct BloomCommands: Commands {
             // anchored after `.saveItem` is dropped whole and Cmd+W falls through to the system
             // Close, which used to end the process and every agent with it.
             //
-            // It belongs to the session in the MAIN window, though, which is why it is scoped to
-            // that scene below. The menu bar is shared with Settings and with each project's
+            // It belongs to the session in the MAIN window, though, which is why it is scoped
+            // to that scene below. The menu bar is shared with Settings and with each project's
             // settings window, and unscoped this item both closed the wrong thing from those
             // windows and left them with no working Cmd+W of their own.
             Button("Close Session") {
@@ -93,11 +90,16 @@ struct BloomCommands: Commands {
 
             Divider()
 
-            Button("Add Project Folder", action: addProjectFolder)
+            Button("Add Project Folder…", action: addProjectFolder)
             .keyboardShortcut("o", modifiers: [.command, .shift])
         }
 
         CommandGroup(after: .pasteboard) {
+            // The separator matters more than it looks. `.pasteboard` ends at Select All, so
+            // without this Find sits welded to it and the Edit menu reads as one undivided run of
+            // eight items. Every Mac Edit menu keeps Find in a group of its own.
+            Divider()
+
             Button("Find Workspace") {
                 model.selection = .search
             }
@@ -252,18 +254,6 @@ struct BloomCommands: Commands {
             }
             .keyboardShortcut(".", modifiers: .command)
             .disabled(model.selectedModel?.activeTranscript?.isRunning != true)
-        }
-
-        // At the head of the Window menu, above the list of open windows, because this item IS
-        // about a window rather than about the workspace or the view: the map is a thing to
-        // bring up, glance at and leave open. No shortcut, because it is a curiosity rather
-        // than a step in anyone's flow.
-        CommandGroup(before: .windowList) {
-            Button("Discovered Seas") {
-                openWindow(id: OceansWindow.id)
-            }
-
-            Divider()
         }
 
         CommandGroup(replacing: .help) {

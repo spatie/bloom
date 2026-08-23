@@ -13,6 +13,24 @@ struct OceansWindow: Scene {
     /// The scene id. Opening this window from anywhere is `openWindow(id:)` with it.
     static let id = "oceans"
 
+    /// **There is no menu item for this window in `BloomCommands`, and there must not be.**
+    ///
+    /// A `Window` scene puts its own item in the Window menu, named after the window, and that
+    /// item is not the list of open windows: it opens the window when it is closed and brings it
+    /// to the front when it is not. Measured, because the difference is the whole question. So a
+    /// command of our own whose only job was to open this window printed "Discovered Seas" twice
+    /// in the same menu, once as SwiftUI's item and once under a separator as ours, with nothing
+    /// to tell a reader which was which.
+    ///
+    /// The command was the copy, so the command went. Renaming ours to "Show Discovered Seas"
+    /// was the tempting version and merely made the duplicate legible; hiding ours while the
+    /// window was open would have made the menu change shape under somebody learning it. Neither
+    /// buys anything the free item does not already do. It buys one thing less: a shortcut, which
+    /// this window never had and does not want.
+    ///
+    /// If this window ever needs a key equivalent, that is the moment to put a command back, and
+    /// it will have to be named so it cannot be read as the line above it.
+
     var body: some Scene {
         Window("Discovered Seas", id: Self.id) {
             OceansMapView()
