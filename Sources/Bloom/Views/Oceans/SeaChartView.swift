@@ -851,7 +851,10 @@ private final class ChartEventView: NSView, NSViewToolTipOwner {
 /// to match a window frame nobody is looking at. So the sheet stays parchment in the dark, and
 /// what changes is the light falling on it. The paper drops a little in value and warms, the
 /// vignette roughly doubles so the edges fall away into the room, and the inks deepen to keep
-/// the same separation from a slightly darker ground. It reads as the chart under a lamp, which
+/// the same separation from a slightly darker ground. The dark vignette came down from 0.42 to
+/// 0.33 when the paper moved on top of the ink: it used to darken only the margin, because the
+/// map covered the rest of it, and over the sheet as well the old figure closed the corners of
+/// the chart rather than the corners of the page. It reads as the chart under a lamp, which
 /// is the only honest way a parchment object goes dark. The window's own chrome, the footer and
 /// its rule, still follows the system through `Palette`, so the app is not fighting the setting.
 private struct ChartInk {
@@ -878,7 +881,7 @@ private struct ChartInk {
                 mark: chartColor(0x8A2E1C),
                 label: chartColor(0x2A1E10),
                 shade: chartColor(0x35240F),
-                vignette: 0.42,
+                vignette: 0.33,
                 texture: 0.82
             )
             : ChartInk(
