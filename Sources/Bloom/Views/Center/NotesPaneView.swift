@@ -33,7 +33,18 @@ struct NotesPaneView: View {
             footer
         }
         .background(Palette.surface)
-        .task { await load() }
+        .task {
+            await load()
+            // The caret, because this pane is one text field and nobody opens it to look at it.
+            // It is reached by Shift+Cmd+N or by picking Notes out of the `+` menu, both of which
+            // are somebody saying "I want to write this down"; without this the first sentence
+            // they typed went nowhere and had to be typed again after a click.
+            //
+            // After `load`, and not in the same breath as it: the editor is `.disabled` until the
+            // row has been read back, and focus does not stick to a disabled field. `hasLoaded` is
+            // set inside `load`, so by here the field is live.
+            isEditing = true
+        }
         // The two moments the debounce is not enough on its own. Leaving the field is the ordinary
         // one; the pane going away covers switching tab, switching workspace and closing the tab,
         // all of which tear this view down while a scheduled save is still sleeping.
