@@ -8,7 +8,8 @@ import BloomCore
 /// introduced itself by listing what your Mac might be missing. That is a form, and the app it
 /// belongs to feels like a utility rather than like something anybody made. So the plinth, which
 /// on the next screen is a band at the top, is the whole window here: the mark, the name, one line
-/// saying what Bloom does, and a sounding going out across the water. One press and it is gone.
+/// saying what Bloom does, and the branches running through the water behind all three. One
+/// press and it is gone.
 ///
 /// The cost of it is one press for somebody who has already read it, and that is paid for in
 /// `OnboardingFlow.firstStep`: this screen is where a FIRST run opens, and the Help menu and a
@@ -29,11 +30,26 @@ struct WelcomeGreeting: View {
     @State private var entered = false
 
     private static let markSize: CGFloat = 104
-    /// Tall enough that the sounding has somewhere to go. A ring that reached the edge of the
+    /// Tall enough that the branches have somewhere to run. A curve that reached the wall of the
     /// plinth in its first second would read as a border being drawn rather than as water. It is
     /// the height BELOW the title bar; the gradient behind it runs up past that, so the window is
     /// this plus the title bar's inset and the plinth fills all of it.
     private static let height: CGFloat = 424
+    private static let plinth = "welcome.plinth"
+
+    /// Where `main` runs, measured down from the top of the plinth: the middle of the mark.
+    ///
+    /// Measured rather than added up, and that is the whole reason there is a preference key on
+    /// this screen. The first version worked it out from the constants (`pane + inset` down, plus
+    /// half the mark) and put the spine 59 points too high, because the content is a `VStack` with
+    /// no height of its own inside a 424 point `ZStack`, so it is CENTRED, and where the mark ends
+    /// up therefore depends on the height of a serif line, a mono line and a button. Any of those
+    /// three changing moves the mark and would leave a line drawn through empty water above it.
+    ///
+    /// The line through the mark is the point of the whole figure. Every branch on this screen
+    /// leaves the thing the app is, and the mark hides the middle of the spine, so what is seen is
+    /// a line going into one side of it and coming out of the other.
+    @State private var spineDepth: CGFloat = 145
 
     /// The gradient and the water are the BACKGROUND, and only the background ignores the safe
     /// area, which is the arrangement the checks step has always had.
@@ -47,10 +63,14 @@ struct WelcomeGreeting: View {
     /// not asked how big it is, so it bleeds upwards and fills downwards and there is no strip.
     var body: some View {
         ZStack {
-            sounding
+            branches
             content
         }
         .frame(height: Self.height)
+        .coordinateSpace(name: Self.plinth)
+        .onPreferenceChange(SpineDepth.self) { depth in
+            if let depth { spineDepth = depth }
+        }
         .clipped()
         .background {
             ZStack {
@@ -73,12 +93,11 @@ struct WelcomeGreeting: View {
         }
     }
 
-    /// The rings, centred on the mark rather than on the window. They go out from the thing that
-    /// is doing the sounding, which is the only placement that means anything.
-    private var sounding: some View {
-        BrandSounding(reach: 260)
-            .frame(width: 560, height: 560)
-            .offset(y: -Self.height / 2 + 150)
+    /// The branches, filling the plinth rather than sitting in a box inside it, because `main`
+    /// runs the width of the window and a branch that stopped short of the edge would be a
+    /// drawing of a branch instead of one.
+    private var branches: some View {
+        BrandBranching(spineDepth: spineDepth)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }
@@ -90,6 +109,17 @@ struct WelcomeGreeting: View {
                 .frame(width: Self.markSize, height: Self.markSize)
                 .shadow(color: .black.opacity(0.55), radius: 18, y: 10)
                 .accessibilityHidden(true)
+                // Reported before the entrance is applied, so the branches are drawn against
+                // where the mark LANDS rather than against where it starts. `scaleEffect` does
+                // not change a layout frame, so this reads the same on every frame of the rise.
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: SpineDepth.self,
+                            value: proxy.frame(in: .named(Self.plinth)).midY
+                        )
+                    }
+                }
                 .opacity(entered ? 1 : 0)
                 .scaleEffect(entered ? 1 : 0.88)
                 .animation(step(0), value: entered)
@@ -133,6 +163,15 @@ struct WelcomeGreeting: View {
     /// nothing to play at all.
     private func step(_ delay: Double) -> Animation? {
         reduceMotion ? nil : .easeOut(duration: 0.45).delay(delay)
+    }
+}
+
+/// Where the middle of the mark ended up, so `BrandBranching` can run `main` through it.
+private struct SpineDepth: PreferenceKey {
+    static let defaultValue: CGFloat? = nil
+
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = nextValue() ?? value
     }
 }
 

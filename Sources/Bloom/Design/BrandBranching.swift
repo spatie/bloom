@@ -1,0 +1,367 @@
+import AppKit
+import BloomCore
+import SwiftUI
+
+/// Branches leaving a line and coming back to it, with the light travelling rather than the line.
+///
+/// The runbloom.app hero draws a git history and nothing else: a horizontal `main` across the
+/// middle, worktrees curving away from it and rejoining, a bloom of light around each. It is the
+/// one picture on the site that is the app rather than a decoration of it, and it reads as water
+/// at the same time, because a branch leaving a spine and returning is the shape of a swell. This
+/// is that figure on the welcome window.
+///
+/// What came over from the site: the geometry, which is `BranchCurve` in the core; the spine
+/// under the mark; the tracing, so what moves is a length of light along a curve rather than the
+/// curve itself; the soft wide stroke under the sharp one, which is what makes a line look like
+/// light in water rather than like a line; and the drift of light along `main` between branches.
+///
+/// What did not: every label, the agent names, the branch names, the commit dots and the `+3`
+/// counts. The site's version is a diagram and wants reading. This is the first screen anybody
+/// sees and wants only to be felt, and a screen with `feat/app-intents` written on it is a screen
+/// somebody stops to parse. What is left says parallel work on one repository without naming any
+/// of it.
+///
+/// It replaced three concentric rings going out from the mark. The rings were a sounding, which
+/// tied the greeting to the checks screen's sounding line, and they were readable because they
+/// were faint and slow. They were also a circle expanding out of a square mark, which is a
+/// gesture any app could make; this is Bloom's own picture, and it earns the extra complexity by
+/// being the thing the app does.
+///
+/// Core Animation at `BrandWater`'s frame rate, for `BrandWater`'s reasons. The cap is the whole
+/// budget: uncapped, the render server honours this display's full ProMotion rate for as long as
+/// the window is open, which was measured on the About window at about forty percent of one core
+/// in WindowServer against seven capped. Nothing here moves fast enough to want more: the head of
+/// a branch travels about twenty points a second, so at twelve frames a second it steps under two
+/// points, which on a glow this soft is below what its edge can show.
+struct BrandBranching: NSViewRepresentable {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Where `main` runs, in points down from the top of the view. The call site puts it through
+    /// the middle of the app mark, so the mark sits on the line the branches leave from.
+    let spineDepth: CGFloat
+
+    func makeNSView(context: Context) -> BrandBranchingView { BrandBranchingView() }
+
+    func updateNSView(_ view: BrandBranchingView, context: Context) {
+        view.spineDepth = spineDepth
+        // Removed, not slowed, which is the rule every call site of `Motion` follows. Unlike the
+        // rings this replaced, there is something worth holding still here: a ring at rest is a
+        // circle drawn round the mark and says nothing, but branches at rest are a spine with
+        // four worktrees caught at four different distances out along it, which is a picture of
+        // the same thing the motion is a picture of. So Reduce Motion gets a composition rather
+        // than an empty plinth. The site does the same in its own `seedStillFrame`.
+        view.setMoving(!reduceMotion)
+    }
+}
+
+final class BrandBranchingView: NSView {
+    var spineDepth: CGFloat = 86 {
+        didSet { if spineDepth != oldValue { needsLayout = true } }
+    }
+
+    /// The four branches, and why there are four.
+    ///
+    /// Three left the field empty for seconds at a time and five had two lines crossing the
+    /// wordmark at once. Four, on periods sharing no common factor, means there is always one
+    /// leaving and one landing and the composition never visibly repeats, which is the same
+    /// arithmetic `BrandWater` uses on its breaths.
+    ///
+    /// `rise` is signed points off the spine, positive upwards, and the spread is deliberately
+    /// not symmetric: there is only the plinth above the mark, and the wordmark below it. The
+    /// deepest branch is the dimmest colour for the same reason, so the one line that passes
+    /// behind the type is the one least able to compete with it.
+    private struct Lane {
+        var from: CGFloat
+        var to: CGFloat
+        var rise: CGFloat
+        var period: CFTimeInterval
+        var colour: UInt32
+        /// Where this branch is caught when nothing is moving, as a fraction of its own travel.
+        var still: CGFloat
+    }
+
+    private static let lanes: [Lane] = [
+        Lane(from: 0.00, to: 0.64, rise: 98, period: 23, colour: 0x9BE9DC, still: 0.93),
+        Lane(from: 0.34, to: 0.96, rise: 62, period: 31, colour: 0x4FD8C4, still: 0.28),
+        Lane(from: 0.02, to: 0.55, rise: -50, period: 27, colour: 0x7FE8D6, still: 0.61),
+        Lane(from: 0.42, to: 0.98, rise: -80, period: 37, colour: 0x2AA3B4, still: 0.45),
+    ]
+
+    /// The share of a branch's period spent tracing out to the far end. The rest of it is the
+    /// tail catching up, which is how the light lands back on the spine and is gone.
+    private static let trace: CFTimeInterval = 0.72
+    /// How far behind the head each of the two strokes trails, as a share of the period.
+    ///
+    /// Two numbers rather than one, and this is what makes a branch read as light rather than as
+    /// a dash sliding along a curve. The sharp line keeps a bit under a third of the branch lit,
+    /// which is enough to show the shape of the turn it just came round and not so much that it
+    /// draws the whole branch. The soft wide one behind it keeps half again as much, so what
+    /// fades out at the back is a glow with no line left inside it. The site gets the same effect
+    /// with a gradient stroke on its trail; this gets it from two layers and no gradient, which
+    /// is what the render server can animate without being handed a new path every frame.
+    private static let lineLag: CFTimeInterval = 0.22
+    private static let wakeLag: CFTimeInterval = 0.36
+    /// The same cap, the same numbers and the same reason as `BrandWater.frameRate`.
+    private static let frameRate = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)
+    /// How many points the head's travel is sampled into. Forty is under three points apart on
+    /// the longest branch here, which is inside the softest edge in the composition.
+    private static let steps = 40
+
+    private let spine = BrandBranchingView.spineLayer()
+    private let drifts = [BrandBranchingView.glow(rgb: 0x2AA3B4, alpha: 0.20),
+                          BrandBranchingView.glow(rgb: 0x4FD8C4, alpha: 0.14)]
+    private var wakes: [CAShapeLayer] = []
+    private var lines: [CAShapeLayer] = []
+    private var heads: [CAGradientLayer] = []
+    /// The paced points of each branch, kept from layout so the head's keyframes and the still
+    /// frame's parking spot are read off the same line the stroke is drawn from.
+    private var tracks: [[CGPoint]] = []
+    private var moving = false
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        layer?.addSublayer(spine)
+        for drift in drifts { layer?.addSublayer(drift) }
+        for lane in Self.lanes {
+            // The wide soft stroke first and the sharp one over it, which is the order the site
+            // paints in and the only order that reads as light around a line rather than as two
+            // lines. Both are one layer each with one path: the whole travel is `strokeStart` and
+            // `strokeEnd`, so the render server owns it and nothing is re-pathed per frame.
+            let wake = CAShapeLayer()
+            wake.fillColor = NSColor.clear.cgColor
+            wake.strokeColor = NSColor(rgb: lane.colour).withAlphaComponent(0.11).cgColor
+            wake.lineWidth = 7
+            wake.lineCap = .round
+            wake.opacity = 0
+            let line = CAShapeLayer()
+            line.fillColor = NSColor.clear.cgColor
+            line.strokeColor = NSColor(rgb: lane.colour).withAlphaComponent(0.55).cgColor
+            line.lineWidth = 1.3
+            line.lineCap = .round
+            line.opacity = 0
+            let head = Self.glow(rgb: lane.colour, alpha: 0.34)
+            head.opacity = 0
+            layer?.addSublayer(wake)
+            layer?.addSublayer(line)
+            layer?.addSublayer(head)
+            wakes.append(wake)
+            lines.append(line)
+            heads.append(head)
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    /// `main`, faded out at both ends rather than run to the window edges.
+    ///
+    /// A hairline reaching both walls of the plinth is a border, and a border across the top of
+    /// the first screen the app draws is the one thing this cannot look like. Faded, it reads as
+    /// a current the branches come off, and the middle of it is hidden behind the mark anyway.
+    private static func spineLayer() -> CAGradientLayer {
+        let spine = CAGradientLayer()
+        let colour = NSColor(rgb: 0x2AA3B4)
+        spine.colors = [
+            colour.withAlphaComponent(0).cgColor,
+            colour.withAlphaComponent(0.26).cgColor,
+            colour.withAlphaComponent(0.26).cgColor,
+            colour.withAlphaComponent(0).cgColor,
+        ]
+        spine.locations = [0, 0.16, 0.84, 1]
+        spine.startPoint = CGPoint(x: 0, y: 0.5)
+        spine.endPoint = CGPoint(x: 1, y: 0.5)
+        return spine
+    }
+
+    /// A soft round light: `BrandWater`'s pool, at the size a head of a branch wants. Radial to
+    /// nothing by seventy percent of the radius, which is the site's `transparent 70%` and what
+    /// keeps it a bloom rather than a disc.
+    private static func glow(rgb: UInt32, alpha: CGFloat) -> CAGradientLayer {
+        let glow = CAGradientLayer()
+        glow.type = .radial
+        glow.colors = [
+            NSColor(rgb: rgb).withAlphaComponent(alpha).cgColor,
+            NSColor(rgb: rgb).withAlphaComponent(0).cgColor,
+            NSColor(rgb: rgb).withAlphaComponent(0).cgColor,
+        ]
+        glow.locations = [0, 0.7, 1]
+        glow.startPoint = CGPoint(x: 0.5, y: 0.5)
+        glow.endPoint = CGPoint(x: 1, y: 1)
+        return glow
+    }
+
+    override func layout() {
+        super.layout()
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+
+        // The core works in the same space the view draws in, so the only conversion is the one
+        // between "down from the top", which is how the greeting is laid out, and the layer
+        // geometry it lands in.
+        let spineY = bounds.height - spineDepth
+        spine.frame = CGRect(x: 0, y: spineY - 0.5, width: bounds.width, height: 1)
+        for drift in drifts {
+            drift.bounds = CGRect(x: 0, y: 0, width: 260, height: 90)
+            drift.position = CGPoint(x: bounds.midX, y: spineY)
+        }
+
+        tracks = Self.lanes.enumerated().map { index, lane in
+            let shape = BranchCurve.shape(
+                from: lane.from * bounds.width,
+                to: lane.to * bounds.width,
+                spine: spineY,
+                rise: lane.rise,
+                crown: 7
+            )
+            let track = BranchCurve.paced(shape, count: Self.steps)
+            let path = CGMutablePath()
+            path.addLines(between: track)
+            for stroke in [wakes[index], lines[index]] {
+                // Each stroke is given the branch's own box rather than the whole view, so the
+                // render server recomposites a band around one curve instead of the whole plinth
+                // four times over.
+                let box = path.boundingBox.insetBy(dx: -8, dy: -8)
+                stroke.frame = box
+                var shift = CGAffineTransform(translationX: -box.minX, y: -box.minY)
+                stroke.path = path.copy(using: &shift)
+            }
+            heads[index].bounds = CGRect(x: 0, y: 0, width: 58, height: 58)
+            heads[index].position = track.first ?? .zero
+            return track
+        }
+
+        CATransaction.commit()
+        applyMotion()
+    }
+
+    func setMoving(_ wanted: Bool) {
+        moving = wanted
+        applyMotion()
+    }
+
+    private func applyMotion() {
+        for layer in drifts + wakes + lines + heads { layer.removeAllAnimations() }
+        guard bounds.width > 0, !tracks.isEmpty else { return }
+        guard moving else { return stillFrame() }
+
+        for (index, lane) in Self.lanes.enumerated() {
+            // Wound forward by a share of its own period rather than delayed, so the window opens
+            // onto branches already out on the water instead of onto an empty spine.
+            let phase = lane.period * CFTimeInterval(lane.still)
+            trace(wakes[index], lag: Self.wakeLag, over: lane.period, phase: phase)
+            trace(lines[index], lag: Self.lineLag, over: lane.period, phase: phase)
+            travel(heads[index], along: tracks[index], over: lane.period, phase: phase)
+        }
+        drift(drifts[0], over: 27, phase: 0)
+        drift(drifts[1], over: 38, phase: 19)
+    }
+
+    /// What the window shows when Reduce Motion is on: the spine, and four branches held at four
+    /// different distances out from it, each lit for the length it would be lit while moving.
+    /// One is landing, one has just left, two are out on the run. It is the same picture, stopped.
+    private func stillFrame() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (index, lane) in Self.lanes.enumerated() {
+            let head = min(lane.still / CGFloat(Self.trace), 1)
+            for (stroke, lag) in [(wakes[index], Self.wakeLag), (lines[index], Self.lineLag)] {
+                stroke.strokeStart = max((lane.still - CGFloat(lag)) / CGFloat(Self.trace), 0)
+                stroke.strokeEnd = head
+                stroke.opacity = 1
+            }
+            let track = tracks[index]
+            let step = min(Int(head * CGFloat(track.count - 1)), track.count - 1)
+            heads[index].position = track[step]
+            heads[index].opacity = 0.85
+        }
+        // Parked a quarter and three quarters of the way along rather than where they were laid
+        // out, because the middle of the spine is behind the mark and a light held still there is
+        // a light nobody can see.
+        for (index, drift) in drifts.enumerated() {
+            drift.position.x = bounds.width * (index == 0 ? 0.26 : 0.74)
+            drift.opacity = 0.55
+        }
+        CATransaction.commit()
+    }
+
+    /// The branch drawing itself out and then being drawn back in.
+    ///
+    /// `strokeEnd` runs the whole length over the first `trace` of the period and `strokeStart`
+    /// follows it a `lag` behind, so the lit part is a length of the curve travelling along it
+    /// rather than a line growing. When the head reaches the spine the tail keeps going, and the
+    /// light shrinks into the rejoin and is gone, which is the only part of the site's version
+    /// that is about merging and the only part worth keeping without a label to explain it.
+    private func trace(
+        _ stroke: CAShapeLayer,
+        lag: CFTimeInterval,
+        over period: CFTimeInterval,
+        phase: CFTimeInterval
+    ) {
+        let head = CAKeyframeAnimation(keyPath: "strokeEnd")
+        head.values = [0, 1, 1]
+        head.keyTimes = [0, NSNumber(value: Self.trace), 1]
+        let tail = CAKeyframeAnimation(keyPath: "strokeStart")
+        tail.values = [0, 0, 1]
+        tail.keyTimes = [0, NSNumber(value: lag), 1]
+        // Rises out of nothing and is gone before the loop point, so neither end of the cycle is
+        // ever seen happening.
+        let fade = CAKeyframeAnimation(keyPath: "opacity")
+        fade.values = [0, 1, 1, 0]
+        fade.keyTimes = [0, 0.09, 0.90, 1]
+        stroke.add(group([head, tail, fade], over: period, phase: phase), forKey: "trace")
+    }
+
+    /// The bloom that rides on the head of a branch.
+    ///
+    /// Its positions are the branch's own points, paced by `BranchCurve` so the light holds one
+    /// speed through the turns as well as along the run. A keyframe interpolates on even key
+    /// times, so unpaced points would have it race the corners, and the corners are exactly where
+    /// the eye is because that is where the branch leaves.
+    private func travel(
+        _ glow: CAGradientLayer,
+        along track: [CGPoint],
+        over period: CFTimeInterval,
+        phase: CFTimeInterval
+    ) {
+        guard track.count > 1 else { return }
+        let path = CAKeyframeAnimation(keyPath: "position")
+        path.values = (track + [track[track.count - 1]]).map { NSValue(point: $0) }
+        path.keyTimes = (0..<track.count).map {
+            NSNumber(value: Double($0) / Double(track.count - 1) * Self.trace)
+        } + [NSNumber(value: 1.0)]
+        let fade = CAKeyframeAnimation(keyPath: "opacity")
+        fade.values = [0, 0.9, 0.9, 0]
+        fade.keyTimes = [0, 0.06, 0.66, 1]
+        glow.add(group([path, fade], over: period, phase: phase), forKey: "travel")
+    }
+
+    /// Light going down `main` itself, so the spine is not the one still thing in the picture
+    /// between branches. The site drifts three of these along its spine; two is enough here,
+    /// because half the line is behind the mark.
+    private func drift(_ glow: CAGradientLayer, over seconds: CFTimeInterval, phase: CFTimeInterval) {
+        let travel = CABasicAnimation(keyPath: "position.x")
+        travel.fromValue = -140
+        travel.toValue = bounds.width + 140
+        let fade = CAKeyframeAnimation(keyPath: "opacity")
+        fade.values = [0, 1, 1, 0]
+        fade.keyTimes = [0, 0.18, 0.82, 1]
+        glow.add(group([travel, fade], over: seconds, phase: phase), forKey: "drift")
+    }
+
+    private func group(
+        _ animations: [CAAnimation],
+        over seconds: CFTimeInterval,
+        phase: CFTimeInterval
+    ) -> CAAnimationGroup {
+        let group = CAAnimationGroup()
+        group.animations = animations
+        group.duration = seconds
+        group.repeatCount = .infinity
+        group.preferredFrameRateRange = Self.frameRate
+        group.timeOffset = phase
+        return group
+    }
+}
