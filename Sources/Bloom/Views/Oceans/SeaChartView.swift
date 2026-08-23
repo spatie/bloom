@@ -644,15 +644,60 @@ struct SeaChartView: View {
             boundsWidth: sheet.width, boundsHeight: sheet.height,
             reserved: reservedBoxes(in: world)
         )
-        for label in labels {
-            let box = CGRect(x: label.x, y: label.y, width: label.width, height: label.height)
-            // A wash of paper under the name, so it stays readable across a coastline or a
-            // neighbour's shading without wearing a chip's border.
-            context.fill(
-                Path(roundedRect: box.insetBy(dx: -3, dy: -1), cornerRadius: 2),
-                with: .color(ink.paper.opacity(0.72))
-            )
-            context.draw(texts[label.mark], in: box)
+        let boxes = labels.map {
+            CGRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height)
+        }
+        drawHalos(
+            context, texts: texts, labels: labels, boxes: boxes,
+            spread: max(typeSize(sheet: sheet) * 0.2, 1.5), ink: ink
+        )
+        for (index, label) in labels.enumerated() {
+            context.draw(texts[label.mark], in: boxes[index])
+        }
+    }
+
+    /// The clearance a name needs to stay readable where it crosses a coast, carried by the
+    /// letterforms themselves rather than by a panel behind them.
+    ///
+    /// What this replaced was a rounded rectangle of paper colour under every name. That was
+    /// invisible while the sheet was a flat gradient and became the loudest thing on the chart
+    /// the moment the sheet grew grain and stains: a panel of one flat tone with a hard edge,
+    /// over a surface with tooth everywhere else, reads as a sticker pasted on rather than a
+    /// name printed into the paper. It was worst over land, where paper is four shades lighter
+    /// than the fill it sat on, and it cut a clean notch out of every coastline it crossed.
+    ///
+    /// A cartographer masks the ground around the glyphs instead, so this is the same names
+    /// drawn in paper colour and blurred, which leaves no edge anywhere for the eye to catch.
+    /// Twice, because one pass of a blur takes the peak alpha inside a thin serif well below
+    /// one and the name has to win against land; two passes fill the letterform back in while
+    /// the fringe stays as soft as it was. Over open water it costs nothing visible, the water
+    /// tone being within a few units of the paper, which is the answer to a name in the middle
+    /// of an ocean needing no clearance at all.
+    ///
+    /// Both passes are one layer holding all forty names, not one layer each. A blur is charged
+    /// per drawing operation and this canvas redraws on every frame of a pinch, so forty blurs
+    /// a frame is a cost worth not paying for a result that is identical. Every halo also goes
+    /// down before any name is written, which the wash could not do, drawn as it was one panel
+    /// and one name at a time: two names close enough to share paper had the second one's wash
+    /// laid over the first one's letters.
+    private func drawHalos(
+        _ context: GraphicsContext,
+        texts: [GraphicsContext.ResolvedText],
+        labels: [SeaChartLabel],
+        boxes: [CGRect],
+        spread: Double,
+        ink: ChartInk
+    ) {
+        for _ in 0..<2 {
+            var pass = context
+            pass.addFilter(.blur(radius: spread))
+            pass.drawLayer { names in
+                for (index, label) in labels.enumerated() {
+                    var glyphs = texts[label.mark]
+                    glyphs.shading = .color(ink.paper)
+                    names.draw(glyphs, in: boxes[index])
+                }
+            }
         }
     }
 
