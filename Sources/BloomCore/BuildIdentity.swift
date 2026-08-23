@@ -73,6 +73,28 @@ public enum BuildIdentity: Equatable, Sendable {
         }
     }
 
+    /// The same line, with the moment the bundle was assembled added for the builds that have no
+    /// other way of being told apart.
+    ///
+    /// A release is unchanged, deliberately. `Version 0.5.0 · Build 570` names a build every other
+    /// copy of it shares, so a timestamp there would say when this particular download was
+    /// assembled, which is a fact about the release runner and about nothing the reader has. The
+    /// two development cases are the opposite: several of them exist on this machine at once, the
+    /// commit is the same in all of them or absent from all of them, and the time is then the only
+    /// thing that separates them. See `BuildTimestamp` for where the date comes from.
+    ///
+    /// A missing date leaves the line exactly as `line` has it, so a bundle assembled by something
+    /// other than `Tools/build.sh` loses the timestamp rather than growing a gap or a placeholder.
+    public func line(
+        built: Date?,
+        now: Date = Date(),
+        locale: Locale = .autoupdatingCurrent,
+        timeZone: TimeZone = .autoupdatingCurrent
+    ) -> String {
+        guard !isRelease, let built else { return line }
+        return "\(line) · \(BuildTimestamp.line(built, now: now, locale: locale, timeZone: timeZone))"
+    }
+
     /// The same fact for a row that already carries the word "Version" as its label, where `line`
     /// would print it twice. The development cases are unchanged, because "Version: 0.1.0" and
     /// "Version: Development build" are both answers to the label's question and the first of them
