@@ -96,11 +96,18 @@ struct BloomCommands: Commands {
 
         CommandGroup(after: .pasteboard) {
             // The separator matters more than it looks. `.pasteboard` ends at Select All, so
-            // without this Find sits welded to it and the Edit menu reads as one undivided run of
-            // eight items. Every Mac Edit menu keeps Find in a group of its own.
+            // without this the find item sits welded to it and the Edit menu reads as one
+            // undivided run of eight items. Every Mac Edit menu keeps find in a group of its own.
             Divider()
 
-            Button("Find Workspace") {
+            // "Search", not "Find Workspace". This opens the sidebar's own Search, which reads
+            // the full text of every transcript as well as workspace names, so the old title
+            // named the smaller half of what it does and nobody would have guessed the rest was
+            // there. The sidebar item it selects is called Search, and one thing wants one name.
+            //
+            // No ellipsis: it puts a screen up in the window rather than raising anything to fill
+            // in, which is what the ellipsis promises.
+            Button("Search") {
                 model.selection = .search
             }
             .keyboardShortcut("f", modifiers: .command)
@@ -281,7 +288,7 @@ struct BloomCommands: Commands {
             // the same gesture aimed at two different answers: one asks for something to be
             // fixed, the other asks for something to be built.
             //
-            // Option+Command+F rather than Command+F, which is Find Workspace and stays that way.
+            // Option+Command+F rather than Command+F, which is Search and stays that way.
             // The sheets themselves are raised from `RootView`, through `FeedbackPresenter`, for
             // the reason the create sheet is: a menu item cannot present anything, and the draft
             // has to outlive the sheet it was typed into.
