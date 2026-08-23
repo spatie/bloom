@@ -156,7 +156,7 @@ struct WelcomeView: View {
                 .foregroundStyle(Palette.textPrimary)
 
             Text(report.sentence)
-                .font(Typo.label)
+                .font(Typo.body)
                 .foregroundStyle(Palette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -195,7 +195,7 @@ struct WelcomeView: View {
 
                     Spacer(minLength: Metrics.spacingWide)
 
-                    status(check, severity: severity)
+                    status(check, in: report, severity: severity)
                 }
 
                 // The login is the row while it is up, and it is drawn from `login` rather than
@@ -213,7 +213,7 @@ struct WelcomeView: View {
                     loginTerminal(check, session: running.session)
                 } else if severity != .ok, check.outcome.isSettled {
                     Text(check.tool.purpose)
-                        .font(Typo.caption)
+                        .font(Typo.label)
                         .foregroundStyle(Palette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -232,33 +232,48 @@ struct WelcomeView: View {
     /// One line, always, and never a sentence: an account, a version, or the shortest true words
     /// for the state. The account comes out of `AgentCatalog`, which has already decided what may
     /// be shown from a file holding a live token.
-    private func status(_ check: SetupCheck, severity: SetupSeverity) -> some View {
+    private func status(_ check: SetupCheck, in report: SetupReport, severity: SetupSeverity) -> some View {
         Group {
             switch check.outcome {
             case .pending:
                 Text("Checking")
+                    .font(Typo.label)
                     .foregroundStyle(Palette.textTertiary)
             case .ready(let detail):
+                // The one place in the column that is monospaced, because it is the one place
+                // holding something the machine said: a version, or the account a CLI is signed
+                // in as. Every other cell here is English, and English set in mono reads as data
+                // rather than as a state, which is what "Not signed in" used to look like.
                 Text(detail ?? "Ready")
+                    .font(detail == nil ? Typo.label : Typo.code)
                     .foregroundStyle(Palette.textTertiary)
             case .needsSignIn:
-                Text("Not signed in")
+                Text(stateWord("Not signed in", in: report, severity: severity))
+                    .font(Typo.label)
                     .foregroundStyle(severity == .problem ? Palette.warning : Palette.textTertiary)
             case .missing:
-                Text(severity == .ok ? "Not installed" : optionalWord(check, severity: severity))
+                Text(stateWord("Not installed", in: report, severity: severity))
+                    .font(Typo.label)
                     .foregroundStyle(severity == .problem ? Palette.warning : Palette.textTertiary)
             }
         }
-        .font(Typo.codeSmall)
         .lineLimit(1)
         .truncationMode(.middle)
     }
 
-    /// What a missing tool is called on the right of its row. "Optional" rather than "Not
-    /// installed" for the ones Bloom does not need, because the fact worth reading first is not
-    /// that it is absent, it is that its absence does not matter.
-    private func optionalWord(_ check: SetupCheck, severity: SetupSeverity) -> String {
-        severity == .note ? "Optional, not installed" : "Not installed"
+    /// What a tool that is not set up is called on the right of its row.
+    ///
+    /// "Optional" first, and on both of the two ways a tool can be not set up rather than only on
+    /// the missing one. The fact worth reading first about a tool Bloom does not need is not that
+    /// it is absent, it is that its absence does not matter, and a GitHub CLI that was installed
+    /// but signed out used to be the one optional state that never said so.
+    ///
+    /// Only once the list has finished settling, which is a guard rather than a nicety. A missing
+    /// agent is a note while the OTHER agent row is still being looked at, so a machine with
+    /// neither Claude Code nor Codex called Claude Code optional for the frame between the two
+    /// rows being revealed. Nothing is called optional until the column knows.
+    private func stateWord(_ state: String, in report: SetupReport, severity: SetupSeverity) -> String {
+        severity == .note && report.isSettled ? "Optional, \(state.lowercased())" : state
     }
 
     // MARK: - The sounding line
@@ -305,7 +320,19 @@ struct WelcomeView: View {
                 // Only the arrival, and only in scale. A tick that spun or bounced would be
                 // announcing itself on a window whose whole argument is that nothing is wrong.
                 .transition(reduceMotion ? .identity : .scale(scale: 0.6).combined(with: .opacity))
-        case .needsSignIn, .missing:
+        // A lock rather than the dotted ring the missing rows carry, and the whole reason this
+        // case is drawn separately. Signed out and not installed are different problems with
+        // different commands behind them, and they used to share one glyph and one colour, so an
+        // optional tool that was merely signed out and an optional tool that was not there at all
+        // were the same mark in the same grey. A lock says the thing is here and closed.
+        case .needsSignIn:
+            Image(systemName: severity == .problem ? "lock.circle.fill" : "lock.circle")
+                .foregroundStyle(severity == .problem ? Palette.warning : Palette.textTertiary)
+                .font(.system(size: 15))
+                .transition(reduceMotion ? .identity : .scale(scale: 0.6).combined(with: .opacity))
+        case .missing:
+            // Filled is the rule for a row that is in the way, on this case and on the one above,
+            // so weight carries the severity down the column and shape carries the state.
             Image(systemName: severity == .problem ? "exclamationmark.circle.fill" : "circle.dotted")
                 .foregroundStyle(severity == .problem ? Palette.warning : Palette.textTertiary)
                 .font(.system(size: 15))
@@ -340,10 +367,14 @@ struct WelcomeView: View {
                     // reveal. What is left is the sentence naming what the command does, which
                     // is worth more as a label than as a control that does nothing new.
                     Text(fix.summary)
-                        .font(Typo.caption)
+                        .font(Typo.label)
                         .foregroundStyle(Palette.textSecondary)
                 } else {
-                    Button(isOpen ? "Hide the command" : fix.summary) {
+                    // Not `fix.summary`, which is the imperative for the command itself.
+                    // Nothing is installed by pressing this: it reveals the line to run, and a
+                    // button reading "Install the GitHub CLI" that produced a shell command was
+                    // the same failure "Check my Mac" was flagged for.
+                    Button(isOpen ? "Hide the install command" : "Show the install command") {
                         withAnimation(reduceMotion ? nil : Motion.pane) {
                             expanded = isOpen ? nil : check.tool
                         }
@@ -356,7 +387,7 @@ struct WelcomeView: View {
                     // draws and what would have put a blue word three inches from the teal one in
                     // the footer. See `linkButton()`, which fixes the same thing for controls.
                     Link("Instructions", destination: url)
-                        .font(Typo.caption)
+                        .font(Typo.label)
                         .foregroundStyle(Palette.link)
                 }
 
@@ -373,7 +404,7 @@ struct WelcomeView: View {
     private func commandLine(_ check: SetupCheck, command: String) -> some View {
         HStack(spacing: Metrics.spacingWide) {
             Text(command)
-                .font(Typo.codeSmall)
+                .font(Typo.code)
                 .foregroundStyle(Palette.textPrimary)
                 .textSelection(.enabled)
                 .lineLimit(1)
@@ -390,7 +421,7 @@ struct WelcomeView: View {
                 }
             }
             .buttonStyle(.plain)
-            .font(Typo.caption)
+            .font(Typo.label)
             .foregroundStyle(Palette.link)
         }
         .padding(.horizontal, Metrics.inset)
@@ -412,7 +443,7 @@ struct WelcomeView: View {
                 // over a terminal whose command had exited minutes ago, which is the window
                 // lying about the one thing on it that was moving.
                 Text(session.isRunning ? "Running \(session.label)" : "\(session.label) finished")
-                    .font(Typo.codeSmall)
+                    .font(Typo.code)
                     .foregroundStyle(Palette.textSecondary)
                     .lineLimit(1)
 
@@ -428,7 +459,7 @@ struct WelcomeView: View {
                 Button("Back to the checks", systemImage: "chevron.left") { stopLogin() }
                     .buttonStyle(.borderless)
                     .controlSize(.small)
-                    .font(Typo.caption)
+                    .font(Typo.label)
                     .foregroundStyle(Palette.link)
                     .help(session.isRunning ? "Stop this and go back to the list" : "Go back to the list")
             }
@@ -496,7 +527,7 @@ struct WelcomeView: View {
                 // prevent, and it would be waiting for an answer nobody could give it.
                 Button(title, systemImage: "chevron.left") { move { stopLogin(); flow.goBack() } }
                     .buttonStyle(.plain)
-                    .font(Typo.label)
+                    .font(Typo.body)
                     .foregroundStyle(Palette.link)
             }
 
@@ -509,12 +540,12 @@ struct WelcomeView: View {
             if inspection.truth.verdict == .blocked {
                 Button("Skip for now") { finish() }
                     .buttonStyle(.plain)
-                    .font(Typo.label)
+                    .font(Typo.body)
                     .foregroundStyle(Palette.link)
             } else {
                 Button("Check again") { inspection.start() }
                     .buttonStyle(.plain)
-                    .font(Typo.label)
+                    .font(Typo.body)
                     .foregroundStyle(inspection.isRunning ? Palette.textTertiary : Palette.link)
                     .disabled(inspection.isRunning)
             }

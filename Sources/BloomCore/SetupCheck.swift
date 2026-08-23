@@ -371,7 +371,8 @@ public extension SetupReport {
         // Capitalised, because the only tool whose name carries an article is the one most likely
         // to be alone in this list, and "Bloom has what it needs. the GitHub CLI is not set up"
         // is what the uncapitalised version actually printed.
-        return "Bloom has what it needs. \(list(quiet).capitalizedFirst) \(quiet.count == 1 ? "is" : "are") not set up, which only turns off the parts below."
+        let subject = quiet.count == 1 ? "it" : "them"
+        return "Bloom has what it needs. \(list(quiet).capitalizedFirst) \(quiet.count == 1 ? "is" : "are") not set up, so only the parts that use \(subject) are off."
     }
 
     private var blockedSentence: String {
@@ -398,10 +399,17 @@ public extension SetupReport {
 
     /// What the primary button says. It never reads as a dead end: a blocked machine is offered
     /// another look rather than a closed door.
+    ///
+    /// A machine still being looked at is offered the same way out as one that has answered, and
+    /// the button says so. It read "Checking" while the probes ran, which is a status and not an
+    /// act: it sat on an enabled button that closed the window and let somebody into the app, so
+    /// the one control on the screen was the one thing on it that did not say what it did. The
+    /// window never makes anybody wait for its own animation, which is the whole argument for
+    /// leaving the button live during a run, and a live button has to be named after what
+    /// pressing it does.
     var primaryButtonTitle: String {
         switch verdict {
-        case .checking: "Checking"
-        case .ready, .readyWithNotes: "Start using Bloom"
+        case .checking, .ready, .readyWithNotes: "Start using Bloom"
         case .blocked: "Check again"
         }
     }

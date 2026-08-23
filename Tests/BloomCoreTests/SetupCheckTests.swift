@@ -136,6 +136,19 @@ struct SetupCopyTests {
         #expect(sentence.contains("Codex and the GitHub CLI"))
     }
 
+    @Test("the button is named after what pressing it does, even mid-check")
+    func checkingIsNotAButtonTitle() {
+        #expect(SetupReport.pending.verdict == .checking)
+        #expect(SetupReport.pending.primaryButtonTitle == "Start using Bloom")
+    }
+
+    @Test("an optional tool that is not set up says what is still on")
+    func saysWhatIsStillOn() {
+        #expect(report(gitHub: .missing).sentence.contains("only the parts that use it are off"))
+        let two = report(codex: .missing, gitHub: .missing).sentence
+        #expect(two.contains("only the parts that use them are off"))
+    }
+
     @Test("a blocked machine is offered another look rather than a closed door")
     func blockedCopy() {
         let blocked = report(claude: .missing, codex: .missing)
