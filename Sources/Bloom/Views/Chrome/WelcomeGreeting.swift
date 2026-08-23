@@ -30,19 +30,36 @@ struct WelcomeGreeting: View {
 
     private static let markSize: CGFloat = 104
     /// Tall enough that the sounding has somewhere to go. A ring that reached the edge of the
-    /// plinth in its first second would read as a border being drawn rather than as water.
+    /// plinth in its first second would read as a border being drawn rather than as water. It is
+    /// the height BELOW the title bar; the gradient behind it runs up past that, so the window is
+    /// this plus the title bar's inset and the plinth fills all of it.
     private static let height: CGFloat = 424
 
+    /// The gradient and the water are the BACKGROUND, and only the background ignores the safe
+    /// area, which is the arrangement the checks step has always had.
+    ///
+    /// It used to be one ZStack, gradient and all, with `.frame(height: 424)` and then
+    /// `.ignoresSafeArea(edges: .top)` over the whole thing. Ignoring the safe area moved the
+    /// drawing up under the title bar without taking the title bar's inset back out of the fitting
+    /// size, so the hosting view asked for 456 points and the plinth painted 424 of them from the
+    /// top down. What was left was 27 points of flat `Palette.surface` along the bottom edge with
+    /// a hard horizontal line above it, on the first screen the app ever draws. A background is
+    /// not asked how big it is, so it bleeds upwards and fills downwards and there is no strip.
     var body: some View {
         ZStack {
-            Brand.depth
-            BrandWater()
             sounding
             content
         }
         .frame(height: Self.height)
         .clipped()
-        .ignoresSafeArea(edges: .top)
+        .background {
+            ZStack {
+                Brand.depth
+                BrandWater()
+            }
+            .clipped()
+            .ignoresSafeArea(edges: .top)
+        }
         .onAppear {
             guard !entered else { return }
             if reduceMotion || !isFirstVisit {
