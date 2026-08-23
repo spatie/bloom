@@ -148,8 +148,15 @@ struct ArchiveView: View {
                     .contextMenu {
                         Button("Read the Transcript") { app.openArchived(footprint.workspace) }
                         Divider()
+                        // Through `ArchiveCleanup.target` rather than straight to this row,
+                        // and the selection is moved to whatever comes back. That keeps the one
+                        // thing this screen cannot afford to get wrong: the strip's count and the
+                        // confirmation's count are the same list, so they cannot say two different
+                        // numbers about the same irreversible delete. See `target` for the bug.
                         Button("Delete Permanently\u{2026}", role: .destructive) {
-                            confirming = ArchiveDeletion([footprint])
+                            let rows = cleanup.target(footprint.id, selection: selected, order: order)
+                            selected = Set(rows.map(\.id))
+                            confirming = ArchiveDeletion(rows)
                         }
                     }
             }
