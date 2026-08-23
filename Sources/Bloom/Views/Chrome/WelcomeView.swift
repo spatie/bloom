@@ -4,6 +4,11 @@ import BloomCore
 
 /// What the welcome window draws.
 ///
+/// Two steps, and the sequence is `OnboardingFlow` in the core rather than a boolean here,
+/// because which screen follows which and whether back is offered is the only part of a wizard
+/// that can be wrong and a decision taken inside a view is a decision nothing can test. The
+/// greeting is `WelcomeGreeting`; everything below is the second step.
+///
 /// Three bands, in the register the About window established: the brand's plinth with the water
 /// moving in it, the reading ground under a hairline, and a chrome strip at the foot with the
 /// buttons in it. Nothing here is a new surface and nothing here is a new colour; the only thing
@@ -14,12 +19,19 @@ struct WelcomeView: View {
     let onFinish: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var flow: OnboardingFlow
     /// The row whose fix is open. One at a time: two open commands is a wall of code where there
     /// should be a next step.
     @State private var expanded: SetupTool?
     @State private var copied: SetupTool?
     /// The login running inside this window, and which row asked for it.
     @State private var login: (tool: SetupTool, session: GitHubLoginSession)?
+
+    init(inspection: SetupInspection, start: OnboardingStep, onFinish: @escaping () -> Void) {
+        self.inspection = inspection
+        self.onFinish = onFinish
+        _flow = State(initialValue: OnboardingFlow(step: start))
+    }
 
     /// Wide enough for `npm install -g @anthropic-ai/claude-code` to sit on one line in the mono
     /// face, which is the longest command this window can ever show, and no wider. A command that
@@ -32,17 +44,24 @@ struct WelcomeView: View {
     private var report: SetupReport { inspection.shown }
 
     var body: some View {
-        VStack(spacing: 0) {
-            plinth
-            hairline
-            body(report)
-            hairline
-            footer
+        Group {
+            switch flow.step {
+            case .greeting:
+                WelcomeGreeting(
+                    isFirstVisit: flow.isFirstVisit(to: .greeting),
+                    onContinue: { move { flow.advance() } }
+                )
+            case .checks:
+                checksStep
+            }
         }
         .frame(width: Self.width)
         .background(Palette.surface)
         .onAppear {
             inspection.revealsInstantly = reduceMotion
+            // Started here rather than on the checks step, so four subprocesses are already
+            // running while somebody reads the greeting and nobody ever waits for them. The
+            // model holds the ROWS back until the checks are on screen; see `presentChecks`.
             inspection.start()
         }
         .onDisappear {
@@ -51,14 +70,41 @@ struct WelcomeView: View {
         }
     }
 
+    /// One move through the sequence, drawn as a crossfade.
+    ///
+    /// Opacity and nothing else. Two screens sliding past each other would be a slideshow, and
+    /// what is wanted is the plinth growing into the window and shrinking back out of it, which
+    /// is what a crossfade between a full bleed plinth and a band at the top already reads as.
+    private func move(_ change: () -> Void) {
+        withAnimation(reduceMotion ? nil : Motion.pane) { change() }
+    }
+
+    private var checksStep: some View {
+        VStack(spacing: 0) {
+            plinth
+            hairline
+            body(report)
+            hairline
+            footer
+        }
+        .transition(reduceMotion ? .identity : .opacity)
+        .onAppear { inspection.presentChecks() }
+        .onDisappear { inspection.dismissChecks() }
+    }
+
     private var hairline: some View {
         Rectangle().fill(Palette.border).frame(height: Metrics.hairline)
     }
 
     // MARK: - The plinth
 
-    /// The About window's plinth at this window's scale. Same gradient, same water, same wordmark
+    /// The greeting's plinth, compressed into a band. Same gradient, same water, same wordmark
     /// face, and the mark read out of the running bundle rather than shipped again.
+    ///
+    /// The line about worktrees and agents is not repeated here. It is the greeting's line, it has
+    /// just been read, and a window that says the same sentence on two screens running is a window
+    /// that was not designed as two screens. What is left is the mark and the name, which is what
+    /// makes this band read as the screen before it, pushed up out of the way.
     private var plinth: some View {
         VStack(spacing: 0) {
             Image(nsImage: NSApp.applicationIconImage)
@@ -68,20 +114,14 @@ struct WelcomeView: View {
                 .accessibilityHidden(true)
 
             Text(verbatim: "Welcome to Bloom")
-                .font(.system(size: 30, weight: .light, design: .serif))
+                .font(.system(size: 26, weight: .light, design: .serif))
                 .tracking(-0.6)
                 .foregroundStyle(Brand.foam)
                 .padding(.top, Metrics.spacingWide + Metrics.spacingSmall)
-
-            Text("A worktree, an agent and a branch for every task you describe")
-                .font(Typo.codeTiny)
-                .foregroundStyle(Brand.mistDim)
-                .multilineTextAlignment(.center)
-                .padding(.top, Metrics.spacing)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 34)
-        .padding(.bottom, 24)
+        .padding(.top, 30)
+        .padding(.bottom, 22)
         .padding(.horizontal, Metrics.pane)
         .background {
             ZStack {
@@ -158,10 +198,20 @@ struct WelcomeView: View {
                     status(check, severity: severity)
                 }
 
-                // The sentence only appears on a row that has something to say. A tick with a
-                // paragraph under it explaining what git is for would be four paragraphs on the
-                // machine where nothing is wrong, which is most machines.
-                if severity != .ok, check.outcome.isSettled {
+                // The login is the row while it is up, and it is drawn from `login` rather than
+                // from the outcome, which is what stops it being yanked away.
+                //
+                // The bug this fixes: a login exiting starts a fresh probe, a fresh probe puts
+                // every row back to pending, and pending failed the settled test below, so the
+                // terminal was torn out of the window on the frame the command finished. If the
+                // login had failed, the reason it failed went with it. A second later the rows
+                // settled, the row still said not signed in, and the same dead terminal came back
+                // by itself with a header still claiming to be running it. Nothing here waits for
+                // the probe now: the terminal stays where it is, with its output, until somebody
+                // presses the way out of it.
+                if let running = login, running.tool == check.tool {
+                    loginTerminal(check, session: running.session)
+                } else if severity != .ok, check.outcome.isSettled {
                     Text(check.tool.purpose)
                         .font(Typo.caption)
                         .foregroundStyle(Palette.textSecondary)
@@ -280,46 +330,41 @@ struct WelcomeView: View {
         severity: SetupSeverity,
         isOpen: Bool
     ) -> some View {
-        if let running = login, running.tool == check.tool {
-            loginTerminal(check, session: running.session)
-        } else {
-            VStack(alignment: .leading, spacing: Metrics.spacingWide) {
-                HStack(spacing: Metrics.inset) {
-                    if fix.isInteractive {
-                        Button(fix.summary) { startLogin(check, fix: fix) }
-                            .controlSize(.small)
-                    } else if severity == .problem {
-                        // The command is already below, so there is nothing left for a button to
-                        // reveal. What is left is the sentence naming what the command does, which
-                        // is worth more as a label than as a control that does nothing new.
-                        Text(fix.summary)
-                            .font(Typo.caption)
-                            .foregroundStyle(Palette.textSecondary)
-                    } else {
-                        Button(isOpen ? "Hide the command" : fix.summary) {
-                            withAnimation(reduceMotion ? nil : Motion.pane) {
-                                expanded = isOpen ? nil : check.tool
-                            }
-                        }
+        VStack(alignment: .leading, spacing: Metrics.spacingWide) {
+            HStack(spacing: Metrics.inset) {
+                if fix.isInteractive {
+                    Button(fix.summary) { startLogin(check, fix: fix) }
                         .controlSize(.small)
+                } else if severity == .problem {
+                    // The command is already below, so there is nothing left for a button to
+                    // reveal. What is left is the sentence naming what the command does, which
+                    // is worth more as a label than as a control that does nothing new.
+                    Text(fix.summary)
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                } else {
+                    Button(isOpen ? "Hide the command" : fix.summary) {
+                        withAnimation(reduceMotion ? nil : Motion.pane) {
+                            expanded = isOpen ? nil : check.tool
+                        }
                     }
-
-                    if let url = fix.url {
-                        // The app's teal rather than the system accent, which is what a bare
-                        // `Link` draws and what would have put a blue word three inches from the
-                        // teal one in the footer. See `linkButton()`, which fixes the same thing
-                        // for controls.
-                        Link("Instructions", destination: url)
-                            .font(Typo.caption)
-                            .foregroundStyle(Palette.link)
-                    }
-
-                    Spacer(minLength: 0)
+                    .controlSize(.small)
                 }
 
-                if isOpen, let command = fix.command {
-                    commandLine(check, command: command)
+                if let url = fix.url {
+                    // The app's teal rather than the system accent, which is what a bare `Link`
+                    // draws and what would have put a blue word three inches from the teal one in
+                    // the footer. See `linkButton()`, which fixes the same thing for controls.
+                    Link("Instructions", destination: url)
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.link)
                 }
+
+                Spacer(minLength: 0)
+            }
+
+            if isOpen, let command = fix.command {
+                commandLine(check, command: command)
             }
         }
     }
@@ -363,19 +408,29 @@ struct WelcomeView: View {
     private func loginTerminal(_ check: SetupCheck, session: GitHubLoginSession) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: Metrics.spacingWide) {
-                Text("Running \(session.label)")
+                // Present tense only while it is true. This used to say "Running gh auth login"
+                // over a terminal whose command had exited minutes ago, which is the window
+                // lying about the one thing on it that was moving.
+                Text(session.isRunning ? "Running \(session.label)" : "\(session.label) finished")
                     .font(Typo.codeSmall)
                     .foregroundStyle(Palette.textSecondary)
                     .lineLimit(1)
 
                 Spacer(minLength: 0)
 
-                Button("Stop", systemImage: "xmark") { stopLogin() }
-                    .labelStyle(.iconOnly)
+                // A named way out, not a cross.
+                //
+                // The cross was the only control on this strip, and a cross reads as kill: the
+                // one thing somebody who had wandered into a login and wanted out was least
+                // likely to press. It is a back button, so it says so and points the way it goes.
+                // Pressing it kills the child first and then drops the strip, in that order, so a
+                // half finished `gh auth login` is never left waiting on a pty nobody can see.
+                Button("Back to the checks", systemImage: "chevron.left") { stopLogin() }
                     .buttonStyle(.borderless)
                     .controlSize(.small)
-                    .foregroundStyle(Palette.textTertiary)
-                    .help("Stop and close")
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.link)
+                    .help(session.isRunning ? "Stop this and go back to the list" : "Go back to the list")
             }
             .padding(.horizontal, Metrics.inset)
             .frame(height: Metrics.barHeight)
@@ -429,6 +484,23 @@ struct WelcomeView: View {
     /// not ask for is the trap this whole window is one step away from.
     private var footer: some View {
         HStack(spacing: Metrics.inset) {
+            if let title = flow.backButtonTitle {
+                // Bottom left, which is where a Mac setup assistant has put Go Back since there
+                // were setup assistants. It is drawn quietly and it never carries the return key:
+                // the one thing the keyboard does on this screen is the primary button, and a
+                // wizard where Return walks backwards is a wizard nobody can get out of.
+                Button(title, systemImage: "chevron.left") { move { flow.goBack() } }
+                    .buttonStyle(.plain)
+                    .font(Typo.label)
+                    .foregroundStyle(Palette.link)
+            }
+
+            Spacer(minLength: Metrics.inset)
+
+            // The two quiet controls are at opposite ends rather than side by side. Back and
+            // Check again next to each other read as one pair of links and neither of them said
+            // which way it went; back belongs with the way out, and Check again belongs with the
+            // button it is the alternative to.
             if inspection.truth.verdict == .blocked {
                 Button("Skip for now") { finish() }
                     .buttonStyle(.plain)
@@ -441,8 +513,6 @@ struct WelcomeView: View {
                     .foregroundStyle(inspection.isRunning ? Palette.textTertiary : Palette.link)
                     .disabled(inspection.isRunning)
             }
-
-            Spacer(minLength: Metrics.inset)
 
             Button(inspection.truth.primaryButtonTitle) {
                 if inspection.truth.verdict == .blocked {

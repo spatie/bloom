@@ -29,8 +29,8 @@ enum WelcomeWindow {
     ///
     /// Looking again on a second visit is the point of the menu item: somebody who came back to
     /// this window came back because they changed something.
-    static func show() {
-        let existing = window ?? make()
+    static func show(trigger: OnboardingTrigger = .none) {
+        let existing = window ?? make(trigger: trigger)
         window = existing
         existing.makeKeyAndOrderFront(nil)
         NSApp.activate()
@@ -41,11 +41,19 @@ enum WelcomeWindow {
         window?.close()
     }
 
-    private static func make() -> NSWindow {
+    private static func make(trigger: OnboardingTrigger) -> NSWindow {
         let model = SetupInspection(rehearsal: SetupRehearsal.report)
         inspection = model
 
-        let host = NSHostingView(rootView: WelcomeView(inspection: model, onFinish: { close() }))
+        // Where the sequence opens is `OnboardingFlow.firstStep`, in the core with its tests: a
+        // first run is greeted, and the Help menu and a later broken launch open straight onto the
+        // checks, because somebody who came back came back for the checks. Back is offered from
+        // there either way, so the greeting is never a screen that has been taken away.
+        let host = NSHostingView(rootView: WelcomeView(
+            inspection: model,
+            start: OnboardingFlow.firstStep(trigger: trigger),
+            onFinish: { close() }
+        ))
         // The window grows and shrinks as rows open and close, so the hosting view drives its
         // size rather than a number written down here.
         host.sizingOptions = [.preferredContentSize]
@@ -92,7 +100,7 @@ enum WelcomeLaunch {
     static func presentIfNeeded() {
         let completed = UserDefaults.standard.bool(forKey: OnboardingGate.completedKey)
         if OnboardingGate.trigger(hasCompletedBefore: completed, verdict: nil) == .firstRun {
-            WelcomeWindow.show()
+            WelcomeWindow.show(trigger: .firstRun)
             return
         }
 
@@ -102,7 +110,7 @@ enum WelcomeLaunch {
             let report = await SetupProbe().report()
             guard OnboardingGate.trigger(hasCompletedBefore: true, verdict: report.verdict) == .blocked
             else { return }
-            WelcomeWindow.show()
+            WelcomeWindow.show(trigger: .blocked)
         }
     }
 

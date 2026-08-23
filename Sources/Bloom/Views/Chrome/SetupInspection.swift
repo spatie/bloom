@@ -42,6 +42,13 @@ final class SetupInspection {
     var revealsInstantly = false
 
     private var run: Task<Void, Never>?
+    private var revealRun: Task<Void, Never>?
+    /// True once the checks step is actually on screen. The probes run under the greeting so
+    /// nobody ever waits for them, but the rows are held back until there is somebody looking at
+    /// them: a settling nobody saw is a settling that may as well not have happened, and a list
+    /// that was already finished when its screen arrived is the flat version of this window.
+    private var isPresentingChecks = false
+    private var hasProbed = false
     /// Detection results this window was handed rather than gathered. Debug builds only; see
     /// `SetupRehearsal`.
     private let rehearsal: SetupReport?
@@ -54,20 +61,55 @@ final class SetupInspection {
     /// calls this is on screen for the whole of one.
     func start() {
         guard run == nil else { return }
+        revealRun?.cancel()
+        revealRun = nil
         truth = .pending
         shown = .pending
+        hasProbed = false
         isRunning = true
         run = Task { [weak self] in
             await self?.probe()
-            self?.run = nil
-            self?.isRunning = false
+            guard let self else { return }
+            self.hasProbed = true
+            self.run = nil
+            if self.isPresentingChecks {
+                self.beginReveal()
+            } else {
+                self.isRunning = false
+            }
         }
+    }
+
+    /// The checks step has arrived. Idempotent, because the view says so every time it appears,
+    /// including on the way back from a step somebody walked away to and returned from.
+    func presentChecks() {
+        isPresentingChecks = true
+        guard hasProbed, revealRun == nil, !shown.isSettled else { return }
+        beginReveal()
+    }
+
+    /// The checks step has gone, because somebody walked back to the greeting. What was already
+    /// revealed stays revealed: coming forward again shows the settled list rather than replaying
+    /// four rows somebody has already read.
+    func dismissChecks() {
+        isPresentingChecks = false
     }
 
     func cancel() {
         run?.cancel()
         run = nil
+        revealRun?.cancel()
+        revealRun = nil
         isRunning = false
+    }
+
+    private func beginReveal() {
+        isRunning = true
+        revealRun = Task { [weak self] in
+            await self?.reveal()
+            self?.revealRun = nil
+            self?.isRunning = false
+        }
     }
 
     private func probe() async {
@@ -80,7 +122,6 @@ final class SetupInspection {
                 record(check)
             }
         }
-        await reveal()
     }
 
     private func record(_ check: SetupCheck) {
