@@ -88,6 +88,10 @@ enum WelcomeWindow {
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
         window.center()
+        // Cmd+W and not Escape, unlike the About window it borrows its plinth from. The GitHub
+        // step puts a real terminal in here, and Escape in a terminal is a key the program on the
+        // other end is waiting for. See `WindowRoles`.
+        WindowRoles.mark(window, as: .utility)
         return window
     }
 }

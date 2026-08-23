@@ -35,6 +35,9 @@ struct OceansWindow: Scene {
         Window("Discovered Seas", id: Self.id) {
             OceansMapView()
                 .environment(model)
+                // Escape as well as Cmd+W. Nothing in this window takes a keystroke at all: the
+                // chart is driven by the wheel, a pinch and a double click. See `WindowRoles`.
+                .windowRole(.reading)
         }
         .defaultSize(width: Self.openingSize.width, height: Self.openingSize.height)
     }

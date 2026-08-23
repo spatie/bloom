@@ -31,6 +31,9 @@ struct RepoSettingsWindow: Scene {
         WindowGroup(id: Self.id, for: Repo.ID.self) { $repoID in
             RepoSettingsWindowContent(repoID: repoID)
                 .environment(model)
+                // Cmd+W and not Escape, for the reason the Settings scene carries the same mark.
+                // See `WindowRoles`.
+                .windowRole(.utility)
         }
         .defaultSize(width: RepoSettingsView.idealSize.width, height: RepoSettingsView.idealSize.height)
     }

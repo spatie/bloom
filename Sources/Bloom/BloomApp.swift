@@ -113,6 +113,10 @@ struct BloomApp: App {
         Settings {
             SettingsView()
                 .environment(model)
+                // Cmd+W, which every window in the app lost when the standard Close was re-keyed.
+                // Not Escape: this window is full of fields, and Escape in a field reverts the
+                // edit. See `WindowRoles`.
+                .windowRole(.utility)
         }
 
         // One window per project, opened from the gear on its sidebar header. See the scene.

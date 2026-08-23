@@ -1,4 +1,5 @@
 import AppKit
+import BloomCore
 
 /// Gives File > Close the Shift+Cmd+W that Safari and Terminal give it when Cmd+W has gone to
 /// something smaller than a window.
@@ -38,6 +39,22 @@ import AppKit
 /// whether its shortcut works, so the keystroke is caught before the menu is consulted at all. A
 /// local monitor runs ahead of key equivalent dispatch, so once the row has its key back the two
 /// cannot both fire: this one takes the event and returns nothing.
+///
+/// **The monitor also carries plain Cmd+W and Escape, and that is a repair rather than an
+/// extra.** Moving the standard Close to Shift+Cmd+W above took Cmd+W off every window in the
+/// app, because there is one standard Close and every window shares it. Close Session greys out
+/// in every window but the workspace one, and a disabled item does not consume its key, so the
+/// press fell through to a standard Close that was answering to a different key, and beeped. The
+/// About window, Discovered Seas, Settings and each project's settings window all had a dead
+/// Cmd+W, and the owner reported the first two. Escape is the other half and had never been
+/// wired at all: a plain `NSWindow` does not close on Escape on this platform, only a panel with
+/// a cancel button does. Which key may close which window is `WindowDismissal` in the core, with
+/// its tests, and which window is which is `WindowRoles`.
+///
+/// **One monitor, for the life of the process, and nothing to tear down.** It is not attached to
+/// a window: it resolves `NSApp.keyWindow` at the moment a key is pressed, so it cannot outlive
+/// a window or fire at one that has gone. The role table it consults holds its windows weakly for
+/// the same reason.
 @MainActor
 enum WindowCloseShortcut {
     private static let attempts = 40
@@ -61,31 +78,56 @@ enum WindowCloseShortcut {
         }
     }
 
-    /// The keystroke itself, independent of what any menu currently says.
-    ///
-    /// It sends `performClose(_:)` rather than `close()`, so a window that has something to ask
-    /// before it goes still gets to ask, and a window that refuses still gets to refuse with the
-    /// same shudder Cmd+W would have drawn. A sheet is left alone: the key window while a sheet is
-    /// up is the sheet, and closing one from underneath its host is not what anybody meant.
+    /// The keystrokes themselves, independent of what any menu currently says.
     private static func watchForTheKey() {
         guard monitor == nil else { return }
         // The event never crosses into the main actor closure below, only the answer does. An
         // `NSEvent` is not `Sendable`, and a local monitor's handler is already called on the main
         // thread, so what is asserted is where this is running rather than that an event may move.
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            guard modifiers == [.command, .shift],
-                  event.charactersIgnoringModifiers?.lowercased() == "w"
-            else { return event }
-
-            return MainActor.assumeIsolated { closeKeyWindow() } ? nil : event
+            guard let stroke = stroke(for: event) else { return event }
+            return MainActor.assumeIsolated { closeKeyWindow(on: stroke) } ? nil : event
         }
     }
 
+    /// Which of the three this press is, or nothing, which is the answer for nearly every press
+    /// the app will ever see and is why it is the first thing the monitor asks.
+    ///
+    /// Escape is read off the key code rather than off its character. `charactersIgnoringModifiers`
+    /// for Escape is the escape character itself, which is a literal nothing wants to see in a
+    /// source file and which a Ctrl+[ pressed in a terminal compares equal to.
+    ///
+    /// The W is the other way round, off the character rather than off a key code, and that is
+    /// the layout the owner is actually on rather than a preference. This Mac is set to
+    /// ABC-AZERTY: the key labelled W is virtual key 6 and virtual key 13 is Z. Matching the key
+    /// code would have made Cmd+W the wrong key on his keyboard and stolen Cmd+Z from a window
+    /// that has an undo in it. AppKit's own key equivalents match both, which is why the standard
+    /// Close still answers to the ASCII position as well; nothing here needs to.
+    private static func stroke(for event: NSEvent) -> WindowDismissal.Stroke? {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        // Bare Escape only. Anything held with it is somebody else's key, and a window that
+        // vanished on Command+Escape would be swallowing a press aimed past the app entirely.
+        if event.keyCode == escapeKeyCode { return modifiers.isEmpty ? .escape : nil }
+
+        guard event.charactersIgnoringModifiers?.lowercased() == "w" else { return nil }
+        if modifiers == [.command, .shift] { return .shiftCommandW }
+        if modifiers == [.command] { return .commandW }
+        return nil
+    }
+
+    private static let escapeKeyCode: UInt16 = 53
+
     /// True when the key press was spent on a window, so the caller knows to swallow it.
-    private static func closeKeyWindow() -> Bool {
-        guard let window = NSApp.keyWindow, !window.isSheet,
-              window.styleMask.contains(.closable)
+    ///
+    /// It sends `performClose(_:)` rather than `close()`, so a window that has something to ask
+    /// before it goes still gets to ask, and a window that refuses still gets to refuse with the
+    /// same shudder Cmd+W would have drawn. A sheet is left alone by the rule it consults: the key
+    /// window while a sheet is up is the sheet, and closing one from underneath its host is not
+    /// what anybody meant.
+    private static func closeKeyWindow(on stroke: WindowDismissal.Stroke) -> Bool {
+        guard let window = NSApp.keyWindow,
+              WindowDismissal.closes(stroke, WindowRoles.target(window))
         else { return false }
         window.performClose(nil)
         return true

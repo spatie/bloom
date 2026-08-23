@@ -67,6 +67,9 @@ enum AboutWindow {
         window.contentView = host
         window.setContentSize(size)
         window.center()
+        // Escape as well as Cmd+W, because this is a window you read and then put away and there
+        // is nothing in it either key could have meant instead. See `WindowRoles`.
+        WindowRoles.mark(window, as: .reading)
         return window
     }
 }
