@@ -116,6 +116,45 @@ struct TranscriptSearchTests {
         #expect(body.contains("Checkpoint the write ahead log"))
     }
 
+    /// The snippet a reader was handed for "hello" read
+    /// "Hello. What are we working on? not_available standard 2026-08-23T10:22:27", which is
+    /// `usage.inference_geo`, `usage.service_tier` and the line's own `timestamp` sitting on the
+    /// end of the sentence. All three are strings with letters in them, so the only test that
+    /// stood between them and the index was the noise list, and they were not on it.
+    @Test("the accounting a turn carries beside its words stays out of the index")
+    func skipsUsageAndStamps() throws {
+        let body = try #require(TranscriptSearchText.indexable(
+            kind: .assistantText,
+            payload: payload("""
+            {"type":"assistant","uuid":"a1","request_id":"req_1","timestamp":"2026-08-23T10:22:27.000Z",
+             "message":{"role":"assistant","model":"claude-sonnet-5",
+             "content":[{"type":"text","text":"Hello. We are looking at the QA worktree."}],
+             "usage":{"input_tokens":2,"output_tokens":3,"service_tier":"standard",
+             "inference_geo":"not_available"},
+             "context_management":{"applied_edits":["cleared the oldest turn"]}},
+             "modelUsage":{"claude-sonnet-5":{"provider":"firstParty","canonicalModel":"claude-sonnet-5"}},
+             "stop_reason":"end_turn","fast_mode_state":"off"}
+            """)
+        ))
+
+        #expect(body == "Hello. We are looking at the QA worktree.")
+    }
+
+    /// The reasoning effort, which Codex sends beside every turn and which read as the word
+    /// "standard" or "high" dropped into the middle of somebody's sentence.
+    @Test("the reasoning effort is a setting rather than a sentence")
+    func skipsReasoningEffort() throws {
+        let body = try #require(TranscriptSearchText.indexable(
+            kind: .user,
+            payload: payload("""
+            {"msg":{"text":"Move the checkpoint into the copy."},
+             "reasoningEffort":"medium","effort":"high","created_at":"2026-08-23T10:22:27Z"}
+            """)
+        ))
+
+        #expect(body == "Move the checkpoint into the copy.")
+    }
+
     @Test("a row of counters and costs is not indexed at all")
     func skipsResultRows() {
         #expect(TranscriptSearchText.indexable(

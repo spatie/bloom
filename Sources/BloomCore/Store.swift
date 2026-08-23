@@ -658,6 +658,32 @@ public actor Store {
                     )
                 }
             },
+
+            // The transcript index, thrown away and built again.
+            //
+            // `TranscriptSearchText` decides what of a row is words and what is machinery, and it
+            // used to let three fields through that are not words: `usage.inference_geo`,
+            // `usage.service_tier` and the line's own `timestamp`. A search for "hello" answered
+            // with "Hello. What are we working on? not_available standard 2026-08-23T10:22:27",
+            // which is the snippet reading out the bookkeeping that had been concatenated onto the
+            // sentence in the index.
+            //
+            // What is indexed is derived at write time, so fixing the extractor fixes nothing that
+            // is already written: every row indexed before this keeps the text it was given, and
+            // the reader keeps being shown it. So the index goes, and the cursor goes back above
+            // the highest message, which is the state the backfill was built for. The app already
+            // walks that cursor down after its first screen is drawn, newest first, a batch at a
+            // time, resumable, so this costs a background walk rather than a slow launch, and the
+            // recent workspaces anybody actually searches for are correct within seconds.
+            { db in
+                try db.execute("DELETE FROM message_search;")
+                let highest = try db.query("SELECT COALESCE(MAX(id), 0) AS m FROM messages")
+                    .first?.int("m") ?? 0
+                try db.run(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                    [.text(Self.backfillCursorKey), .text(String(highest + 1))]
+                )
+            },
         ]
 
         let current = Int(db.userVersion)

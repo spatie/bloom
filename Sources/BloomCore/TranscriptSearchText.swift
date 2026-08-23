@@ -26,12 +26,35 @@ public enum TranscriptSearchText {
 
     /// Keys whose values are machinery. Both spellings of each, because the CLIs disagree about
     /// snake case and Bloom is not going to arbitrate.
+    ///
+    /// The second half of this list is the bookkeeping a turn carries beside its words, and it is
+    /// here because it was showing up in the snippets a reader is handed. Searching for "hello"
+    /// rendered "Hello. What are we working on? not_available standard 2026-08-23T10:22:27", which
+    /// is `usage.inference_geo`, `usage.service_tier` and the line's own `timestamp` read as prose
+    /// and concatenated onto the sentence. They are strings with letters in them, so nothing else
+    /// here was ever going to stop them.
     private static let noiseKeys: Set<String> = [
         "id", "uuid", "type", "subtype", "role", "signature", "model", "version",
         "session_id", "sessionId", "tool_use_id", "toolUseId", "toolUseID",
         "parent_tool_use_id", "parentToolUseId", "call_id", "callId", "request_id", "requestId",
         "media_type", "mediaType", "data", "encoding", "permission_mode", "permissionMode",
         "leaf_uuid", "leafUuid", "message_id", "messageId", "parent_uuid", "parentUuid",
+        // Accounting, not words. `usage` and `modelUsage` are whole subtrees of it.
+        "usage", "modelUsage", "model_usage", "diagnostics",
+        "context_management", "contextManagement",
+        "service_tier", "serviceTier", "inference_geo", "inferenceGeo", "speed", "provider",
+        "canonical_model", "canonicalModel",
+        // How hard the model was told to think, which is a setting rather than a sentence.
+        "effort", "reasoning_effort", "reasoningEffort",
+        // Clocks. Every one of these is a machine readable stamp, and the "T" in the middle of an
+        // ISO one is a letter, which is the only test a leaf had to pass before this.
+        "timestamp", "created_at", "createdAt", "updated_at", "updatedAt",
+        "started_at", "startedAt", "completed_at", "completedAt", "date", "time",
+        // Why a turn ended. Four CLIs, four vocabularies, none of them prose.
+        "stop_reason", "stopReason", "terminal_reason", "terminalReason",
+        "finish_reason", "finishReason", "api_error_status", "apiErrorStatus",
+        "fast_mode_state", "fastModeState",
+        "fast_mode_disabled_reason", "fastModeDisabledReason",
     ]
 
     /// The kinds worth indexing, and why the rest are not.
@@ -77,9 +100,17 @@ public enum TranscriptSearchText {
         // megabyte tool result should not be walked in full to throw most of it away.
         guard pieces.reduce(0, { $0 + $1.count }) < limit else { return }
 
+        // The whole subtree, not only the leaf. The test used to sit inside the string case, which
+        // reads the same and is not: `usage` is an object, `modelUsage` is an object of objects,
+        // and naming either of them there skipped a value that was never a string in the first
+        // place while every field underneath it was still walked and indexed. Pruning here means a
+        // key that is machinery takes everything hanging off it with it, which is also what the
+        // list always meant by "data" and "diagnostics".
+        if let key, noiseKeys.contains(key) { return }
+
         switch value {
         case .string(let text):
-            guard let key, !noiseKeys.contains(key) else { return }
+            guard key != nil else { return }
             // A string with no letter in it is a hash, a path fragment or a number. The words are
             // what a person types.
             guard text.contains(where: \.isLetter) else { return }
