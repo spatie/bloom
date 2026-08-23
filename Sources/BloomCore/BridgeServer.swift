@@ -294,13 +294,11 @@ public final class BridgeServer: Sendable {
             return nil
         }
         guard let identity = registry.identity(forToken: hello.token) else {
-            // The ordinary cause is a config file left over from a previous launch: tokens live in
-            // memory, so every one of them is retired by a quit.
-            refuse(
-                "Bloom does not recognise this token. It was minted by a previous launch; "
-                    + "quit and reopen Bloom.",
-                on: connection
-            )
+            // What a stale token means depends entirely on which kind it is, and only the claimed
+            // role says which. `BridgeProtocol.unrecognisedToken(claiming:)` holds both answers
+            // and the reasoning behind the split.
+            refuse(BridgeProtocol.unrecognisedToken(claiming: hello.role), on: connection)
+            note("bridge refused an unknown token claiming role \(hello.role)")
             return nil
         }
         if hello.role != identity.role.rawValue {

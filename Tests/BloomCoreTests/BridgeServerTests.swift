@@ -149,7 +149,7 @@ struct BridgeServerTests {
         #expect(await caller.iterator.next() == nil)
     }
 
-    @Test("a token this launch did not mint gets nowhere")
+    @Test("a session token this launch did not mint is told to quit and reopen Bloom")
     func unknownToken() async throws {
         let (server, _, _, _) = try await makeBridge()
         defer { server.stop() }
@@ -157,7 +157,56 @@ struct BridgeServerTests {
         var caller = try Caller(socketPath: server.socketPath)
         let welcome = try await caller.hello(BridgeHello(token: "made up", role: "child", shim: "x"))
         #expect(!welcome.accepted)
-        #expect(welcome.problem?.contains("previous launch") == true)
+        let problem = try #require(welcome.problem)
+        #expect(problem.contains("previous launch"))
+        #expect(problem.lowercased().contains("quit and reopen bloom"))
+    }
+
+    /// The same refusal, and it must not say the same thing.
+    ///
+    /// An owner token is written to disk on purpose and outlives every quit, so the one remedy a
+    /// session token gets is the one remedy this caller cannot use: it would restart Bloom, present
+    /// the identical token and be refused again. What has actually happened is a registration
+    /// pointing at another Bloom, a token regenerated in Settings, or a configuration copied from
+    /// an installation that never minted it, and all three end at the same pane.
+    @Test("an owner token this launch did not mint is sent to Settings, not to a restart")
+    func unknownOwnerToken() async throws {
+        let (server, _, _, _) = try await makeBridge()
+        defer { server.stop() }
+
+        var caller = try Caller(socketPath: server.socketPath)
+        let welcome = try await caller.hello(BridgeHello(
+            token: "a token from another Bloom",
+            role: BridgeRole.owner.rawValue,
+            shim: "x"
+        ))
+
+        #expect(!welcome.accepted)
+        let problem = try #require(welcome.problem)
+        #expect(problem.lowercased().contains("settings"))
+        // The remedy that cannot work, in any of the forms the session branch says it in.
+        #expect(!problem.lowercased().contains("quit and reopen"))
+        #expect(!problem.lowercased().contains("previous launch"))
+        #expect(!problem.lowercased().contains("restart bloom"))
+        // And it says out loud that presenting this token again is pointless.
+        #expect(problem.lowercased().contains("no retry with this token will connect"))
+    }
+
+    /// The two branches of the same refusal, without a socket in the way.
+    @Test("the unknown token sentence is chosen by the claimed role")
+    func unknownTokenSentencePerRole() {
+        let owner = BridgeProtocol.unrecognisedToken(claiming: BridgeRole.owner.rawValue)
+        #expect(owner.contains("standalone registration"))
+        #expect(!owner.lowercased().contains("quit and reopen"))
+
+        // Every role that is not the owner's is a session token, including one this build does not
+        // know, because a claim is a string off the shim's environment and not an enum.
+        for role in [BridgeRole.parent.rawValue, BridgeRole.child.rawValue, "", "something else"] {
+            let session = BridgeProtocol.unrecognisedToken(claiming: role)
+            #expect(session.contains("previous launch"))
+            #expect(session.lowercased().contains("quit and reopen bloom"))
+            #expect(session != owner)
+        }
     }
 
     @Test("a connection that starts talking MCP without a hello is refused")

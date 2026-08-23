@@ -61,6 +61,47 @@ public enum BridgeProtocol {
             \(hello.shimDescription) speaks \(hello.version). Quit and reopen Bloom.
             """
     }
+
+    /// Why a token the registry has never heard of got nowhere, said to whoever presented it.
+    ///
+    /// Two kinds of token reach this handshake and they die of completely different things, so one
+    /// sentence cannot serve both. A session token is minted for a process Bloom is about to
+    /// launch and is held in memory only, so a quit really does retire it and reopening Bloom
+    /// really does mint another; telling that caller to restart is telling it the truth. The
+    /// owner's standalone token is the opposite by design, and `BridgeOwnerToken` sets out at
+    /// length why: it is handed over once, it is meant to outlive every relaunch, and it ends when
+    /// the owner regenerates it. Sending that caller away to quit and reopen Bloom is sending it
+    /// to do the one thing that cannot change the answer, after which it presents the same dead
+    /// token and is refused again in the same words.
+    ///
+    /// The claimed role is what tells them apart. It comes out of the shim's environment, so it is
+    /// worth nothing as authority, which is why an accepted connection reads the role off the
+    /// database instead and logs the claim when the two disagree. Here there is no row to read:
+    /// the token matched nothing, so the claim is the only evidence there is, and this is the
+    /// diagnostic use it is carried for. A caller that lies about it reads a sentence about a
+    /// registration it does not have, which costs nobody anything.
+    ///
+    /// Neither sentence quotes the registration command or the path it names. What a person needs
+    /// is the pane the command is offered in, which they can reach; what a model needs is to know
+    /// that this is the owner's to fix and not its own to retry.
+    public static func unrecognisedToken(claiming role: String) -> String {
+        guard role == BridgeRole.owner.rawValue else {
+            // Minted per launch, held in memory, retired by a quit. The ordinary cause is a config
+            // file left over from a launch that has since ended.
+            return "Bloom does not recognise this token. It was minted by a previous launch; "
+                + "quit and reopen Bloom."
+        }
+        return """
+            Bloom does not recognise this token. It came from a standalone registration, and that \
+            kind of token is meant to outlive a quit, so restarting Bloom will not bring it back \
+            and no retry with this token will connect. Either another copy of Bloom, Bloom Dev \
+            included, has registered itself under the same name and taken the entry over, or the \
+            token was regenerated in Bloom's Settings, which revokes the one it replaced, or the \
+            configuration was copied from an installation whose token was never this one's. All \
+            three are put right the same way: open Bloom's Settings and run the registration \
+            command it offers there again.
+            """
+    }
 }
 
 /// The first line the shim sends, before any MCP byte crosses the socket.
