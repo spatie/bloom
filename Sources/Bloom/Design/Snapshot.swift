@@ -664,6 +664,12 @@ enum Snapshot {
 
         let model = await seededModel()
 
+        // The limits panel is drawn from a real ask rather than from made up rows. It is the one
+        // scene here whose whole point is what a CLI actually answered, and a picture of invented
+        // percentages would be a picture of nothing. A machine with neither CLI installed renders
+        // the panel's own empty state, which is also worth a photograph.
+        let board = QuotaBoard.make(from: await AgentQuotaSources.readAll())
+
         let scenes: [(String, AnyView, CGSize)] = [
             ("sidebar", AnyView(SidebarView().frame(width: 260, height: 620)), CGSize(width: 260, height: 620)),
             ("home", AnyView(HomeView().frame(width: 900, height: 620)), CGSize(width: 900, height: 620)),
@@ -671,6 +677,17 @@ enum Snapshot {
             ("permission", AnyView(PermissionSnapshotGallery().frame(width: 720, height: 1560)), CGSize(width: 720, height: 1560)),
             ("tool-rows", AnyView(ToolRowSnapshotGallery().frame(width: 800, height: 720)), CGSize(width: 800, height: 720)),
             ("review-comments", AnyView(ReviewCommentSnapshotGallery().frame(width: 800, height: 900)), CGSize(width: 800, height: 900)),
+            // On the menu's own ground rather than the window's, because every colour in this
+            // panel is an AppKit semantic one chosen to sit on a menu. See `QuotaPanel`.
+            (
+                "limits",
+                AnyView(
+                    QuotaPanel(board: board, freshness: QuotaFreshness.of(board))
+                        .padding(.vertical, 8)
+                        .background(Color(nsColor: .windowBackgroundColor))
+                ),
+                CGSize(width: QuotaPanel.width + 43, height: 200)
+            ),
         ]
 
         for appearanceName in ["light", "dark"] {
