@@ -243,6 +243,15 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
+        // Somebody is about to read the limits, so ask for a fresher set. Not awaited: a menu that
+        // waited on two subprocesses would open half a second after it was clicked, and the figures
+        // this drops in arrive on the store's own feed, which redraws the strip and fills the panel
+        // in the next time the menu is opened. `AppModel.refreshQuotas` is the only asker and it
+        // will decline this if it has answered recently. See `QuotaPollSchedule`.
+        if let app {
+            Task { await app.refreshQuotas(after: QuotaPollSchedule.onDemandFloor) }
+        }
+
         // First, because it is the one thing in here nowhere else in the app says, and because a
         // person opening this menu at four in the afternoon is usually asking exactly this. The
         // workspace lists below it are also on screen in the window; the limits are not.
@@ -304,7 +313,10 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
     /// frame and the row collapses to nothing.
     private func limits() -> NSMenuItem {
         let board = QuotaBoard.make(from: app?.quotas ?? [])
-        let host = NSHostingView(rootView: QuotaPanel(board: board))
+        let host = NSHostingView(rootView: QuotaPanel(
+            board: board,
+            freshness: QuotaFreshness.of(board)
+        ))
         host.frame = CGRect(origin: .zero, size: host.fittingSize)
 
         let item = NSMenuItem()

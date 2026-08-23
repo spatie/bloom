@@ -43,6 +43,14 @@ import BloomCore
 /// step in that order, in the system's own three colours.
 struct QuotaPanel: View {
     let board: QuotaBoard
+    /// How old the oldest figure on the board is, decided in `BloomCore` rather than here.
+    ///
+    /// **A number with no age on it is a claim about now.** Bloom asks both providers on a
+    /// schedule, so between asks the panel is drawing history, and that is fine right up until
+    /// something has stopped answering. A five hour window drawn at 40 percent from this morning's
+    /// reading would be worse than the "not reported" this whole feature replaced, so a board that
+    /// has missed two polls says how long ago underneath itself and stops implying otherwise.
+    var freshness: QuotaFreshness = .current
     /// Passed rather than read, so every countdown in one drawing agrees and so the panel can be
     /// rendered at a fixed instant.
     var now: Date = Date()
@@ -121,6 +129,7 @@ struct QuotaPanel: View {
             }
 
             if board.isEmpty { emptyState }
+            if !board.isEmpty, let age = freshness.phrase { staleNote(age) }
         }
         .frame(width: Self.width, alignment: .leading)
         .padding(.leading, Self.leadingInset)
@@ -230,11 +239,25 @@ struct QuotaPanel: View {
         }
     }
 
+    /// When the figures above were last confirmed, shown only once they are old enough to matter.
+    ///
+    /// Under everything rather than beside a row, because it is one fact about the whole panel:
+    /// the ask goes out for every provider at once, so they go stale together. In the secondary
+    /// ink and not a warning colour, because an old reading is not an alarm, it is a caveat on
+    /// numbers that are otherwise still the best answer anybody has.
+    private func staleNote(_ age: String) -> some View {
+        Text("Last checked \(age)")
+            .font(Self.rowFont)
+            .foregroundStyle(MenuInk.secondary)
+            .padding(.top, Metrics.spacingWide)
+    }
+
     // MARK: The empty state
 
     /// Two of the four CLIs Bloom detects publish nothing about their limits, and the two that do
-    /// publish only after a turn, so an install that has not run one yet lands here. It says what
-    /// will fill it rather than announcing an absence, because there is nothing wrong.
+    /// have to be installed and signed in before they will answer, so a machine with neither lands
+    /// here. It says what will fill it rather than announcing an absence, because there is nothing
+    /// wrong.
     private var emptyState: some View {
         Text(Self.emptySentence)
             .font(Self.rowFont)
@@ -248,18 +271,15 @@ struct QuotaPanel: View {
     /// stands, both figures arrive on the way out of a turn and nowhere else, so a fresh install
     /// shows this until the first one finishes.
     ///
-    /// That is a limit of Bloom rather than of the CLIs, and it is worth writing down here because
-    /// this sentence is what has to change when it is lifted. Both providers can be asked
-    /// directly, measured on this machine and neither costing a turn: Claude Code answers a
-    /// `control_request` of subtype `get_usage` on the stream-json stdin Bloom already holds open,
-    /// returning every window at once where `rate_limit_event` carries one; and the Codex
-    /// app-server answers `account/rateLimits/read` with the same `RateLimitSnapshot` type
-    /// `CodexQuotaAdapter` already reads, which its own schema calls the snapshot that
-    /// `account/rateLimits/updated` is a delta on. Wiring either is a change to the runners rather
-    /// than to this view, so it is not this commit.
+    /// It no longer says "after the next turn", because Bloom no longer waits to be told. Both
+    /// providers are asked directly, on a schedule, and neither ask costs a turn: Claude Code
+    /// answers a `control_request` of subtype `get_usage`, and the Codex app-server answers
+    /// `account/rateLimits/read`. See `AgentQuotaSources`. What is left here is the genuinely
+    /// empty case: neither CLI installed, neither signed in, or the very first seconds of a launch
+    /// before the first ask has come back.
     static let emptySentence =
-        "Nothing reported yet. Claude Code and Codex each publish their figures on the way out of "
-        + "a turn, so this fills in after the next one."
+        "Nothing reported yet. Bloom asks Claude Code and Codex for their figures every few "
+        + "minutes, so this fills in shortly after either one is installed and signed in."
 
 
     // MARK: Parts

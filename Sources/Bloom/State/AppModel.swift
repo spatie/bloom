@@ -262,6 +262,12 @@ final class AppModel {
     private var refreshTask: Task<Void, Never>?
     private var storeObservationTask: Task<Void, Never>?
     private var quotaObservationTask: Task<Void, Never>?
+    private var quotaPollTask: Task<Void, Never>?
+    /// When the one asker last went out, and whether it is still out. Together they are what
+    /// makes it one asker: every route into `askForQuotas` reads both, so a background poll, a
+    /// menu opening and ten workspaces all collapse into a single question per interval.
+    @ObservationIgnored private var lastQuotaAskAt: Date?
+    @ObservationIgnored private var isAskingForQuotas = false
     private var identityTask: Task<Void, Never>?
     /// The launch sweep for project icons. Not private, because the work it does is in
     /// `AppModel+ProjectIcons.swift`, and outside observation because nothing draws from it.
@@ -337,6 +343,7 @@ final class AppModel {
         startBackgroundRefresh()
         startObservingStore()
         startObservingQuotas()
+        startPollingQuotas()
         // Last, and nothing waits for it: the window is already drawn by the time this runs, and
         // every project it has anything to do is one that is drawing its initials meanwhile. See
         // `searchForMissingProjectIcons`.
@@ -461,6 +468,8 @@ final class AppModel {
         storeObservationTask = nil
         quotaObservationTask?.cancel()
         quotaObservationTask = nil
+        quotaPollTask?.cancel()
+        quotaPollTask = nil
         identityTask?.cancel()
         identityTask = nil
         iconSearchTask?.cancel()
@@ -544,8 +553,11 @@ final class AppModel {
     /// five hour window, and the store keys on provider and window so the two land on one row.
     /// The reload is left to the store's own change feed below rather than done here, so a write
     /// from anywhere reaches the menu the same way.
-    func recordQuotas(_ quotas: [AgentQuota]) async {
-        guard let store, !quotas.isEmpty else { return }
+    func recordQuotas(_ reported: [AgentQuota]) async {
+        guard let store, !reported.isEmpty else { return }
+        // Merged before it is written, because one of the two providers says in its own schema
+        // that what it sends is a sparse delta over the last full snapshot. See `QuotaMerge`.
+        let quotas = QuotaMerge.resolved(reported, against: self.quotas)
         do {
             try await store.recordQuotas(quotas)
         } catch {
@@ -558,6 +570,39 @@ final class AppModel {
         guard let store else { return }
         let loaded = (try? await store.quotas()) ?? []
         if quotas != loaded { quotas = loaded }
+    }
+
+    /// Asks every provider what is left, rather than waiting to be told.
+    ///
+    /// **This is the one asker.** Nothing else in the app may call a `AgentQuotaSource`, and this
+    /// takes no session, no workspace and no runner, because an allowance is account wide: ten
+    /// workspaces open is ten views of one number, and ten askers would be ten HTTP calls for it.
+    /// The gap is the shortest acceptable age of the last answer, so a menu opening can ask sooner
+    /// than the background poll without being a button that hammers an endpoint.
+    ///
+    /// Nothing is thrown and nothing is reported. A provider that is not installed or not logged
+    /// in answers nothing, which is the same as never having been asked, and the panel keeps
+    /// saying what it already knew.
+    func refreshQuotas(after gap: TimeInterval = QuotaPollSchedule.interval) async {
+        guard !isAskingForQuotas,
+              QuotaPollSchedule.isDue(lastAskedAt: lastQuotaAskAt, at: Date(), after: gap)
+        else { return }
+        isAskingForQuotas = true
+        lastQuotaAskAt = Date()
+        defer { isAskingForQuotas = false }
+        await recordQuotas(await AgentQuotaSources.readAll())
+    }
+
+    /// The background poll, which is what keeps the menu bar's own severity honest for somebody
+    /// who never opens the menu. `QuotaPollSchedule` holds the interval and the argument for it.
+    private func startPollingQuotas() {
+        quotaPollTask?.cancel()
+        quotaPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.refreshQuotas()
+                try? await Task.sleep(for: .seconds(QuotaPollSchedule.interval))
+            }
+        }
     }
 
     /// Follows the store, so a write anybody makes is a window that has already redrawn.

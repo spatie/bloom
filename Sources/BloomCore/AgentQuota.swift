@@ -48,11 +48,31 @@ public struct QuotaWindow: Sendable, Hashable, Codable, Identifiable {
     /// `one_month` or a `thirty_day` shipping later arrives with a length and a readable label
     /// instead of a raw token. A name that does not parse still produces a usable row: the key
     /// tidied into words, and no duration, which is honest about what is known.
+    /// A name may also carry a qualifier after the length, which is how Claude Code's own
+    /// `get_usage` answer spells the windows a `rate_limit_event` never mentions:
+    /// `seven_day_opus`, `seven_day_sonnet` and `seven_day_oauth_apps` are all a week, each
+    /// counting something different. The length is read from the front and the rest is kept as
+    /// words beside the label, so three weekly rows are three readable rows rather than three
+    /// identical ones.
     public static func named(_ key: String) -> QuotaWindow {
         guard let duration = seconds(fromName: key) else {
             return QuotaWindow(key: key, label: humanised(key), duration: nil)
         }
-        return QuotaWindow(key: key, label: label(forSeconds: duration), duration: duration)
+        let qualifier = words(after: 2, of: key)
+        let base = label(forSeconds: duration)
+        return QuotaWindow(
+            key: key,
+            label: qualifier.isEmpty ? base : "\(base) (\(qualifier))",
+            duration: duration
+        )
+    }
+
+    /// Everything past the first `count` words of a key, spaced out, or an empty string.
+    static func words(after count: Int, of key: String) -> String {
+        key.lowercased()
+            .split(whereSeparator: { $0 == "_" || $0 == "-" })
+            .dropFirst(count)
+            .joined(separator: " ")
     }
 
     private static let numerals: [String: Double] = [
@@ -65,11 +85,12 @@ public struct QuotaWindow: Sendable, Hashable, Codable, Identifiable {
         "minute": 60, "min": 60, "hour": 3600, "day": 86_400, "week": 604_800, "month": 2_592_000,
     ]
 
-    /// `five_hour` and `seven_day` into seconds. Plurals and digits both, because a protocol that
-    /// has already used two spellings of the same idea will use a third.
+    /// `five_hour` and `seven_day` into seconds, reading the length off the front. Plurals and
+    /// digits both, because a protocol that has already used two spellings of the same idea will
+    /// use a third, and anything past the first two words is a qualifier rather than a length.
     static func seconds(fromName key: String) -> TimeInterval? {
         let parts = key.lowercased().split(whereSeparator: { $0 == "_" || $0 == "-" }).map(String.init)
-        guard parts.count == 2 else { return nil }
+        guard parts.count >= 2 else { return nil }
         let count = numerals[parts[0]] ?? Double(parts[0])
         let unit = units[parts[1]] ?? units[String(parts[1].dropLast())]
         guard let count, let unit, count > 0 else { return nil }
