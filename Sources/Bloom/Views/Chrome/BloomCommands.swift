@@ -86,6 +86,61 @@ struct BloomCommands: Commands {
             .keyboardShortcut("t", modifiers: .command)
             .disabled(model.selectedModel == nil)
 
+            // The other four things that open a tab in the workspace's centre column, which until
+            // now existed only as key equivalents on hidden buttons inside `SessionTabsView`. The
+            // `+` at the end of the tab strip listed them and drew their shortcuts, but a `Menu`
+            // in a view cannot fire a key equivalent, so the keys were registered a second time on
+            // an invisible `ZStack` of buttons. Four bindings with no menu item anywhere is four
+            // bindings nobody could discover.
+            //
+            // The keys moved here rather than being registered here as well. Measured on a
+            // reduction of the two registrations, a `CommandMenu` item and a view hierarchy
+            // button carrying the same key: the button wins and the menu item never fires. So a
+            // second registration would have left four menu items drawn with keys that ran the
+            // hidden buttons instead, which is the same feature with more places for it to come
+            // apart. The hidden buttons are gone and these carry the keys.
+            //
+            // All four in File, next to New Session, rather than the review and the notes going to
+            // View. They are one family: each opens one of the five kinds of tab a workspace has,
+            // and New Session above them opens the fifth. Splitting them would also split
+            // Shift+Cmd+T, B, D and N across two menus, and it is the shape of that set that makes
+            // it learnable.
+            Divider()
+
+            Button("New Terminal Tab") { openPane(.terminal) }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+                .disabled(model.selectedModel == nil)
+
+            Button("New Browser Tab") { openBrowserPane() }
+                .keyboardShortcut("b", modifiers: [.command, .shift])
+                .disabled(model.selectedModel == nil)
+
+            // The same key both ways, as the hidden button had it: show me the change, or give me
+            // the conversation back. Enabled on any selected workspace rather than only on one
+            // with changes, unlike the `+` menu's own row, because half of what this key does is
+            // the way back out of a review and a workspace can have a review open with nothing
+            // left in it.
+            Button("Show Changes") {
+                guard let workspace = model.selectedModel else { return }
+                FileReview.toggle(in: workspace)
+            }
+            .keyboardShortcut("d", modifiers: [.command, .shift])
+            .disabled(model.selectedModel == nil)
+
+            // Shift+Cmd+N, which nothing in Bloom held. It is the initial of the thing, which is
+            // what the other three in this group are, and that pattern is the only reason a set
+            // of four is easier to remember than four separate facts. Never disabled beyond
+            // needing a workspace, because an empty note is exactly what somebody opening this is
+            // about to fix.
+            Button("Show Notes") {
+                guard let workspace = model.selectedModel else { return }
+                WorkspaceNotes.open(in: workspace)
+            }
+            .keyboardShortcut("n", modifiers: [.command, .shift])
+            .disabled(model.selectedModel == nil)
+
+            Divider()
+
             // Cmd+W belongs to the session, not the window. Bloom has no Save item, so a group
             // anchored after `.saveItem` is dropped whole and Cmd+W falls through to the system
             // Close, which used to end the process and every agent with it.
@@ -412,6 +467,27 @@ struct BloomCommands: Commands {
         tabs.close(
             pane: tabs.focusedPane(of: tab), in: tab, of: workspace.workspace.id
         )
+    }
+
+    /// A terminal in a new tab, placed and selected exactly as the tab strip's own `+` does it.
+    private func openPane(_ kind: PaneKind) {
+        guard let workspace = model.selectedModel else { return }
+        NewPane.open(kind, in: workspace) {
+            WorkspaceTabsStore.shared.select($0, in: workspace)
+        }
+    }
+
+    /// A browser on the workspace's own dev server, which is what the `+` opens and what a split
+    /// does not: this is the route that has a port to hand. See `SessionTabsView.newBrowser`.
+    private func openBrowserPane() {
+        guard let workspace = model.selectedModel else { return }
+        Task {
+            await workspace.ensurePort()
+            let address = workspace.port > 0 ? "http://localhost:\(workspace.port)" : ""
+            NewPane.open(.browser, in: workspace, url: address) {
+                WorkspaceTabsStore.shared.select($0, in: workspace)
+            }
+        }
     }
 
     private func addProjectFolder() {

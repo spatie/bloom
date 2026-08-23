@@ -150,7 +150,6 @@ struct SessionTabsView: View {
 
             inspectorToggle
         }
-        .background { shortcuts }
         // The list, and nothing else. Reconciling used to be here too, right after this line, and
         // it was wrong by exactly one await: this body has no suspension point in it, so it ran
         // while `WorkspaceModel` was still on the `Store` actor and judged real tool tabs against
@@ -306,7 +305,14 @@ struct SessionTabsView: View {
     }
 
     /// One control for all four kinds, because they differ in what they open and in nothing else.
-    /// The shortcuts are shown here and fired from `shortcuts`, for the reason spelled out there.
+    ///
+    /// The shortcuts are drawn here and fired from the File menu. A `Menu` in a view becomes an
+    /// `NSMenu` hanging off a button, and key equivalents are only offered to the menu bar and to
+    /// the view hierarchy, neither of which that menu is in, so what is written here is a label.
+    /// This used to be backed by an invisible `ZStack` of buttons that registered the same keys in
+    /// the view hierarchy; the menu bar carries them now, and it has to be one or the other. A view
+    /// hierarchy button and a menu item bound to the same key are not a tie: the button wins and
+    /// the item never fires, measured.
     ///
     /// The first three take their name and their glyph from `PaneKind` rather than spelling them
     /// out, because the pane's split submenus offer the same three and the two lists have to keep
@@ -363,28 +369,6 @@ struct SessionTabsView: View {
         .padding(.horizontal, Metrics.spacing)
         .frame(height: Metrics.barHeight)
         .help(app.isInspectorVisible ? "Hide the changed files" : "Show the changed files")
-    }
-
-    /// The menu above shows the shortcuts; it cannot fire them. A `Menu` in a view becomes an
-    /// `NSMenu` that hangs off a button, and key equivalents are only offered to the menu bar and
-    /// to the view hierarchy, neither of which that menu is in. Buttons are, so these are.
-    ///
-    /// Cmd+T is missing on purpose: the File menu's New Session already owns it, and a second
-    /// registration of the same shortcut in the same window is a coin toss over which one runs.
-    private var shortcuts: some View {
-        ZStack {
-            Button("New Terminal Tab", action: newTerminal)
-                .keyboardShortcut("t", modifiers: [.command, .shift])
-            Button("New Browser Tab", action: newBrowser)
-                .keyboardShortcut("b", modifiers: [.command, .shift])
-            // The same key both ways, because it is one question: show me the change, or give me
-            // the conversation back. Shift+Cmd+D is what Conductor binds its own diff view to.
-            Button("Show Changes") { FileReview.toggle(in: model) }
-                .keyboardShortcut("d", modifiers: [.command, .shift])
-        }
-        .frame(width: 0, height: 0)
-        .opacity(0)
-        .accessibilityHidden(true)
     }
 
     /// Whether this tab can be opened beside the one the user is in. The pair of menu items is
