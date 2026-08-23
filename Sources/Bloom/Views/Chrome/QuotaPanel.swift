@@ -31,7 +31,18 @@ struct QuotaPanel: View {
     /// the width that holds it with the columns still lining up, and no more: a menu that reaches
     /// a third of the way across the screen to carry two percentages is worse than one that wraps
     /// nothing.
-    static let width: CGFloat = 300
+    static let width: CGFloat = 272
+
+    /// The two insets are different, and they are AppKit's rather than a choice.
+    ///
+    /// A standard menu item's title starts clear of the column its checkmark is drawn in, and its
+    /// separators start on that same edge. Measured off a capture of this menu open: twenty nine
+    /// points from the menu's leading edge to the title, fourteen from its trailing edge to the end
+    /// of a separator. A panel padded evenly sat sixteen points to the left of "Prevent Sleep While
+    /// Agents Run" underneath it, with its rule overhanging the separators above and below, and
+    /// read as something pasted onto the menu rather than as one of its rows.
+    private static let leadingInset: CGFloat = 29
+    private static let trailingInset: CGFloat = 14
 
     private var ledger: [AgentQuota] {
         let headline = board.headline?.id
@@ -66,7 +77,8 @@ struct QuotaPanel: View {
             if board.isEmpty { emptyState }
         }
         .frame(width: Self.width, alignment: .leading)
-        .padding(.horizontal, Metrics.inset + Metrics.spacingSmall)
+        .padding(.leading, Self.leadingInset)
+        .padding(.trailing, Self.trailingInset)
         .padding(.top, Metrics.spacing)
         .padding(.bottom, Metrics.spacingWide)
         .fixedSize()
