@@ -292,6 +292,34 @@ public struct WorkspaceManager: Sendable {
 
     public static let environmentPrefixes = [environmentPrefix, deprecatedEnvironmentPrefix]
 
+    /// The project a workspace belongs to, as a name a script may put in an identifier.
+    ///
+    /// Conductor has no equivalent, so this one is Bloom's and the deprecated prefix carries it
+    /// only so that the two prefixes stay the same set of names. It exists because
+    /// `*_WORKSPACE_NAME` is unique inside one repository and nowhere else: two projects each
+    /// with a branch called `main` produce the same name, so a setup script that says
+    /// `CREATE DATABASE $BLOOM_WORKSPACE_NAME` has one project's worktree writing into the
+    /// other's database, and the archive script then drops it out from under them. Every script
+    /// author could derive this from `basename $BLOOM_ROOT_PATH`, and the ones who do not think
+    /// of it are the ones the corruption happens to.
+    ///
+    /// Taken from the folder the repository is checked out in rather than from the project's
+    /// display name, because the display name is renameable in the sidebar and a database named
+    /// after it would be orphaned by a rename. Everything outside the ASCII letters, digits and
+    /// underscores becomes an underscore, so the value can be pasted into a database name, a
+    /// container name or a shell identifier without quoting.
+    static func projectName(for repo: Repo) -> String {
+        // A repository registered at the filesystem root has `/` as its last component, which
+        // cleans down to a bare underscore, so the display name is the fallback for both that and
+        // an empty path.
+        let folder = URL(fileURLWithPath: repo.path).lastPathComponent
+        let source = (folder.isEmpty || folder == "/") ? repo.name : folder
+        let cleaned = String(source.map { character in
+            character.isASCII && (character.isLetter || character.isNumber) ? character : "_"
+        })
+        return cleaned.isEmpty ? "project" : cleaned
+    }
+
     /// What a setup, archive or run script is launched with, on top of the user's own shell
     /// environment.
     ///
@@ -304,6 +332,7 @@ public struct WorkspaceManager: Sendable {
             ("WORKSPACE_NAME", workspace.branch.replacingOccurrences(of: "/", with: "-")),
             ("WORKSPACE_ID", workspace.id.rawValue),
             ("WORKSPACE_PATH", workspace.path),
+            ("PROJECT_NAME", Self.projectName(for: repo)),
             ("ROOT_PATH", repo.path),
             ("DEFAULT_BRANCH", repo.defaultBranch),
             ("PORT", String(port)),

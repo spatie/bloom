@@ -77,6 +77,7 @@ meanings, so a script written for Conductor runs unchanged:
 | `*_WORKSPACE_NAME` | The branch name with slashes replaced by dashes |
 | `*_WORKSPACE_ID` | The workspace's internal id |
 | `*_WORKSPACE_PATH` | The worktree directory |
+| `*_PROJECT_NAME` | The project's folder name, cleaned down to letters, digits and underscores. Bloom's own; Conductor has no equivalent. Use it to keep a name unique across projects, since `*_WORKSPACE_NAME` only is inside one |
 | `*_ROOT_PATH` | The main checkout |
 | `*_DEFAULT_BRANCH` | The repo's default branch |
 | `*_PORT` | The first of ten ports allocated to this workspace |

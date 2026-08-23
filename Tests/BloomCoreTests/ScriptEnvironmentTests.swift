@@ -31,6 +31,7 @@ struct ScriptEnvironmentTests {
         #expect(env["BLOOM_WORKSPACE_NAME"] == "freek-fix-the-inbox")
         #expect(env["BLOOM_WORKSPACE_ID"] == "w1")
         #expect(env["BLOOM_WORKSPACE_PATH"] == "/tmp/there-fix-the-inbox")
+        #expect(env["BLOOM_PROJECT_NAME"] == "there")
         #expect(env["BLOOM_ROOT_PATH"] == "/tmp/there")
         #expect(env["BLOOM_DEFAULT_BRANCH"] == "main")
         #expect(env["BLOOM_PORT"] == "3100")
@@ -74,5 +75,54 @@ struct ScriptEnvironmentTests {
         let env = try makeEnvironment(port: 0)
         #expect(env["BLOOM_PORT"] == "0")
         #expect(env["CONDUCTOR_PORT"] == "0")
+    }
+
+    /// The failure this variable exists to prevent, written down as the two values a script would
+    /// build a database name out of.
+    @Test("two projects with the same branch name are told apart by the project name")
+    func theProjectNameSeparatesTwoProjectsOnTheSameBranch() throws {
+        let manager = WorkspaceManager(store: try Store.inMemory())
+        let names = ["/Users/freek/dev/there-there", "/Users/freek/dev/mailcoach"].map { path -> (String, String) in
+            let repo = Repo(id: RepoID("r"), name: "Project", path: path, defaultBranch: "main")
+            let workspace = Workspace(
+                id: WorkspaceID("w"),
+                repoID: repo.id,
+                name: "Main",
+                branch: "main",
+                path: path + "-main",
+                baseBranch: "main"
+            )
+            let env = manager.environment(for: workspace, repo: repo, port: 3_100)
+            return (env["BLOOM_WORKSPACE_NAME"] ?? "", env["BLOOM_PROJECT_NAME"] ?? "")
+        }
+
+        // The name a script had before this: identical, so both worktrees name one database.
+        #expect(names[0].0 == names[1].0)
+        #expect(names[0].1 != names[1].1)
+        #expect(names[0].1 == "there_there")
+        #expect(names[1].1 == "mailcoach")
+    }
+
+    /// A script pastes this into `CREATE DATABASE` and into container names, unquoted.
+    @Test("the project name is safe to paste into an identifier")
+    func theProjectNameIsAnIdentifier() {
+        let cases = [
+            ("/Users/freek/dev/there-there", "there_there"),
+            ("/Users/freek/dev/My Project", "My_Project"),
+            ("/Users/freek/dev/laravel.dev", "laravel_dev"),
+            ("/Users/freek/dev/naïve", "na_ve"),
+        ]
+        for (path, expected) in cases {
+            let repo = Repo(id: RepoID("r"), name: "Fallback", path: path, defaultBranch: "main")
+            #expect(WorkspaceManager.projectName(for: repo) == expected)
+        }
+    }
+
+    /// A repository registered at the filesystem root has no folder to be named after, and a
+    /// variable that is set to nothing at all is the one shape a script cannot recover from.
+    @Test("a repository with no folder name falls back rather than binding an empty string")
+    func aRepositoryWithNoFolderNameStillGetsAName() {
+        let repo = Repo(id: RepoID("r"), name: "Rescue", path: "/", defaultBranch: "main")
+        #expect(WorkspaceManager.projectName(for: repo) == "Rescue")
     }
 }
