@@ -25,6 +25,10 @@ struct SeaChartView: View {
     let showEmptyNotice: Bool
 
     @Environment(\.colorScheme) private var colorScheme
+    /// The tile is generated in device pixels, so drawing it takes the screen's scale to put
+    /// one of its pixels on one of the screen's. On a one times display the grain simply lands
+    /// twice as large, which is what a coarser sheet looks like and not a defect.
+    @Environment(\.displayScale) private var displayScale
     /// How far in the chart is looking. All the arithmetic is in the core; this is the handle.
     @State private var camera = SeaChartCamera.whole
     /// Multiplies the size the core asks for, so the user's text setting still moves the names
@@ -112,63 +116,73 @@ struct SeaChartView: View {
 
     // MARK: The sheet
 
+    /// The order is the order the object was made in, and the last three passes are the reason
+    /// it was changed. The texture used to go down first and was then buried: the map fills the
+    /// sheet with an opaque water tone, so every stain and every fibre survived only in the
+    /// margin, and the ocean, which is most of what this window is, stayed a flat swatch. Ink
+    /// does not hide the paper it was printed on. So the sheet is inked first and the paper is
+    /// laid over all of it, grain, stains, vignette and torn edge together, which is also what
+    /// makes a name look printed rather than pasted on.
     private func draw(_ context: GraphicsContext, size: CGSize, ink: ChartInk) {
-        drawPaper(context, size: size, ink: ink)
+        let page = CGRect(origin: .zero, size: size)
+        context.fill(Path(page), with: .color(ink.paper))
+
         let sheet = Self.sheetRect(in: size)
-        guard sheet.width > 0 else { return }
-        let world = Self.worldRect(sheet: sheet, camera: camera)
-        let figures = figureOpacity()
+        if sheet.width > 0 {
+            let world = Self.worldRect(sheet: sheet, camera: camera)
+            let figures = figureOpacity()
 
-        var chart = context
-        chart.clip(to: Path(sheet))
-        chart.fill(Path(sheet), with: .color(ink.water))
-        drawRhumbs(chart, in: world, ink: ink, opacity: figures)
-        drawGraticule(chart, in: world, ink: ink)
-        drawLand(chart, in: world, ink: ink)
-        if figures > 0.01 {
-            drawRose(chart, in: world, ink: ink, opacity: figures)
-            drawCartouche(chart, in: world, ink: ink, opacity: figures)
+            var chart = context
+            chart.clip(to: Path(sheet))
+            chart.fill(Path(sheet), with: .color(ink.water))
+            drawRhumbs(chart, in: world, ink: ink, opacity: figures)
+            drawGraticule(chart, in: world, ink: ink)
+            drawLand(chart, in: world, ink: ink)
+            if figures > 0.01 {
+                drawRose(chart, in: world, ink: ink, opacity: figures)
+                drawCartouche(chart, in: world, ink: ink, opacity: figures)
+            }
+            drawMarks(chart, in: world, sheet: sheet, ink: ink)
+            drawFrame(context, in: sheet, ink: ink)
         }
-        drawMarks(chart, in: world, sheet: sheet, ink: ink)
 
-        drawFrame(context, in: sheet, ink: ink)
+        drawPaper(context, size: size, ink: ink)
         drawDeckle(context, size: size, ink: ink)
     }
 
-    /// The sheet: one flat tone, a seeded speckle for grain, a few foxing blooms, and a vignette
-    /// that deepens towards the edges. The speckle is a fixed sequence, not `random`, because
-    /// paper does not regrow its grain every time a window resizes.
+    /// The sheet's surface, laid over the ink: formation and stains from one small field
+    /// stretched across the window, then grain from a seamless tile at device resolution, then
+    /// the vignette that falls away towards the edges.
+    ///
+    /// This replaced four hundred and twenty seeded dots and fourteen radial blooms. Those were
+    /// the right instinct and the wrong material. A dot is a disc of one tone, so four hundred
+    /// of them read as specks scattered on a flat colour rather than as a surface, and a radial
+    /// gradient is perfectly round with a perfectly even falloff, which is the one thing a water
+    /// stain never is. What the field below has instead is a wobbling edge and a tideline, the
+    /// darker rim damp leaves behind as it dries and carries its pigment outwards.
+    ///
+    /// Both bitmaps are made once for the life of the process, not once a frame and not once a
+    /// window: neither depends on the size of anything, which is the point of tiling one and
+    /// stretching the other, so a window being dragged larger re-tiles the same pixels.
     private func drawPaper(_ context: GraphicsContext, size: CGSize, ink: ChartInk) {
-        let sheet = CGRect(origin: .zero, size: size)
-        context.fill(Path(sheet), with: .color(ink.paper))
+        let page = CGRect(origin: .zero, size: size)
 
-        var seed = ChartGrain(seed: 0x5EED)
-        for _ in 0..<420 {
-            let x = seed.next() * size.width
-            let y = seed.next() * size.height
-            let radius = 0.4 + seed.next() * 0.9
-            let speck = CGRect(x: x, y: y, width: radius, height: radius)
-            context.fill(Path(ellipseIn: speck), with: .color(ink.ink.opacity(0.05)))
-        }
-        // Foxing: the soft brown blooms old paper grows where it was damp. A dozen, large and
-        // very faint, which is what keeps a flat fill from reading as a swatch.
-        for _ in 0..<14 {
-            let radius = 18 + seed.next() * 46
-            let centre = CGPoint(x: seed.next() * size.width, y: seed.next() * size.height)
-            context.fill(
-                Path(ellipseIn: CGRect(
-                    x: centre.x - radius, y: centre.y - radius,
-                    width: radius * 2, height: radius * 2
-                )),
-                with: .radialGradient(
-                    Gradient(colors: [ink.stain.opacity(0.16), .clear]),
-                    center: centre, startRadius: 0, endRadius: radius
-                )
+        var surface = context
+        surface.opacity = ink.texture
+        surface.draw(
+            Image(decorative: ChartPaperTexture.field, scale: 1).interpolation(.high),
+            in: page
+        )
+        surface.fill(
+            Path(page),
+            with: .tiledImage(
+                Image(decorative: ChartPaperTexture.tile, scale: displayScale),
+                sourceRect: CGRect(x: 0, y: 0, width: 1, height: 1)
             )
-        }
+        )
 
         context.fill(
-            Path(sheet),
+            Path(page),
             with: .radialGradient(
                 Gradient(colors: [.clear, ink.shade.opacity(ink.vignette)]),
                 center: CGPoint(x: size.width / 2, y: size.height / 2),
@@ -848,8 +862,11 @@ private struct ChartInk {
     let mark: Color
     let label: Color
     let shade: Color
-    let stain: Color
     let vignette: Double
+    /// How much of the paper's own surface the light picks out. The sheet is the same sheet in
+    /// both appearances, but a dimmer lamp shows less of its tooth, so the texture comes back a
+    /// little in the dark rather than staying at full strength over a darker ground.
+    let texture: Double
 
     static func resolve(_ scheme: ColorScheme) -> ChartInk {
         scheme == .dark
@@ -861,8 +878,8 @@ private struct ChartInk {
                 mark: chartColor(0x8A2E1C),
                 label: chartColor(0x2A1E10),
                 shade: chartColor(0x35240F),
-                stain: chartColor(0x7A5A2A),
-                vignette: 0.42
+                vignette: 0.42,
+                texture: 0.82
             )
             : ChartInk(
                 paper: chartColor(0xEAE0C2),
@@ -872,8 +889,8 @@ private struct ChartInk {
                 mark: chartColor(0x9E3826),
                 label: chartColor(0x3D2D19),
                 shade: chartColor(0x6B5228),
-                stain: chartColor(0xA98246),
-                vignette: 0.16
+                vignette: 0.16,
+                texture: 1.0
             )
     }
 }
@@ -884,20 +901,4 @@ private func chartColor(_ rgb: UInt32) -> Color {
         green: Double((rgb >> 8) & 0xFF) / 255,
         blue: Double(rgb & 0xFF) / 255
     )
-}
-
-/// A small fixed sequence for grain and jitter. Not `SystemRandomNumberGenerator`, because
-/// the paper must not re-speckle on every redraw, and not `srand48`, because two windows
-/// would share its global state. SplitMix64, which is four lines and passes for paper.
-private struct ChartGrain {
-    private var state: UInt64
-    init(seed: UInt64) { state = seed }
-
-    mutating func next() -> Double {
-        state &+= 0x9E37_79B9_7F4A_7C15
-        var z = state
-        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
-        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
-        return Double((z ^ (z >> 31)) >> 11) * (1.0 / 9_007_199_254_740_992.0)
-    }
 }
