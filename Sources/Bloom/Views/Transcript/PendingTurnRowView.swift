@@ -101,21 +101,32 @@ struct PendingTurnRowView: View {
     /// Cancel appears on hover and is announced always. A control that only exists under the
     /// pointer is invisible to anybody driving this with a keyboard or a screen reader, and
     /// withdrawing something you asked for is not a decoration.
+    ///
+    /// **The sentence is last in the row and the row carries no trailing padding**, so its right
+    /// edge is the enclosing `VStack`'s trailing edge, which is the bubble's. Nothing here
+    /// re-states the alignment: one container aligns both, and the two edges agree by
+    /// construction. The bubble's outline is a `strokeBorder`, which draws inside the frame rather
+    /// than astride it, so the frame edge really is the edge you can see.
+    ///
+    /// It read wrong before because Cancel was last and the sentence in front of it. The button
+    /// holds its width whether or not it is drawn (that is what stops the sentence sliding
+    /// sideways the moment the pointer arrives), so the sentence sat a button and a gutter and a
+    /// bubble's padding in from the bubble above it, near enough centred under it to look like a
+    /// caption somebody had dropped there rather than a label belonging to that bubble.
     @ViewBuilder
     private var caption: some View {
         HStack(spacing: Metrics.gutter) {
-            if let hold {
-                Text(hold.sentence)
-                    .foregroundStyle(Palette.textTertiary)
-            }
-
             Button("Cancel", action: onCancel)
                 .linkButton()
                 .help("Takes this message back out of the queue. It is not sent.")
                 .opacity(isHovered ? 1 : 0)
                 .accessibilityHidden(false)
+
+            if let hold {
+                Text(hold.sentence)
+                    .foregroundStyle(Palette.textTertiary)
+            }
         }
         .font(Typo.caption)
-        .padding(.trailing, Self.padding.trailing)
     }
 }
