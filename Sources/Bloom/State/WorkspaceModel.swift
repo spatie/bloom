@@ -9,13 +9,6 @@ struct GitFailure: Error, Sendable {
     var message: String
 }
 
-/// Which tab the top of the inspector is showing.
-enum InspectorTab: String, Hashable, CaseIterable {
-    case allFiles = "All files"
-    case changes = "Changes"
-    case checks = "Checks"
-}
-
 /// Live state for one workspace: its sessions, its transcript, what git says changed, and the
 /// pull request if there is one. Created lazily by `AppModel.model(for:)` and kept for the
 /// lifetime of the launch so switching away and back is free.
@@ -58,7 +51,19 @@ final class WorkspaceModel {
     private var transcripts: [SessionID: TranscriptModel] = [:]
 
     // Inspector.
-    var inspectorTab: InspectorTab = .changes
+    /// What the reader last picked in the tab strip, which is not always what is on screen.
+    ///
+    /// Kept whole rather than clamped to what is currently on offer, because the Checks tab comes
+    /// and goes with the pull request under it. See `InspectorTab.resolve`.
+    private var chosenInspectorTab: InspectorTab = .changes
+
+    /// The tabs the strip may draw for this workspace, and the one it is showing.
+    var availableInspectorTabs: [InspectorTab] { InspectorTab.available(for: pullRequest) }
+
+    var inspectorTab: InspectorTab {
+        get { InspectorTab.resolve(chosenInspectorTab, available: availableInspectorTabs) }
+        set { chosenInspectorTab = newValue }
+    }
     var changedFiles: [ChangedFile] = []
     var selectedFilePath: String?
     var isLoadingChanges = false

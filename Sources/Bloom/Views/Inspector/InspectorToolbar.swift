@@ -8,7 +8,7 @@ import BloomCore
 /// exactly this choice, so it gets the right metrics, the right selection colour and the right
 /// behaviour when the window goes inactive, for free.
 ///
-/// It is only the right control while all three segments fit. Dragged down to the pane's minimum
+/// It is only the right control while every segment fits. Dragged down to the pane's minimum
 /// width there is no room for them, and a segmented control does not truncate: it overflows and is
 /// clipped by the split view, which is how the tab row ended up cut off at both ends. `ViewThatFits`
 /// falls back to a pop-up button, which is what AppKit uses for the same choice in a narrow place.
@@ -112,8 +112,12 @@ struct InspectorToolbar: View {
     /// there is nothing left for a tint to fix. If a future SDK puts the accent back in it, this is
     /// the note to come back to, and the answer will be a control of our own rather than a tint.
     private var tabPicker: some View {
+        // Whichever tabs this workspace has, rather than all three. Checks is only offered when
+        // GitHub has reported a run for the branch, so a workspace with no pull request draws two
+        // segments and no gap where a third used to be. `InspectorTab.available` is where that is
+        // decided and why it is decided there.
         Picker("Inspector view", selection: $model.inspectorTab) {
-            ForEach(InspectorTab.allCases, id: \.self) { tab in
+            ForEach(model.availableInspectorTabs, id: \.self) { tab in
                 Text(title(for: tab)).tag(tab)
             }
         }

@@ -576,7 +576,7 @@ enum Snapshot {
 
     /// Photographs a design gallery in a window of its own.
     ///
-    ///     Bloom --snapshot-gallery /tmp/shots
+    ///     Bloom --snapshot-gallery /tmp/shots [--gallery review-comments|inspector-tabs]
     ///
     /// `--snapshot` cannot photograph this one. `ImageRenderer` paints SwiftUI's yellow
     /// "unsupported" placeholder wherever an `NSViewRepresentable` sits, and the box a review
@@ -594,11 +594,61 @@ enum Snapshot {
         CommandLine.arguments.contains("--snapshot-gallery")
     }
 
+    /// Which gallery `--snapshot-gallery` is being pointed at.
+    ///
+    /// A name rather than a second flag per gallery. Both of these exist because `ImageRenderer`
+    /// cannot draw the control the page is about: a review comment is written in the composer's
+    /// own text view, and the inspector's tab strip is an `NSSegmentedControl`. Rendered offscreen
+    /// each came out as a yellow bar, which is exactly nothing where the whole point is the shape
+    /// of a control.
+    private enum GalleryChoice: String {
+        case reviewComments = "review-comments"
+        case inspectorTabs = "inspector-tabs"
+
+        var title: String {
+            switch self {
+            case .reviewComments: "Review comments"
+            case .inspectorTabs: "Inspector tabs"
+            }
+        }
+
+        var size: CGSize {
+            switch self {
+            case .reviewComments: CGSize(width: 820, height: 900)
+            case .inspectorTabs: CGSize(width: 460, height: 470)
+            }
+        }
+
+        /// Whether this page has to be photographed in the key window of the active app.
+        ///
+        /// True only where the state under review is a field somebody is typing in: a text view
+        /// draws its focus ring nowhere else. Taking the keys is a rude thing to do to whoever is
+        /// using the machine, so a page that does not need them does not ask.
+        var needsFocus: Bool { self == .reviewComments }
+    }
+
+    private static func gallery(from arguments: [String]) -> GalleryChoice {
+        guard let index = arguments.firstIndex(of: "--gallery"), index + 1 < arguments.count,
+              let choice = GalleryChoice(rawValue: arguments[index + 1])
+        else { return .reviewComments }
+        return choice
+    }
+
+    @ViewBuilder
+    @MainActor
+    private static func galleryView(_ choice: GalleryChoice, app: AppModel) -> some View {
+        switch choice {
+        case .reviewComments: ReviewCommentSnapshotGallery()
+        case .inspectorTabs: InspectorTabStripGallery(app: app)
+        }
+    }
+
     static func scheduleGalleryCapture() {
         let arguments = CommandLine.arguments
         guard let index = arguments.firstIndex(of: "--snapshot-gallery"),
               index + 1 < arguments.count else { return }
         let output = arguments[index + 1]
+        let choice = gallery(from: arguments)
 
         Task { @MainActor in
             try? FileManager.default.createDirectory(
@@ -608,7 +658,10 @@ enum Snapshot {
             // laying themselves out at the same moment.
             try? await Task.sleep(for: .seconds(3))
 
-            let size = CGSize(width: 820, height: 900)
+            // Owned here, for the whole run: a `WorkspaceModel` holds its `AppModel` unowned, so
+            // the tab strip's fixtures need something with a longer life than a `body`.
+            let app = AppModel()
+            let size = choice.size
             for name in ["light", "dark"] {
                 let window = NSWindow(
                     contentRect: NSRect(origin: .zero, size: size),
@@ -616,24 +669,26 @@ enum Snapshot {
                     backing: .buffered,
                     defer: false
                 )
-                window.title = "Review comments"
+                window.title = choice.title
                 window.appearance = NSAppearance(named: name == "dark" ? .darkAqua : .aqua)
                 window.contentView = NSHostingView(
-                    rootView: ReviewCommentSnapshotGallery()
+                    rootView: galleryView(choice, app: app)
                         .frame(width: size.width, height: size.height)
                         .background(Palette.windowBackground)
                 )
                 window.center()
-                // Key, because a field draws its focus ring only in the window the keys are going
-                // to, and the state being photographed is a field somebody is typing in.
-                window.makeKeyAndOrderFront(nil)
-                NSApp.activate(ignoringOtherApps: true)
+                if choice.needsFocus {
+                    window.makeKeyAndOrderFront(nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                } else {
+                    window.orderFrontRegardless()
+                }
                 // A hosting view lays out, the text view measures its own wrapped height and
                 // reports it back, and the box grows on the pass after that. Captured sooner, a
                 // two-line comment was photographed in a one-line box.
                 try? await Task.sleep(for: .seconds(2))
 
-                let path = "\(output)/review-comments-\(name).png"
+                let path = "\(output)/\(choice.rawValue)-\(name).png"
                 if captureWindowServerImage(windowNumber: window.windowNumber, to: path) {
                     print(path)
                 } else {
@@ -727,6 +782,10 @@ enum Snapshot {
             ("permission", AnyView(PermissionSnapshotGallery().frame(width: 720, height: 1560)), CGSize(width: 720, height: 1560)),
             ("tool-rows", AnyView(ToolRowSnapshotGallery().frame(width: 800, height: 720)), CGSize(width: 800, height: 720)),
             ("review-comments", AnyView(ReviewCommentSnapshotGallery().frame(width: 800, height: 900)), CGSize(width: 800, height: 900)),
+            // No inspector-tabs scene, deliberately. The strip is a segmented control, which is an
+            // `NSSegmentedControl`, and `ImageRenderer` paints its yellow placeholder over exactly
+            // the thing that page exists to show. It is captured as a real window instead:
+            // `--snapshot-gallery <dir> --gallery inspector-tabs`.
             // On the menu's own ground rather than the window's, because every colour in this
             // panel is an AppKit semantic one chosen to sit on a menu. See `QuotaPanel`.
             (
