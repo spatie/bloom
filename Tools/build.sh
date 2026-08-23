@@ -74,6 +74,24 @@ else
   plist_set BloomBuildChannel string local
 fi
 
+# When this bundle was assembled, which is the only thing that tells two development builds apart.
+#
+# A release has a version and a build number. A build made here has neither: BuildIdentity prints
+# "Development build" for it, plus the commit for the copy Tools/master.sh installs, so two builds
+# made an hour apart from the same commit print the same line, and there are usually several of
+# them on this machine at once. The About window now adds this date for those cases and ignores it
+# for a release, where it would describe the release runner rather than anything the reader has.
+#
+# Stamped here rather than measured at runtime from the executable's modification date, because an
+# mtime moves when a bundle is copied and codesign rewrites the binary below, so that number would
+# be an approximation in the shape of a fact. That is the same mistake as reading the placeholder
+# version out of Resources/Info.plist, one level down. Written on every build, release included,
+# because what the About window does with it is the window's decision and not this script's.
+#
+# UTC and ISO 8601, so the value is unambiguous wherever it is read and whoever reads it; the
+# window renders it in the reader's own zone and locale. See BuildTimestamp.
+plist_set BloomBuildDate string "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
 # The year in the copyright line, refreshed at assembly so nobody has to remember January.
 #
 # NSHumanReadableCopyright has two readers, the About window and Finder's Get Info, and both read

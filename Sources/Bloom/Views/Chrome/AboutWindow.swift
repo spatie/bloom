@@ -177,8 +177,15 @@ private struct AboutView: View {
     /// fixed `0.1.0 (1)` that only the release workflow overwrites, so reading those keys made
     /// every build on this machine claim a version that had never been released. `BuildIdentity`
     /// is the type that knows the difference; see its head.
+    ///
+    /// The date the build was assembled is passed in beside it rather than formatted here, and
+    /// which builds show one at all is `BuildIdentity`'s decision rather than this view's. There
+    /// are usually several development builds on this machine at once and the line is identical in
+    /// all of them, so the timestamp is the answer to the only question this line gets asked; a
+    /// release keeps the version it shares with everybody else and no timestamp. See
+    /// `BuildTimestamp`.
     private var versionLine: String {
-        BuildIdentity.read(from: .main).line
+        BuildIdentity.read(from: .main).line(built: BuildTimestamp.read(from: .main))
     }
 
     // MARK: The makers

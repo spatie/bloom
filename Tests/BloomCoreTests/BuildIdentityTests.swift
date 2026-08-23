@@ -99,6 +99,51 @@ struct BuildIdentityTests {
         #expect(identity.line == "Version 0.2.0")
     }
 
+    // MARK: The build's own timestamp
+
+    private static let brussels = TimeZone(identifier: "Europe/Brussels")!
+    private static let belgium = Locale(identifier: "en_GB")
+    /// 23 August 2026 at 14:32 in Brussels, read on the evening of the same day.
+    private static let built = Date(timeIntervalSince1970: 1_787_488_320)
+    private static let now = Date(timeIntervalSince1970: 1_787_500_800)
+
+    private static func line(_ identity: BuildIdentity, built: Date?) -> String {
+        identity.line(built: built, now: now, locale: belgium, timeZone: brussels)
+    }
+
+    /// The copy in `~/Applications` is rebuilt from a new commit most days, and an agent's build
+    /// is rebuilt from the same commit several times an hour. The commit alone does not separate
+    /// those, which is the whole reason the time is there.
+    @Test("A development build says when it was made")
+    func developmentBuildCarriesItsTimestamp() {
+        #expect(Self.line(.local, built: Self.built) == "Development build · 23 Aug 14:32")
+        #expect(
+            Self.line(.master(commit: "10320b4c9f1e2a3"), built: Self.built)
+                == "Development build · 10320b4 · 23 Aug 14:32"
+        )
+    }
+
+    /// A release's version is the fact somebody reads back, and it is the same in every copy of
+    /// that release. When the release runner happened to assemble the zip is not.
+    @Test("A release is left exactly as it was")
+    func releaseNeverShowsATimestamp() {
+        let identity = BuildIdentity.release(version: "0.5.0", build: "570")
+
+        #expect(Self.line(identity, built: Self.built) == "Version 0.5.0 · Build 570")
+        #expect(Self.line(identity, built: Self.built) == identity.line)
+    }
+
+    /// A bundle assembled by something other than `Tools/build.sh`, and old enough that the
+    /// executable's date could not be read either. The line goes back to what it always was.
+    @Test("No date is the line without one, not a gap where one would go")
+    func missingDateChangesNothing() {
+        #expect(Self.line(.local, built: nil) == "Development build")
+        #expect(
+            Self.line(.master(commit: "10320b4c9f1e2a3"), built: nil)
+                == "Development build · 10320b4"
+        )
+    }
+
     /// Reading a bundle rather than four strings, which is what both call sites actually do.
     @Test("Reading it out of a bundle agrees with reading the keys by hand")
     func readsFromABundle() {
