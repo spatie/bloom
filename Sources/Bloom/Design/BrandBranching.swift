@@ -31,8 +31,11 @@ import SwiftUI
 /// budget: uncapped, the render server honours this display's full ProMotion rate for as long as
 /// the window is open, which was measured on the About window at about forty percent of one core
 /// in WindowServer against seven capped. Nothing here moves fast enough to want more: the head of
-/// a branch travels about twenty points a second, so at twelve frames a second it steps under two
-/// points, which on a glow this soft is below what its edge can show.
+/// a branch travels between twenty seven and thirty nine points a second, so at twelve frames a
+/// second it steps at most three and a quarter points, which on a fifty eight point bloom whose
+/// colour is already gone by seven tenths of its radius is inside the softness of its own edge.
+/// Measured again after the speed went up, because that is exactly the change that would have
+/// taken it out of the noise, and it had not.
 struct BrandBranching: NSViewRepresentable {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -47,7 +50,7 @@ struct BrandBranching: NSViewRepresentable {
         // Removed, not slowed, which is the rule every call site of `Motion` follows. Unlike the
         // rings this replaced, there is something worth holding still here: a ring at rest is a
         // circle drawn round the mark and says nothing, but branches at rest are a spine with
-        // four worktrees caught at four different distances out along it, which is a picture of
+        // seven worktrees caught at seven different distances out along it, which is a picture of
         // the same thing the motion is a picture of. So Reduce Motion gets a composition rather
         // than an empty plinth. The site does the same in its own `seedStillFrame`.
         view.setMoving(!reduceMotion)
@@ -59,17 +62,39 @@ final class BrandBranchingView: NSView {
         didSet { if spineDepth != oldValue { needsLayout = true } }
     }
 
-    /// The four branches, and why there are four.
+    /// The seven branches, and why there are seven of them at these seven periods.
     ///
-    /// Three left the field empty for seconds at a time and five had two lines crossing the
-    /// wordmark at once. Four, on periods sharing no common factor, means there is always one
-    /// leaving and one landing and the composition never visibly repeats, which is the same
-    /// arithmetic `BrandWater` uses on its breaths.
+    /// It was four, on the reasoning that three left the field empty for seconds at a time and
+    /// five had two lines crossing the wordmark at once, and four was asked to be more. The five
+    /// that failed failed because the fifth was put below, where the only room left is the room
+    /// the type is in; going up and sideways instead costs nothing, because the plinth above the
+    /// mark is empty and the picture was only ever using half the width at a time.
+    ///
+    /// So the three that were added are two more above the spine and one more below it but well
+    /// clear of the wordmark, and every branch was shortened and moved off the middle. What
+    /// stops seven reading as busy is not that they are faint, it is that no two of them share a
+    /// stretch of the plinth: the runs sit at seven heights and the spans are cut into a left
+    /// half, a right half and a long middle, so two heads at the same distance out are still in
+    /// two different places. `-80` is still the only run that passes behind the type, and it is
+    /// still the dimmest colour, which is the whole reason it is allowed to.
+    ///
+    /// The periods stay mutually coprime, which is what keeps the composition from ever falling
+    /// into lockstep, and that is why two of them are not prime: nine and sixteen are a power of
+    /// three and a power of two, so they share no factor with each other or with the five primes
+    /// beside them, and they fill the gaps at the fast end that the primes leave. The lowest
+    /// common multiple of the seven is over nine years.
+    ///
+    /// They are assigned longest branch to longest period, which is the part that makes seven
+    /// lights read as one family rather than as seven separate animations: a head covers between
+    /// twenty seven and thirty nine points a second whichever branch it is on, where the four
+    /// used to run from fourteen to twenty seven. That is the quicker Freek asked for, a little
+    /// under twice the pace of the old average, and it is spent on the whole set rather than on
+    /// the front of it.
     ///
     /// `rise` is signed points off the spine, positive upwards, and the spread is deliberately
-    /// not symmetric: there is only the plinth above the mark, and the wordmark below it. The
-    /// deepest branch is the dimmest colour for the same reason, so the one line that passes
-    /// behind the type is the one least able to compete with it.
+    /// not symmetric: there is only the plinth above the mark, and the wordmark below it. Colour
+    /// darkens with depth for the same reason, so the lines nearest the type are the ones least
+    /// able to compete with it.
     private struct Lane {
         var from: CGFloat
         var to: CGFloat
@@ -80,11 +105,17 @@ final class BrandBranchingView: NSView {
         var still: CGFloat
     }
 
+    /// Ordered top to bottom, so the reason the colours darken down the list is visible in it.
+    /// The stills are seven roughly even steps through a cycle, dealt out so that neighbours in
+    /// height are never neighbours in progress; see `stillFrame` for what that is holding.
     private static let lanes: [Lane] = [
-        Lane(from: 0.00, to: 0.64, rise: 98, period: 23, colour: 0x9BE9DC, still: 0.93),
-        Lane(from: 0.34, to: 0.96, rise: 62, period: 31, colour: 0x4FD8C4, still: 0.28),
-        Lane(from: 0.02, to: 0.55, rise: -50, period: 27, colour: 0x7FE8D6, still: 0.61),
-        Lane(from: 0.42, to: 0.98, rise: -80, period: 37, colour: 0x2AA3B4, still: 0.45),
+        Lane(from: 0.04, to: 0.60, rise: 132, period: 23, colour: 0x9BE9DC, still: 0.70),
+        Lane(from: 0.52, to: 1.00, rise: 112, period: 16, colour: 0x9BE9DC, still: 0.58),
+        Lane(from: 0.00, to: 0.46, rise: 98, period: 13, colour: 0x7FE8D6, still: 0.36),
+        Lane(from: 0.16, to: 0.78, rise: 62, period: 17, colour: 0x7FE8D6, still: 0.12),
+        Lane(from: 0.54, to: 1.00, rise: -46, period: 11, colour: 0x4FD8C4, still: 0.47),
+        Lane(from: 0.00, to: 0.42, rise: -50, period: 9, colour: 0x4FD8C4, still: 0.24),
+        Lane(from: 0.28, to: 0.92, rise: -80, period: 19, colour: 0x2AA3B4, still: 0.86),
     ]
 
     /// The share of a branch's period spent tracing out to the far end. The rest of it is the
@@ -93,14 +124,21 @@ final class BrandBranchingView: NSView {
     /// How far behind the head each of the two strokes trails, as a share of the period.
     ///
     /// Two numbers rather than one, and this is what makes a branch read as light rather than as
-    /// a dash sliding along a curve. The sharp line keeps a bit under a third of the branch lit,
+    /// a dash sliding along a curve. The sharp line keeps a bit over a fifth of the branch lit,
     /// which is enough to show the shape of the turn it just came round and not so much that it
     /// draws the whole branch. The soft wide one behind it keeps half again as much, so what
     /// fades out at the back is a glow with no line left inside it. The site gets the same effect
     /// with a gradient stroke on its trail; this gets it from two layers and no gradient, which
     /// is what the render server can animate without being handed a new path every frame.
-    private static let lineLag: CFTimeInterval = 0.22
-    private static let wakeLag: CFTimeInterval = 0.36
+    ///
+    /// Both were cut back when the count went from four to seven and the pace went up, and the
+    /// two changes wanted the same cut for different reasons. Seven branches lit for a third of
+    /// their length is a third more lit line on the plinth than four were, which is the busy this
+    /// had to stay away from; and a light moving half again as fast wants a shorter trail anyway,
+    /// because a long one at speed stops reading as a bloom being carried and starts reading as a
+    /// stripe being dragged.
+    private static let lineLag: CFTimeInterval = 0.16
+    private static let wakeLag: CFTimeInterval = 0.27
     /// The same cap, the same numbers and the same reason as `BrandWater.frameRate`.
     private static let frameRate = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)
     /// How many points the head's travel is sampled into. Forty is under three points apart on
@@ -259,9 +297,16 @@ final class BrandBranchingView: NSView {
         drift(drifts[1], over: 38, phase: 19)
     }
 
-    /// What the window shows when Reduce Motion is on: the spine, and four branches held at four
-    /// different distances out from it, each lit for the length it would be lit while moving.
-    /// One is landing, one has just left, two are out on the run. It is the same picture, stopped.
+    /// What the window shows when Reduce Motion is on: the spine, and seven branches held at
+    /// seven different distances out from it, each lit for the length it would be lit while
+    /// moving. One is landing, one has just left, the other five are spread along their runs. It
+    /// is the same picture, stopped.
+    ///
+    /// Holding seven still takes more care than holding four did, because a still frame cannot
+    /// rely on time to separate anything: whatever the stills say is what is seen for as long as
+    /// the window is open. So they are dealt out against the heights rather than down them, and
+    /// the two that read as events, the one landing and the one just departed, are put at
+    /// opposite ends of the plinth and on opposite sides of the spine.
     private func stillFrame() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)

@@ -131,15 +131,22 @@ struct WelcomeGreeting: View {
                 .padding(.top, Metrics.pane + Metrics.spacingWide)
                 .modifier(Rise(entered: entered, animation: step(0.16)))
 
+            // The only sentence on the screen that says what the app is, and it was set in the
+            // smallest mono size in the theme, which is the size a timestamp is set in. Between a
+            // thirty eight point serif line and a large button it read as a caption to the
+            // wordmark rather than as the thing to read, and Freek could not comfortably read it
+            // at all. Up one step to the size the app uses for a line of prose in mono, which is
+            // where it should have been: the mono face is deliberate, because that is this app's
+            // voice for naming what it does, but the smallest cut of it was not.
             Text("A worktree, an agent and a branch for every task you describe")
-                .font(Typo.codeTiny)
+                .font(Typo.codeSmall)
                 .foregroundStyle(Brand.mistDim)
                 .multilineTextAlignment(.center)
                 .padding(.top, Metrics.inset + Metrics.spacingSmall)
                 .padding(.horizontal, Metrics.pane)
                 .modifier(Rise(entered: entered, animation: step(0.28)))
 
-            Button("Check my Mac", action: onContinue)
+            Button("See what Bloom needs", action: onContinue)
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
                 // Bloom's own fill rather than whatever the user picked in Appearance, for the
@@ -149,6 +156,25 @@ struct WelcomeGreeting: View {
                 .controlSize(.large)
                 .padding(.top, Metrics.pane + Metrics.inset)
                 .modifier(Rise(entered: entered, animation: step(0.40)))
+
+            // What the button is about to do, said plainly, because "Check my Mac" on its own
+            // could be read as anything from a hardware scan to something rummaging through the
+            // disk. It names the four things by the shapes they are rather than by their four
+            // names: the next screen lists Git, Claude Code, Codex and the GitHub CLI with their
+            // versions, and printing that list twice would turn a greeting into the screen it is
+            // introducing. There is no line here saying nothing leaves the Mac, because a screen
+            // that says that has raised the question it is answering; being specific about what
+            // is looked for does the same work without the flinch.
+            //
+            // It takes the mono size the lede has just left, so the two lines of mono on the
+            // screen are still a step apart and the hierarchy did not move, it just shifted up.
+            Text("Bloom looks for Git, a coding agent and the GitHub CLI")
+                .font(Typo.codeTiny)
+                .foregroundStyle(Brand.mistDim)
+                .multilineTextAlignment(.center)
+                .padding(.top, Metrics.inset + Metrics.spacingSmall)
+                .padding(.horizontal, Metrics.pane)
+                .modifier(Rise(entered: entered, animation: step(0.52)))
         }
         .padding(.top, Metrics.pane + Metrics.inset)
         .frame(maxWidth: .infinity)
@@ -156,8 +182,8 @@ struct WelcomeGreeting: View {
 
     /// One element of the entrance, and its place in the queue.
     ///
-    /// The whole sequence is under nine tenths of a second from the mark to the button, and every
-    /// element is faded and lifted eight points rather than slid, scaled or sprung. It is an app
+    /// The whole sequence is a little over a second from the mark to the line under the button,
+    /// and every element is faded and lifted eight points rather than slid, scaled or sprung. It is an app
     /// opening its door, and a door that bounced would be a splash screen. Reduce Motion is not
     /// given a slower version of it: `entered` is already true on the first frame, so there is
     /// nothing to play at all.
@@ -175,8 +201,8 @@ private struct SpineDepth: PreferenceKey {
     }
 }
 
-/// Faded and lifted into place. Its own modifier because four elements do the same thing at four
-/// different moments, and four copies of two lines is four places for one of them to drift.
+/// Faded and lifted into place. Its own modifier because five elements do the same thing at five
+/// different moments, and five copies of two lines is five places for one of them to drift.
 private struct Rise: ViewModifier {
     let entered: Bool
     let animation: Animation?

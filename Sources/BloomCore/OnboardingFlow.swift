@@ -53,9 +53,16 @@ public enum OnboardingStep: String, Sendable, Hashable, CaseIterable, Identifiab
     /// One phrase, in the imperative, naming what the next screen is rather than naming the act
     /// of moving. "Continue" would be true of every wizard ever shipped and would tell nobody
     /// what they are about to see.
+    ///
+    /// It said "Check my Mac", which named the object and left the act to the imagination, and on
+    /// a screen that has just asked to look at somebody's machine the imagination fills that in
+    /// badly: a hardware scan, a disk sweep, something rummaging. What it actually does is look
+    /// down the PATH for four tools and ask two of them whether they are signed in. So the button
+    /// names the screen it opens, which is a short list of what Bloom needs, and the greeting
+    /// says underneath it which things those are.
     public var forwardButtonTitle: String? {
         switch self {
-        case .greeting: "Check my Mac"
+        case .greeting: "See what Bloom needs"
         case .checks: nil
         }
     }
