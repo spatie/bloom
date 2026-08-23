@@ -121,12 +121,17 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         // pausing them: a turn interrupted here is work the agent has already paid for and
         // cannot resume. Only asked when there is something to lose, so a quiet quit stays one
         // keystroke.
-        if !isInstallingUpdate,
-           let running = appModel?.runningAgentCount, running > 0,
-           !confirmQuit(running: running) {
-            return .terminateCancel
+        if !isInstallingUpdate, let running = appModel?.runningAgentCount, running > 0 {
+            askBeforeQuitting(running: running)
+            return .terminateLater
         }
 
+        beginTeardown()
+        return .terminateLater
+    }
+
+    /// The teardown, and the two replies that end it.
+    private func beginTeardown() {
         isTerminating = true
 
         Task { @MainActor in
@@ -140,15 +145,60 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
             try? await Task.sleep(for: .seconds(8))
             NSApp.reply(toApplicationShouldTerminate: true)
         }
+    }
 
-        return .terminateLater
+    /// The question, as a sheet on the window the keystroke was aimed at.
+    ///
+    /// It used to be `runModal()`, and that is the whole of the bug this replaces. A modal alert is
+    /// a window of its own, floating free of the window Cmd+Q was pressed in, and a run that
+    /// watches the app by its window id sees that window unchanged and the process still alive: the
+    /// keystroke reads as having done nothing at all. Measured on a build with one agent running,
+    /// where Cmd+Q left the process up with the same window and the same state until the free
+    /// floating alert was found and answered.
+    ///
+    /// A sheet is attached to the window, so the question arrives where the reader is looking and
+    /// belongs to the thing being asked about. It also drops the last `runModal()` on a hot path:
+    /// the head of `PanelPresentation` explains why, and it counts double here, because a modal run
+    /// loop stops every other workspace's transcript streaming for as long as the question stands
+    /// unanswered, which is exactly the agents this question is about.
+    ///
+    /// The app is activated first, because a quit can arrive from the Dock or from the switcher
+    /// with Bloom behind three other windows, and a sheet nobody can see is the same failure again.
+    @MainActor
+    private func askBeforeQuitting(running: Int) {
+        let alert = quitAlert(running: running)
+
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first(where: \.isVisible) else {
+            // No window to hang it on, which is a Bloom with its window closed and agents still
+            // working. Modal is all that is left, and with no window there is nothing for it to
+            // hide behind.
+            NSApp.activate()
+            if alert.runModal() == .alertFirstButtonReturn {
+                beginTeardown()
+            } else {
+                NSApp.reply(toApplicationShouldTerminate: false)
+            }
+            return
+        }
+
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+        alert.beginSheetModal(for: window) { response in
+            MainActor.assumeIsolated {
+                if response == .alertFirstButtonReturn {
+                    self.beginTeardown()
+                } else {
+                    NSApp.reply(toApplicationShouldTerminate: false)
+                }
+            }
+        }
     }
 
     /// Names the workspaces rather than only counting them, so the answer to "which one was that?"
     /// is on screen at the moment it is needed. Long lists are capped: past a handful the count is
     /// the useful fact and the names are noise.
     @MainActor
-    private func confirmQuit(running: Int) -> Bool {
+    private func quitAlert(running: Int) -> NSAlert {
         let names = appModel?.runningAgentWorkspaceNames ?? []
 
         let alert = NSAlert()
@@ -176,7 +226,7 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         alert.buttons.last?.keyEquivalent = "\r"
         alert.buttons.first?.keyEquivalent = ""
 
-        return alert.runModal() == .alertFirstButtonReturn
+        return alert
     }
 
     /// The dock icon's menu. Only the workspaces with an agent actually running, because the dock
