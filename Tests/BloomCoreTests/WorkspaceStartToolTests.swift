@@ -300,6 +300,44 @@ struct WorkspaceStartToolTests {
         #expect(result.text.contains("could not start"))
     }
 
+    /// The tool's own half of the diagnosis: it reads the caller's project so a failed start can
+    /// be explained, and it answers with the explanation rather than with git's argv.
+    @Test("a start that failed in a repository with no commits says so through the tool")
+    func startFailureIsDiagnosed() async throws {
+        let repoPath = TestScratch.unique("bloom-git")
+        try FileManager.default.createDirectory(atPath: repoPath, withIntermediateDirectories: true)
+        try await Shell.check("git", ["init", "-q", "-b", "main"], cwd: repoPath)
+
+        let store = try makeTestStore("diagnosed")
+        let repo = try await store.upsert(Repo(name: "flare", path: repoPath, defaultBranch: "main"))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id,
+            name: "group occurrences",
+            branch: "claude/group-occurrences",
+            path: repoPath,
+            baseBranch: "main"
+        ))
+        let session = try await store.upsert(Session(workspaceID: workspace.id, title: "First chat"))
+
+        let recorder = Recorder()
+        recorder.failure = ShellError(
+            command: "git worktree add -b do-thing -- \(repoPath)/do-thing main",
+            status: 128,
+            stderr: "fatal: invalid reference: main"
+        )
+
+        let result = await recorder.tool().call(
+            request(["prompt": .string("do a thing")]),
+            as: BridgeIdentity(sessionID: session.id, workspaceID: workspace.id, role: .parent),
+            store: store
+        )
+
+        #expect(result.isError)
+        #expect(result.text.contains("'flare' has no commits yet"))
+        #expect(!result.text.contains("invalid reference"))
+        #expect(!result.text.contains("worktree add"))
+    }
+
     /// The description is the only thing the model reads before deciding, so the three facts it
     /// must not get wrong are pinned here: it does not block, the child has no context, and it
     /// costs money.

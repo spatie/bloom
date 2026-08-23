@@ -192,10 +192,19 @@ public struct WorkspaceStartTool: BridgeToolHandling {
 
         // The second lock. The role gate already hid this tool from a child, so reaching here as
         // one means something spoke MCP at the socket directly.
+        //
+        // The project is read here rather than only on the happy path, because it is what makes a
+        // failed start explicable: `WorkspaceStartTrouble` needs the repository's name, its path
+        // and the branch a call that named none would have been cut from.
+        let project: Repo
         do {
             guard let caller = try await store.workspace(id: identity.workspaceID) else {
                 return .failure("This workspace is no longer in Bloom's database.")
             }
+            guard let repo = try await store.repo(id: caller.repoID) else {
+                return .failure("This workspace's project is no longer in Bloom's database.")
+            }
+            project = repo
 
             if caller.origin.isAgentSpawned {
                 return .failure(
@@ -261,7 +270,14 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                 ),
             ]))
         } catch {
-            return .failure("Bloom could not start that workspace: \(error.readableMessage)")
+            let trouble = await WorkspaceStartTrouble.diagnose(
+                error,
+                project: project.name,
+                projectPath: project.path,
+                baseBranch: order.baseBranch ?? project.defaultBranch,
+                wasRequested: order.baseBranch != nil
+            )
+            return .failure(trouble.sentence)
         }
     }
 
