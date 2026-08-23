@@ -164,33 +164,12 @@ struct WelcomeGreeting: View {
                 .padding(.top, Metrics.pane + Metrics.inset)
                 .modifier(Rise(entered: entered, animation: step(0.40)))
 
-            // What the button is about to do, said plainly, because "Check my Mac" on its own
-            // could be read as anything from a hardware scan to something rummaging through the
-            // disk. It names the four things by the shapes they are rather than by their four
-            // names: the next screen lists Git, Claude Code, Codex and the GitHub CLI with their
-            // versions, and printing that list twice would turn a greeting into the screen it is
-            // introducing. There is no line here saying nothing leaves the Mac, because a screen
-            // that says that has raised the question it is answering; being specific about what
-            // is looked for does the same work without the flinch.
-            //
-            // `Typo.caption`, which is the rung for supporting text that still has to be read:
-            // two below the lede, so it is plainly subordinate to it rather than competing with
-            // it, and one above the floor it used to sit on.
-            //
-            // It was mono, for the same wrong reason the lede was, and it outlasted the lede's
-            // fix by a commit. Git and the GitHub CLI being proper nouns does not make the
-            // sentence data: mono here is reserved for what a machine said, and this is Bloom
-            // saying what it is about to go and look for. It was also the last line on the screen
-            // still set at the bottom of the scale, which is the complaint that started all of
-            // this, so leaving it there would have fixed the sentence above it and left the
-            // smallest text in the window exactly as small as it was.
-            Text("Bloom looks for Git, a coding agent and the GitHub CLI")
-                .font(Typo.caption)
-                .foregroundStyle(Brand.mistDim)
-                .multilineTextAlignment(.center)
-                .padding(.top, Metrics.inset + Metrics.spacingSmall)
-                .padding(.horizontal, Metrics.pane)
-                .modifier(Rise(entered: entered, animation: step(0.52)))
+            // Nothing under the button. There WAS a line here naming what the next screen goes
+            // looking for, and it was answering a question the button had stopped asking: it was
+            // written when the button said "Check my Mac", which could be read as anything from a
+            // hardware scan to something rummaging through the disk. "See what Bloom needs"
+            // already says that pressing it shows you a list, so the line under it was the screen
+            // explaining its own button.
         }
         .padding(.top, Metrics.pane + Metrics.inset)
         .frame(maxWidth: .infinity)
@@ -198,11 +177,14 @@ struct WelcomeGreeting: View {
 
     /// One element of the entrance, and its place in the queue.
     ///
-    /// The whole sequence is a little over a second from the mark to the line under the button,
-    /// and every element is faded and lifted eight points rather than slid, scaled or sprung. It is an app
+    /// The whole sequence is a little under a second, from the mark to the button, and every
+    /// element is faded and lifted eight points rather than slid, scaled or sprung. It is an app
     /// opening its door, and a door that bounced would be a splash screen. Reduce Motion is not
     /// given a slower version of it: `entered` is already true on the first frame, so there is
     /// nothing to play at all.
+    ///
+    /// The delays are spaced rather than counted, so dropping the last element shortens the
+    /// entrance instead of leaving a beat of nothing at the end of it.
     private func step(_ delay: Double) -> Animation? {
         reduceMotion ? nil : .easeOut(duration: 0.45).delay(delay)
     }
@@ -217,8 +199,10 @@ private struct SpineDepth: PreferenceKey {
     }
 }
 
-/// Faded and lifted into place. Its own modifier because five elements do the same thing at five
-/// different moments, and five copies of two lines is five places for one of them to drift.
+/// Faded and lifted into place. Its own modifier because three elements do the same thing at
+/// three different moments, and three copies of two lines is three places for one of them to
+/// drift. Four until the line under the button went. The mark is not one of them: it scales as
+/// well as fades, so it is written out at the call site.
 private struct Rise: ViewModifier {
     let entered: Bool
     let animation: Animation?
