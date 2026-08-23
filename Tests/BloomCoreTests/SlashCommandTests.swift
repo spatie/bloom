@@ -702,7 +702,7 @@ struct SlashCommandDraftTests {
         #expect(after.name == nil)
         // The caret lands at the end, so the next press eats a letter and the menu is open again.
         #expect(draft.caretAfterBackspace == 7)
-        #expect(ComposerMenu.slashQuery(in: after.text) == "review")
+        #expect(ComposerMenu.slashToken(in: after.text, caret: 7)?.query == "review")
     }
 
     @Test("backspace on a chip with a prompt after it removes the chip and keeps the prompt")

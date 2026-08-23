@@ -17,10 +17,10 @@ struct ComposerMenuOverlay: View {
 
     var body: some View {
         switch menu {
-        case .slash(let query):
+        case .slash(let token):
             SlashCommandMenu(
                 matches: commands,
-                query: query,
+                query: token.query,
                 isLoaded: commandsAreLoaded,
                 selectedIndex: selectedIndex,
                 maxHeight: maxHeight,

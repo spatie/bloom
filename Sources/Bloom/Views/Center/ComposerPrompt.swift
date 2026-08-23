@@ -343,7 +343,9 @@ struct ComposerPrompt<Footer: View>: View {
     ///
     /// Resolved against the body rather than the whole draft, because the chip is not text any
     /// more: with `/review ` already picked, a `@` in the prompt is a mention and a second `/` is
-    /// a new command, and both are measured from where the editor's own caret is.
+    /// a new command, and both are measured from where the editor's own caret is. Both are also
+    /// found anywhere in the body, not only at its start, so completion is offered for the `/rev`
+    /// of "do a /rev of this" exactly as it is for the `@Sou` of "look at @Sou".
     private var menu: ComposerMenu {
         ComposerMenu.resolve(draft: command.body, caret: caret)
     }
@@ -357,8 +359,8 @@ struct ComposerPrompt<Footer: View>: View {
     /// Only scored while the slash menu is actually on screen, so a keystroke in an ordinary draft
     /// costs nothing.
     private var slashResults: [SlashCommandMatch] {
-        guard case .slash(let query) = activeMenu else { return [] }
-        return slashCatalog.matches(query)
+        guard let token = activeMenu.slash else { return [] }
+        return slashCatalog.matches(token.query)
     }
 
     /// Whether the slash menu is the one the draft is asking for, which is the moment the command
@@ -391,9 +393,9 @@ struct ComposerPrompt<Footer: View>: View {
     /// How far under the box's top edge the line being typed ends: the box's own padding, the
     /// chip strip when the draft leads with a command, and one line of text. A panel that opens
     /// downwards starts here, so the token being completed stays visible above it. A caret on a
-    /// later line of a long draft can end up under the panel; the slash menu never does, because
-    /// it only exists while the whole draft is one `/word`, and the file menu's own filtering is
-    /// the feedback for what is being typed.
+    /// later line of a long draft can end up under the panel, and both menus can now be opened
+    /// there, since a slash completes anywhere it begins a word. The filtering each menu does is
+    /// the feedback for what is being typed, so a covered caret costs the reader nothing.
     private var typedLineBottom: CGFloat {
         Metrics.gutter
             + (command.name == nil ? 0 : AttachmentChip.height + Metrics.spacingWide)
@@ -429,14 +431,15 @@ struct ComposerPrompt<Footer: View>: View {
         }.value
     }
 
-    /// Accepting a row replaces the command, and only the command.
+    /// Accepting a row replaces the token the menu was opened on, and only that token.
     ///
-    /// The menu is only ever open on a body that is one unbroken `/word`, so there is nothing
-    /// under the caret worth keeping; and a draft that already leads with a command is having that
-    /// command changed, because two of them cannot both lead.
+    /// Which is the whole prompt when the slash began it, and one word of a sentence when it did
+    /// not. `SlashCommandDraft.picking` owns both shapes; this writes the answer back.
     private func pick(command picked: SlashCommand) {
-        text = SlashCommandDraft(name: picked.name, body: "").text
-        caret = 0
+        guard let token = activeMenu.slash else { return }
+        let insertion = command.picking(command: picked.name, token: token)
+        text = insertion.draft.text
+        caret = insertion.caret
         isFocused = true
     }
 
