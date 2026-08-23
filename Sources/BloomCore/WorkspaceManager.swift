@@ -433,6 +433,59 @@ public struct WorkspaceManager: Sendable {
         )
     }
 
+    // MARK: - Ports
+
+    /// The block of ten ports this workspace holds, allocating one the first time anybody asks.
+    ///
+    /// Lives here rather than in the view model it used to live in, and reads and writes the
+    /// stored row rather than a property in memory, because of what a setup script does with the
+    /// number. It writes it into a `.env`, a compose file, a Valet site: files that are still
+    /// there on the next launch. A block allocated fresh each launch left every one of those
+    /// naming a port nothing was listening on, and it left the archive script unable to take down
+    /// what the setup script put up, because the two were told different numbers.
+    ///
+    /// The row is the record and the row is also what makes the answer stable: `update` re-reads
+    /// inside the actor, so a second caller arriving while the first is probing sockets finds a
+    /// port already written and keeps it rather than overwriting it with its own. That is why the
+    /// allocated value is only taken when the stored one is still 0.
+    ///
+    /// `taken` comes from every other active row, not from the workspaces somebody happens to
+    /// have opened this launch. The allocator probes live binds, so a workspace whose dev server
+    /// is not up right now holds a block the probe would call free, and on a fresh launch that is
+    /// every workspace there is. Archived rows are not counted: their worktrees are gone and
+    /// nothing is going to bind their block again.
+    ///
+    /// Returns 0 when there is no free block left. A machine with none is not a reason to refuse
+    /// to run setup; the script simply gets no port, which it can decide for itself what to do
+    /// about.
+    @discardableResult
+    public func ensurePort(for workspace: Workspace) async -> Int {
+        let current = (try? await store.workspace(id: workspace.id))?.port ?? workspace.port
+        if current != 0 { return current }
+
+        let taken = await takenPorts(excluding: workspace.id)
+        // Opening sockets, so off whatever actor the caller is on.
+        let allocated = await Task.detached { (try? PortAllocator.allocate(taken: taken)) ?? 0 }.value
+        guard allocated != 0 else { return 0 }
+
+        let written = try? await store.update(workspaceID: workspace.id) { row in
+            if row.port == 0 { row.port = allocated }
+        }
+        // No row means the project was removed while this ran, and there is nothing to remember
+        // the number in. The caller still gets a usable block for the run in flight.
+        return written?.port ?? allocated
+    }
+
+    /// Every port a live workspace has been promised, whether or not anything is bound to it.
+    func takenPorts(excluding id: WorkspaceID) async -> Set<Int> {
+        let rows = (try? await store.workspaces()) ?? []
+        var taken: Set<Int> = []
+        for row in rows where row.id != id && row.port != 0 {
+            taken.formUnion(row.port..<(row.port + PortAllocator.blockSize))
+        }
+        return taken
+    }
+
     /// How long an archive script is given before it is killed and the archive abandoned.
     ///
     /// It was two minutes, which is generous for the `DROP DATABASE` the docs suggest and short

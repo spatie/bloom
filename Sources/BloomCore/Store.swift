@@ -629,6 +629,35 @@ public actor Store {
                 updated_at REAL NOT NULL
             );
             """),
+
+            // The block of ten ports a workspace holds, which used to live only in memory.
+            //
+            // A setup script writes this number into files that outlive the process: a `.env`
+            // saying `APP_URL=http://localhost:3100`, a compose file, a Valet site. Allocating a
+            // fresh block on the next launch left every one of those naming a port nothing was
+            // listening on. It is also the only way the archive script can take down what the
+            // setup script put up, because it is what makes `$BLOOM_PORT` the same number in both.
+            //
+            // Zero rather than NULL, and no backfill. Zero already means "no block yet" in the
+            // Swift value and in `$BLOOM_PORT`, so every row that existed before this reads as a
+            // workspace that has not asked for one, which is true: nothing wrote a port down, so
+            // there is no earlier promise to keep. The first thing that wants one allocates it,
+            // against the blocks the other rows now hold.
+            //
+            // Real code rather than SQL for the same reason as the steps above: `ADD COLUMN` has
+            // no `IF NOT EXISTS`, and the store's own tests rewind `user_version` to reproduce an
+            // old schema, so a step that could not be replayed would throw and take the whole
+            // migration transaction with it.
+            { db in
+                let existing = Set(
+                    try db.query("PRAGMA table_info(workspaces);").compactMap { $0.string("name") }
+                )
+                if !existing.contains("port") {
+                    try db.execute(
+                        "ALTER TABLE workspaces ADD COLUMN port INTEGER NOT NULL DEFAULT 0;"
+                    )
+                }
+            },
         ]
 
         let current = Int(db.userVersion)
@@ -791,8 +820,8 @@ public actor Store {
                 id, repo_id, name, branch, path, base_branch, state, setup_state, setup_log,
                 sort_order, created_at, last_activity_at, archived_at,
                 additions, deletions, changed_files, unread, pinned, colour,
-                parent_workspace_id, spawn_tool_use_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                parent_workspace_id, spawn_tool_use_id, port
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 branch = excluded.branch,
@@ -811,7 +840,8 @@ public actor Store {
                 pinned = excluded.pinned,
                 colour = excluded.colour,
                 parent_workspace_id = excluded.parent_workspace_id,
-                spawn_tool_use_id = excluded.spawn_tool_use_id
+                spawn_tool_use_id = excluded.spawn_tool_use_id,
+                port = excluded.port
             """,
             [
                 .text(workspace.id), .text(workspace.repoID), .text(workspace.name),
@@ -827,6 +857,7 @@ public actor Store {
                 workspace.colour.map { .text($0) } ?? .null,
                 workspace.origin.parentWorkspaceID.map { .text($0) } ?? .null,
                 workspace.origin.spawnToolUseID.map { .text($0) } ?? .null,
+                .int(Int64(workspace.port)),
             ]
         )
         return workspace
@@ -2047,7 +2078,8 @@ public actor Store {
             origin: WorkspaceOrigin(
                 parentWorkspaceID: row.string("parent_workspace_id"),
                 spawnToolUseID: row.string("spawn_tool_use_id")
-            )
+            ),
+            port: Int(row.int("port") ?? 0)
         )
     }
 

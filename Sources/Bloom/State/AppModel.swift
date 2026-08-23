@@ -245,18 +245,6 @@ final class AppModel {
     /// watches is the state inside each model, which stays observable.
     @ObservationIgnored private var workspaceModels: [WorkspaceID: WorkspaceModel] = [:]
 
-    /// Every port block a live workspace is holding, bound or not. The allocator probes live
-    /// binds, so without this a sibling whose dev server was not up yet held a block the probe
-    /// called free, and two workspaces could be handed the same one. See
-    /// `WorkspaceModel.ensurePort`.
-    func takenPorts(excluding id: WorkspaceID) -> Set<Int> {
-        var taken: Set<Int> = []
-        for model in workspaceModels.values where model.workspace.id != id && model.port != 0 {
-            taken.formUnion(model.port..<(model.port + PortAllocator.blockSize))
-        }
-        return taken
-    }
-
     private var refreshTask: Task<Void, Never>?
     private var storeObservationTask: Task<Void, Never>?
     private var identityTask: Task<Void, Never>?

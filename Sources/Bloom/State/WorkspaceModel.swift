@@ -168,7 +168,9 @@ final class WorkspaceModel {
 
     // Layout.
 
-    var port: Int = 0
+    /// The workspace's port block, which is a column on the row rather than a fact about this
+    /// launch. See `Workspace.port` for why it has to survive a restart.
+    var port: Int { workspace.port }
     /// The allocation in flight, so two callers arriving together get one block. See `ensurePort`.
     @ObservationIgnored private var portTask: Task<Int, Never>?
 
@@ -527,21 +529,28 @@ final class WorkspaceModel {
     /// Setup, the terminal pane and the browser each used to run their own if-zero-allocate
     /// dance, and two of them are reachable concurrently: opening a browser while a terminal
     /// pane prepared had both see 0, allocate different blocks, and the last write won, so the
-    /// browser opened on one block while the shell exported the other's `BLOOM_PORT`. They also
-    /// passed `taken: []`, and the allocator probes live binds only, so a sibling workspace
-    /// whose dev server had not bound yet held a block the probe called free. The probe opens
-    /// sockets, which is why it runs off the main thread.
+    /// browser opened on one block while the shell exported the other's `BLOOM_PORT`. The task
+    /// held here is what stops the two of them probing sixty sockets each; the store is what
+    /// stops them disagreeing, because `WorkspaceManager.ensurePort` writes through `update` and
+    /// keeps whichever number reached the row first.
+    ///
+    /// The decision itself is in the core now rather than here. It has to read and write the row
+    /// to be worth anything after a relaunch, and the set of blocks already spoken for is every
+    /// active row rather than the workspaces somebody has opened this launch.
     @discardableResult
     func ensurePort() async -> Int {
         if port != 0 { return port }
         if let inFlight = portTask { return await inFlight.value }
-        let taken = app.takenPorts(excluding: workspace.id)
-        let task = Task.detached { (try? PortAllocator.allocate(taken: taken)) ?? 0 }
+        guard let manager = app.manager else { return 0 }
+        let workspace = workspace
+        let task = Task { await manager.ensurePort(for: workspace) }
         portTask = task
         let allocated = await task.value
         portTask = nil
-        if port == 0 { port = allocated }
-        return port
+        // The row is the record; this keeps the model in step with it without waiting for the
+        // next refresh, so the terminal about to be forked reads the number rather than 0.
+        if self.workspace.port == 0 { self.workspace.port = allocated }
+        return self.workspace.port
     }
 
     /// One setup run: the state it resets, the output it streams, and what it leaves behind.

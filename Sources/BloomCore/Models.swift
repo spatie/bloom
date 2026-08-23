@@ -153,6 +153,20 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
     /// depth, and a number kept beside it is a number that can drift out of step with the parent
     /// it is supposed to describe.
     public var origin: WorkspaceOrigin
+    /// The first of the ten ports this workspace holds, or 0 while it holds none.
+    ///
+    /// Stored rather than allocated fresh each launch, because a setup script writes this number
+    /// into files that outlive the process: a `.env` with `APP_URL=http://localhost:3100`, a
+    /// compose file, a Valet or Herd site. Reallocating on the next launch left those files
+    /// naming a block nothing was listening on, and the dev server bound somewhere the browser
+    /// was not looking. It is also what lets the archive script take down what the setup script
+    /// put up, since both are handed the same `$BLOOM_PORT` for the same workspace.
+    ///
+    /// 0 means no block has been asked for yet, which is every row written before this column
+    /// existed and every workspace whose repository has no script that wants one. Allocation is
+    /// `WorkspaceManager.ensurePort`, and it is deliberately lazy: probing sixty-odd sockets for
+    /// a workspace nothing will ever bind is work nobody asked for.
+    public var port: Int
 
     /// A workspace as it is at rest: the three lifecycle columns spelled out.
     ///
@@ -190,7 +204,8 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
         unread: Bool = false,
         pinned: Bool = false,
         colour: String? = nil,
-        origin: WorkspaceOrigin = .user
+        origin: WorkspaceOrigin = .user,
+        port: Int = 0
     ) {
         self.id = id
         self.repoID = repoID
@@ -212,6 +227,7 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
         self.pinned = pinned
         self.colour = colour
         self.origin = origin
+        self.port = port
     }
 
     /// A brand new workspace, which is the only kind anybody outside the module has any business
@@ -260,7 +276,8 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
             unread: unread,
             pinned: pinned,
             colour: colour,
-            origin: origin
+            origin: origin,
+            port: 0
         )
     }
 
