@@ -433,6 +433,23 @@ public struct WorkspaceManager: Sendable {
         )
     }
 
+    /// How long an archive script is given before it is killed and the archive abandoned.
+    ///
+    /// It was two minutes, which is generous for the `DROP DATABASE` the docs suggest and short
+    /// for the other thing people put here. `docker compose down -v` on a stack of half a dozen
+    /// services stops each container in turn, each with its own grace period before the kill,
+    /// then removes the volumes; on a busy machine that is minutes, and the archive it was
+    /// supposed to be tearing down failed at two of them with the containers still running and
+    /// the worktree still on disk.
+    ///
+    /// Ten minutes, and not unbounded. The archive holds the workspace while it runs, so a script
+    /// that never returns is a workspace nobody can get rid of and a process nothing reaps. A
+    /// script that gives up after ten minutes leaves a mess somebody can see and clean up by
+    /// hand, which is the better of the two failures. The archive is still abandoned when the
+    /// script fails, timeout included, because a worktree removed on top of containers still
+    /// holding its database is the failure that has nothing left to clean it up from.
+    public static let archiveScriptTimeout: Duration = .seconds(600)
+
     /// Removes the worktree and, optionally, the branch.
     ///
     /// Archiving is not undoable: once the worktree is gone the uncommitted files are gone, and
@@ -448,7 +465,8 @@ public struct WorkspaceManager: Sendable {
         repo: Repo,
         deleteBranch: Bool? = nil,
         force: Bool = false,
-        isPullRequestMerged: Bool = false
+        isPullRequestMerged: Bool = false,
+        archiveScriptTimeout: Duration = WorkspaceManager.archiveScriptTimeout
     ) async throws {
         // Already archived, so there is nothing here to wind down. Everything below this line acts
         // on a worktree that has been removed once already: the archive script would run in a
@@ -494,7 +512,7 @@ public struct WorkspaceManager: Sendable {
             let env = environment(for: workspace, repo: repo, port: 0)
             let result = try await Shell.run(
                 archiveLaunch.executable, archiveLaunch.arguments,
-                cwd: workspace.path, env: env, timeout: .seconds(120)
+                cwd: workspace.path, env: env, timeout: archiveScriptTimeout
             )
             guard result.ok else {
                 throw WorkspaceError.archiveScriptFailed(

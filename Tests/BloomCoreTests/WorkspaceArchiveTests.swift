@@ -102,6 +102,38 @@ struct WorkspaceArchiveTests {
         #expect(try await manager.store.workspace(id: workspace.id)?.state != .archived)
     }
 
+    /// The budget a real teardown gets. Two minutes covered `DROP DATABASE` and nothing else:
+    /// `docker compose down -v` over a handful of services, each with its own stop grace period
+    /// before the kill and then the volumes to remove, runs past it on a loaded machine, and the
+    /// archive it was tearing down failed with the containers still up.
+    @Test("an archive script is given long enough for a real teardown")
+    func theArchiveScriptBudgetFitsARealTeardown() {
+        #expect(WorkspaceManager.archiveScriptTimeout >= .seconds(300))
+    }
+
+    /// And it is still a budget. A script that never returns holds the workspace open forever,
+    /// with nothing to reap the process, which is worse than one that gives up. When it does give
+    /// up the archive is abandoned exactly as any other failure abandons it: the worktree stays,
+    /// the branch stays, and the row does not claim the workspace is gone.
+    @Test("an archive script that runs past its budget is killed and the archive abandoned")
+    func anOverrunningArchiveScriptStopsTheArchive() async throws {
+        let (repo, registered, manager, workspace) = try await makeWorkspace(settings: """
+        [scripts]
+        archive = 'sleep 120'
+        """)
+        defer { repo.cleanUp() }
+
+        await #expect(throws: WorkspaceError.self) {
+            try await manager.archive(
+                workspace: workspace, repo: registered, archiveScriptTimeout: .seconds(1)
+            )
+        }
+
+        #expect(FileManager.default.fileExists(atPath: workspace.path))
+        #expect(await Git.branchExists(workspace.branch, in: repo.path))
+        #expect(try await manager.store.workspace(id: workspace.id)?.state != .archived)
+    }
+
     @Test("a refusal is not sticky: cleaning the worktree makes the same workspace archivable")
     func refusalIsNotSticky() async throws {
         let (repo, registered, manager, workspace) = try await makeWorkspace()
