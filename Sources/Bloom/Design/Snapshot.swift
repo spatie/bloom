@@ -629,6 +629,7 @@ enum Snapshot {
         case inspectorTabs = "inspector-tabs"
         case diffScope = "diff-scope"
         case pendingDelete = "pending-delete"
+        case runningGlyph = "running-glyph"
 
         var title: String {
             switch self {
@@ -636,6 +637,7 @@ enum Snapshot {
             case .inspectorTabs: "Inspector tabs"
             case .diffScope: "Diff scope"
             case .pendingDelete: "Pending message delete"
+            case .runningGlyph: "Running mark"
             }
         }
 
@@ -645,6 +647,7 @@ enum Snapshot {
             case .inspectorTabs: CGSize(width: 460, height: 470)
             case .diffScope: CGSize(width: 460, height: 700)
             case .pendingDelete: CGSize(width: 820, height: 900)
+            case .runningGlyph: CGSize(width: 700, height: 760)
             }
         }
 
@@ -660,7 +663,9 @@ enum Snapshot {
         var needsFocus: Bool {
             switch self {
             case .reviewComments: true
-            case .inspectorTabs, .diffScope, .pendingDelete: false
+            // The running mark does not, even though it moves: `forcesBusyPulse` is what
+            // lets a capture past the frontmost gate, so the heartbeat runs without the keys.
+            case .inspectorTabs, .diffScope, .pendingDelete, .runningGlyph: false
             }
         }
     }
@@ -680,6 +685,7 @@ enum Snapshot {
         case .inspectorTabs: InspectorTabStripGallery(app: app)
         case .diffScope: DiffScopeGallery(app: app)
         case .pendingDelete: PendingDeleteSnapshotGallery()
+        case .runningGlyph: RunningGlyphGallery()
         }
     }
 

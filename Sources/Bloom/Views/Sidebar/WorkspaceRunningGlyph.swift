@@ -4,92 +4,70 @@ import BloomCore
 
 /// The mark at the head of a sidebar row whose agent is mid turn.
 ///
-/// Three dots in a vertical line, brightening and dimming in turn so the light runs down them and
-/// back. It is Conductor's mark for the same state, in Bloom's own glyph box and Bloom's own
-/// accent, and it is the only thing in the sidebar that moves.
+/// Two concentric rings whose radial gap breathes: the inner grows while the outer shrinks until
+/// they almost meet, then they part again. It is the only thing in the sidebar that moves.
 ///
-/// It REPLACES the pulsing `ActivityDot` that used to stand here rather than joining it. Both
-/// occupy the row's one glyph slot, so keeping both was never on the table, and of the two this is
-/// the one that says which agent is working without also being the shape the app uses for "a thing
-/// is happening" in four other places. The row now has one moving part, not two, and the tab strip
-/// and the transcript keep the dot they always had.
+/// It replaced three dots that ran a wave of opacity down a vertical line, and the reason is worth
+/// keeping. Seventeen candidates were drawn side by side in a browser at true size in a mock row,
+/// and the three that read best at thirteen points all moved slowly. At this size a single element
+/// changing is a dot getting bigger; two elements approaching each other is a gesture, and a
+/// gesture survives being small. The dots' own advantage is real and was given up knowingly: an
+/// opacity crossfade has no position to stutter, so it was immune to frame capping in a way nothing
+/// positional is. This is capped instead, and the cap is affordable because the travel is tiny.
 ///
 /// The row cannot shift when the state changes. `WorkspaceStatusGlyph` frames every one of its
-/// thirteen marks in the same `Metrics.glyph` box, this one included, and the figure is centred in
-/// it: a workspace that starts working, finishes, and comes back with changed files draws three
-/// different shapes in the same square and the name beside it never moves a pixel. Measured on a
-/// capture: the name begins on the same pixel in a running row and an idle one.
-///
-/// # Why the dots do not step
-///
-/// The first version of this built a figure out of nothing, a stage per beat: one dot, then a line
-/// of three, then a grid of six. It was wrong, and wrong in a way worth writing down, because it
-/// reads perfectly well in the source and cannot look right on a screen. Swapping between three
-/// arrangements gives exactly three frames of motion however often the swap fires, and shortening
-/// the interval only makes the three arrivals come sooner. It was read as "like 3 frames" from
-/// across the room, which is precisely what it was.
-///
-/// So nothing here is stepped. Each dot holds one opacity, ramped between two values, and Core
-/// Animation interpolates it at whatever the display refreshes at: 120 frames a second on a
-/// ProMotion panel and 60 on anything else, with no rate named anywhere here.
-///
-/// The travel is `stagger`. Every dot runs the same wave, each starting a little after the one
-/// above it, so at any instant the three are at three different points of it and the brightness
-/// runs down the line. Without it the three would brighten together, which is a blink.
+/// marks in the same `Metrics.glyph` box, this one included, and the figure is centred in it: a
+/// workspace that starts working, finishes, and comes back with changed files draws three different
+/// shapes in the same square and the name beside it never moves a pixel.
 ///
 /// # The phase is not this view's
 ///
-/// Every one of these reads `BusyPulse.epoch` rather than starting a loop of its own, which is the
-/// whole argument on that type: five agents started at five moments give five figures at five
-/// phases, and nothing ever pulls them back together. Phased off one instant, five lit rows are
-/// one rhythm down the column, and they are in step with the light on the rule as well, because
-/// the sweep is exactly four of these.
+/// It reads `BusyPulse.epoch` rather than starting a loop of its own, which is the whole argument on
+/// that type: five agents started at five moments give five figures at five phases, and nothing ever
+/// pulls them back together. Phased off one instant, five working rows breathe as one column, and
+/// they are in step with the light on the rule as well, because `BusyBreath.period` is exactly one
+/// crossing of it. See `BusyBreath.period` for why the design's 3.6 seconds was not kept.
 ///
 /// # What it costs
 ///
-/// Three `CAKeyframeAnimation`s per running row, added when the row starts working and never
-/// touched again, and one body evaluation in the same period. The list is an `NSTableView`
-/// underneath, so a running row scrolled out of view is not built and holds nothing.
+/// Two layers per working row and three `CAKeyframeAnimation`s, added when the row starts working
+/// and never touched again. Nothing here rasterises a path per frame: each ring's path is built once
+/// at the largest radius it will ever hold and then scaled down, so the render server is
+/// interpolating a transform and an opacity and nothing else. That matters because a sidebar can
+/// show many working rows at once, and per row cost multiplies where the window's does not.
 ///
-/// It used to be three SwiftUI opacity animations restarted every 750 milliseconds off a shared
-/// tick, and those are not the same thing: SwiftUI runs such an animation itself, on the main
-/// thread, and re-renders the display list of the whole sidebar for each frame of it. That is why
-/// five lit rows cost barely more than one, and why three 3 point dots cost as much as a 160 point
-/// light crossing the window. See `BusyPulse`.
+/// A stroked ring that is scaled is resampled, so its stroke is only ever as wide as its scale. Each
+/// ring is baked at the largest radius it will hold and scaled down, so **a ring is thinnest when it
+/// is smallest**, which is the opposite way round from the note the design was drawn with. Measured
+/// on a capture at eight times rather than reasoned about: the inner ring is about half a point at
+/// rest and a whole point at the top of the breath.
 ///
-/// The clock stops when the window is not the front one and when Reduce Motion is on, and the
-/// figure then rests at full strength, which is the state the mark means anyway.
+/// Kept, rather than corrected. Holding the stroke at a point would mean animating `lineWidth`, and
+/// that re-renders a shape layer's contents every frame, which is the one cost this mark is built to
+/// avoid. What it buys instead is that the inner ring brightens as it opens, so the figure gains
+/// weight as it tightens and the pair never reads as a fixed target with something moving inside it.
+///
+/// The clock stops when the window is not the front one and when Reduce Motion is on, and the figure
+/// then rests half open, which is two clean concentric rings and a good mark in its own right.
 struct WorkspaceRunningGlyph: View {
     /// Set on a row sitting on the accent selection fill, where the accent itself is unreadable.
     var isOnSelection = false
 
     private var pulse: BusyPulse { .shared }
 
-    /// The figure: three dots, three points across and one point apart.
-    ///
-    /// Whole points, and that is the only reason these are not 2.5 and 2. Eleven points centred in
-    /// the thirteen point glyph box puts every dot on a whole point, so the figure is drawn on
-    /// pixel boundaries at one times as well as at two. The half point version measured 11.5 in a
-    /// 13 box, which lands the first dot on 0.75 and softens all three on a display that has no
-    /// half pixels to soften them into.
-    static let dot: CGFloat = 3
-    static let gap: CGFloat = 1
-    static let count = 3
+    /// The box the figure is centred in. The outer ring is 11.2 points across at its widest and its
+    /// stroke is a point, so 13 is the smallest whole number that cannot clip it, and it is the box
+    /// every other mark in this column already uses.
+    static let box: CGFloat = Metrics.glyph
 
-    /// How tall the whole figure is: three dots and the two gaps between them.
-    static var height: CGFloat { CGFloat(count) * dot + CGFloat(count - 1) * gap }
+    /// How wide a ring is drawn. One point, and not scaled with anything: a hairline ring at this
+    /// size reads as a smudge on a non retina display, and two points closes the gap the figure is
+    /// made of.
+    static let line: CGFloat = 1
 
-    /// How far each dot's ramp trails the one above it. Long enough that the eye reads a direction
-    /// rather than three dots moving as one, short enough that the last dot has finished before
-    /// the next beat begins: two of these plus `ramp` is `BusyPulse.beat` to the millisecond.
-    static let stagger: CFTimeInterval = 0.1
-
-    /// How long one dot takes to cross between its two opacities.
-    static let ramp: CFTimeInterval = 0.55
-
-    /// What a dot holds at the bottom of its ramp. Not zero: a dot that goes out entirely makes
-    /// the figure a different shape twice a beat, and the shape is what this column is read by.
-    static let dim: Double = 0.22
+    /// Where the figure rests when nothing is moving. Half way, so both rings are visible and
+    /// neither is at an extreme, which is the still the design was chosen with.
+    static let restingBreath: Double = 0.5
 
     private var tint: Color { isOnSelection ? Palette.textInverted : Palette.running }
 
@@ -98,25 +76,41 @@ struct WorkspaceRunningGlyph: View {
             // Layers rather than views, and only here. The resting figure below stays SwiftUI,
             // because it is the one `ImageRenderer` can draw and because a still figure has
             // nothing to gain from Core Animation. See `Snapshot`.
-            RunningDots(epoch: pulse.epoch, tint: NSColor(tint))
-                .frame(width: Self.dot, height: Self.height)
+            BreathingRings(epoch: pulse.epoch, tint: NSColor(tint))
+                .frame(width: Self.box, height: Self.box)
         } else {
-            VStack(spacing: Self.gap) {
-                ForEach(0..<Self.count, id: \.self) { _ in
-                    Circle()
-                        .fill(tint)
-                        .frame(width: Self.dot, height: Self.dot)
-                }
-            }
+            RestingRings(tint: tint)
+                .frame(width: Self.box, height: Self.box)
         }
     }
 }
 
-// MARK: - The figure
+// MARK: - The resting figure
 
-/// The moving figure: three dot layers running one wave, each a little behind the one above it.
-private struct RunningDots: NSViewRepresentable {
-    /// The heartbeat's start, which is the only thing that decides where in its wave the figure
+/// The two rings held half open, drawn in SwiftUI so an offscreen render can photograph them.
+private struct RestingRings: View {
+    var tint: Color
+
+    var body: some View {
+        let breath = WorkspaceRunningGlyph.restingBreath
+        let inner = BusyBreath.Rings.innerScale(at: breath) * BusyBreath.Rings.innerDrawn
+        let outer = BusyBreath.Rings.outerScale(at: breath) * BusyBreath.Rings.outerDrawn
+
+        ZStack {
+            Circle()
+                .stroke(tint.opacity(BusyBreath.Rings.outerOpacity(at: breath)), lineWidth: WorkspaceRunningGlyph.line)
+                .frame(width: outer * 2, height: outer * 2)
+            Circle()
+                .stroke(tint.opacity(BusyBreath.Rings.innerOpacity), lineWidth: WorkspaceRunningGlyph.line)
+                .frame(width: inner * 2, height: inner * 2)
+        }
+    }
+}
+
+// MARK: - The moving figure
+
+private struct BreathingRings: NSViewRepresentable {
+    /// The heartbeat's start, which is the only thing that decides where in its breath the figure
     /// is. See `BusyPulse.epoch`.
     var epoch: CFTimeInterval
 
@@ -124,59 +118,57 @@ private struct RunningDots: NSViewRepresentable {
     /// row's selection rather than about the figure.
     var tint: NSColor
 
-    func makeNSView(context: Context) -> RunningDotsView {
-        let view = RunningDotsView(frame: .zero)
+    func makeNSView(context: Context) -> BreathingRingsView {
+        let view = BreathingRingsView(frame: .zero)
         view.configure(epoch: epoch, tint: tint)
         return view
     }
 
-    func updateNSView(_ view: RunningDotsView, context: Context) {
+    func updateNSView(_ view: BreathingRingsView, context: Context) {
         view.configure(epoch: epoch, tint: tint)
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: RunningDotsView, context: Context) -> CGSize? {
-        CGSize(width: WorkspaceRunningGlyph.dot, height: WorkspaceRunningGlyph.height)
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: BreathingRingsView, context: Context) -> CGSize? {
+        CGSize(width: WorkspaceRunningGlyph.box, height: WorkspaceRunningGlyph.box)
     }
 }
 
-/// Three round layers, each under a repeating keyframe animation on its opacity.
-final class RunningDotsView: BusyPulseLayerView {
-    private var dots: [CALayer] = []
+/// Two ring layers, each under a repeating keyframe animation on its scale.
+final class BreathingRingsView: BusyPulseLayerView {
+    private let inner = CAShapeLayer()
+    private let outer = CAShapeLayer()
     private var epoch: CFTimeInterval = 0
     private var tint: NSColor = .clear
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        // The parent clips, and the figure is exactly its own size, so nothing here would ever be
-        // clipped. Off anyway, because a mask on eleven points of layer is a rasterisation nobody
-        // asked for.
+        // The rings are exactly the box, so nothing here would ever be clipped, and a mask on
+        // thirteen points of layer is a rasterisation nobody asked for.
         layer?.masksToBounds = false
 
-        let size = WorkspaceRunningGlyph.dot
-        for _ in 0..<WorkspaceRunningGlyph.count {
-            let dot = CALayer()
-            dot.cornerRadius = size / 2
-            layer?.addSublayer(dot)
-            dots.append(dot)
+        for (ring, radius) in [(outer, BusyBreath.Rings.outerDrawn), (inner, BusyBreath.Rings.innerDrawn)] {
+            ring.fillColor = nil
+            ring.lineWidth = WorkspaceRunningGlyph.line
+            ring.path = CGPath(
+                ellipseIn: CGRect(
+                    x: -radius, y: -radius, width: radius * 2, height: radius * 2
+                ),
+                transform: nil
+            )
+            // The path is centred on the layer's own origin, so scaling it scales about the centre
+            // of the figure without any anchor arithmetic.
+            ring.bounds = .zero
+            layer?.addSublayer(ring)
         }
     }
 
-    /// The three dots, stacked from the top of the box down. `isFlipped` is what makes that read
-    /// the same way here as it does in the `VStack` this replaces: the first dot is the top one,
-    /// and the light runs down the line from it.
     override func layout() {
         super.layout()
-        let size = WorkspaceRunningGlyph.dot
+        let centre = CGPoint(x: bounds.midX, y: bounds.midY)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for (index, dot) in dots.enumerated() {
-            dot.frame = CGRect(
-                x: 0,
-                y: CGFloat(index) * (size + WorkspaceRunningGlyph.gap),
-                width: size,
-                height: size
-            )
-        }
+        inner.position = centre
+        outer.position = centre
         CATransaction.commit()
     }
 
@@ -184,7 +176,9 @@ final class RunningDotsView: BusyPulseLayerView {
         let color = resolved(tint)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for dot in dots { dot.backgroundColor = color }
+        inner.strokeColor = color
+        outer.strokeColor = color
+        inner.opacity = Float(BusyBreath.Rings.innerOpacity)
         CATransaction.commit()
     }
 
@@ -202,37 +196,36 @@ final class RunningDotsView: BusyPulseLayerView {
     }
 
     private func install() {
-        for (index, dot) in dots.enumerated() {
-            install(wave(), on: dot, key: "wave", beginAt: epoch + Double(index) * WorkspaceRunningGlyph.stagger)
-        }
+        let breath = BusyBreath.samples()
+        install(
+            keyframes("transform.scale", breath.map { BusyBreath.Rings.innerScale(at: $0) }),
+            on: inner, key: "breath", beginAt: epoch
+        )
+        install(
+            keyframes("transform.scale", breath.map { BusyBreath.Rings.outerScale(at: $0) }),
+            on: outer, key: "breath", beginAt: epoch
+        )
+        install(
+            keyframes("opacity", breath.map { BusyBreath.Rings.outerOpacity(at: $0) }),
+            on: outer, key: "weight", beginAt: epoch
+        )
     }
 
-    /// One whole wave of a single dot, written out rather than left to a basic animation, because
-    /// a dot does not spend the whole beat moving.
+    /// One whole breath, sampled rather than shaped by timing functions. See
+    /// `BusyBreath.samples(count:)` for why.
     ///
-    /// It ramps up over `ramp`, holds at full strength until the beat is out, ramps back down over
-    /// `ramp`, and holds dim until the next beat. That hold is what a `CABasicAnimation` with
-    /// `autoreverses` could not have given: it would have spread each ramp over the whole 750
-    /// milliseconds and the figure would breathe rather than pulse. These are the same four
-    /// stretches the SwiftUI version drew, with the same curve on the two that move, so the motion
-    /// on screen is the motion that was there before.
-    private func wave() -> CAKeyframeAnimation {
-        let beat = BusyPulse.beat
-        let cycle = BusyPulse.wave
-        let ramp = WorkspaceRunningGlyph.ramp
-        let dim = WorkspaceRunningGlyph.dim
-
-        let animation = CAKeyframeAnimation(keyPath: "opacity")
-        animation.values = [dim, 1, 1, dim, dim]
-        animation.keyTimes = [0, ramp / cycle, beat / cycle, (beat + ramp) / cycle, 1]
-            .map { NSNumber(value: $0) }
-        animation.timingFunctions = [
-            CAMediaTimingFunction(name: .easeInEaseOut),
-            CAMediaTimingFunction(name: .linear),
-            CAMediaTimingFunction(name: .easeInEaseOut),
-            CAMediaTimingFunction(name: .linear),
-        ]
-        animation.duration = cycle
+    /// Capped, and this mark can afford to be where the dots before it could not have been. The
+    /// inner ring travels 1.7 points over an inhale of just under a second, so at twelve frames a
+    /// second it moves about a seventh of a point per frame, which is inside the softness of a
+    /// resampled one point stroke. `BrandBranching` names the same range for the same reason. The
+    /// dots this replaced named no rate at all, deliberately, because an opacity crossfade has
+    /// nothing to stutter and no reason to be slowed.
+    private func keyframes(_ keyPath: String, _ values: [Double]) -> CAKeyframeAnimation {
+        let animation = CAKeyframeAnimation(keyPath: keyPath)
+        animation.values = values
+        animation.duration = BusyBreath.period
+        animation.calculationMode = .linear
+        animation.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)
         return animation
     }
 }
