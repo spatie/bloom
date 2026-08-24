@@ -1,0 +1,134 @@
+import Foundation
+
+/// What the centre pane says about one subagent, in every state it can be in.
+///
+/// The pane existed before this and said almost nothing: a title, the word "subagent", and the one
+/// sentence of `summary`. Three separate reasons, and all three are decisions rather than drawing,
+/// so they are here where the suite can reach them.
+///
+/// 1. **It never refreshed while the subagent was working.** The pane re-read its file keyed on
+///    the subagent's state, so a pane opened mid run showed the prefix that existed at the moment
+///    it was opened and then nothing more until the subagent ended. `refreshSeconds` is the fix
+///    and `refreshes(_:)` says when to spend it.
+/// 2. **A background command was asked an agent's questions.** See `SubagentKind`.
+/// 3. **A prompt is prose and a command line is not.** `bodyIsCode(_:)` is the one place that is
+///    decided, because the codebase's rule is that monospace is for what a machine said or will
+///    run, and a Task prompt is neither.
+public enum SubagentPane: Sendable {
+    // MARK: - Staying live
+
+    /// How often a running subagent's output is re-read from disk.
+    ///
+    /// The same second `tool_progress` ticks on, which is what the row's elapsed readout moves
+    /// with. Picking any other number would mean the row and the pane disagreed about how fresh
+    /// they were, and the pane is the one you open BECAUSE the row is too small. It is affordable
+    /// only because `SubagentOutput` reads the tail of the file rather than the whole of it: see
+    /// `SubagentOutput.tailBytes`.
+    public static let refreshSeconds: Double = 1.0
+
+    /// Whether the pane should keep re-reading.
+    ///
+    /// Only while it is running. A finished subagent's file is finished too, and a poll that
+    /// carried on would re-read and re-parse a file that cannot change for as long as the pane
+    /// is open.
+    public static func refreshes(_ subagent: Subagent?) -> Bool {
+        subagent?.state == .running
+    }
+
+    // MARK: - What it is
+
+    /// The line under the title: what it is, how deep it was spawned when that is worth saying,
+    /// and how long it has been going.
+    ///
+    /// It used to open with `subagent_type` and fall back to the literal "subagent", which is why
+    /// a background command, whose `task_started` carries no `subagent_type` at all, described
+    /// itself as a subagent in the one place there was room to be accurate.
+    public static func subtitle(_ subagent: Subagent) -> String {
+        var parts: [String] = []
+        switch subagent.kind {
+        case .command:
+            parts.append(subagent.kind.noun)
+        case .agent:
+            let type = subagent.type.trimmingCharacters(in: .whitespacesAndNewlines)
+            parts.append(type.isEmpty ? subagent.kind.noun : type)
+            // Only past one. Saying "depth 1" on every row would be noise on the case that is
+            // always true, and the pane is the one place depth can be said at all: the sidebar
+            // draws every depth at the same indent.
+            if subagent.spawnDepth > 1 {
+                parts.append("spawned by a subagent, depth \(subagent.spawnDepth)")
+            }
+        }
+        let elapsed = SubagentRow.duration(subagent.elapsedSeconds)
+        if !elapsed.isEmpty { parts.append(elapsed) }
+        return parts.joined(separator: " . ")
+    }
+
+    // MARK: - What it was given
+
+    /// The heading over what it was given to do, and whether there is anything to put under it.
+    public static func briefLabel(_ kind: SubagentKind) -> String {
+        switch kind {
+        case .agent: "Asked"
+        case .command: "Ran"
+        }
+    }
+
+    /// The heading over what it has done so far.
+    public static func outputLabel(_ kind: SubagentKind) -> String {
+        switch kind {
+        case .agent: "Did"
+        case .command: "Printed"
+        }
+    }
+
+    /// Whether the brief is set in the reading face or in the code face.
+    ///
+    /// A Task prompt is prose somebody wrote and is set in the reading face, full stop. A command
+    /// line is a thing a shell will run, so it is code and is set as code. This is the codebase's
+    /// standing rule and this is the one place the subagent pane applies it.
+    public static func briefIsCode(_ kind: SubagentKind) -> Bool {
+        kind == .command
+    }
+
+    /// How many characters of a brief are shown before it is offered collapsed.
+    ///
+    /// Shown in full when it is under this, because a two line prompt behind a disclosure arrow is
+    /// a click to read two lines. Past it the pane opens with the head and an arrow, because a
+    /// handed-off brief runs to a page and a half and the answer is what you came for. The number
+    /// is roughly what fits above the fold of the pane at its default height.
+    public static let briefCollapseLimit = 500
+
+    public static func briefCollapses(_ brief: String) -> Bool {
+        brief.count > briefCollapseLimit
+    }
+
+    /// The head of a long brief, cut on a line boundary so a collapsed prompt does not stop
+    /// mid-sentence and a collapsed command does not stop mid-flag.
+    public static func briefHead(_ brief: String) -> String {
+        guard briefCollapses(brief) else { return brief }
+        let head = String(brief.prefix(briefCollapseLimit))
+        guard let line = head.lastIndex(of: "\n"), head.distance(from: line, to: head.endIndex) < 200
+        else { return head }
+        return String(head[head.startIndex..<line])
+    }
+
+    /// The command line a background command was given.
+    ///
+    /// **Not in the `task_started` line.** A `local_bash` start carries `task_id`, `tool_use_id`,
+    /// `description` and `task_type` and nothing else, so the only account of what actually ran is
+    /// the parent's own Bash tool call, which the transcript already holds under the same
+    /// `tool_use_id` the subagent carries. This lifts it back out of that row's payload.
+    ///
+    /// - Parameter payload: the stored bytes of the transcript row whose `refID` is the
+    ///   subagent's `toolUseID`.
+    public static func commandLine(inPayload payload: Data) -> String? {
+        guard let line = String(data: payload, encoding: .utf8),
+              case .toolUse(let use)? = AgentEvent.decode(line: line)
+        else { return nil }
+        // `command` for Bash, and `command` again for the background variants. Nothing else in
+        // the CLI's vocabulary puts a shell line anywhere but here, so one key rather than a list.
+        let command = (use.input["command"]?.stringValue ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return command.isEmpty ? nil : command
+    }
+}

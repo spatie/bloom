@@ -420,6 +420,17 @@ final class WorkspaceModel {
         return SubagentRow.rows(transcript.subagents)
     }
 
+    /// The shell line a backgrounded command was given, found by the tool call that started it.
+    ///
+    /// A `local_bash` task's own lines carry a description and no command, so the only account of
+    /// what actually ran is the parent's Bash call, which the transcript already holds under the
+    /// same `tool_use_id`. Decoding it is `SubagentPane.commandLine`; finding the row is this.
+    func commandLine(forToolUseID toolUseID: String) -> String? {
+        guard !toolUseID.isEmpty, let transcript = activeTranscript else { return nil }
+        guard let row = transcript.rows.last(where: { $0.refID == toolUseID }) else { return nil }
+        return SubagentPane.commandLine(inPayload: row.payload)
+    }
+
     /// Whether any session here has an agent stopped and waiting on a person.
     var isAwaitingPermission: Bool {
         transcripts.values.contains { $0.isAwaitingPermission }

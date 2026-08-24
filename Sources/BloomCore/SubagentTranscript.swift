@@ -27,6 +27,10 @@ public struct SubagentTranscript: Sendable, Hashable {
             case toolResult
             /// An assistant message the CLI marked as an API error.
             case failure
+            /// Bytes a background command printed. Not NDJSON and not parsed: a `local_bash`
+            /// task writes plain stdout to `tasks/<task_id>.output`, and the whole of what it
+            /// has to say is that text.
+            case printed
         }
 
         public let id: Int
@@ -39,17 +43,39 @@ public struct SubagentTranscript: Sendable, Hashable {
             self.id = id
             self.kind = kind
             self.title = title
-            self.body = body
+            // Cut here rather than in the pane, so no reader of this type can be handed a
+            // megabyte. The HEAD is kept, unlike the transcript's own cut above: a tool result
+            // says what it found in its first lines and a file dumped into one is the tail.
+            self.body = body.count > SubagentTranscript.bodyLimit
+                ? String(body.prefix(SubagentTranscript.bodyLimit)) + "..."
+                : body
         }
     }
 
     public let entries: [Entry]
+    /// How many entries were dropped off the front to keep the pane bounded. Drawn as a line
+    /// saying so, because a transcript that silently starts in the middle is a lie about what
+    /// the subagent did.
+    public let droppedEntries: Int
 
-    public init(entries: [Entry] = []) {
+    public init(entries: [Entry] = [], droppedEntries: Int = 0) {
         self.entries = entries
+        self.droppedEntries = droppedEntries
     }
 
     public var isEmpty: Bool { entries.isEmpty }
+
+    /// How many entries the pane will render.
+    ///
+    /// A fan-out agent that read forty files leaves eighty entries and a long one leaves many
+    /// more, and every one of them is a `Text` in a `ScrollView` that is laid out whether or not
+    /// it is on screen. The LAST of them are kept rather than the first: the answer is at the end,
+    /// and the prompt, which is the one early entry worth having, is drawn from
+    /// `task_started.prompt` above rather than from this file.
+    public static let entryLimit = 120
+
+    /// How much of one entry is rendered. A tool result can be a whole file.
+    public static let bodyLimit = 4_000
 
     /// The last thing the subagent said, which is its answer. Nil when it never said anything.
     public var answer: Entry? {
@@ -67,7 +93,19 @@ public struct SubagentTranscript: Sendable, Hashable {
             guard let json = JSONValue.parse(String(line)) else { continue }
             entries.append(contentsOf: read(json, from: entries.count))
         }
-        return SubagentTranscript(entries: entries)
+        let dropped = max(0, entries.count - entryLimit)
+        return SubagentTranscript(entries: Array(entries.suffix(entryLimit)), droppedEntries: dropped)
+    }
+
+    /// What a background command printed, as the one entry it is.
+    ///
+    /// No parsing, because there is nothing to parse: it is the bytes a program wrote to a
+    /// terminal. Trimmed only, so an empty capture is an empty transcript and the pane can say
+    /// "nothing yet" rather than draw a blank block.
+    public static func printed(_ text: String) -> SubagentTranscript {
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return SubagentTranscript() }
+        return SubagentTranscript(entries: [Entry(id: 0, kind: .printed, body: body)])
     }
 
     private static func read(_ json: JSONValue, from index: Int) -> [Entry] {
@@ -155,32 +193,80 @@ public enum SubagentOutput: Sendable {
         case unreadable(String)
     }
 
-    /// Read and parse one subagent's transcript.
+    /// How much of the end of the file is read.
     ///
-    /// `path` is `task_notification.output_file`, which is a symlink; `String(contentsOf:)`
-    /// follows it, which is what makes this two lines rather than a resolve and a read.
-    public static func read(path: String?) -> Result<SubagentTranscript, Failure> {
+    /// The pane re-reads once a second while the subagent works (`SubagentPane.refreshSeconds`),
+    /// and that is only affordable against a bound. It is the END that is read, because that is
+    /// where the answer is and because the pane only renders the last
+    /// `SubagentTranscript.entryLimit` entries anyway. A quarter of a megabyte holds far more
+    /// than that many lines of anything the capture contained, so in practice this reads whole
+    /// files and exists for the one that is not.
+    public static let tailBytes = 256 * 1024
+
+    /// Read and parse one subagent's output.
+    ///
+    /// `path` is `task_notification.output_file`. For an agent it is a symlink to NDJSON in
+    /// Claude Code's transcript shape; for a background command it is plain stdout, which is why
+    /// the kind is asked for rather than sniffed. Parsing one as the other is what made a
+    /// background command's pane empty.
+    public static func read(path: String?, kind: SubagentKind = .agent)
+        -> Result<SubagentTranscript, Failure>
+    {
         guard let path, !path.isEmpty else { return .failure(.noFile) }
         let url = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: url.path) else { return .failure(.missing) }
         do {
-            return .success(SubagentTranscript.parse(try String(contentsOf: url, encoding: .utf8)))
+            let text = try tail(of: url)
+            return .success(kind.writesTranscript
+                ? SubagentTranscript.parse(text)
+                : SubagentTranscript.printed(text))
         } catch {
             return .failure(.unreadable(error.localizedDescription))
         }
+    }
+
+    /// The last `tailBytes` of a file, starting at a line boundary.
+    ///
+    /// The first partial line is dropped rather than handed on: half a JSON object would be a
+    /// skipped line in the NDJSON case and half a word of output in the other, and the second of
+    /// those is the one somebody would have believed. A file smaller than the bound is returned
+    /// whole, first line and all.
+    static func tail(of url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let size = Int(try handle.seekToEnd())
+        guard size > tailBytes else {
+            try handle.seek(toOffset: 0)
+            let data = try handle.readToEnd() ?? Data()
+            return String(decoding: data, as: UTF8.self)
+        }
+        try handle.seek(toOffset: UInt64(size - tailBytes))
+        let data = try handle.readToEnd() ?? Data()
+        let text = String(decoding: data, as: UTF8.self)
+        guard let newline = text.firstIndex(where: \.isNewline) else { return text }
+        return String(text[text.index(after: newline)...])
     }
 }
 
 extension SubagentOutput.Failure {
     /// What the pane says instead of a transcript.
-    public var sentence: String {
-        switch self {
-        case .noFile:
+    ///
+    /// Worded per kind, because "this subagent's output" said of a `git push` running in the
+    /// background is the same category error that put the two in one list. The empty
+    /// `output_file` is the ordinary case for a background command rather than a fault, so
+    /// `.noFile` says so plainly instead of blaming the agent for not telling us.
+    public func sentence(_ kind: SubagentKind = .agent) -> String {
+        switch (self, kind) {
+        case (.noFile, .agent):
             "The agent did not say where this subagent's output was written."
-        case .missing:
+        case (.noFile, .command):
+            "The agent did not capture this command's output, so there is nothing to show."
+        case (.missing, .agent):
             "The agent has not written this subagent's output yet."
-        case .unreadable(let reason):
-            "This subagent's output could not be read. \(reason)"
+        case (.missing, .command):
+            "This command has not printed anything yet."
+        case (.unreadable(let reason), _):
+            "This \(kind.noun)'s output could not be read. \(reason)"
         }
     }
 }

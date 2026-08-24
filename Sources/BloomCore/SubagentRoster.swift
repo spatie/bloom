@@ -12,6 +12,10 @@ public struct Subagent: Sendable, Hashable, Identifiable {
     public let spawnDepth: Int
     public let isBackgrounded: Bool
     public let prompt: String
+    /// `task_started.task_type` verbatim, which is the one field that says whether this row is an
+    /// agent at all. Kept as the word the CLI sent rather than only as the `kind` below, because
+    /// the day a third value appears the raw word is the thing that tells us so.
+    public let taskType: String
     public private(set) var state: SubagentState = .running
     /// The one line the CLI gave for the ending, empty until it ends.
     public private(set) var summary: String = ""
@@ -33,6 +37,7 @@ public struct Subagent: Sendable, Hashable, Identifiable {
         spawnDepth = start.spawnDepth
         isBackgrounded = start.isBackgrounded
         prompt = start.prompt
+        taskType = start.taskType
     }
 
     /// A subagent built whole, for a gallery or a test that is not replaying a stream.
@@ -44,6 +49,7 @@ public struct Subagent: Sendable, Hashable, Identifiable {
         spawnDepth: Int = 1,
         isBackgrounded: Bool = false,
         prompt: String = "",
+        taskType: String = "",
         state: SubagentState = .running,
         summary: String = "",
         outputFile: String? = nil,
@@ -57,6 +63,7 @@ public struct Subagent: Sendable, Hashable, Identifiable {
         self.spawnDepth = spawnDepth
         self.isBackgrounded = isBackgrounded
         self.prompt = prompt
+        self.taskType = taskType
         self.state = state
         self.summary = summary
         self.outputFile = outputFile
@@ -64,8 +71,14 @@ public struct Subagent: Sendable, Hashable, Identifiable {
         self.retry = retry
     }
 
-    /// Whether clicking this row can show anything. False only when the CLI never named a file,
-    /// which in the capture it always did.
+    /// An agent, or a shell command the CLI put in the background. Read off `task_type`.
+    public var kind: SubagentKind { SubagentKind(taskType: taskType) }
+
+    /// Whether clicking this row can show anything.
+    ///
+    /// False when the CLI never named a file. It always did for an agent in the capture, and it
+    /// routinely does NOT for a background command: `task_notification.output_file` comes through
+    /// empty for `local_bash` in the same captures where it is an absolute path for `local_agent`.
     public var hasOutput: Bool { !(outputFile ?? "").isEmpty }
 
     fileprivate mutating func move(to state: SubagentState) {

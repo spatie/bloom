@@ -1,8 +1,8 @@
 import SwiftUI
 import BloomCore
 
-/// The centre column while a subagent is selected: what that subagent was asked, what it did, and
-/// what it answered.
+/// The centre column while a subagent is selected: what it was asked or what it ran, what it has
+/// been doing, and what it answered.
 ///
 /// **Everything else in the window keeps showing the parent workspace.** The terminal is still the
 /// worktree's terminal, the diff is still the worktree's diff, the composer still sends to the
@@ -10,28 +10,40 @@ import BloomCore
 /// it answers `workspaceID` with the parent, so every pane that hangs off the selection carries on
 /// unchanged and this is the only one that had to notice.
 ///
-/// **What it reads.** `system/task_notification.output_file`, which is the CLI's own transcript
-/// for that subagent. It is a real file, written for a failed subagent as readily as for one that
-/// worked (measured, not assumed: see `SubagentTranscript`), so the pane shows what the subagent
-/// actually said rather than Bloom's reconstruction of it from the nested rows in the parent's
-/// transcript. Bloom does not own the file, so every way of failing to read it is a sentence.
+/// **What it reads.** `system/task_notification.output_file`, which is the CLI's own record for
+/// that task. For an agent it is a symlink to NDJSON in Claude Code's transcript shape, written
+/// for a failed subagent as readily as for one that worked (measured, not assumed: see
+/// `SubagentTranscript`). For a background command it is plain stdout, and reading one as the
+/// other is what used to leave this pane with a title and a single sentence in it. Bloom does not
+/// own the file, so every way of failing to read it is a sentence.
+///
+/// **It stays live while the subagent works**, which is the case it is most often opened in. The
+/// brief is known the moment the task starts, so it is on screen immediately; the output file
+/// grows under the CLI's hand, so it is re-read on `SubagentPane.refreshSeconds`. The version
+/// before this keyed its one read on the subagent's state, so a pane opened mid run showed
+/// whatever prefix existed at the instant it was opened and then nothing more until the end.
+///
+/// Everything decided is decided in `SubagentPane`, `SubagentKind` and `SubagentTranscript`.
 struct SubagentOutputView: View {
     var model: WorkspaceModel
     var subagentID: SubagentID
 
     @State private var transcript: SubagentTranscript?
     @State private var failure: SubagentOutput.Failure?
+    @State private var isBriefExpanded = false
 
     private var subagent: Subagent? {
         model.activeTranscript?.subagents[subagentID]
     }
+
+    private var kind: SubagentKind { subagent?.kind ?? .agent }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Metrics.pane) {
                 if let subagent {
                     header(subagent)
-                    prompt(subagent)
+                    brief(subagent)
                 } else {
                     // Only reachable if the turn was cleared out from under the selection, which
                     // the next turn starting does by design.
@@ -40,37 +52,40 @@ struct SubagentOutputView: View {
                         .foregroundStyle(Palette.textSecondary)
                 }
 
-                if let failure {
-                    Text(failure.sentence)
-                        .font(Typo.body)
-                        .foregroundStyle(Palette.textSecondary)
-                } else if let transcript {
-                    ForEach(transcript.entries.filter { $0.kind != .prompt }) { entry in
-                        self.entry(entry)
-                    }
-                }
+                output
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(Metrics.pane)
         }
         .background(Palette.windowBackground)
-        // Re-read when the selection moves to a different subagent, and when this one ends: the
-        // CLI writes the file as the subagent runs, so a pane opened mid run is showing a
-        // prefix of it.
-        .task(id: reloadKey) { await load() }
+        // Re-read when the selection moves to a different subagent, and when this one ends. The
+        // running case keeps re-reading inside the task rather than re-keying it: an id that
+        // carried the elapsed seconds would tear the whole pane down and rebuild it once a second,
+        // losing the scroll position and any brief the reader had just opened.
+        .task(id: subagentID) { await follow() }
     }
 
-    /// What a re-read is keyed to: which subagent, and whether it has finished. Not the elapsed
-    /// seconds, which would re-read the file once a second for the whole of a long run.
-    private var reloadKey: String {
-        "\(subagentID.rawValue):\(subagent?.state.rawValue ?? "")"
+    /// Read the file, and keep reading it for as long as the task is running.
+    private func follow() async {
+        isBriefExpanded = false
+        await load()
+        while !Task.isCancelled, SubagentPane.refreshes(subagent) {
+            try? await Task.sleep(for: .seconds(SubagentPane.refreshSeconds))
+            guard !Task.isCancelled else { return }
+            await load()
+        }
+        // One last read after it ends. The CLI writes the notification and the last lines of the
+        // file at very nearly the same moment, and without this the pane could keep the read it
+        // took a fraction of a second before the answer landed.
+        await load()
     }
 
     private func load() async {
         // Off the main actor. A subagent's transcript is small in the capture and is not promised
-        // to be: a fan-out that read files could leave a megabyte here.
+        // to be, and this now runs once a second rather than once.
         let path = subagent?.outputFile
-        let result = await Task.detached { SubagentOutput.read(path: path) }.value
+        let kind = kind
+        let result = await Task.detached { SubagentOutput.read(path: path, kind: kind) }.value
         switch result {
         case .success(let parsed):
             transcript = parsed
@@ -91,7 +106,7 @@ struct SubagentOutputView: View {
                     .font(Typo.title)
             }
 
-            Text(subtitle(subagent))
+            Text(SubagentPane.subtitle(subagent))
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textSecondary)
 
@@ -105,26 +120,53 @@ struct SubagentOutputView: View {
         }
     }
 
-    /// The type, the depth when it is worth saying, and how long it took.
-    private func subtitle(_ subagent: Subagent) -> String {
-        var parts = [subagent.type.isEmpty ? "subagent" : subagent.type]
-        // Only past one. Saying "depth 1" on every row would be noise on the case that is always
-        // true, and the pane is the one place depth can be said at all: the sidebar draws every
-        // depth at the same indent.
-        if subagent.spawnDepth > 1 { parts.append("spawned by a subagent, depth \(subagent.spawnDepth)") }
-        let elapsed = SubagentRow.duration(subagent.elapsedSeconds)
-        if !elapsed.isEmpty { parts.append(elapsed) }
-        return parts.joined(separator: " . ")
+    /// What it was given to do: a prompt for an agent, a command line for a background command.
+    ///
+    /// The prompt arrives on `task_started` and is therefore on screen from the first frame, which
+    /// is the half of this that is useful before the task has finished. A command line arrives
+    /// nowhere on the task's own lines, so it is lifted back out of the parent's Bash call: see
+    /// `SubagentPane.commandLine`.
+    @ViewBuilder
+    private func brief(_ subagent: Subagent) -> some View {
+        let text = briefText(subagent)
+        if !text.isEmpty {
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                caption(SubagentPane.briefLabel(subagent.kind))
+                Text(isBriefExpanded ? text : SubagentPane.briefHead(text))
+                    .font(SubagentPane.briefIsCode(subagent.kind) ? Typo.codeSmall : Typo.body)
+                    .textSelection(.enabled)
+                if SubagentPane.briefCollapses(text) {
+                    Button(isBriefExpanded ? "Show less" : "Show all") {
+                        isBriefExpanded.toggle()
+                    }
+                    .buttonStyle(.link)
+                    .font(Typo.caption)
+                }
+            }
+        }
+    }
+
+    private func briefText(_ subagent: Subagent) -> String {
+        switch subagent.kind {
+        case .agent: subagent.prompt
+        case .command: model.commandLine(forToolUseID: subagent.toolUseID) ?? ""
+        }
     }
 
     @ViewBuilder
-    private func prompt(_ subagent: Subagent) -> some View {
-        if !subagent.prompt.isEmpty {
-            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                caption("Asked")
-                Text(subagent.prompt)
-                    .font(Typo.body)
-                    .textSelection(.enabled)
+    private var output: some View {
+        if let failure {
+            Text(failure.sentence(kind))
+                .font(Typo.body)
+                .foregroundStyle(Palette.textSecondary)
+        } else if let transcript {
+            if transcript.droppedEntries > 0 {
+                caption("\(transcript.droppedEntries) earlier steps not shown")
+            }
+            // `.prompt` is dropped: it is the same text the brief above already shows in full,
+            // and showing it twice would push the answer another screen down.
+            ForEach(transcript.entries.filter { $0.kind != .prompt }) { entry in
+                self.entry(entry)
             }
         }
     }
@@ -134,9 +176,18 @@ struct SubagentOutputView: View {
         VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
             caption(label(for: entry))
             Text(entry.body)
-                .font(entry.kind == .text || entry.kind == .failure ? Typo.body : Typo.codeSmall)
+                .font(Self.isProse(entry.kind) ? Typo.body : Typo.codeSmall)
                 .foregroundStyle(colour(for: entry.kind))
                 .textSelection(.enabled)
+        }
+    }
+
+    /// Which entries are somebody's words and which are a machine's. The standing rule: monospace
+    /// is for what a machine said or will run, and what a model wrote in English is not that.
+    static func isProse(_ kind: SubagentTranscript.Entry.Kind) -> Bool {
+        switch kind {
+        case .text, .failure, .thinking, .prompt: true
+        case .tool, .toolResult, .printed: false
         }
     }
 
@@ -148,6 +199,7 @@ struct SubagentOutputView: View {
         case .tool: entry.title.isEmpty ? "Called a tool" : entry.title
         case .toolResult: "Result"
         case .failure: "Stopped"
+        case .printed: SubagentPane.outputLabel(.command)
         }
     }
 
