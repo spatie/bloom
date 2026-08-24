@@ -2,11 +2,9 @@ import Foundation
 
 /// Every tool the bridge serves, and the only place a new one is added.
 ///
-/// A list of handlers rather than a switch, because the phases after this one add five more tools
-/// (`workspace_spawn`, `workspace_send`, `workspace_status`, `workspace_read`,
-/// `workspace_report`, `workspace_archive`) and a switch would put each of them in three places:
-/// the listing, the dispatch and the role gate. Here a tool is one type, and it carries its own
-/// gate.
+/// A list of handlers rather than a switch. There are twelve of them now, and a switch would put
+/// each in three places: the listing, the dispatch and the role gate. Here a tool is one type, and
+/// it carries its own gate. See `docs/BRIDGE.md` for the whole surface and who may reach it.
 public struct BridgeToolbox: Sendable {
     public let handlers: [any BridgeToolHandling]
 
@@ -14,9 +12,12 @@ public struct BridgeToolbox: Sendable {
         self.handlers = handlers
     }
 
-    /// What phase one ships. `whoami` alone: it needs no runner, no writes and no parentage, so it
-    /// proves the transport and the identity mapping without any of the machinery the tools that
-    /// follow will need.
+    /// What a `BridgeServer` built without the app serves: everything that needs no seam back
+    /// into the app, which is every test that did not ask for more.
+    ///
+    /// `whoami` came first and came alone, because it needs no runner, no writes and no parentage,
+    /// so it proved the transport and the identity mapping before any of the machinery the rest
+    /// need existed.
     ///
     /// One thing the live run measured that the tools after this one have to answer: **a bridge
     /// call raises a permission question like any other tool call.** On claude 2.1.238, under
@@ -25,13 +26,16 @@ public struct BridgeToolbox: Sendable {
     /// MCP rather than a CLI the agent shells out to was partly that a shell command goes through
     /// the permission machinery; being an MCP tool does not exempt it. A child that has to file
     /// `workspace_report` unattended therefore needs an answer of its own, either a grant Bloom
-    /// makes for its own tools or an allow rule in the child's settings. See `LiveBridgeTests`.
-    /// Everything that needs no seam back into the app. `workspace_start` and `workspace_merge`
-    /// are the exceptions and are added by `AppModel`, because starting a workspace has to reach
-    /// the main-actor graph that runs one and asking one to merge has to reach the same path the
-    /// Merge button takes; see `WorkspaceStarting` and `WorkspaceMergeRequesting`. So this is what
-    /// a `BridgeServer` built without the app serves, which is every test that did not ask for
-    /// more.
+    /// makes for its own tools or an allow rule in the child's settings. `BridgeToolApproval` is
+    /// where that was answered, and its head says which tools Bloom answers for and why the rest
+    /// are not on the list. See `LiveBridgeTests`.
+    ///
+    /// `workspace_start`, `workspace_merge` and the four pane tools are the exceptions and are
+    /// added by `AppModel.bridgeToolbox()`, because starting a workspace has to reach the
+    /// main-actor graph that runs one, asking one to merge has to reach the same path the Merge
+    /// button takes, and a pane is a thing the window owns; see `WorkspaceStarting`,
+    /// `WorkspaceMergeRequesting`, `PaneOpening`, `PaneSplitting`, `PaneClosing` and
+    /// `PaneRenaming`.
     public static let standard = BridgeToolbox(handlers: [
         WhoamiTool(),
         ProjectListTool(),

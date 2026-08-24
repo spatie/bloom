@@ -248,14 +248,16 @@ struct AgentsSettingsView: View {
     }
 
     /// Detecting a CLI and being able to drive a workspace with it are two different things, and
-    /// only Claude Code can do the second one today. Saying so here is cheaper than letting
-    /// someone find out when a workspace refuses to start.
+    /// only the ones with a runner behind them can do the second. Saying so here is cheaper than
+    /// letting someone find out when a workspace refuses to start. It reads the answer off
+    /// `AgentKind.canRunWorkspaces` rather than naming a backend, so a CLI that grows a runner
+    /// stops showing this note without anybody having to remember the sentence exists.
     @ViewBuilder
     private var capabilitySection: some View {
         if !selection.canRunWorkspaces {
             Section {
                 Label {
-                    Text("Bloom can detect and configure \(selection.label), but cannot run a workspace with it yet. Workspaces run on Claude Code.")
+                    Text("Bloom can detect and configure \(selection.label), but cannot run a workspace with it yet. Workspaces run on \(AgentKind.runnableSentence).")
                         .font(Typo.label)
                         .foregroundStyle(Palette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)

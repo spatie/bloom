@@ -7,6 +7,11 @@ The phases below are all done, and the figures in this section are the ones that
 each was closed: the suite has grown a long way past the 188 tests named here. What is worth
 keeping is the two lists of bugs, because each one names a mistake that is cheap to make again.
 
+Two things in the record have since been overtaken and are left as they were written. "Non-Claude
+agent backends" is listed as a non-goal below and is not one any more: `docs/CODEX.md` is the Codex
+backend, a chat picks its CLI, and `AgentKind.canRunWorkspaces` admits both. And the architecture
+section says one dependency, which was true before Sparkle arrived for updates; there are two.
+
 ## Status
 
 Every phase below is done and checked against its endgoal. The app builds with zero warnings,

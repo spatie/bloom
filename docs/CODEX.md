@@ -27,7 +27,7 @@ uses `codex exec --json`.**
 
 app-server has all three, plus typed lifecycles, token usage, rate limits and thread status. It is
 also what Conductor drives. The reasoning is repeated in the doc comment at the top of
-`Sources/BloomCore/CodexProtocol.swift`, because `exec` will keep looking tempting.
+`Sources/BloomCore/Agent/Codex/CodexProtocol.swift`, because `exec` will keep looking tempting.
 
 ### The protocol describes itself
 
@@ -306,10 +306,12 @@ protocol means and survives an app restart mid-turn.
 
 ### Presenters
 
-`Sources/Bloom/Views/Transcript/ToolPresenter.swift` is 535 lines of Claude Code tool names
+`Sources/BloomCore/Agent/ToolPresenter.swift` is 563 lines of Claude Code tool names
 (`Read`, `Write`, `MultiEdit`, `Bash`, `Glob`, `Grep`, `Task`, `TodoWrite`, `WebFetch`, …) and it
-is the largest single UI cost in this work. **Do not add Codex cases to it.** Codex has no tool
-names at all; it has ten item types. The two vocabularies have nothing in common but the glyphs.
+is the largest single cost in this work. It sat under `Views/` when this was written and is in the
+core now, which is the reason the split below could be tested at all. **Do not add Codex cases to
+it.** Codex has no tool names at all; it has ten item types. The two vocabularies have nothing in
+common but the glyphs.
 
 Split it:
 
@@ -324,14 +326,13 @@ Split it:
   `agentKind`: a row knows what it is, and a transcript drawn from the database has the row before
   it has the session.
 
-Done, in `Views/Transcript/CodexItemPresenter.swift` and `TranscriptPresenter`. The remaining edit
-is one call site in `ToolRowView` and friends, held today: `ToolPresenter.present(` becomes
-`TranscriptPresenter.present(`. The rows that draw it are mostly reusable:
+Done, in `Views/Transcript/CodexItemPresenter.swift`, which also holds the `TranscriptPresenter`
+router that picks a presenter by reading the row's payload. Every call site goes through the
+router; the two `ToolPresenter.present` calls left inside `CodexItemPresenter` are its fallback to
+the Claude Code vocabulary and belong there. The rows that draw it are mostly reusable:
 `ToolRowView`, `ExpandableRow`, `DetailCodeBlock` and `ToolResultView` do not care where the text
 came from. `fileChange` is the nicest case, because its `changes[].diff` is already a unified diff
 and Bloom's `DiffParser` reads that shape.
-
-`Views/Transcript/` is held by another agent. Coordinate before touching it.
 
 ---
 
@@ -426,12 +427,12 @@ flag and Bloom infers it; here it is handed over.
 
 | Place | What it assumes | What to do |
 | --- | --- | --- |
-| `AgentKind.canRunWorkspaces` (`Models.swift:434`) | `self == .claudeCode` | Becomes `self == .claudeCode \|\| self == .codex` **last**, once a Codex chat actually works. It is the switch that makes the rest reachable |
+| `AgentKind.canRunWorkspaces` (`Model/Models.swift`) | Was `self == .claudeCode` | **Done.** It admits `.codex` too, and it was the last switch thrown, which is what made everything above reachable |
 | `SlashCommandIndex` | Documents in its own header that it is Claude Code's list and that a second backend gets its own index | Codex has `skills/list` as a real RPC, so its index is a call rather than a directory walk. A `CodexSkillIndex` beside it, chosen per chat |
 | `WorkspaceNamer` | Shells out to `claude` with Claude-only flags (`--json-schema`, `--tools ""`, `--safe-mode`) and gates on `Shell.which("claude")` | Leave it on Claude Code, and say so. A workspace name is not a chat, so it does not follow the chat's backend. It should fall back to the mechanical name when `claude` is absent, which it already does. Revisit only if a Codex-only machine turns out to be common |
-| `InstallPing.agentName(installed:)` (`InstallPing.swift:319`) | `AgentKind.allCases.first(where: \.canRunWorkspaces)`, i.e. exactly one runnable agent | Becomes a set. The wire name should report what is installed **and** runnable, not the first one. It reports no credential and must keep reporting none |
-| `ContextWindowUsage` (`Views/Center/ContextWindowUsage.swift`) | Reads the limit off `result.modelUsage.<model>.contextWindow` and the used figure off the last `assistant` event's usage | Codex hands both over directly on `thread/tokenUsage/updated`: `modelContextWindow` and the `total` breakdown. Simpler, not harder. Give it a second reader and keep the doc comment explaining why Claude needs two lines and Codex needs one |
-| `AgentsSettingsView.swift:256` | Shows a "cannot run workspaces" note for anything but Claude Code | Follows `canRunWorkspaces` already, so it corrects itself. Its account table for Codex is already written and verified |
+| `InstallPing.agentName(installed:)` (`System/InstallPing.swift`) | `AgentKind.allCases.first(where: \.canRunWorkspaces)`, i.e. exactly one runnable agent | Becomes a set. The wire name should report what is installed **and** runnable, not the first one. It reports no credential and must keep reporting none |
+| `ContextWindowUsage` (`Views/Center/Composer/ContextWindowUsage.swift`) | Reads the limit off `result.modelUsage.<model>.contextWindow` and the used figure off the last `assistant` event's usage | Codex hands both over directly on `thread/tokenUsage/updated`: `modelContextWindow` and the `total` breakdown. Simpler, not harder. Give it a second reader and keep the doc comment explaining why Claude needs two lines and Codex needs one |
+| `AgentsSettingsView` (`Views/Chrome/Settings/`) | Shows a "cannot run workspaces" note for anything that cannot run one | Follows `canRunWorkspaces` already, so it corrects itself. Its account table for Codex is already written and verified |
 | `ComposerOption.models` / `.efforts` | Three Claude models and five flat efforts, hardcoded | See §9 |
 | `AgentRunner`, `AgentEvent` | Claude Code's stream-json, end to end | Stay Claude Code's. A `CodexRunner` beside them |
 | Sidebar status glyph, `WorkspaceRunningGlyph` | Workspace-level busy state | A workspace is busy when **any** of its chats is. Already per workspace, so no change, but check it is aggregating chats and not reading one |
@@ -547,9 +548,10 @@ Each step should land on its own and leave the app working.
 - **Cost wording**, as in step 7.
 - **`SlashCommandIndex`'s Codex sibling**, from the `skills/list` RPC. Codex's slash vocabulary is
   a call rather than a directory walk, so it is a different index, not a flag on that one.
-- **`WorkspaceNamer` stays on Claude Code**, deliberately. A workspace name is not a chat, so it
-  does not follow the chat's backend, and it already degrades to the mechanical name when `claude`
-  is absent. Revisit only if a Codex-only machine turns out to be common.
+
+`WorkspaceNamer` is not on this list, and was for a while. Staying on Claude Code is a decision
+rather than an item, and §8's table is where it is recorded with the other things left out on
+purpose.
 
 ---
 

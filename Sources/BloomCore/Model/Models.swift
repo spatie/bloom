@@ -654,4 +654,18 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
     /// Derived rather than listed, so an agent that grows a runner joins this by answering
     /// `canRunWorkspaces` and nothing else has to be remembered.
     public static var runnable: [AgentKind] { allCases.filter(\.canRunWorkspaces) }
+
+    /// The runnable ones named in a sentence, for prose that has to list them.
+    ///
+    /// Derived for the reason `runnable` is, and it exists because the literal that used to do
+    /// this job outlived the fact it stated. The Agents settings screen said "Workspaces run on
+    /// Claude Code" for the whole of the work that made Codex a backend, and went on saying it
+    /// afterwards, because nothing about giving a CLI a runner touches a string in a view. A
+    /// backend that grows one joins this sentence by answering `canRunWorkspaces`.
+    public static var runnableSentence: String {
+        let names = runnable.map(\.label)
+        guard let last = names.last else { return "no agent Bloom can run" }
+        guard names.count > 1 else { return last }
+        return names.dropLast().joined(separator: ", ") + " and " + last
+    }
 }

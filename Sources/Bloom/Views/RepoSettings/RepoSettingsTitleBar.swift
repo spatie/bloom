@@ -30,7 +30,7 @@ import BloomCore
 /// AppKit rather than SwiftUI because SwiftUI models none of the three things this needs.
 /// `windowToolbarStyle` has no case for the preferences style, nothing in SwiftUI un-hides a title
 /// the framework decided to hide, and there is no scene modifier for tabbing at all.
-/// `WindowProxyIcon` reaches for the main window's title bar the same way and for the same reason.
+/// `WindowChrome` reaches for the main window's title bar the same way and for the same reason.
 struct RepoSettingsTitleBar: ViewModifier {
     let repo: Repo
 
