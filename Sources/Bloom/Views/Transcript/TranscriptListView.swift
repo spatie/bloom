@@ -216,6 +216,10 @@ struct TranscriptListView: View {
     private var maxBubbleWidth: CGFloat { geometry.bubbleCap }
 
     var body: some View {
+        // The first pass of this body after a tab switch, which is where the rebuilt list starts.
+        // Stamped once per timeline, so the passes that follow it cost nothing to ignore.
+        let _ = SwitchTrace.mark("transcript.body", workspace: transcript.workspace.id)
+        let _ = SwitchTrace.markOnScreen("transcript.body", workspace: transcript.workspace.id)
         // Read once for the pass rather than once per footer: resolving it walks the row list,
         // and every realised footer would otherwise pay for its own walk. See `TranscriptModel`.
         let stoppedTurnSeq = transcript.stoppedTurnSeq
@@ -512,6 +516,13 @@ struct TranscriptListView: View {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard !Task.isCancelled else { return }
                 drawnInFull = transcript.session.id
+                // **The number the whole of this is about.** The work stamp is the instant the
+                // history was asked for; the vsync stamp is the first frame that could show it,
+                // and the display link cannot run while the main thread is laying rows out. The
+                // gap between the two IS the layout `TranscriptTail` exists to keep off the
+                // arrival frame, and on a return to a chat tab it is paid all over again.
+                SwitchTrace.mark("transcript.full", workspace: transcript.workspace.id)
+                SwitchTrace.markOnScreen("transcript.full", workspace: transcript.workspace.id)
                 // Not an arrival. See `TranscriptLiveEndFollower.forget`.
                 follower.forget()
                 // And the live end again, in two calls, in two passes.

@@ -39,6 +39,10 @@ struct BloomApp: App {
         // to seeing it. See `SwitchProbe`.
         if SwitchProbe.isRequested { SwitchProbe.schedule() }
 
+        // And its sibling one level in: `Bloom --tab-probe <out.json>` times the path from picking
+        // a tab in the centre column to seeing it. See `TabProbe`.
+        if TabProbe.isRequested { TabProbe.schedule() }
+
         // And two last ones. `Bloom --menu-probe <out.png>` opens one of the centre pane's split
         // submenus and photographs it, which nothing else can; `Bloom --menu-action <title>`
         // performs a real item of a real menu and reports the windows either side of it, which is
