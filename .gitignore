@@ -4,3 +4,8 @@
 .DS_Store
 Tests/fixtures/*.local.jsonl
 dist/
+
+# Agent worktrees. Each is a checkout of this repository, so `git add -A` from inside one commits
+# an embedded repository as a gitlink: a one line entry pointing at a commit nobody else has, in
+# somebody else's branch. It happened once, from this session.
+.claude/worktrees/
