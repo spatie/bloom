@@ -56,6 +56,12 @@ struct DiffView: View {
     @State private var source: FileDiff?
     @State private var mode: FileViewMode
     @State private var isEditable = false
+    /// The file whose diff is on screen, which is not the same question as `file`.
+    ///
+    /// `file` is what this view has been asked for, and it changes before `load` runs. This is what
+    /// `load` last finished, and the difference between the two is exactly what decides whether a
+    /// reload may keep what the reader is looking at. See `load`.
+    @State private var presented: String?
     @State private var revertProblem: String?
     /// Editing buffers outlive this view, so flipping back to the diff, walking to the next file
     /// or switching workspace cannot discard what the user typed.
@@ -173,12 +179,35 @@ struct DiffView: View {
 
     private func load() async {
         priming?.cancel()
-        phase = .loading
-        rows = []
-        expandedRuns = []
-        revealedGaps = [:]
-        fileLines = nil
-        source = nil
+        // **A reload of the file already on screen keeps what is on screen.**
+        //
+        // This used to say `phase = .loading` unconditionally, and the reader paid for it twice.
+        // The changed file poll runs every six seconds and hands this view a fresh `ChangedFile`
+        // whenever a count moves, which re-runs the `task` keyed on it: the diff they were reading
+        // was replaced by "Reading the diff" and came back a moment later, mid sentence. And the
+        // whitespace and layout toggles go through the same door.
+        //
+        // Only the same file, and `presented` is what says so rather than `file`, because `file`
+        // IS the task's id and has already changed by the time this runs. Walking to another file
+        // still drops to the spinner, because the alternative is holding one file's diff under
+        // another file's name.
+        //
+        // It does not answer the case a rebuilt view has. A tab switch destroys this view, so the
+        // way back starts at `Phase.loading` from the state's own initialiser whatever this does,
+        // and what shortens that is `PatchCache` already having the patch: no `git diff`, only the
+        // parse. See `WorkspaceModel.patch(for:)`.
+        if presented != file.path {
+            phase = .loading
+            rows = []
+            expandedRuns = []
+            revealedGaps = [:]
+            fileLines = nil
+            source = nil
+            // Another file's answer to another file's question. It is set at the foot of this
+            // function rather than in the middle of it now, so without this the header bar would
+            // offer Edit on the strength of the file the reader has just walked away from.
+            isEditable = false
+        }
 
         let patch = await model.patch(for: file)
         let path = file.path
@@ -188,15 +217,7 @@ struct DiffView: View {
 
         guard !Task.isCancelled else { return }
 
-        // Whether Edit mode is even offered is a question about the bytes on disk, not about the
-        // patch, so it is asked once here and off the main thread.
-        let absolute = absolutePath
-        let binary = file.isBinary
-        isEditable = await Task.detached(priority: .utility) {
-            !binary && FileEditor.isEditable(absolute)
-        }.value
-
-        guard !Task.isCancelled else { return }
+        presented = file.path
 
         guard let parsed else {
             phase = .notice(
@@ -208,6 +229,20 @@ struct DiffView: View {
         }
         source = parsed
         await apply(parsed)
+
+        // Whether Edit mode is even offered is a question about the bytes on disk rather than
+        // about the patch, so it is asked off the main thread, and it is asked AFTER the diff is
+        // on screen rather than before. It used to sit between the parse and the presentation,
+        // where a `stat` and a read of the first bytes of the file stood between the reader and
+        // the thing they had clicked. Nothing above it needs the answer; only the header bar's
+        // Edit control does, and it appears with the bar rather than with the diff.
+        let absolute = absolutePath
+        let binary = file.isBinary
+        let editable = await Task.detached(priority: .utility) {
+            !binary && FileEditor.isEditable(absolute)
+        }.value
+        guard !Task.isCancelled else { return }
+        isEditable = editable
     }
 
     /// Turn the parsed patch into whatever the current settings say it should be.
