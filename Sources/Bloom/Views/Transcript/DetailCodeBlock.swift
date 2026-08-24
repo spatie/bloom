@@ -8,6 +8,48 @@ struct DetailCodeBlock: View {
     /// What a copy of this block is called, in the caller's words.
     var copyTitle: String = "Copy"
 
+    var body: some View {
+        DetailBlock(text: text, font: Typo.code, tint: tint, copyTitle: copyTitle)
+    }
+}
+
+/// The same block, set in the face prose is read in.
+///
+/// **Mono is for what a machine said or will run.** A command, a patch, a pattern, a file's new
+/// contents: those line up in columns and the columns mean something. The sentence a subagent was
+/// handed and the plan an agent wrote before asking to leave plan mode are neither. They are
+/// English, often several paragraphs of it, and set in `Typo.code` they read as data: the measure
+/// goes to about two thirds of the characters, the line breaks land where nothing broke, and the
+/// whole block claims to be something you would paste into a terminal.
+///
+/// `ToolRowSnapshotGallery` is the page this rule was written on, one surface over, and its own
+/// header says the mistake it guards against is "English set in mono". The two blocks under
+/// `Task` and `ExitPlanMode` were that mistake in the drawer under the row the gallery
+/// photographs.
+///
+/// Plain text rather than markdown, deliberately. A plan is usually written in markdown, and
+/// rendering it here would put a fenced block on a plate inside this plate, and a heading at
+/// heading size inside a detail drawer. The row is a receipt of what was asked, not a second
+/// place to read a document.
+struct DetailProseBlock: View {
+    var text: String
+    var copyTitle: String = "Copy"
+
+    var body: some View {
+        DetailBlock(
+            text: text, font: Typo.body, tint: Palette.surfaceSunken, copyTitle: copyTitle
+        )
+    }
+}
+
+/// The plate, the cut and the copy button the two share, so the only thing that varies between
+/// them is the face the words are set in.
+private struct DetailBlock: View {
+    var text: String
+    var font: ScaledFont
+    var tint: Color
+    var copyTitle: String
+
     @State private var showsAll = false
     @State private var isHovered = false
 
@@ -21,7 +63,7 @@ struct DetailCodeBlock: View {
                 // exactly the blocks worth copying.
                 HStack(alignment: .top, spacing: TranscriptLayout.glyphGap) {
                     Text(capped.text)
-                        .font(Typo.code)
+                        .font(font)
                         .foregroundStyle(Palette.textPrimary)
                         .frame(maxWidth: .infinity, alignment: .leading)
 

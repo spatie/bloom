@@ -52,12 +52,13 @@ struct ToolInputView: View {
         case "TodoWrite":
             TodoListView(todos: input["todos"]?.arrayValue ?? [])
 
+        // Prose, not a literal, so it is set in the reading face. See `DetailProseBlock`.
         case "Task", "Agent":
             DetailCaption(text: input["description"]?.stringValue ?? "")
-            DetailCodeBlock(text: input["prompt"]?.stringValue ?? "")
+            DetailProseBlock(text: input["prompt"]?.stringValue ?? "", copyTitle: "Copy the brief")
 
         case "ExitPlanMode":
-            DetailCodeBlock(text: input["plan"]?.stringValue ?? "")
+            DetailProseBlock(text: input["plan"]?.stringValue ?? "", copyTitle: "Copy the plan")
 
         case "WebFetch":
             DetailPathLabel(path: input["url"]?.stringValue ?? "")

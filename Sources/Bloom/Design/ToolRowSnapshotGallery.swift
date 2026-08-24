@@ -22,6 +22,16 @@ struct ToolRowSnapshotGallery: View {
         + "$(gh pr view 168 --json headRefOid -q .headRefOid)/check-runs "
         + "--jq '.check_runs[] | {name, conclusion}'"
 
+    /// A real brief, at a real length. Set in mono this ran to about two thirds of the measure
+    /// and broke where nothing broke.
+    private static let brief = """
+        Read the transcript's row views and work out where the decision is taken that a tool's \
+        detail is a literal rather than a sentence. Report the file and the line, and say whether \
+        the same rule reaches the block inside an expanded row.
+
+        Do not change anything. This is a question, not a task.
+        """
+
     private var workspace: Workspace {
         Workspace(
             repoID: RepoID("r1"), name: "laravel-webhook-server", branch: "main",
@@ -83,6 +93,16 @@ struct ToolRowSnapshotGallery: View {
                 row("e1", "Bash", [
                     "description": .string("Check check-runs and PR conclusions"),
                     "command": .string(Self.longCommand),
+                ], isExpanded: true)
+
+                // The drawer, which is where the rule the page above states was being broken: the
+                // row header set this tool's detail in the reading face and then the block under
+                // it set the whole brief in mono. Photographed open, because collapsed it looks
+                // right either way.
+                row("e2", "Task", [
+                    "subagent_type": .string("Explore"),
+                    "description": .string("Find where the transcript decides which rows are code"),
+                    "prompt": .string(Self.brief),
                 ], isExpanded: true)
             }
         }
