@@ -66,57 +66,6 @@ struct BloomAlert: Identifiable {
     var message: String
 }
 
-/// An archive the app refused to carry out, waiting on the user.
-///
-/// It carries the report rather than a yes or no question, because "are you sure?" tells the user
-/// nothing, and the whole point of stopping is that there is something specific to lose.
-struct ArchiveRequest: Identifiable {
-    let id = UUID()
-    var workspace: Workspace
-    var report: WorkspaceSafetyReport
-    var deleteBranch: Bool?
-    /// Set when git could not be asked at all, so the report is empty for want of an answer rather
-    /// than because there is nothing at stake. Shown alongside the losses, never instead of them.
-    var problem: String?
-    /// What the app knows about this workspace that git does not. See `ArchiveHazards`.
-    var hazards = ArchiveHazards()
-
-    /// Everything this confirmation exists because of, in the words the sheet will use.
-    ///
-    /// The live reasons come first. An agent mid turn is producing work that is not in git at all
-    /// yet, so it is both the most valuable thing at stake and the one the report cannot see.
-    var reasons: [String] {
-        hazards.liveLosses + report.losses(
-            deletingBranch: hazards.isDeletingBranch,
-            isPullRequestMerged: hazards.isPullRequestMerged
-        )
-    }
-}
-
-/// What the app knows about a workspace that a git process cannot.
-///
-/// Deliberately not fields on `WorkspaceSafetyReport`. That type is computed inside BloomCore by
-/// running git, and every field on it is something git answered; neither of these is. An agent mid
-/// turn is a process this app is holding a handle to, and the pull request's state came from `gh`
-/// minutes ago and is cached above the core. Putting them on the report would mean a report that
-/// is wrong until whoever built it remembers to correct it, which is the kind of half-filled
-/// safety check that decides whether work gets destroyed.
-struct ArchiveHazards {
-    /// An agent is mid turn in this workspace, right now.
-    var isAgentRunning = false
-    /// GitHub says this branch's pull request was merged.
-    var isPullRequestMerged = false
-    /// Whether this archive will delete the branch as well as the worktree.
-    var isDeletingBranch = false
-
-    /// The losses that are not git's to report.
-    var liveLosses: [String] {
-        isAgentRunning
-            ? ["the turn an agent is running in this workspace right now, which is not in git yet"]
-            : []
-    }
-}
-
 /// The root of the app's state. Owns the store, the repo and workspace lists, and one
 /// `WorkspaceModel` per workspace the user has opened.
 ///

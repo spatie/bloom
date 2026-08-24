@@ -175,7 +175,12 @@ struct RootView: View {
             // `app.pendingArchive` back inside the action is what made Archive do nothing at all:
             // dismissing the dialog clears it before the action's task ever reaches the main
             // actor. See `AppModel.confirmArchive`.
-            Button(Self.confirmLabel(for: request), role: .destructive) { confirmArchive(request) }
+            // The role follows the severity rather than the action, because the action is the
+            // same either way. A worktree carrying nothing but a `.env` and a folder of generated
+            // types gets a plain button: see `ArchiveRequest.Severity`.
+            Button(
+                request.confirmLabel, role: request.isDestructive ? .destructive : nil
+            ) { confirmArchive(request) }
             // No `.keyboardShortcut(.defaultAction)` on the cancel button, and that is not an
             // oversight. It used to be there, to keep Return off the destructive answer, and it
             // did that by REPLACING the cancel button's own key binding. A `.cancel` role button
@@ -185,10 +190,11 @@ struct RootView: View {
             // Return does nothing at all, because a confirmation dialog has no default button
             // unless one is named. Both halves of the rule hold, and the safe answer keeps the
             // key it is supposed to have.
-            Button("Keep the workspace", role: .cancel, action: app.cancelPendingArchive)
+            Button(request.cancelLabel, role: .cancel, action: app.cancelPendingArchive)
         } message: { request in
-            // Naming what disappears, rather than asking "are you sure?".
-            Text(Self.losses(in: request))
+            // Naming what disappears, rather than asking "are you sure?". Written by
+            // `ArchiveRequest` in the core, where it can be tested.
+            Text(request.message)
         }
         // The question asked before a session that is still working is closed. On the window for
         // the reason the archive confirmation above is: it is raised from the tab strip's close
@@ -286,45 +292,6 @@ struct RootView: View {
 
     private func confirmArchive(_ request: ArchiveRequest) {
         Task { await app.confirmArchive(request) }
-    }
-
-    /// The destructive button's label, which only promises a loss when there is one.
-    ///
-    /// This dialog is now raised by the sidebar row's hover button as well, which asks every time
-    /// precisely because it appears under the pointer unbidden. Telling somebody they are about
-    /// to "lose that work" when the worktree is clean is the fastest way to teach them that this
-    /// dialog exaggerates.
-    private static func confirmLabel(for request: ArchiveRequest) -> String {
-        request.reasons.isEmpty && request.problem == nil ? "Archive" : "Archive and lose that work"
-    }
-
-    /// What the user is about to lose, said as a list rather than as a question.
-    ///
-    /// Built here rather than in the message builder so the string work is a plain function that
-    /// can be read, and changed, without going through a view body.
-    ///
-    /// A confirmation that only asks "are you sure?" is one people learn to click through, so
-    /// this one always says what archiving does to this particular workspace, and adds the list
-    /// only when there is something on it. `ArchiveRequest.reasons` puts the agent mid turn
-    /// first, because that is the work that is not in git yet.
-    private static func losses(in request: ArchiveRequest) -> String {
-        // The worktree's path used to open this message and it took five wrapped lines of a
-        // narrow dialog to say something the name above it had already said. What has to be read
-        // here is the list, so the path is gone and the name is what identifies the workspace,
-        // which is what it does everywhere else in the app.
-        var text = "\u{201C}\(request.workspace.name)\u{201D}\n\n"
-        text += "The worktree is deleted and the branch is "
-        text += request.hazards.isDeletingBranch ? "deleted too." : "kept."
-        text += " The workspace moves to Archived."
-        let reasons = request.reasons
-        if !reasons.isEmpty {
-            text += "\n\nThis would lose:\n"
-            text += reasons.map { "\u{2022} \($0)" }.joined(separator: "\n")
-        }
-        if let problem = request.problem {
-            text += "\n\n\(problem)"
-        }
-        return text
     }
 }
 

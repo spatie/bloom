@@ -160,7 +160,28 @@ public struct WorkspaceSafetyReport: Sendable, Hashable {
     /// A confirmation that lists commits as a loss when the branch is being kept is a
     /// confirmation nobody will read twice. See `isSafeToDiscard(deletingBranch:)` for both
     /// arguments.
+    ///
+    /// Everything, in one voice, which is right for `WorkspaceError.unsafeToArchive` and wrong
+    /// for the confirmation. The confirmation asks for the two halves separately. See
+    /// `irreversibleLosses(deletingBranch:isPullRequestMerged:)`.
     public func losses(deletingBranch: Bool, isPullRequestMerged: Bool = false) -> [String] {
+        irreversibleLosses(deletingBranch: deletingBranch, isPullRequestMerged: isPullRequestMerged)
+            + ignoredFileNotes
+    }
+
+    /// The half of the list that is genuinely gone for good: work git was keeping no other copy
+    /// of, and commits nothing else points at.
+    ///
+    /// Split out from `ignoredFileNotes` because saying both in one red sentence is how a
+    /// destructive button stops being read. The owner merged a pull request, pressed Archive, and
+    /// was offered "Archive and lose that work" over thirteen ignored paths: a `.env`, generated
+    /// route and type files, an attachments folder. None of that was ever in a commit, none of it
+    /// was meant to be, and the code itself was already on the default branch. Spending the
+    /// strongest words in the app on that teaches people to click through them, which is the last
+    /// thing wanted on the one action that cannot be undone.
+    public func irreversibleLosses(
+        deletingBranch: Bool, isPullRequestMerged: Bool = false
+    ) -> [String] {
         var losses: [String] = []
         if hasUncommittedChanges {
             losses.append("uncommitted changes to tracked files")
@@ -169,27 +190,6 @@ public struct WorkspaceSafetyReport: Sendable, Hashable {
             let sample = untrackedFiles.prefix(5).joined(separator: ", ")
             let rest = untrackedFiles.count > 5 ? ", and \(untrackedFiles.count - 5) more" : ""
             losses.append("\(Self.count(untrackedFiles.count, "untracked file")): \(sample)\(rest)")
-        }
-        if !modifiedIgnoredFiles.isEmpty {
-            let sample = modifiedIgnoredFiles.prefix(5).joined(separator: ", ")
-            let rest = modifiedIgnoredFiles.count > 5
-                ? ", and \(modifiedIgnoredFiles.count - 5) more"
-                : ""
-            // A trailing slash means the entry is a whole directory, named once, so the noun has
-            // to allow for one. Everything a package manager could put back is already gone from
-            // this list, which is what makes naming the rest worth the reader's time.
-            let folders = modifiedIgnoredFiles.contains { $0.hasSuffix("/") }
-            let one = modifiedIgnoredFiles.count == 1
-            let noun = switch (one, folders) {
-            case (true, true): "ignored folder"
-            case (true, false): "ignored file"
-            case (false, true): "ignored files and folders"
-            case (false, false): "ignored files"
-            }
-            losses.append(
-                "\(modifiedIgnoredFiles.count) \(noun) that \(one ? "differs" : "differ") "
-                + "from the main checkout: \(sample)\(rest)"
-            )
         }
         if deletingBranch, unpushedCommits > 0, !isBranchMerged, !isPullRequestMerged {
             losses.append(
@@ -204,6 +204,37 @@ public struct WorkspaceSafetyReport: Sendable, Hashable {
             )
         }
         return losses
+    }
+
+    /// The half worth mentioning rather than warning about: ignored paths that differ from the
+    /// main checkout.
+    ///
+    /// Still said out loud, because `git worktree remove` really does delete them and nothing
+    /// else in the app would tell anyone. Never called a loss, because git was never holding a
+    /// copy to lose: these are files a `.gitignore` deliberately keeps out of every commit.
+    /// `ReproduciblePaths` has already dropped everything a package manager could put back, which
+    /// is what makes naming the rest worth the reader's time.
+    public var ignoredFileNotes: [String] {
+        guard !modifiedIgnoredFiles.isEmpty else { return [] }
+
+        let sample = modifiedIgnoredFiles.prefix(5).joined(separator: ", ")
+        let rest = modifiedIgnoredFiles.count > 5
+            ? ", and \(modifiedIgnoredFiles.count - 5) more"
+            : ""
+        // A trailing slash means the entry is a whole directory, named once, so the noun has to
+        // allow for one.
+        let folders = modifiedIgnoredFiles.contains { $0.hasSuffix("/") }
+        let one = modifiedIgnoredFiles.count == 1
+        let noun = switch (one, folders) {
+        case (true, true): "ignored folder"
+        case (true, false): "ignored file"
+        case (false, true): "ignored files and folders"
+        case (false, false): "ignored files"
+        }
+        return [
+            "\(modifiedIgnoredFiles.count) \(noun) that \(one ? "differs" : "differ") "
+            + "from the main checkout: \(sample)\(rest)"
+        ]
     }
 
     /// "1 untracked file", "3 untracked files". The list this feeds is read at the moment somebody
