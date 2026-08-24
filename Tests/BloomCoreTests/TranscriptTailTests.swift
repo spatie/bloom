@@ -60,4 +60,12 @@ struct TranscriptTailTests {
     func zeroLengthDrawsEverything() {
         #expect(TranscriptTail.start(in: session(count: 500, turn: 10), length: 0) == 0)
     }
+
+    /// The list asks this over `rows.lazy.map(\.kind)` rather than over an array it built, so the
+    /// answer has to be the same read through a view of the rows as it is read off a copy of them.
+    @Test("a lazy view of the kinds answers what an array of them does")
+    func lazyKindsAgree() {
+        let kinds = session(count: 500, turn: 10)
+        #expect(TranscriptTail.start(in: kinds.lazy.map { $0 }) == TranscriptTail.start(in: kinds))
+    }
 }

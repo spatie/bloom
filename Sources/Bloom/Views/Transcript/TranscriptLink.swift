@@ -75,6 +75,53 @@ enum TranscriptLink {
     /// The addresses are scanned per run of words rather than over the whole turn, because a range
     /// found in the turn would name the wrong characters once the paths in front of it had each
     /// collapsed to a single character.
+    /// The same, from the turn's own words, and held.
+    ///
+    /// **This is the second uncached attributed string builder in the transcript.** `dfe734b` put
+    /// `InlineNSAttributes.make` behind a cache and called itself the last one; a sent bubble was
+    /// building a fresh `NSAttributedString` on every pass, which means segmenting the sentence,
+    /// scanning each run of it for addresses and laying out a text attachment per file in it, and
+    /// then handing the result to an `NSTextView` that relays the whole run out on being given a
+    /// new string. A bubble is a minority of the rows in a transcript, which is why this came last
+    /// rather than not at all.
+    ///
+    /// Keyed on everything the drawing depends on, the way `InlineAttributesKey` is: the words, the
+    /// two faces of them (size and colour), the leading and which ground the chips are drawn for.
+    /// A sent turn is never rewritten, so the entry cannot go stale under its key.
+    @MainActor
+    static func attributedString(
+        sent text: String,
+        font: NSFont,
+        color: NSColor,
+        lineSpacing: CGFloat,
+        chipGround: AttachmentChipCell.Ground
+    ) -> NSAttributedString {
+        let key = SentTurnKey(
+            text: text, font: font, color: color, lineSpacing: lineSpacing, ground: chipGround
+        )
+        if let cached = sentTurns.object(forKey: key) { return cached }
+
+        let value = attributedString(
+            FileMention.segments(in: text),
+            font: font,
+            color: color,
+            lineSpacing: lineSpacing,
+            chipGround: chipGround
+        )
+        sentTurns.setObject(value, forKey: key, cost: text.utf8.count)
+        return value
+    }
+
+    /// One screenful of bubbles and then some. A turn is a sentence and a few chips, so the cost
+    /// limit is over the words rather than over anything that could be large.
+    @MainActor
+    private static let sentTurns: NSCache<SentTurnKey, NSAttributedString> = {
+        let cache = NSCache<SentTurnKey, NSAttributedString>()
+        cache.countLimit = 200
+        cache.totalCostLimit = 2 * 1_024 * 1_024
+        return cache
+    }()
+
     @MainActor
     static func attributedString(
         _ segments: [AttachmentDraft.Segment],
@@ -192,7 +239,8 @@ extension View {
             self
         } else {
             contextMenu {
-                ForEach(Array(addresses.enumerated()), id: \.offset) { _, address in
+                ForEach(addresses.indices, id: \.self) { index in
+                    let address = addresses[index]
                     Button(addresses.count == 1 ? "Copy Link" : "Copy \(LinkPolicy.shortened(address))") {
                         TranscriptLink.copy(address)
                     }
@@ -212,7 +260,8 @@ extension View {
             self
         } else {
             accessibilityActions {
-                ForEach(Array(addresses.enumerated()), id: \.offset) { _, address in
+                ForEach(addresses.indices, id: \.self) { index in
+                    let address = addresses[index]
                     Button(addresses.count == 1 ? "Open Link" : "Open \(LinkPolicy.shortened(address))") {
                         guard let url = URL(string: address), LinkPolicy.opens(url) else { return }
                         NSWorkspace.shared.open(url)
@@ -220,5 +269,45 @@ extension View {
                 }
             }
         }
+    }
+}
+
+/// `NSCache` predates generics over value types, so the key has to be a class. It is an
+/// implementation detail of `TranscriptLink.attributedString(sent:...)` and lives with it.
+private final class SentTurnKey: NSObject {
+    let text: String
+    let font: NSFont
+    let color: NSColor
+    let lineSpacing: CGFloat
+    let ground: AttachmentChipCell.Ground
+    private let cachedHash: Int
+
+    init(text: String, font: NSFont, color: NSColor, lineSpacing: CGFloat, ground: AttachmentChipCell.Ground) {
+        self.text = text
+        self.font = font
+        self.color = color
+        self.lineSpacing = lineSpacing
+        self.ground = ground
+        var hasher = Hasher()
+        hasher.combine(text)
+        hasher.combine(font)
+        hasher.combine(color)
+        hasher.combine(lineSpacing)
+        // The plate alone. There are two grounds in the app, both of them `static let`s, and their
+        // three colours move together; the equality below is still on the whole of it.
+        hasher.combine(ground.plate)
+        cachedHash = hasher.finalize()
+    }
+
+    override var hash: Int { cachedHash }
+
+    override func isEqual(_ object: Any?) -> Bool {
+        guard let other = object as? SentTurnKey else { return false }
+        return cachedHash == other.cachedHash
+            && text == other.text
+            && font == other.font
+            && color == other.color
+            && lineSpacing == other.lineSpacing
+            && ground == other.ground
     }
 }

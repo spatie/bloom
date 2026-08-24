@@ -108,7 +108,11 @@ struct ToolRowHeader: View {
     }
 
     var body: some View {
-        HStack(spacing: TranscriptLayout.glyphGap) {
+        // Read once for the pass. Working it out punctuates a sentence and joins two more, and the
+        // glyph's tint at the top of this stack and the word near the bottom of it both need it.
+        let outcome = outcome
+
+        return HStack(spacing: TranscriptLayout.glyphGap) {
             TranscriptGlyph(
                 symbol: presentation.glyph,
                 // The outcome's colour wins where there is one, and the presentation's role
@@ -155,8 +159,8 @@ struct ToolRowHeader: View {
             // refuses to give ground is cut in half at a narrow pane width rather than
             // truncated. `Chip` already holds itself to one line, and the detail beside it
             // carries the higher layout priority, so the chip only gives ground last.
-            ForEach(Array(presentation.chips.enumerated()), id: \.offset) { _, chip in
-                switch chip {
+            ForEach(presentation.chips.indices, id: \.self) { index in
+                switch presentation.chips[index] {
                 case .code(let text):
                     Chip(text: text, monospaced: true)
                 case .file(let path):

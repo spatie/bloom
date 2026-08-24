@@ -90,8 +90,11 @@ struct RetryRowView: View {
 
     private var header: some View {
         HStack(spacing: TranscriptLayout.glyphGap) {
-            TranscriptGlyph(symbol: "arrow.trianglehead.clockwise", tint: tint)
-                .modifier(BreathingOpacity(isActive: !isStill && !reduceMotion))
+            // The breath is a `CAAnimation` on a layer rather than a repeating SwiftUI animation,
+            // and it keeps moving when the window is behind another app. See `BreathingMark`.
+            BreathingMark(isMoving: !isStill && !reduceMotion) {
+                TranscriptGlyph(symbol: "arrow.trianglehead.clockwise", tint: tint)
+            }
 
             Text(retry.headline)
                 .font(Typo.label)
@@ -149,34 +152,5 @@ struct RetryRowView: View {
         }
         .frame(height: Metrics.hairline * 2)
         .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
-    }
-}
-
-/// The glyph breathing on the window's heartbeat, so a retrying turn reads as alive.
-///
-/// `BusyBreath`'s envelope rather than a sine, and on a period that is a whole number of the busy
-/// dot's pulses, so a workspace that is retrying breathes against the window's own rhythm rather
-/// than at some rate of its own. Opacity only: the glyph must not change
-/// size, because a symbol that grows and shrinks at this size reads as a focus problem.
-private struct BreathingOpacity: ViewModifier {
-    var isActive: Bool
-
-    func body(content: Content) -> some View {
-        if isActive {
-            content.keyframeAnimator(
-                initialValue: 1.0,
-                repeating: true
-            ) { view, value in
-                view.opacity(value)
-            } keyframes: { _ in
-                KeyframeTrack {
-                    for sample in BusyBreath.samples(count: 12) {
-                        LinearKeyframe(0.45 + 0.55 * sample, duration: BusyBreath.period / 12)
-                    }
-                }
-            }
-        } else {
-            content
-        }
     }
 }

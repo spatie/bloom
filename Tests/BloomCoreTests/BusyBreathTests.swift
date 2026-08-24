@@ -75,6 +75,28 @@ struct BusyBreathTests {
         #expect(biggestStep < 0.2)
     }
 
+    /// The retry glyph is a layer now, and what it is handed is these numbers. A mark that reaches
+    /// nothing is absent for part of every cycle, which is the failure the floor exists to prevent.
+    @Test("the breathing mark never goes out, and arrives at full strength")
+    func opacityStaysOnScreen() {
+        #expect(BusyBreath.opacity(atPhase: 0) == BusyBreath.restingOpacity)
+        #expect(abs(BusyBreath.opacity(atPhase: BusyBreath.inhale) - 1) < 1e-12)
+
+        for step in 0...1_000 {
+            let value = BusyBreath.opacity(atPhase: Double(step) / 1_000)
+            #expect(value >= BusyBreath.restingOpacity)
+            #expect(value <= 1)
+        }
+    }
+
+    @Test("the opacity samples close on themselves")
+    func opacitySamplesClose() {
+        let samples = BusyBreath.opacitySamples(count: 12)
+        #expect(samples.count == 13)
+        #expect(samples.first == samples.last)
+        #expect(samples.max() == 1)
+    }
+
     /// The period is not free: every moving mark in the window is phased off one instant, and that
     /// only keeps them together while the periods share whole multiples. The rule crosses in
     /// `BusyPulse.pass`, which is three seconds.

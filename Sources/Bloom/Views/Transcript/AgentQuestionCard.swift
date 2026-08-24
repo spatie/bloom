@@ -33,7 +33,9 @@ struct AgentQuestionCard: View {
     @State private var isWritingOther: Set<String> = []
     @FocusState private var otherFocus: String?
 
-    private var questions: [AgentQuestion] { AgentQuestionnaire.questions(in: ask.input) }
+    /// The questions this card is about. See `AgentQuestionCache`, which is why asking for them
+    /// six or eight times in one pass is not six or eight parses.
+    private var questions: [AgentQuestion] { AgentQuestionCache.questions(in: ask) }
 
     private var isOpen: Bool { decision == nil }
 
@@ -460,4 +462,46 @@ private struct QuestionOptionStyle: ButtonStyle {
             return .clear
         }
     }
+}
+
+/// The questions inside an ask, parsed once per request rather than once per read.
+///
+/// `AgentQuestionnaire.questions(in:)` walks the tool input and builds a question and its options
+/// out of it, and the card asks for the answer from `body`, from its header, from the completeness
+/// check, from the answers it would send and from the debug capture: six to eight reads in a pass.
+/// The card also holds three pieces of `@State`, so typing a word into an Other row re-runs all of
+/// them per keystroke.
+///
+/// Keyed on the request id and the call it is about, which is what the CLI uses to identify one
+/// control request and what the answer is posted back against. The input behind that pair is what
+/// the agent sent once; nothing rewrites it. Both halves, because a request id is only promised to
+/// be unique within the session that issued it and a window holds several sessions at once, where a
+/// `tool_use` id is minted per call.
+@MainActor
+private enum AgentQuestionCache {
+    /// A transcript holds few of these, and a card that has scrolled away can afford to parse
+    /// again if it comes back after a hundred others.
+    private static let values: NSCache<NSString, AgentQuestionsBox> = {
+        let cache = NSCache<NSString, AgentQuestionsBox>()
+        cache.countLimit = 64
+        return cache
+    }()
+
+    static func questions(in ask: PermissionAsk) -> [AgentQuestion] {
+        // A separator no id can hold, so two pairs cannot be spelled the same way round.
+        let key = "\(ask.requestID)\u{1}\(ask.toolUseID)" as NSString
+        if let cached = values.object(forKey: key) { return cached.value }
+
+        let value = AgentQuestionnaire.questions(in: ask.input)
+        values.setObject(AgentQuestionsBox(value), forKey: key)
+        return value
+    }
+}
+
+/// `NSCache` cannot hold a value type. See `TranscriptEventCache`, which keeps its boxes beside it
+/// for the same reason.
+private final class AgentQuestionsBox {
+    let value: [AgentQuestion]
+
+    init(_ value: [AgentQuestion]) { self.value = value }
 }

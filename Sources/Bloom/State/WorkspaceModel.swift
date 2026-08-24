@@ -159,7 +159,10 @@ final class WorkspaceModel {
     var localWork: LocalWork?
 
     // Setup.
-    var setupOutput: String = ""
+    /// Written here and nowhere else, which `private(set)` is what keeps true: the timeline below
+    /// is memoised against it, and a writer outside this class would leave the memo standing over
+    /// a log that had moved. See `timeline(isRunningSetup:)`.
+    private(set) var setupOutput: String = ""
     var isRunningSetup = false
     /// Things Bloom did to this workspace that are worth a line in the transcript: a merge, and
     /// whatever follows it.
@@ -180,15 +183,74 @@ final class WorkspaceModel {
 
     /// What the transcript draws above its rows: the setup line, derived from the workspace's own
     /// stored state, then everything Bloom has recorded since, in the order it happened.
+    ///
+    /// **Memoised, because this is asked from a view body rather than when the log moves.**
+    /// `WorkspaceEventsView` sits at the top of the transcript's own `LazyVStack`, so its body runs
+    /// on every pass of that list, which during a window or sidebar drag is once a frame. Building
+    /// the event is not cheap: `WorkspaceEvent.setup` counts the lines of a log that
+    /// `Workspace.setupLogLimit` allows to be two hundred thousand characters, and does it twice
+    /// for a run that succeeded, and for a run that failed `SetupDiagnosis.read` copies and splits
+    /// the whole of it on top of that.
+    ///
+    /// This partly undoes `dfe734b`, which moved the count into `WorkspaceEvent`'s initialiser so
+    /// it was "counted once at construction". That was true and it did not help, because
+    /// construction is what happens every pass: the count moved rather than went away. What makes
+    /// it go away is not constructing the event again when nothing it is built from has changed.
+    ///
+    /// Every field of the key is read on every call, and that is load-bearing rather than
+    /// wasteful: reading them is what registers this view's observation of them, so a memo that
+    /// answered without touching `setupOutput` would leave the transcript never hearing that the
+    /// log had moved. `utf8.count` is O(1) on a native Swift string.
     func timeline(isRunningSetup running: Bool) -> [WorkspaceEvent] {
+        let key = TimelineKey(
+            isRunning: running,
+            setupState: workspace.setupState,
+            logBytes: setupOutput.utf8.count,
+            logWrites: setupLogWrites,
+            durationMS: setupDurationMS,
+            exitStatus: setupExitStatus,
+            recorded: events
+        )
+        if let timelineMemo, timelineMemo.key == key { return timelineMemo.events }
+
         let setup = WorkspaceEvent.setup(
             state: running ? .running : workspace.setupState,
             log: setupOutput,
             durationMS: setupDurationMS,
             status: setupExitStatus
         )
-        return [setup].compactMap { $0 } + events
+        let built = [setup].compactMap { $0 } + events
+        timelineMemo = (key, built)
+        return built
     }
+
+    /// Everything the timeline is derived from, in the cheapest form that can tell two of them
+    /// apart.
+    ///
+    /// The log is in here twice, and neither is the log. Its byte count is what registers the
+    /// observation and catches every ordinary flush; the write count is what catches the one case
+    /// a length cannot, which is a log already at `Workspace.setupLogLimit` having a batch appended
+    /// and the same number of characters dropped off its front.
+    ///
+    /// The recorded events are compared whole rather than counted, and that is not the expensive
+    /// option it looks: the two sides are the same array buffer on every pass that has not appended
+    /// to it, which `Array.==` answers on identity alone. None of these carries a log.
+    private struct TimelineKey: Equatable {
+        var isRunning: Bool
+        var setupState: SetupState
+        var logBytes: Int
+        var logWrites: Int
+        var durationMS: Int?
+        var exitStatus: Int?
+        var recorded: [WorkspaceEvent]
+    }
+
+    /// The last timeline built, and what it was built from. Not observed: nothing draws it, the
+    /// values it is derived from are all observed already, and a view body is where it is written.
+    @ObservationIgnored private var timelineMemo: (key: TimelineKey, events: [WorkspaceEvent])?
+
+    /// How many times `setupOutput` has been written this launch. See `TimelineKey`.
+    @ObservationIgnored private var setupLogWrites = 0
 
     /// When the run now in flight started, and what the last finished one cost.
     ///
@@ -637,6 +699,7 @@ final class WorkspaceModel {
         setupDurationMS = nil
         setupExitStatus = nil
         setupOutput = ""
+        setupLogWrites += 1
         // A machine with no free block left is not a reason to refuse to run setup. The script
         // simply gets no port to bind, which it can decide for itself what to do about.
         await ensurePort()
@@ -756,6 +819,7 @@ final class WorkspaceModel {
     func appendSetupOutput(_ lines: [String]) {
         guard !lines.isEmpty else { return }
         setupOutput += lines.joined(separator: "\n") + "\n"
+        setupLogWrites += 1
         // The same cap the row is written under, so the transcript and the stored log agree
         // about how much of a long setup survives. See `Workspace.setupLogLimit`.
         if setupOutput.count > Workspace.setupLogLimit {

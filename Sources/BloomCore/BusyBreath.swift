@@ -64,6 +64,28 @@ public enum BusyBreath {
         return 0
     }
 
+    /// What the mark holds at the bottom of the breath.
+    ///
+    /// Not nothing, for the reason `BusyDot` gives for its own floor: a glyph that reaches zero is
+    /// absent for part of every cycle, and a thirteen point symbol in a reading column is glanced
+    /// at rather than watched. A mark that disappears and comes back reads as a fault.
+    public static let restingOpacity = 0.45
+
+    /// The opacity a breathing mark is drawn at, at a fraction of the period.
+    ///
+    /// The envelope is here rather than at the mark for the reason the rest of this type is: the
+    /// retry glyph used to hold these two numbers itself, inside a `keyframeAnimator`, where
+    /// nothing could ask what they were.
+    public static func opacity(atPhase phase: Double) -> Double {
+        restingOpacity + (1 - restingOpacity) * value(atPhase: phase)
+    }
+
+    /// The opacities of one whole breath, for a `CAKeyframeAnimation` that interpolates between
+    /// them. The last repeats the first, so the animation closes on itself.
+    public static func opacitySamples(count: Int = 48) -> [Double] {
+        samples(count: count).map { restingOpacity + (1 - restingOpacity) * $0 }
+    }
+
     /// The breath sampled evenly across one period, for a keyframe animation.
     ///
     /// Sampled rather than expressed as four keyframes with timing functions, because the two eased

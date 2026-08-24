@@ -134,7 +134,7 @@ struct UserTurnRowView: View {
                 // nothing at all. See the note on that type.
                 TranscriptTextView(
                     text: TranscriptLink.attributedString(
-                        FileMention.segments(in: text),
+                        sent: text,
                         font: Typo.body.resolvedNSFont(scale: fontScale, face: chatFont),
                         // White, the same ink a selected row uses on the same fill. Measured 5.2
                         // to 1 on Spatie Blue, which passes AA for body text in both appearances.

@@ -63,11 +63,10 @@ struct PermissionSnapshotGallery: View {
     }
 
     private func toolRow(_ id: String, name: String, file: String) -> some View {
-        ToolRowView(
-            use: AgentToolUse(
-                id: id, name: name,
-                input: .object(["file_path": .string(file)])
-            ),
+        let use = AgentToolUse(id: id, name: name, input: .object(["file_path": .string(file)]))
+        return ToolRowView(
+            use: use,
+            presentation: TranscriptPresenter.present(use),
             workspace: workspace,
             result: nil,
             isError: false,
