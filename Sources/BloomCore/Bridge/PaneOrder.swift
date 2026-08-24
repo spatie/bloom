@@ -50,10 +50,28 @@ public struct PaneOrder: Sendable, Equatable {
     /// choice handed to the caller instead of decided for it.
     public var focus: Bool
 
-    public init(kind: PaneKind, url: String? = nil, focus: Bool = true) {
+    /// What the tab is called, or nothing for the name the strip hands out.
+    ///
+    /// A name is the difference between four tabs called Terminal and four a reader can tell
+    /// apart, and an agent opening one usually knows what it is for: it is opening it in order to
+    /// do something nameable. Optional because the strip's own numbering is right whenever
+    /// nothing better is known, and a tool that demanded a name would get one invented.
+    public var title: String?
+
+    public init(kind: PaneKind, url: String? = nil, focus: Bool = true, title: String? = nil) {
         self.kind = kind
         self.url = url
         self.focus = focus
+        self.title = title
+    }
+
+    /// A name somebody meant, or nothing.
+    ///
+    /// Trimmed, and empty is nothing rather than a tab with a blank name: a model passing "" is
+    /// saying it has no name to give, and the strip's own numbering is the answer to that.
+    public static func name(from raw: String?) -> String? {
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
     }
 
     /// The kinds named in a tool's description, in the order a reader meets them.
@@ -66,7 +84,11 @@ public struct PaneOrder: Sendable, Equatable {
     /// Every refusal names the argument and what would have worked. A model that is told "invalid
     /// input" tries the same thing again; one that is told which words are accepted picks one.
     public static func parse(
-        kind rawKind: String?, url rawURL: String?, focus rawFocus: JSONValue?, tool: String
+        kind rawKind: String?,
+        url rawURL: String?,
+        focus rawFocus: JSONValue?,
+        title rawTitle: String? = nil,
+        tool: String
     ) -> PaneOrderReading {
         guard let rawKind, !rawKind.trimmingCharacters(in: .whitespaces).isEmpty else {
             return .refused(
@@ -98,7 +120,12 @@ public struct PaneOrder: Sendable, Equatable {
         }
 
         return .order(
-            PaneOrder(kind: kind, url: url?.isEmpty == true ? nil : url, focus: focus)
+            PaneOrder(
+                kind: kind,
+                url: url?.isEmpty == true ? nil : url,
+                focus: focus,
+                title: name(from: rawTitle)
+            )
         )
     }
 
@@ -108,18 +135,19 @@ public struct PaneOrder: Sendable, Equatable {
     /// it has to carry the one thing the caller could not have known: whether the pane it asked
     /// for is the one now in front of the reader.
     public var confirmation: String {
-        let what = url.map { "\(kind.title) on \($0)" } ?? kind.title
+        let named = title.map { "\(kind.title) called '\($0)'" } ?? kind.title
+        let what = url.map { "\(named) on \($0)" } ?? named
         return focus
             ? "Opened \(what) and brought it to the front."
             : "Opened \(what) in the background. It is in the tab strip but the reader is still on what they were looking at."
     }
 }
 
-/// A refusal that travels as an `Error`, for the one place a `Result` is the natural shape.
+/// A refusal that travels as an `Error`, for the places a `Result` is the natural shape.
 ///
-/// `PaneSplitTool.axis` reads one word and either has an answer or does not, which is exactly what
-/// `Result` is for; everything else in this family refuses through `PaneOrderReading` or
-/// `PaneOutcome`, because those carry a success worth naming.
+/// `PaneSplitTool.axis` reads one word and either has an answer or does not, and `PaneRenameTool`
+/// reads two, which is exactly what `Result` is for; the tools themselves refuse through
+/// `PaneOrderReading` or `PaneOutcome`, because those carry a success worth naming.
 public struct PaneRefusal: Error, Sendable, Equatable {
     public let sentence: String
 

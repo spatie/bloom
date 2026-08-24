@@ -9,9 +9,10 @@ import Testing
 @Suite("Asking for a pane")
 struct PaneToolTests {
     private func read(
-        kind: String? = "terminal", url: String? = nil, focus: JSONValue? = nil
+        kind: String? = "terminal", url: String? = nil, focus: JSONValue? = nil,
+        title: String? = nil
     ) -> PaneOrderReading {
-        PaneOrder.parse(kind: kind, url: url, focus: focus, tool: "pane_open")
+        PaneOrder.parse(kind: kind, url: url, focus: focus, title: title, tool: "pane_open")
     }
 
     // MARK: - The kind
@@ -114,6 +115,105 @@ struct PaneToolTests {
         )
     }
 
+    // MARK: - The title
+
+    /// Four tabs called Terminal are four a reader cannot tell apart, so a name an agent knows has
+    /// to survive the wire rather than be dropped on the way in.
+    @Test("a name given for a tab arrives as the name of the tab")
+    func aTitleSurvives() {
+        #expect(
+            read(title: "Build log")
+                == .order(PaneOrder(kind: .terminal, title: "Build log"))
+        )
+        #expect(
+            read(title: "  Build log  ")
+                == .order(PaneOrder(kind: .terminal, title: "Build log"))
+        )
+    }
+
+    /// A model passing "" or a couple of spaces is saying it has no name to give. Writing that
+    /// down would leave a tab with a blank label, which is worse than the numbering it replaced.
+    @Test("a blank name is no name rather than a blank tab")
+    func aBlankTitleIsNoTitle() {
+        for blank in [nil, "", "   ", "\n"] as [String?] {
+            #expect(read(title: blank) == .order(PaneOrder(kind: .terminal)))
+        }
+    }
+
+    /// The confirmation is the only thing the model reads back, so a tab it named has to be named
+    /// there too: otherwise it cannot tell a name that took from one that was ignored.
+    @Test("what the model is told names the tab when there is a name")
+    func theConfirmationNamesTheTab() {
+        let named = PaneOrder(kind: .terminal, title: "Build log").confirmation
+        #expect(named.contains("'Build log'"))
+        // And says nothing about a name when there is none to say.
+        #expect(!PaneOrder(kind: .terminal).confirmation.contains("called"))
+    }
+
+    // MARK: - Renaming
+
+    /// A name is the one thing about a pane an agent can change after the fact, and most panes are
+    /// opened by the reader, so it cannot be an argument on opening alone.
+    @Test("a rename takes a name, and a kind is optional")
+    func aRenameTakesANameAndOptionallyAKind() throws {
+        #expect(
+            try PaneRenameTool.parse(title: "  Docs ", kind: nil).get()
+                == PaneRenameOrder(title: "Docs")
+        )
+        #expect(
+            try PaneRenameTool.parse(title: "Docs", kind: " browser ").get()
+                == PaneRenameOrder(title: "Docs", kind: .browser)
+        )
+    }
+
+    /// Refused rather than written. A tab with a blank label is one the reader cannot pick out and
+    /// cannot click to fix, and the refusal has to name the argument that was missing.
+    @Test("a rename with no name is refused rather than blanking the tab")
+    func aRenameNeedsAName() {
+        for blank in [nil, "", "   "] as [String?] {
+            guard case .failure(let refusal) = PaneRenameTool.parse(title: blank, kind: nil) else {
+                Issue.record("expected a refusal for \(String(describing: blank))"); return
+            }
+            #expect(refusal.sentence.contains("'title'"))
+        }
+    }
+
+    @Test("a rename of a kind that does not exist lists the ones that do")
+    func aRenameRefusesAnUnknownKind() {
+        guard case .failure(let refusal) = PaneRenameTool.parse(title: "Docs", kind: "editor")
+        else { Issue.record("expected a refusal"); return }
+        #expect(refusal.sentence.contains("'editor'"))
+        for kind in PaneKind.allCases {
+            #expect(refusal.sentence.contains("'\(kind.rawValue)'"))
+        }
+    }
+
+    /// The tab strip is what the reader navigates by, so a tool that renames one has to offer the
+    /// same "which pane" vocabulary closing does and no ids of its own.
+    @Test("renaming asks for a title and offers the kinds, and nothing else")
+    func renamingSpeaksTheSameVocabulary() {
+        let rename = PaneRenameTool { _, _, _ in .opened("") }
+        guard case .object(let schema) = rename.tool.inputSchema,
+              case .object(let properties)? = schema["properties"]
+        else { Issue.record("no schema"); return }
+        #expect(Set(properties.keys) == ["title", "kind"])
+        #expect(schema["required"] == .array([.string("title")]))
+    }
+
+    /// Every pane tool takes the title, so a name an agent has is one it can give at any of the
+    /// three moments rather than only when it happens to be opening something.
+    @Test("opening and splitting both accept a title")
+    func bothOpenersTakeATitle() {
+        for tool in [PaneOpenTool { _, _ in .opened("") }.tool,
+                     PaneSplitTool { _, _, _ in .opened("") }.tool] {
+            guard case .object(let schema) = tool.inputSchema,
+                  case .object(let properties)? = schema["properties"]
+            else { Issue.record("no schema for \(tool.name)"); return }
+            #expect(properties["title"] != nil)
+            #expect(tool.description.contains("title"))
+        }
+    }
+
     // MARK: - The direction of a split
 
     /// `horizontal` meaning side by side is the thing everyone reads backwards, so the wire says
@@ -139,12 +239,13 @@ struct PaneToolTests {
 
     /// A subagent opening tabs in its parent's window is a pane arriving from something the
     /// reader did not address.
-    @Test("a subagent cannot open, split or close panes")
+    @Test("a subagent cannot open, split, close or rename panes")
     func aChildCannotTouchPanes() {
         let open = PaneOpenTool { _, _ in .opened("") }
         let split = PaneSplitTool { _, _, _ in .opened("") }
         let close = PaneCloseTool { _, _ in .opened("") }
-        for roles in [open.roles, split.roles, close.roles] {
+        let rename = PaneRenameTool { _, _, _ in .opened("") }
+        for roles in [open.roles, split.roles, close.roles, rename.roles] {
             #expect(!roles.contains(.child))
             #expect(roles.contains(.parent))
             #expect(roles.contains(.owner))
@@ -172,6 +273,8 @@ struct PaneToolTests {
         #expect(BridgeToolApproval.selfApproved.contains("pane_open"))
         #expect(BridgeToolApproval.selfApproved.contains("pane_split"))
         #expect(BridgeToolApproval.selfApproved.contains("pane_close"))
+        // A name is undone by typing over it, which is a smaller thing again than closing.
+        #expect(BridgeToolApproval.selfApproved.contains("pane_rename"))
         // And the one that asks for a merge is deliberately not.
         #expect(!BridgeToolApproval.selfApproved.contains("workspace_merge"))
     }

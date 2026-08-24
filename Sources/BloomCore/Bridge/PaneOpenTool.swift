@@ -47,6 +47,8 @@ public struct PaneOpenTool: BridgeToolHandling {
             would be easier for them with the thing already open in front of them.
 
             'kind' is one of \(PaneOrder.kindList). 'url' is for a browser and is optional. \
+            'title' is what the tab is called and is optional: pass one when you know what the \
+            pane is for, because four tabs called Terminal are four a reader cannot tell apart. \
             'focus' decides whether the new tab is brought to the front, and defaults to true: \
             pass false when you are opening something to be useful later and the reader is in the \
             middle of something now.
@@ -65,6 +67,12 @@ public struct PaneOpenTool: BridgeToolHandling {
                 "url": .object([
                     "type": .string("string"),
                     "description": .string("Where a browser pane should start. Browser only."),
+                ]),
+                "title": .object([
+                    "type": .string("string"),
+                    "description": .string(
+                        "What to call the tab. Leave it out for the strip's own numbering."
+                    ),
                 ]),
                 "focus": .object([
                     "type": .string("boolean"),
@@ -92,6 +100,7 @@ public struct PaneOpenTool: BridgeToolHandling {
             kind: request.stringParam("kind"),
             url: request.stringParam("url"),
             focus: request.param("focus"),
+            title: request.stringParam("title"),
             tool: "pane_open"
         ) {
         case .refused(let refusal):

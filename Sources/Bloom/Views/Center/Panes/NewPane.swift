@@ -26,28 +26,36 @@ enum NewPane {
     /// a split has nowhere in particular to go: the address field is where somebody says. The
     /// strip's `+` passes the workspace's own dev server, which is what its setup and run scripts
     /// were told to bind.
+    ///
+    /// `title` is nothing for every menu that calls this, and something only when a caller knows
+    /// what the pane is for: `pane_open` and `pane_split` carry the name an agent gave, because
+    /// four tabs called Terminal are four a reader cannot tell apart. Nil takes the numbering each
+    /// kind has always had, so no menu changed when this argument arrived.
     static func open(
         _ kind: PaneKind,
         in model: WorkspaceModel,
         url: String = "",
+        title: String? = nil,
         place: @escaping @MainActor (PaneContent) -> Void
     ) {
         switch kind {
         case .chat:
             Task {
-                guard let session = await model.createSession() else { return }
+                guard let session = await model.createSession(title: title) else { return }
                 place(.chat(session.id))
             }
 
         // The shell itself is not started here. `ToolPaneView` settles the environment and the
         // port first, because both are baked into the process the moment it is forked.
         case .terminal:
-            let tab = CenterTabStore.shared.add(kind: .terminal, workspaceID: model.workspace.id)
+            let tab = CenterTabStore.shared.add(
+                kind: .terminal, workspaceID: model.workspace.id, title: title
+            )
             place(.tool(tab.id))
 
         case .browser:
             let tab = CenterTabStore.shared.add(
-                kind: .browser, workspaceID: model.workspace.id, url: url
+                kind: .browser, workspaceID: model.workspace.id, url: url, title: title
             )
             place(.tool(tab.id))
         }

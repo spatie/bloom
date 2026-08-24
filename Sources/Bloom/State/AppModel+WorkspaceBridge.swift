@@ -53,6 +53,10 @@ extension AppModel {
                 guard let self else { return .refused("Bloom is still starting up.") }
                 return await self.closePaneForBridge(kind, in: workspaceID)
             },
+            PaneRenameTool { [weak self] title, kind, workspaceID in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return await self.renamePaneForBridge(title, kind: kind, in: workspaceID)
+            },
             WorkspaceMergeTool { [weak self] workspace, pullRequest, method in
                 guard let self else {
                     return .refused("Bloom is still starting up. Try again in a moment.")
@@ -154,7 +158,7 @@ extension AppModel {
     func openPaneForBridge(_ order: PaneOrder, in workspaceID: WorkspaceID) async -> PaneOutcome {
         guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForPane) }
         let tabs = WorkspaceTabsStore.shared
-        NewPane.open(order.kind, in: model, url: order.url ?? "") { content in
+        NewPane.open(order.kind, in: model, url: order.url ?? "", title: order.title) { content in
             // Placed either way, and selected only when asked. A pane opened in the background is
             // still in the strip, which is the whole point of being able to ask for one: the
             // agent has put it within reach without taking the reader out of what they are doing.
@@ -182,11 +186,36 @@ extension AppModel {
                 "There is no tab open in that workspace to split. Use pane_open instead."
             )
         }
-        NewPane.open(order.kind, in: model, url: order.url ?? "") { content in
+        NewPane.open(order.kind, in: model, url: order.url ?? "", title: order.title) { content in
             tabs.split(tab: tab, axis: axis, showing: content)
         }
         let where_ = axis == .horizontal ? "beside" : "below"
         return .opened("Opened \(order.kind.title) \(where_) what was already on screen.")
+    }
+
+    /// Which pane of the tab in front a kind names, or the sentence saying why none does.
+    ///
+    /// One copy for `pane_close` and `pane_rename` rather than two, because both ask the same
+    /// question of the same layout and a second reading is how they would come to disagree about
+    /// what "the browser" means. `verb` is the only thing that differs, and it is in the refusal
+    /// because a model told "nothing was closed" after asking for a rename learns the wrong thing.
+    private func paneForBridge(
+        _ kind: PaneKind?, in tab: PaneContent, of workspaceID: WorkspaceID, verb: String
+    ) -> Result<String, PaneRefusal> {
+        let tabs = WorkspaceTabsStore.shared
+        guard let kind else { return .success(tabs.focusedPane(of: tab)) }
+        let found = tabs.layout(of: tab).panes.first {
+            paneKind(of: tabs.content(of: $0, in: tab), in: workspaceID) == kind
+        }
+        guard let found else {
+            return .failure(
+                PaneRefusal(
+                    "There is no \(kind.title.lowercased()) open in the tab in front. Nothing was "
+                        + verb + "."
+                )
+            )
+        }
+        return .success(found)
     }
 
     /// `pane_close`, through the same surgery the pane's own close control uses.
@@ -202,21 +231,11 @@ extension AppModel {
         }
 
         let layout = tabs.layout(of: tab)
-        let pane: String?
-        if let kind {
-            pane = layout.panes.first {
-                paneKind(of: tabs.content(of: $0, in: tab), in: model.workspace.id) == kind
-            }
-            guard pane != nil else {
-                return .refused(
-                    "There is no \(kind.title.lowercased()) open in the tab in front. Nothing was "
-                        + "closed."
-                )
-            }
-        } else {
-            pane = tabs.focusedPane(of: tab)
+        let pane: String
+        switch paneForBridge(kind, in: tab, of: model.workspace.id, verb: "closed") {
+        case .failure(let refusal): return .refused(refusal.sentence)
+        case .success(let found): pane = found
         }
-        guard let pane else { return .refused("There is nothing there to close.") }
 
         // The last one standing stays. A centre column with nothing in it is a window that looks
         // broken, and an agent tidying up after itself must not be able to produce one.
@@ -231,6 +250,55 @@ extension AppModel {
             return .refused("Bloom could not close that pane.")
         }
         return .opened(kind.map { "Closed the \($0.title.lowercased())." } ?? "Closed that pane.")
+    }
+
+    /// `pane_rename`, writing the name to whichever of the two places a pane's name lives in.
+    ///
+    /// There is no one place, and that is the whole of this function. A terminal and a browser are
+    /// `CenterTab` rows, renamed through the store the strip's own double click renames through,
+    /// which also settles that a browser page may not rename it back. A chat is a `Session` row in
+    /// SQLite, and its rename is `SessionTabsView.commitRename` copied deliberately rather than
+    /// re-derived: the list is corrected in place so the strip redraws at once, and the write is
+    /// `updateSessionPreferences` and its title alone, because a running agent has been writing
+    /// its own columns into that row and a whole-value write would carry them back.
+    func renamePaneForBridge(
+        _ title: String, kind: PaneKind?, in workspaceID: WorkspaceID
+    ) async -> PaneOutcome {
+        guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForPane) }
+        let tabs = WorkspaceTabsStore.shared
+        guard let tab = tabs.selectedTab(in: model) else {
+            return .refused("There is nothing open in that workspace to rename.")
+        }
+
+        let pane: String
+        switch paneForBridge(kind, in: tab, of: model.workspace.id, verb: "renamed") {
+        case .failure(let refusal): return .refused(refusal.sentence)
+        case .success(let found): pane = found
+        }
+
+        switch tabs.content(of: pane, in: tab) {
+        case .tool(let id):
+            let centre = CenterTabStore.shared
+            guard let target = centre.tabs(for: workspaceID).first(where: { $0.id == id }) else {
+                return .refused("That pane is not in the strip any more, so it was not renamed.")
+            }
+            centre.rename(target, to: title)
+
+        case .chat(let sessionID):
+            guard let store,
+                  let session = model.sessions.first(where: { $0.id == sessionID })
+            else {
+                return .refused("That chat is not open any more, so it was not renamed.")
+            }
+            let updated = session.with { $0.title = title }
+            if let index = model.sessions.firstIndex(where: { $0.id == session.id }) {
+                model.sessions[index] = updated
+            }
+            try? await store.updateSessionPreferences(id: session.id, title: title)
+            await model.reloadSessions()
+        }
+
+        return .opened("Renamed that pane to '\(title)'.")
     }
 
     /// What a pane is showing, as one of the three kinds a tool may name.

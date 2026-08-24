@@ -46,8 +46,8 @@ public struct PaneSplitTool: BridgeToolHandling {
             the diff it is about, and `pane_open` when they are not.
 
             'kind' is one of \(PaneOrder.kindList). 'url' is for a browser and is optional. \
-            'direction' is 'beside' to put the new pane on the right, or 'below' to stack it \
-            under; it defaults to 'beside'.
+            'title' is what the tab is called and is optional. 'direction' is 'beside' to put \
+            the new pane on the right, or 'below' to stack it under; it defaults to 'beside'.
 
             It splits the tab in your own workspace and takes no workspace argument. It can be \
             refused: there has to be a tab open, and some panes a workspace has only one of \
@@ -64,6 +64,12 @@ public struct PaneSplitTool: BridgeToolHandling {
                 "url": .object([
                     "type": .string("string"),
                     "description": .string("Where a browser pane should start. Browser only."),
+                ]),
+                "title": .object([
+                    "type": .string("string"),
+                    "description": .string(
+                        "What to call the tab. Leave it out for the strip's own numbering."
+                    ),
                 ]),
                 "direction": .object([
                     "type": .string("string"),
@@ -106,6 +112,7 @@ public struct PaneSplitTool: BridgeToolHandling {
             kind: request.stringParam("kind"),
             url: request.stringParam("url"),
             focus: JSONValue?.none,
+            title: request.stringParam("title"),
             tool: "pane_split"
         ) {
         case .refused(let refusal):

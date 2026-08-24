@@ -108,8 +108,12 @@ final class CenterTabStore {
     }
 
     /// `title` is only passed by a caller that has a better name than "Terminal 3", which today
-    /// means a run script opening a shell called after itself. Everything else takes the numbered
-    /// name the strip has always given a new tab.
+    /// means a run script opening a shell called after itself, or an agent naming the pane it is
+    /// opening. Everything else takes the numbered name the strip has always given a new tab.
+    ///
+    /// A title given here is a named tab, which matters for exactly one kind: a browser's name is
+    /// otherwise the page's, so `pane_open` asking for a browser called "Docs" would have watched
+    /// the first page it loaded rename it. See `CenterTab.isNamed` and `BrowserTabTitle`.
     @discardableResult
     func add(
         kind: CenterTab.Kind, workspaceID: WorkspaceID, url: String = "", title: String? = nil
@@ -119,7 +123,8 @@ final class CenterTabStore {
             workspaceID: workspaceID,
             kind: kind,
             title: title ?? Self.nextTitle(for: kind, in: tabs),
-            url: url
+            url: url,
+            isNamed: title != nil
         )
         tabs.append(tab)
         apply(tabs, to: workspaceID)
