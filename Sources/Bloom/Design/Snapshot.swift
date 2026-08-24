@@ -974,6 +974,9 @@ enum Snapshot {
             ("components", AnyView(ComponentGallery().frame(width: 640, height: 700)), CGSize(width: 640, height: 700)),
             ("permission", AnyView(PermissionSnapshotGallery().frame(width: 720, height: 1560)), CGSize(width: 720, height: 1560)),
             ("tool-rows", AnyView(ToolRowSnapshotGallery().frame(width: 800, height: 720)), CGSize(width: 800, height: 720)),
+            // Offscreen rather than through a window: no `CheckRunRow` holds a representable, so
+            // `ImageRenderer` draws the real column here.
+            ("check-runs", AnyView(CheckRunSnapshotGallery()), CGSize(width: 420, height: 1000)),
             // Offscreen as well as through the window path, which the two pages above cannot be:
             // the one representable on this page draws a plain shape when it is held still,
             // precisely so this scene is a photograph of the row rather than of a placeholder.

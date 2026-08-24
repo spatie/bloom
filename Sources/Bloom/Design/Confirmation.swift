@@ -239,10 +239,20 @@ enum ConfirmationTone: Sendable {
     /// workflow.
     case completing
 
+    /// Green for completing, and it was purple until the owner reported it from a screenshot.
+    ///
+    /// `Palette.merged` is the colour of a pull request that HAS merged, in this app and on GitHub
+    /// and in Conductor. On the button that has not merged anything yet it named the state rather
+    /// than the action, so the dialog asking whether to land the branch was already wearing the
+    /// answer. `Palette.positive` is the app's one green, the same value a passed check is drawn
+    /// in, and green on a merge button is what every tool this one sits beside does.
+    ///
+    /// No green of its own: the ramp is explicit that this app does not get a second one, and
+    /// `positive` is the accent for exactly that reason.
     var color: Color {
         switch self {
         case .destructive: Palette.negative
-        case .completing: Palette.merged
+        case .completing: Palette.positive
         }
     }
 }

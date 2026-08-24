@@ -108,38 +108,39 @@ struct CheckRunRow: View {
     /// Every state occupies the same box, so a list of mixed results does not shuffle its names
     /// sideways as runs finish.
     ///
-    /// Six states, six shapes. Queued and running are both amber, because the strip above the
-    /// list rolls both of them up into one amber "checks pending" and a row that argued with it
-    /// would be noise. They are told apart the way every other glyph column in this window is
-    /// told apart, by shape: a clock for a job nobody has picked up, and a ring for one a runner
-    /// is executing. That holds under Reduce Motion, where the ring stops and the shapes are all
-    /// that is left.
+    /// Six states, six shapes, and the shapes live in `CheckState` rather than here: see
+    /// `CheckState.symbolName` for why that mapping is a decision the suite holds rather than one
+    /// this view takes. Queued and running are both amber, because the strip above the list rolls
+    /// both of them up into one amber "checks pending" and a row that argued with it would be
+    /// noise. They are told apart the way every other glyph column in this window is told apart,
+    /// by shape: a clock for a job nobody has picked up, and a filled disc for one a runner is
+    /// executing.
+    ///
+    /// Nothing here moves any more. The running mark used to be a dashed ring turning once every
+    /// three seconds, and the turn was never what made it findable: the dashes were, and there
+    /// were not enough of them. A mark with the same ink as the tick beside it is found without
+    /// motion, which is also what GitHub draws, so Reduce Motion now has nothing to switch off and
+    /// the render server has nothing to composite for a branch with seven checks in flight.
     private var glyph: some View {
-        Group {
-            switch CheckState(run) {
-            case .queued:
-                Image(systemName: "clock")
-                    .foregroundStyle(tint(Palette.warning))
-            case .running:
-                RunningRing(tint: tint(Palette.warning))
-            case .passed:
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(tint(Palette.positive))
-            case .failed:
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(tint(Palette.negative))
-            case .skipped:
-                Image(systemName: "minus.circle")
-                    .foregroundStyle(tint(Palette.textTertiary))
-            case .neutral:
-                Image(systemName: "circle")
-                    .foregroundStyle(tint(Palette.textTertiary))
-            }
+        let state = CheckState(run)
+        return Image(systemName: state.symbolName)
+            .foregroundStyle(tint(ink(for: state)))
+            .font(Typo.label)
+            .imageScale(.medium)
+            .frame(width: InspectorLayout.glyphWidth, height: InspectorLayout.glyphWidth, alignment: .leading)
+            .accessibilityLabel(state.description)
+    }
+
+    /// What each state is drawn in. The colour stays with the drawing, where `TurnEnding` leaves
+    /// it: it is the shape that has to be right about all six at once, and that is next door in
+    /// the core.
+    private func ink(for state: CheckState) -> Color {
+        switch state {
+        case .queued, .running: Palette.warning
+        case .passed: Palette.positive
+        case .failed: Palette.negative
+        case .skipped, .neutral: Palette.textTertiary
         }
-        .font(Typo.label)
-        .imageScale(.medium)
-        .frame(width: InspectorLayout.glyphWidth, height: InspectorLayout.glyphWidth, alignment: .leading)
-        .accessibilityLabel(CheckState(run).description)
     }
 
     /// A pass/fail colour is unreadable on the accent fill, so a selected row hands the meaning
@@ -162,49 +163,5 @@ struct CheckRunRow: View {
     private func open() {
         guard let url = run.detailsURL else { return }
         GitHubBridge.open(url)
-    }
-}
-
-/// The mark beside a check a runner is executing: a dashed ring, turning once every three seconds.
-///
-/// A ring rather than a `ProgressView`, which is what used to be here. A spinner is the shape this
-/// app uses for one thing it is waiting on: a sheet, a workspace being set up, an attachment. A
-/// branch routinely has seven checks in flight at once, and seven spinners in a 380 point column
-/// is a machine room, not a list. GitHub draws the same event as a slowly turning dashed circle
-/// for the same reason, and at three seconds a turn it reads as texture rather than as motion.
-///
-/// It costs nothing per frame. `rotationEffect` under a `repeatForever` animation is handed to
-/// Core Animation once and interpolated by the render server, so the main thread evaluates this
-/// body exactly twice in the life of a check: once when it appears and once when it finishes. The
-/// list is lazy, so a row scrolled out of view is torn down and its animation with it, and the
-/// tab only polls while it is on screen, so a pane nobody is looking at holds nothing at all.
-private struct RunningRing: View {
-    var tint: Color
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.controlActiveState) private var activeState
-
-    @State private var turned = false
-
-    /// Reduce Motion drops the turn rather than slowing it, which is what `ActivityDot` and the
-    /// pane animations do. Nothing is lost: the ring is still a ring, and it is still the only
-    /// amber shape in the column that is not a clock.
-    ///
-    /// It also stops when the window is not the front one. A check that runs for twenty minutes
-    /// behind a browser is twenty minutes of the render server compositing a ring nobody is
-    /// reading, and the state is unchanged when the window comes back.
-    private var isTurning: Bool {
-        turned && !reduceMotion && activeState != .inactive
-    }
-
-    var body: some View {
-        Image(systemName: "circle.dashed")
-            .foregroundStyle(tint)
-            .rotationEffect(.degrees(isTurning ? 360 : 0))
-            .animation(
-                isTurning ? .linear(duration: 3).repeatForever(autoreverses: false) : .default,
-                value: isTurning
-            )
-            .onAppear { turned = true }
     }
 }
