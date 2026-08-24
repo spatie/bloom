@@ -48,4 +48,46 @@ public enum WorkspaceStartPlan {
         if let userSuppliedBranch, !userSuppliedBranch.isEmpty { return userSuppliedBranch }
         return claimedSea
     }
+
+    // MARK: - Crossing between the two modes
+
+    /// What the terminal mode's name field carries over when the sheet leaves chat mode.
+    ///
+    /// This is the whole question the two-button sheet answered silently. Pressing "Just a
+    /// terminal" with a sentence in the box did use that sentence: `Git.title(from:)` cut its
+    /// first line down to a name, `Git.slug` made the branch out of it, and nothing said so. So
+    /// the crossing does exactly what the create was always going to do, and puts the answer in an
+    /// editable field where it can be read and disagreed with before anything is cut.
+    ///
+    /// A name already in the field wins. A mode switch may not overwrite something somebody typed
+    /// on purpose, and an empty field has nothing to lose, so no "has been edited" flag is needed
+    /// to tell the two apart. Going back and forth therefore keeps the first crossing's answer
+    /// rather than re-deriving it from a sentence that has since grown, which is the safer of the
+    /// two wrong answers: the field is on screen and one keystroke from being fixed.
+    ///
+    /// An empty prompt carries an empty name, rather than `Git.title`'s "New workspace". Empty is
+    /// what claims a sea, and a sea is a better name than "New workspace" by some distance.
+    public static func carriedName(prompt: String, currentName: String) -> String {
+        guard currentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return currentName
+        }
+        let spoken = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !spoken.isEmpty else { return "" }
+        return Git.title(from: spoken)
+    }
+
+    /// And what the prompt carries back when the sheet returns to chat mode.
+    ///
+    /// The mirror of the rule above, and it exists because the sheet now OPENS in terminal mode
+    /// for anybody who was last there. Somebody who types a sentence into the name field and then
+    /// realises they wanted an agent after all must not have to type it twice: that is the same
+    /// silent discard, pointing the other way.
+    ///
+    /// The draft in the box wins where there is one, for the same reason a typed name does above.
+    public static func carriedPrompt(name: String, currentPrompt: String) -> String {
+        guard currentPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return currentPrompt
+        }
+        return name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }

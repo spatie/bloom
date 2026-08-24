@@ -1388,18 +1388,31 @@ final class AppModel {
             self.notice = BloomNotice(message: notice)
         }
 
-        // The agent gets the sentence as it was written, files and all, because the paths in it
-        // are already the paths those files have in the worktree: staging lays a draft out under
-        // exactly the layout it will have here, so this is a move and nothing has to be rewritten.
-        // What is taken out is anything that failed to arrive, which is a path to nothing and
-        // worse than one file fewer.
-        var opening: String? = opensWith == .chat ? prompt : nil
-        if opensWith == .chat, let staged, !staged.attachments.isEmpty {
-            let moved = Set(
+        // The files come across whichever mode asked for the workspace.
+        //
+        // This used to be inside the `.chat` branch below, so a workspace opened as a terminal
+        // dropped every staged file on the floor: nothing moved them into the worktree, and
+        // `AttachmentStaging.discard` deleted them a moment later. Nothing said so, and the chips
+        // had already gone with the sheet. A screenshot somebody dragged in is a file they wanted
+        // in the worktree, and the shell they are about to get is standing in that worktree, so
+        // the honest answer is to carry it rather than to announce a deletion.
+        var moved: Set<String> = []
+        if let staged, !staged.attachments.isEmpty {
+            moved = Set(
                 AttachmentFiles
                     .adopt(staged.attachments, from: staged.directory, into: started.workspace.path)
                     .map(\.path)
             )
+        }
+
+        // The agent gets the sentence as it was written, files and all, because the paths in it
+        // are already the paths those files have in the worktree: staging lays a draft out under
+        // exactly the layout it will have here, so this is a move and nothing has to be rewritten.
+        // What is taken out is anything that failed to arrive, which is a path to nothing and
+        // worse than one file fewer. Only this half is a chat's: a terminal workspace has no turn
+        // to put a sentence in, which is the whole of the difference between the two.
+        var opening: String? = opensWith == .chat ? prompt : nil
+        if opensWith == .chat, let staged, !moved.isEmpty {
             opening = AttachmentDraft
                 .parse(prompt, paths: staged.attachments.map(\.path))
                 .keeping { moved.contains($0) }

@@ -90,3 +90,110 @@ struct WorkspaceStartPlanTests {
         ) == nil)
     }
 }
+
+/// What survives a person changing their mind about which of the two things they are doing.
+///
+/// The whole reason the create sheet chooses a mode first is that the two-button version could
+/// take a sentence, name a workspace after it and never say so. Choosing first removes the input,
+/// which only helps if what was written comes with it.
+@Suite("Crossing between chat and terminal")
+struct WorkspaceModeCrossingTests {
+    @Test("a sentence becomes the name it was always going to become")
+    func sentenceBecomesTheName() {
+        #expect(WorkspaceStartPlan.carriedName(
+            prompt: "Fix the flaky worktree test", currentName: ""
+        ) == "Fix the flaky worktree test")
+    }
+
+    /// The same cut `Git.title` makes, because the crossing has to promise what the create will
+    /// actually do rather than something close to it.
+    @Test("a long sentence is cut where the name would have been cut")
+    func longSentenceIsCut() {
+        let prompt = String(repeating: "alpha ", count: 40)
+        #expect(WorkspaceStartPlan.carriedName(prompt: prompt, currentName: "")
+                == Git.title(from: prompt))
+    }
+
+    @Test("only the first line, because that is what names a workspace")
+    func firstLineOnly() {
+        #expect(WorkspaceStartPlan.carriedName(
+            prompt: "Rebase onto main\n\nThen fix the conflicts", currentName: ""
+        ) == "Rebase onto main")
+    }
+
+    /// A name somebody typed is not a draft to be improved on. The mode is switched by a click,
+    /// and a click may not overwrite words.
+    @Test("a name already typed is never overwritten")
+    func typedNameWins() {
+        #expect(WorkspaceStartPlan.carriedName(
+            prompt: "Fix the flaky worktree test", currentName: "spike"
+        ) == "spike")
+    }
+
+    /// Empty is what claims a sea, and a sea is a better name than "New workspace", which is what
+    /// `Git.title` answers for an empty prompt.
+    @Test("an empty box carries an empty name, not a placeholder")
+    func emptyStaysEmpty() {
+        #expect(WorkspaceStartPlan.carriedName(prompt: "", currentName: "").isEmpty)
+        #expect(WorkspaceStartPlan.carriedName(prompt: "  \n\t ", currentName: "").isEmpty)
+    }
+
+    /// The sheet opens on whichever mode was used last, so somebody can now type a sentence into
+    /// the name field and only then realise they wanted an agent. That is the same silent discard
+    /// pointing the other way.
+    @Test("a name typed in terminal mode comes back as the prompt")
+    func nameComesBack() {
+        #expect(WorkspaceStartPlan.carriedPrompt(
+            name: "Fix the flaky worktree test", currentPrompt: ""
+        ) == "Fix the flaky worktree test")
+    }
+
+    @Test("a draft already in the box wins")
+    func draftWins() {
+        #expect(WorkspaceStartPlan.carriedPrompt(
+            name: "spike", currentPrompt: "Rebase onto main"
+        ) == "Rebase onto main")
+    }
+
+    /// Both directions in turn, because the control is a segmented picker and somebody will click
+    /// it four times before deciding. Nothing may be lost or invented on the way round.
+    @Test("a round trip loses nothing and invents nothing")
+    func roundTrip() {
+        let written = "Fix the flaky worktree test"
+        let name = WorkspaceStartPlan.carriedName(prompt: written, currentName: "")
+        // The box is not cleared on the way out, so the sentence is still there to win coming back.
+        #expect(WorkspaceStartPlan.carriedPrompt(name: name, currentPrompt: written) == written)
+    }
+}
+
+@Suite("What the create sheet opens on")
+struct WorkspaceStartModeTests {
+    /// Nineteen creations out of twenty are chats, and somebody who has not chosen yet can back
+    /// out of chat mode by simply typing.
+    @Test("a fresh install opens on chat")
+    func freshInstallIsChat() {
+        #expect(WorkspaceStartMode.remembered(raw: nil) == .chat)
+    }
+
+    @Test("the last choice is what it opens on")
+    func lastChoiceWins() {
+        #expect(WorkspaceStartMode.remembered(raw: "terminal") == .terminal)
+        #expect(WorkspaceStartMode.remembered(raw: "chat") == .chat)
+    }
+
+    /// A value written by a future version, or a key somebody cleared by hand. Neither is worth an
+    /// empty sheet.
+    @Test("anything unreadable is a fresh install")
+    func unreadableIsFresh() {
+        #expect(WorkspaceStartMode.remembered(raw: "shell") == .chat)
+        #expect(WorkspaceStartMode.remembered(raw: "") == .chat)
+    }
+
+    /// The one question the rest of the sheet is downstream of: the model, the effort, the output
+    /// style, the permission mode and the paperclip all qualify a turn, and only one mode has one.
+    @Test("only a chat runs an agent")
+    func onlyChatRunsAnAgent() {
+        #expect(WorkspaceStartMode.chat.runsAnAgent)
+        #expect(!WorkspaceStartMode.terminal.runsAnAgent)
+    }
+}

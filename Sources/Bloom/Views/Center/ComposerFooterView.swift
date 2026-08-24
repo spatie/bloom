@@ -33,10 +33,6 @@ struct ComposerFooterView: View {
     /// one control on the row that still does something.
     var showsAgentControls: Bool = true
 
-    /// A second action beside the primary button, or nothing. Only the create sheet passes one.
-    /// See `ComposerSecondaryAction`.
-    var secondary: ComposerSecondaryAction?
-
     /// Model and effort ids this footer has been set to that are not on the built-in lists, kept
     /// so the menu can offer the way back. See `ComposerOption.adding`.
     ///
@@ -184,12 +180,6 @@ struct ComposerFooterView: View {
             // one that keeps the end of the row in every state.
             if isRunning {
                 ComposerStopButton(onStop: onStop)
-            }
-
-            // Before the primary, never after it. The last control in the row is the one the hand
-            // goes to without looking, and that has to stay the ordinary answer.
-            if let secondary {
-                ComposerSecondaryButton(action: secondary)
             }
 
             ComposerSendButton(
