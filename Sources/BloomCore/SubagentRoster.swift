@@ -28,6 +28,10 @@ public struct Subagent: Sendable, Hashable, Identifiable {
     /// The API refusing it, while it is being refused. Cleared by the first tick that does not
     /// carry one, because a retry that succeeded is not a fact about the subagent any more.
     public private(set) var retry: AgentRetry?
+    /// When it stopped running, which is what `SubagentRetention` counts the hold from. Nil while
+    /// it is still going. Wall clock rather than the elapsed seconds the CLI reports, because the
+    /// question is how long the ROW has been on screen and the CLI's counter is about the work.
+    public private(set) var finishedAt: Date?
 
     init(_ start: SubagentStart) {
         id = start.id
@@ -54,7 +58,8 @@ public struct Subagent: Sendable, Hashable, Identifiable {
         summary: String = "",
         outputFile: String? = nil,
         elapsedSeconds: Int = 0,
-        retry: AgentRetry? = nil
+        retry: AgentRetry? = nil,
+        finishedAt: Date? = nil
     ) {
         self.id = id
         self.toolUseID = toolUseID
@@ -69,6 +74,7 @@ public struct Subagent: Sendable, Hashable, Identifiable {
         self.outputFile = outputFile
         self.elapsedSeconds = elapsedSeconds
         self.retry = retry
+        self.finishedAt = finishedAt
     }
 
     /// An agent, or a shell command the CLI put in the background. Read off `task_type`.
@@ -81,8 +87,11 @@ public struct Subagent: Sendable, Hashable, Identifiable {
     /// empty for `local_bash` in the same captures where it is an absolute path for `local_agent`.
     public var hasOutput: Bool { !(outputFile ?? "").isEmpty }
 
-    fileprivate mutating func move(to state: SubagentState) {
+    fileprivate mutating func move(to state: SubagentState, at now: Date) {
         self.state = state
+        // Only the first ending is timed. Two lines report one ending and the second must not
+        // restart the hold, which would be a row that stayed twice as long as any other.
+        if finishedAt == nil { finishedAt = now }
         // A finished subagent stops counting. The last tick before the ending is the honest
         // elapsed time and the row keeps it, but nothing arrives to raise it again and a row
         // that kept ticking would be inventing seconds.
@@ -111,12 +120,15 @@ public struct Subagent: Sendable, Hashable, Identifiable {
 /// Every subagent this turn has spawned, in the order they were spawned, for the length of the
 /// turn and no longer.
 ///
-/// **The clearing rule, which is the whole shape of the thing.** A row appears on `task_started`,
-/// stays through its ending carrying a tick or a cross and what it answered, and is removed when
-/// the NEXT turn starts. Not when it finishes, which is the option that photographs well and is
-/// unusable: three rows that vanish one by one while you are reading them take everything below
-/// them up the pane with each. Not for ever, either, because then the sidebar accumulates a
+/// **The clearing rule, which is the backstop.** A row appears on `task_started` and is removed at
+/// the latest when the NEXT turn starts. Not for ever, because then the sidebar accumulates a
 /// morning's worth of dead work under every workspace.
+///
+/// Most rows go sooner than that: a tick is held briefly and then leaves, and only a failure, or a
+/// row somebody has opened, stays for the whole turn. That is `SubagentRetention`'s to decide and
+/// not this type's, which holds every subagent the turn spawned whether or not it still has a row.
+/// The roster is also what the output pane reads, so a subagent whose row has gone is still there
+/// to be shown.
 ///
 /// **Nothing here is stored.** `Store`'s rule is that `upsert` creates and `update` modifies, and
 /// the question in front of it is whether a subagent should have a row at all. It should not. The
@@ -159,7 +171,8 @@ public struct SubagentRoster: Sendable, Hashable {
     /// to summarise the children it is drawing.
     public var isWorking: Bool { subagents.contains { $0.state == .running } }
 
-    /// The next turn has started, so the last turn's children go.
+    /// The next turn has started, so the last turn's children go, rows and all. The backstop
+    /// under `SubagentRetention`, and the only thing that clears a failure.
     public mutating func turnStarted() {
         subagents = []
         byToolUse = [:]
@@ -171,14 +184,18 @@ public struct SubagentRoster: Sendable, Hashable {
     /// Sent on the result line rather than inferred, because the process that would have reported
     /// these endings is the one that just went away: without this a subagent whose notification
     /// was lost breathes on the row until the owner sends the next message.
-    public mutating func turnEnded() {
+    public mutating func turnEnded(now: Date = Date()) {
         for index in subagents.indices {
-            apply(.turnEnded, at: index)
+            apply(.turnEnded, at: index, now: now)
         }
     }
 
     /// Read one line about a subagent.
-    public mutating func apply(_ signal: SubagentSignal) {
+    ///
+    /// - Parameter now: when the line arrived, which is what a row's hold is counted from. A
+    ///   parameter rather than a `Date()` inside, so a test can put a row past its hold without
+    ///   sleeping through it.
+    public mutating func apply(_ signal: SubagentSignal, now: Date = Date()) {
         switch signal {
         case .started(let start):
             guard let index = subagents.firstIndex(where: { $0.id == start.id }) else {
@@ -186,7 +203,7 @@ public struct SubagentRoster: Sendable, Hashable {
                 if !start.toolUseID.isEmpty { byToolUse[start.toolUseID] = start.id }
                 return
             }
-            apply(.spawned, at: index)
+            apply(.spawned, at: index, now: now)
 
         case .progressed(let progress):
             guard let id = byToolUse[progress.parentToolUseID],
@@ -202,20 +219,20 @@ public struct SubagentRoster: Sendable, Hashable {
             // first and overwritten by the summary if one comes.
             subagents[index].note(summary: patch.error ?? "")
             guard let status = patch.status else { return }
-            apply(.reported(status: status), at: index)
+            apply(.reported(status: status), at: index, now: now)
 
         case .reported(let report):
             guard let index = subagents.firstIndex(where: { $0.id == report.id }) else { return }
             subagents[index].note(summary: report.summary)
             subagents[index].note(outputFile: report.outputFile)
-            apply(.reported(status: report.status), at: index)
+            apply(.reported(status: report.status), at: index, now: now)
         }
     }
 
-    private mutating func apply(_ event: SubagentLifecycleEvent, at index: Int) {
+    private mutating func apply(_ event: SubagentLifecycleEvent, at index: Int, now: Date) {
         let transition = subagents[index].state.transition(on: event)
         if let destination = transition.destination {
-            subagents[index].move(to: destination)
+            subagents[index].move(to: destination, at: now)
         } else if transition.isRefused {
             refusals += 1
         }

@@ -58,7 +58,11 @@ public struct SubagentRow: Sendable, Hashable, Identifiable {
     /// summary always is.
     static let detailLimit = 28
 
-    /// Build the rows for a whole roster, in the order they are drawn.
+    /// Build a row for every subagent in a roster, in the order they are drawn.
+    ///
+    /// Every one of them, which is what a gallery and a test want. The pane does not draw every
+    /// one: which of them still has a row depends on the clock and on what is open, and that is
+    /// `SubagentRetention.rows`.
     ///
     /// **Depth greater than one is drawn flat**, at the same indent as depth one, rather than
     /// nested a level further. A fourth outline level in a 260 point pane leaves a name six

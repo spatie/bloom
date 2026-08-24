@@ -45,6 +45,9 @@ struct WorkspaceRow: View {
     var onArchive: (Workspace) -> Void
 
     @Environment(AppModel.self) private var app
+
+    /// How many of this turn's subagents failed, whichever of them still have rows of their own.
+    private var subagentFailures: Int { app.subagentFailures(of: workspace.id) }
     /// Whether this row is the one the list is painting with the accent colour.
     ///
     /// This is the list's own answer, not one derived from the window's active state. AppKit fills
@@ -100,6 +103,26 @@ struct WorkspaceRow: View {
                             .font(Typo.micro)
                             .foregroundStyle(.tertiary)
                             .accessibilityLabel("Pinned")
+                    }
+
+                    // What is left on the workspace row when a subagent's own row goes.
+                    //
+                    // A tick leaves nothing: the workspace carrying on already says the work
+                    // landed. A cross leaves this, because the workspace row is the one that
+                    // persists and a failure nobody saw is the whole risk in removing rows at
+                    // all. It also carries the overflow past `SubagentRetention.failureLimit`,
+                    // which is what makes capping the crosses safe: three rows and a five here
+                    // never disagree about how bad it was. See `SubagentRetention`.
+                    if subagentFailures > 0 {
+                        Label("\(subagentFailures)", systemImage: "xmark")
+                            .font(Typo.micro)
+                            .monospacedDigit()
+                            .labelStyle(SubagentFailureLabelStyle())
+                            .foregroundStyle(isEmphasized ? Palette.textInverted : Palette.negative)
+                            .opacity(isHovered ? 0 : 1)
+                            .accessibilityLabel(subagentFailures == 1
+                                ? "1 subagent failed this turn"
+                                : "\(subagentFailures) subagents failed this turn")
                     }
 
                     // In the layout, not overlaid, so a name shares the row with real counts
@@ -347,5 +370,16 @@ struct WorkspaceRow: View {
         renaming = nil
         guard !name.isEmpty, name != workspace.name else { return }
         Task { await app.rename(workspace, to: name) }
+    }
+}
+
+/// The cross and its count, set tight so the pair reads as one mark rather than as an icon beside
+/// a number. The same shape the subagent rows use, at the same size the diff stat beside it uses.
+private struct SubagentFailureLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 2) {
+            configuration.icon
+            configuration.title
+        }
     }
 }

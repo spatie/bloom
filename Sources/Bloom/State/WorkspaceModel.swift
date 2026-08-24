@@ -410,14 +410,15 @@ final class WorkspaceModel {
         transcripts.values.contains { $0.isRunning }
     }
 
-    /// The rows for the subagents the ACTIVE chat's turn has spawned.
+    /// The ACTIVE chat's subagents, whole.
     ///
     /// A pure lookup over existing transcripts, safe from a view body, and deliberately not a
     /// union over every session: see `AppModel.subagentRows` for why one workspace row must not
-    /// draw four chats' children at once.
-    var activeSubagentRows: [SubagentRow] {
-        guard let transcript = activeTranscript else { return [] }
-        return SubagentRow.rows(transcript.subagents)
+    /// draw four chats' children at once. The roster rather than the rows, because which of them
+    /// still HAS a row depends on the clock and on what is selected, and both of those are the
+    /// app model's to know. See `SubagentRetention`.
+    var activeSubagentRoster: SubagentRoster? {
+        activeTranscript?.subagents
     }
 
     /// The shell line a backgrounded command was given, found by the tool call that started it.

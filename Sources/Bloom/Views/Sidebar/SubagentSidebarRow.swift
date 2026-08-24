@@ -3,12 +3,12 @@ import BloomCore
 
 /// One subagent in the source list, indented a step under the workspace that spawned it.
 ///
-/// **It stays for the turn.** The row appears when the subagent starts, breathes while it works,
-/// and when it ends it keeps its place carrying a tick, a cross or a dash and what it answered.
-/// It goes when the next turn starts. The version that removed the row on completion looked
-/// better in a screenshot and was unusable: three rows leaving one by one take everything below
-/// them up the pane while you are reading the third. See `SubagentRoster` for the rule and
-/// `SubagentRow` for what each state says.
+/// **It appears when the subagent starts, breathes while it works, and mostly goes when it is
+/// done.** A tick is held long enough to be seen and then leaves; a cross stays, because it is the
+/// only place a piece of a fan-out dying is visible at a glance; a row somebody has opened stays
+/// while they are reading it; and the next turn clears whatever is left. See `SubagentRetention`
+/// for that argument in full, `SubagentRoster` for the backstop and `SubagentRow` for what each
+/// state says.
 ///
 /// Everything drawn here is decided in `SubagentRow`, in the core, where the suite can reach it.
 /// What is left in this file is a mark, a name, a readout and an indent.

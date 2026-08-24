@@ -1,7 +1,13 @@
 import SwiftUI
 import BloomCore
 
-/// The sidebar's subagent rows, at the pane's real width, in every state a row can be in.
+/// The sidebar's subagent rows, at the pane's real width, in every state a row can be in, and at
+/// the three moments of a fan-out finishing.
+///
+/// The last three panes are a frame trace of the removal: the same eight subagents from the
+/// screenshot that prompted it, at the instant they all finish, a second and a half later while
+/// the ticks are still being held, and after the hold. `SubagentRetention` decides which of them
+/// each pane draws and the suite pins every one of those decisions; this is what they look like.
 ///
 /// Photographed in a real window rather than through `--snapshot`, for the reason
 /// `RunningGlyphGallery` gives at length: the running mark is layer backed and an offscreen render
@@ -59,26 +65,82 @@ struct SubagentRowGallery: View {
         ]
     }
 
+    /// A background command, which is not an agent at all and used to be drawn as one. See
+    /// `SubagentKind`: a `local_bash` start carries a description and nothing else.
+    private var command: [Subagent] {
+        [
+            Subagent(id: SubagentID("9"), description: "Build frontend assets",
+                     taskType: "local_bash", elapsedSeconds: 12),
+            Subagent(id: SubagentID("10"), description: "Push branch to origin",
+                     taskType: "local_bash", state: .completed,
+                     summary: "Background command completed (exit code 0)", elapsedSeconds: 3),
+        ]
+    }
+
+    /// The screenshot that prompted the removal: seven ticks and a cross under one workspace that
+    /// is still running.
+    private var fanOut: [Subagent] {
+        (1...8).map { index in
+            Subagent(
+                id: SubagentID("f\(index)"),
+                description: [
+                    "Read the app layer", "Read the core", "Read the tests", "Check the lint rules",
+                    "Sketch the migration", "Count the call sites", "Read the release notes",
+                    "Run the suite",
+                ][index - 1],
+                type: "Explore",
+                state: index == 6 ? .failed : .completed,
+                summary: index == 6 ? "Agent terminated early due to an API error" : "no findings",
+                outputFile: "/x",
+                elapsedSeconds: 4 + index,
+                finishedAt: Self.finished
+            )
+        }
+    }
+
+    /// When the fan-out above ended, so the three trace panes can be asked for different moments.
+    private static let finished = Date(timeIntervalSince1970: 1_700_000_000)
+
     var body: some View {
-        HStack(alignment: .top, spacing: 24) {
-            pane("Mid turn", working)
-            pane("Twenty seconds later", finished)
-            pane("Depth past one, drawn flat", deep)
+        VStack(alignment: .leading, spacing: 24) {
+            HStack(alignment: .top, spacing: 24) {
+                pane("Mid turn", working)
+                pane("Twenty seconds later", finished)
+                pane("Depth past one, drawn flat", deep)
+                pane("Not an agent at all", command)
+            }
+            HStack(alignment: .top, spacing: 24) {
+                trace("The moment eight finish", after: 0)
+                trace("1.5s, the ticks still held", after: 1.5)
+                trace("After the hold", after: SubagentRetention.lingerSeconds + 0.1)
+            }
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    /// One frame of the removal, at `after` seconds past the moment they all finished.
+    private func trace(_ title: String, after seconds: Double) -> some View {
+        pane(title, rows: SubagentRetention.rows(
+            SubagentRoster(fanOut),
+            now: Self.finished.addingTimeInterval(seconds)
+        ), failures: SubagentRetention.failureCount(SubagentRoster(fanOut)))
+    }
+
     /// The pane at its 260 point default, which is the only width these rows are ever judged at.
     private func pane(_ title: String, _ subagents: [Subagent]) -> some View {
+        pane(title, rows: SubagentRow.rows(SubagentRoster(subagents)), failures: 0)
+    }
+
+    private func pane(_ title: String, rows: [SubagentRow], failures: Int) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
 
             VStack(alignment: .leading, spacing: 0) {
-                workspaceRow
-                ForEach(SubagentRow.rows(SubagentRoster(subagents))) { row in
+                workspaceRow(failures: failures)
+                ForEach(rows) { row in
                     SubagentSidebarRow(row: row)
                         .frame(height: 32)
                 }
@@ -90,10 +152,26 @@ struct SubagentRowGallery: View {
 
     /// The workspace the children hang off, drawn the way the real pane draws it so the indents
     /// can be judged against each other.
-    private var workspaceRow: some View {
+    ///
+    /// - Parameter failures: what is left on the row that PERSISTS when a subagent's own row goes.
+    ///   A tick leaves nothing here; a cross leaves this, and so does every cross past the cap.
+    private func workspaceRow(failures: Int) -> some View {
         Label {
-            Text("Review PR 168")
-                .font(Typo.caption)
+            HStack(spacing: Metrics.spacingSmall) {
+                Text("Review repository changes")
+                    .font(Typo.caption)
+                    .lineLimit(1)
+                Spacer(minLength: Metrics.spacingSmall)
+                if failures > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "xmark")
+                        Text("\(failures)")
+                    }
+                    .font(Typo.micro)
+                    .monospacedDigit()
+                    .foregroundStyle(Palette.negative)
+                }
+            }
         } icon: {
             WorkspaceRunningGlyph()
         }

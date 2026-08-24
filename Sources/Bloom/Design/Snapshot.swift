@@ -768,8 +768,9 @@ enum Snapshot {
             case .pendingDelete: CGSize(width: 820, height: 900)
             case .runningGlyph: CGSize(width: 700, height: 760)
             case .retries: CGSize(width: 860, height: 1020)
-            // Three panes at the sidebar's 260 point default, side by side.
-            case .subagentRows: CGSize(width: 900, height: 320)
+            // Four panes at the sidebar's 260 point default, side by side, over a second row of
+            // three that traces the removal.
+            case .subagentRows: CGSize(width: 1_180, height: 720)
             case .paneTabs: CGSize(width: 700, height: 720)
             }
         }

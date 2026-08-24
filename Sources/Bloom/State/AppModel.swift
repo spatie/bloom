@@ -156,8 +156,15 @@ final class AppModel {
             if let id = newValue.workspaceID, id != storedSelection.workspaceID {
                 SwitchTrace.begin(workspaceID: id)
             }
+            let vacated = storedSelection.workspaceID
             storedSelection = newValue
             Self.rememberSelection(newValue)
+            // Opening or closing a subagent's pane changes which rows are exempt from being
+            // removed. See `SubagentRetention`: the row you are reading stays. Both workspaces,
+            // because moving away from one leaves a row there that is no longer being read.
+            for id in Set([vacated, newValue.workspaceID].compactMap { $0 }) {
+                noteSubagentsChanged(workspaceID: id)
+            }
             SwitchTrace.mark("selection.set")
             // A switch is the moment to re-read the repository's settings. The Workspace menu
             // lists this repository's run scripts, and somebody who has just added one expects to
@@ -1013,6 +1020,15 @@ final class AppModel {
     /// this turn spawned eleven subagents when it spawned two.
     private(set) var subagentRows: [WorkspaceID: [SubagentRow]] = [:]
 
+    /// How many of the active turn's subagents failed, per workspace, whether or not they still
+    /// have a row. What the workspace row carries, and the reason `SubagentRetention.failureLimit`
+    /// is safe: three crosses and a count of five never disagree about how bad it was.
+    private(set) var subagentFailures: [WorkspaceID: Int] = [:]
+
+    /// The timers that take a finished row off the pane. One per workspace, because one turn's
+    /// rows all expire on one clock and a task per row would be a task per tick.
+    @ObservationIgnored private var subagentSweeps: [WorkspaceID: Task<Void, Never>] = [:]
+
     /// Told by `TranscriptModel` whenever its roster moves, and by `WorkspaceModel` whenever the
     /// active session changes underneath it.
     ///
@@ -1020,7 +1036,27 @@ final class AppModel {
     /// siblings, so a background session's roster cannot land under the workspace row while a
     /// different chat is the one on screen.
     func noteSubagentsChanged(workspaceID: WorkspaceID) {
-        let rows = workspaceModels[workspaceID]?.activeSubagentRows ?? []
+        subagentSweeps.removeValue(forKey: workspaceID)?.cancel()
+        guard let roster = workspaceModels[workspaceID]?.activeSubagentRoster else {
+            if subagentRows[workspaceID] != nil { subagentRows[workspaceID] = nil }
+            if subagentFailures[workspaceID] != nil { subagentFailures[workspaceID] = nil }
+            return
+        }
+
+        // **What the selection does when its subagent goes.** It falls back to the parent
+        // workspace, which is where every other pane in the window was already pointing: see
+        // `SidebarSelection.subagent`, which answers `workspaceID` with the parent precisely so
+        // that a subagent selection narrows the centre column and nothing else. Retention never
+        // removes the row you are reading, so the only moment this can happen is the next turn
+        // starting and clearing the roster underneath it, and the alternative was a centre pane
+        // reading "that subagent belonged to a turn that has since been replaced".
+        if case .subagent(workspaceID, let id) = selection, roster[id] == nil {
+            selection = .workspace(workspaceID)
+            return
+        }
+
+        let now = Date()
+        let rows = SubagentRetention.rows(roster, now: now, opened: selection.subagentID)
         // Ticks arrive about once a second per running subagent and most of them change nothing
         // the row says. An unconditional write would invalidate every sidebar row in the window
         // on each one.
@@ -1029,12 +1065,35 @@ final class AppModel {
         } else if subagentRows[workspaceID] != rows {
             subagentRows[workspaceID] = rows
         }
+
+        let failures = SubagentRetention.failureCount(roster)
+        if failures == 0 {
+            if subagentFailures[workspaceID] != nil { subagentFailures[workspaceID] = nil }
+        } else if subagentFailures[workspaceID] != failures {
+            subagentFailures[workspaceID] = failures
+        }
+
+        // A row leaving is the one change no line announces: the last thing that happens to a
+        // successful subagent is the notification that finished it. Without this the tick would
+        // sit there until some other subagent ticked, or for ever if it was the last one working.
+        guard let next = SubagentRetention.nextChange(roster, now: now, opened: selection.subagentID)
+        else { return }
+        subagentSweeps[workspaceID] = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(max(0, next.timeIntervalSinceNow)))
+            guard !Task.isCancelled else { return }
+            self?.noteSubagentsChanged(workspaceID: workspaceID)
+        }
     }
 
     /// The rows under one workspace, without forcing a `WorkspaceModel` into existence. Asked by
     /// the sidebar for every visible workspace on every redraw.
     func subagents(of workspaceID: WorkspaceID) -> [SubagentRow] {
         subagentRows[workspaceID] ?? []
+    }
+
+    /// How many of this turn's subagents failed. Asked by the workspace row.
+    func subagentFailures(of workspaceID: WorkspaceID) -> Int {
+        subagentFailures[workspaceID] ?? 0
     }
 
     /// How many workspaces are waiting on the user, for the sidebar's status bar, the Dock badge

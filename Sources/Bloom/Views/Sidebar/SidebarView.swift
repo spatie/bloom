@@ -197,6 +197,14 @@ struct SidebarView: View {
         // halves are told apart.
         .animation(visibilityMotion, value: hiddenProjects)
         .animation(visibilityMotion, value: showsHiddenProjects)
+        // A subagent's row leaving when its work is done, which is another insertion or removal
+        // and so another reflow, at the one length this pane confirms anything in.
+        //
+        // The value is WHICH subagents have rows and nothing about what those rows say. A running
+        // subagent's readout changes about once a second, and animating on the rows themselves
+        // would put the whole column into a 220 millisecond transaction on every tick of every
+        // fan-out, which is the same trap the fold above is keyed away from.
+        .animation(subagentMotion, value: subagentIdentities)
         .settlesArrivals($arrival)
         // The note takes itself back, and each one is on its own clock.
         .task(id: reorderNote) {
@@ -293,6 +301,20 @@ struct SidebarView: View {
         guard hasSettled,
               let seconds = ProjectVisibilityMotion
                   .hideGesture(showingHidden: showsHiddenProjects, reduceMotion: reduceMotion)
+                  .seconds
+        else { return nil }
+        return .easeOut(duration: seconds)
+    }
+
+    /// Which subagents have rows, per workspace. See the animation this keys.
+    private var subagentIdentities: [WorkspaceID: [SubagentID]] {
+        app.subagentRows.mapValues { $0.map(\.id) }
+    }
+
+    /// A subagent's row leaving. See `ProjectVisibilityMotion.subagentRemoval`.
+    private var subagentMotion: Animation? {
+        guard hasSettled,
+              let seconds = ProjectVisibilityMotion.subagentRemoval(reduceMotion: reduceMotion)
                   .seconds
         else { return nil }
         return .easeOut(duration: seconds)

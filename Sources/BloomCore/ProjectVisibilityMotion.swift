@@ -62,6 +62,17 @@ public enum ProjectVisibilityMotion: Equatable, Sendable {
         reduceMotion ? .instant : .reflow(seconds: seconds)
     }
 
+    /// A subagent's row leaving the pane because its work is done.
+    ///
+    /// Always a reflow, never a dim: the row is removed and everything below it closes up, which
+    /// is the same change hiding a project makes with the filter off. It is the same LENGTH for
+    /// the same reason the three above share one: a pane that closed a gap in 220 milliseconds
+    /// for one reason and in some other number for another would be two apps. See
+    /// `SubagentRetention` for when a row is removed at all.
+    public static func subagentRemoval(reduceMotion: Bool) -> ProjectVisibilityMotion {
+        reduceMotion ? .instant : .reflow(seconds: seconds)
+    }
+
     /// Whether an arriving row should be faded in on top of the reflow.
     ///
     /// A row that is LEAVING has a place to leave from, and a row that is MOVING has a place to
