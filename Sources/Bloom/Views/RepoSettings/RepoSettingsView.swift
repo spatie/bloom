@@ -128,14 +128,14 @@ struct RepoSettingsView: View {
             Task { await model.refresh() }
         }
         .confirmationDialog(
-            "Remove \(repo.name)?",
+            removal.title,
             isPresented: $isConfirmingRemove,
             titleVisibility: .visible
         ) {
-            Button("Remove project", role: .destructive, action: removeProject)
-            Button("Cancel", role: .cancel) {}
+            Button(removal.confirmLabel, role: .destructive, action: removeProject)
+            Button(removal.cancelLabel, role: .cancel) {}
         } message: {
-            Text(removalConsequences)
+            Text(removal.message)
         }
     }
 
@@ -518,24 +518,11 @@ struct RepoSettingsView: View {
         }
     }
 
-    /// Says what disappears, named and counted, rather than asking "are you sure?" about nothing
-    /// in particular. Matching the sidebar's own removal confirmation, which this cannot contradict.
-    private var removalConsequences: String {
-        let workspaces = app.workspaces.filter { $0.repoID == repo.id }
-        let active = workspaces.filter { $0.state == .active }.count
-
-        var text = "Bloom forgets this project"
-        switch active {
-        case 0 where workspaces.isEmpty: text += "."
-        case 0: text += " and its \(workspaces.count) archived workspace\(workspaces.count == 1 ? "" : "s")."
-        default:
-            text += ", its \(active) active workspace\(active == 1 ? "" : "s") and their transcripts."
-        }
-        text += " Nothing on disk is deleted: the repository stays where it is"
-        if active > 0 {
-            text += ", and the worktrees stay checked out, so they have to be removed with `git worktree remove` if they are no longer wanted"
-        }
-        return text + "."
+    /// The one question, asked here and in the sidebar and in Settings. See `ProjectRemoval`.
+    private var removal: Confirmation {
+        ProjectRemoval.confirmation(
+            for: repo, workspaces: app.workspaces.filter { $0.repoID == repo.id }
+        )
     }
 
     private func removeProject() {

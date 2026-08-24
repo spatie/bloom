@@ -155,14 +155,14 @@ struct RepoHeaderRow: View {
             )
         }
         .confirmationDialog(
-            "Remove \(repo.name)?",
+            removal.title,
             isPresented: $isConfirmingRemove,
             titleVisibility: .visible
         ) {
-            Button("Remove project", role: .destructive, action: removeRepo)
-            Button("Cancel", role: .cancel) {}
+            Button(removal.confirmLabel, role: .destructive, action: removeRepo)
+            Button(removal.cancelLabel, role: .cancel) {}
         } message: {
-            Text("Bloom forgets this project and its workspaces. Nothing on disk is deleted.")
+            Text(removal.message)
         }
     }
 
@@ -376,6 +376,13 @@ struct RepoHeaderRow: View {
     }
 
     // MARK: - Actions
+
+    /// The one question, asked here and in both settings panes. See `ProjectRemoval`.
+    private var removal: Confirmation {
+        ProjectRemoval.confirmation(
+            for: repo, workspaces: app.workspaces.filter { $0.repoID == repo.id }
+        )
+    }
 
     private func removeRepo() {
         Task { await app.removeRepository(repo) }

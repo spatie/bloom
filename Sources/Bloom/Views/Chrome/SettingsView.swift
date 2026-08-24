@@ -213,21 +213,32 @@ private struct ProjectSettingsView: View {
                 selectedRepoID = repos.first?.id
             }
         }
+        // Through `ProjectRemoval` like the other two, and with a visible title like the other
+        // two: this was the one of the three that drew the dialog headless.
         .confirmationDialog(
-            "Remove \(repoPendingRemoval?.name ?? "this project")?",
+            repoPendingRemoval.map(removal)?.title ?? "",
             isPresented: $repoPendingRemoval.isPresent(),
+            titleVisibility: .visible,
             presenting: repoPendingRemoval
         ) { repo in
-            Button("Remove Project", role: .destructive) { remove(repo) }
-            Button("Cancel", role: .cancel) {}
-        } message: { _ in
-            Text("Existing workspace records for this project will also be removed.")
+            Button(removal(repo).confirmLabel, role: .destructive) { remove(repo) }
+            Button(removal(repo).cancelLabel, role: .cancel) {}
+        } message: { repo in
+            Text(removal(repo).message)
         }
         .sheet(item: $projectSetup.request.on(.settings)) { request in
             ProjectSetupSheet(request: request) { path in
                 Task { await app.finishProjectSetup(path) }
             }
         }
+    }
+
+    /// The one question, asked here and in the sidebar and in the project's own window. See
+    /// `ProjectRemoval`.
+    private func removal(_ repo: Repo) -> Confirmation {
+        ProjectRemoval.confirmation(
+            for: repo, workspaces: app.workspaces.filter { $0.repoID == repo.id }
+        )
     }
 
     private func remove(_ repo: Repo) {
