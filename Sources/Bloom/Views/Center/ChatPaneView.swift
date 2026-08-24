@@ -11,6 +11,9 @@ import BloomCore
 struct ChatPaneView: View {
     var transcript: TranscriptModel
     @Bindable var model: WorkspaceModel
+    /// Which pane of the tab this is, and the only thing it is used for is remembering where the
+    /// reader had got to in the conversation. See `TranscriptPaneMemory`.
+    var pane: String
 
     /// Whether the user has scrolled away from the newest row, which is the only thing the jump
     /// pill is an answer to. Read here rather than passed on, because the pill is drawn here.
@@ -43,7 +46,8 @@ struct ChatPaneView: View {
         VStack(spacing: 0) {
             TranscriptView(
                 transcript: transcript,
-                isRunningSetup: model.isRunningSetup
+                isRunningSetup: model.isRunningSetup,
+                memory: TranscriptPaneMemory(model: model, pane: pane)
             ) { isTranscriptScrolledUp = $0 }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // On the transcript, not on the composer, and that is the whole of the change.

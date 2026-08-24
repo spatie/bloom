@@ -112,6 +112,17 @@ final class WorkspaceModel {
     /// not another subprocess. Not observed: nothing draws it, and a write on every file opened
     /// would invalidate every view watching this model. See `PatchCache`.
     @ObservationIgnored private var patches = PatchCache()
+    /// Where each chat pane had got to in each conversation, so that coming back to a tab is not
+    /// the session being opened all over again.
+    ///
+    /// Here rather than in the list view because the list view is the thing that dies: a tab
+    /// switch destroys the whole subtree under `CenterPaneView.content`, which is exactly why the
+    /// unfolded rows re-folded and the history was laid out twice. `TranscriptResume` is the rule
+    /// and carries the measurements.
+    ///
+    /// Not observed, for the reason `patches` is not: a scroll writes this and nothing draws it,
+    /// so an observed write would invalidate every view watching this model once per gesture.
+    @ObservationIgnored private var panePositions: [TranscriptPaneState.Key: TranscriptPaneState] = [:]
     /// Why the last refresh could not answer. Non-nil means `changedFiles` is the last list git was
     /// able to produce, not what the worktree looks like now.
     var changesError: String?
@@ -1180,6 +1191,20 @@ final class WorkspaceModel {
         }
         fileTreeTask = task
         await task.value
+    }
+
+    // MARK: - Where a chat pane had got to
+
+    /// What this pane last wrote down about this conversation, if it has been here before.
+    func panePosition(pane: String, session: SessionID) -> TranscriptPaneState? {
+        panePositions[TranscriptPaneState.Key(pane: pane, session: session)]
+    }
+
+    /// Written by the transcript when the reader stops scrolling, when a row is folded or
+    /// unfolded, and when the pane goes away. Everything about when it is worth reading back is
+    /// `TranscriptResume`'s.
+    func rememberPanePosition(_ state: TranscriptPaneState, pane: String, session: SessionID) {
+        panePositions[TranscriptPaneState.Key(pane: pane, session: session)] = state
     }
 
     /// One file's diff, from the cache where the worktree has not been looked at since the last

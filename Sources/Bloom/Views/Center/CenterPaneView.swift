@@ -92,7 +92,7 @@ struct CenterPaneView: View {
             // The lookup only, never `transcript(for:)`: building one writes observed state, and a
             // body may not do that. `prepare` below is where it is built.
             if let transcript = model.existingTranscript(for: sessionID) {
-                ChatPaneView(transcript: transcript, model: model)
+                ChatPaneView(transcript: transcript, model: model, pane: pane)
             } else if model.sessions.contains(where: { $0.id == sessionID }) {
                 LoadingView()
             } else {
