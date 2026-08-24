@@ -189,6 +189,14 @@ struct SidebarView: View {
         // a workspace must not make the pane slide, and a running agent rewrites its diff stat
         // every few seconds, which would otherwise animate the whole column once a second.
         .animation(foldMotion, value: foldedProjects)
+        // Hiding and unhiding, which is a different curve from folding because it is a different
+        // change: a fold hides rows the list still holds, and this inserts or removes them. The
+        // value is the projects that are hidden and the switch that decides whether being hidden
+        // takes a row out of the pane at all, so both halves of the one gesture reach the table
+        // through the same transaction. See `ProjectVisibilityMotion`, which is where the two
+        // halves are told apart.
+        .animation(visibilityMotion, value: hiddenProjects)
+        .animation(visibilityMotion, value: showsHiddenProjects)
         .settlesArrivals($arrival)
         // The note takes itself back, and each one is on its own clock.
         .task(id: reorderNote) {
@@ -223,9 +231,17 @@ struct SidebarView: View {
         .onChange(of: app.subagentRows) { _, _ in reflow() }
         // Rescoped, so widening the filter is not forty rows fading in at once. See `RowArrival`.
         .onChange(of: filter) { _, _ in regroup(rescoped: true) }
-        // Rescoped for the same reason the filter is: turning hidden projects on is a whole
-        // project's worth of rows arriving at once, and none of them is work that just landed.
-        .onChange(of: showsHiddenProjects) { _, _ in regroup(rescoped: true) }
+        // NOT rescoped, unlike the filter above, and the difference is what the two switches do.
+        // A filter is a question you ask of rows that were always there. This one inserts project
+        // headers at several depths at once, and a row that is arriving has no old position to
+        // travel from: without the fade it slides in from wherever the table decides. The reflow
+        // carries the rows that stay and `RowArrival` carries the ones that turn up, which is what
+        // `ProjectVisibilityMotion.fadesArrivals` says and is the whole difference between this
+        // reading as a list rearranging and as a list flickering.
+        .onChange(of: showsHiddenProjects) { _, _ in
+            regroup(rescoped: !ProjectVisibilityMotion.filterToggle(reduceMotion: reduceMotion)
+                .fadesArrivals)
+        }
         .onChange(of: listSelection) { _, _ in commitSelection() }
         // Moving off a row has to close whatever field was open on it, or the rename would carry
         // on editing a workspace that is no longer on screen.
@@ -256,6 +272,30 @@ struct SidebarView: View {
     /// folded or unfolded and at no other time.
     private var foldedProjects: [RepoID] {
         groups.filter(\.repo.collapsed).map(\.id)
+    }
+
+    /// Which projects are hidden, in order. The same discipline `foldedProjects` is under: this
+    /// must change when one is hidden or unhidden and at no other time, or a diff stat landing
+    /// mid animation would restart it.
+    private var hiddenProjects: [RepoID] {
+        groups.filter(\.repo.hidden).map(\.id)
+    }
+
+    /// The curve hiding, unhiding and the "Show hidden projects" switch all move on.
+    ///
+    /// One `Animation?` for all three, because the decision that differs between them is what
+    /// CHANGES rather than how long it takes: with the switch on, hiding changes an opacity the
+    /// header already draws and nothing is inserted, so the same transaction carries a contrast
+    /// change; with it off, the same transaction carries an insertion or a removal and the rows
+    /// below travel. See `ProjectVisibilityMotion` for that argument in full, and for why the
+    /// length is `TranscriptMotion.arrival`'s rather than one chosen here.
+    private var visibilityMotion: Animation? {
+        guard hasSettled,
+              let seconds = ProjectVisibilityMotion
+                  .hideGesture(showingHidden: showsHiddenProjects, reduceMotion: reduceMotion)
+                  .seconds
+        else { return nil }
+        return .easeOut(duration: seconds)
     }
 
     /// - Parameter rescoped: whether the list is being rebuilt because the filter moved, in which

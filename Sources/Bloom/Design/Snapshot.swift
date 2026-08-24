@@ -631,6 +631,7 @@ enum Snapshot {
         case pendingDelete = "pending-delete"
         case runningGlyph = "running-glyph"
         case retries = "retries"
+        case subagentRows = "subagent-rows"
 
         var title: String {
             switch self {
@@ -640,6 +641,7 @@ enum Snapshot {
             case .pendingDelete: "Pending message delete"
             case .runningGlyph: "Running mark"
             case .retries: "Retries"
+            case .subagentRows: "Subagent rows"
             }
         }
 
@@ -651,6 +653,8 @@ enum Snapshot {
             case .pendingDelete: CGSize(width: 820, height: 900)
             case .runningGlyph: CGSize(width: 700, height: 760)
             case .retries: CGSize(width: 860, height: 1020)
+            // Three panes at the sidebar's 260 point default, side by side.
+            case .subagentRows: CGSize(width: 900, height: 320)
             }
         }
 
@@ -668,7 +672,9 @@ enum Snapshot {
             case .reviewComments: true
             // The running mark does not, even though it moves: `forcesBusyPulse` is what
             // lets a capture past the frontmost gate, so the heartbeat runs without the keys.
-            case .inspectorTabs, .diffScope, .pendingDelete, .runningGlyph, .retries: false
+            case .inspectorTabs, .diffScope, .pendingDelete, .runningGlyph, .retries,
+                 .subagentRows:
+                false
             }
         }
     }
@@ -690,6 +696,7 @@ enum Snapshot {
         case .pendingDelete: PendingDeleteSnapshotGallery()
         case .runningGlyph: RunningGlyphGallery()
         case .retries: RetrySnapshotGallery()
+        case .subagentRows: SubagentRowGallery()
         }
     }
 
