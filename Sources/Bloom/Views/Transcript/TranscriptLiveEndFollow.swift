@@ -50,7 +50,16 @@ final class TranscriptLiveEndFollower {
     /// Weak, because the scroll view belongs to the view hierarchy and holding it here would keep
     /// a pane's worth of realised rows alive after the pane has gone. See `TranscriptScrollBridge`.
     weak var scrollView: NSScrollView? {
-        didSet { if scrollView !== oldValue { lastHeight = 0 } }
+        didSet {
+            guard scrollView !== oldValue else { return }
+            lastHeight = 0
+            // And re-ask, like every other input below. `wants` reads this property, and
+            // `TranscriptScrollBridge` measured that `enclosingScrollView` is nil on the first
+            // update: a turn that starts streaming before the second layout pass therefore set
+            // `isStreaming` while `wants` was still false for want of a view, and nothing asked
+            // again. The following stayed off until the next `nudge()` or state change.
+            refresh()
+        }
     }
 
     /// Whether a turn is streaming into this transcript. The tail grows without any row landing,

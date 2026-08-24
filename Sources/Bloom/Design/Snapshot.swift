@@ -880,7 +880,14 @@ enum Snapshot {
             // is worth a photograph anyway, since it is exactly what Reduce Motion draws, and it
             // is the only picture of this mark an agent can take without asking to film the
             // owner's screen. The moving figure is `--snapshot-gallery --gallery running-glyph`.
-            ("running-glyph", AnyView(RunningGlyphGallery()), Gallery.runningGlyph.size),
+            //
+            // Named `running-glyph-still` and not `running-glyph`, because both of those write
+            // into a directory the caller names and a run that points the two flags at one
+            // directory would have had the second silently replace the first. That already
+            // happened once on this page's neighbour: see the note above about a photograph being
+            // overwritten by a yellow bar. Here neither picture is wrong, which is worse, because
+            // nothing about the file would say which one it is.
+            ("running-glyph-still", AnyView(RunningGlyphGallery()), Gallery.runningGlyph.size),
             // No review-comments and no inspector-tabs scene, deliberately, and for one reason:
             // `ImageRenderer` paints SwiftUI's yellow placeholder over an `NSViewRepresentable`,
             // and each of those two pages exists to show one. The review comment box is the
