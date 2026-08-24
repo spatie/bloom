@@ -133,7 +133,6 @@ struct TranscriptTextView: NSViewRepresentable {
             widestLine: Double(widestLine(layout, in: container)),
             usedHeight: Double(used.height),
             proposed: proposed,
-            laidOutAt: width,
             lineHeight: Double(lineHeight(nsView, layout)),
             hasGlyphs: (nsView.textStorage?.length ?? 0) > 0
         )

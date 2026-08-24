@@ -32,8 +32,22 @@ import Foundation
 /// own and the sentence missing. That is a report we have from a real session and could not
 /// reproduce. Whatever the cause turns out to be, this function is one of the places it would have
 /// to pass through, and a run holding glyphs coming back with a zero in it is wrong however it got
-/// there: falling back to the width it was laid out at is a worse answer than the truth and a far
-/// better one than a blank row.
+/// there.
+///
+/// ## And the floor falls back to the room it was offered, never to `idealWidth`
+///
+/// The floor used to fall back to the width the run had just been LAID OUT at, which for a
+/// question about the ideal size is `idealWidth`: a hundred thousand points, chosen so that
+/// nothing wraps in it. That is a scratch measure, not a size, and it was reachable. A run whose
+/// glyphs draw no ink at all is the ordinary way in, and there is nothing exotic about one: a
+/// paragraph of nothing but line breaks lays out real line fragments, every one of them zero
+/// points wide, so `widestLine` is zero while `hasGlyphs` is true. Measured on the real TextKit 1
+/// stack, "\n" answered 100000 by 32 to a question about its ideal size, and every other
+/// ink-free run answered the same. A row a hundred thousand points wide is not a smaller failure
+/// than a blank row.
+///
+/// So the fallback is the room the run was offered, and a hair's width when it was offered none.
+/// Nothing here can report a width the layout system did not first name.
 public enum TranscriptTextMeasure {
     /// What "no width was proposed" is laid out at.
     ///
@@ -79,17 +93,16 @@ public enum TranscriptTextMeasure {
     ///   - usedHeight: the height of the whole lay out, which `usedRect` is right about and which
     ///     counts the extra line fragment a trailing newline leaves behind.
     ///   - proposed: the width that was proposed, unchanged. A finite one caps the answer, because
-    ///     a run may not report itself wider than the room it was offered.
-    ///   - laidOutAt: what `layoutWidth(proposed:)` said, so a degenerate measurement has a real
-    ///     number to fall back on.
-    ///   - lineHeight: one line of this run's font, for the same reason.
+    ///     a run may not report itself wider than the room it was offered, and it is also what a
+    ///     run that measured no ink falls back on.
+    ///   - lineHeight: one line of this run's font, which a run that measured no height falls
+    ///     back on.
     ///   - hasGlyphs: whether the run holds anything at all. An empty run is the one thing allowed
     ///     to report nothing, and it must, or an empty paragraph would take a line of space.
     public static func size(
         widestLine: Double,
         usedHeight: Double,
         proposed: Double?,
-        laidOutAt: Double,
         lineHeight: Double,
         hasGlyphs: Bool
     ) -> Size {
@@ -99,12 +112,22 @@ public enum TranscriptTextMeasure {
         if let proposed, proposed.isFinite, proposed > 0 {
             width = min(width, proposed)
         }
-        // See the head of this type. A run with words in it never reports nothing.
-        if !(width > 0) { width = laidOutAt }
+        // See the head of this type. A run with glyphs in it never reports nothing, and it never
+        // reports the scratch width an ideal size is measured in either.
+        if !(width > 0) { width = room(offered: proposed) }
 
         var height = usedHeight.rounded(.up)
         if !(height > 0) { height = max(lineHeight.rounded(.up), floorWidth) }
 
         return Size(width: width, height: height)
+    }
+
+    /// The room a proposal offered, or a hair's width when it offered none.
+    ///
+    /// The only thing a run that measured nothing is allowed to report itself as. See the head of
+    /// this type for what it used to report instead.
+    private static func room(offered proposed: Double?) -> Double {
+        guard let proposed, proposed.isFinite, proposed > 0 else { return floorWidth }
+        return proposed
     }
 }
