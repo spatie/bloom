@@ -632,6 +632,7 @@ enum Snapshot {
         case runningGlyph = "running-glyph"
         case retries = "retries"
         case subagentRows = "subagent-rows"
+        case paneTabs = "pane-tabs"
 
         var title: String {
             switch self {
@@ -642,6 +643,7 @@ enum Snapshot {
             case .runningGlyph: "Running mark"
             case .retries: "Retries"
             case .subagentRows: "Subagent rows"
+            case .paneTabs: "Pane tabs"
             }
         }
 
@@ -655,6 +657,7 @@ enum Snapshot {
             case .retries: CGSize(width: 860, height: 1020)
             // Three panes at the sidebar's 260 point default, side by side.
             case .subagentRows: CGSize(width: 900, height: 320)
+            case .paneTabs: CGSize(width: 700, height: 720)
             }
         }
 
@@ -672,8 +675,9 @@ enum Snapshot {
             case .reviewComments: true
             // The running mark does not, even though it moves: `forcesBusyPulse` is what
             // lets a capture past the frontmost gate, so the heartbeat runs without the keys.
+            // The pane tabs page has no field in it either: every tab on it is drawn as a label.
             case .inspectorTabs, .diffScope, .pendingDelete, .runningGlyph, .retries,
-                 .subagentRows:
+                 .subagentRows, .paneTabs:
                 false
             }
         }
@@ -697,6 +701,7 @@ enum Snapshot {
         case .runningGlyph: RunningGlyphGallery()
         case .retries: RetrySnapshotGallery()
         case .subagentRows: SubagentRowGallery()
+        case .paneTabs: PaneTabsGallery(app: app)
         }
     }
 

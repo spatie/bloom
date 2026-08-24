@@ -13,8 +13,9 @@ import SwiftUI
 /// renamed, so two tabs can never both think they hold the editor.
 struct TabItemView: View {
     var title: String
-    /// The kinds that need telling apart carry one; a chat tab does not, because it is what the
-    /// strip is mostly made of and a glyph on every tab is noise rather than information.
+    /// Every kind carries one, including a chat: a strip with a glyph on two tabs of three reads
+    /// as a row that has lost an icon. Still optional, because the bottom panel's setup log and
+    /// run scripts are named after the script and have nothing to add.
     var icon: String?
     var isActive: Bool
     var isRunning = false

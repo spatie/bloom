@@ -54,14 +54,14 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
     /// they opened from the worktree tree a few seconds after they opened it.
     var path: String = ""
 
-    /// The glyph that tells the kinds apart in the strip. Chat tabs carry none, which is what
-    /// keeps a row of conversations from reading as a toolbar of icons.
+    /// The glyph that tells the kinds apart in the strip. Chats carry one too now, and the whole
+    /// vocabulary is `PaneGlyph`.
     var icon: String {
         switch kind {
-        case .terminal: "apple.terminal"
-        case .browser: "globe"
-        case .review: "doc.text"
-        case .notes: "note.text"
+        case .terminal: PaneGlyph.terminal
+        case .browser: PaneGlyph.browser
+        case .review: PaneGlyph.review
+        case .notes: PaneGlyph.notes
         }
     }
 

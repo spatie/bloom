@@ -232,7 +232,9 @@ struct SessionTabsView: View {
     private func sessionTab(_ session: Session) -> some View {
         SessionTabView(
             session: session,
-            agentGlyph: AgentMark.glyph(for: session.agentKind, in: model.sessions),
+            agentGlyph: PaneGlyph.agentMark(
+                for: session.agentKind, among: model.sessions.map(\.agentKind)
+            ),
             isActive: isSelected(session),
             isRunning: model.isRunning(session),
             isAtPaneEdge: isAtPaneEdge(session.id.rawValue),

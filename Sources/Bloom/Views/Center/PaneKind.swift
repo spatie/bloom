@@ -1,3 +1,5 @@
+import BloomCore
+
 /// The three kinds of thing a pane can be opened on, and what each of them is called.
 ///
 /// The nouns and the glyphs live here for the reason `PaneSymbol` exists: the strip's `+` menu and
@@ -19,19 +21,24 @@ enum PaneKind: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
+    /// The names themselves are `PaneNaming` in the core, because what a new pane is CALLED is
+    /// the same fact as what the menu item offering one says, and two of the strip's three kinds
+    /// were numbering themselves off a second copy of the words.
     var title: String {
         switch self {
-        case .chat: "Chat"
-        case .terminal: "Terminal"
-        case .browser: "Browser"
+        case .chat: PaneNaming.chat
+        case .terminal: PaneNaming.terminal
+        case .browser: PaneNaming.browser
         }
     }
 
+    /// And the glyphs are `PaneGlyph`, for the reason the head of this file gives: the menu item
+    /// and the tab it opens have to wear the same mark, and they were stating it separately.
     var symbol: String {
         switch self {
-        case .chat: "bubble.left.and.bubble.right"
-        case .terminal: "apple.terminal"
-        case .browser: "globe"
+        case .chat: PaneGlyph.chat
+        case .terminal: PaneGlyph.terminal
+        case .browser: PaneGlyph.browser
         }
     }
 }
