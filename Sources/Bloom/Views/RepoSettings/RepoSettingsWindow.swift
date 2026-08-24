@@ -36,6 +36,25 @@ struct RepoSettingsWindow: Scene {
                 .windowRole(.utility)
         }
         .defaultSize(width: RepoSettingsView.idealSize.width, height: RepoSettingsView.idealSize.height)
+        // The whole of the "settings window that appears to do nothing" report.
+        //
+        // Every precondition for window restoration was met and nothing opted out: a
+        // `WindowGroup(id:for:)`, a `Codable` value, and `applicationSupportsSecureRestorableState`
+        // deliberately returning true. So macOS reopened every project settings window that was
+        // open at quit. `openWindow(id:value:)` on a group like this reuses the window already
+        // presenting that value rather than opening a second one, and on macOS that raise is
+        // unreliable when the window is behind, minimised or on another Space: the menu item and
+        // the gear both looked like they did nothing, because the window they wanted was already
+        // there and out of sight.
+        //
+        // The second half of the same mechanism: `RepoSettingsWindowContent` resolves its id
+        // against `app.repos`, which is empty at launch, so every restored window first painted
+        // "This project is no longer in Bloom" and nothing closed them.
+        //
+        // This window is not worth restoring. It is opened from a menu item and a gear, both a
+        // keystroke away, and it holds no work: the settings it edits are in the project's own
+        // file. macOS 15 and later, and this targets 26.
+        .restorationBehavior(.disabled)
     }
 }
 
