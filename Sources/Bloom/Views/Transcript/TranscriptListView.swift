@@ -34,6 +34,7 @@ struct TranscriptListView: View {
         _drawnInFull = State(
             initialValue: TranscriptResume.drawsInFull(remembered) ? transcript.session.id : nil
         )
+        _owesHistory = State(initialValue: TranscriptResume.opensOnTheTail(remembered))
     }
 
     /// Which tool results are unfolded.
@@ -150,6 +151,27 @@ struct TranscriptListView: View {
     /// every workspace the window visits, and a flag left standing from the last one would draw
     /// the next one's whole history onto the frame that is trying to arrive.
     @State private var drawnInFull: SessionID?
+
+    /// Whether this pane came back to the end of a session it has drawn before, so it is holding a
+    /// tail and owes the history behind it only if the reader goes looking for it.
+    ///
+    /// False for a first open, which also draws a tail but owes its history on the hundred
+    /// millisecond timer that has always put it there: an unread mark or a searched row can be
+    /// anywhere in the session and a reader arriving has to be able to reach them. See
+    /// `TranscriptResume.opensOnTheTail`.
+    @State private var owesHistory = false
+
+    /// Set for the one layout pass that puts the history back underneath the reader, and read by
+    /// the size-change anchor.
+    ///
+    /// **The anchor is what stops that layout being a jump.** Content grows above the viewport by
+    /// however tall the history is, and `.bottom` holds the bottom edge still while it does, so
+    /// what is on screen stays exactly where it is. It cannot simply be the anchor's standing
+    /// value, which is `geometry.isNearBottom`: `.bottom` while the reader is scrolled up is the
+    /// live end dragging them back down as a turn streams, which is the one thing this list must
+    /// never do. So it is a flag for the single pass that needs it, set with `drawnInFull` and
+    /// dropped as soon as the growth has landed.
+    @State private var isRevealingHistory = false
 
     /// Sentinel id, negative so it can never collide with a row sequence number.
     private static let streamingID = -2
@@ -461,7 +483,13 @@ struct TranscriptListView: View {
             // scrolled away, which is the rule the per-row scroll used to enforce by hand. Yanking
             // someone back down as they read something further up is the single most irritating
             // thing a live log can do.
-            .defaultScrollAnchor(geometry.isNearBottom ? .bottom : nil, for: .sizeChanges)
+            // `isRevealingHistory` is the one pass that puts the history back under the reader,
+            // where the content grows ABOVE the viewport rather than below it and the bottom edge
+            // is what has to be held still. See the property for why it is a flag rather than a
+            // second standing condition on the anchor.
+            .defaultScrollAnchor(
+                geometry.isNearBottom || isRevealingHistory ? .bottom : nil, for: .sizeChanges
+            )
             .onScrollGeometryChange(for: TranscriptGeometry.self, of: Self.measure) { _, new in
                 geometry = new
                 // The state, every time, rather than only on a transition of it.
@@ -488,6 +516,7 @@ struct TranscriptListView: View {
             // closure call per frame and no pass over this list. See `contentOffset`.
             .onScrollGeometryChange(for: Double.self) { $0.contentOffset.y } action: { _, new in
                 contentOffset.value = new
+                revealHistoryIfNeeded(approaching: new)
             }
             // Where the reader ends up, written down for the pane that is built next. On the end
             // of a gesture rather than during one: see `remember`.
@@ -560,6 +589,11 @@ struct TranscriptListView: View {
                 // otherwise find its own id still recorded and put four thousand rows on the
                 // frame that is trying to arrive.
                 drawnInFull = TranscriptResume.drawsInFull(remembered) ? transcript.session.id : nil
+                // And what it still owes, for the same reason and at the same moment: a session
+                // left before its history landed and come straight back to must not find the last
+                // one's answer still standing. See `owesHistory`.
+                owesHistory = TranscriptResume.opensOnTheTail(remembered)
+                isRevealingHistory = false
                 // And nothing in the session being arrived at counts as having arrived. Cleared
                 // here as well as set in `task` for the same reason `drawnInFull` is: leaving a
                 // session before it had settled and coming straight back must not find its own
@@ -594,6 +628,20 @@ struct TranscriptListView: View {
                 // the same number of rows never positioned and never marked the session read,
                 // and the unread badge stuck until the next row happened to land.
                 position(proxy)
+
+                // A pane coming back to the END of a session it has drawn before is holding a tail
+                // and owes the history behind it, and owes it to a reader who scrolls towards it
+                // rather than to a clock. Nothing above the viewport has to exist for the view to
+                // be where it is, so putting it there now would be the whole of the arrival cost
+                // paid for rows nobody has asked to see. See `revealHistoryIfNeeded`, which is
+                // where it goes back, and `TranscriptResume.drawsInFull` for the measurement that
+                // moved it.
+                if owesHistory {
+                    arrivalSession = transcript.session.id
+                    SwitchTrace.mark("transcript.tail", workspace: transcript.workspace.id)
+                    SwitchTrace.markOnScreen("transcript.tail", workspace: transcript.workspace.id)
+                    return
+                }
 
                 // A pane coming back to a session it has drawn before has the whole of it on the
                 // frame it arrived on and is already where the reader left it, so none of the
@@ -685,6 +733,18 @@ struct TranscriptListView: View {
                 arrivalSession = transcript.session.id
                 SwitchTrace.mark("transcript.history", workspace: transcript.workspace.id)
                 SwitchTrace.markOnScreen("transcript.history", workspace: transcript.workspace.id)
+            }
+            // The anchor goes back to its standing value once the growth it was held for has been
+            // laid out. A wait rather than a yield, for the reason the deferred reveal above gives:
+            // a yield is the same run loop pass, and dropping the flag in the pass that asked for
+            // the growth would drop it before the layout it exists for. Long enough to be sure of
+            // that and short enough that a turn arriving cannot be dragged into view behind it,
+            // which is the only thing a `.bottom` anchor left standing could do.
+            .task(id: isRevealingHistory) {
+                guard isRevealingHistory else { return }
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+                isRevealingHistory = false
             }
             // Every chip in every row reports to this one object, which is why it is handed down
             // rather than passed as a closure through five layers of view. A closure would be a
@@ -895,6 +955,40 @@ struct TranscriptListView: View {
     /// scroll: it realises every row it passes. So it happens once per session rather than once
     /// per row that arrives, and keeping up with a running turn is `TranscriptLiveEndFollower`'s
     /// job.
+    /// Puts the history back behind a tail this pane opened on, once the reader scrolls near it.
+    ///
+    /// **A pane that comes back to the live end draws the tail and stops there.** Nothing above the
+    /// viewport has to exist for the view to be where it is, so laying it out is work for rows
+    /// thousands of points away that the reader has not asked to see, and on a return that is the
+    /// whole of the wait: 114ms to 218ms on the owner's own session, measured with `--tab-probe`.
+    /// This is what asking looks like.
+    ///
+    /// A pane's height ahead of the top, rather than at it. The growth is one main thread stop of
+    /// the size the arrival used to be, and the point of doing it here is that the reader is still
+    /// a screen away from the seam when it lands: they never see the rows arrive, they see a
+    /// scroll that keeps going. Triggering at the top itself would put the stop exactly where the
+    /// eye is.
+    ///
+    /// Once. `drawnInFull` is what the guard reads and what the reveal sets, so the growth cannot
+    /// be asked for twice by the frames of one flick, and `owesHistory` is false for every pane
+    /// that has nothing owed.
+    private func revealHistoryIfNeeded(approaching offset: Double) {
+        guard owesHistory, drawnInFull != transcript.session.id else { return }
+        // **Not until the session has finished arriving, and this is not belt and braces.** A
+        // scroll view reports its geometry from the moment it is laid out, which is several passes
+        // before anything has put it on the live end, and its offset until then is nought. Without
+        // this the reveal fired on the arrival frame every time, measured at 90ms to 109ms into a
+        // return with `transcript.history.revealed` stamped right behind `transcript.tail`, which
+        // is the whole of the saving handed straight back.
+        guard arrivalSession == transcript.session.id else { return }
+        // Nought until the pane has been measured, and a pane with no height cannot say what a
+        // screen ahead of the top means. `TranscriptGeometry.height` reads nought the same way.
+        guard geometry.paneHeight > 0, offset < geometry.paneHeight else { return }
+        isRevealingHistory = true
+        drawnInFull = transcript.session.id
+        SwitchTrace.mark("transcript.history.revealed", workspace: transcript.workspace.id)
+    }
+
     private func position(_ proxy: ScrollViewProxy) {
         guard !transcript.rows.isEmpty, !didPosition else { return }
         didPosition = true

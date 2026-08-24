@@ -36,9 +36,30 @@ struct TranscriptResumeTests {
         #expect(TranscriptResume.drawsInFull(nil) == false)
     }
 
-    @Test("a pane coming back to a session it has drawn draws the whole of it")
-    func aReturnDrawsInFull() {
-        #expect(TranscriptResume.drawsInFull(state()))
+    /// An offset is a point down a laid out document, and the only way to resolve one is to lay out
+    /// everything above it.
+    @Test("a pane coming back to a place in the middle draws the whole session")
+    func aReturnToAnOffsetDrawsInFull() {
+        #expect(TranscriptResume.drawsInFull(state(isAtLiveEnd: false)))
+        #expect(TranscriptResume.opensOnTheTail(state(isAtLiveEnd: false)) == false)
+    }
+
+    /// The case the whole change is about, and the common one: nothing above the viewport has to
+    /// exist for the end of the session to be the end of the session, so the rows above it are a
+    /// layout nobody has asked for. Measured with `--tab-probe` at 114ms to 218ms of stopped main
+    /// thread per return.
+    @Test("a pane coming back to the live end draws only the tail, and owes the history")
+    func aReturnToTheLiveEndDrawsTheTail() {
+        #expect(TranscriptResume.drawsInFull(state(isAtLiveEnd: true)) == false)
+        #expect(TranscriptResume.opensOnTheTail(state(isAtLiveEnd: true)))
+    }
+
+    /// A first open draws a tail too, and the difference is what it owes afterwards: its history
+    /// goes back on the timer that has always put it there, because an unread mark or a searched
+    /// row can be anywhere in the session and a reader arriving has to be able to reach them.
+    @Test("a first open owes its history to the clock rather than to the reader")
+    func aFirstOpenDoesNotOpenOnTheTail() {
+        #expect(TranscriptResume.opensOnTheTail(nil) == false)
     }
 
     // MARK: Where it opens
