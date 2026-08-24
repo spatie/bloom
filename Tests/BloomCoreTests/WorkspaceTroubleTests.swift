@@ -202,3 +202,89 @@ struct WorkspaceTroubleTests {
         #expect(trouble == .worktreeGone(workspace: first.name))
     }
 }
+
+// MARK: - Trouble writing a transcript
+
+/// The other half of the same bug, a day later.
+///
+/// The owner archived a workspace while its agent was still working and got a modal reading
+/// "The agent stopped in Review the changes / Could not store a system row: FOREIGN KEY constraint
+/// failed [INSERT INTO messages (session_id, seq, kind, payload, created_at, duration_ms, ref_id)
+/// VALUES (?, ?, ?, ?, ?, ?, ?)]". Two faults in one dialog: it was not a failure at all, and if
+/// it had been, that is not how one is said.
+@Suite("Trouble writing a transcript", .tags(.persistence), .scratchDirectory)
+struct TranscriptTroubleTests {
+    // MARK: - The probe
+
+    @Test("asks the database whether the session is there, rather than reading its complaint")
+    func standingOfEverySession() async throws {
+        let store = try makeTestStore("transcript-standing")
+        let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r-\(UUID().uuidString)"))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id, name: "w", branch: "b", path: "/tmp/w", baseBranch: "main"
+        ))
+        let session = try await store.upsert(Session(workspaceID: workspace.id))
+
+        #expect(await TranscriptStanding.of(sessionID: session.id, in: store) == .there)
+
+        // Exactly what archiving or removing does: the cascade takes the session with it.
+        try await store.deleteWorkspace(id: workspace.id)
+        #expect(await TranscriptStanding.of(sessionID: session.id, in: store) == .gone)
+    }
+
+    // MARK: - Which refusals are silence
+
+    /// A row refused because the owner has just deleted the workspace it belonged to is not a
+    /// fault, and there is no transcript left to report it in.
+    @Test("a session that has gone is not worth a word")
+    func aDeletedTranscriptIsSilent() {
+        #expect(WorkspaceTrouble.recording(transcript: .gone, complaint: "anything") == nil)
+    }
+
+    /// And the swallow-everything version of the same fix would hide the failure the `.error`
+    /// event on a refused write exists for.
+    @Test("a database that refused for any other reason is still reported")
+    func anythingElseIsReported() {
+        #expect(WorkspaceTrouble.recording(transcript: .there, complaint: "Disk image is malformed.")
+            == .transcriptUnwritable(complaint: "Disk image is malformed."))
+        // A database that cannot answer the question is broken by any reading of it, so the
+        // benefit of the doubt goes to reporting rather than to silence.
+        #expect(WorkspaceTrouble.recording(transcript: .unanswerable, complaint: "It is closed.")
+            == .transcriptUnwritable(complaint: "It is closed."))
+    }
+
+    // MARK: - The sentence
+
+    /// The statement is the one part of the failure the reader neither wrote nor can change, and
+    /// seven bound question marks are the worst version of the thing `WorkspaceTrouble` exists to
+    /// prevent.
+    @Test("drops the statement from the database's complaint")
+    func complaintDropsTheStatement() {
+        let error = SQLiteError(
+            message: "FOREIGN KEY constraint failed",
+            sql: "INSERT INTO messages (session_id, seq, kind, payload, created_at, duration_ms, ref_id) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?)"
+        )
+        #expect(TranscriptStanding.complaint(about: error) == "FOREIGN KEY constraint failed.")
+        #expect(!TranscriptStanding.complaint(about: error).contains("?"))
+        #expect(!TranscriptStanding.complaint(about: error).contains("INSERT INTO"))
+    }
+
+    @Test("says what happened, what is safe, and whether trying again helps")
+    func theSentenceIsWhatAPersonNeeds() {
+        let sentence = WorkspaceTrouble.transcriptUnwritable(
+            complaint: "Database disk image is malformed."
+        ).sentence
+
+        #expect(!sentence.contains("?"))
+        #expect(!sentence.contains("INSERT"))
+        #expect(!sentence.contains("session_id"))
+        // What is at stake, which is nothing on disk.
+        #expect(sentence.contains("worktree"))
+        // Whether trying again helps, which here it does not.
+        #expect(sentence.contains("Sending again will fail the same way"))
+        // The database's own words survive, marked as the database's, exactly as a CLI's do on a
+        // failed turn.
+        #expect(sentence.contains("The database said: Database disk image is malformed."))
+    }
+}

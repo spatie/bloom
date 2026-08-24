@@ -1,5 +1,6 @@
 import Foundation
 import Synchronization
+import os
 
 // MARK: - Process seam
 
@@ -100,6 +101,9 @@ public actor AgentRunner {
     private var cachedRepoID: RepoID?
     private var alive = false
     private var cancelled = false
+    /// Whether this run has already been stopped because its transcript was deleted underneath it.
+    /// See `stopBecauseTheTranscriptWentAway`.
+    private var transcriptWentAway = false
     private var persistenceFailures = 0
     private var lastFailure: String?
 
@@ -304,6 +308,10 @@ public actor AgentRunner {
 
     /// How many rows never made it to the store.
     public var persistenceFailureCount: Int { persistenceFailures }
+
+    /// Whether this run has been stopped. For the suite: what a write refused because its
+    /// workspace was deleted has to do, beyond keeping quiet, is stop the agent.
+    var hasBeenCancelled: Bool { cancelled }
 
     /// Decoded events for the UI. Nonisolated so a view can start consuming without hopping onto
     /// the actor, which means it must not read actor state: the sink lives in its own reference
@@ -515,7 +523,7 @@ public actor AgentRunner {
                 refID: refID
             )
         } catch {
-            report("Could not store a \(kind.rawValue) row", error)
+            await report("could not store a \(kind.rawValue) row", error)
         }
     }
 
@@ -551,22 +559,62 @@ public actor AgentRunner {
                 $0.updatedAt = session.updatedAt
             }
         } catch {
-            report("Could not save the session", error)
+            await report("could not save the session", error)
         }
     }
 
-    /// Say so when the store refuses a write.
+    /// Say so when the store refuses a write, unless there is nobody left to say it to.
     ///
     /// These used to be `try?`, and the event went out as though it had been stored: a failing
     /// database threw the whole transcript away and told nobody. The failure now reaches the UI as
     /// an `.error` event and stays readable on the runner afterwards. It goes straight to the sink
     /// rather than through `ingest`, because storing a row is exactly what just failed.
-    private func report(_ what: String, _ error: Error) {
-        let message = "\(what): \(error)"
+    ///
+    /// The one silence is a transcript that has gone. Archiving or removing a workspace under a
+    /// turn that is still in flight deletes the session row, `ON DELETE CASCADE`, and the foreign
+    /// key on `messages.session_id` then correctly refuses the next row this turn writes. Nothing
+    /// is wrong there: the owner's own gesture removed the transcript, so there is nowhere for the
+    /// write to go and nothing worth saying about it. The row is dropped and the agent is stopped,
+    /// because an agent still working in a worktree nobody is recording is the part that would be
+    /// a fault.
+    ///
+    /// It is not a `try?` round the write, and it must never become one: that swallows a database
+    /// that has genuinely gone wrong along with it, which is the bug above. The two are told apart
+    /// by asking the store whether the session is still there rather than by reading SQLite's
+    /// message, which says "FOREIGN KEY constraint failed" for both. See `TranscriptStanding`.
+    private func report(_ what: String, _ error: Error) async {
+        // The log keeps what the person is not shown: which write it was, and the statement.
+        Self.log.error("\(what, privacy: .public): \(error.readableMessage, privacy: .public)")
+
+        let standing = await TranscriptStanding.of(sessionID: session.id, in: store)
+        guard let trouble = WorkspaceTrouble.recording(
+            transcript: standing, complaint: TranscriptStanding.complaint(about: error)
+        ) else {
+            stopBecauseTheTranscriptWentAway()
+            return
+        }
+
         persistenceFailures += 1
-        lastFailure = message
-        sink.yield(.error(.storage(message: message)))
+        lastFailure = trouble.sentence
+        sink.yield(.error(.storage(message: trouble.sentence)))
     }
+
+    /// The workspace this session belonged to has been removed. Stop the process and say nothing.
+    ///
+    /// Once, and guarded, because everything already in flight when the rows went will fail the
+    /// same way on its way through: the turn's remaining lines, the session save that cancelling
+    /// provokes, and any question still open. One cancel is enough for all of them.
+    private func stopBecauseTheTranscriptWentAway() {
+        guard !transcriptWentAway else { return }
+        transcriptWentAway = true
+        Self.log.info("the transcript for \(self.session.id.rawValue, privacy: .public) has been removed, so this run is being stopped without a word")
+        cancel()
+    }
+
+    private static let log = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "be.spatie.bloom",
+        category: "agent-runner"
+    )
 
     // MARK: Permission asks
 
@@ -577,7 +625,7 @@ public actor AgentRunner {
         do {
             try await store.appendPermissionAsk(sessionID: session.id, ask: ask)
         } catch {
-            report("Could not store a permission question", error)
+            await report("could not store a permission question", error)
         }
 
         // Bloom's own bridge tools answer themselves. Checked before the grant lookup because it
@@ -675,7 +723,7 @@ public actor AgentRunner {
         do {
             try await store.resolvePermissionAsk(id: ask.requestID, decision: decision)
         } catch {
-            report("Could not record a permission decision", error)
+            await report("could not record a permission decision", error)
         }
         sink.yield(.permissionDecided(PermissionResolution(
             requestID: ask.requestID,

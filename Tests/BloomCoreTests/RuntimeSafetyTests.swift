@@ -409,13 +409,31 @@ private struct SeededGenerator: RandomNumberGenerator {
 
 // MARK: - Persistence failures
 
+/// Makes the database refuse every message row, for a reason that has nothing to do with the
+/// session being gone.
+///
+/// A second connection, deliberately: the point of these tests is a store failure that is not the
+/// cascade, and the only two ways to provoke one are a database that is actually broken and a
+/// rule the database itself enforces. `@testable` reaches `SQLiteDatabase` for exactly this kind
+/// of thing; see its own head. The abort message shares no words with `isSeqConflict`, so the
+/// sequence retry loop does not eat it.
+private func refuseEveryMessageRow(in store: Store) throws -> SQLiteDatabase {
+    let database = try SQLiteDatabase(path: store.path)
+    try database.execute("""
+        CREATE TRIGGER refuse_messages BEFORE INSERT ON messages
+        BEGIN SELECT RAISE(ABORT, 'the transcript table is bolted shut'); END;
+        """)
+    return database
+}
+
 @Suite("AgentRunner persistence failures", .tags(.persistence), .scratchDirectory, .timeLimit(.minutes(1)))
 struct AgentRunnerPersistenceFailureTests {
     @Test("surfaces a failed write instead of pretending the row landed")
     func surfacesFailedAppend() async throws {
         let store = try makeTestStore("runtime")
-        // A session that was never inserted: the foreign key on messages refuses every row.
-        let session = Session(workspaceID: WorkspaceID("no-such-workspace"))
+        let session = try await makeSession(store)
+        let refusing = try refuseEveryMessageRow(in: store)
+        defer { try? refusing.execute("DROP TRIGGER refuse_messages") }
         let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
 
         let events = runner.events
@@ -427,7 +445,9 @@ struct AgentRunnerPersistenceFailureTests {
             Issue.record("the failed write should reach the stream as an error")
             return
         }
-        #expect(failure.message.contains("Could not store"))
+        #expect(failure.message == WorkspaceTrouble.transcriptUnwritable(
+            complaint: "the transcript table is bolted shut."
+        ).sentence)
         #expect(JSONValue.parse(failure.raw)?["subtype"]?.stringValue == "storage")
         if case .assistantText = received[1] {} else {
             Issue.record("the event itself should still be delivered")
@@ -438,20 +458,52 @@ struct AgentRunnerPersistenceFailureTests {
         #expect(try await store.messageCount(sessionID: session.id) == 0)
     }
 
+    /// The bug this whole file was reopened for, written down.
+    ///
+    /// The owner archived a workspace while its agent was still working and got a modal reading
+    /// "The agent stopped in Review the changes / Could not store a system row: FOREIGN KEY
+    /// constraint failed [INSERT INTO messages (session_id, seq, kind, payload, created_at,
+    /// duration_ms, ref_id) VALUES (?, ?, ?, ?, ?, ?, ?)]". Nothing had gone wrong: the workspace
+    /// was removed, the session row cascaded away with it, and the row the turn was still trying
+    /// to write had nowhere to go. A write for a transcript the owner has just deleted is not a
+    /// failure and there is nobody to report it to.
+    @Test("a write for a workspace that has just been deleted is dropped without a word")
+    func deletedWorkspaceIsSilent() async throws {
+        let store = try makeTestStore("runtime")
+        var session = try await makeSession(store)
+        // Mid turn, which is when this happens and is also the only state a cancel is legal from.
+        _ = session.apply(.turnStarted)
+        session = try await store.upsert(session)
+        let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
+
+        let events = runner.events
+        // Exactly what archiving or removing does: the workspace goes, and every session and
+        // message under it goes with it, `ON DELETE CASCADE`.
+        try await store.deleteWorkspace(id: session.workspaceID)
+        await runner.ingest(.assistantText(AgentTextBlock(text: "mid turn", raw: Data("{}".utf8))))
+
+        let received = await take(1, from: events)
+        if case .error = received.first {
+            Issue.record("a workspace the owner deleted must not be reported as a database fault")
+        }
+        #expect(await runner.persistenceFailureCount == 0)
+        #expect(await runner.lastPersistenceFailure == nil)
+        // And the agent is stopped, because an agent still working in a worktree nothing is
+        // recording is the part that would be a fault.
+        #expect(await runner.hasBeenCancelled)
+    }
+
     @Test("a failed write leaves the sequence where it was")
     func failedWriteDoesNotBurnASequenceNumber() async throws {
         let store = try makeTestStore("runtime")
         let session = try await makeSession(store)
-        let broken = Session(id: session.id, workspaceID: session.workspaceID)
-        let runner = AgentRunner(workspacePath: "/tmp/w", session: broken, store: store)
+        let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
 
-        // A payload no row can hold: a kind is fine, but the session id must exist. Delete the
-        // session out from under the runner, write, then put it back.
-        try await store.deleteSession(id: session.id)
+        let refusing = try refuseEveryMessageRow(in: store)
         await runner.ingest(.assistantText(AgentTextBlock(text: "lost", raw: Data("{}".utf8))))
         #expect(await runner.persistenceFailureCount == 1)
 
-        _ = try await store.upsert(session)
+        try refusing.execute("DROP TRIGGER refuse_messages")
         await runner.ingest(.assistantText(AgentTextBlock(text: "kept", raw: Data("{}".utf8))))
 
         let stored = try await store.messages(sessionID: session.id)

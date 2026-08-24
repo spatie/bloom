@@ -520,9 +520,7 @@ struct RepoSettingsView: View {
 
     /// The one question, asked here and in the sidebar and in Settings. See `ProjectRemoval`.
     private var removal: Confirmation {
-        ProjectRemoval.confirmation(
-            for: repo, workspaces: app.workspaces.filter { $0.repoID == repo.id }
-        )
+        app.projectRemoval(repo)
     }
 
     private func removeProject() {

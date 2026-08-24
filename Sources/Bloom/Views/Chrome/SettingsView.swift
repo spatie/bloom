@@ -236,9 +236,7 @@ private struct ProjectSettingsView: View {
     /// The one question, asked here and in the sidebar and in the project's own window. See
     /// `ProjectRemoval`.
     private func removal(_ repo: Repo) -> Confirmation {
-        ProjectRemoval.confirmation(
-            for: repo, workspaces: app.workspaces.filter { $0.repoID == repo.id }
-        )
+        app.projectRemoval(repo)
     }
 
     private func remove(_ repo: Repo) {

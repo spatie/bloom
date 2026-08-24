@@ -420,7 +420,10 @@ final class TranscriptModel {
             Log.composer.error(
                 "the message could not be queued: \(error.readableMessage, privacy: .public)"
             )
-            app.alert = BloomAlert(title: "Could not queue the message", message: error.readableMessage)
+            app.alert = BloomAlert(
+                title: "Could not queue the message",
+                message: TranscriptStanding.complaint(about: error)
+            )
             return
         }
 

@@ -1,7 +1,12 @@
 import Foundation
 
-/// Why something Bloom did in a recorded directory failed, said to the owner rather than to an
-/// agent.
+/// Why something Bloom did for a workspace failed, said to the owner rather than to an agent.
+///
+/// Mostly that is a recorded directory: a project folder or a worktree that has stopped being
+/// what the database says it is. One case is the database itself refusing a write, and it is
+/// here rather than in a vocabulary of its own because it is the same kind of sentence about the
+/// same workspace, and because a second set of words for "this went wrong and here is what to do
+/// about it" is how the two drift apart.
 ///
 /// The companion of `WorkspaceStartTrouble`, which says the same diagnoses to a model calling
 /// `workspace_start`. Two enums rather than one because the two readers can do different things
@@ -37,6 +42,10 @@ public enum WorkspaceTrouble: Sendable, Equatable {
     case worktreeNotACheckout(workspace: String)
     /// The branch this workspace is measured against is not in the project any more.
     case worktreeBaseBranchGone(branch: String, workspace: String)
+    /// Bloom could not write a turn into its own database, and the transcript it would have
+    /// gone into is still there. See `recording(transcript:complaint:)` for the refusal that
+    /// is deliberately not this.
+    case transcriptUnwritable(complaint: String)
     /// Anything else, in git's own words with the command line dropped.
     case unexplained(String)
 
@@ -95,6 +104,16 @@ public enum WorkspaceTrouble: Sendable, Equatable {
                 or give the workspace a base branch that is still there.
                 """
 
+        case let .transcriptUnwritable(complaint):
+            return """
+                Bloom could not write this turn into its own database, so this conversation is \
+                missing rows from here on. Nothing in the worktree has been touched and every \
+                change the agent has made is still there. Sending again will fail the same way \
+                while the database is refusing writes, so quit Bloom and open it again; if it \
+                happens a second time the database itself needs looking at. The database said: \
+                \(complaint)
+                """
+
         case let .unexplained(message):
             return message
         }
@@ -115,6 +134,31 @@ public enum WorkspaceTrouble: Sendable, Equatable {
         case .noCommitsYet: return .projectHasNoCommits(project: project)
         case .branchMissing(let branch): return .baseBranchGone(branch: branch, project: project)
         case .fine: return .unexplained(CheckoutStanding.complaint(about: error))
+        }
+    }
+
+    /// Whether a refused store write is worth telling the owner about, and what to say.
+    ///
+    /// Nil is the whole point of this method. A write for a workspace the owner has just archived
+    /// or removed has nowhere to go and nothing to say: the session row went with the workspace,
+    /// `ON DELETE CASCADE`, the foreign key correctly refused the row the turn was still trying to
+    /// add, and the gesture that removed the transcript was the owner's own. There is no
+    /// transcript left to record into, so the runner drops the write and stops, quietly.
+    ///
+    /// It is deliberately not a `try?` at the write site. That would swallow a database that has
+    /// genuinely gone wrong along with it, which is the failure the `.error` event on a refused
+    /// write was written to stop being invisible in the first place. So the two are told apart by
+    /// asking the database which one it is, and only the second is said out loud.
+    ///
+    /// `.unanswerable` reports, and reports through the same case as `.there`. A database that
+    /// cannot answer whether a row exists is broken by any reading, and guessing in the quiet
+    /// direction would put the silence back exactly where it must not be.
+    public static func recording(
+        transcript: TranscriptStanding, complaint: String
+    ) -> WorkspaceTrouble? {
+        switch transcript {
+        case .gone: return nil
+        case .there, .unanswerable: return .transcriptUnwritable(complaint: complaint)
         }
     }
 

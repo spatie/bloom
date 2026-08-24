@@ -360,7 +360,13 @@ final class AppModel {
             isLoaded = true
             reportFailedDatabaseMigration()
         } catch {
-            alert = BloomAlert(title: "Could not open the Bloom database", message: error.readableMessage)
+            // `TranscriptStanding.complaint` rather than `readableMessage`: a `SQLiteError`
+            // describes itself with the statement that provoked it appended, which is a log's
+            // register and not a person's. See its own doc for the modal that made the point.
+            alert = BloomAlert(
+                title: "Could not open the Bloom database",
+                message: TranscriptStanding.complaint(about: error)
+            )
             isLoaded = true
         }
 
@@ -558,7 +564,10 @@ final class AppModel {
                 }
             }
         } catch {
-            alert = BloomAlert(title: "Could not read workspaces", message: error.readableMessage)
+            alert = BloomAlert(
+                title: "Could not read workspaces",
+                message: TranscriptStanding.complaint(about: error)
+            )
         }
     }
 
@@ -865,7 +874,14 @@ final class AppModel {
         if let open = selection.archivedWorkspaceID, ids.contains(open) {
             selection = .archive
         }
-        for id in ids { workspaceModels[id] = nil }
+        // Torn down rather than only dropped. Everything here was archived, and archiving stops
+        // its agents, so in practice there is nothing left to stop; a model let go of while it
+        // still holds a runner is a writer aimed at rows that have just been deleted, and that is
+        // the shape of failure this whole path was fixed for.
+        for id in ids {
+            workspaceModels[id]?.teardown()
+            workspaceModels[id] = nil
+        }
         invalidateArchived()
         return removed
     }
@@ -1214,12 +1230,59 @@ final class AppModel {
         await addKnownRepository(at: path)
     }
 
+    /// The one question about removing a project, built from what this window knows.
+    ///
+    /// Assembled here rather than at each of the three places that ask it. They used to filter the
+    /// workspace list themselves and now have a second argument to get right as well, and three
+    /// copies of a filter is how the three of them worded the consequence differently in the first
+    /// place. See `ProjectRemoval`.
+    func projectRemoval(_ repo: Repo) -> Confirmation {
+        let mine = workspaces.filter { $0.repoID == repo.id }
+        return ProjectRemoval.confirmation(
+            for: repo,
+            workspaces: mine,
+            runningAgents: mine.count { isRunning($0) }
+        )
+    }
+
+    /// Forgets a project, and stops its agents first.
+    ///
+    /// The stop is the whole of the fix for a modal that read "Could not store a system row:
+    /// FOREIGN KEY constraint failed". Removing a project deletes its workspaces, their sessions
+    /// and their transcripts by cascade, and this used to do that with the agents still running:
+    /// the next row a turn wrote had no session left to hang from, the foreign key refused it, and
+    /// the runner reported a database fault for something the owner had just asked for.
+    ///
+    /// Awaited rather than signalled, unlike the archive path, because there is no worktree left
+    /// to protect here and no hurry: nothing is on screen waiting for this, and a process that is
+    /// actually gone before the rows go is a race that never has to be diagnosed afterwards. It is
+    /// still only most of the race, which is why `AgentRunner.report` can tell the two apart: a
+    /// runner whose process has exited can still be draining the lines it already read.
+    ///
+    /// The models are dropped as well as torn down. A `WorkspaceModel` left in the table for a
+    /// workspace whose row no longer exists is a second writer with nothing to write to.
     func removeRepository(_ repo: Repo) async {
         guard let store else { return }
+
+        // Every model this project has, not only the rows the sidebar is drawing: `workspaces`
+        // holds active ones, and an archived workspace that is still open in a tab has a model too.
+        let doomed = workspaceModels.filter { $0.value.workspace.repoID == repo.id }
+        // Signalled first and waited for second, exactly as `shutdownEverything` does it, so a
+        // project with four running agents costs one SIGTERM escalation rather than four in a row.
+        for (_, model) in doomed { model.stopEverything() }
+        for (id, model) in doomed {
+            await model.shutdown()
+            model.teardown()
+            workspaceModels[id] = nil
+        }
+
         do {
             try await store.deleteRepo(id: repo.id)
         } catch {
-            alert = BloomAlert(title: "Could not remove the project", message: error.readableMessage)
+            alert = BloomAlert(
+                title: "Could not remove the project",
+                message: TranscriptStanding.complaint(about: error)
+            )
         }
     }
 

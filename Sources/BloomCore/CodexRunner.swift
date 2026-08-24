@@ -1,5 +1,6 @@
 import Foundation
 import Synchronization
+import os
 
 /// Supervises one `codex app-server` connection for one Bloom chat.
 ///
@@ -50,6 +51,9 @@ public actor CodexRunner: SessionRunner {
     private let handle = TurnHandle()
     private let sink = EventFanout<AgentEvent>()
 
+    /// Whether this run has already been stopped because its transcript was deleted underneath
+    /// it. See `stopBecauseTheTranscriptWentAway`.
+    private var transcriptWentAway = false
     private var persistenceFailures = 0
     private var lastFailure: String?
 
@@ -336,6 +340,13 @@ public actor CodexRunner: SessionRunner {
     private func handle(_ event: CodexEvent) async {
         remember(event)
 
+        // A connection that closed because Bloom closed it is not news, and it must not be drawn
+        // as an outage. `.closed` translates to an `.error`, which the window puts up as "The
+        // agent stopped in <workspace>", so a chat whose workspace was archived, removed or simply
+        // closed produced a modal saying the Codex process had ended: true, and the owner is the
+        // one who ended it. Only a server that went away on its own is worth a word.
+        if case .closed = event, handle.wasCancelled || transcriptWentAway { return }
+
         if case .approval(let request) = event {
             await ask(request)
             return
@@ -402,7 +413,7 @@ public actor CodexRunner: SessionRunner {
         do {
             try await store.appendPermissionAsk(sessionID: session.id, ask: ask)
         } catch {
-            report("Could not store a permission question", error)
+            await report("could not store a permission question", error)
         }
         await persist(kind: .permissionAsk, payload: ask.raw, refID: ask.toolUseID)
 
@@ -472,7 +483,7 @@ public actor CodexRunner: SessionRunner {
         do {
             try await store.resolvePermissionAsk(id: ask.requestID, decision: decision)
         } catch {
-            report("Could not record a permission decision", error)
+            await report("could not record a permission decision", error)
         }
         sink.yield(.permissionDecided(PermissionResolution(
             requestID: ask.requestID,
@@ -516,7 +527,7 @@ public actor CodexRunner: SessionRunner {
                 refID: refID
             )
         } catch {
-            report("Could not store a \(kind.rawValue) row", error)
+            await report("could not store a \(kind.rawValue) row", error)
         }
     }
 
@@ -535,22 +546,56 @@ public actor CodexRunner: SessionRunner {
                 $0.updatedAt = session.updatedAt
             }
         } catch {
-            report("Could not save the session", error)
+            await report("could not save the session", error)
         }
     }
 
-    /// Say so when the store refuses a write, on the stream as well as on the runner.
+    /// Say so when the store refuses a write, on the stream as well as on the runner, unless there
+    /// is nobody left to say it to.
     ///
     /// The sink rather than `emit`, twice over: persisting a row is exactly what just failed, and
     /// `emit`'s `.error` arm ends the turn, which a database hiccup has no business doing. The
     /// Claude Code side has emitted this event since its `try?` swallowed a whole transcript;
     /// this backend used to keep the count and tell nobody who was looking at the window.
-    private func report(_ what: String, _ error: Error) {
-        let message = "\(what): \(error.readableMessage)"
+    ///
+    /// The silence, and why only this one refusal gets it, is written out in full at
+    /// `AgentRunner.report`. Both backends have to make the same call, because both of them can be
+    /// mid turn when a workspace is archived or removed and the session row goes.
+    private func report(_ what: String, _ error: Error) async {
+        // The log keeps what the person is not shown: which write it was, and the statement.
+        Self.log.error("\(what, privacy: .public): \(error.readableMessage, privacy: .public)")
+
+        let standing = await TranscriptStanding.of(sessionID: session.id, in: store)
+        guard let trouble = WorkspaceTrouble.recording(
+            transcript: standing, complaint: TranscriptStanding.complaint(about: error)
+        ) else {
+            stopBecauseTheTranscriptWentAway()
+            return
+        }
+
         persistenceFailures += 1
-        lastFailure = message
-        sink.yield(.error(.storage(message: message)))
+        lastFailure = trouble.sentence
+        sink.yield(.error(.storage(message: trouble.sentence)))
     }
+
+    /// The workspace this session belonged to has been removed. Stop the process and say nothing.
+    /// Guarded, and for the same reason as its twin: everything already in flight when the rows
+    /// went will be refused on its way through, and one stop answers all of it.
+    private func stopBecauseTheTranscriptWentAway() {
+        guard !transcriptWentAway else { return }
+        transcriptWentAway = true
+        Self.log.info("the transcript for \(self.session.id.rawValue, privacy: .public) has been removed, so this run is being stopped without a word")
+        terminateNow()
+    }
+
+    /// Whether this run has been stopped because its transcript was deleted underneath it. For
+    /// the suite, and for the same reason as `AgentRunner.hasBeenCancelled`.
+    var transcriptWasRemoved: Bool { transcriptWentAway }
+
+    private static let log = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "be.spatie.bloom",
+        category: "codex-runner"
+    )
 }
 
 // MARK: - Turn handle

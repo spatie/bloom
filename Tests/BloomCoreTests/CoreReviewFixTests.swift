@@ -32,8 +32,16 @@ struct CodexRunnerPersistenceFailureTests {
     @Test("surfaces a failed write instead of pretending the row landed")
     func surfacesFailedAppend() async throws {
         let store = try makeTestStore("codex-persistence")
-        // A session that was never inserted: the foreign key on messages refuses every row.
-        let session = Session(workspaceID: WorkspaceID("no-such-workspace"))
+        let session = try await makeCodexSession(store)
+        // A rule the database enforces, and pointedly not the cascade: a refused write that is
+        // genuinely a fault still has to be said out loud. The session going away is the one
+        // refusal that is silent, and it is the test below.
+        let refusing = try SQLiteDatabase(path: store.path)
+        try refusing.execute("""
+            CREATE TRIGGER refuse_messages BEFORE INSERT ON messages
+            BEGIN SELECT RAISE(ABORT, 'the transcript table is bolted shut'); END;
+            """)
+        defer { try? refusing.execute("DROP TRIGGER refuse_messages") }
         let box = scriptedBox()
         let runner = CodexRunner(
             workspacePath: "/tmp/w",
@@ -66,13 +74,70 @@ struct CodexRunnerPersistenceFailureTests {
             Issue.record("the failed write should reach the stream as an error, got \(String(describing: first))")
             return
         }
-        #expect(failure.message.contains("Could not store"))
+        #expect(failure.message == WorkspaceTrouble.transcriptUnwritable(
+            complaint: "the transcript table is bolted shut."
+        ).sentence)
         #expect(JSONValue.parse(failure.raw)?["subtype"]?.stringValue == "storage")
 
         #expect(await runner.lastPersistenceFailure != nil)
         #expect(await runner.persistenceFailureCount == 1)
         #expect(try await store.messageCount(sessionID: session.id) == 0)
     }
+
+    /// The same silence the Claude Code runner keeps, for the same reason. Both backends can be
+    /// mid turn when the owner archives or removes the workspace under them, and a foreign key
+    /// refusing a row whose session has just been deleted is not a fault either side should report.
+    @Test("a write for a workspace that has just been deleted is dropped without a word")
+    func deletedWorkspaceIsSilent() async throws {
+        let store = try makeTestStore("codex-persistence")
+        var session = try await makeCodexSession(store)
+        // Mid turn, which is when this happens and is also the only state a cancel is legal from.
+        _ = session.apply(.turnStarted)
+        session = try await store.upsert(session)
+        let box = scriptedBox()
+        let runner = CodexRunner(
+            workspacePath: "/tmp/w",
+            session: session,
+            store: store,
+            makeClient: { configuration in
+                CodexClient(configuration: configuration, makeProcess: box.factory)
+            }
+        )
+
+        let events = runner.events
+        try await store.deleteWorkspace(id: session.workspaceID)
+        // Refused: stopping the run closes the connection this send is riding on, which is the
+        // point. The turn does not get to carry on into a transcript that is not there.
+        try? await runner.send("hello")
+
+        let first = await withTaskGroup(of: AgentEvent?.self) { group in
+            group.addTask {
+                for await event in events { return event }
+                return nil
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(2))
+                return nil
+            }
+            let winner = await group.next() ?? nil
+            group.cancelAll()
+            return winner
+        }
+        if case .error = first {
+            Issue.record("a workspace the owner deleted must not be reported as a database fault")
+        }
+        #expect(await runner.persistenceFailureCount == 0)
+        #expect(await runner.lastPersistenceFailure == nil)
+        #expect(await runner.transcriptWasRemoved)
+    }
+}
+
+private func makeCodexSession(_ store: Store) async throws -> Session {
+    let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r-\(UUID().uuidString)"))
+    let workspace = try await store.upsert(Workspace(
+        repoID: repo.id, name: "w", branch: "b", path: "/tmp/w", baseBranch: "main"
+    ))
+    return try await store.upsert(Session(workspaceID: workspace.id, agentKind: .codex))
 }
 
 // MARK: - Git.runRaw cancellation
