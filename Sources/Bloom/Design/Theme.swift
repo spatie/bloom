@@ -966,64 +966,6 @@ extension View {
     }
 }
 
-/// A spinner that does not animate when nothing is running, because a dozen idle workspaces
-/// each animating a spinner is a measurable amount of CPU.
-struct ActivityDot: View {
-    var isActive: Bool
-    var tint: Color = Palette.running
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Whether this window is the one in front. See `isPulsing`.
-    @Environment(\.controlActiveState) private var activeState
-    @State private var pulse = false
-
-    /// Reduce Motion drops the pulse rather than slowing it, the same way the pane animations do.
-    /// The dot still says what it said: it is tinted while something is running and grey when it
-    /// is not, so nothing is lost by holding it still.
-    ///
-    /// **And it stops when the window is not in front, which is the same gate `BusyPulseDriver`
-    /// has and this did not.** A `repeatForever` animation goes on animating in a backgrounded
-    /// app, and `BusyPulse`'s own header is this project's measurement of what that costs: 320,971
-    /// view-graph updates for 12 body evaluations over 12.3 seconds, with the bill set by
-    /// `RootGeometry` and `LayoutChildGeometries` recomputed 239.6 times a second. So the cost is
-    /// how big the window is, not how big the mark is, and a backgrounded Bloom with agents
-    /// running woke the main thread for as long as they ran.
-    ///
-    /// This is a battery item and not a smoothness one: the transcript measured ten times the
-    /// browser's cost with no dot on screen at all. Behind another app there is nothing to read
-    /// anyway, and the resting state is legible: tinted while something runs, grey when not.
-    ///
-    /// `Snapshot.forcesBusyPulse` for the same reason `BusyPulseDriver` reads it: a capture run
-    /// has no frontmost window and would otherwise photograph a mark that never moves.
-    private var isPulsing: Bool {
-        let isFront = activeState != .inactive || Snapshot.forcesBusyPulse
-        return isActive && pulse && !reduceMotion && isFront
-    }
-
-    var body: some View {
-        Circle()
-            .fill(isActive ? tint : Palette.textTertiary)
-            .frame(width: Metrics.dot, height: Metrics.dot)
-            .scaleEffect(isPulsing ? 1.35 : 1)
-            .opacity(isPulsing ? 0.5 : 1)
-            .animation(
-                isPulsing
-                    ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true)
-                    : .default,
-                value: pulse
-            )
-            .onChange(of: isActive, initial: true) { _, active in
-                pulse = active
-            }
-            // Leaving the app has to take the repeating animation down, not merely stop starting
-            // new ones: without this the pulse that was already running when the window went
-            // behind carries on for as long as the agent does.
-            .onChange(of: activeState) { _, _ in
-                pulse = isActive
-            }
-    }
-}
-
 // MARK: - Link buttons
 
 extension View {

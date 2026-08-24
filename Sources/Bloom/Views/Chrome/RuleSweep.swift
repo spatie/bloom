@@ -141,8 +141,8 @@ struct RuleSweep: View {
     /// enough that most of the rule is untouched at any moment.
     static let length: CGFloat = 160
 
-    /// What the rule holds while an agent is working and nothing is moving: Reduce Motion, or the
-    /// window behind another app. A tint rather than nothing at all, because the signal has to
+    /// What the rule holds while an agent is working and nothing is moving, which is Reduce Motion
+    /// and nothing else now. A tint rather than nothing at all, because the signal has to
     /// survive being frozen, and quiet enough that a screenshot does not read as a rule drawn in
     /// the wrong colour.
     private static let restingOpacity: Double = 0.32

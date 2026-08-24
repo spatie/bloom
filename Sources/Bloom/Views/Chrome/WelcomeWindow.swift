@@ -156,7 +156,7 @@ enum WelcomeLaunch {
 ///
 ///     Bloom --setup-rehearsal signed-out-github
 ///
-/// Debug only, and deliberately, for the reason `Snapshot.forcesBusyPulse` is: this makes the
+/// Debug only, and deliberately, for the reason `--running` is: this makes the
 /// window say something about the machine that is not true, and a shipped copy has no business
 /// being able to say that.
 enum SetupRehearsal {

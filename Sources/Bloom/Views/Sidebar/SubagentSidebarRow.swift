@@ -66,10 +66,9 @@ struct SubagentSidebarRow: View {
 
 /// The mark at the leading edge of a subagent's row.
 ///
-/// The running case is `WorkspaceRunningGlyph`, the same figure the workspace above it draws and
-/// on the same clock, because `BusyPulse` is what keeps every lit row in the column breathing
-/// together. A second moving figure with a phase of its own would be the one thing this pane
-/// cannot have.
+/// The running case is `WorkspaceRunningGlyph`, the same mark the workspace above it draws and on
+/// the same clock, because `BusyPulse` is what keeps every lit row in the column pulsing together.
+/// A second moving figure with a phase of its own would be the one thing this pane cannot have.
 ///
 /// The three endings differ in SHAPE before they differ in colour, which is the rule the whole
 /// column is drawn to: a tick, a cross and a dash are told apart by someone who cannot tell the

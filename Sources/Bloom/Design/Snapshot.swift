@@ -179,20 +179,10 @@ enum Snapshot {
         }
     }
 
-    /// Whether the busy signals may run while another app is in front.
-    ///
-    /// `--running` lifts their frontmost gate as well as setting the state. Anything that films
-    /// this window is another process, so this window is not the front one while it is being
-    /// filmed, and the signals would stop on the frame the recorder started. The alternative is a
-    /// capture run that repeatedly takes focus off whatever the user is doing, which is worse than
-    /// a debug flag.
-    static var forcesBusyPulse: Bool {
-        #if DEBUG
-        return CommandLine.arguments.contains("--running")
-        #else
-        return false
-        #endif
-    }
+    // There was a `forcesBusyPulse` here, which let `--running` lift the busy marks' frontmost
+    // gate: anything that films this window is another process, so the window is not the front one
+    // while it is being filmed, and the marks used to stop on the frame the recorder started.
+    // There is no frontmost gate left to lift. See `BusyPulseDriver`.
 
     /// Unfolds the setup row's log in the transcript, the same way its link does.
     ///
@@ -768,7 +758,7 @@ enum Snapshot {
             case .inspectorTabs: CGSize(width: 460, height: 470)
             case .diffScope: CGSize(width: 460, height: 700)
             case .pendingDelete: CGSize(width: 820, height: 900)
-            case .runningGlyph: CGSize(width: 700, height: 760)
+            case .runningGlyph: CGSize(width: 700, height: 900)
             case .retries: CGSize(width: 860, height: 1020)
             // Four panes at the sidebar's 260 point default, side by side, over a second row of
             // three that traces the removal.
@@ -793,8 +783,8 @@ enum Snapshot {
             // The sidebar's selection does, and for the same reason: a source list draws the
             // emphasized fill only while it holds the keyboard, and that fill is the whole page.
             case .sidebarSelection: true
-            // The running mark does not, even though it moves: `forcesBusyPulse` is what
-            // lets a capture past the frontmost gate, so the heartbeat runs without the keys.
+            // The running mark does not, even though it moves: the heartbeat has no frontmost
+            // gate left, so it runs in a window nobody has given the keys to.
             // The pane tabs page has no field in it either: every tab on it is drawn as a label.
             case .inspectorTabs, .diffScope, .pendingDelete, .runningGlyph, .retries,
                  .subagentRows, .paneTabs:
@@ -981,6 +971,12 @@ enum Snapshot {
             // the one representable on this page draws a plain shape when it is held still,
             // precisely so this scene is a photograph of the row rather than of a placeholder.
             ("retries", AnyView(RetrySnapshotGallery().frame(width: 860, height: 1020)), CGSize(width: 860, height: 1020)),
+            // The running mark, for the same reason and with the same limit: what comes out here
+            // is the mark held still, because the heartbeat needs a window and there is none. That
+            // is worth a photograph anyway, since it is exactly what Reduce Motion draws, and it
+            // is the only picture of this mark an agent can take without asking to film the
+            // owner's screen. The moving figure is `--snapshot-gallery --gallery running-glyph`.
+            ("running-glyph", AnyView(RunningGlyphGallery()), GalleryChoice.runningGlyph.size),
             // No review-comments and no inspector-tabs scene, deliberately, and for one reason:
             // `ImageRenderer` paints SwiftUI's yellow placeholder over an `NSViewRepresentable`,
             // and each of those two pages exists to show one. The review comment box is the
