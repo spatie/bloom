@@ -36,7 +36,16 @@ public struct PaneSplitTool: BridgeToolHandling {
         self.split = split
     }
 
-    public let roles: Set<BridgeRole> = [.parent, .owner]
+    /// A parent and nothing else.
+    ///
+    /// Not `.owner`, although it was at first, and that was a listed tool that could never work.
+    /// This tool is scoped to the workspace the caller is standing in, and `BridgeIdentity.owner`
+    /// carries no `workspaceID` by definition: the role is the person reaching Bloom from a client
+    /// they started themselves, sitting in no workspace at all. Every call refused with "this
+    /// connection is not speaking for one", after being advertised in `tools/list` as though it
+    /// would work. `BridgeRole.owner` says as much in its own doc comment: not anything scoped to
+    /// a workspace, because it has none to be scoped to.
+    public let roles: Set<BridgeRole> = [.parent]
 
     public let tool = BridgeTool(
         name: "pane_split",
