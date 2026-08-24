@@ -650,7 +650,10 @@ public enum RepositoryStarter {
     }
 
     /// One readable line out of whatever git or gh returned.
-    static func sentence(from error: Error) -> String {
+    ///
+    /// Public because `ProjectSetupSheet`'s untyped catch needs it: `readableMessage` there is
+    /// the argv and the exit status, in the same modal this method exists to keep them out of.
+    public static func sentence(from error: Error) -> String {
         let raw: String
         if let shell = error as? ShellError {
             raw = shell.stderr.isEmpty ? shell.description : shell.stderr

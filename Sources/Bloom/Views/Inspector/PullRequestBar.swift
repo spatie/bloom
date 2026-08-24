@@ -222,7 +222,10 @@ struct PullRequestBar: View {
                 report = PullRequestNotice(
                     tone: .failure,
                     title: "Could not continue",
-                    message: reason + " This worktree is where it was.",
+                    // The reassurance used to be appended here, which read as a contradiction
+                    // over a worktree that had been deleted. `WorkspaceTrouble` carries it in
+                    // the one sentence where it is true.
+                    message: reason,
                     details: nil
                 )
             }

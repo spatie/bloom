@@ -1657,7 +1657,7 @@ final class AppModel {
                 isAgentRunning: isRunning(workspace)
             )
         } catch {
-            return .failed(error.readableMessage)
+            return .failed(await trouble(continuing: error, in: workspace).sentence)
         }
 
         let branch: String
@@ -1672,11 +1672,21 @@ final class AppModel {
                 workspace: workspace, branch: branch
             )
         } catch {
-            return .failed(error.readableMessage)
+            return .failed(await trouble(continuing: error, in: workspace).sentence)
         }
 
         await adopt(continuation, pullRequest: pullRequest)
         return .continued(continuation)
+    }
+
+    /// Both catches above, so the two sentences cannot drift apart.
+    private func trouble(continuing error: any Error, in workspace: Workspace) async -> WorkspaceTrouble {
+        await WorkspaceTrouble.continuing(
+            error,
+            workspace: workspace.name,
+            path: workspace.path,
+            baseBranch: workspace.baseBranch
+        )
     }
 
     /// Everything the app has to forget or refresh now that the worktree is on another branch.

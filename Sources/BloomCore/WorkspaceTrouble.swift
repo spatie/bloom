@@ -60,6 +60,8 @@ public enum WorkspaceTrouble: Sendable, Equatable {
     case restoreBranchGone(branch: String, workspace: String)
     /// Restoring stopped for a reason nothing about the project explains.
     case restoreUnexplained(workspace: String, complaint: String)
+    /// Continuing after a merge stopped for a reason nothing about the worktree explains.
+    case continueUnexplained(workspace: String, complaint: String)
     /// The disk work is done and the database would not record it, so every list in the app is
     /// showing where this workspace was rather than where it is. The sibling of
     /// `transcriptUnwritable`, which is the same refusal about a conversation.
@@ -182,6 +184,15 @@ public enum WorkspaceTrouble: Sendable, Equatable {
                 checkout in good order and nothing else is holding its branch, so this is neither \
                 a project nor a branch that has gone missing. It stays in Archived, with nothing \
                 lost. The reason given was: \(complaint)
+                """
+
+        case let .continueUnexplained(workspace, complaint):
+            return """
+                Continuing '\(workspace)' stopped, and Bloom cannot say why. Its worktree is still \
+                a checkout in good order and the branch it would be cut from is still there, so \
+                this is neither a folder that has moved nor a branch that has gone missing. The \
+                worktree is where it was, on the branch it was on, with everything in it \
+                untouched. The reason given was: \(complaint)
                 """
 
         case let .recordUnwritable(workspace, complaint):
@@ -314,6 +325,42 @@ public enum WorkspaceTrouble: Sendable, Equatable {
             let work = try? await Git.localWork(worktree: path)
             if work?.hasUncommitted == true { return .archiveWorktreeNotEmpty(workspace: workspace) }
             return .archiveUnexplained(workspace: workspace, complaint: complaint(about: error))
+        }
+    }
+
+    /// Why continuing a merged workspace on a fresh branch failed.
+    ///
+    /// Asked of the worktree, like `readingChanges`, because both halves of the gesture happen
+    /// there: the facts are read out of the worktree, and the new branch is cut in it. The
+    /// project is not probed at all, since a worktree shares its refs with the project it came
+    /// from, so the base branch question is the same question either way.
+    ///
+    /// This is the fifth modal that used to show `error.readableMessage`. Every call behind it is
+    /// git in a worktree, so a refusal put the argv and the exit status in front of somebody who
+    /// had pressed one button, and `PullRequestBar` then appended "This worktree is where it was"
+    /// to it. That reassurance belongs in the sentence rather than glued to whatever git said,
+    /// which is why `.continueUnexplained` carries it and why the two folder cases, where the
+    /// worktree is emphatically not where it was, do not get it.
+    public static func continuing(
+        _ error: any Error, workspace: String, path: String, baseBranch: String
+    ) async -> WorkspaceTrouble {
+        // See `archiving`: the last thing a continuation does is write the branch, and by then
+        // the checkout has already moved, so probing the folder for a refused write would report
+        // the wrong fault entirely.
+        if error is SQLiteError {
+            return .recordUnwritable(workspace: workspace, complaint: complaint(about: error))
+        }
+
+        switch await CheckoutStanding.of(path, branch: baseBranch) {
+        case .missing: return .worktreeGone(workspace: workspace)
+        case .notACheckout: return .worktreeNotACheckout(workspace: workspace)
+        // A worktree cannot outlive its repository's first commit, so this is the repository the
+        // worktree points at having been emptied. The folder is what the reader can act on.
+        case .noCommitsYet: return .worktreeNotACheckout(workspace: workspace)
+        case .branchMissing(let branch):
+            return .worktreeBaseBranchGone(branch: branch, workspace: workspace)
+        case .fine:
+            return .continueUnexplained(workspace: workspace, complaint: complaint(about: error))
         }
     }
 

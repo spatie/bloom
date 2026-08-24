@@ -350,6 +350,72 @@ struct WorkspaceTroubleTests {
         #expect(trouble.sentence.contains("The database said: database disk image is malformed."))
     }
 
+    // MARK: - Continuing after a merge
+
+    /// The fifth modal that showed `error.readableMessage`. Both calls behind Continue are git in
+    /// a worktree, so a refusal put the argv in front of somebody who had pressed one button.
+    @Test("says why continuing stopped without quoting the command")
+    func continuingAHealthyWorktree() async throws {
+        let repo = try await TempRepo(defaultBranch: "main")
+        defer { repo.cleanUp() }
+        let worktree = TestScratch.unique("wt")
+        try await Git.addWorktree(repo: repo.path, path: worktree, branch: "file-pill", base: "main")
+        defer { try? FileManager.default.removeItem(atPath: worktree) }
+
+        let trouble = await WorkspaceTrouble.continuing(
+            ShellError(
+                command: "git checkout -b file-pill-2 abc123",
+                status: 128,
+                stderr: "fatal: a branch named 'file-pill-2' already exists"
+            ),
+            workspace: "File pill", path: worktree, baseBranch: "main"
+        )
+        #expect(trouble == .continueUnexplained(
+            workspace: "File pill",
+            complaint: "fatal: a branch named 'file-pill-2' already exists."
+        ))
+        #expect(!trouble.sentence.contains("checkout -b"))
+        #expect(!trouble.sentence.contains("128"))
+        // The reassurance the bar used to glue on, said where it is true.
+        #expect(trouble.sentence.contains("The worktree is where it was"))
+        #expect(trouble.sentence.contains("already exists"))
+    }
+
+    /// And not said where it is false: a deleted worktree is emphatically not where it was, which
+    /// is why the appended sentence had to move into the enum rather than stay at the call site.
+    @Test("does not promise the worktree is intact when it has gone")
+    func continuingWithNoWorktree() async throws {
+        let repo = try await TempRepo(defaultBranch: "main")
+        defer { repo.cleanUp() }
+        let worktree = TestScratch.unique("wt")
+        try await Git.addWorktree(repo: repo.path, path: worktree, branch: "merge-scroll", base: "main")
+        try FileManager.default.removeItem(atPath: worktree)
+
+        let trouble = await WorkspaceTrouble.continuing(
+            ShellError(command: "git rev-parse", status: 128, stderr: "fatal: not a git repository"),
+            workspace: "Merge scroll", path: worktree, baseBranch: "main"
+        )
+        #expect(trouble == .worktreeGone(workspace: "Merge scroll"))
+        #expect(!trouble.sentence.contains("The worktree is where it was"))
+    }
+
+    /// The last step of a continuation is the branch write, by which point the checkout has
+    /// already moved, so probing the folder would report the wrong fault entirely.
+    @Test("blames the database rather than the folder for a refused write")
+    func continuingWithARefusedWrite() async throws {
+        let trouble = await WorkspaceTrouble.continuing(
+            SQLiteError(
+                message: "database disk image is malformed",
+                sql: "UPDATE workspaces SET branch = ? WHERE id = ?"
+            ),
+            workspace: "Merge scroll", path: "/nowhere", baseBranch: "main"
+        )
+        #expect(trouble == .recordUnwritable(
+            workspace: "Merge scroll", complaint: "database disk image is malformed."
+        ))
+        #expect(!trouble.sentence.contains("UPDATE"))
+    }
+
     // MARK: - One missing worktree does not take down the rest
 
     /// The question the modal raised: creating workspace B should not care that workspace A's

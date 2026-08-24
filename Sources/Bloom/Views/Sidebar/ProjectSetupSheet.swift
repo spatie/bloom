@@ -711,7 +711,10 @@ struct ProjectSetupSheet: View {
                 guard !Task.isCancelled else { return }
                 phase = .failed(RepositoryStartFailure(
                     step: .initialise,
-                    message: error.readableMessage,
+                    // Not `readableMessage`, which is the argv and the exit status for a
+                    // `ShellError`. Nothing reaches here today, because the typed catch above
+                    // takes every path that exists, but this is the modal it would leak into.
+                    message: RepositoryStarter.sentence(from: error),
                     completed: completed,
                     destination: target
                 ))
