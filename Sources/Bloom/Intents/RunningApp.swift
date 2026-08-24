@@ -38,8 +38,11 @@ enum RunningApp {
     /// about.
     static func startWorkspace(in repo: Repo, prompt: String) async throws -> Workspace {
         guard let model else { throw AppNotReady.stillStartingUp }
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.first?.makeKeyAndOrderFront(nil)
+        // `MainWindow.raise()`, not `NSApp.windows.first`. That helper exists precisely to
+        // replace this pattern and its comment names the bug: with About or Settings open,
+        // `first` is whichever panel is in front, so a Shortcut raised the About window. The app
+        // delegate was fixed when it was found; Shortcuts and Services were not.
+        MainWindow.raise()
         return try await model.startWorkspace(in: repo, prompt: prompt)
     }
 
@@ -62,15 +65,13 @@ enum RunningApp {
     /// would take a round trip through LaunchServices only to arrive back in this process as the
     /// same notification.
     static func open(_ url: URL) {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.first?.makeKeyAndOrderFront(nil)
+        MainWindow.raise()
         NotificationCenter.default.post(name: .bloomHandleURL, object: url)
     }
 
     /// Selects a workspace in the window, the same way a click in the dock menu does.
     static func select(workspaceID: WorkspaceID) {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.first?.makeKeyAndOrderFront(nil)
+        MainWindow.raise()
         OpenWorkspaceNotification.post(workspaceID)
     }
 

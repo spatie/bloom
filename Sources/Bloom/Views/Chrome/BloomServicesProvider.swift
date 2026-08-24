@@ -51,7 +51,9 @@ final class BloomServicesProvider: NSObject {
         guard let (repo, prompt) = confirm(text: text, in: app) else { return }
 
         UserDefaults.standard.set(repo.id.rawValue, forKey: Self.lastRepoKey)
-        NSApp.windows.first?.makeKeyAndOrderFront(nil)
+        // See `MainWindow`: `first` is whichever panel is in front, and this runs right after a
+        // confirmation panel has been up, which is exactly when that is not the main window.
+        MainWindow.raise()
         Task { await app.createWorkspace(in: repo, prompt: prompt) }
     }
 

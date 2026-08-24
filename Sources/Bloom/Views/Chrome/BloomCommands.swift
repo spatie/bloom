@@ -210,6 +210,22 @@ struct BloomCommands: Commands {
                 .disabled(model.selectedModel == nil)
 
             Divider()
+
+            // Cmd+Shift+[ and ], which is what Safari, Terminal, Xcode and Finder all bind.
+            //
+            // Every kind of centre tab could already be opened from the keyboard, and none of
+            // them could be moved between: the full shortcut grep across this app found 74
+            // bindings and not one for `[`, `]`, Ctrl+Tab or Cmd+1, and there was no menu item to
+            // carry one. Which tab is next is `TabCycle` in the core, wrapping included.
+            Button("Previous Tab") { cycleCentreTab(by: -1) }
+                .keyboardShortcut("[", modifiers: [.command, .shift])
+                .disabled(!canCycleCentreTabs)
+
+            Button("Next Tab") { cycleCentreTab(by: 1) }
+                .keyboardShortcut("]", modifiers: [.command, .shift])
+                .disabled(!canCycleCentreTabs)
+
+            Divider()
         }
 
         CommandGroup(after: .sidebar) {
@@ -473,6 +489,18 @@ struct BloomCommands: Commands {
         PaneDuplicate.open(tabs.content(of: pane, in: tab), in: workspace) { content in
             tabs.split(tab: tab, pane: pane, axis: axis, showing: content)
         }
+    }
+
+    /// Greyed on a strip with nothing to move to, rather than on no workspace at all, which is
+    /// the same rule Split Right follows two items above.
+    private var canCycleCentreTabs: Bool {
+        guard let workspace = model.selectedModel else { return false }
+        return WorkspaceTabsStore.shared.entries(in: workspace).count > 1
+    }
+
+    private func cycleCentreTab(by offset: Int) {
+        guard let workspace = model.selectedModel else { return }
+        WorkspaceTabsStore.shared.selectNextTab(offset: offset, in: workspace)
     }
 
     private func closeCentrePane() {

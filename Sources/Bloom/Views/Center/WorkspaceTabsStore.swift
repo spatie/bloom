@@ -294,6 +294,20 @@ final class WorkspaceTabsStore {
         adoptActiveSession(of: tab, in: model)
     }
 
+    /// Next Tab and Previous Tab, which is the pointer-free way round the strip.
+    ///
+    /// The order is `entries(in:)`, which is what the strip draws and what a drag reorders, so
+    /// the shortcut walks the tabs in the order they are seen rather than in the order they were
+    /// opened. Which tab is next is `TabCycle` in the core, with the wrapping and the
+    /// closed-tab case tested; what is here is the strip it asks about.
+    func selectNextTab(offset: Int, in model: WorkspaceModel) {
+        let tabs = entries(in: model)
+        guard let next = TabCycle.next(from: selectedTab(in: model), in: tabs, offset: offset) else {
+            return
+        }
+        select(next, in: model)
+    }
+
     /// Brings something to the front by name: the tab it is, or the tab that has absorbed it.
     ///
     /// The door every "open this in the centre column" route goes through, replacing

@@ -29,11 +29,19 @@ enum WelcomeWindow {
     ///
     /// Looking again on a second visit is the point of the menu item: somebody who came back to
     /// this window came back because they changed something.
-    static func show(trigger: OnboardingTrigger = .none) {
+    /// - Parameter mayActivate: whether Bloom is allowed to pull itself in front of whatever the
+    ///   owner is doing. True for a menu item, which is somebody asking; false for the launch
+    ///   probe, which is not.
+    static func show(trigger: OnboardingTrigger = .none, mayActivate: Bool = true) {
         let existing = window ?? make(trigger: trigger)
         window = existing
         existing.makeKeyAndOrderFront(nil)
-        NSApp.activate()
+        // Only when Bloom is already the front application, or when somebody asked for this
+        // window by name. `NSApp.activate()` was unconditional, and the caller behind it is an
+        // async probe whose own comment says it "can take as long as four CLIs take", so Bloom
+        // pulled itself to the front seconds after the owner had moved to another app. The window
+        // is still ordered in, so it is there when they come back.
+        if mayActivate || NSApp.isActive { NSApp.activate() }
         inspection?.start()
     }
 
@@ -113,6 +121,8 @@ enum WelcomeLaunch {
     static func presentIfNeeded() {
         let completed = UserDefaults.standard.bool(forKey: OnboardingGate.completedKey)
         if OnboardingGate.trigger(hasCompletedBefore: completed, verdict: nil) == .firstRun {
+            // A first launch is the one case that may take focus: the app has just been opened
+            // and this window is what it opened to.
             WelcomeWindow.show(trigger: .firstRun)
             return
         }
@@ -123,7 +133,7 @@ enum WelcomeLaunch {
             let report = await SetupProbe().report()
             guard OnboardingGate.trigger(hasCompletedBefore: true, verdict: report.verdict) == .blocked
             else { return }
-            WelcomeWindow.show(trigger: .blocked)
+            WelcomeWindow.show(trigger: .blocked, mayActivate: false)
         }
     }
 
