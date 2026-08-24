@@ -94,8 +94,10 @@ struct PullRequestBar: View {
                 worktree: model.workspace.path,
                 localWork: model.localWork,
                 isWorking: isWorking,
+                isAgentBusy: model.isRunning,
                 onMerge: merge,
                 onPush: push,
+                onFixConflicts: { fixConflicts(on: pullRequest) },
                 onContinue: { carryOn(after: pullRequest) },
                 onArchive: archive
             )
@@ -186,6 +188,26 @@ struct PullRequestBar: View {
         Task {
             defer { isWorking = false }
             if let refusal = await model.requestPush() {
+                report = PullRequestNotice(
+                    tone: .info, title: "Nothing was sent", message: refusal
+                )
+            }
+        }
+    }
+
+    /// Hands the conflict to the agent, the same way the other three buttons hand it their work.
+    ///
+    /// Nothing here runs git, and there is nothing to report on success either: what comes back is
+    /// an ordinary turn in the transcript, and the strip notices the resolved worktree on its next
+    /// refresh like any other change on this disk. The pull request stays conflicted on GitHub
+    /// until the reader presses Commit and push, which is the button the strip offers next.
+    private func fixConflicts(on pullRequest: PullRequest) {
+        isWorking = true
+        report = nil
+
+        Task {
+            defer { isWorking = false }
+            if let refusal = await model.requestFixConflicts(pullRequest) {
                 report = PullRequestNotice(
                     tone: .info, title: "Nothing was sent", message: refusal
                 )

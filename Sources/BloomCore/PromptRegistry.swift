@@ -8,6 +8,7 @@ public enum PromptID: String, Sendable, Hashable, CaseIterable, Codable {
     case createPullRequest
     case pushLocalWork
     case mergePullRequest
+    case fixConflicts
     case continueAfterMerge
     case review
     case nameWorkspace
@@ -60,8 +61,8 @@ public struct PromptDefinition: Sendable, Hashable, Identifiable {
 /// none of that and can only fail.
 public enum PromptRegistry {
     public static let all: [PromptDefinition] = [
-        createPullRequest, pushLocalWork, mergePullRequest, continueAfterMerge, review,
-        nameWorkspace,
+        createPullRequest, pushLocalWork, mergePullRequest, fixConflicts, continueAfterMerge,
+        review, nameWorkspace,
     ]
 
     public static func definition(for id: PromptID) -> PromptDefinition {
@@ -100,6 +101,21 @@ public enum PromptRegistry {
         /// is read by a person editing it in Settings and then by an agent typing a command, and
         /// neither form is the right one for both readers.
         public static let methodFlag = "method_flag"
+    }
+
+    /// The names the fix-merge-conflicts prompt may use.
+    ///
+    /// Deliberately fewer than the merge prompt's. Nothing in this turn touches GitHub, so the
+    /// method and its flag would be two variables describing a command that is never run, and the
+    /// title says nothing a conflicted file does not say better.
+    public enum FixConflicts {
+        public static let workspace = "workspace"
+        public static let number = "number"
+        /// The branch the conflicts are resolved ON, which is the one this worktree is standing on.
+        public static let branch = "branch"
+        /// The branch that is brought IN. Both, because the direction of that merge is the one
+        /// thing in this prompt that must not be left to a guess.
+        public static let baseBranch = "base_branch"
     }
 
     /// The names the continue-after-merge prompt may use.
@@ -286,6 +302,66 @@ public enum PromptRegistry {
         defaultTemplate: """
         Merge pull request #{{number}} into {{base_branch}} as a {{method}}, which is \
         `{{method_flag}}`. It is on the branch {{branch}}.
+        """
+    )
+
+    /// Sent when the strip says the branch conflicts with its base.
+    ///
+    /// It exists because the button that used to stand there could not work. A conflicted pull
+    /// request drew the ordinary Merge button beside a red band, and pressing it asked the agent
+    /// to run `gh pr merge` on something GitHub had already refused to merge. The state has one
+    /// remedy, a person resolving the conflict, and the button now offers that instead.
+    ///
+    /// No instructions file, and that is the difference from the merge prompt rather than an
+    /// omission. `MergeInstructions` is a file because merging is policy about a server: which
+    /// flags are allowed, what to do when GitHub refuses, when the branch is deleted, and a
+    /// project that merges differently has to be able to say so once for everybody. Resolving a
+    /// conflict is ordinary work in this worktree, of the kind every other turn asks for, and the
+    /// conventions for it are already in front of the agent in the project's own instruction
+    /// files. A second file repeating them would be a second place to keep them right.
+    ///
+    /// The template pushes nothing and merges nothing on the server. What comes out is a resolved
+    /// worktree with a commit in it, which is exactly the state the strip's Commit and push button
+    /// is for, so the next press is the reader's rather than this turn's.
+    static let fixConflicts = PromptDefinition(
+        id: .fixConflicts,
+        title: "Fix merge conflicts",
+        summary: """
+        Sent to the workspace's agent when you press Fix merge conflicts, which is what the strip \
+        offers in place of Merge once GitHub reports that the branch conflicts with its base. It \
+        asks for the base branch to be brought into this worktree and the conflicts resolved \
+        here. Nothing is pushed and nothing is merged on GitHub: what you get back is a resolved \
+        worktree, and the strip then offers Commit and push in the ordinary way.
+        """,
+        variables: [
+            PromptVariable(name: FixConflicts.workspace, summary: "The workspace's name."),
+            PromptVariable(name: FixConflicts.number, summary: "The pull request's number."),
+            PromptVariable(
+                name: FixConflicts.branch,
+                summary: "The branch the conflicts are resolved on, which is this worktree's."
+            ),
+            PromptVariable(
+                name: FixConflicts.baseBranch,
+                summary: "The branch that conflicts with it, and that is brought in."
+            ),
+        ],
+        defaultTemplate: """
+        Pull request #{{number}} conflicts with {{base_branch}}, so GitHub will not merge it as it \
+        stands. Resolve that here, in this worktree, on {{branch}}.
+
+        Fetch {{base_branch}} first, so you are working against what is on the server rather than \
+        a stale copy of it, then bring it into this branch the way this project brings it in: \
+        merge it unless the project's own conventions say to rebase onto it. It goes into this \
+        branch and never the other way round.
+
+        Work through every conflicted file. Keep what this branch changed and what \
+        {{base_branch}} changed, and where the two genuinely disagree, read enough of the code \
+        around them to work out which is right instead of taking a side. Follow this project's \
+        conventions, and run whatever it uses to check itself before you call anything resolved.
+
+        Commit the resolution, with a message worded the way this project words one. Do not push \
+        it, and do not merge the pull request. Finish by saying which files conflicted, what you \
+        decided in each of them, and anything you are not sure about.
         """
     )
 

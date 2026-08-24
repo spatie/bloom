@@ -189,9 +189,10 @@ struct PullRequestCreator: View {
     }
 
     private var helpText: String {
-        if isAgentBusy {
-            return "The agent is working. The request is sent as a turn, so it has to wait for this one."
-        }
+        // The same sentence `PullRequestSummary` shows on the buttons it draws in this band once
+        // there is a pull request, from the one place it is written: it is a fact about how all
+        // five of these buttons work rather than about this one.
+        if isAgentBusy { return PullRequestStatus.agentBusyReason }
         // No path named. There are two, the project's own and Bloom's copy of the default, and
         // which one is in play is not something a tooltip should be teaching anybody.
         return "Ask this workspace's agent to push the branch and open a pull request against "

@@ -54,7 +54,20 @@ public struct PullRequestStatus: Sendable, Hashable {
         /// depending on whether anything is uncommitted, and the label follows.
         case commitAndPush
         case push
+        /// Bring the base in and resolve the conflict, because merging is the one thing this state
+        /// cannot do. The strip used to draw Merge here, beside a red band saying the branch
+        /// conflicts, and pressing it asked the agent to run a command GitHub had already refused.
+        case fixConflicts
     }
+
+    /// Why the strip's buttons are dead while the workspace's agent is mid turn.
+    ///
+    /// Here rather than in the two views that say it, because it is one fact about how every one
+    /// of these buttons works: none of them does anything itself, they all compose a turn, and an
+    /// agent runs one turn at a time. `PullRequestCreator` and `PullRequestSummary` both show it,
+    /// and a sentence written out twice is a sentence that gets improved once.
+    public static let agentBusyReason =
+        "The agent is working. The request is sent as a turn, so it has to wait for this one."
 
     public init(
         tone: Tone,
@@ -210,7 +223,13 @@ public extension PullRequest {
                 text: "Merge conflicts",
                 detail: "This branch conflicts with the base branch",
                 canMerge: false,
-                blockedReason: "Resolve the conflicts with the base branch first."
+                blockedReason: "Resolve the conflicts with the base branch first.",
+                // The one state whose remedy is neither merging nor pushing. It is set here and
+                // not weighed against local work, because `status(local:)` hands a conflict
+                // straight back: a conflicted branch with uncommitted files still needs the
+                // conflict resolved first, and resolving it is going to make more local work
+                // rather than less.
+                remedy: .fixConflicts
             )
         }
         if isDraft {

@@ -1305,6 +1305,47 @@ final class WorkspaceModel {
         return text + "\n\n" + MergeInstructions.defaultMarkdown
     }
 
+    /// Asks the workspace's agent to bring the base branch in and resolve the conflicts.
+    ///
+    /// The state this answers used to be offered a Merge button, which could not work: GitHub had
+    /// already said the branch does not apply to its base, so the only thing that press could
+    /// produce was the agent running `gh pr merge` and reading the refusal back out.
+    ///
+    /// The same guard and the same route as the other three buttons in the strip, with two
+    /// differences that are both about what this turn does NOT do. There is no instructions file,
+    /// because nothing here acts on a server and the project's conventions for resolving a
+    /// conflict are already in front of the agent; and there is no confirmation in front of it,
+    /// for the reason written out at `PullRequestSummary.fixConflictsButton`.
+    ///
+    /// Returns nil on success, or the sentence to put in front of the user.
+    func requestFixConflicts(
+        _ pullRequest: PullRequest,
+        overrides: PromptOverrides = PromptOverrides()
+    ) async -> String? {
+        guard !isRunning else {
+            return "\(workspace.name) is still working. Wait for the turn to finish, then press "
+                + "Fix merge conflicts again."
+        }
+
+        guard let session = await sessionForPullRequest(titledIfNew: "Fix merge conflicts") else {
+            return "Could not open a session in \(workspace.name) to send the request to."
+        }
+
+        let context = FixConflictsPromptContext(
+            workspaceName: workspace.name,
+            number: pullRequest.number,
+            // The worktree's own branch rather than gh's `headRefName`. The sentence is about the
+            // branch the agent is standing on, and this is the one fact here Bloom holds itself.
+            branch: workspace.branch,
+            baseBranch: workspace.baseBranch
+        )
+        let render = context.render(template: overrides.template(for: .fixConflicts))
+
+        activeSessionID = session.id
+        await transcript(for: session).submit(render.text)
+        return nil
+    }
+
     /// The turn that goes down the wire, with the instructions named in it.
     ///
     /// The path goes in the sentence that asks for it, which is where every other file Bloom sends

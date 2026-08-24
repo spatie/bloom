@@ -386,6 +386,7 @@ public struct WorkspaceListTool: BridgeToolHandling {
         case .merge: "merge"
         case .push: "push"
         case .commitAndPush: "commitAndPush"
+        case .fixConflicts: "fixConflicts"
         }
     }
 }

@@ -26,9 +26,16 @@ struct PullRequestSummary: View {
     /// still running, which is not the same as "nothing", and is drawn as nothing extra.
     var localWork: LocalWork?
     var isWorking: Bool
+    /// The workspace's agent is mid turn. Every button in this strip works by composing a turn and
+    /// sending it, and an agent runs one turn at a time, so none of them can do anything until
+    /// this one is over. `PullRequestCreator` takes the same fact for the same reason, and both
+    /// say it in the same words: `PullRequestStatus.agentBusyReason`.
+    var isAgentBusy: Bool
     var onMerge: (GitHub.MergeMethod) -> Void
     /// Hands the outstanding work to the workspace's agent to commit and push.
     var onPush: () -> Void
+    /// Asks the workspace's agent to bring the base branch in and resolve the conflicts with it.
+    var onFixConflicts: () -> Void
     /// Carries a merged workspace on to a fresh branch, in place. See `continueButton`.
     var onContinue: () -> Void
     /// Archives, through the app's ordinary archive with all its checks intact.
@@ -217,7 +224,7 @@ struct PullRequestSummary: View {
         } else if pullRequest.isOpen {
             HStack(spacing: Metrics.spacingTight) {
                 mergeMenu
-                if status.remedy == .merge { mergeButton } else { pushButton }
+                primaryButton
             }
             .fixedSize()
         } else if pullRequest.isMerged {
@@ -233,6 +240,22 @@ struct PullRequestSummary: View {
         // only place its commits live, and moving off it would be exactly the wrong offer. Archive
         // on its own would be a control that says "throw this away" over a branch nobody has
         // agreed to throw away.
+    }
+
+    /// Which of the three the open state's primary slot holds.
+    ///
+    /// A switch rather than a chain of conditions, and the reason is the failure this project has
+    /// had four times: the remedy is an enum in the core, and a case added to it has to stop
+    /// compiling here rather than quietly falling through to whichever branch happened to be last.
+    /// The decision itself is `PullRequest.status(local:)`, tested, because a decision taken in a
+    /// view is a decision nothing can test.
+    @ViewBuilder
+    private var primaryButton: some View {
+        switch status.remedy {
+        case .merge: mergeButton
+        case .fixConflicts: fixConflictsButton
+        case .commitAndPush, .push: pushButton
+        }
     }
 
     /// Carry this workspace on, on a new branch, without giving up the session.
@@ -351,15 +374,74 @@ struct PullRequestSummary: View {
             .buttonStyle(.borderedProminent)
             .tint(status.tone.fill)
             .controlSize(.regular)
+            .disabled(isAgentBusy)
             .help(
-                "Ask this workspace's agent to \(pushLabel.lowercased()) branch "
-                    + "\(pullRequest.branch.isEmpty ? "this branch" : pullRequest.branch), so "
-                    + "#\(pullRequest.number) is what is on this disk."
+                isAgentBusy
+                    ? PullRequestStatus.agentBusyReason
+                    : "Ask this workspace's agent to \(pushLabel.lowercased()) branch "
+                        + "\(pullRequest.branch.isEmpty ? "this branch" : pullRequest.branch), so "
+                        + "#\(pullRequest.number) is what is on this disk."
             )
     }
 
     private var pushLabel: String {
         status.remedy == .push ? "Push" : "Commit and push"
+    }
+
+    /// What stands where Merge stands, when merging is the one thing this state cannot do.
+    ///
+    /// GitHub has already said the branch does not apply to its base, so the Merge button that
+    /// used to sit here beside a red band could only ever produce a refusal read back out of `gh`.
+    /// The state has one remedy and this offers it: the same route as every other button in the
+    /// strip, a turn composed and sent to this workspace's agent, in the transcript, under the
+    /// permission mode the reader already set.
+    ///
+    /// **No confirmation, and that is a decision rather than an oversight.** Merge asks because it
+    /// is the one destructive, off-machine thing this app offers: it lands commits on somebody
+    /// else's branch and deletes a branch on the server, and none of that can be taken back from
+    /// here. This lands nothing anywhere. It brings the base into a worktree that is already the
+    /// disposable copy, commits the resolution locally, and is told to push nothing and merge
+    /// nothing, so what it can cost is a git operation in a worktree that exists to be thrown
+    /// away. Asking "are you sure?" about that is how confirmations stop being read, which is the
+    /// same argument `archiveButton` makes for the press above it.
+    ///
+    /// The sign in gate is skipped for the same reason: nothing in this turn talks to GitHub, so
+    /// a signed out `gh` has no bearing on whether it can work.
+    ///
+    /// Two forms, the way `pushButton` has two. "Fix merge conflicts" is longer than any other
+    /// label in the strip and the headline is the part that must not be what truncates.
+    private var fixConflictsButton: some View {
+        ViewThatFits(in: .horizontal) {
+            fixConflictsControl.labelStyle(.titleAndIcon)
+            fixConflictsControl.labelStyle(.iconOnly)
+        }
+        .fixedSize()
+    }
+
+    /// Tinted `status.tone.fill`, which in this state is red, and deliberately so.
+    ///
+    /// Red is the band's colour here and the rule the strip is built on is that the prominent
+    /// button carries the colour of the band it stands in: see `PullRequestStatus.Tone.fill`,
+    /// where that rule and the reason it is stated once are written out. It reads as the state
+    /// rather than as a warning about the press, which is what it already means over Checks
+    /// failing, where the same red button lands a branch on somebody's main.
+    ///
+    /// Tinted explicitly, like every prominent button in this app, because an untinted
+    /// `.borderedProminent` follows the system accent and comes out as whatever colour the Mac is
+    /// set to. `mergeButton` carries the measurement.
+    private var fixConflictsControl: some View {
+        Button("Fix merge conflicts", systemImage: "wrench.and.screwdriver", action: onFixConflicts)
+            .buttonStyle(.borderedProminent)
+            .tint(status.tone.fill)
+            .controlSize(.regular)
+            .disabled(isAgentBusy)
+            .help(
+                isAgentBusy
+                    ? PullRequestStatus.agentBusyReason
+                    : "Ask this workspace's agent to bring \(baseBranch) into this worktree and "
+                        + "resolve the conflicts here. Nothing is pushed and #\(pullRequest.number)"
+                        + " is not merged."
+            )
     }
 
     /// The other two merge methods, and while there is local work the way to merge at all.
@@ -379,8 +461,8 @@ struct PullRequestSummary: View {
         // reads as a stray control that wandered into the strip.
         .foregroundStyle(tint ?? Palette.accent)
         .controlSize(.small)
-        .disabled(!status.canMerge)
-        .help(status.blockedReason ?? "Merge #\(pullRequest.number), by whichever method")
+        .disabled(!status.canMerge || isAgentBusy)
+        .help(blockedReason ?? "Merge #\(pullRequest.number), by whichever method")
     }
 
     /// The one prominent control in the inspector, and the only solid colour in the strip.
@@ -412,13 +494,22 @@ struct PullRequestSummary: View {
             .buttonStyle(.borderedProminent)
             .tint(status.tone.fill)
             .controlSize(.regular)
-            .disabled(!status.canMerge)
+            .disabled(!status.canMerge || isAgentBusy)
             // Disabled controls do not explain themselves, and "why is this greyed out" is the
             // whole question a blocked pull request raises.
-            .help(status.blockedReason ?? "Squash and merge, or choose another method")
+            .help(blockedReason ?? "Squash and merge, or choose another method")
     }
 
     // MARK: - Text
+
+    /// Why nothing here can be pressed, or nil when something can.
+    ///
+    /// The busy turn comes first. It is true of every button in this strip rather than of one of
+    /// them, and it is the reason that goes away on its own, so a reader who hovers a grey button
+    /// while their agent is working is told to wait rather than told about a draft.
+    private var blockedReason: String? {
+        isAgentBusy ? PullRequestStatus.agentBusyReason : status.blockedReason
+    }
 
     /// The title belongs somewhere, and a tooltip on the state is where: it answers "which pull
     /// request is this" without spending any of the strip's width on an answer the reader already
