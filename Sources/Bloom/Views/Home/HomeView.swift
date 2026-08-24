@@ -191,52 +191,16 @@ struct HomeView: View {
 
     // MARK: - Summary
 
-    /// What the readout at the end of the strip says.
-    ///
-    /// It describes the list rather than the database whenever the two differ. A line reading "312
-    /// workspaces" above eleven rows is how a forgotten filter becomes a bug report about missing
-    /// work, so a narrowed list says so in the same breath as the total it was narrowed from.
-    ///
-    /// Empty when there is no list. The strip is not drawn at all then, and with no project on the
-    /// machine there is nothing to count in the first place.
+    /// What the readout at the end of the strip says. `HomeList.summary` in the core, where its
+    /// five branches can be asked about: this was four pieces of view state picking between
+    /// sentences, and one of those sentences had already been wrong once.
     private var summary: String {
-        guard hasAnyWorkspace else { return "" }
-
-        // Everything on this Mac has been archived, and archived is being hidden.
-        //
-        // Said as one fact rather than as a number and then a correction. `HomeListing.considered`
-        // counts only what the archived switch let through, so the general shape below reports "0
-        // workspaces" about a machine holding three of them, directly above a panel that says all
-        // three exist. Neither half of the readout mentioned them.
-        if !filter.isNarrowed, listing.considered == 0, !archived.isEmpty {
-            return "\(ArchiveDeletion.count(archived.count, "workspace")), all archived and hidden"
-        }
-
-        var text: String
-        if filter.isNarrowed {
-            text = "Showing \(listing.shown) of \(ArchiveDeletion.count(listing.considered, "workspace"))"
-        } else {
-            text = ArchiveDeletion.count(listing.considered, "workspace")
-            if app.repos.count > 1 {
-                text += " across \(ArchiveDeletion.count(app.repos.count, "project"))"
-            }
-        }
-
-        // Both ways round, for the same reason as the branch above: the count in front of this
-        // clause is a count of what the archived switch let through, so a machine with archived
-        // work it is not being shown has to hear about it here or nowhere. The first half is the
-        // ordinary case now that Home lists archived work by default, and it is worth saying:
-        // "48 workspaces" reads very differently once you know 30 of them are over.
-        if listing.shownArchived > 0 {
-            text += ", \(listing.shownArchived) archived"
-        } else if !archived.isEmpty {
-            text += ", \(archived.count) archived hidden"
-        }
-
-        let running = app.runningCount
-        if running > 0 { text += ", \(running) running" }
-
-        return text
+        HomeList.summary(
+            listing: listing,
+            isNarrowed: filter.isNarrowed,
+            projects: app.repos.count,
+            running: app.runningCount
+        )
     }
 
     private var hasAnyWorkspace: Bool {

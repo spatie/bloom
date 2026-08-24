@@ -261,6 +261,63 @@ public enum HomeList {
         if let locale = calendar.locale { style.locale = locale }
         return day.formatted(style)
     }
+
+    /// The line above the list, which describes the list rather than the database.
+    ///
+    /// A line reading "312 workspaces" above eleven rows is how a forgotten filter becomes a bug
+    /// report about missing work, so a narrowed list says so in the same breath as the total it
+    /// was narrowed from.
+    ///
+    /// **It was four pieces of view state picking between sentences inside `HomeView`, and the
+    /// comment on its first clause records that the expression had already produced a wrong
+    /// answer once**: "0 workspaces" about a machine holding three, printed directly above a
+    /// panel saying all three existed. That is the whole argument for this being here. A sentence
+    /// assembled in a body is a sentence nothing can be asked about, and this one has five
+    /// branches and four counts.
+    ///
+    /// Empty when there is nothing to describe. The strip is not drawn then, and on a machine
+    /// with no project there is nothing to count.
+    public static func summary(
+        listing: HomeListing,
+        isNarrowed: Bool,
+        projects: Int,
+        running: Int
+    ) -> String {
+        guard listing.considered > 0 || listing.archived > 0 else { return "" }
+
+        // Everything on this Mac is archived and archived is being hidden. Said as one fact
+        // rather than as a number and then a correction: `considered` counts only what the
+        // archived switch let through, so the general shape below would report nothing at all
+        // about a machine that is full of work.
+        if !isNarrowed, listing.considered == 0, listing.archived > 0 {
+            return "\(ArchiveDeletion.count(listing.archived, "workspace")), all archived and hidden"
+        }
+
+        var text: String
+        if isNarrowed {
+            text = "Showing \(listing.shown) of \(ArchiveDeletion.count(listing.considered, "workspace"))"
+        } else {
+            text = ArchiveDeletion.count(listing.considered, "workspace")
+            if projects > 1 {
+                text += " across \(ArchiveDeletion.count(projects, "project"))"
+            }
+        }
+
+        // Both ways round, for the same reason as the branch above: the count in front of this
+        // clause is a count of what the archived switch let through, so a machine with archived
+        // work it is not being shown has to hear about it here or nowhere. The first half is the
+        // ordinary case now that Home lists archived work by default, and it is worth saying:
+        // "48 workspaces" reads very differently once you know 30 of them are over.
+        if listing.shownArchived > 0 {
+            text += ", \(listing.shownArchived) archived"
+        } else if listing.archived > 0 {
+            text += ", \(listing.archived) archived hidden"
+        }
+
+        if running > 0 { text += ", \(running) running" }
+
+        return text
+    }
 }
 
 /// How long ago, in the two or three characters a dense row has room for.
