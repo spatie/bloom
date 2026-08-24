@@ -118,6 +118,10 @@ final class TranscriptLiveEndScroller {
 /// than a descendant of it, so it would answer nil, or find the composer's.
 struct TranscriptScrollBridge: NSViewRepresentable {
     let scroller: TranscriptLiveEndScroller
+    /// The other thing that moves this scroll view: what keeps up with a running turn. Fed from
+    /// here rather than from a bridge of its own, so there is one view planted in the content and
+    /// one answer about which scroll view the transcript is in.
+    let follower: TranscriptLiveEndFollower
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
@@ -129,7 +133,14 @@ struct TranscriptScrollBridge: NSViewRepresentable {
         // Every layout pass rather than once on attach. The pane is reused for every workspace the
         // window visits and SwiftUI is free to rebuild the hosting scroll view underneath it, so a
         // reference taken once goes stale in exactly the case that matters.
+        //
+        // It is also the only chance either of these gets. Measured against a bare hosted
+        // `ScrollView`, `enclosingScrollView` is nil on the first update, because the
+        // representable's view is created before it is put in the hierarchy: the scroll view is
+        // there from the second update on. Anything that took the reference once, on attach, would
+        // hold nil for ever and every travel below would silently fall back to a jump.
         let found = nsView.enclosingScrollView
         if scroller.scrollView !== found { scroller.scrollView = found }
+        if follower.scrollView !== found { follower.scrollView = found }
     }
 }

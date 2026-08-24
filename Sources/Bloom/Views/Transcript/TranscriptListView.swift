@@ -50,6 +50,18 @@ struct TranscriptListView: View {
     /// scroll there in place of the `withAnimation` this used to be one line of.
     @State private var scroller = TranscriptLiveEndScroller()
 
+    /// What keeps the view with the newest row while a turn runs, and turns the last of that
+    /// travel into something the eye can follow. See `TranscriptLiveEndFollower`, which is where
+    /// the rules about whose view it may move are, and `TranscriptFollow`, where the arithmetic
+    /// is. Nothing in this body reads it, on purpose: it writes no SwiftUI state, so following a
+    /// turn costs no pass over this list.
+    @State private var follower = TranscriptLiveEndFollower()
+
+    /// Whether this window is the one in front, which is the whole of what the follower needs it
+    /// for: a display link in a backgrounded app is the battery cost `ActivityDot` carries the
+    /// measurement for, and there is nobody watching the travel.
+    @Environment(\.controlActiveState) private var activeState
+
     /// The unanimated second half of a glide to the live end, if one is owed. See `goToLiveEnd`.
     @State private var catchUp: Task<Void, Never>?
 
@@ -64,6 +76,21 @@ struct TranscriptListView: View {
     /// turning up in front of the reader: it is the pane being pointed somewhere else. See
     /// `trackArrivals` and the `task` below, which is where a session stops arriving.
     @State private var arrivalSession: SessionID?
+
+    /// Where this session was opened, so the reveal can put it back there once the history has
+    /// landed under it. See `position` and the reveal in `task`.
+    ///
+    /// Three openings and only one of them is the live end: a session opened on an unread mark or
+    /// on a row somebody searched for was opened where the reader asked to be, and putting it back
+    /// means putting it back THERE. The reveal used to say the live end whatever had been chosen,
+    /// which was wrong for two of the three and did nothing at all for the third.
+    private enum Opening: Equatable {
+        case liveEnd
+        /// A row, and where in the pane it was put.
+        case row(Int, UnitPoint)
+    }
+
+    @State private var opening: Opening?
 
     /// The session whose history has been put back, if any. See `visibleRows`.
     ///
@@ -311,7 +338,10 @@ struct TranscriptListView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 // Inside the content, so the scroll view behind the transcript can be found by
                 // walking up from it. See `TranscriptScrollBridge`.
-                .background(TranscriptScrollBridge(scroller: scroller).frame(width: 0, height: 0))
+                .background(
+                    TranscriptScrollBridge(scroller: scroller, follower: follower)
+                        .frame(width: 0, height: 0)
+                )
             }
             // A conversation shorter than the pane starts at the top of it, and only once there is
             // more of it than fits does the view sit at the live end.
@@ -329,16 +359,25 @@ struct TranscriptListView: View {
             // is longer than the pane, which is the case this one never sees.
             .defaultScrollAnchor(.top, for: .alignment)
             .scrollPosition($scrollPosition)
-            // What keeps the view at the live end while a turn runs, and it replaces a `scrollTo`
-            // that used to be issued on every row that arrived. Any scroll that names a position
-            // inside a `LazyVStack` has to build and measure every row between the viewport and
-            // that position, so following a turn re-rendered the entire transcript per row. An
-            // anchor asks for none of that.
+            // Held for the reader who has scrolled away, and not for the following.
             //
-            // Nil while the user has scrolled away, which is the whole of the rule that scroll
-            // used to enforce by hand. Yanking someone back down as they read something further up
-            // is the single most irritating thing a live log can do, and an absent anchor leaves
-            // them exactly where they are.
+            // This was put here as what keeps the view at the live end while a turn runs, in place
+            // of a `scrollTo` issued on every row that arrived: any scroll that names a position
+            // inside a `LazyVStack` has to build and measure every row between the viewport and
+            // that position, so following a turn re-rendered the entire transcript per row, and an
+            // anchor asks for none of that. The argument holds. What does not is that the anchor
+            // is what does the following. Measured on macOS 27.0 against a hosted `ScrollView` of
+            // four thousand rows, with a `.scrollPosition` and without one, over a lazy stack and
+            // an eager one, forced to `.bottom` and left to the flag below: appending a row moved
+            // the content and never the offset, in any of the eight. What actually holds the view
+            // at the end is the `ScrollPosition` above standing at `.bottom`, which does it in the
+            // same layout pass that grows the content, and `TranscriptLiveEndFollower`, which
+            // turns the last of that into something the eye can follow.
+            //
+            // It stays because it says the right thing and costs nothing: nil while the user has
+            // scrolled away, which is the rule the per-row scroll used to enforce by hand. Yanking
+            // someone back down as they read something further up is the single most irritating
+            // thing a live log can do.
             .defaultScrollAnchor(geometry.isNearBottom ? .bottom : nil, for: .sizeChanges)
             .onScrollGeometryChange(for: TranscriptGeometry.self, of: Self.measure) { _, new in
                 geometry = new
@@ -366,6 +405,21 @@ struct TranscriptListView: View {
             .onChange(of: transcript.rows.count, initial: true) { _, _ in
                 position(proxy)
                 trackArrivals()
+                // A row has landed, so the end of the content has moved. Between rows the tail
+                // grows without any of this being told, which is what `isStreaming` below is for.
+                follower.nudge()
+            }
+            // The three things that decide whether the follower may move anything, said out loud
+            // rather than read from a body: it writes no state and reads none, so nothing else
+            // would ever tell it. See `TranscriptLiveEndFollower`.
+            .onChange(of: transcript.isStreaming, initial: true) { _, streaming in
+                follower.isStreaming = streaming
+            }
+            .onChange(of: activeState, initial: true) { _, state in
+                follower.isFrontmost = state != .inactive
+            }
+            .onChange(of: reduceMotion, initial: true) { _, reduced in
+                follower.travels = TranscriptFollow.travels(reduceMotion: reduced)
             }
             // Asked for by the jump pill, and an edge rather than a row on purpose: the list is
             // drawing the end of the session and may not be holding the row a seq names yet.
@@ -375,8 +429,10 @@ struct TranscriptListView: View {
             .onChange(of: transcript.session.id) { _, _ in
                 // Nothing owed to a conversation the pane has left.
                 scroller.stop()
+                follower.stop()
                 catchUp?.cancel()
                 didPosition = false
+                opening = nil
                 expanded.removeAll()
                 // A session opens at its live end whatever the one being left was scrolled to,
                 // and the anchor is read before the new rows arrive.
@@ -397,6 +453,16 @@ struct TranscriptListView: View {
                 arrivalSession = nil
             }
             .task(id: transcript.session.id) {
+                // Said before anything is awaited, because the first row can land inside the load
+                // below. See `TranscriptLiveEndFollower.onRest`: the first frame the follower
+                // steps takes SwiftUI's own hold on the live end down, and this is what gives it
+                // back when the travel is over.
+                //
+                // The scroll position's own box rather than `settleAtLiveEnd`, which would be one
+                // character shorter and would capture this view. The view holds the follower, the
+                // follower would hold the closure, and a pane torn down mid turn would leave both
+                // of them behind. A `State` box is not a view and closes no circle.
+                follower.onRest = { [box = _scrollPosition] in box.wrappedValue.scrollTo(edge: .bottom) }
                 await transcript.load()
                 // Whatever the session arrived with, taken in without a fade. This runs whether
                 // or not the row count changed, which matters: two sessions can hold the same
@@ -423,24 +489,45 @@ struct TranscriptListView: View {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard !Task.isCancelled else { return }
                 drawnInFull = transcript.session.id
-                // And the live end again, in the same breath.
+                // Not an arrival. See `TranscriptLiveEndFollower.forget`.
+                follower.forget()
+                // And the live end again, in two calls, in two passes.
                 //
-                // The size-change anchor is what holds the view still while the history lands,
-                // and it is only in force while `isNearBottom` says the user is following along.
-                // On the first visit of a launch that is not reliably true at this instant: the
-                // rows arrive into a scroll view that is already on screen and already empty, so
-                // there is a pass where the content is tall and the offset is still zero, the
-                // measurement says the user is a long way from the end, and the anchor is dropped
-                // for exactly as long as it takes the arrival to scroll itself down. Growing the
-                // content by four thousand rows with no anchor moved the viewport into a part of
-                // the stack that is not realised, and the transcript went blank and stayed blank.
-                // Filmed: rendered at 620ms, gone at 700ms, still gone three seconds later.
+                // **This is the "the chat text is gone" bug, and it is a fact about
+                // `ScrollPosition` rather than about anchors.** Growing the content by four
+                // thousand rows leaves the viewport where the tail's own end was, which is now a
+                // couple of per cent down a document twenty-five times taller, over rows the lazy
+                // stack has not realised: the transcript goes blank and stays blank. Filmed at the
+                // time: rendered at 620ms, gone at 700ms, still gone three seconds later. The line
+                // that was here to fix it, one `scrollTo(edge: .bottom)`, could not: a
+                // `ScrollPosition` is a VALUE, and asking it for the edge it already names is not
+                // a change, so SwiftUI has nothing to apply.
                 //
-                // A session that has just been arrived at is at its live end by construction, so
-                // saying so again costs nothing and cannot be wrong. It is not a second walk over
-                // the rows either: the anchor has already moved the viewport, and this only names
-                // the edge it is already on.
-                scrollPosition.scrollTo(edge: .bottom)
+                // Which is why it looked fixed. Arriving from another workspace, the position had
+                // been moved off `.bottom` by the session being left, so the reassert was a real
+                // change and landed. Coming back to a chat tab from an All changes tab, the pane
+                // is built from nothing, the state starts at `ScrollPosition(edge: .bottom)` from
+                // its own initialiser and is never moved off it, and the same line does nothing at
+                // all. That is the "sometimes".
+                //
+                // Measured on a hosted `ScrollView` of four thousand rows, driven through exactly
+                // this sequence: `scrollTo(edge: .bottom)` alone left the offset at the tail's
+                // 4,100 of 239,300; a point named first and the edge named in the NEXT update
+                // landed on 239,300 every time. Two updates, because both calls in one pass net
+                // out to the same value and change nothing. The point itself moves nothing: it is
+                // resolved against the content as it was before this pass, so it names where the
+                // view already is, and it exists only to stop the edge being the value the state
+                // already held.
+                //
+                // A row needs none of that, because `ScrollViewProxy.scrollTo` is a call rather
+                // than a value and always acts, which is why the two openings are said through
+                // one place that knows the difference. See `open`.
+                if opening == .liveEnd {
+                    scrollPosition.scrollTo(y: .greatestFiniteMagnitude)
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                }
+                open(opening, with: proxy)
                 // The session has finished arriving, so from here on a row that turns up is a row
                 // the reader is watching turn up. The history that just landed is not one of them:
                 // it was never absorbed, so every one of those rows latches at full opacity on the
@@ -476,6 +563,12 @@ struct TranscriptListView: View {
                     scroller.stop()
                     catchUp?.cancel()
                 }
+                // The follower is paused rather than stopped, and for deceleration too: a flick
+                // that lands near the live end is still the reader's own movement, and something
+                // pulling the last few points out from under the momentum is the same
+                // interruption a drag would be. `.animating` is this app's own travel, which is
+                // the one phase that is not somebody taking hold.
+                follower.isPaused = phase != .idle && phase != .animating
             }
             .overlay {
                 if showsPlaceholder {
@@ -650,7 +743,8 @@ struct TranscriptListView: View {
     ///
     /// Both of these resolve a position inside a `LazyVStack`, which is the expensive kind of
     /// scroll: it realises every row it passes. So it happens once per session rather than once
-    /// per row that arrives, and keeping up with a running turn is the size-change anchor's job.
+    /// per row that arrives, and keeping up with a running turn is `TranscriptLiveEndFollower`'s
+    /// job.
     private func position(_ proxy: ScrollViewProxy) {
         guard !transcript.rows.isEmpty, !didPosition else { return }
         didPosition = true
@@ -659,14 +753,36 @@ struct TranscriptListView: View {
         // screen asked for that line, and taking them to their unread mark or to the live end
         // instead would be the app finding the answer and then hiding it again. Centred rather
         // than at the top, because the sentence usually needs the turn around it to make sense.
+        //
+        // Which of the three it was is written down as it is chosen, because the history landing
+        // behind this a moment later moves everything on screen and the view has to be put back
+        // where it was put. See the reveal in `task`.
         if let target = app.takeTranscriptTarget(for: transcript.workspace.id) {
-            proxy.scrollTo(target.seq, anchor: .center)
+            opening = .row(target.seq, .center)
         } else if let unread = transcript.firstUnreadSeq, unread != transcript.rows.first?.seq {
-            proxy.scrollTo(unread, anchor: .top)
+            opening = .row(unread, .top)
         } else {
-            scrollPosition.scrollTo(edge: .bottom)
+            opening = .liveEnd
         }
+        open(opening, with: proxy)
         Task { await transcript.markAllRead() }
+    }
+
+    /// Puts the view where the session was opened.
+    ///
+    /// Said twice: once as the session arrives, and once more when its history has gone back in
+    /// behind the tail, because that grows the content above the viewport and leaves it looking at
+    /// something else entirely. See the reveal in `task` for why the live end takes two calls to
+    /// say and a row takes one.
+    private func open(_ opening: Opening?, with proxy: ScrollViewProxy) {
+        switch opening {
+        case .row(let seq, let anchor):
+            proxy.scrollTo(seq, anchor: anchor)
+        case .liveEnd:
+            scrollPosition.scrollTo(edge: .bottom)
+        case nil:
+            break
+        }
     }
 
     // MARK: Arrivals

@@ -16,6 +16,10 @@ import Foundation
 /// would be replacing. So the fade belongs to the block rather than to the text, and there is
 /// nothing here to decide per delta: see `StreamingRowView`.
 ///
+/// **Keeping up with the end of a running turn is `TranscriptFollow`**, which is a fourth thing
+/// and is not here: it is a rule about where the view sits rather than about how a row is drawn,
+/// and it has to answer per frame rather than per arrival.
+///
 /// **A session's history does not fade at all.** Eighty rows fading up as a window opens reads as
 /// the app being slow rather than as anything arriving, and it is not work turning up in front of
 /// the reader, it is the pane being pointed somewhere else. That rule is `RowArrival.adopt` and
