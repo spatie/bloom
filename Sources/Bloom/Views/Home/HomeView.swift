@@ -297,6 +297,10 @@ struct HomeView: View {
             } actions: {
                 Button("Choose a folder", systemImage: "folder", action: addProject)
                     .buttonStyle(.borderedProminent)
+                    // Tinted explicitly, like every other prominent button in the app: untinted it
+                    // follows the system accent, which on a Mac set to Graphite is grey glass. See
+                    // `EmptyStateView`, which says the same over the same button.
+                    .tint(Palette.accentFill)
             }
         } else if !hasAnyWorkspace {
             ContentUnavailableView {
@@ -306,6 +310,10 @@ struct HomeView: View {
             } actions: {
                 Button("New workspace", systemImage: "plus") { requestWorkspace(in: nil) }
                     .buttonStyle(.borderedProminent)
+                    // Tinted explicitly, like every other prominent button in the app: untinted it
+                    // follows the system accent, which on a Mac set to Graphite is grey glass. See
+                    // `EmptyStateView`, which says the same over the same button.
+                    .tint(Palette.accentFill)
             }
         } else if listing.isEmpty {
             if !filter.query.trimmingCharacters(in: .whitespaces).isEmpty {

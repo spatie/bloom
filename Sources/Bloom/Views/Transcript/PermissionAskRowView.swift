@@ -213,6 +213,9 @@ struct PermissionAskRowView: View {
                         // as the default answer is what makes a long turn ask thirty times.
                         Button("Always allow") { onAnswer(.allow(scope: .project)) }
                             .buttonStyle(.borderedProminent)
+                            // Bloom's fill rather than the system accent, as every other prominent button in
+                            // the app carries. See `EmptyStateView`.
+                            .tint(Palette.accentFill)
                             .keyboardShortcut(.return, modifiers: .command)
 
                         Button("This session") { onAnswer(.allow(scope: .session)) }
@@ -228,6 +231,9 @@ struct PermissionAskRowView: View {
                     } else {
                         Button("Allow once") { onAnswer(.allow(scope: .once)) }
                             .buttonStyle(.borderedProminent)
+                            // Bloom's fill rather than the system accent, as every other prominent button in
+                            // the app carries. See `EmptyStateView`.
+                            .tint(Palette.accentFill)
                             .keyboardShortcut(.defaultAction)
                     }
                 }
@@ -312,6 +318,9 @@ struct PermissionAskRowView: View {
                 HStack(spacing: Metrics.spacing) {
                     Button("Deny") { onAnswer(.deny(message: reason, endsTurn: false)) }
                         .buttonStyle(.borderedProminent)
+                        // Bloom's fill rather than the system accent, as every other prominent button in
+                        // the app carries. See `EmptyStateView`.
+                        .tint(Palette.accentFill)
                         .keyboardShortcut(.return, modifiers: .command)
 
                     Button("Deny and stop the turn") {

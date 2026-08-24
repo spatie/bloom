@@ -257,6 +257,9 @@ struct AgentQuestionCard: View {
         HStack(spacing: TranscriptLayout.tight) {
             Button("Send answer") { send() }
                 .buttonStyle(.borderedProminent)
+                // Bloom's fill rather than the system accent, as every other prominent
+                // button in the app carries. See `EmptyStateView`.
+                .tint(Palette.accentFill)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!isComplete)
 
