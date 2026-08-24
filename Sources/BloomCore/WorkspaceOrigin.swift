@@ -61,7 +61,7 @@ public enum WorkspaceOrigin: Sendable, Equatable, Hashable, Codable {
     ///
     /// And a tool call takes no gesture, so the rate at which these arrive is worth counting,
     /// which a mixture of these and sheet-made rows could not be counted from. See
-    /// `WorkspaceStartTool.startedTooFast`.
+    /// `WorkspaceStartAllowance`.
     ///
     /// It costs no column. A row with a spawn id and no parent used to read back as `.user`,
     /// which was the safest reading while nothing could write one; this is what writes one.

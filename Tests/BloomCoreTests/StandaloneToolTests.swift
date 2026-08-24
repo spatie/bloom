@@ -343,7 +343,7 @@ struct OwnerWorkspaceStartTests {
     func notCappedTheParentsWay() async throws {
         let store = try makeTestStore("owner-uncapped")
         let repo = try await store.upsert(Repo(name: "flare", path: "/tmp/flare", defaultBranch: "main"))
-        for index in 0...WorkspaceStartTool.maximumChildren {
+        for index in 0...WorkspaceStartAllowance.maximumChildren {
             _ = try await store.upsert(Workspace(
                 repoID: repo.id, name: "w\(index)", branch: "b\(index)",
                 path: "/tmp/w\(index)", baseBranch: "main"
@@ -444,7 +444,7 @@ struct OwnerStartRateTests {
     @Test("one short of the limit still starts")
     func underTheLimit() async throws {
         let (store, repo) = try await fixture("owner-rate-under")
-        try await alreadyStarted(WorkspaceStartTool.maximumOwnerStarts - 1, in: repo, store: store)
+        try await alreadyStarted(WorkspaceStartAllowance.maximumOwnerStarts - 1, in: repo, store: store)
         let recorder = Recorder()
 
         let result = await recorder.tool().call(request("one more"), as: .owner, store: store)
@@ -456,7 +456,7 @@ struct OwnerStartRateTests {
     @Test("at the limit it is refused, and nothing is cut")
     func atTheLimit() async throws {
         let (store, repo) = try await fixture("owner-rate-at")
-        try await alreadyStarted(WorkspaceStartTool.maximumOwnerStarts, in: repo, store: store)
+        try await alreadyStarted(WorkspaceStartAllowance.maximumOwnerStarts, in: repo, store: store)
         let recorder = Recorder()
 
         let result = await recorder.tool().call(request("one more"), as: .owner, store: store)
@@ -470,7 +470,7 @@ struct OwnerStartRateTests {
     @Test("the refusal says retrying will not help and says what to do instead")
     func theRefusalDoesNotInviteARetry() async throws {
         let (store, repo) = try await fixture("owner-rate-words")
-        try await alreadyStarted(WorkspaceStartTool.maximumOwnerStarts, in: repo, store: store)
+        try await alreadyStarted(WorkspaceStartAllowance.maximumOwnerStarts, in: repo, store: store)
 
         let result = await Recorder().tool().call(request("one more"), as: .owner, store: store)
 
@@ -488,10 +488,10 @@ struct OwnerStartRateTests {
     func theWindowRolls() async throws {
         let (store, repo) = try await fixture("owner-rate-rolls")
         try await alreadyStarted(
-            WorkspaceStartTool.maximumOwnerStarts * 3,
+            WorkspaceStartAllowance.maximumOwnerStarts * 3,
             in: repo,
             store: store,
-            ago: WorkspaceStartTool.ownerWindow + 60
+            ago: WorkspaceStartAllowance.ownerWindow + 60
         )
         let recorder = Recorder()
 
@@ -506,7 +506,7 @@ struct OwnerStartRateTests {
     @Test("workspaces made in Bloom's own window do not count against the tool")
     func handMadeWorkspacesDoNotCount() async throws {
         let (store, repo) = try await fixture("owner-rate-sheet")
-        for index in 0..<(WorkspaceStartTool.maximumOwnerStarts * 2) {
+        for index in 0..<(WorkspaceStartAllowance.maximumOwnerStarts * 2) {
             _ = try await store.upsert(Workspace(
                 repoID: repo.id,
                 name: "by hand \(index)",
@@ -529,7 +529,7 @@ struct OwnerStartRateTests {
     func archivingDoesNotFreeTheWindow() async throws {
         let (store, repo) = try await fixture("owner-rate-archived")
         let earlier = try await alreadyStarted(
-            WorkspaceStartTool.maximumOwnerStarts, in: repo, store: store
+            WorkspaceStartAllowance.maximumOwnerStarts, in: repo, store: store
         )
         for var workspace in earlier {
             workspace.state = .archived

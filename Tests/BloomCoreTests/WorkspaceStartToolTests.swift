@@ -227,7 +227,7 @@ struct WorkspaceStartToolTests {
         let fixture = try await fixture()
         let recorder = Recorder()
 
-        for index in 0..<WorkspaceStartTool.maximumChildren {
+        for index in 0..<WorkspaceStartAllowance.maximumChildren {
             _ = try await fixture.store.upsert(Workspace(
                 repoID: fixture.workspace.repoID,
                 name: "child \(index)",
@@ -247,12 +247,55 @@ struct WorkspaceStartToolTests {
         #expect(recorder.orders.isEmpty)
     }
 
+    /// The bug the two brakes had while they were checked in two places. The owner's rate was
+    /// asked after the dedup, with a comment saying a retry of a call that already cut a worktree
+    /// is not another start, and the parent's ceiling was asked before it, so a parent that was
+    /// full had its retries answered with a limit instead of with the workspace it already had.
+    @Test("a retry from a caller at its limit gets the workspace it already made, not a refusal")
+    func retryAtTheLimitIsNotRefused() async throws {
+        let fixture = try await fixture()
+        let recorder = Recorder()
+        let call = request(["prompt": .string("one more")])
+
+        // The workspace this exact call produced, recorded under the digest a repeat of it makes.
+        let order = AgentWorkspaceOrder(prompt: "one more")
+        _ = try await fixture.store.upsert(Workspace(
+            repoID: fixture.workspace.repoID,
+            name: "the first answer",
+            branch: "claude/one-more",
+            path: "/tmp/one-more",
+            baseBranch: "main",
+            origin: .agent(
+                parentWorkspaceID: fixture.workspace.id,
+                spawnToolUseID: order.spawnID(parentWorkspaceID: fixture.workspace.id)
+            )
+        ))
+        // And enough others beside it to put the caller over its ceiling.
+        for index in 0..<WorkspaceStartAllowance.maximumChildren {
+            _ = try await fixture.store.upsert(Workspace(
+                repoID: fixture.workspace.repoID,
+                name: "child \(index)",
+                branch: "claude/child-\(index)",
+                path: "/tmp/child-\(index)",
+                baseBranch: "main",
+                origin: .agent(parentWorkspaceID: fixture.workspace.id, spawnToolUseID: "t\(index)")
+            ))
+        }
+
+        let result = await recorder.tool().call(call, as: fixture.identity, store: fixture.store)
+
+        #expect(!result.isError)
+        #expect(result.text.contains("already_started"))
+        #expect(result.text.contains("the first answer"))
+        #expect(recorder.orders.isEmpty)
+    }
+
     @Test("archived children do not count against the limit, because the limit is on what runs")
     func archivedChildrenDoNotCount() async throws {
         let fixture = try await fixture()
         let recorder = Recorder()
 
-        for index in 0..<WorkspaceStartTool.maximumChildren {
+        for index in 0..<WorkspaceStartAllowance.maximumChildren {
             var child = Workspace(
                 repoID: fixture.workspace.repoID,
                 name: "child \(index)",

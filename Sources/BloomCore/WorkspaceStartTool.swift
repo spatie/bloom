@@ -149,10 +149,10 @@ public typealias WorkspaceStarting =
 /// refused rather than ignored if it names one. The owner's client must name a project, because
 /// nothing else says which, and it may only name one Bloom already has.
 ///
-/// A parent's workspaces are `.agent` origin, carry its id and are capped at eight running at
-/// once, because an agent looping on its own instructions is the failure that cap exists for. The
-/// owner's are `.ownerClient` origin and are capped on rate instead, which is a different brake
-/// for a different failure: see `maximumOwnerStarts`.
+/// A parent's workspaces are `.agent` origin and carry its id; the owner's are `.ownerClient`
+/// origin and carry no parent. How many either may start is not decided here: `WorkspaceOrigin`
+/// answers it through `WorkspaceStartAllowance`, which holds all three answers, the sheet's
+/// included, in one switch.
 ///
 /// Both roles are deduplicated by a digest of the call, because a model retries and a retried
 /// spawn cuts a second worktree. The owner's used to be exempt on the grounds that `.user` had
@@ -160,44 +160,6 @@ public typealias WorkspaceStarting =
 /// The argument that two identical asks a minute apart from a person are two asks is an argument
 /// about the Create sheet, where each of them is a press; here neither of them is.
 public struct WorkspaceStartTool: BridgeToolHandling {
-    /// How many a single caller may have running at once.
-    ///
-    /// Not a safety limit, a sanity one: an agent that misreads its own instructions can ask for
-    /// workspaces in a loop, and each one is a real worktree, a real process and real spend. Eight
-    /// is more than anyone has wanted and small enough that a runaway is noticed rather than
-    /// discovered on the next bill.
-    public static let maximumChildren = 8
-
-    /// How many the owner's own client may start inside `ownerWindow`.
-    ///
-    /// **Why the owner is capped at all.** It was not, and the reason given was that Bloom's own
-    /// Create sheet is not capped either. That does not hold: the sheet needs one human gesture
-    /// per workspace and this tool needs none. The caller here is a model acting on an instruction
-    /// it interpreted, and "start a workspace for each failing test" against a suite with forty of
-    /// them used to cut forty worktrees with nothing in the system saying no.
-    ///
-    /// **Why a rolling window and not a ceiling.** The parent's eight is a ceiling on what is
-    /// running, and it is right for a parent because a parent's children are work it is waiting
-    /// on. The owner is a person, their workspaces accumulate over weeks, and a ceiling on how
-    /// many they may have would refuse the eleventh workspace of a busy fortnight, which is
-    /// ordinary use rather than a runaway. What is not ordinary is the rate. So the brake is on
-    /// how fast, not how many.
-    ///
-    /// **Why six, and why fifteen minutes.** The largest deliberate fan-out anybody has asked for
-    /// in one sitting is a handful, and six leaves room above that; a loop, whose calls are
-    /// seconds apart, hits it inside a minute, having cut six worktrees rather than forty. Fifteen
-    /// minutes is long enough that no loop can outrun it and short enough that a person who
-    /// genuinely wanted a seventh is inconvenienced rather than blocked. Neither number is a
-    /// safety limit: six worktrees and six agents is already real money, and the point is that
-    /// somebody notices at six instead of at forty.
-    ///
-    /// Counted from the database, like the parent's, so two calls racing cannot both read the same
-    /// stale number and so a restart does not hand out a fresh allowance.
-    public static let maximumOwnerStarts = 6
-
-    /// The window `maximumOwnerStarts` is counted over.
-    public static let ownerWindow: TimeInterval = 15 * 60
-
     private let start: WorkspaceStarting
 
     public init(start: @escaping WorkspaceStarting) {
@@ -335,15 +297,17 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             }
         }
 
-        if origin.isOwnerClient {
-            do {
-                if let refusal = try await startedTooFast(store: store) { return .failure(refusal) }
-            } catch {
-                return .failure(
-                    "Bloom could not check how many workspaces it has started for you recently: "
-                        + error.readableMessage
-                )
-            }
+        // After the dedup, and that order is the rule rather than a preference. A retry of a call
+        // that already cut a worktree is not another start, and answering it with a limit is how a
+        // duplicate comes back looking like a runaway. It used to hold for the owner's client only,
+        // because the two brakes were checked in two places.
+        do {
+            if let refusal = try await overAllowance(origin, store: store) { return .failure(refusal) }
+        } catch {
+            return .failure(
+                "Bloom could not check how many workspaces it has started recently: "
+                    + error.readableMessage
+            )
         }
 
         do {
@@ -444,10 +408,6 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                 )
             }
 
-            if let refusal = try await tooMany(for: workspaceID, store: store) {
-                return .refused(refusal)
-            }
-
             // A retry of the same call is the same call. See `AgentWorkspaceOrder.spawnID`.
             return .resolved(project, .agent(
                 parentWorkspaceID: workspaceID,
@@ -458,56 +418,37 @@ public struct WorkspaceStartTool: BridgeToolHandling {
         }
     }
 
-    /// Whether this caller already has as many as it is allowed.
+    /// Whether this caller has already had as many as its origin allows, and the sentence saying
+    /// so.
     ///
-    /// Counted from the database rather than kept in memory, so it survives Bloom being reopened
-    /// while the children are still running, and so two calls racing cannot both see the same
-    /// stale number. Archived ones do not count: the limit is on what is running.
-    private func tooMany(for workspaceID: WorkspaceID, store: Store) async throws -> String? {
-        let live = try await store.workspaces(startedBy: workspaceID)
-
-        guard live.count >= Self.maximumChildren else { return nil }
-
-        return "You already have \(live.count) workspaces running, which is Bloom's limit. "
-            + "Wait for some to be reviewed and archived before starting more."
-    }
-
-    /// Whether the owner's client has been starting workspaces faster than a person would, and
-    /// the sentence saying so.
+    /// One function for all three origins, because there is one question. Which brake applies is
+    /// `WorkspaceStartAllowance.of`, and the only thing that genuinely differs here is the count
+    /// each one is measured against: a parent's is how many of its children are running, and the
+    /// owner's is how many have been started inside the window.
+    ///
+    /// Both are counted from the database rather than kept in memory. See the allowance.
     ///
     /// `now` is a parameter so the window can be tested without waiting a quarter of an hour.
-    func startedTooFast(store: Store, now: Date = Date()) async throws -> String? {
-        let recent = try await store.workspacesStartedByOwnerClient(
-            since: now.addingTimeInterval(-Self.ownerWindow)
-        )
+    func overAllowance(
+        _ origin: WorkspaceOrigin, store: Store, now: Date = Date()
+    ) async throws -> String? {
+        let allowance = WorkspaceStartAllowance.of(origin)
 
-        guard recent.count >= Self.maximumOwnerStarts else { return nil }
+        switch allowance {
+        case .unlimited:
+            return nil
 
-        return Self.startedTooFastSentence(count: recent.count)
-    }
+        case .running:
+            guard let parent = origin.parentWorkspaceID else { return nil }
+            let live = try await store.workspaces(startedBy: parent)
+            return allowance.refusal(count: live.count)
 
-    /// What a caller that has hit the window is told.
-    ///
-    /// Written to the standard `WorkspaceStartTrouble` sets, and against one particular misreading.
-    /// A model that has just been refused reads any mention of a window as a timer to wait out,
-    /// and a model that waits and retries has turned a brake into a slower loop. So the sentence
-    /// says plainly that retrying is refused, that nothing the caller does shortens the window,
-    /// and what to do instead, which is to stop and say what it has already started.
-    ///
-    /// It names no path and no command, and it does not tell the caller to ask the owner to raise
-    /// a limit, because there is nothing the owner can raise from here.
-    static func startedTooFastSentence(count: Int) -> String {
-        let minutes = Int(ownerWindow / 60)
-        return """
-            Bloom has already started \(count) workspaces for you in the last \(minutes) minutes, \
-            which is as many as it will start from a client outside the app. Each one is a real \
-            git worktree, a real agent process and real spend, and this many in this short a time \
-            is what a misread instruction looks like rather than a plan. Calling again will be \
-            refused for the same reason, and nothing you can do here shortens the \(minutes) \
-            minutes, so do not retry and do not wait for it. Tell the owner what you have already \
-            started and what is left over, and leave the rest to them: Bloom's own window starts \
-            workspaces with no limit, one deliberate press at a time.
-            """
+        case .rate(_, let window):
+            let recent = try await store.workspacesStartedByOwnerClient(
+                since: now.addingTimeInterval(-window)
+            )
+            return allowance.refusal(count: recent.count)
+        }
     }
 
     /// The note on a workspace that has just been started, which differs by who is being told.
