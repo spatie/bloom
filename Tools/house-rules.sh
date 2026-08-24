@@ -85,9 +85,9 @@ baton_allowed=(
   '*PROTOCOL.md'                                    # quotes a recorded session
   '*build.sh'                                       # BATON_CODESIGN_IDENTITY, kept working on purpose
   '*fixtures/'                                      # recorded sessions, byte for byte
-  'Sources/BloomCore/LegacyDatabase.swift'          # reads the old app's database
-  'Sources/BloomCore/LegacyDefaults.swift'          # reads the old app's preferences
-  'Sources/BloomCore/WorkspaceManager.swift'        # a comment about the old worktree home
+  'Sources/BloomCore/Persistence/LegacyDatabase.swift'          # reads the old app's database
+  'Sources/BloomCore/Persistence/LegacyDefaults.swift'          # reads the old app's preferences
+  'Sources/BloomCore/Workspace/WorkspaceManager.swift'        # a comment about the old worktree home
   'Tests/BloomCoreTests/AgentEventTests.swift'      # sample paths and recorded payloads
   'Tests/BloomCoreTests/FilePathGuessTests.swift'   # sample paths
   'Tests/BloomCoreTests/HomeListTests.swift'        # a sample repository name
@@ -179,8 +179,8 @@ echo "==> one way to start a workspace"
 # `@testable`, and a test that wants a worktree and nothing else is not a route
 # into the app.
 create_workspace_allowed=(
-  'Sources/BloomCore/WorkspaceManager.swift' # declares it
-  'Sources/BloomCore/WorkspaceStart.swift'   # the one caller: `start`
+  'Sources/BloomCore/Workspace/WorkspaceManager.swift' # declares it
+  'Sources/BloomCore/Workspace/WorkspaceStart.swift'   # the one caller: `start`
 )
 for file in $(git grep --untracked -l -I -e 'createWorkspace(' -- 'Sources/BloomCore/*' || true); do
   allowed=0
@@ -232,7 +232,7 @@ echo "==> a state moves through its lifecycle"
 # see. If one of them ever starts naming a case, that is worth reading before it
 # is worth allowing.
 state_move_allowed=(
-  'Sources/BloomCore/WorkspaceLifecycle.swift' # archive() and restore(), which name both
+  'Sources/BloomCore/Workspace/WorkspaceLifecycle.swift' # archive() and restore(), which name both
 )
 state_move='(^|[^A-Za-z0-9_])(state|setupState) *= *\.(active|archived|pending|running|succeeded|failed|skipped|idle|waiting|cancelled)([^A-Za-z0-9_]|$)'
 for file in $(git grep --untracked -l -I -E "$state_move" -- 'Sources/BloomCore/*' || true); do
@@ -279,10 +279,10 @@ echo "==> an id has a type"
 # wrapper at every parse site and would buy nothing, because there is no second
 # kind of thread id to confuse one with.
 id_type_allowed_files=(
-  'Sources/BloomCore/AgentEvent.swift'   # Claude Code's stream-json, as measured
-  'Sources/BloomCore/CodexEvent.swift'   # the Codex app-server protocol
-  'Sources/BloomCore/CodexClient.swift'  # the same protocol's request envelopes
-  'Sources/BloomCore/AgentRetry.swift'   # the same stream-json, one line of it
+  'Sources/BloomCore/Agent/AgentEvent.swift'   # Claude Code's stream-json, as measured
+  'Sources/BloomCore/Agent/Codex/CodexEvent.swift'   # the Codex app-server protocol
+  'Sources/BloomCore/Agent/Codex/CodexClient.swift'  # the same protocol's request envelopes
+  'Sources/BloomCore/Agent/AgentRetry.swift'   # the same stream-json, one line of it
 )
 # Names that are never a Bloom row, wherever they appear. This list should only
 # ever get shorter. A name not on it is a new mistake.
@@ -306,16 +306,16 @@ id_type_allowed_names=(
 # The remaining stored `String` ids, each one a deliberate decision. This list
 # should only ever get shorter.
 id_type_allowed_lines=(
-  'Sources/BloomCore/HomeList.swift'                  # a date bucket key, not a row
-  'Sources/BloomCore/Settings.swift'                  # a run script named in settings
-  'Sources/BloomCore/CodexModelCatalog.swift'         # a model name the CLI offers
-  'Sources/BloomCore/EditorCatalog.swift'             # an application, by bundle id
+  'Sources/BloomCore/Presentation/HomeList.swift'                  # a date bucket key, not a row
+  'Sources/BloomCore/Persistence/Settings.swift'                  # a run script named in settings
+  'Sources/BloomCore/Agent/Codex/CodexModelCatalog.swift'         # a model name the CLI offers
+  'Sources/BloomCore/System/EditorCatalog.swift'             # an application, by bundle id
   'Sources/Bloom/Views/Center/ComposerOption.swift'   # a picker entry, "opus" and friends
   'Sources/Bloom/Views/Center/CenterTab.swift'        # a tab: a terminal row, a browser or the review pane
-  'Sources/BloomCore/TerminalPaneCensus.swift'        # the same tab id, read back off the same bytes
+  'Sources/BloomCore/System/TerminalPaneCensus.swift'        # the same tab id, read back off the same bytes
   'Sources/Bloom/Views/Center/PromptAttachment.swift' # a draft key, which has no session yet
   'Sources/Bloom/State/TranscriptModel.swift'         # payload ids, read straight off an event
-  'Sources/BloomCore/CheckFailureHandoff.swift'       # a GitHub Actions run and job, read out of a URL gh gave us
+  'Sources/BloomCore/GitHub/CheckFailureHandoff.swift'       # a GitHub Actions run and job, read out of a URL gh gave us
 )
 # A stored property whose name ends in ID or Ids and whose type is a bare
 # String. Trailing `{` is excluded by the `$` anchor, which is what leaves
@@ -334,7 +334,7 @@ while IFS= read -r hit; do
   done
   if [ "$allowed" -eq 0 ]; then
     echo "$hit" | show
-    report "$file declares an id as a bare String. Give it a type from Sources/BloomCore/Identifier.swift, or add it to the list in $0 saying which id from outside Bloom it holds. A String id can be handed to any lookup that wants any other id, and the write that lands on no row says nothing at all."
+    report "$file declares an id as a bare String. Give it a type from Sources/BloomCore/Model/Identifier.swift, or add it to the list in $0 saying which id from outside Bloom it holds. A String id can be handed to any lookup that wants any other id, and the write that lands on no row says nothing at all."
   fi
 done <<EOF
 $(git grep --untracked -n -I -E "$id_declaration" -- 'Sources/*' || true)

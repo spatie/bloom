@@ -113,6 +113,38 @@ calling `Git.branches` from its own `.task`; that loading and both branch decisi
 `WorkspaceStartContext` in the core now, tested, so the sheet's entry came off and the allow-list
 in `Tools/house-rules.sh` is back to the three helper types it was meant to hold.
 
+## Where a file goes
+
+`Sources/BloomCore` is grouped by subject, one directory deep and no deeper:
+
+    Agent/          running one, its events, its quotas, its turns; Codex/ is its own protocol
+    Bridge/         the unix socket, the MCP tools an agent calls back in with
+    Git/            git itself, and everything read out of a diff
+    GitHub/         gh, pull requests, checks
+    Workspace/      creating, starting, archiving, restoring, and a project's own settings
+    Transcript/     what a turn is made of: rows, tools, subagents, attachments, prompts
+    Persistence/    Store, SQLite, the settings file, the old app's leftovers
+    Model/          the row types, the typed ids, and the lifecycle rules over them
+    Presentation/   decisions that exist for the window and hold no UI framework
+    Ocean/          the chart, which is its own small world
+    System/         this Mac: the shell, notifications, updates, other applications
+    Support/        small things with no subject of their own
+
+It was 274 files in one directory, which is not a structure, it is a list. The grouping is by
+**what a file is about**, never by what it is: no `Extensions/`, no `Helpers/`, no `Protocols/`,
+because those tell a reader nothing they could not see from the file itself.
+
+`Presentation/` is the one that needs a sentence. It holds decisions the window needs and that
+have no `import SwiftUI` in them: which tab is next, what the sidebar's summary line says, whether
+two colours are far enough apart. They are here rather than beside the views for the reason the
+whole three-target split exists, and they are in their own directory rather than mixed into the
+subjects so that "this is a view's decision, moved" stays visible.
+
+A directory with one file in it is not a subject. Put it in `Support/` and move it out when a
+second one arrives. The app target is grouped the same way, by pane rather than by kind, and
+`Tools/house-rules.sh` names a handful of these paths in its allow-lists, so a move has to update
+it: `make lint` says so immediately, which is the point.
+
 ## One subject per file
 
 `AppModel` reached 2,421 lines: four enums and structs stacked above the class, fourteen `MARK`
