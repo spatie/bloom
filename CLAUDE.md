@@ -7,7 +7,9 @@ worktree on disk, which is why so much of what follows is about not destroying o
 Longer documents, pointed at rather than repeated here: `README.md` for what the app is,
 `RELEASING.md` for signing, notarising and the appcast, `docs/CODEX.md` for the Codex app-server
 protocol as measured, `docs/PROTOCOL.md` for Claude Code's stream-json,
-`docs/AGENTS-INTEGRATION.md` for how the four CLIs are detected, `docs/PLAN.md` for what is next.
+`docs/AGENTS-INTEGRATION.md` for how the four CLIs are detected, `docs/PLAN.md` for what is next,
+`docs/start-from.html` for what the create sheet's three sources each do, which is a page to open in a
+browser rather than to read here.
 
 ## Three targets, and the line between them
 
