@@ -154,9 +154,9 @@ struct RetryRowView: View {
 
 /// The glyph breathing on the window's heartbeat, so a retrying turn reads as alive.
 ///
-/// `BusyBreath`'s envelope rather than a sine, and sampled through the same keyframes the sidebar's
-/// running mark uses, so a workspace that is retrying breathes in step with every other mark in
-/// the window rather than starting a rhythm of its own. Opacity only: the glyph must not change
+/// `BusyBreath`'s envelope rather than a sine, and on a period that is a whole number of the busy
+/// dot's pulses, so a workspace that is retrying breathes against the window's own rhythm rather
+/// than at some rate of its own. Opacity only: the glyph must not change
 /// size, because a symbol that grows and shrinks at this size reads as a focus problem.
 private struct BreathingOpacity: ViewModifier {
     var isActive: Bool

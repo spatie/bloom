@@ -4,13 +4,19 @@ import BloomCore
 
 /// The sidebar's running mark, at the size it is read at and enlarged enough to see the mechanism.
 ///
-/// It exists because `ImageRenderer` cannot photograph this mark. The moving figure is layer backed,
-/// and an offscreen render paints SwiftUI's yellow placeholder over any `NSViewRepresentable`, so
-/// the only picture `--snapshot` can take of the sidebar is one with a yellow square where the mark
-/// should be. This page is captured in a real window instead. See `Snapshot`.
+/// It exists because `ImageRenderer` cannot photograph this mark while it is moving. The moving
+/// figure is layer backed, and an offscreen render paints SwiftUI's yellow placeholder over any
+/// `NSViewRepresentable`, so the only picture `--snapshot` can take of a mark mid pulse is one with
+/// a yellow square where the mark should be. This page is captured in a real window instead. See
+/// `Snapshot`.
 ///
 /// Photograph it with `Bloom --snapshot-gallery <dir> --gallery running-glyph --running`. The
 /// `--running` flag is what starts the heartbeat, since nothing is actually working in a capture.
+///
+/// The page is in `--snapshot`'s offscreen list as well, and that picture is not a placeholder: a
+/// mark with the heartbeat stopped is a plain SwiftUI circle, which is exactly what Reduce Motion
+/// draws. It is the picture to take when the alternative would be putting a window in front of
+/// whatever the owner is reading.
 struct RunningGlyphGallery: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
@@ -31,6 +37,22 @@ struct RunningGlyphGallery: View {
             HStack(alignment: .top, spacing: 32) {
                 enlarged("Moving", onSelection: false)
                 enlarged("Selected", onSelection: true)
+            }
+
+            // The dot is a filled circle in the accent, and so is the unread mark, which makes
+            // this the one page where that can be looked at. The column's rule is that its states
+            // differ in shape before they differ in colour, and these two now differ in size, in
+            // whether they move, and in nothing else. Drawn side by side so the question is asked
+            // by the picture rather than left to be discovered in a sidebar.
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Against the other accent marks")
+                    .font(Typo.label)
+                    .foregroundStyle(Palette.textSecondary)
+                HStack(alignment: .top, spacing: 24) {
+                    named("Running") { WorkspaceRunningGlyph() }
+                    named("Unread") { WorkspaceStatusGlyph(status: .unread) }
+                    named("Pull request") { WorkspaceStatusGlyph(status: .pullRequestOpen) }
+                }
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -68,6 +90,22 @@ struct RunningGlyphGallery: View {
         .frame(width: 260, height: 32)
         .background(background)
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+
+    /// One mark at true size with its name under it, and the mark scaled up beside the name so the
+    /// two can be told apart on a page rather than only in a column.
+    private func named<Mark: View>(_ title: String, @ViewBuilder mark: () -> Mark) -> some View {
+        VStack(spacing: 6) {
+            mark()
+                .frame(width: Metrics.glyph, height: Metrics.glyph)
+            mark()
+                .frame(width: Metrics.glyph, height: Metrics.glyph)
+                .scaleEffect(4, anchor: .center)
+                .frame(width: Metrics.glyph * 4, height: Metrics.glyph * 4)
+            Text(title)
+                .font(Typo.micro)
+                .foregroundStyle(Palette.textSecondary)
+        }
     }
 
     /// Eight times, drawn by scaling the real mark rather than by a second implementation, so the

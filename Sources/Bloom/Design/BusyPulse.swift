@@ -4,9 +4,10 @@ import BloomCore
 
 /// The window's one heartbeat, while an agent is working.
 ///
-/// Two things move while agents are running: the light that travels the shared rule under the
-/// title bar (`RuleSweep`) and the figure at the head of every working row in the sidebar
-/// (`WorkspaceRunningGlyph`). They read their phase from here rather than each starting an
+/// Everything that moves while agents are running reads its phase from here: the light that
+/// travels the shared rule under the title bar (`RuleSweep`), the dot at the head of every working
+/// row in the sidebar (`WorkspaceRunningGlyph`), and the same dot beside "Working" in the
+/// transcript and in front of a running tab's label (`ActivityDot`). None of them starts an
 /// animation of its own, and that is the whole reason this type exists.
 ///
 /// An animation begins when the view that carries it is committed. Five agents started at five
@@ -36,17 +37,17 @@ import BloomCore
 ///
 /// So nothing is stepped and nothing is interpolated here any more. What this publishes is one
 /// number, `epoch`: the `CACurrentMediaTime()` at which the current run of the heartbeat began.
-/// Both marks build a repeating `CAAnimation` whose `beginTime` is derived from it, hand it to a
-/// layer, and never hear from it again. Core Animation runs the interpolation out of process, the
+/// Every mark builds a repeating `CAAnimation` whose `beginTime` is derived from it, hands it to a
+/// layer, and never hears from it again. Core Animation runs the interpolation out of process, the
 /// app is not woken per frame, and the phase lock is stronger than it was: two animations that
 /// share an absolute `beginTime` and have periods in a whole number ratio cannot drift, where two
 /// restarted from a timer could only be as accurate as the timer.
 ///
-/// The periods below are unchanged and stay in that ratio: the figure's wave is 1.5 seconds, a
-/// crossing of the rule is 3, and out and back is 6, so a turn of the light lands on a trough of
-/// the dots exactly as it did. See `10bef55` for the measurement that established it.
+/// The periods below stay in that ratio: a pulse of the dot is 1.5 seconds, a crossing of the rule
+/// is 3, and out and back is 6, so every crossing of the light begins with a pulse and the light's
+/// turn lands on one. See `10bef55` for the measurement that established it.
 ///
-/// It runs only while something is running, and only while the window is the front one. See
+/// It runs while something is running, and it does not care whether the window is in front. See
 /// `BusyPulseDriver`, which is the single place that decides.
 @MainActor
 @Observable
@@ -55,17 +56,18 @@ final class BusyPulse {
 
     /// The unit. Everything else here is a count of these.
     ///
-    /// It is the half period of the sidebar's figure: the light runs down the three dots on one
-    /// beat and back up them on the next, so a whole wave is a second and a half.
+    /// It is half a pulse of the busy dot: the dot swells on one beat and settles on the next, so
+    /// a whole pulse is a second and a half. `BusyDot.period` is that number where the mark can be
+    /// tested, and this is the same number where the light is measured against it.
     static let beat: CFTimeInterval = 0.75
 
-    /// One wave of the sidebar's figure: down the three dots and back up.
+    /// One pulse of the busy dot: out, and back.
     static let wave: CFTimeInterval = beat * 2
 
     /// How long the light takes to cross the rule once, in either direction.
     ///
     /// Three seconds, and it is the same three seconds a crossing has always taken. It is four
-    /// beats, so it is a whole number of the figure's waves, which is what keeps the two marks
+    /// beats, so it is a whole number of the dot's pulses, which is what keeps the two marks
     /// locked to each other.
     static let pass: CFTimeInterval = beat * 4
 
@@ -74,11 +76,10 @@ final class BusyPulse {
 
     /// Whether the heartbeat is running at all.
     ///
-    /// False is not the same as idle. An agent can be working with this false, because the window
-    /// is behind somebody's browser or because Reduce Motion is on, and both marks have a resting
-    /// state for exactly that: the rule holds a quiet tint and the row holds the whole figure. So
-    /// what this answers is "is anything moving", and the marks ask `AppModel` itself whether
-    /// anything is running.
+    /// False is not the same as idle. An agent can be working with this false, because Reduce
+    /// Motion is on, and every mark has a resting state for exactly that: the rule holds a quiet
+    /// tint and a row holds a whole dot. So what this answers is "is anything moving", and the
+    /// marks ask `AppModel` itself whether anything is running.
     private(set) var isTicking = false
 
     /// The instant the current run of the heartbeat began, on Core Animation's clock.
@@ -90,8 +91,8 @@ final class BusyPulse {
     ///
     /// `CACurrentMediaTime()` rather than a `Date`, because that is the clock `CAAnimation`
     /// measures `beginTime` on. It does not advance while the machine is asleep, which is the
-    /// behaviour wanted: a window that comes back from a lid close finds both marks where it left
-    /// them rather than somewhere a wall clock would have carried them.
+    /// behaviour wanted: a window that comes back from a lid close finds every mark where it left
+    /// it rather than somewhere a wall clock would have carried it.
     private(set) var epoch: CFTimeInterval = 0
 
     private init() {}
@@ -113,39 +114,41 @@ final class BusyPulse {
 
 /// Decides when the window's heartbeat runs, and is the only thing that does.
 ///
-/// Three conditions, and each of them is a case that was argued somewhere else in this app
-/// already.
+/// Two conditions, and each of them is a case that was argued somewhere else in this app already.
 ///
 /// **Something is running.** Read from `AppModel.runningWorkspaceIDs`, which is the one observable
 /// set the transcript writes when a turn starts or ends. Nothing here keeps a count of its own:
 /// see that property for what happened the last time a reader did.
 ///
-/// **Reduce Motion is off.** Dropped rather than slowed, matching `ActivityDot`, `RowArrival` and
-/// the pane animations. Both marks keep their meaning without it, which is the test the mockup
-/// applied: the rule holds a quiet accent tint and the row holds all three dots at full strength.
-/// Read here rather than at the marks, so a call site cannot keep half the mechanism.
+/// **Reduce Motion is off.** Dropped rather than slowed, matching `RowArrival` and the pane
+/// animations. Every mark keeps its meaning without it, which is the test the mockup applied: the
+/// rule holds a quiet accent tint and a row holds a whole dot at full strength. Read here rather
+/// than at the marks, so a call site cannot keep half the mechanism.
 ///
-/// **The window is the front one.** An animation that never stops is what keeps a window off the
-/// idle path, and on a ProMotion display it holds the display link awake for as long as an agent
-/// runs, which can be hours. Behind a browser there is nothing to read anyway, and the resting
-/// states mean nothing is lost when there is: the marks stop moving and stay legible, the way a
-/// background window's chrome stops being tinted.
+/// # The third condition, and why it is gone
+///
+/// It used to stop the heartbeat while the window was not the front one, and `ActivityDot` carried
+/// a second copy of that gate. The argument was a real measurement of the wrong mechanism: a
+/// SwiftUI `.animation(_:value:)` is interpolated on the main thread, so a mark that never stopped
+/// kept a backgrounded window off the idle path for as long as an agent ran. Nothing here is a
+/// SwiftUI animation any more. A `CAAnimation` handed to a layer is copied into the render server
+/// and interpolated there on the display's own clock, and this process is not woken for a frame of
+/// it, so a window behind a browser costs the same whether its marks are moving or parked.
+///
+/// What the gate cost is the one thing these marks are for. A window put to one side while five
+/// agents work is exactly the window whose marks are worth reading, and it was the window that
+/// showed them frozen.
 struct BusyPulseDriver: ViewModifier {
     let app: AppModel
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.controlActiveState) private var activeState
 
     func body(content: Content) -> some View {
         // Reading the set is what subscribes this body to it, and the write that adds or removes
         // an id is what brings the heartbeat up and takes it down again. There is no poll here and
         // no second flag: the last agent finishing is the same event everything else in the window
         // hears.
-        let isRunning = !app.runningWorkspaceIDs.isEmpty
-        // `Snapshot.forcesBusyPulse` is false in every build anyone ships. See that property for
-        // why a capture run has to be allowed past the frontmost gate.
-        let isFront = activeState != .inactive || Snapshot.forcesBusyPulse
-        let wanted = isRunning && !reduceMotion && isFront
+        let wanted = !app.runningWorkspaceIDs.isEmpty && !reduceMotion
 
         return content.onChange(of: wanted, initial: true) { _, on in
             BusyPulse.shared.setTicking(on)
@@ -162,7 +165,7 @@ extension View {
 
 // MARK: - Layers
 
-/// What both marks are made of: a layer-backed view that is handed a repeating `CAAnimation` once
+/// What every mark is made of: a layer-backed view that is handed a repeating `CAAnimation` once
 /// and then left alone.
 ///
 /// This is the whole point of the rewrite, so it is worth being plain about what it buys. A
@@ -172,8 +175,8 @@ extension View {
 /// main thread wake, a view graph update and a display list render whose size is the window's, not
 /// the mark's.
 ///
-/// Two rules keep an animation on the cheap side of that line, and both are followed by everything
-/// below:
+/// Two rules keep an animation on the cheap side of that line, and both are followed by every mark
+/// that subclasses this:
 ///
 /// - It repeats forever, so nothing has to restart it. `repeatCount` is infinite and
 ///   `isRemovedOnCompletion` is false.
@@ -185,9 +188,9 @@ extension View {
 /// The colours are the other half. A `CALayer` holds a `CGColor`, which is one appearance's
 /// answer, where the palette's colours are `NSColor`s that answer per appearance. So every layer
 /// colour is resolved against the view's own `effectiveAppearance` and resolved again when that
-/// changes, which is what `viewDidChangeEffectiveAppearance` is doing in both views below. Without
-/// it the marks keep the colour they were built in and a window switched to dark draws the light
-/// in the light appearance's teal.
+/// changes, which is what `viewDidChangeEffectiveAppearance` is doing here. Without it a mark keeps
+/// the colour it was built in and a window switched to dark draws the light in the light
+/// appearance's teal.
 class BusyPulseLayerView: NSView {
     /// Layer backed from the first moment, because everything here is layer geometry and a view
     /// that gains its layer later would have to build itself twice.

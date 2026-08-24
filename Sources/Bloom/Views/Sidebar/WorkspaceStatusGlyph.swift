@@ -30,9 +30,9 @@ struct WorkspaceStatusGlyph: View {
                 .progressViewStyle(.circular)
                 .controlSize(.mini)
         case .running:
-            // The figure that builds itself, not the pulsing dot that used to be here. See
-            // `WorkspaceRunningGlyph` for why the row has one moving part rather than two, and
-            // `BusyPulse` for why every lit row in the column moves together.
+            // The one dot the whole window says "working" with, at this column's size. See
+            // `WorkspaceRunningGlyph` for what it replaced and why, and `BusyPulse` for why every
+            // lit row in the column moves together.
             WorkspaceRunningGlyph(isOnSelection: isOnSelection)
         default:
             Image(systemName: Self.symbol(for: status))
