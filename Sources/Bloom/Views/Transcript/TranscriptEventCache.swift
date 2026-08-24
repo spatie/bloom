@@ -50,12 +50,28 @@ final class TranscriptPayloadKey: NSObject {
     let payload: Data
     private let cachedHash: Int
 
+    /// **The hash is of the row id and the payload's length, not of the payload.**
+    ///
+    /// It used to SipHash every byte, and a key is built on every LOOKUP rather than only on a
+    /// miss, so asking whether a row's decode was cached cost a pass over the whole row. On the
+    /// scroll path that is the expensive thing in the app: a `Write` call carries the entire file
+    /// the agent wrote and a tool result carries whatever was read, so scrolling past one turn
+    /// hashed hundreds of kilobytes to answer a question the cache then answered instantly.
+    ///
+    /// `isEqual` below stopped comparing the bytes for exactly this reason and wrote down why. The
+    /// hash is the other half of the same argument and was left behind: what identifies a stored
+    /// row is its id, whose payload is written once and never rewritten.
+    /// `TranscriptPresentationCache` states the conclusion plainly, keys on the row id alone, and
+    /// has done since it was written.
+    ///
+    /// The length stays in both, as the cheap half of the guard the byte comparison used to be. A
+    /// row that somehow IS rewritten into something of a different size still misses.
     init(rowID: Int64, payload: Data) {
         self.rowID = rowID
         self.payload = payload
         var hasher = Hasher()
         hasher.combine(rowID)
-        hasher.combine(payload)
+        hasher.combine(payload.count)
         cachedHash = hasher.finalize()
     }
 

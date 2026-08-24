@@ -42,7 +42,20 @@ struct TranscriptRowView: View, Equatable {
             && lhs.row.parentToolUseID == rhs.row.parentToolUseID
             && lhs.isExpanded == rhs.isExpanded
             && lhs.isNested == rhs.isNested
-            && lhs.maxBubbleWidth == rhs.maxBubbleWidth
+            // Only a `.user` row reads it. `maxBubbleWidth` caps a speech bubble and reaches
+            // `UserTurnRowView` from the two branches of `content` that draw one; every other kind
+            // of row is handed it and never looks.
+            //
+            // It was compared for all of them, and it is the one field here that moves during a
+            // drag: `TranscriptGeometry.cap` steps every eight points, so widening the inspector
+            // failed this comparison on most frames and rebuilt every realised row, tool rows and
+            // prose rows included, for a number none of them draw with. The layout those rows owe
+            // the new width is unavoidable and is not what this is about; rebuilding the view tree
+            // to produce it is.
+            //
+            // Scoped rather than dropped, because dropping it would leave a bubble at the width it
+            // was built for while the pane moved out from under it.
+            && (lhs.row.kind != .user || lhs.maxBubbleWidth == rhs.maxBubbleWidth)
             && lhs.workspace.id == rhs.workspace.id
             && lhs.workspace.path == rhs.workspace.path
             // A question being answered has to redraw the row that asked it, and the decision is
