@@ -937,18 +937,31 @@ final class WorkspaceModel {
     /// find those four words already committed as a review comment. A draft only joins the
     /// review through Return or the Comment button; until then it waits here, and the editor
     /// reopens holding it when its file is opened again.
+    ///
+    /// Only where it will attach, not what is being typed into it. That is `reviewText`, because
+    /// `DiffView.body` reads this for every pass it makes over the diff and a keystroke must not
+    /// be a reason to make one.
     var reviewDrafts: [String: ReviewDraft] = [:]
 
-    /// The text of every comment currently being edited in place, keyed by the comment it belongs
-    /// to. Here for the same reason `reviewDrafts` is, and the reason is not hypothetical for an
-    /// edit either: the band being edited sits in the same lazy stack, so scrolling it out of
-    /// sight destroys it, and `ReviewPaneView` keys the whole diff by path, so glancing at another
-    /// file destroys it again. An edit held as view state would lose the rewritten sentence to
-    /// either, without a keystroke from the person who typed it.
+    /// Which comments are open for editing in place. Here for the same reason `reviewDrafts` is,
+    /// and the reason is not hypothetical for an edit either: the band being edited sits in the
+    /// same lazy stack, so scrolling it out of sight destroys it, and `ReviewPaneView` keys the
+    /// whole diff by path, so glancing at another file destroys it again. An edit held as view
+    /// state would lose the rewritten sentence to either, without a keystroke from the person who
+    /// typed it.
     ///
-    /// Keyed by id rather than by path because two comments on one file can be open at once, and
-    /// closing one must not take the other's text with it.
-    var reviewEdits: [ReviewCommentID: String] = [:]
+    /// By id rather than by path because two comments on one file can be open at once, and closing
+    /// one must not take the other's text with it.
+    ///
+    /// Which ones are open, not what is in them: the text is `reviewText`, for the reason given on
+    /// `reviewDrafts` above. `DiffView.body` asks this question of every band it lays out.
+    var reviewEdits: Set<ReviewCommentID> = []
+
+    /// What is being typed into the draft and into every open edit. See `ReviewTextHost`.
+    ///
+    /// A `let`, so reading it registers no observation and only the editor row that reads a key
+    /// out of it is invalidated when that key changes.
+    let reviewText = ReviewTextHost()
 
     func reloadReviewComments() async {
         guard let store else { return }
@@ -1015,7 +1028,8 @@ final class WorkspaceModel {
         // A comment that no longer exists cannot be being edited. Left behind, the buffer would
         // be a dictionary that grows for the life of the workspace and, worse, would put the old
         // text back into an editor if the same id were ever seen again.
-        reviewEdits[id] = nil
+        reviewEdits.remove(id)
+        reviewText.edits[id] = nil
     }
 
     /// One alert however many rows were refused, because a database that will not take a delete
@@ -1046,7 +1060,10 @@ final class WorkspaceModel {
         }
         let sent = Set(removed)
         reviewComments.removeAll { sent.contains($0.id) }
-        for id in removed { reviewEdits[id] = nil }
+        for id in removed {
+            reviewEdits.remove(id)
+            reviewText.edits[id] = nil
+        }
         if let refusal { report(refused: refusal) }
     }
 
@@ -1498,11 +1515,10 @@ final class LineBuffer: Sendable {
     }
 }
 
-/// A review comment mid-composition: where it will attach, the evidence captured when its
-/// editor opened, and the text so far. See `WorkspaceModel.reviewDrafts` for why it outlives
-/// the diff view that is editing it.
+/// A review comment mid-composition: where it will attach and the evidence captured when its
+/// editor opened. See `WorkspaceModel.reviewDrafts` for why it outlives the diff view that is
+/// editing it, and `ReviewTextHost` for why the text it is being given is not in here.
 struct ReviewDraft: Hashable {
     var spot: ReviewSpot
     var anchor: ReviewCommentAnchor
-    var text: String = ""
 }

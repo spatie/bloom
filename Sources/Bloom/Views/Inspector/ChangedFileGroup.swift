@@ -12,12 +12,19 @@ struct ChangedFileGroup: Identifiable {
     var id: String { directory }
 
     /// The directory said once, dimmed, with its files under it in name order.
+    ///
+    /// The names are taken once and sorted beside their files rather than read inside the
+    /// comparator. `ChangedFile.filename` bridges the path to `NSString` on every access, and a
+    /// comparator reads it O(n log n) times, on a list a running agent rewrites every six seconds.
     static func build(from files: [ChangedFile]) -> [ChangedFileGroup] {
         Dictionary(grouping: files, by: \.directory)
             .map { directory, files in
-                ChangedFileGroup(
+                let named = files.map { (name: $0.filename, file: $0) }
+                return ChangedFileGroup(
                     directory: directory,
-                    files: files.sorted { $0.filename.localizedStandardCompare($1.filename) == .orderedAscending }
+                    files: named
+                        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                        .map(\.file)
                 )
             }
             .sorted { $0.directory.localizedStandardCompare($1.directory) == .orderedAscending }

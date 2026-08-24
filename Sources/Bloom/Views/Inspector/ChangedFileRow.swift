@@ -7,7 +7,23 @@ import BloomCore
 /// The selection and hover fill is painted by the list, not here, so this row can read
 /// `isOnEmphasizedSelection` and flip the colours that carry meaning. A row that sets the fill on
 /// itself only puts that value into its own children's environment, never into its own body.
-struct ChangedFileRow: View {
+struct ChangedFileRow: View, Equatable {
+    /// A row redraws when what it holds changes, and not because the closures beside it are new
+    /// closures. Both are written at the call site as `{ ... }`, so they are freshly allocated on
+    /// every pass over the list, and functions are never equal to one another: without this
+    /// SwiftUI has to assume every row differs from the one it drew a moment ago, and the whole
+    /// realised list is rebuilt whenever anything above it moves.
+    ///
+    /// Compared on the values, which is everything this row draws from. What the closures do is
+    /// decided by the list from the same `file`, so two of them can never disagree about a row
+    /// they both belong to.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.file == rhs.file
+            && lhs.isSelected == rhs.isSelected
+            && lhs.fullPath == rhs.fullPath
+            && lhs.depth == rhs.depth
+    }
+
     var file: ChangedFile
     var isSelected: Bool
     /// The file's location in the worktree, for the menu items that hand it to another app.

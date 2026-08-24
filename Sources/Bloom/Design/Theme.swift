@@ -876,17 +876,33 @@ struct DiffStatLabel: View {
         .monospacedDigit()
     }
 
+    /// The three styles the counts are set in, composed once rather than per call.
+    ///
+    /// This label draws two numbers for every changed file in the inspector, and a running agent
+    /// rewrites that list every six seconds, so `abbreviate` runs a few hundred times a minute
+    /// while nothing the reader can see has moved.
+    ///
+    /// Not `String(value)` for the plain case, which is what it looks like it could be: `formatted`
+    /// is what makes the digits the reader's own, and a locale that does not use Western digits
+    /// would get Western ones out of the shortcut.
+    private static let plainStyle = IntegerFormatStyle<Int>.number.grouping(.never)
+    private static let thousandsStyle = FloatingPointFormatStyle<Double>.number
+        .precision(.fractionLength(1))
+    private static let wholeThousandsStyle = FloatingPointFormatStyle<Double>.number
+        .precision(.fractionLength(0))
+        .grouping(.never)
+
     /// 2.8k rather than 2793, because the sidebar has no room for the exact number.
     ///
     /// `formatted` rather than `String(format:)`, which is not locale aware: the composer's token
     /// gauge a few inches away already used `formatted`, so on a machine set to a comma decimal
     /// separator one number in this window read `174,0k` and the other `2.8k`.
     static func abbreviate(_ value: Int) -> String {
-        if value < 1_000 { return value.formatted(.number.grouping(.never)) }
+        if value < 1_000 { return value.formatted(plainStyle) }
         let thousands = Double(value) / 1_000
         return thousands < 10
-            ? "\(thousands.formatted(.number.precision(.fractionLength(1))))k"
-            : "\(thousands.formatted(.number.precision(.fractionLength(0)).grouping(.never)))k"
+            ? "\(thousands.formatted(thousandsStyle))k"
+            : "\(thousands.formatted(wholeThousandsStyle))k"
     }
 }
 

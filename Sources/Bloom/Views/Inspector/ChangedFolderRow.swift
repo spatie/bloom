@@ -11,7 +11,17 @@ import AppKit
 /// Deliberately laid out exactly like `FileTreeRow`, the other tree in the same pane: one glyph
 /// box, then the name. The two used to disagree about the glyph, the gap and the type size, which
 /// made switching tabs look like switching apps.
-struct ChangedFolderRow: View {
+struct ChangedFolderRow: View, Equatable {
+    /// On the values, not on `action`, which is a fresh closure on every pass over the tree. See
+    /// `ChangedFileRow` for the whole of the reason.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.name == rhs.name
+            && lhs.path == rhs.path
+            && lhs.isExpanded == rhs.isExpanded
+            && lhs.depth == rhs.depth
+            && lhs.fullPath == rhs.fullPath
+    }
+
     var name: String
     var path: String
     var isExpanded: Bool

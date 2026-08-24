@@ -12,8 +12,12 @@ import BloomCore
 /// costs the row the space a readable folder would have.
 struct FilePathChip: View {
     var file: ChangedFile
-    /// Shown when Edit mode is holding changes that are not on disk yet.
-    var hasUnsavedEdits: Bool
+    /// Where the dot after the name asks whether Edit mode is holding changes that are not on disk
+    /// yet. The question is asked by `UnsavedEditsDot` rather than answered here, so a keystroke
+    /// invalidates the dot instead of the bar this chip sits in.
+    var session: FileEditSession
+    /// The file's absolute path, which is what `FileEditSession` keys on.
+    var absolutePath: String
 
     /// Whether there is room for the folder at all. The bar knows its own width; this view only
     /// ever sees the share of it the layout has already decided to give away.
@@ -39,13 +43,7 @@ struct FilePathChip: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
 
-            if hasUnsavedEdits {
-                Circle()
-                    .fill(Palette.accent)
-                    .frame(width: Metrics.dot, height: Metrics.dot)
-                    .help("Unsaved changes")
-                    .accessibilityLabel("Unsaved changes")
-            }
+            UnsavedEditsDot(session: session, path: absolutePath)
         }
         .help(file.path)
         .accessibilityElement(children: .combine)

@@ -13,7 +13,6 @@ struct FileTreeView: View {
     /// `WorkspaceModel.fileTree`, and the note there for why it cannot live in this view.
     @State private var expanded: Set<String> = []
     @State private var selection: String?
-    @State private var hovered: String?
 
     /// The flattened row list, rebuilt when the listing loads or a folder opens rather than on
     /// every redraw. Walking the index inside `body` meant re-walking it for every layout pass.
@@ -80,20 +79,20 @@ struct FileTreeView: View {
     private func row(_ item: FileTreeRowItem) -> some View {
         let path = item.node.path
 
-        return FileTreeRow(
-            item: item,
-            isExpanded: expanded.contains(path),
-            isChanged: changedPaths.contains(path),
-            fullPath: fullPath(path),
-            action: { activate(item.node) }
-        )
-        // Applied here rather than inside the row, so the row can read the selection back out of
-        // the environment and invert the dot that marks a changed file.
-        .rowBackground(isSelected: selection == path, isHovered: hovered == path)
-        .padding(.horizontal, Metrics.spacingSmall)
-        .onHoverChange { hovering in
-            hovered = hovering ? path : (hovered == path ? nil : hovered)
+        // The fill is applied outside the row rather than inside it, so the row can read the
+        // selection back out of the environment and invert the dot that marks a changed file. That
+        // is also why the hover cannot simply be state on the row: see `HoverRow`.
+        return HoverRow(isSelected: selection == path) {
+            FileTreeRow(
+                item: item,
+                isExpanded: expanded.contains(path),
+                isChanged: changedPaths.contains(path),
+                fullPath: fullPath(path),
+                action: { activate(item.node) }
+            )
+            .equatable()
         }
+        .padding(.horizontal, Metrics.spacingSmall)
     }
 
     // MARK: - Actions
