@@ -32,21 +32,30 @@ struct ToolPaneView: View {
     var body: some View {
         switch tab.kind {
         case .terminal:
-            Group {
-                if readyTabID == tab.id {
-                    TerminalSplitView(
-                        ownerID: tab.id,
-                        workspace: model.workspace,
-                        repo: model.repo,
-                        port: model.port,
-                        onCloseTab: { Task { await CenterTabStore.shared.close(tab) } },
-                        splitColumn: splitColumn
-                    )
-                    .id(tab.id)
-                } else {
-                    LoadingView("Opening a terminal")
+            VStack(spacing: 0) {
+                // Above the shell rather than inside it. A workspace created to be worked in by
+                // hand opens this tab while the setup script is still installing, and until this
+                // strip existed nothing on the tab said so. See `WorktreeSetupStrip`.
+                WorktreeSetupStrip(readiness: readiness)
+
+                Group {
+                    if readyTabID == tab.id {
+                        TerminalSplitView(
+                            ownerID: tab.id,
+                            workspace: model.workspace,
+                            repo: model.repo,
+                            port: model.port,
+                            onCloseTab: { Task { await CenterTabStore.shared.close(tab) } },
+                            splitColumn: splitColumn
+                        )
+                        .id(tab.id)
+                    } else {
+                        LoadingView("Opening a terminal")
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .animation(.snappy(duration: 0.2), value: readiness)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.surfaceSunken)
             .task(id: tab.id) { await prepareTerminal() }
@@ -73,6 +82,16 @@ struct ToolPaneView: View {
                 .id(model.workspace.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// Whether this worktree is finished being built, which is the one thing a shell standing in
+    /// it cannot tell you itself. The rule and both sentences are `WorktreeReadiness`, in the
+    /// core; the two facts it reads are the live run and the row's own verdict.
+    private var readiness: WorktreeReadiness {
+        WorktreeReadiness.of(
+            isRunningSetup: model.isRunningSetup,
+            setupState: model.workspace.setupState
+        )
     }
 
     /// The store a shell's environment is built from, and the workspace's port, which is the one
