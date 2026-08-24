@@ -105,22 +105,49 @@ struct TranscriptTextView: NSViewRepresentable {
         view.selectedTextAttributes = [.backgroundColor: selectionColor]
     }
 
+    /// How big this run is, at whatever width the layout system is asking about.
+    ///
+    /// **Every proposal is answered.** This used to decline three of them, and what SwiftUI does
+    /// with a declined answer is not what the name suggests: it fills the proposal's width and
+    /// gives the view a single line of height, so a paragraph needing 592 by 35 was placed at 592
+    /// by 16 with two thirds of it cut off. One of the three is asked constantly, because
+    /// `.textSelection(.enabled)` around a markdown block measures every run inside it with no
+    /// width at all. The rules for the other two, and the reasons, are `TranscriptTextMeasure`,
+    /// which is in the core because arithmetic in a view is arithmetic nothing can test.
+    ///
+    /// The width reported is the width the text USED, not the width it was offered. `CappedWidth`
+    /// measures the bubble against its cap and then takes the size that came back, which is what
+    /// makes a one word turn a one word bubble. Returning the proposal here would report every
+    /// turn as the full measure and put "yes" in a bubble seventy percent of the pane wide, which
+    /// is the exact failure that layout was written to fix.
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: LinkTextView, context: Context) -> CGSize? {
         guard let container = nsView.textContainer, let layout = nsView.layoutManager else {
             return nil
         }
-        let width = proposal.width ?? nsView.bounds.width
-        guard width > 0, width.isFinite else { return nil }
+        let proposed = proposal.width.map(Double.init)
+        let width = TranscriptTextMeasure.layoutWidth(proposed: proposed)
         container.containerSize = CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
         layout.ensureLayout(for: container)
         let used = layout.usedRect(for: container)
-        // The width the text USED, not the width it was offered.
-        //
-        // `CappedWidth` measures the bubble against its cap and then takes the size that came
-        // back, which is what makes a one word turn a one word bubble. Returning the proposal
-        // here would report every turn as the full measure and put "yes" in a bubble seventy
-        // percent of the pane wide, which is the exact failure that layout was written to fix.
-        return CGSize(width: min(ceil(widestLine(layout, in: container)), width), height: ceil(used.height))
+        let size = TranscriptTextMeasure.size(
+            widestLine: Double(widestLine(layout, in: container)),
+            usedHeight: Double(used.height),
+            proposed: proposed,
+            laidOutAt: width,
+            lineHeight: Double(lineHeight(nsView, layout)),
+            hasGlyphs: (nsView.textStorage?.length ?? 0) > 0
+        )
+        return CGSize(width: size.width, height: size.height)
+    }
+
+    /// One line of whatever this run is set in, which is the height a run that measured nothing
+    /// falls back on. The first font in the string rather than the view's, which for a string
+    /// carrying a span of code in a second face answers nil.
+    private func lineHeight(_ view: LinkTextView, _ layout: NSLayoutManager) -> CGFloat {
+        let font = view.textStorage?.length ?? 0 > 0
+            ? view.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+            : nil
+        return layout.defaultLineHeight(for: font ?? .systemFont(ofSize: NSFont.systemFontSize))
     }
 
     /// How wide the widest line actually came out.
