@@ -27,6 +27,8 @@ struct ToolPaneView: View {
     /// this view is reused from one workspace to the next rather than built again, so a flag left
     /// standing from the last workspace's terminal would let the next one's shell be forked before
     /// its port had been allocated. See `CenterPanesView.soloPane`.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @State private var readyTabID: String?
 
     var body: some View {
@@ -55,7 +57,10 @@ struct ToolPaneView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .animation(.snappy(duration: 0.2), value: readiness)
+            // Gated, because what it drives is `WorktreeSetupStrip`'s `.move(edge: .top)`: the
+            // strip slides down and back up, pushing the terminal with it, on every terminal tab
+            // opened while setup runs.
+            .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: readiness)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.surfaceSunken)
             .task(id: tab.id) { await prepareTerminal() }

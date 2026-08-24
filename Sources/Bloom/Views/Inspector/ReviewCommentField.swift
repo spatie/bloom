@@ -50,7 +50,8 @@ struct ReviewCommentField: View {
             // prompt as text, so the path is the most useful thing it could become, and false is
             // what leaves AppKit to type it.
             onAttach: { _, _ in false },
-            placeholder: placeholder
+            placeholder: placeholder,
+            accessibilityLabel: "Review comment"
         )
         .composerBox(isFocused: $isFocused)
         // The editor is opened by pressing something, so the caret belongs in it without a second

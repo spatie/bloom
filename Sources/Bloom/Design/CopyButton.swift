@@ -42,12 +42,15 @@ struct CopyButton: View {
                 .labelStyle(.iconOnly)
                 .font(Typo.caption)
                 .imageScale(.medium)
-                .foregroundStyle(copied ? Palette.positive : Palette.textTertiary)
+                // Clear rather than `.opacity(0)`, for the reason `DiffLineView.commentButton`
+                // measured: fading a button or its label to nothing took the element out of the
+                // accessibility hierarchy, so the control existed only for a pointer. Nothing
+                // gates hit testing here, so this one is reachable by Tab as well.
+                .foregroundStyle(isVisible || copied ? (copied ? Palette.positive : Palette.textTertiary) : Color.clear)
                 .frame(width: size, height: size)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .opacity(isVisible || copied ? 1 : 0)
         // Still says "Copied" while it is showing the tick, because the tick alone is not an
         // answer to somebody who cannot see it.
         .help(copied ? "Copied" : title)

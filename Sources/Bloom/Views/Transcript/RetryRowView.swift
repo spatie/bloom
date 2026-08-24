@@ -124,7 +124,13 @@ struct RetryRowView: View {
     @ViewBuilder
     private var drain: some View {
         Group {
-            if isStill {
+            // `isStill` is a snapshot-capture flag, not an accessibility one, and it was the only
+            // gate here: the file reads `accessibilityReduceMotion` at the top and applies it to
+            // the breathing glyph above, then handed the drain bar an ungated `remaining:`. During
+            // an upstream outage that bar empties and restarts for minutes in the reading column.
+            // `NoticeBanner` guards the identical component correctly, and the still branch below
+            // already draws a correct frozen bar.
+            if isStill || reduceMotion {
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
                         Capsule().fill(tint.opacity(0.12))

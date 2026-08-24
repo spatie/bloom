@@ -137,6 +137,11 @@ struct QuotaPanel: View {
             if board.isEmpty { emptyState }
             if !board.isEmpty, let age = freshness.phrase { staleNote(age) }
         }
+        // The sentence `QuotaBoard.headline`'s own comment has promised for months. Container
+        // rather than ignore: the rows below still speak for themselves, and this is what is read
+        // on the way in, so "nothing is close to a limit" arrives before four windows do.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(board.spokenSummary(at: now))
         .frame(width: Self.width, alignment: .leading)
         .padding(.leading, Self.leadingInset)
         .padding(.trailing, Self.trailingInset)
@@ -185,6 +190,23 @@ struct QuotaPanel: View {
                     // this is what makes that a promise rather than a hope.
                     .fixedSize()
                 Spacer(minLength: Metrics.spacingWide)
+                // The mark, between the name and the figure, and only when there is news.
+                //
+                // The ramp used to be a tint on the lane and nothing else, so "this window is
+                // nearly gone" was carried by a hue: the one channel somebody colour blind,
+                // somebody on a bad projector and somebody using VoiceOver all miss at once. A
+                // shape is the second channel, and the three shapes are told apart in greyscale,
+                // which is the same rule the workspace status marks and the check runs follow.
+                //
+                // Hidden from VoiceOver because `row` speaks the whole line, severity included:
+                // an unlabelled glyph beside a labelled row is the reader hearing it twice or not
+                // at all.
+                if let symbol = line.severity?.symbol {
+                    Image(systemName: symbol)
+                        .font(Self.rowFont)
+                        .foregroundStyle(tint(line.severity))
+                        .accessibilityHidden(true)
+                }
                 Text(line.figure)
                     .font(Self.rowFontEmphasised)
                     .monospacedDigit()
@@ -203,6 +225,12 @@ struct QuotaPanel: View {
                     .fixedSize()
             }
         }
+        // One element per window rather than four unrelated labels. The lane IS the row for a
+        // sighted reader, and a lane reaches VoiceOver as nothing at all, so `QuotaLine.spoken`
+        // in the core says the same thing in words. Before this the panel carried no
+        // accessibility modifier anywhere in the file.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(line.spoken)
     }
 
     // MARK: Parts

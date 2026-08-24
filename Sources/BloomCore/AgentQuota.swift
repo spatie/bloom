@@ -221,6 +221,39 @@ public enum QuotaSeverity: Int, Sendable, Hashable, Comparable, CaseIterable {
         lhs.rawValue < rhs.rawValue
     }
 
+    /// The step said in a word, for every reader who is not getting it from the colour.
+    ///
+    /// The panel drew this ramp as a tint on a lane and nothing else: no word, no glyph, no
+    /// pattern, and not one accessibility modifier in the whole file. So the difference between a
+    /// window with room in it and a window about to close was a hue, which is the one channel
+    /// somebody colour blind, somebody on a bad projector and somebody using VoiceOver all miss
+    /// at once.
+    ///
+    /// Nothing for calm, deliberately. A word on every row is a word nobody reads by the third
+    /// one, and calm is the absence of news. The three that are news say so.
+    public var word: String? {
+        switch self {
+        case .calm: nil
+        case .warning: "Running low"
+        case .critical: "Nearly gone"
+        case .spent: "Spent"
+        }
+    }
+
+    /// The same, as a shape, so the row carries it without being read.
+    ///
+    /// Three distinct silhouettes rather than one glyph in three colours, which is the rule the
+    /// workspace status marks and the check runs already follow: a triangle, a filled circle with
+    /// a bar, and a struck-through circle are told apart in greyscale.
+    public var symbol: String? {
+        switch self {
+        case .calm: nil
+        case .warning: "exclamationmark.triangle.fill"
+        case .critical: "exclamationmark.octagon.fill"
+        case .spent: "circle.slash.fill"
+        }
+    }
+
     /// Eighty and ninety, and both are the owner's, asked for in those words after looking at the
     /// panel with his own account's figures in it.
     ///
@@ -349,6 +382,31 @@ public struct QuotaBoard: Sendable, Hashable {
         return all.map {
             QuotaLine.of($0, at: now, forecasting: $0.id == forecast?.id, locale: locale)
         }
+    }
+
+    /// The whole panel in one sentence, which is what VoiceOver reads before the rows.
+    ///
+    /// The comment on `headline` has said for a while that this is "the sentence VoiceOver reads
+    /// out over the whole panel", and no such sentence existed and no view applied one. The panel
+    /// carried no accessibility modifier anywhere in the file, so what a reader actually got was
+    /// a stack of unrelated titles and figures with the severity, which is the only thing the
+    /// panel exists to say, carried entirely by a tint on a lane.
+    ///
+    /// It leads with the nearest wall rather than reading the list out, because the list is what
+    /// the rows are for. A panel where nothing is close says so in as many words: "nothing is
+    /// close" is the answer somebody opened this to hear, and making them listen to four rows to
+    /// work it out is the same failure the tint was.
+    public func spokenSummary(at now: Date = Date(), locale: Locale = .current) -> String {
+        let rows = lines(at: now, locale: locale)
+        guard !rows.isEmpty else { return "Agent limits. Nothing has reported one yet." }
+
+        guard let headline, let leader = rows.first(where: { $0.id == headline.id }) else {
+            return "Agent limits. \(rows.count) windows, none of them measured."
+        }
+        if severity == .calm {
+            return "Agent limits. Nothing is close to a limit. Nearest is \(leader.spoken)."
+        }
+        return "Agent limits. \(leader.spoken)."
     }
 
     /// The one window allowed to say what its rate means, which is the one furthest ahead of its

@@ -288,7 +288,11 @@ struct RepoHeaderRow: View {
                 .opacity(isHeaderHovered ? 0 : 1)
 
             settingsButton
-                .opacity(isHeaderHovered ? 1 : 0)
+                // Clear ink rather than `.opacity(0)`, which `DiffLineView.commentButton`
+                // measured as taking the element out of the accessibility hierarchy: the gear
+                // existed only for a pointer, and the context menu and Cmd+Shift+comma were all
+                // anybody else had.
+                .foregroundStyle(isHeaderHovered ? Palette.textPrimary : Color.clear)
                 // An invisible button still takes clicks, and this one sits on top of the row's
                 // own mark. The pointer has to be on the header for it to be drawn at all, so
                 // this costs nothing real and stops a resting header eating a click on its tile.

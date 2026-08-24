@@ -32,6 +32,10 @@ struct ComposerEditor: View {
     /// What an empty box says. A parameter rather than a constant because the create sheet asks a
     /// different question of the same box: there is no conversation yet to ask for changes to.
     var placeholder: String = ComposerEditor.chatPlaceholder
+    /// What the field announces itself as, passed through to the text view. A parameter for the
+    /// same reason `placeholder` is: the review comment field is this box too, and it used to
+    /// announce itself as "Message".
+    var accessibilityLabel: String = "Message"
 
     static let chatPlaceholder = "Ask to make changes, @mention files, run /commands"
 
@@ -55,6 +59,7 @@ struct ComposerEditor: View {
                 text: $text,
                 caret: $caret,
                 isFocused: $isFocused,
+                accessibilityLabel: accessibilityLabel,
                 onHeightChange: onContentHeightChange,
                 onKey: onKey,
                 onBackspaceAtStart: onBackspaceAtStart,

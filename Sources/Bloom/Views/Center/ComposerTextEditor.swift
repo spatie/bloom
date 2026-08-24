@@ -30,6 +30,13 @@ struct ComposerTextEditor: NSViewRepresentable {
     @Binding var isFocused: Bool
     var minLines: Int = 1
     var maxLines: Int = 12
+    /// What this field announces itself as.
+    ///
+    /// A parameter rather than the literal "Message" it was, because two different fields are
+    /// this view: the composer, and the review comment field on a diff line. Both said "Message",
+    /// so a reader tabbing into a comment was told they were writing a chat turn. The default is
+    /// the composer's, which is the caller that has always been right.
+    var accessibilityLabel: String = "Message" 
     var onHeightChange: @MainActor (CGFloat) -> Void
     var onKey: @MainActor (ComposerKey) -> Bool
     /// Backspace, asked only at a bare caret at the very start of the text, where the thing to the
@@ -165,7 +172,10 @@ struct ComposerTextEditor: NSViewRepresentable {
             height: CGFloat.greatestFiniteMagnitude
         )
         context.coordinator.write(text, into: textView, font: textView.font ?? Self.font)
-        textView.setAccessibilityLabel("Message")
+        // Not the literal "Message". This view is the review comment field as well as the
+        // composer, and both announced themselves as "Message", so a reader tabbing into a
+        // comment on a diff line was told they were writing a chat turn.
+        textView.setAccessibilityLabel(accessibilityLabel)
 
         handle?.textView = textView
 

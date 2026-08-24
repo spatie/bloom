@@ -30,6 +30,18 @@ struct ContextWindowUsage: Equatable {
 
     var remaining: Int { max(0, limit - used) }
 
+    /// Where the gauge stops being an ordinary readout and starts being a warning.
+    ///
+    /// One number in one place. It was the literal `0.8` in `ComposerContextGauge` and the literal
+    /// `0.8` in `ContextWindowDetail`, which is two copies of a threshold that has to agree or the
+    /// bar in the popover contradicts the bar that opened it.
+    static let crowdedAt = 0.8
+
+    /// Whether the window is filling up. The gauge draws this as amber and nothing else, so it is
+    /// also what the spoken value has to say: a reader who cannot see the tint used to get the
+    /// number and no indication that the number was a problem.
+    var isCrowded: Bool { fraction >= Self.crowdedAt }
+
     /// The most recent reading a transcript holds, or nil when the session has not run a turn yet
     /// and so has never been told either number.
     ///

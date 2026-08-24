@@ -203,6 +203,22 @@ public struct QuotaLine: Sendable, Hashable, Identifiable {
     public var severity: QuotaSeverity?
     public var footnote: String
 
+    /// The whole row in one sentence, for a reader who cannot see the lane.
+    ///
+    /// The lane IS the row for a sighted reader: the figure says how much and the tint says
+    /// whether that is a problem. Neither of those reaches VoiceOver, which read the title and the
+    /// figure as two unrelated labels and never mentioned the severity at all, because the panel
+    /// carried no accessibility modifier anywhere in the file.
+    ///
+    /// Built here rather than in the view for the reason the rest of this type is here: a sentence
+    /// a view owns is a sentence nothing can read back.
+    public var spoken: String {
+        var parts = [title, figure]
+        if let word = severity?.word { parts.append(word) }
+        if !footnote.isEmpty { parts.append(footnote) }
+        return parts.joined(separator: ", ")
+    }
+
     public init(
         provider: AgentKind,
         windowKey: String,

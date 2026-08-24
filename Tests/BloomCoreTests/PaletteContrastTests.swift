@@ -154,3 +154,81 @@ private extension Double {
         return (self * factor).rounded() / factor
     }
 }
+
+/// The states this app draws as a colour and nothing else, and what they say instead.
+///
+/// Every one of these was a hue on its own: the quota ramp had no word, no glyph and not one
+/// accessibility modifier in the whole panel file, and a subagent that failed was a red cross with
+/// no label beside a row that said only its name. A hue is the one channel somebody colour blind,
+/// somebody on a bad projector and somebody using VoiceOver all miss at once.
+@Suite("A state says itself in more than a colour")
+struct SeverityVocabularyTests {
+    @Test("calm is the only quota step with nothing to say")
+    func calmIsSilent() {
+        #expect(QuotaSeverity.calm.word == nil)
+        #expect(QuotaSeverity.calm.symbol == nil)
+        for severity in [QuotaSeverity.warning, .critical, .spent] {
+            #expect(severity.word != nil, "\(severity) has no word")
+            #expect(severity.symbol != nil, "\(severity) has no shape")
+        }
+    }
+
+    /// Distinct shapes rather than one glyph in three colours, which is the rule the workspace
+    /// status marks and the check runs already follow.
+    @Test("no two quota steps share a word or a shape")
+    func stepsAreToldApart() {
+        let words = QuotaSeverity.allCases.compactMap(\.word)
+        let symbols = QuotaSeverity.allCases.compactMap(\.symbol)
+        #expect(Set(words).count == words.count)
+        #expect(Set(symbols).count == symbols.count)
+    }
+
+    @Test("no two subagent outcomes share a word")
+    func outcomesAreToldApart() {
+        let marks: [SubagentRow.Mark] = [.working, .done, .failed, .stopped]
+        let words = marks.map(\.word)
+        #expect(Set(words).count == words.count)
+        #expect(!words.contains(""))
+    }
+
+    /// The row is the lane for a sighted reader, and a lane reaches VoiceOver as nothing.
+    @Test("a quota row says its severity out loud")
+    func aRowSaysItsSeverity() {
+        let line = QuotaLine(
+            provider: .claudeCode,
+            windowKey: "five-hour",
+            title: "Claude Code, 5 hours",
+            figure: "84%",
+            fill: 0.84,
+            severity: .warning,
+            footnote: "Lifts in 40m"
+        )
+        #expect(line.spoken.contains("Claude Code, 5 hours"))
+        #expect(line.spoken.contains("84%"))
+        #expect(line.spoken.contains("Running low"))
+        #expect(line.spoken.contains("Lifts in 40m"))
+    }
+
+    /// Calm says nothing, so a calm row is the title, the figure and the footnote and no verdict.
+    @Test("a calm row does not invent a verdict")
+    func aCalmRowIsQuiet() {
+        let line = QuotaLine(
+            provider: .codex,
+            windowKey: "weekly",
+            title: "Codex, weekly",
+            figure: "12%",
+            fill: 0.12,
+            severity: .calm,
+            footnote: ""
+        )
+        #expect(line.spoken == "Codex, weekly, 12%")
+    }
+
+    /// The sentence `QuotaBoard.headline`'s own comment promised and nothing ever wrote.
+    @Test("an empty board still says something over the panel")
+    func anEmptyBoardSpeaks() {
+        let summary = QuotaBoard(providers: []).spokenSummary()
+        #expect(summary.contains("Agent limits"))
+        #expect(summary.contains("Nothing has reported"))
+    }
+}

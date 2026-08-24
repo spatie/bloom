@@ -115,6 +115,10 @@ struct AttachmentChip: View {
                     // fill's own ink instead.
                     .foregroundStyle(isOnSelection ? Palette.selectedEmphasizedText : Palette.warning)
                     .help("This file is no longer on disk")
+                    // `.help` is a tooltip and reaches nobody who is not pointing at it. The chip
+                    // is labelled with the filename alone, so without this a file that is not
+                    // there sounds exactly like one that is, on the send path.
+                    .accessibilityLabel("Missing")
             }
         }
         .padding(.horizontal, Metrics.spacing)

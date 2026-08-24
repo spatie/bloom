@@ -436,19 +436,31 @@ struct ProjectSetupSheet: View {
             VStack(alignment: .leading, spacing: Metrics.spacing) {
                 ForEach(RepositoryStartStep.steps(for: destination), id: \.self) { candidate in
                     HStack(spacing: Metrics.spacingWide) {
+                        // Hidden rather than labelled, and the row speaks for itself below. Three
+                        // marks, none of them labelled and none of them hidden, is three
+                        // unnamed images in a list, which is what this was: the same file gets it
+                        // right twice already, at the radio button and the destination picker.
                         if candidate < step {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(Palette.positive)
+                                .accessibilityHidden(true)
                         } else if candidate == step {
                             ProgressView().controlSize(.small)
+                                .accessibilityHidden(true)
                         } else {
                             Image(systemName: "circle")
                                 .foregroundStyle(Palette.textTertiary)
+                                .accessibilityHidden(true)
                         }
                         Text(candidate.label)
                             .font(Typo.label)
                             .foregroundStyle(candidate == step ? Palette.textPrimary : Palette.textSecondary)
                     }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(candidate.label)
+                    .accessibilityValue(
+                        candidate < step ? "Done" : candidate == step ? "Running" : "Not started"
+                    )
                 }
             }
 

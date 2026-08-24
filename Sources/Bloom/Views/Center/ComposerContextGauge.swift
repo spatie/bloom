@@ -17,7 +17,6 @@ struct ComposerContextGauge: View {
 
     /// Where a nearly full window stops being background information. Past it the bar takes the
     /// warning colour, which is the only thing in this control that asks to be noticed.
-    private static let crowded = 0.8
 
     var body: some View {
         Button {
@@ -43,9 +42,12 @@ struct ComposerContextGauge: View {
         .fixedSize()
         .help("Context window")
         .accessibilityLabel("Context window")
+        // The crowded state is drawn as amber and as nothing else, so it has to be said here or
+        // a reader gets the number with no indication that the number is a problem.
         .accessibilityValue(
             "\(ContextWindowUsage.percent(usage.fraction)) used, "
                 + "\(ContextWindowUsage.format(usage.used)) of \(ContextWindowUsage.format(usage.limit)) tokens"
+                + (usage.isCrowded ? ", filling up" : "")
         )
         .popover(isPresented: $isShowingDetail, arrowEdge: .top) {
             ContextWindowDetail(usage: usage)
@@ -53,7 +55,7 @@ struct ComposerContextGauge: View {
     }
 
     private var bar: some View {
-        ContextWindowBar(fraction: usage.fraction, isCrowded: usage.fraction >= Self.crowded)
+        ContextWindowBar(fraction: usage.fraction, isCrowded: usage.isCrowded)
             .frame(width: Self.barWidth, height: Self.barHeight)
     }
 }

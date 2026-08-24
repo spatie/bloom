@@ -24,7 +24,7 @@ struct ContextWindowDetail: View {
                     .foregroundStyle(Palette.textSecondary)
             }
 
-            ContextWindowBar(fraction: usage.fraction, isCrowded: usage.fraction >= 0.8)
+            ContextWindowBar(fraction: usage.fraction, isCrowded: usage.isCrowded)
                 .frame(height: Self.barHeight)
 
             VStack(spacing: Metrics.spacingSmall) {

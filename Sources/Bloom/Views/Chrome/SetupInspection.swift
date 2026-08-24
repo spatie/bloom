@@ -39,6 +39,12 @@ final class SetupInspection {
     private static let stagger = Duration.milliseconds(140)
 
     /// A run whose rows arrive all at once, for Reduce Motion. See `WelcomeView`.
+    ///
+    /// It is only ever correct because the sole construction path sets it from
+    /// `accessibilityReduceMotion`, and `reveal` below used to call `withAnimation` ungated on the
+    /// strength of that. A second caller who forgot would have got the animation with no way to
+    /// see they had. The gate is inside `reveal` now, so the flag is what it says it is rather
+    /// than a promise about who calls it.
     var revealsInstantly = false
 
     private var run: Task<Void, Never>?
@@ -148,7 +154,7 @@ final class SetupInspection {
                 checks[index] = SetupCheck(tool: tool, outcome: truth.outcome(for: tool))
             }
             let next = SetupReport(checks: checks)
-            if revealsInstantly {
+            if revealsInstantly || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                 shown = next
             } else {
                 withAnimation(Motion.arrival) { shown = next }

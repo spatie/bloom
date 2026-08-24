@@ -17,6 +17,20 @@ public struct SubagentRow: Sendable, Hashable, Identifiable {
         case failed
         /// It never finished and nothing is coming. Not a cross: nothing broke.
         case stopped
+
+        /// The outcome in a word, for a reader getting it from neither the shape nor the tint.
+        ///
+        /// The three marks are genuinely distinct shapes, which is the hard half done, but the
+        /// glyph carried no label and the row's text says only the subagent's name. So VoiceOver
+        /// read out a name and never once said the thing failed.
+        public var word: String {
+            switch self {
+            case .working: "Working"
+            case .done: "Finished"
+            case .failed: "Failed"
+            case .stopped: "Stopped"
+            }
+        }
     }
 
     /// The short readout at the trailing edge.

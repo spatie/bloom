@@ -257,15 +257,27 @@ struct TabItemView: View {
                 // old cross had it the other way round, large enough to be the heaviest mark in
                 // the strip while being too faint to look deliberate.
                 .imageScale(.small)
-                .foregroundStyle(isActive ? surface.inkMuted : Palette.textSecondary)
+                // Drawn in clear rather than faded with `.opacity`, which is the trick
+                // `DiffLineView.commentButton` documents from a measurement: `.opacity(0)` on a
+                // button or on its label took the element out of the accessibility hierarchy
+                // entirely, so a hover-revealed control was one VoiceOver could never find. Clear
+                // ink draws the same nothing and the element stays.
+                .foregroundStyle(closeInk)
                 .frame(width: Metrics.glyph, height: Metrics.glyph)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
-        .opacity(isVisible ? 1 : 0)
+        // Hit testing still follows the hover, and deliberately: this sits at a tab's trailing
+        // edge, and a close button that takes a click while invisible closes tabs somebody meant
+        // to select.
         .allowsHitTesting(isVisible)
         .accessibilityHidden(!canClose)
         .help(closeTitle)
+    }
+
+    private var closeInk: Color {
+        guard isVisible else { return .clear }
+        return isActive ? surface.inkMuted : Palette.textSecondary
     }
 
     private var isVisible: Bool {

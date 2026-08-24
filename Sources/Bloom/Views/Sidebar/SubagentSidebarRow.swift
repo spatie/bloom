@@ -92,6 +92,9 @@ struct SubagentMarkGlyph: View {
             Image(systemName: Self.symbol(for: mark))
                 .font(Typo.micro)
                 .foregroundStyle(isOnSelection ? Palette.textInverted : Self.tint(for: mark))
+                // The shapes are distinct and the tints are distinct, and neither reaches
+                // VoiceOver: it read the subagent's name and never said the thing had failed.
+                .accessibilityLabel(mark.word)
         }
     }
 
