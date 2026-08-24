@@ -82,12 +82,17 @@ struct CenterPaneView: View {
 
     @ViewBuilder
     private var content: some View {
+        // The first thing a tab switch rebuilds, and therefore the start of everything `TabProbe`
+        // is timing. Off unless a probe run turned the trace on, and stamped once per timeline.
+        let _ = SwitchTrace.mark("pane.body", workspace: model.workspace.id)
+        let _ = SwitchTrace.markOnScreen("pane.body", workspace: model.workspace.id)
+
         switch showing {
         case .chat(let sessionID):
             // The lookup only, never `transcript(for:)`: building one writes observed state, and a
             // body may not do that. `prepare` below is where it is built.
             if let transcript = model.existingTranscript(for: sessionID) {
-                ChatPaneView(transcript: transcript, model: model)
+                ChatPaneView(transcript: transcript, model: model, pane: pane)
             } else if model.sessions.contains(where: { $0.id == sessionID }) {
                 LoadingView()
             } else {

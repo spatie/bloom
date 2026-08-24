@@ -1,4 +1,5 @@
 import SwiftUI
+import BloomCore
 
 /// The transcript: the surface where a user watches an agent work.
 ///
@@ -13,13 +14,20 @@ struct TranscriptView: View {
     /// uses it to decide whether a "jump to newest" pill is worth offering.
     private let onScrolledUpChange: (@MainActor @Sendable (Bool) -> Void)?
 
+    /// Where this pane's place in this conversation is kept while the pane does not exist, which
+    /// is every moment the centre column is showing another tab. Nil for a transcript nobody comes
+    /// back to. See `TranscriptPaneMemory`.
+    private let memory: TranscriptPaneMemory?
+
     init(
         transcript: TranscriptModel,
         isRunningSetup: Bool = false,
+        memory: TranscriptPaneMemory? = nil,
         onScrolledUpChange: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         self.transcript = transcript
         self.isRunningSetup = isRunningSetup
+        self.memory = memory
         self.onScrolledUpChange = onScrolledUpChange
     }
 
@@ -28,10 +36,12 @@ struct TranscriptView: View {
     init(
         transcript: TranscriptModel?,
         isRunningSetup: Bool = false,
+        memory: TranscriptPaneMemory? = nil,
         onScrolledUpChange: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         self.transcript = transcript
         self.isRunningSetup = isRunningSetup
+        self.memory = memory
         self.onScrolledUpChange = onScrolledUpChange
     }
 
@@ -41,6 +51,7 @@ struct TranscriptView: View {
                 TranscriptListView(
                     transcript: transcript,
                     isRunningSetup: isRunningSetup,
+                    memory: memory,
                     onScrolledUpChange: onScrolledUpChange
                 )
             } else {

@@ -411,6 +411,14 @@ struct ComposerView: View {
     /// All of it is only interesting once, hence the `task(id:)`. The precedence rules live in
     /// `ComposerDefaults`.
     private func prepare() async {
+        // A `defer`, because this function has five ways out and every one of them is a composer
+        // that is ready: the common one by far is the early return below for a session whose
+        // defaults were applied on an earlier launch, which is exactly the path a return to a chat
+        // tab takes. A mark on the last line would never fire for it. See `TabProbe`.
+        defer {
+            SwitchTrace.mark("composer.prepared", workspace: transcript.workspace.id)
+            SwitchTrace.markOnScreen("composer.prepared", workspace: transcript.workspace.id)
+        }
         isFocused = true
         caret = (transcript.draft as NSString).length
 
