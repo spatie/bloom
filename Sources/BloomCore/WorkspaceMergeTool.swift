@@ -402,7 +402,23 @@ public struct WorkspaceMergeTool: BridgeToolHandling {
             // gh threw. Which of the two it is decides the advice, so it is asked rather than
             // assumed: an unusable gh is permanent and a failed call usually is not.
             let access = await GitHub.access()
-            return access == .ready ? .failed(error.readableMessage) : .unavailable(access)
+            return access == .ready ? .failed(plainly(error)) : .unavailable(access)
         }
+    }
+
+    /// gh's complaint without the command line Bloom built to provoke it.
+    ///
+    /// `ShellError.readableMessage` is the whole invocation, its exit status and its stderr, and
+    /// measured against a worktree with no remote that came out as the full `gh pr view` argv with
+    /// ten `--json` fields in it. That is a command line in a tool result, which is the thing this
+    /// file's siblings refuse to emit: it invites the model to reason about gh rather than about
+    /// the tool it called, and the flags are the one part of the failure the caller neither chose
+    /// nor can change. The same trim as `WorkspaceStartTrouble.plainly`, which exists for the same
+    /// sentence in git's voice.
+    static func plainly(_ error: any Error) -> String {
+        guard let shell = error as? ShellError else { return error.readableMessage }
+        let stderr = shell.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !stderr.isEmpty else { return "gh exited \(shell.status) without saying why." }
+        return stderr.hasSuffix(".") ? stderr : stderr + "."
     }
 }

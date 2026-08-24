@@ -361,7 +361,27 @@ struct WorkspaceMergeToolTests {
 
         #expect(result.isError)
         #expect(result.text.contains("gh timed out after 20s"))
-        #expect(result.text.contains("worth asking again"))
+        #expect(result.text.contains("asking again in a minute"))
+    }
+
+    /// Measured over the socket before it was fixed: a worktree with no remote came back with the
+    /// whole `gh pr view` invocation, ten `--json` fields and all, inside the refusal.
+    @Test("gh's own words reach the caller, and the command line Bloom built does not")
+    func ghsWordsWithoutTheCommandLine() {
+        let error = ShellError(
+            command: "gh pr view b --json number,title,url,state,isDraft,mergeable",
+            status: 1,
+            stderr: "no git remotes found\n"
+        )
+
+        let plain = WorkspaceMergeTool.plainly(error)
+
+        #expect(plain == "no git remotes found.")
+        #expect(!plain.contains("--json"))
+        #expect(!WorkspaceMergeTrouble.githubSilent(plain).sentence.contains("--json"))
+        // One full stop after gh's line, not two. Measured over the socket.
+        #expect(WorkspaceMergeTrouble.githubSilent(plain).sentence.contains("found. Nothing was sent"))
+        #expect(WorkspaceMergeTrouble.githubSilent("gh gave up").sentence.contains("up. Nothing was sent"))
     }
 
     /// The `git init` shape of mistake, in this tool's terms: handed "there is nothing to merge",

@@ -126,12 +126,17 @@ public enum WorkspaceMergeTrouble: Sendable, Equatable {
                 """
 
         case .githubSilent(let message):
+            // gh's own line, with exactly one full stop after it. `WorkspaceMergeTool.plainly`
+            // already ends what it hands over, so a stop written here made "no git remotes found..",
+            // which is what a sentence assembled out of two halves that both think they finish it
+            // looks like.
+            let said = message.hasSuffix(".") ? message : message + "."
             return """
                 Bloom asked GitHub what state that pull request is in and gh did not answer: \
-                \(message). Nothing was sent, and nothing here says anything about the pull \
-                request, because nothing was read. This one is usually temporary, so it is worth \
-                asking again in a minute. If it keeps happening, say so rather than working round \
-                it.
+                \(said) Nothing was sent, and nothing here says anything about the pull \
+                request, because nothing was read. What gh said is the whole of what is known: if \
+                it reads like a network or a rate limit, asking again in a minute is the right \
+                thing, and if it does not, say so rather than working round it.
                 """
 
         case let .noPullRequest(workspace, branch):
