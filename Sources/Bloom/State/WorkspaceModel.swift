@@ -137,7 +137,8 @@ final class WorkspaceModel {
     ///
     /// A computed property rather than a migration of every call site: the shared store is
     /// `@Observable` too, so reading through it registers the same dependency a stored property
-    /// did, and `model.pullRequest = nil` still means what it meant.
+    /// did. Writing nil through it still reaches the shared cache, which is why
+    /// `refreshPullRequest` below no longer does: see the note there.
     var pullRequest: PullRequest? {
         get { WorkspacePullRequests.shared.pullRequest(for: workspace.id) }
         set { WorkspacePullRequests.shared.set(newValue, for: workspace.id) }
@@ -1277,7 +1278,16 @@ final class WorkspaceModel {
 
         guard pullRequestTask == task, !task.isCancelled else { return }
         pullRequestTask = nil
-        if pullRequest != fresh { pullRequest = fresh }
+        // A nil is not written, and that is the rule the shared cache has always had: nil is "gh
+        // could not answer" at least as often as it is "there is no pull request", so a slow
+        // network or a rate limit would otherwise drop the mark back to a plain branch.
+        //
+        // It matters more now than it did. This used to write into a copy only the inspector
+        // read; it writes into the one cache the sidebar glyph, the Home rail and the title bar
+        // strip all read, so a nil from this poll would clear the mark in four places at once.
+        // The deliberate clear is `WorkspacePullRequests.forget`, which `adopt` calls when a
+        // merge moves the worktree to a fresh branch.
+        if let fresh, pullRequest != fresh { pullRequest = fresh }
         isLoadingPullRequest = false
         SwitchTrace.mark("pullRequest.loaded", workspace: workspace.id)
     }

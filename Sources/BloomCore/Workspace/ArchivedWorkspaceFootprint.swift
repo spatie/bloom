@@ -208,6 +208,7 @@ public struct DatabaseSize: Sendable, Hashable {
 /// workspace appears here. What is left is the record: the conversation, what the agent was asked,
 /// what it did, and the review someone wrote on it. `WorkspaceRestore` can bring a workspace back
 /// from a branch and can never bring any of that back, so this confirmation says so plainly.
+
 /// What came of destroying a set of archived records.
 ///
 /// It used to be an `Int` that the one call site discarded, over a store call wrapped in `try?`,

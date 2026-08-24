@@ -127,9 +127,9 @@ struct RunningGlyphGallery: View {
 
 extension Gallery {
     /// The registry entry for this page. See `Gallery`.
-///
-/// It moves and still does not need the keys: the heartbeat has no frontmost gate, so it runs in
-/// a window nobody has given the keyboard to.
+    ///
+    /// It moves and still does not need the keys: the heartbeat has no frontmost gate, so it runs in
+    /// a window nobody has given the keyboard to.
     static let runningGlyph = Gallery(
         name: "running-glyph",
         title: "Running mark",

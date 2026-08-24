@@ -296,15 +296,22 @@ public enum WorkspaceCheckoutPlan {
         return Git.uniqueBranch(checkout.alternateLocalBranch ?? preferred, taken: taken)
     }
 
-    /// A workspace already sitting on this branch, if there is one.
+    /// A workspace already sitting on this branch **of this project**, if there is one.
     ///
     /// Git refuses to check a branch out into two worktrees at once, so this is not a nicety: the
     /// answer decides between opening a second workspace and taking the one that is already there.
     /// Archived workspaces do not count, because their worktrees are gone.
+    ///
+    /// **The project is the half this was missing.** Git's refusal is per repository, and a branch
+    /// name is not unique across them: `main`, `develop` and `staging` exist in nearly every
+    /// project on a machine. Matching on the name alone meant the create sheet for project A
+    /// labelled A's own `develop` "In use by ‹a workspace in project B›", and picking that row
+    /// dismissed the sheet and selected B's workspace. Somebody asked for a workspace in A and
+    /// landed in an unrelated project, with nothing on screen saying why.
     public static func workspaceHolding(
-        branch: String, among workspaces: [Workspace]
+        branch: String, in repoID: RepoID, among workspaces: [Workspace]
     ) -> Workspace? {
-        workspaces.first { $0.state == .active && $0.branch == branch }
+        workspaces.first { $0.state == .active && $0.repoID == repoID && $0.branch == branch }
     }
 
     /// What the sheet says about a pull request before it is opened, or nil when there is nothing

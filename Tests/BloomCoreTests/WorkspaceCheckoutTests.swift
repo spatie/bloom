@@ -276,11 +276,49 @@ struct WorkspaceCheckoutTests {
             repoID: repoID, name: "review", branch: "fix-parser", path: "/tmp/b", baseBranch: "main"
         )
         #expect(
-            WorkspaceCheckoutPlan.workspaceHolding(branch: "fix-parser", among: [archived, live])?.name
-                == "review"
+            WorkspaceCheckoutPlan.workspaceHolding(
+                branch: "fix-parser", in: repoID, among: [archived, live]
+            )?.name == "review"
         )
         #expect(
-            WorkspaceCheckoutPlan.workspaceHolding(branch: "fix-parser", among: [archived]) == nil
+            WorkspaceCheckoutPlan.workspaceHolding(
+                branch: "fix-parser", in: repoID, among: [archived]
+            ) == nil
+        )
+    }
+
+    /// Git's refusal to check a branch out twice is **per repository**, and a branch name is not
+    /// unique across them: `main`, `develop` and `staging` exist in nearly every project on a
+    /// machine. Matching on the name alone meant the create sheet for one project labelled its own
+    /// `develop` as held by a workspace in another, and picking that row dismissed the sheet and
+    /// selected the other project's workspace.
+    @Test("a branch of the same name in another project is not this project's branch")
+    func doesNotReachIntoAnotherProject() {
+        let mine = RepoID("bloom")
+        let theirs = RepoID("beacon")
+        let elsewhere = Workspace(
+            repoID: theirs, name: "Beacon develop", branch: "develop",
+            path: "/tmp/beacon", baseBranch: "main"
+        )
+        let here = Workspace(
+            repoID: mine, name: "Bloom develop", branch: "develop",
+            path: "/tmp/bloom", baseBranch: "main"
+        )
+
+        #expect(
+            WorkspaceCheckoutPlan.workspaceHolding(
+                branch: "develop", in: mine, among: [elsewhere]
+            ) == nil
+        )
+        #expect(
+            WorkspaceCheckoutPlan.workspaceHolding(
+                branch: "develop", in: mine, among: [elsewhere, here]
+            )?.name == "Bloom develop"
+        )
+        #expect(
+            WorkspaceCheckoutPlan.workspaceHolding(
+                branch: "develop", in: theirs, among: [elsewhere, here]
+            )?.name == "Beacon develop"
         )
     }
 

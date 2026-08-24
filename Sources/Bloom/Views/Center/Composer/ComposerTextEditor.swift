@@ -36,7 +36,7 @@ struct ComposerTextEditor: NSViewRepresentable {
     /// this view: the composer, and the review comment field on a diff line. Both said "Message",
     /// so a reader tabbing into a comment was told they were writing a chat turn. The default is
     /// the composer's, which is the caller that has always been right.
-    var accessibilityLabel: String = "Message" 
+    var accessibilityLabel: String = "Message"
     var onHeightChange: @MainActor (CGFloat) -> Void
     var onKey: @MainActor (ComposerKey) -> Bool
     /// Backspace, asked only at a bare caret at the very start of the text, where the thing to the

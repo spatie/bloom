@@ -183,9 +183,9 @@ struct SubagentRowGallery: View {
 
 extension Gallery {
     /// The registry entry for this page. See `Gallery`.
-///
-/// Four panes at the sidebar's 260 point default, side by side, over a second row of three that
-/// traces the removal.
+    ///
+    /// Four panes at the sidebar's 260 point default, side by side, over a second row of three that
+    /// traces the removal.
     static let subagentRows = Gallery(
         name: "subagent-rows",
         title: "Subagent rows",

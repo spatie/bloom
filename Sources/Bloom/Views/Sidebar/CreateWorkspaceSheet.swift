@@ -754,8 +754,8 @@ struct CreateWorkspaceSheet: View {
     private var checkoutNote: String? {
         guard let checkout else { return nil }
         if let sentence = WorkspaceCheckoutPlan.warning(for: checkout) { return sentence }
-        if let held = WorkspaceCheckoutPlan.workspaceHolding(
-            branch: checkout.preferredLocalBranch, among: app.workspaces
+        if let repo, let held = WorkspaceCheckoutPlan.workspaceHolding(
+            branch: checkout.preferredLocalBranch, in: repo.id, among: app.workspaces
         ) {
             return "Already open in \(held.name)"
         }
@@ -910,8 +910,8 @@ struct CreateWorkspaceSheet: View {
             baseBranch = ref
             focusTheBox()
         case .existingBranch(let branch):
-            if let held = WorkspaceCheckoutPlan.workspaceHolding(
-                branch: branch.name, among: app.workspaces
+            if let repo, let held = WorkspaceCheckoutPlan.workspaceHolding(
+                branch: branch.name, in: repo.id, among: app.workspaces
             ) {
                 app.selection = .workspace(held.id)
                 dismiss()
@@ -981,10 +981,17 @@ struct CreateWorkspaceSheet: View {
         guard let repo else { return }
         isLoadingCheckouts = true
         let inUse = Dictionary(
-            app.workspaces.filter { $0.state == .active }.map { ($0.branch, $0.name) },
-            // Two live workspaces cannot hold the same branch, so a duplicate here is a row that
-            // has not caught up with a worktree that has gone. The first is as good an answer as
-            // there is, and it is what `workspaceHolding` will find when the row is selected.
+            app.workspaces
+                // This project's, not the machine's. A branch name is not unique across projects,
+                // and `main` or `develop` exists in nearly all of them, so an unfiltered list
+                // labelled this project's branch as held by a workspace in another one. See
+                // `WorkspaceCheckoutPlan.workspaceHolding`.
+                .filter { $0.state == .active && $0.repoID == repo.id }
+                .map { ($0.branch, $0.name) },
+            // Two live workspaces in one project cannot hold the same branch, so a duplicate here
+            // is a row that has not caught up with a worktree that has gone. The first is as good
+            // an answer as there is, and it is what `workspaceHolding` finds when the row is
+            // selected.
             uniquingKeysWith: { first, _ in first }
         )
         let options = await WorkspaceCheckoutOptions.load(

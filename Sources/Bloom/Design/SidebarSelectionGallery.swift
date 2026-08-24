@@ -112,9 +112,9 @@ private struct FirstResponderProbe: NSViewRepresentable {
 
 extension Gallery {
     /// The registry entry for this page. See `Gallery`.
-///
-/// A source list draws the emphasized fill only while it holds the keyboard, and that fill is the
-/// whole page.
+    ///
+    /// A source list draws the emphasized fill only while it holds the keyboard, and that fill is the
+    /// whole page.
     static let sidebarSelection = Gallery(
         name: "sidebar-selection",
         title: "Sidebar selection",

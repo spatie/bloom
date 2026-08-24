@@ -27,9 +27,10 @@ struct ToolPaneView: View {
     /// this view is reused from one workspace to the next rather than built again, so a flag left
     /// standing from the last workspace's terminal would let the next one's shell be forked before
     /// its port had been allocated. See `CenterPanesView.soloPane`.
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     @State private var readyTabID: String?
+
+    /// Read for the setup strip's slide. See the `.animation` in `body`.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         switch tab.kind {

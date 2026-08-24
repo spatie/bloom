@@ -15,14 +15,23 @@ struct StreamingThinkingView: View {
 
     private static let tailLimit = 600
 
-    /// `utf8.count` and not `count`. This is read on every delta of a buffer the file's own
-    /// header says reaches a hundred kilobytes, and `String.count` walks the whole thing to count
-    /// graphemes. A byte count answers the only question being asked, which is "is this longer
-    /// than 600 characters", because a string of n bytes can never hold more than n characters.
+    /// The last 600 characters, with a leading ellipsis only when something was really dropped.
+    ///
+    /// The byte count is a cheap upper bound and nothing more: a string of n bytes can never hold
+    /// more than n characters, so anything at or under the limit in bytes is under it in
+    /// characters too and needs no walk at all. That is the fast path, it is the common one, and
+    /// it is why this is not `text.count`, which walks a buffer the file's own header says reaches
+    /// a hundred kilobytes, on every delta.
+    ///
+    /// **It cannot decide the cut, only skip it.** Four hundred accented or CJK characters are
+    /// over 600 bytes and under 600 characters, so the byte test alone sent complete text down the
+    /// else branch, where `suffix` returned all of it and an ellipsis was prefixed to text nothing
+    /// had been taken from. Comparing the indices says whether the cut moved, in constant time.
     private var tail: String {
-        text.utf8.count <= Self.tailLimit
-            ? text
-            : "\u{2026}" + String(text.suffix(Self.tailLimit))
+        guard text.utf8.count > Self.tailLimit else { return text }
+        let kept = text.suffix(Self.tailLimit)
+        guard kept.startIndex != text.startIndex else { return text }
+        return "\u{2026}" + String(kept)
     }
 
     var body: some View {
