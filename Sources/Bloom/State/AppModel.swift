@@ -1309,7 +1309,11 @@ final class AppModel {
             userSuppliedName: name ?? checkout?.workspaceName,
             userSuppliedBranch: branch,
             isChatWorkspace: opensWith == .chat,
-            wantsAutomaticName: wantsAName
+            wantsAutomaticName: wantsAName,
+            // A terminal workspace started with nothing written has no other source of a name:
+            // no turn is sent, so no model is asked, and there is no sentence to slug a branch
+            // out of. The sea is both, and it is the name for good rather than a placeholder.
+            hasTask: !spoken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         ) {
             pick = try? await store?.claimOcean()
         } else {
@@ -1337,9 +1341,16 @@ final class AppModel {
             // The claimed sea's slug when there is one, so the branch and the name tell the same
             // story. `Git.uniqueBranch` still suffixes a collision with an earlier voyage.
             branch: branch ?? seaBranch,
-            // A terminal workspace is named after the branch the user typed, because there is no
-            // task to derive a name from and nothing is going to be asked.
-            name: name ?? (opensWith == .terminal ? branch : nil),
+            // A terminal workspace is named after the branch the user typed, or after the sea it
+            // just claimed when nothing was typed at all. Either way the name is settled here
+            // rather than left to the namer, because nothing is going to be asked: passing a name
+            // is also what stops `start` returning a placeholder and so what stops `adopt`
+            // kicking off an automatic rename with no first turn to read.
+            name: name ?? (opensWith == .terminal
+                ? WorkspaceStartPlan.terminalName(
+                    userSuppliedBranch: branch, claimedSea: pick?.ocean.name
+                )
+                : nil),
             checkout: checkout,
             controls: effectiveControls,
             opensSession: opensWith == .chat,

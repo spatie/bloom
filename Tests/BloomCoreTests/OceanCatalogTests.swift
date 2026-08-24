@@ -60,7 +60,7 @@ struct OceanClaimGateTests {
     func plainChatClaims() {
         #expect(OceanCatalog.shouldClaim(
             userSuppliedName: nil, userSuppliedBranch: nil,
-            isChatWorkspace: true, wantsAutomaticName: true
+            isChatWorkspace: true, wantsAutomaticName: true, hasTask: true
         ))
     }
 
@@ -68,7 +68,7 @@ struct OceanClaimGateTests {
     func ownNameSpendsNothing() {
         #expect(!OceanCatalog.shouldClaim(
             userSuppliedName: "Fix the login flow", userSuppliedBranch: nil,
-            isChatWorkspace: true, wantsAutomaticName: true
+            isChatWorkspace: true, wantsAutomaticName: true, hasTask: true
         ))
     }
 
@@ -76,15 +76,33 @@ struct OceanClaimGateTests {
     func ownBranchSpendsNothing() {
         #expect(!OceanCatalog.shouldClaim(
             userSuppliedName: nil, userSuppliedBranch: "fix/login",
-            isChatWorkspace: true, wantsAutomaticName: true
+            isChatWorkspace: true, wantsAutomaticName: true, hasTask: true
         ))
     }
 
-    @Test("a terminal workspace spends no sea")
-    func terminalSpendsNothing() {
+    @Test("a terminal workspace with a task written is named after the task, not after a sea")
+    func terminalWithTaskSpendsNothing() {
         #expect(!OceanCatalog.shouldClaim(
             userSuppliedName: nil, userSuppliedBranch: nil,
-            isChatWorkspace: false, wantsAutomaticName: true
+            isChatWorkspace: false, wantsAutomaticName: false, hasTask: true
+        ))
+    }
+
+    /// The promptless start. Nothing else in the app can name this workspace: no turn is sent, so
+    /// no model is asked, and there is no sentence to slug a branch out of.
+    @Test("a terminal workspace started with nothing written spends a sea")
+    func promptlessTerminalClaims() {
+        #expect(OceanCatalog.shouldClaim(
+            userSuppliedName: nil, userSuppliedBranch: nil,
+            isChatWorkspace: false, wantsAutomaticName: false, hasTask: false
+        ))
+    }
+
+    @Test("a promptless terminal start with its own branch still spends no sea")
+    func promptlessTerminalWithBranchSpendsNothing() {
+        #expect(!OceanCatalog.shouldClaim(
+            userSuppliedName: nil, userSuppliedBranch: "spike/perf",
+            isChatWorkspace: false, wantsAutomaticName: false, hasTask: false
         ))
     }
 
@@ -92,7 +110,7 @@ struct OceanClaimGateTests {
     func noRenameSpendsNothing() {
         #expect(!OceanCatalog.shouldClaim(
             userSuppliedName: nil, userSuppliedBranch: nil,
-            isChatWorkspace: true, wantsAutomaticName: false
+            isChatWorkspace: true, wantsAutomaticName: false, hasTask: true
         ))
     }
 }

@@ -72,22 +72,33 @@ public enum OceanCatalog {
 
     /// Whether creating this workspace should spend a sea from the catalogue.
     ///
-    /// Only a chat workspace that left both name and branch to Bloom, and that is going to be
-    /// named automatically, gets one. A caller that chose either has already said what it wants,
-    /// so the bridge's explicitly named workspaces spend nothing; without an automatic rename
-    /// coming the sea would never be replaced by a real name, so it stays unspent there too.
+    /// A caller that chose a name or a branch has already said what it wants, so the bridge's
+    /// explicitly named workspaces spend nothing. What is left is the two cases where Bloom is the
+    /// one choosing, and they are not the same case:
+    ///
+    /// - A chat that is going to be named automatically. The sea is a placeholder, worn for the
+    ///   few seconds it takes a model to read the first turn and answer with something better.
+    /// - A terminal started with nothing written in the box at all. There is no first turn, so no
+    ///   model is ever going to be asked, and the sea is the name rather than a stand-in for one.
+    ///   This is the whole of what makes a promptless start possible: the catalogue produces a
+    ///   word and a branch slug without being told anything, which is exactly what a worktree
+    ///   somebody is about to drive by hand has to be given.
+    ///
+    /// A terminal workspace whose box was written in is deliberately not here. What was typed is a
+    /// better name than a sea, because somebody chose it.
+    ///
     /// A pure function here rather than a condition at the claim site, because the claim site is
     /// `AppModel` and the test target depends on the core alone.
     public static func shouldClaim(
         userSuppliedName: String?,
         userSuppliedBranch: String?,
         isChatWorkspace: Bool,
-        wantsAutomaticName: Bool
+        wantsAutomaticName: Bool,
+        hasTask: Bool
     ) -> Bool {
-        wantsAutomaticName
-            && userSuppliedName == nil
-            && userSuppliedBranch == nil
-            && isChatWorkspace
+        guard userSuppliedName == nil, userSuppliedBranch == nil else { return false }
+        if isChatWorkspace { return wantsAutomaticName }
+        return !hasTask
     }
 
     /// One sea per line, tab separated: name, slug, latitude, longitude. The first line is the
