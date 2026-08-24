@@ -174,6 +174,182 @@ struct WorkspaceTroubleTests {
         #expect(trouble.sentence.contains("'release', the branch 'Retry surfaces' is measured against"))
     }
 
+    // MARK: - Archiving
+
+    /// The proven failure, reproduced the way it happens: the safety check clears, then the
+    /// archive script writes a log into the worktree, then the safe removal refuses. Freek was
+    /// shown "`git worktree remove ...` exited 128: fatal: '/.../wt1' contains modified or
+    /// untracked files, use --force to delete it".
+    @Test("blames the leftover files, not the command that tripped over them")
+    func archivingAWorktreeAScriptDirtied() async throws {
+        let repo = try await TempRepo(defaultBranch: "main")
+        defer { repo.cleanUp() }
+        let worktree = TestScratch.unique("wt")
+        try await Git.addWorktree(repo: repo.path, path: worktree, branch: "archive-logs", base: "main")
+        defer { try? FileManager.default.removeItem(atPath: worktree) }
+        // What an archive script leaves behind after the check for unsaved work has already run.
+        try "teardown ok\n".write(toFile: worktree + "/archive.log", atomically: true, encoding: .utf8)
+
+        let error = await #expect(throws: (any Error).self) {
+            try await Git.removeWorktree(repo: repo.path, path: worktree, force: false)
+        }
+        #expect("\(error!)".contains("worktree remove"))
+
+        let trouble = await WorkspaceTrouble.archiving(
+            error!, workspace: "Archive logs", path: worktree, baseBranch: "main"
+        )
+        #expect(trouble == .archiveWorktreeNotEmpty(workspace: "Archive logs"))
+        #expect(trouble.sentence.contains("holds files that are in no commit"))
+        #expect(trouble.sentence.contains("archive script"))
+        #expect(!trouble.sentence.contains("git"))
+        #expect(!trouble.sentence.contains("exited"))
+        #expect(!trouble.sentence.contains("`"))
+    }
+
+    @Test("says there is nothing left to lose when the worktree has already gone")
+    func archivingAWorktreeThatIsNotThere() async throws {
+        let repo = try await TempRepo(defaultBranch: "main")
+        defer { repo.cleanUp() }
+        let worktree = TestScratch.unique("wt")
+
+        let trouble = await WorkspaceTrouble.archiving(
+            ShellError(command: "git status --porcelain", status: 128, stderr: "fatal: cannot chdir"),
+            workspace: "Sidebar blue", path: worktree, baseBranch: "main"
+        )
+        #expect(trouble == .archiveWorktreeGone(workspace: "Sidebar blue"))
+        #expect(trouble.sentence.contains("destroys nothing that is still there"))
+        #expect(!trouble.sentence.contains("status --porcelain"))
+    }
+
+    /// The one sentence in the type that names a worktree path, because deleting that folder is
+    /// the only thing that unblocks the archive.
+    @Test("names the folder when git no longer knows it as a worktree")
+    func archivingAFolderGitHasLostTrackOf() async throws {
+        let repo = try await TempRepo(defaultBranch: "main")
+        defer { repo.cleanUp() }
+        let worktree = TestScratch.unique("wt")
+        try await Git.addWorktree(repo: repo.path, path: worktree, branch: "limits-panel", base: "main")
+        try FileManager.default.removeItem(atPath: worktree)
+        try FileManager.default.createDirectory(atPath: worktree, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: worktree) }
+
+        let trouble = await WorkspaceTrouble.archiving(
+            ShellError(command: "git worktree remove", status: 128, stderr: "fatal: not a working tree"),
+            workspace: "Limits panel", path: worktree, baseBranch: "main"
+        )
+        #expect(trouble == .archiveWorktreeNotACheckout(workspace: "Limits panel", path: worktree))
+        #expect(trouble.sentence.contains("delete it yourself"))
+        #expect(!trouble.sentence.contains("not a working tree"))
+    }
+
+    @Test("passes an archive failure through when the worktree is clean and healthy")
+    func archivingAHealthyWorktree() async throws {
+        let repo = try await TempRepo(defaultBranch: "main")
+        defer { repo.cleanUp() }
+        let worktree = TestScratch.unique("wt")
+        try await Git.addWorktree(repo: repo.path, path: worktree, branch: "retry-surfaces", base: "main")
+        defer { try? FileManager.default.removeItem(atPath: worktree) }
+
+        let trouble = await WorkspaceTrouble.archiving(
+            ShellError(command: "git branch -d retry-surfaces", status: 1, stderr: "error: the branch is not fully merged"),
+            workspace: "Retry surfaces", path: worktree, baseBranch: "main"
+        )
+        #expect(trouble == .archiveUnexplained(
+            workspace: "Retry surfaces", complaint: "error: the branch is not fully merged."
+        ))
+        #expect(trouble.sentence.contains("Nothing has been removed."))
+        #expect(!trouble.sentence.contains("branch -d"))
+    }
+
+    // MARK: - Bringing one back
+
+    /// The proven failure: git allows a branch in one worktree at a time, and the refusal names
+    /// the folder holding it inside an argv and an exit status nobody can act on.
+    @Test("names the branch and the folder holding it, rather than quoting the refusal")
+    func restoringOntoABranchAnotherWorktreeHas() async throws {
+        let repo = try await TempRepo(defaultBranch: "main")
+        defer { repo.cleanUp() }
+        let held = TestScratch.unique("wt1")
+        try await Git.addWorktree(repo: repo.path, path: held, branch: "feature", base: "main")
+        defer { try? FileManager.default.removeItem(atPath: held) }
+
+        // Exactly what restoring does: a second worktree for a branch that already has one.
+        let error = await #expect(throws: (any Error).self) {
+            try await Git.addWorktree(
+                repo: repo.path, path: TestScratch.unique("wt2"), branch: "feature", base: "main"
+            )
+        }
+        #expect("\(error!)".contains("already used by worktree"))
+
+        let trouble = await WorkspaceTrouble.restoring(
+            error!, workspace: "Feature", branch: "feature",
+            project: "bloom", projectPath: repo.path
+        )
+        guard case let .restoreBranchInUse(branch, workspace, folder) = trouble else {
+            Issue.record("expected the branch to be diagnosed as in use, got \(trouble)")
+            return
+        }
+        #expect(branch == "feature")
+        #expect(workspace == "Feature")
+        #expect(folder.hasSuffix((held as NSString).lastPathComponent))
+        #expect(trouble.sentence.contains("is already checked out in the worktree at"))
+        #expect(!trouble.sentence.contains("worktree add"))
+        #expect(!trouble.sentence.contains("exited"))
+    }
+
+    @Test("says the branch is gone when neither this Mac nor a remote has it")
+    func restoringABranchNobodyHas() async throws {
+        let repo = try await TempRepo(defaultBranch: "main")
+        defer { repo.cleanUp() }
+
+        let trouble = await WorkspaceTrouble.restoring(
+            WorkspaceRestoreRefusal.branchGone(branch: "sidebar-blue"),
+            workspace: "Sidebar blue", branch: "sidebar-blue",
+            project: "bloom", projectPath: repo.path
+        )
+        #expect(trouble == .restoreBranchGone(branch: "sidebar-blue", workspace: "Sidebar blue"))
+        #expect(trouble.sentence.contains("not on this Mac and not on any remote"))
+        #expect(trouble.sentence.contains("stays in Archived"))
+    }
+
+    @Test("names the project and its folder when the project has gone")
+    func restoringIntoAProjectThatHasGone() async throws {
+        let path = TestScratch.unique("harbour")
+        let trouble = await WorkspaceTrouble.restoring(
+            ShellError(command: "git worktree add", status: 128, stderr: "fatal: not a git repository"),
+            workspace: "Sidebar blue", branch: "sidebar-blue",
+            project: "harbour", projectPath: path
+        )
+        #expect(trouble == .projectGone(project: "harbour", path: path))
+        #expect(!trouble.sentence.contains("worktree add"))
+    }
+
+    /// The raw-SQL path, and the reason this suite exists twice over: restoring ends by writing
+    /// the row, `SQLiteError.description` appends the statement, and the modal read
+    /// "message [UPDATE workspaces SET ... VALUES (?, ?, ?)]".
+    @Test("drops the statement when the database refuses the restored row")
+    func restoringWhenTheDatabaseRefusesTheRow() async throws {
+        let repo = try await TempRepo(defaultBranch: "main")
+        defer { repo.cleanUp() }
+
+        let trouble = await WorkspaceTrouble.restoring(
+            SQLiteError(
+                message: "database disk image is malformed",
+                sql: "UPDATE workspaces SET name = ?, branch = ?, path = ?, state = ? WHERE id = ?"
+            ),
+            workspace: "Sidebar blue", branch: "sidebar-blue",
+            project: "bloom", projectPath: repo.path
+        )
+        #expect(trouble == .recordUnwritable(
+            workspace: "Sidebar blue", complaint: "database disk image is malformed."
+        ))
+        #expect(!trouble.sentence.contains("?"))
+        #expect(!trouble.sentence.contains("UPDATE"))
+        #expect(!trouble.sentence.contains("workspaces SET"))
+        #expect(trouble.sentence.contains("Nothing in the worktree is at risk"))
+        #expect(trouble.sentence.contains("The database said: database disk image is malformed."))
+    }
+
     // MARK: - One missing worktree does not take down the rest
 
     /// The question the modal raised: creating workspace B should not care that workspace A's

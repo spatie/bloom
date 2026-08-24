@@ -1823,11 +1823,22 @@ final class AppModel {
         } catch {
             // Git could not answer, and not knowing what is at stake is not a licence to delete it.
             // The user still gets the choice, with the reason the check failed in front of them.
+            //
+            // Diagnosed rather than reported, and this is the worst of the four places that used
+            // not to be: it is read while somebody is deciding whether to destroy a worktree, and
+            // `error.readableMessage` on a `ShellError` put a git command line and an exit status
+            // there. See `WorkspaceTrouble.archiving`.
+            let trouble = await WorkspaceTrouble.archiving(
+                error,
+                workspace: workspace.name,
+                path: workspace.path,
+                baseBranch: workspace.baseBranch
+            )
             pendingArchive = ArchiveRequest(
                 workspace: workspace,
                 report: WorkspaceSafetyReport(),
                 deleteBranch: deleteBranch,
-                problem: "Bloom could not check this workspace for unsaved work. \(error.readableMessage)",
+                problem: "Bloom could not check this workspace for unsaved work. \(trouble.sentence)",
                 hazards: hazards
             )
             return
@@ -2006,15 +2017,31 @@ final class AppModel {
                 Log.archive.error(
                     "could not archive \(workspace.name, privacy: .public): \(error.readableMessage, privacy: .public)"
                 )
-                alert = BloomAlert(title: "Could not archive the workspace", message: error.readableMessage)
+                await reportArchiveFailure(error, workspace: workspace)
             }
         } catch {
             await undoOptimisticArchive(workspace, restoring: previousSelection)
             Log.archive.error(
                 "could not archive \(workspace.name, privacy: .public): \(error.readableMessage, privacy: .public)"
             )
-            alert = BloomAlert(title: "Could not archive the workspace", message: error.readableMessage)
+            await reportArchiveFailure(error, workspace: workspace)
         }
+    }
+
+    /// Diagnosed rather than reported, for both of the archive's catches.
+    ///
+    /// `error.readableMessage` used to be the message here, so a `ShellError` put "`git worktree
+    /// remove ...` exited 128" in a modal and a refused row put "[UPDATE workspaces SET ...
+    /// VALUES (?, ?, ?)]" in one. Neither said what to do. `WorkspaceTrouble.archiving` asks the
+    /// worktree instead.
+    private func reportArchiveFailure(_ error: any Error, workspace: Workspace) async {
+        let trouble = await WorkspaceTrouble.archiving(
+            error,
+            workspace: workspace.name,
+            path: workspace.path,
+            baseBranch: workspace.baseBranch
+        )
+        alert = BloomAlert(title: "Could not archive the workspace", message: trouble.sentence)
     }
 
     /// Workspaces whose row has already left the sidebar while their archive is still running.
@@ -2184,9 +2211,20 @@ final class AppModel {
             Log.archive.error(
                 "could not restore \(workspace.name, privacy: .public): \(error.readableMessage, privacy: .public)"
             )
+            // Diagnosed rather than reported. A store error reaching here rendered its own SQL,
+            // "message [UPDATE workspaces SET ... VALUES (?, ?, ?)]", and the likeliest git
+            // failure, the branch being checked out in another worktree, arrived as an argv and
+            // an exit status. See `WorkspaceTrouble.restoring`.
+            let trouble = await WorkspaceTrouble.restoring(
+                error,
+                workspace: workspace.name,
+                branch: workspace.branch,
+                project: repo.name,
+                projectPath: repo.path
+            )
             alert = BloomAlert(
                 title: "Could not bring \(workspace.name) back",
-                message: error.readableMessage
+                message: trouble.sentence
             )
         }
     }

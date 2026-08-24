@@ -42,6 +42,28 @@ public enum WorkspaceTrouble: Sendable, Equatable {
     case worktreeNotACheckout(workspace: String)
     /// The branch this workspace is measured against is not in the project any more.
     case worktreeBaseBranchGone(branch: String, workspace: String)
+    /// Archiving cannot go on because the worktree it would remove is not there.
+    case archiveWorktreeGone(workspace: String)
+    /// Archiving cannot go on because the folder is there and git does not own it any more.
+    ///
+    /// The one case that names a worktree's path, against the rule above, because it is the one
+    /// case whose remedy is the owner opening that folder: git will not release a worktree it
+    /// does not recognise, so nothing in Bloom can finish this until the directory is gone.
+    case archiveWorktreeNotACheckout(workspace: String, path: String)
+    /// Archiving stopped because the worktree holds work that is in no commit.
+    case archiveWorktreeNotEmpty(workspace: String)
+    /// Archiving stopped for a reason nothing about the worktree explains.
+    case archiveUnexplained(workspace: String, complaint: String)
+    /// Restoring cannot go on because another worktree already has the branch checked out.
+    case restoreBranchInUse(branch: String, workspace: String, worktree: String)
+    /// Restoring cannot go on because the branch is on neither this Mac nor a remote.
+    case restoreBranchGone(branch: String, workspace: String)
+    /// Restoring stopped for a reason nothing about the project explains.
+    case restoreUnexplained(workspace: String, complaint: String)
+    /// The disk work is done and the database would not record it, so every list in the app is
+    /// showing where this workspace was rather than where it is. The sibling of
+    /// `transcriptUnwritable`, which is the same refusal about a conversation.
+    case recordUnwritable(workspace: String, complaint: String)
     /// Bloom could not write a turn into its own database, and the transcript it would have
     /// gone into is still there. See `recording(transcript:complaint:)` for the refusal that
     /// is deliberately not this.
@@ -102,6 +124,74 @@ public enum WorkspaceTrouble: Sendable, Equatable {
                 '\(branch)', the branch '\(workspace)' is measured against, is not in the project \
                 any more, so there is nothing to compare this worktree with. Put that branch back, \
                 or give the workspace a base branch that is still there.
+                """
+
+        case let .archiveWorktreeGone(workspace):
+            return """
+                The worktree for '\(workspace)' is not on disk any more. Something outside Bloom \
+                deleted the folder, so there is no unsaved work left in it and nothing left to \
+                remove. Archiving it destroys nothing that is still there.
+                """
+
+        case let .archiveWorktreeNotACheckout(workspace, path):
+            return """
+                The folder for '\(workspace)' is still at \(path), and git does not know it as a \
+                worktree any more, which is what a folder that was deleted and then recreated \
+                looks like. A worktree git no longer recognises cannot be handed back, so \
+                archiving cannot finish while that folder is there. Look at what is in it, delete \
+                it yourself, and archive again.
+                """
+
+        case let .archiveWorktreeNotEmpty(workspace):
+            return """
+                The worktree for '\(workspace)' holds files that are in no commit, and Bloom will \
+                not delete a worktree holding work that is nowhere else. Nothing has been \
+                removed. Bloom looks for unsaved work before it runs the archive script, so files \
+                that appeared after that, a log or a dump the script left behind, are the usual \
+                reason for this. Archive again and the confirmation will list what is there, so \
+                you can look before you go ahead.
+                """
+
+        case let .archiveUnexplained(workspace, complaint):
+            return """
+                Archiving '\(workspace)' stopped, and Bloom cannot say why. Its worktree is still \
+                a checkout in good order and holds nothing that is not committed, so this is \
+                neither a folder that has moved nor work standing in the way. Nothing has been \
+                removed. The reason given was: \(complaint)
+                """
+
+        case let .restoreBranchInUse(branch, workspace, worktree):
+            return """
+                The branch '\(branch)' is already checked out in the worktree at \(worktree), and \
+                git allows one worktree per branch, so there is nowhere to bring '\(workspace)' \
+                back to. Another workspace on the same branch is the usual reason. Archive that \
+                one, or delete that folder if it is not one of Bloom's, and try again.
+                """
+
+        case let .restoreBranchGone(branch, workspace):
+            return """
+                The branch '\(branch)' is not on this Mac and not on any remote Bloom can see, so \
+                the commits '\(workspace)' held cannot be reached by name and there is nothing to \
+                rebuild its worktree from. It stays in Archived, still readable. If somebody else \
+                still has that branch, fetch the project and try again.
+                """
+
+        case let .restoreUnexplained(workspace, complaint):
+            return """
+                Bringing '\(workspace)' back stopped, and Bloom cannot say why. Its project is a \
+                checkout in good order and nothing else is holding its branch, so this is neither \
+                a project nor a branch that has gone missing. It stays in Archived, with nothing \
+                lost. The reason given was: \(complaint)
+                """
+
+        case let .recordUnwritable(workspace, complaint):
+            return """
+                Bloom finished the disk work for '\(workspace)' and could not write the result \
+                into its own database, so the sidebar and the archive are showing where this \
+                workspace was rather than where it is. Nothing in the worktree is at risk; the \
+                record is the only thing that is wrong. Quit Bloom and open it again, and if it \
+                happens a second time the database itself needs looking at. The database said: \
+                \(complaint)
                 """
 
         case let .transcriptUnwritable(complaint):
@@ -181,5 +271,104 @@ public enum WorkspaceTrouble: Sendable, Equatable {
             return .worktreeBaseBranchGone(branch: branch, workspace: workspace)
         case .fine: return .unexplained(CheckoutStanding.complaint(about: error))
         }
+    }
+
+    /// Why archiving a workspace failed.
+    ///
+    /// Covers both halves of the gesture, because both used to show `error.readableMessage` and
+    /// the worse of the two was the safety check: its text is read while somebody is deciding
+    /// whether to destroy a worktree, and it said "`git status --porcelain` exited 128" there.
+    /// One method for the two, because the reader is answering the same question either way and
+    /// two vocabularies for it would drift.
+    ///
+    /// The proven failure this exists for is the dirty worktree. `WorkspaceManager.archive` runs
+    /// the safety check, then the archive script, then `Git.removeWorktree(force: false)`, so a
+    /// script that leaves a log or a database dump behind makes the safe removal fail with
+    /// "contains modified or untracked files" after the check has already cleared. Nothing in
+    /// that stderr says the script was the cause, and the count of untracked files does.
+    public static func archiving(
+        _ error: any Error, workspace: String, path: String, baseBranch: String
+    ) async -> WorkspaceTrouble {
+        // The error's type, and only here. Every other question below is put to the worktree, but
+        // the last thing an archive does is write the row, and by then the worktree is meant to
+        // be gone: probing the folder for a refused write would find it missing and report a
+        // deleted worktree as the fault. `readingChanges` needs no such test because nothing it
+        // does touches the database.
+        if error is SQLiteError {
+            return .recordUnwritable(workspace: workspace, complaint: complaint(about: error))
+        }
+
+        switch await CheckoutStanding.of(path, branch: baseBranch) {
+        case .missing: return .archiveWorktreeGone(workspace: workspace)
+        case .notACheckout:
+            return .archiveWorktreeNotACheckout(workspace: workspace, path: path)
+        // A worktree cannot outlive its repository's first commit, so this is the repository the
+        // worktree points at having been emptied. The folder is what the reader can act on.
+        case .noCommitsYet:
+            return .archiveWorktreeNotACheckout(workspace: workspace, path: path)
+        case .branchMissing(let branch):
+            return .worktreeBaseBranchGone(branch: branch, workspace: workspace)
+        case .fine:
+            // Asked of the worktree rather than read out of the stderr, so the same sentence
+            // arrives whether git refused the removal or the safety check never finished.
+            let work = try? await Git.localWork(worktree: path)
+            if work?.hasUncommitted == true { return .archiveWorktreeNotEmpty(workspace: workspace) }
+            return .archiveUnexplained(workspace: workspace, complaint: complaint(about: error))
+        }
+    }
+
+    /// Why bringing an archived workspace back failed.
+    ///
+    /// Asked of the project rather than of the worktree, which is the one thing that does not
+    /// exist yet: restoring cuts a fresh worktree from the project's repository, so every
+    /// question worth asking is about that repository.
+    ///
+    /// The proven failure this exists for is the branch being checked out somewhere else.
+    /// `WorkspaceRestore` calls `Git.addWorktree`, git allows a branch in one worktree at a time,
+    /// and the refusal is "fatal: 'feature' is already used by worktree at '/.../wt1'" with the
+    /// argv and the exit status wrapped round it. The worktree list says the same thing without
+    /// any of that, and says which folder to go and look at.
+    public static func restoring(
+        _ error: any Error, workspace: String, branch: String, project: String, projectPath: String
+    ) async -> WorkspaceTrouble {
+        // See `archiving`: restoring also ends by writing the row, and by then the worktree it
+        // rebuilt is on disk and healthy, so no probe of the project would find anything wrong.
+        if error is SQLiteError {
+            return .recordUnwritable(workspace: workspace, complaint: complaint(about: error))
+        }
+
+        switch await CheckoutStanding.of(projectPath) {
+        case .missing: return .projectGone(project: project, path: projectPath)
+        case .notACheckout: return .projectNotACheckout(project: project, path: projectPath)
+        case .noCommitsYet: return .projectHasNoCommits(project: project)
+        // The branch is deliberately not asked of `CheckoutStanding`. A workspace restored from a
+        // remote branch has no local branch by definition, and calling that missing would refuse
+        // the one case that works.
+        case .branchMissing, .fine:
+            let worktrees = (try? await Git.worktrees(of: projectPath)) ?? []
+            if let holder = worktrees.first(where: { $0.branch == branch }) {
+                return .restoreBranchInUse(
+                    branch: branch, workspace: workspace, worktree: holder.path
+                )
+            }
+            let isLocal = await Git.branchExists(branch, in: projectPath)
+            let isOnARemote = await Git.hasRemoteCounterpart(branch, in: projectPath)
+            if !isLocal, !isOnARemote {
+                return .restoreBranchGone(branch: branch, workspace: workspace)
+            }
+            return .restoreUnexplained(workspace: workspace, complaint: complaint(about: error))
+        }
+    }
+
+    /// The failure in its own words, with both the command line and the SQL statement dropped.
+    ///
+    /// Archiving and restoring can fail in git or in the database inside one call, so one `catch`
+    /// holds a `ShellError` on most paths and a `SQLiteError` on the last one. Each has its own
+    /// stripper already, and picking between them here is what stops "message [UPDATE workspaces
+    /// SET ... VALUES (?, ?, ?)]" reaching a modal the way it did from `readableMessage`.
+    static func complaint(about error: any Error) -> String {
+        error is SQLiteError
+            ? TranscriptStanding.complaint(about: error)
+            : CheckoutStanding.complaint(about: error)
     }
 }
