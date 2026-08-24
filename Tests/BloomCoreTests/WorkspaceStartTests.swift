@@ -58,6 +58,47 @@ struct WorkspaceStartTests {
         #expect(try await store.sessions(workspaceID: started.workspace.id).isEmpty)
     }
 
+    /// The promptless start, all the way through. Nothing is written in the box, so the sea is
+    /// carried as the request's `name` and its slug as the branch, and both are final: `start`
+    /// asks the namer only when the request left the name open, so nothing renames this later.
+    @Test("a terminal workspace started with nothing written takes the name it was handed")
+    func startsWithNothingWritten() async throws {
+        let (repo, registered, manager, store) = try await makeManager()
+        defer { repo.cleanUp() }
+
+        let started = try await manager.start(
+            WorkspaceStartRequest(
+                repo: registered, prompt: "", origin: .user,
+                branch: "coral-sea", name: "Coral Sea", opensSession: false
+            ),
+            namer: { "Foxglove" }
+        )
+
+        #expect(started.workspace.name == "Coral Sea")
+        #expect(started.workspace.branch == "coral-sea")
+        #expect(started.placeholder == nil)
+        #expect(started.session == nil)
+        #expect(FileManager.default.fileExists(atPath: started.workspace.path))
+        #expect(try await store.sessions(workspaceID: started.workspace.id).isEmpty)
+    }
+
+    /// The fallback under the sea, for a machine whose catalogue is spent. A workspace still
+    /// arrives, on a branch git accepts, rather than the start failing over a name.
+    @Test("nothing written and no name handed over still cuts a worktree")
+    func startsWithNothingAtAll() async throws {
+        let (repo, registered, manager, store) = try await makeManager()
+        defer { repo.cleanUp() }
+
+        let started = try await manager.start(WorkspaceStartRequest(
+            repo: registered, prompt: "", origin: .user, opensSession: false
+        ))
+
+        #expect(started.workspace.name == "New workspace")
+        #expect(started.workspace.branch == "workspace")
+        #expect(FileManager.default.fileExists(atPath: started.workspace.path))
+        #expect(try await store.sessions(workspaceID: started.workspace.id).isEmpty)
+    }
+
     // MARK: - The choices the sheet used to be the only route to carry
 
     /// Every one of these was reachable from the create sheet and from nowhere else. The link, the
