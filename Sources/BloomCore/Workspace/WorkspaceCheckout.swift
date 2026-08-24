@@ -26,6 +26,23 @@ public struct PullRequestListing: Sendable, Hashable, Identifiable, Codable {
 
     public var isOpen: Bool { state.uppercased() == "OPEN" }
 
+    /// The branch this pull request lands on, named the way the picker should draw it.
+    ///
+    /// A fork's head is qualified with its owner, which is git's own convention for the ref and is
+    /// not decoration: `heads(of:)` deliberately leaves a cross repository head out of the branches
+    /// it hides, because a local branch of the same name is somebody else's unrelated work wearing
+    /// the same word. Drawing both as a bare `patch-1` would put that collision on screen.
+    ///
+    /// Empty when an older gh did not answer `headRefName`, which is why every caller has to have
+    /// something to fall back on rather than drawing a blank row.
+    public var qualifiedHead: String {
+        guard !headRefName.isEmpty else { return "" }
+        guard isCrossRepository, let owner = headRepositoryOwner, !owner.isEmpty else {
+            return headRefName
+        }
+        return "\(owner):\(headRefName)"
+    }
+
     public init(
         number: Int,
         title: String,

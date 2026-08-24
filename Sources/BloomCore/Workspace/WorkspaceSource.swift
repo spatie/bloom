@@ -58,13 +58,45 @@ public enum WorkspaceSource: Sendable, Hashable, Identifiable {
     }
 
     /// The thing the row names, as it is written everywhere else in the app.
+    ///
+    /// A listed pull request is named after the **branch it lands on**, not after its number and
+    /// title, and that is the fix for the bug this whole picker keeps being rewritten around.
+    /// `searchText` has always matched a pull request by its head, with a comment saying why ("the
+    /// figma one" is how a head is recalled long after the title has gone), so searching a branch
+    /// name already found the row. It found a row reading `#362 Lay the app-side styling
+    /// foundation`, on which the searched word appeared nowhere, and the owner scrolled past his
+    /// own result and concluded the branch was gone. A match nobody can see is not a match.
+    ///
+    /// The number and the title are not lost: they are `detail`, on the line underneath. The
+    /// branch is what was searched for and what is being chosen, so the branch is what the row is
+    /// called. The fallback matters, because an older gh does not answer `headRefName` at all.
     public var name: String {
         switch self {
         case .newBranch(let ref): ref
         case .existingBranch(let branch): branch.name
-        case .pullRequest(.listed(let request)): "#\(request.number) \(request.title)"
+        case .pullRequest(.listed(let request)):
+            request.qualifiedHead.isEmpty ? "#\(request.number) \(request.title)" : request.qualifiedHead
         case .pullRequest(.typed(let reference, _)): "#\(reference.number)"
         }
+    }
+
+    /// The tab this row belongs under, which is the verb it carries and nothing else.
+    public var tab: WorkspaceSourceTab {
+        switch self {
+        case .newBranch: .newBranch
+        case .existingBranch, .pullRequest: .existingBranch
+        }
+    }
+
+    /// The second line of the row, or nothing.
+    ///
+    /// Only a listed pull request has one, and it is what `name` used to be. A branch with no pull
+    /// request needs no second line, and drawing an empty one would make the list ragged for the
+    /// sake of a shape.
+    public var detail: String? {
+        guard case .pullRequest(.listed(let request)) = self else { return nil }
+        guard !request.qualifiedHead.isEmpty else { return nil }
+        return "#\(request.number) \(request.title)"
     }
 
     /// What is worth saying after the name, or nothing.
@@ -231,6 +263,66 @@ public struct WorkspaceSourceOffering: Sendable, Hashable {
     }
 }
 
+/// Which of the two things the picker can do is on screen.
+///
+/// The two verbs used to be two sections of one scrolling list, one above the other, so that the
+/// choice could be made with both answers in view. That was right about the choice and wrong about
+/// the search: half the offering was below the fold, the headings scrolled away, and "New branch
+/// from" and "Open, and carry on" are not words anybody reads before they start typing. They are
+/// tabs now, and the tab carries a sentence saying where a commit ends up, which is the only real
+/// difference between them and the thing neither heading ever said.
+///
+/// What tabs cost, written down because it is not fixed and should not be forgotten: they make the
+/// verb be chosen before the search, and people arrive knowing a branch name rather than the
+/// vocabulary. `WorkspaceSource.name` naming a pull request after its head is what keeps that from
+/// being the trap it was.
+public enum WorkspaceSourceTab: String, Sendable, Hashable, CaseIterable, Identifiable {
+    /// Cut a fresh branch off whatever is picked. The common case, so it leads.
+    case newBranch
+    /// Carry on a branch or a pull request that already exists.
+    case existingBranch
+
+    public var id: String { rawValue }
+
+    /// The tab strip's own words. Both start with a verb so neither reads as a category.
+    public var title: String {
+        switch self {
+        case .newBranch: "Create new branch"
+        case .existingBranch: "Continue on existing branch"
+        }
+    }
+
+    /// The line under the strip.
+    ///
+    /// Both halves open on the same three words so the eye lands on the fourth and reads only the
+    /// difference. Both say where a commit ends up and what merging does with it, because that is
+    /// the whole distinction: on a new branch the merge is yours to do later, and on an existing
+    /// one the merge already belongs to that branch and your commits ride it.
+    public var explanation: String {
+        switch self {
+        case .newBranch:
+            "Commits land on a new branch. Merging it brings them into the branch you pick here."
+        case .existingBranch:
+            "Commits land on the branch you pick here, and merge when it does."
+        }
+    }
+
+    /// What the search field says. Only one tab can be given a pull request number to look up.
+    public var searchPlaceholder: String {
+        switch self {
+        case .newBranch: "Search branches to start from"
+        case .existingBranch: "Search branches and pull requests, or paste a pull request"
+        }
+    }
+
+    /// The next tab along, wrapping, for the keyboard.
+    public func stepped(by step: Int) -> WorkspaceSourceTab {
+        let all = Self.allCases
+        guard let index = all.firstIndex(of: self) else { return self }
+        return all[(index + step + all.count) % all.count]
+    }
+}
+
 /// What the panel draws, in the order the arrow keys walk it.
 public struct WorkspaceSourceMatches: Sendable, Hashable {
     /// What was searched for, so the empty state can say it rather than shrugging. See
@@ -245,13 +337,24 @@ public struct WorkspaceSourceMatches: Sendable, Hashable {
         self.new = new
     }
 
+    /// Whether there is nothing at all, in either tab. The panel uses the per tab answer; this one
+    /// is for asking whether the offering is empty rather than whether a tab is.
     public var isEmpty: Bool { open.isEmpty && new.isEmpty }
 
-    /// Both sections as one list, top to bottom.
+    /// What one tab draws, and the only rows its keyboard may reach.
     ///
-    /// The keyboard walks this and the panel draws it in the same order, from the same value, so
-    /// Return cannot pick something other than the highlighted row.
-    public var ordered: [WorkspaceSource] { open + new }
+    /// The keyboard walks this and the panel draws it, from the same value, so Return cannot pick
+    /// something other than the highlighted row. It is scoped to the tab rather than spanning
+    /// both, because a highlight that can step into a tab nobody can see is a Return that opens
+    /// something off screen.
+    public func rows(in tab: WorkspaceSourceTab) -> [WorkspaceSource] {
+        switch tab {
+        case .newBranch: new
+        case .existingBranch: open
+        }
+    }
+
+    public func isEmpty(in tab: WorkspaceSourceTab) -> Bool { rows(in: tab).isEmpty }
 
     /// Where the highlight lands after a step, given what is highlighted now.
     ///
@@ -259,8 +362,10 @@ public struct WorkspaceSourceMatches: Sendable, Hashable {
     /// decision taken in a view is a decision nothing can test. It wraps at both ends, which is
     /// what every menu on the Mac does, and it answers with the first row when nothing is
     /// highlighted yet, so the first press of Down after typing does not swallow itself.
-    public func stepped(from current: WorkspaceSource?, by step: Int) -> WorkspaceSource? {
-        let rows = ordered
+    public func stepped(
+        from current: WorkspaceSource?, by step: Int, in tab: WorkspaceSourceTab
+    ) -> WorkspaceSource? {
+        let rows = rows(in: tab)
         guard !rows.isEmpty else { return nil }
         guard let current, let index = rows.firstIndex(of: current) else {
             return step < 0 ? rows.last : rows.first
@@ -271,9 +376,13 @@ public struct WorkspaceSourceMatches: Sendable, Hashable {
 
     /// What stays highlighted when the list changes under the field: the same row if it survived
     /// the new query, otherwise the best one there is now. A highlight left pointing at a row that
-    /// has been filtered out is a Return that does nothing.
-    public func settled(after current: WorkspaceSource?) -> WorkspaceSource? {
-        guard let current, ordered.contains(current) else { return ordered.first }
+    /// has been filtered out is a Return that does nothing, and one left pointing into the other
+    /// tab is worse, so switching tab settles through here too.
+    public func settled(
+        after current: WorkspaceSource?, in tab: WorkspaceSourceTab
+    ) -> WorkspaceSource? {
+        let rows = rows(in: tab)
+        guard let current, rows.contains(current) else { return rows.first }
         return current
     }
 }
