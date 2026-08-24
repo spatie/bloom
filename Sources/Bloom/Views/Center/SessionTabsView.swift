@@ -27,7 +27,12 @@ struct SessionTabsView: View {
     @State private var drag: StripDrag?
     /// Where each tab is centred along the strip. Written continuously, read only as a snapshot at
     /// the start of a drag.
-    @State private var centres: [PaneContent: Double] = [:]
+    ///
+    /// In a box rather than in `@State`, for the reason `GeometryBox` sets out and because the
+    /// sentence above is the whole argument: nothing draws these numbers. Every tab's probe wrote
+    /// one on every frame of a window resize, and each of those writes rebuilt this strip and
+    /// every tab in it.
+    @State private var centres = GeometryBox([PaneContent: Double]())
     /// The namespace the selection fill matches across, so moving the selection slides one
     /// capsule between tabs instead of fading one out and another in. See `TabItemView`, which
     /// hangs its `matchedGeometryEffect` off this.
@@ -85,15 +90,38 @@ struct SessionTabsView: View {
         return drag.order
     }
 
-    /// Which tab the user is in. **One** answer, where `CenterPaneStore.isShowing` gave the strip
-    /// as many marks as the column had panes: a tab owns the panes now, so being in a tab is a
-    /// single fact about the workspace again.
-    private var selectedTab: PaneContent? {
-        store.selectedTab(in: model)
-    }
-
     var body: some View {
-        TabStrip(pane: Self.pane, selection: selectedID) {
+        // Derived once, at the top, and threaded down to everything that needs it.
+        //
+        // `entries` is not a stored list: it maps the sessions, reads the tool tab list, works out
+        // what the tabs have absorbed and lays the user's own order over the result. It used to be
+        // asked for again by the separator between every pair of tabs (twice each), by the pane
+        // edge test on every tab, by the scroll target, by the rule before the `+`, by every split
+        // menu, and once more inside the store on the way to the selection. That is about six full
+        // derivations per tab per pass for a list that cannot change while the pass is running.
+        //
+        // This is `SidebarRepoGroup`'s bug and `SidebarRepoGroup`'s fix: derive it once, pass it
+        // as a parameter, and let the helpers say what they need rather than reach for it.
+        let entries = self.entries
+        // **One** answer, where `CenterPaneStore.isShowing` gave the strip as many marks as the
+        // column had panes: a tab owns the panes now, so being in a tab is a single fact about the
+        // workspace again.
+        let selected = store.selectedTab(in: model, entries: entries)
+        // Which tab the strip scrolls into view, as a plain id rather than as `PaneContent`.
+        //
+        // Nil when the focused pane is showing something the strip does not have a tab for, which
+        // is the moment after a tab is closed: aiming a scroll at an id that is no longer laid out
+        // does nothing, and this says so rather than relying on that.
+        let selectedID = selected.flatMap { entries.contains($0) ? AnyHashable($0.id) : nil }
+        // Whichever tab the pane's leading edge runs through. This strip begins at that edge: it
+        // has no leading control, so its first tab starts where the centre column starts, drops
+        // the line and the corner down that side and lets the pane's own rule be its edge. Read
+        // off the whole order rather than off either kind's run, because a workspace whose
+        // conversations have all been closed opens with a terminal or a browser first. See
+        // `TabItemView.isAtPaneEdge`.
+        let leadingID = entries.first?.id
+
+        return TabStrip(pane: Self.pane, selection: selectedID) {
             HStack(spacing: 0) {
                 // One run over one list. A conversation and a terminal are two kinds of thing kept
                 // in two stores, which is why they used to be drawn by two `ForEach`es in that
@@ -102,17 +130,25 @@ struct SessionTabsView: View {
                 // drag the owner could actually make into a drag that could not be honoured.
                 ForEach(Array(entries.enumerated()), id: \.element) { index, entry in
                     if index > 0 {
-                        TabStripSeparator(isHidden: !isSeparated(at: index))
+                        TabStripSeparator(
+                            isHidden: !isSeparated(at: index, in: entries, selected: selected)
+                        )
                     }
 
                     switch entry {
                     case .chat(let id):
                         if let session = session(id) {
-                            sessionTab(session).id(id)
+                            sessionTab(
+                                session,
+                                selected: selected,
+                                isAtPaneEdge: leadingID == id.rawValue
+                            )
+                            .id(id)
                         }
                     case .tool(let id):
                         if let tab = tool(id) {
-                            toolTab(tab).id(id)
+                            toolTab(tab, selected: selected, isAtPaneEdge: leadingID == id)
+                                .id(id)
                         }
                     }
                 }
@@ -142,7 +178,7 @@ struct SessionTabsView: View {
             // own fill is its edge, and hidden again when there is no tab for it to come after.
             // A workspace whose conversations have all been closed would otherwise open with a
             // hairline standing against the rule down the edge of the pane.
-            TabStripSeparator(isHidden: order.last.map(isSelected) ?? true)
+            TabStripSeparator(isHidden: entries.last.map { $0 == selected } ?? true)
 
             newTabMenu
         } trailing: {
@@ -164,12 +200,6 @@ struct SessionTabsView: View {
     /// measurements that used to live here.
     private static let pane = TabPane.content
 
-    /// Every tab in the strip, in the order it is drawn. Identity and order only: a title that
-    /// changes must not make the strip move.
-    private var order: [String] {
-        entries.map(\.id)
-    }
-
     /// The conversation or the tool tab one entry of the strip stands for, and nil for an entry
     /// whose content has gone between the strip being derived and this being asked.
     private func session(_ id: SessionID) -> Session? {
@@ -180,64 +210,35 @@ struct SessionTabsView: View {
         tabs.tabs(for: model.workspace.id).first { $0.id == id }
     }
 
-    /// Whether a tab is the one the pane's leading edge runs through.
-    ///
-    /// This strip begins at that edge: it has no leading control, so its first tab starts where
-    /// the centre column starts. Whichever tab that is drops the line and the corner down that
-    /// side and lets the pane's own rule be its edge. See `TabItemView.isAtPaneEdge`.
-    ///
-    /// Asked of the strip's whole order rather than of either run on its own, because a workspace
-    /// whose conversations have all been closed opens with a terminal or a browser first.
-    private func isAtPaneEdge(_ id: String) -> Bool {
-        order.first == id
-    }
-
-    /// Which tab the strip scrolls into view, as a plain id rather than as `PaneContent`.
-    ///
-    /// Nil when the focused pane is showing something the strip does not have a tab for, which is
-    /// the moment after a tab is closed: aiming a scroll at an id that is no longer laid out does
-    /// nothing, and this says so rather than relying on that.
-    private var selectedID: AnyHashable? {
-        guard let selectedTab, entries.contains(selectedTab) else { return nil }
-        return AnyHashable(selectedTab.id)
-    }
-
-    private func isSelected(_ session: Session) -> Bool {
-        selectedTab == .chat(session.id)
-    }
-
-    private func isSelected(_ tab: CenterTab) -> Bool {
-        selectedTab == .tool(tab.id)
-    }
-
-    /// Whether a tab is selected, named by id alone, for the callers that have thrown away which
-    /// of the two kinds of thing it is. `order` is one such.
-    private func isSelected(_ id: String) -> Bool {
-        selectedTab?.id == id
-    }
-
     /// Whether the rule between two tabs is drawn.
     ///
     /// Hidden against the selected tab on either side, whose own fill is its edge. One rule for the
     /// whole strip now that the strip is one list: the pair of cases this used to need, "the last
     /// conversation before the first tool" and "the tool before this one", were the seam between
     /// two runs and there is no seam any more.
-    private func isSeparated(at index: Int) -> Bool {
+    ///
+    /// Handed the strip and the selection rather than reaching for either. It is asked once per
+    /// gap, so a version that derived the strip itself derived it twice per gap.
+    private func isSeparated(
+        at index: Int, in entries: [PaneContent], selected: PaneContent?
+    ) -> Bool {
         guard index > 0 else { return false }
-        return !isSelected(entries[index - 1].id) && !isSelected(entries[index].id)
+        return entries[index - 1] != selected && entries[index] != selected
     }
 
     // MARK: - Tabs
 
-    private func sessionTab(_ session: Session) -> some View {
+    private func sessionTab(
+        _ session: Session, selected: PaneContent?, isAtPaneEdge: Bool
+    ) -> some View {
         SessionTabView(
             session: session,
             agentGlyph: PaneGlyph.agentMark(
                 for: session.agentKind, among: model.sessions.map(\.agentKind)
             ),
-            isActive: isSelected(session),
+            isActive: selected == .chat(session.id),
             isRunning: model.isRunning(session),
-            isAtPaneEdge: isAtPaneEdge(session.id.rawValue),
+            isAtPaneEdge: isAtPaneEdge,
             isRenaming: renamingID == session.id.rawValue,
             // Always. The workspace's last conversation IS closable, and hiding the cross was the
             // only thing pretending otherwise: "Close Session" in the File menu holds Cmd+W and has
@@ -249,26 +250,28 @@ struct SessionTabsView: View {
             onCommitRename: { commitRename(session, to: $0) },
             onCancelRename: { renamingID = nil },
             onClose: { close(session) },
-            onSplitRight: splitAction(.chat(session.id), axis: .horizontal),
-            onSplitDown: splitAction(.chat(session.id), axis: .vertical),
+            onSplitRight: splitAction(.chat(session.id), axis: .horizontal, selected: selected),
+            onSplitDown: splitAction(.chat(session.id), axis: .vertical, selected: selected),
             namespace: selection
         )
         .draggable(session.id.rawValue)
         .modifier(StripDragTracking(
             content: .chat(session.id),
             space: Self.stripSpace,
-            onMeasure: { centres[.chat(session.id)] = $0 },
+            onMeasure: { centres.value[.chat(session.id)] = $0 },
             onBegin: { begin(.chat(session.id)) },
             onEnd: { finish(taken: $0) }
         ))
     }
 
-    private func toolTab(_ tab: CenterTab) -> some View {
+    private func toolTab(
+        _ tab: CenterTab, selected: PaneContent?, isAtPaneEdge: Bool
+    ) -> some View {
         TabItemView(
             title: tabs.displayTitle(of: tab, in: model),
             icon: tab.icon,
-            isActive: isSelected(tab),
-            isAtPaneEdge: isAtPaneEdge(tab.id),
+            isActive: selected == .tool(tab.id),
+            isAtPaneEdge: isAtPaneEdge,
             surface: Self.pane.surface,
             isRenaming: renamingID == tab.id,
             // What is on the tab, not what the tab is filed under. A browser showing "Spatie"
@@ -287,15 +290,15 @@ struct SessionTabsView: View {
             },
             onCancelRename: { renamingID = nil },
             onClose: { Task { await tabs.close(tab) } },
-            onSplitRight: splitAction(.tool(tab.id), axis: .horizontal),
-            onSplitDown: splitAction(.tool(tab.id), axis: .vertical),
+            onSplitRight: splitAction(.tool(tab.id), axis: .horizontal, selected: selected),
+            onSplitDown: splitAction(.tool(tab.id), axis: .vertical, selected: selected),
             namespace: selection
         )
         .draggable(tab.id)
         .modifier(StripDragTracking(
             content: .tool(tab.id),
             space: Self.stripSpace,
-            onMeasure: { centres[.tool(tab.id)] = $0 },
+            onMeasure: { centres.value[.tool(tab.id)] = $0 },
             onBegin: { begin(.tool(tab.id)) },
             onEnd: { finish(taken: $0) }
         ))
@@ -388,15 +391,15 @@ struct SessionTabsView: View {
     /// Also false for the review asked of itself, which has no second copy to make: a workspace
     /// has exactly one of it by design. See `PaneDuplicate`.
     private func splitAction(
-        _ content: PaneContent, axis: SplitAxis
+        _ content: PaneContent, axis: SplitAxis, selected: PaneContent?
     ) -> (@MainActor () -> Void)? {
-        guard canSplit(content) else { return nil }
+        guard canSplit(content, selected: selected) else { return nil }
         return { split(content, axis: axis) }
     }
 
-    private func canSplit(_ content: PaneContent) -> Bool {
-        guard let selectedTab else { return false }
-        guard content != selectedTab else { return duplicable(content) }
+    private func canSplit(_ content: PaneContent, selected: PaneContent?) -> Bool {
+        guard let selected else { return false }
+        guard content != selected else { return duplicable(content) }
         return store.canAbsorb(content)
     }
 
@@ -414,7 +417,7 @@ struct SessionTabsView: View {
     /// the strip as an entry of its own. Asking this of the tab you are already in is asking for
     /// the same thing twice, which is `PaneDuplicate`'s question rather than this one's.
     private func split(_ content: PaneContent, axis: SplitAxis) {
-        guard let tab = selectedTab else { return }
+        guard let tab = store.selectedTab(in: model) else { return }
         let pane = store.focusedPane(of: tab)
 
         guard content != tab else {
@@ -488,7 +491,7 @@ struct SessionTabsView: View {
         guard drag?.tab != tab else { return }
         let run = stored
         guard run.count > 1, run.contains(tab) else { return }
-        drag = StripDrag(tab: tab, run: run, centres: centres, order: run)
+        drag = StripDrag(tab: tab, run: run, centres: centres.value, order: run)
     }
 
     /// The pointer has moved. Nothing else about the strip is touched: this is the only thing that
@@ -519,7 +522,7 @@ struct SessionTabsView: View {
         guard run.count > 1, run.contains(tab) else { return drag = nil }
 
         settle(drag?.order ?? TabDragOrder.live(
-            run, moving: tab, centres: drag?.centres ?? centres, to: pointer
+            run, moving: tab, centres: drag?.centres ?? centres.value, to: pointer
         ))
     }
 

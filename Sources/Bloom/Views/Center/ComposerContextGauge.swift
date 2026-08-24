@@ -6,6 +6,10 @@ import SwiftUI
 /// something about the next turn that the user may want to act on before sending it.
 struct ComposerContextGauge: View {
     var usage: ContextWindowUsage
+    /// The percentage and the spoken sentence, formatted by the footer. Passed in rather than
+    /// worked out here because this control is built two or three times per pass: see
+    /// `ContextWindowUsage.Reading`.
+    var reading: ContextWindowUsage.Reading
     /// Owned by the footer, not by this view, and the popover is attached there too.
     ///
     /// `ComposerFooterView` draws this row inside a `ViewThatFits` with three candidates, and two
@@ -33,7 +37,7 @@ struct ComposerContextGauge: View {
         } label: {
             HStack(spacing: Metrics.spacingSmall) {
                 bar
-                Text(ContextWindowUsage.percent(usage.fraction))
+                Text(reading.percent)
                     .monospacedDigit()
             }
             .font(Typo.label)
@@ -51,13 +55,7 @@ struct ComposerContextGauge: View {
         .fixedSize()
         .help("Context window")
         .accessibilityLabel("Context window")
-        // The crowded state is drawn as amber and as nothing else, so it has to be said here or
-        // a reader gets the number with no indication that the number is a problem.
-        .accessibilityValue(
-            "\(ContextWindowUsage.percent(usage.fraction)) used, "
-                + "\(ContextWindowUsage.format(usage.used)) of \(ContextWindowUsage.format(usage.limit)) tokens"
-                + (usage.isCrowded ? ", filling up" : "")
-        )
+        .accessibilityValue(reading.spoken)
     }
 
     private var bar: some View {

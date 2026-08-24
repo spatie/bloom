@@ -87,6 +87,18 @@ final class TranscriptModel {
     private var storedIsAwaitingPermission = false
     private(set) var isLoaded = false
 
+    /// How full the model's context window is, as of the newest row that said anything about it.
+    ///
+    /// Stored for exactly the reason `isAwaitingPermission` is stored, and the composer is exactly
+    /// the reader that argument was written for. It used to be derived in the composer's own body
+    /// from `rows`, which is observed, so every row appended during a turn invalidated the whole
+    /// composer subtree: the box, the chips, the footer and its four menus, once per streamed
+    /// block. And the walk itself could not stop early when there was no answer to find, because
+    /// the limit only ever arrives on the line that closes a turn, so a session that had never
+    /// finished one walked the entire transcript on every pass to return nil. Keeping the answer
+    /// removes the walk and the dependency together. See `ContextWindowUsage.updated`.
+    private(set) var contextUsage: ContextWindowUsage?
+
     /// Text and thinking arriving live, before the completed block is persisted.
     private(set) var streamingText = ""
     private(set) var streamingThinking = ""
@@ -242,6 +254,10 @@ final class TranscriptModel {
         }
         rows = built
         indexByRefID = index
+        // The one place the whole list is walked, because it is also the one place there is a
+        // whole list to walk. Everything after this folds in what arrived. Nothing is held from
+        // before: this is a session being read from the start.
+        contextUsage = ContextWindowUsage.latest(in: built)
         SwitchTrace.mark("transcript.rows.built", workspace: workspace.id)
         SwitchTrace.markOnScreen("transcript.rows.built", workspace: workspace.id)
 
@@ -974,7 +990,19 @@ final class TranscriptModel {
         await loader.wait()
         let after = rows.map(\.seq).max() ?? -1
         let fresh = (try? await store.messages(sessionID: session.id, afterSeq: after)) ?? []
+        guard !fresh.isEmpty else { return }
+        let appendedFrom = rows.count
         for message in fresh { absorb(message) }
+        // Over what actually arrived, not over the transcript. A tool result folds onto a row that
+        // is already there rather than appending, so the slice can be empty, and an empty one
+        // leaves the held reading exactly where it was.
+        noteContextWindow(in: rows[min(appendedFrom, rows.count)...])
+    }
+
+    /// Folds what the newest rows say about the context window into the held reading.
+    private func noteContextWindow(in appended: ArraySlice<TranscriptRow>) {
+        let usage = ContextWindowUsage.updated(contextUsage, with: appended)
+        if usage != contextUsage { contextUsage = usage }
     }
 
     private func clearStreaming() {

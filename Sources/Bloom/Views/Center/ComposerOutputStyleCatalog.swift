@@ -29,6 +29,26 @@ final class ComposerOutputStyleCatalog {
     /// How long a list is taken on trust before opening the menu re-reads it.
     static let stalenessWindow: TimeInterval = 3
 
+    /// One catalogue per checkout, shared by every footer pointing at it.
+    ///
+    /// Held on the same terms as `SlashCommandCatalog.shared(for:)` and for the same bug: the
+    /// footer's own copy came and went with the pane, so switching tab threw away a list that had
+    /// just been read off disk and scanned for it again. `refreshIfStale` already declined to
+    /// re-read a list that was fresh; what it could not do was find one, because the object
+    /// holding it had been destroyed with the view.
+    ///
+    /// Keyed on the project, which can be nil in the create sheet, where there is no checkout yet
+    /// and the built in styles are the whole answer.
+    private static var byProject: [String: ComposerOutputStyleCatalog] = [:]
+
+    static func shared(for project: String?) -> ComposerOutputStyleCatalog {
+        let key = project ?? ""
+        if let held = byProject[key] { return held }
+        let made = ComposerOutputStyleCatalog()
+        byProject[key] = made
+        return made
+    }
+
     /// Re-reads only if the held list is for another checkout, or is old enough to have missed
     /// something. Cheap to call on every appearance, which is how the footer calls it.
     func refreshIfStale(project: String?, now: Date = Date()) async {

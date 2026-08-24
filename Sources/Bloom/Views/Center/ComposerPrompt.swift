@@ -77,6 +77,13 @@ struct ComposerPrompt<Footer: View>: View {
     /// the text system can undo rather than as a draft replaced behind its back.
     @State private var editor = ComposerEditorHandle()
 
+    /// The `/command` list for the checkout this composer points at.
+    ///
+    /// Swapped for the shared one in the task below rather than owned. A composer that owned its
+    /// catalogue re-scanned six directories every time the centre column changed tab, because the
+    /// pane and everything in it is built again on the way back. This starts as an empty one so
+    /// there is something to read on the pass before that task runs. See
+    /// `SlashCommandCatalog.shared(for:)`.
     @State private var slashCatalog = SlashCommandCatalog()
     /// Whether the pointer has settled on the command chip, which is what puts its card up.
     @State private var isCommandPreviewed = false
@@ -89,7 +96,32 @@ struct ComposerPrompt<Footer: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.spacingWide) {
+        // Everything derived from the draft, worked out once at the top and threaded down.
+        //
+        // Both of these parse the whole draft. `SlashCommandDraft.parse` splits the leading
+        // `/command` off the prompt, and `ComposerMenu.resolve` takes the text before the caret
+        // and the token around it, which is three `NSString` copies of the draft per call. They
+        // were computed properties, and this body read them about fourteen times between the chip,
+        // the drop target, the three floating overlays, the placement rule they share and the four
+        // task ids underneath, on every keystroke.
+        //
+        // The local is named `draft` rather than `command` deliberately: the drop closure below
+        // reads `command.body` when a file is let go, which must be the draft as it is THEN and
+        // not as it was when this pass ran.
+        let draft = command
+        let menu = ComposerMenu.resolve(draft: draft.body, caret: caret)
+        // Escape only takes down the menu that was open. See `activeMenu`.
+        let openMenu = isMenuDismissed ? ComposerMenu.none : menu
+        // One lookup for the chip and its hover card, which are the same command.
+        let named = draft.name.flatMap { slashCatalog.command(named: $0) }
+        let attachments = self.attachments
+        // Shared by all three floating panels, so the menus and the hover cards cannot end up on
+        // different sides of the same box.
+        let typedLineBottom = typedLineBottom(hasCommand: draft.name != nil)
+        let placement = menuPlacement(typedLineBottom: typedLineBottom)
+        let guide = floatingGuide(isBelow: placement.isBelow, typedLineBottom: typedLineBottom)
+
+        return VStack(alignment: .leading, spacing: Metrics.spacingWide) {
             if !reviewComments.isEmpty {
                 ChipFlow(spacing: Metrics.spacingSmall, lineSpacing: Metrics.spacingSmall) {
                     ForEach(reviewComments) { comment in
@@ -102,10 +134,10 @@ struct ComposerPrompt<Footer: View>: View {
                 }
             }
 
-            if let name = command.name {
+            if let name = draft.name {
                 SlashCommandChip(
                     name: name,
-                    command: slashCatalog.command(named: name),
+                    command: named,
                     onRemove: removeCommand,
                     onHover: { isCommandPreviewed = $0 }
                 )
@@ -152,36 +184,38 @@ struct ComposerPrompt<Footer: View>: View {
             // same time as one of them: they would sit on top of each other, and a menu the user
             // is typing into outranks a preview they are only looking at.
             AttachmentCardOverlay(
-                attachment: activeMenu == .none ? hoveredAttachment : nil,
+                attachment: openMenu == .none
+                    ? hoveredAttachment(in: draft, among: attachments)
+                    : nil,
                 worktree: attachmentRoot,
                 availableWidth: boxWidth
             )
-            .alignmentGuide(.top, computeValue: floatingGuide)
+            .alignmentGuide(.top, computeValue: guide)
         }
         .overlay(alignment: .topLeading) {
             // Same place, same card, same rule as the attachment preview: a menu the user is
             // typing into outranks anything they are only looking at.
             SlashCommandCardOverlay(
-                name: activeMenu == .none && isCommandPreviewed ? command.name : nil,
-                command: command.name.flatMap { slashCatalog.command(named: $0) },
+                name: openMenu == .none && isCommandPreviewed ? draft.name : nil,
+                command: named,
                 availableWidth: boxWidth,
-                availableHeight: menuPlacement.room
+                availableHeight: placement.room
             )
-            .alignmentGuide(.top, computeValue: floatingGuide)
+            .alignmentGuide(.top, computeValue: guide)
         }
         .overlay(alignment: .topLeading) {
             ComposerMenuOverlay(
-                menu: activeMenu,
-                commands: slashResults,
+                menu: openMenu,
+                commands: slashResults(in: openMenu),
                 commandsAreLoaded: slashCatalog.isLoaded,
                 files: fileMatches,
                 selectedIndex: menuIndex,
-                maxHeight: menuPlacement.menuHeight,
+                maxHeight: placement.menuHeight,
                 onPickCommand: pick(command:),
                 onPickFile: pick(file:),
                 onHighlight: { menuIndex = $0 }
             )
-            .alignmentGuide(.top, computeValue: floatingGuide)
+            .alignmentGuide(.top, computeValue: guide)
         }
         // Keyed on the session rather than run on first appearance, because this view is not built
         // again for each one. An unsplit centre column is now the same pane in every workspace, so
@@ -194,15 +228,19 @@ struct ComposerPrompt<Footer: View>: View {
             applyCaptureDraft()
             applyCaptureAttachments()
         }
-        .task(id: mentionRoot) { await slashCatalog.load(workspacePath: mentionRoot) }
+        .task(id: mentionRoot) {
+            let catalog = SlashCommandCatalog.shared(for: mentionRoot)
+            slashCatalog = catalog
+            await catalog.load(workspacePath: mentionRoot)
+        }
         // Opening the menu is the only moment a stale list can be seen, so it is the only moment
         // worth re-reading one. A skill written in another window while Bloom stayed open is in
         // the list by the time the user has finished typing the slash.
-        .task(id: isSlashMenuOpen) {
-            guard isSlashMenuOpen else { return }
+        .task(id: openMenu.kind == .slash) {
+            guard openMenu.kind == .slash else { return }
             await slashCatalog.refreshIfStale(workspacePath: mentionRoot)
         }
-        .task(id: activeMenu.mention?.query) { await refreshFileMatches() }
+        .task(id: openMenu.mention?.query) { await refreshFileMatches() }
         .onChange(of: text) { _, _ in menuIndex = 0 }
         .onChange(of: menu) { old, new in
             menuIndex = 0
@@ -296,24 +334,25 @@ struct ComposerPrompt<Footer: View>: View {
     /// The hover card, once it has been checked against what the draft still says. A file that was
     /// typed out of the sentence, or that went with the turn, takes its card with it without
     /// anything having to remember to put it away.
-    private var hoveredAttachment: PromptAttachment? {
-        guard let hoveredPath, files.paths.contains(hoveredPath) else { return nil }
-        return attachment(for: hoveredPath)
-    }
-
-    /// The draft, split into what was typed and the files named in it.
     ///
-    /// Derived rather than stored, for the same reason `command` is: the text is the only record
-    /// that a file is attached, so nothing can disagree with it about whether one is. See
-    /// `AttachmentDraft`.
-    private var files: AttachmentDraft {
-        AttachmentDraft.parse(command.body, paths: attachments.map(\.path))
+    /// Handed the draft and the records the caller has already read, because the body has both to
+    /// hand and parsing the draft a second time to answer a question about the pointer is the cost
+    /// this whole pass was written to stop paying.
+    private func hoveredAttachment(
+        in draft: SlashCommandDraft, among attachments: [PromptAttachment]
+    ) -> PromptAttachment? {
+        guard let hoveredPath else { return nil }
+        let files = AttachmentDraft.parse(draft.body, paths: attachments.map(\.path))
+        guard files.paths.contains(hoveredPath) else { return nil }
+        return attachment(for: hoveredPath, among: attachments)
     }
 
     /// What is known about one of the paths in the draft. A path with no record beside it is
     /// still a file: it is drawn, opened and sent from the path alone, which is what makes a
     /// restored draft work when nothing else survived the relaunch.
-    private func attachment(for path: String) -> PromptAttachment {
+    private func attachment(
+        for path: String, among attachments: [PromptAttachment]
+    ) -> PromptAttachment {
         attachments.first { $0.path == path } ?? .sent(path: path)
     }
 
@@ -358,18 +397,14 @@ struct ComposerPrompt<Footer: View>: View {
 
     /// Only scored while the slash menu is actually on screen, so a keystroke in an ordinary draft
     /// costs nothing.
-    private var slashResults: [SlashCommandMatch] {
-        guard let token = activeMenu.slash else { return [] }
+    private func slashResults(in menu: ComposerMenu) -> [SlashCommandMatch] {
+        guard let token = menu.slash else { return [] }
         return slashCatalog.matches(token.query)
     }
 
-    /// Whether the slash menu is the one the draft is asking for, which is the moment the command
-    /// list is worth reading off disk again.
-    private var isSlashMenuOpen: Bool { activeMenu.kind == .slash }
-
     private var menuCount: Int {
         switch activeMenu {
-        case .slash: slashResults.count
+        case .slash: slashResults(in: activeMenu).count
         case .mention: fileMatches.count
         case .none: 0
         }
@@ -383,7 +418,7 @@ struct ComposerPrompt<Footer: View>: View {
     /// opened upwards there was clipped at the sheet's top edge: two arbitrary rows survived, the
     /// ranked ones, the selected one among them, were cut off, and the header controls were
     /// covered by what was left. See `MenuLayout.placement` for the rule.
-    private var menuPlacement: MenuLayout.Placement {
+    private func menuPlacement(typedLineBottom: CGFloat) -> MenuLayout.Placement {
         MenuLayout.placement(
             above: boxTop - Metrics.spacing * 2,
             below: windowHeight - boxTop - typedLineBottom - Metrics.spacing * 2
@@ -396,9 +431,9 @@ struct ComposerPrompt<Footer: View>: View {
     /// later line of a long draft can end up under the panel, and both menus can now be opened
     /// there, since a slash completes anywhere it begins a word. The filtering each menu does is
     /// the feedback for what is being typed, so a covered caret costs the reader nothing.
-    private var typedLineBottom: CGFloat {
+    private func typedLineBottom(hasCommand: Bool) -> CGFloat {
         Metrics.gutter
-            + (command.name == nil ? 0 : AttachmentChip.height + Metrics.spacingWide)
+            + (hasCommand ? AttachmentChip.height + Metrics.spacingWide : 0)
             + ComposerTextEditor.lineHeight
     }
 
@@ -409,8 +444,9 @@ struct ComposerPrompt<Footer: View>: View {
     /// A closure built here rather than a method passed by name, because `alignmentGuide` runs
     /// its closure during layout, off the main actor, and a main actor method cannot go there.
     /// The two numbers can: they are read while the body is being built.
-    private var floatingGuide: @Sendable (ViewDimensions) -> CGFloat {
-        let isBelow = menuPlacement.isBelow
+    private func floatingGuide(
+        isBelow: Bool, typedLineBottom: CGFloat
+    ) -> @Sendable (ViewDimensions) -> CGFloat {
         let drop = typedLineBottom + Metrics.spacing
         return { isBelow ? -drop : $0[.bottom] + Metrics.spacing }
     }
@@ -483,8 +519,9 @@ struct ComposerPrompt<Footer: View>: View {
     private func pickHighlighted() {
         switch activeMenu {
         case .slash:
-            guard slashResults.indices.contains(menuIndex) else { return }
-            pick(command: slashResults[menuIndex].command)
+            let results = slashResults(in: activeMenu)
+            guard results.indices.contains(menuIndex) else { return }
+            pick(command: results[menuIndex].command)
         case .mention:
             guard fileMatches.indices.contains(menuIndex) else { return }
             pick(file: fileMatches[menuIndex])
@@ -594,7 +631,7 @@ struct ComposerPrompt<Footer: View>: View {
 
     private func open(path: String) {
         hoveredPath = nil
-        onOpenAttachment(attachment(for: path))
+        onOpenAttachment(attachment(for: path, among: attachments))
     }
 
     private func attachFiles() {

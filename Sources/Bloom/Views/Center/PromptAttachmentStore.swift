@@ -18,21 +18,53 @@ import BloomCore
 final class PromptAttachmentStore {
     static let shared = PromptAttachmentStore()
 
-    private(set) var bySession: [String: [PromptAttachment]] = [:]
+    /// One session's list, in a box of its own.
+    ///
+    /// **A dictionary is one observed property however many sessions are in it.** Reading
+    /// `bySession[id]` from a composer's body registered a dependency on the whole map, so
+    /// attaching a file to one conversation, or reading another one's list back off disk on the
+    /// first visit to it, rebuilt every composer in the window. A box per session is the ordinary
+    /// answer: the map itself is not observed, and a body that read one session's list hears about
+    /// that session and no other.
+    ///
+    /// Nil means the list has not been read back from defaults yet, which is not the same as a
+    /// session with nothing attached. `load` is the only thing that tells the two apart, and it
+    /// has to, or every pass would re-read the defaults for a session that genuinely has none.
+    @Observable
+    final class SessionAttachments {
+        var list: [PromptAttachment]?
+    }
+
+    /// Not observed, deliberately: see `SessionAttachments`. Entries are only ever added, so a
+    /// reader that has a box keeps it.
+    @ObservationIgnored private var bySession: [String: SessionAttachments] = [:]
 
     private init() {}
 
     // MARK: - Reading
 
     func attachments(for sessionID: String) -> [PromptAttachment] {
-        bySession[sessionID] ?? []
+        box(for: sessionID).list ?? []
     }
 
     /// Reads a session's attachments back once per launch. Called from a task rather than from a
-    /// getter, because filling the map is a mutation and a view body may not cause one.
+    /// getter, because filling the list is a mutation and a view body may not cause one.
     func load(sessionID: String) {
-        guard bySession[sessionID] == nil else { return }
-        bySession[sessionID] = Self.restore(sessionID: sessionID)
+        let box = box(for: sessionID)
+        guard box.list == nil else { return }
+        box.list = Self.restore(sessionID: sessionID)
+    }
+
+    /// The box a session's list lives in, made on the spot if this is the first anyone has asked.
+    ///
+    /// Called from a body, and that is safe here in a way `load` above is not: the map is not
+    /// observed, so putting an empty box in it changes nothing anything is watching. What the body
+    /// then reads is the box's own list, which is what it has to observe.
+    private func box(for sessionID: String) -> SessionAttachments {
+        if let held = bySession[sessionID] { return held }
+        let made = SessionAttachments()
+        bySession[sessionID] = made
+        return made
     }
 
     // MARK: - Writing
@@ -209,7 +241,7 @@ final class PromptAttachmentStore {
     // MARK: - Persistence
 
     private func apply(_ attachments: [PromptAttachment], to sessionID: String) {
-        bySession[sessionID] = attachments
+        box(for: sessionID).list = attachments
         Self.persist(attachments, sessionID: sessionID)
     }
 

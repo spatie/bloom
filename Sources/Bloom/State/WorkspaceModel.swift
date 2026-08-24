@@ -108,6 +108,10 @@ final class WorkspaceModel {
     /// re-check their anchors against the worktree. Only that re-check reads this, so the tick
     /// invalidates one small view and not the tree.
     private(set) var changesGeneration = 0
+    /// Patches git has already produced for this worktree, so that returning to the review tab is
+    /// not another subprocess. Not observed: nothing draws it, and a write on every file opened
+    /// would invalidate every view watching this model. See `PatchCache`.
+    @ObservationIgnored private var patches = PatchCache()
     /// Why the last refresh could not answer. Non-nil means `changedFiles` is the last list git was
     /// able to produce, not what the worktree looks like now.
     var changesError: String?
@@ -1178,15 +1182,36 @@ final class WorkspaceModel {
         await task.value
     }
 
+    /// One file's diff, from the cache where the worktree has not been looked at since the last
+    /// one, and from git otherwise. See `PatchCache` for what makes an answer reusable and for the
+    /// bug this closes, which is that changing centre tab destroys the review pane and coming back
+    /// to it re-ran the same `git diff` on a worktree nothing had touched.
     func patch(for file: ChangedFile) async -> String {
         let path = workspace.path
         let base = workspace.baseBranch
         // The same scope the list was built with, or the pane opens a file the list narrowed and
         // shows it in full.
         let scope = diffScope
-        return await Task.detached(priority: .userInitiated) {
+        let key = PatchCache.Key(
+            worktree: path, base: base, file: file, scope: scope, generation: changesGeneration
+        )
+        if let held = patches.patch(for: key) { return held }
+
+        let patch = await Task.detached(priority: .userInitiated) {
             (try? await Git.patch(worktree: path, base: base, file: file, scope: scope)) ?? ""
         }.value
+
+        // Only an answer git actually gave. Empty is also what a failure comes back as, and
+        // holding one would turn a moment of git trouble into a file that reads as unchanged for
+        // as long as the generation lasts.
+        guard !patch.isEmpty else { return patch }
+        // Checked again on the way out, because a refresh can land while git is out. An answer
+        // measured before that refresh says nothing about the worktree after it, and filing it
+        // under the new generation would be a claim; filing it under the old one would sweep the
+        // new generation's entries out. So it is handed back and not kept.
+        guard changesGeneration == key.generation else { return patch }
+        patches.store(patch, for: key)
+        return patch
     }
 
     /// Full contents of a file in the worktree, for the All files tab.

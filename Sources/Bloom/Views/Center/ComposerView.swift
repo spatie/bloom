@@ -32,6 +32,12 @@ struct ComposerView: View {
     @State private var contentHeight = ComposerTextEditor.lineHeight
     /// Everything in the composer that is not the editor: the divider, the footer, the box and the
     /// padding. Measured rather than assumed, because the footer's height comes from its controls.
+    ///
+    /// Rounded, like the pane height it is taken off. This feeds `maxEditorHeight`, which feeds
+    /// `editorHeight`, which is the body: raw, a window resize wrote it once a frame and each
+    /// write re-ran this view and the footer under it. Up rather than down, because it is
+    /// subtracted from the room, so both roundings err on the side of leaving the transcript its
+    /// floor. See `PaneMeasure`.
     @State private var chromeHeight: CGFloat = 0
     /// The height the drag started from, and the marker for "a drag is under way".
     @State private var resizeOrigin: CGFloat?
@@ -60,8 +66,16 @@ struct ComposerView: View {
         .background(Palette.surface)
         // The chrome is whatever is left once the editor's share is taken off, so this settles on
         // the first pass and only moves again when the footer's controls change size.
+        //
+        // Rounded in the action rather than in the probe, unlike `ChatPaneView`: the number being
+        // measured is the whole composer and the number being kept is the difference between that
+        // and the editor, so a probe that quantised the total would put the rounding error into a
+        // subtraction instead of into the answer. The guard is what stops the write: a resize
+        // moves the total on every frame and leaves the chrome exactly where it was, and writing
+        // an unchanged value into `@State` still re-runs this body.
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { total in
-            chromeHeight = total - editorHeight
+            let chrome = PaneMeasure.chrome(total - editorHeight)
+            if chrome != chromeHeight { chromeHeight = chrome }
         }
     }
 
@@ -84,7 +98,7 @@ struct ComposerView: View {
             ComposerFooterView(
                 controls: controls,
                 onChange: apply(controls:),
-                context: ContextWindowUsage.latest(in: transcript.rows),
+                context: transcript.contextUsage,
                 isRunning: transcript.isRunning,
                 canSend: canSend,
                 project: transcript.workspace.path,
@@ -161,8 +175,13 @@ struct ComposerView: View {
         )
     }
 
+    /// Whether anything but whitespace has been typed.
+    ///
+    /// Asked rather than trimmed. `trimmingCharacters` allocates a copy of the whole draft to
+    /// settle a question the first non-space character settles, and this is read through `canSend`
+    /// on every pass of the composer's body.
     private var hasBody: Bool {
-        !transcript.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        transcript.draft.contains { !$0.isWhitespace }
     }
 
     private var attachments: [PromptAttachment] {
