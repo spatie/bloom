@@ -104,6 +104,27 @@ spelling.** The app is called Bloom, and it had another name before it was renam
 arrives from stale memory. `make lint` checks all three, knows the old name so this file does not
 have to, and names the file and line.
 
+## Do not take over the machine
+
+The owner is sitting at this Mac, working, while you run. Anything that takes focus, moves the
+pointer, opens or closes a window, launches or quits an application, or puts a window in front of
+what he is reading is an interruption to a person, not a step in a task. **Ask before doing any of
+it.**
+
+Needs permission every time: launching an app in a way that activates it (`open -g` does not, and
+is the one to reach for), `NSApp.activate` or anything that makes a process frontmost, quitting or
+signalling any application, sending a keystroke or a click or any synthetic event, capturing or
+recording the **display**, changing a system setting including the appearance, and opening a
+browser or an editor.
+
+Needs no permission: offscreen rendering, anything headless, and capturing **your own** window by
+its window id after opening it with `open -g`.
+
+If a piece of work cannot be verified without one of these, say so and stop. An honest "I could
+not photograph this" is a better outcome than an interruption, and it is what several agents have
+correctly chosen. A capture that films the display shows whatever is in front of your window,
+which has twice turned out to be the owner's own screen.
+
 ## The dev build, and the rules that keep the owner's data alive
 
 Bloom is developed in Bloom. The app you are running inside is the owner's, holding his real
