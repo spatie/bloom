@@ -290,6 +290,26 @@ public enum WorkspaceCheckoutPlan {
         }
         let preferred = checkout.preferredLocalBranch
         guard taken.contains(preferred) else { return preferred }
+        // **A branch of our own that the pull request is about is the branch to open.**
+        //
+        // `taken` is every branch in the project, so a pull request raised from this repository
+        // always collides with its own head: the branch exists locally the moment it has been
+        // fetched, which for your own work is always. That sent "Open, and carry on" on a pull
+        // request to `<head>-2`, a branch with no pull request on it, so the strip offered Create
+        // pull request for one that was already open and the push and merge buttons never
+        // appeared. Reported from a real workspace made off a real pull request.
+        //
+        // The heading says carry on, and both kinds of row in it now mean the same thing: a
+        // branch row already returns its name verbatim above. `gh pr checkout` brings an existing
+        // branch up to the pull request head, so the stale-head worry the suffix was protecting
+        // against is answered by the checkout rather than by the name.
+        //
+        // A fork keeps the suffix, which is what it was really written for: two contributors both
+        // calling a branch `patch-1` is ordinary, and there the local branch of that name is
+        // somebody else's unrelated work rather than the thing being asked for.
+        if case .pullRequest(let request) = checkout, !request.isCrossRepository {
+            return preferred
+        }
         if let alternate = checkout.alternateLocalBranch, !taken.contains(alternate) {
             return alternate
         }

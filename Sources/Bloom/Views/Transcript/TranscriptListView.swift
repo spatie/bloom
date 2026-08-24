@@ -498,10 +498,10 @@ struct TranscriptListView: View {
             // tab switch destroys this view, and a reader who arrived, read what was on screen and
             // moved on has scrolled nothing for the closure above to fire on.
             .onDisappear { remember() }
-            // No `settlesArrivals` here, unlike the two lists. That modifier bounds how long
-            // `arriving` keeps saying yes, and the transcript no longer asks `arriving` anything:
-            // it asks `isNew`, which stops being true the moment `trackArrivals` takes the new
-            // rows in and needs nothing to close a window for it. See `isArriving` below.
+            // `settlesArrivals`, like the two lists. It was dropped when the transcript moved to
+            // `isNew`, which bounds itself; the transcript asks `arriving` again now, for the
+            // reason written on `isArriving` below, so the window it opens has to be closed again.
+            .settlesArrivals($arrival)
             .onChange(of: transcript.rows.count, initial: true) { _, _ in
                 position(proxy)
                 trackArrivals()
@@ -577,6 +577,12 @@ struct TranscriptListView: View {
                 // follower would hold the closure, and a pane torn down mid turn would leave both
                 // of them behind. A `State` box is not a view and closes no circle.
                 follower.onRest = { [box = _scrollPosition] in box.wrappedValue.scrollTo(edge: .bottom) }
+                // And the other half of that hand-off. A `ScrollPosition` standing at an edge is a
+                // standing instruction SwiftUI reapplies on every layout pass that grows the
+                // content, so the follower's take-back was being overwritten before it could be
+                // drawn: the edge has to be let go of while the follower drives. Naming the
+                // offset the view is already at moves nothing. See `onStart`.
+                follower.onStart = { [box = _scrollPosition] y in box.wrappedValue.scrollTo(y: y) }
                 await transcript.load()
                 // Whatever the session arrived with, taken in without a fade. This runs whether
                 // or not the row count changed, which matters: two sessions can hold the same
@@ -1021,7 +1027,24 @@ struct TranscriptListView: View {
     /// most of a long session, and what follows it is a set lookup on an integer.
     private func isArriving(_ row: TranscriptRow) -> Bool {
         guard TranscriptMotion.fadesOnArrival(row.kind) else { return false }
-        return arrival.isNew(row.seq)
+        // **Both answers, because the two orderings both happen.**
+        //
+        // `isNew` was written for the pass that opens a session: every row is built in the same
+        // body evaluation that created it, before `trackArrivals` has taken the list in, so
+        // `arriving` is still empty and only "absent from what you were last told" can be true.
+        // That was filmed and it is real.
+        //
+        // A row landing mid turn is the other way round. `onChange(of: rows.count)` fires as soon
+        // as the count moves, and a `LazyVStack` does not build the new row until layout, which is
+        // after that: `absorb` has already put the seq into `known`, so `isNew` is false by the
+        // time the row asks, and no tool row in a running turn ever settled. The owner reported
+        // exactly that, watching real turns, while the streaming block above faded correctly
+        // because it passes a literal `true` and asks nothing.
+        //
+        // Neither question is wrong and neither is sufficient. `arriving` answers the second
+        // ordering, `isNew` answers the first, and `settlesArrivals` below bounds how long the
+        // first stays true so a row scrolled back into view months later is not greeted as new.
+        return arrival.isNew(row.seq) || arrival.isArriving(row.seq)
     }
 
     private func toggle(_ seq: Int) {

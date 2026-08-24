@@ -213,14 +213,28 @@ struct WorkspaceCheckoutTests {
         #expect(twice != "someone-patch-1")
     }
 
-    @Test("A branch name already taken gets a suffix rather than reusing a stale local branch")
-    func uniquesAgainstExistingBranches() {
+    /// **Changed deliberately, and this test is where the old rule lived.** It used to take a
+    /// suffix here, on the argument that a local branch of that name might be a stale head. But
+    /// `taken` is every branch in the project, so a pull request raised from this repository
+    /// always collides with its own head the moment it has been fetched, which for your own work
+    /// is always. The result was that "Open, and carry on" on your own pull request opened
+    /// `<head>-2`, a branch with no pull request on it: the strip offered Create pull request for
+    /// one that was already open, and push and merge never appeared. Reported from a real
+    /// workspace made off a real pull request.
+    ///
+    /// `gh pr checkout` brings an existing branch up to the head, so the staleness the suffix was
+    /// guarding against is answered by the checkout rather than by the name.
+    @Test("Your own pull request opens the branch it is about, even when it is already local")
+    func opensItsOwnHeadBranch() {
         let checkout = WorkspaceCheckout.pullRequest(listing(head: "fix-parser"))
-        let branch = WorkspaceCheckoutPlan.localBranch(
-            for: checkout, taken: ["main", "fix-parser"]
+        #expect(
+            WorkspaceCheckoutPlan.localBranch(for: checkout, taken: ["main", "fix-parser"])
+                == "fix-parser"
         )
-        #expect(branch != "fix-parser")
-        #expect(branch.hasPrefix("fix-parser"))
+        // And with no local copy yet, which was always the easy case.
+        #expect(
+            WorkspaceCheckoutPlan.localBranch(for: checkout, taken: ["main"]) == "fix-parser"
+        )
     }
 
     @Test("An existing local branch is opened as it is, not copied under a new name")

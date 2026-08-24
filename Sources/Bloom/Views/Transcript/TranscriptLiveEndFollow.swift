@@ -93,6 +93,22 @@ final class TranscriptLiveEndFollower {
     /// the reader who has just taken hold of the view is precisely who must not be given one.
     var onRest: (@MainActor () -> Void)?
 
+    /// Called with the current offset when the following starts, so whoever owns the scroll
+    /// position can stop naming an edge.
+    ///
+    /// **Without this the follower cannot win an argument it is having every frame.** The list
+    /// holds a `ScrollPosition(edge: .bottom)`, and a position standing at an edge is a standing
+    /// instruction: SwiftUI puts the view back at the end on the layout pass that grows the
+    /// content, every time. This writes the clip view's origin directly, so the take-back landed
+    /// and was overwritten before a frame was drawn, and what reached the screen was the instant
+    /// pin with the travel invisible underneath it. `onRest` gave the edge back and nothing ever
+    /// took it away.
+    ///
+    /// The offset it hands over is the one the view is already at, so naming it moves nothing:
+    /// what changes is that the position stops being an edge and starts being a number, which is
+    /// what leaves the clip view alone until `onRest` names the edge again.
+    var onStart: (@MainActor (CGFloat) -> Void)?
+
     /// How long a row landing keeps the link up on its own.
     ///
     /// Long enough for the travel it started to finish, which `TranscriptFollow` settles in about
@@ -151,6 +167,9 @@ final class TranscriptLiveEndFollower {
     private func startLink() {
         guard link == nil, let scrollView else { return }
         lastFrame = 0
+        // Before the first frame runs, so the very first take-back is not overwritten by the pin
+        // it is trying to take back from. See `onStart`.
+        onStart?(scrollView.contentView.bounds.origin.y)
         let created = scrollView.contentView.displayLink(target: self, selector: #selector(step))
         created.add(to: .main, forMode: .common)
         link = created
