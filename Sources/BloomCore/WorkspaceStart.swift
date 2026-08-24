@@ -164,7 +164,12 @@ extension WorkspaceManager {
             let controls = request.controls
             let opened = try await store.upsert(Session(
                 workspaceID: workspace.id,
-                title: Git.title(from: request.prompt, maxLength: 40),
+                // Not the prompt. The WORKSPACE is named after the work, by `namer` above and
+                // by `Git.title` when that declines; the tab over the conversation is furniture
+                // and says what it is. Naming both from the same sentence gave one workspace two
+                // names, a real one in the sidebar and a fragment of a prompt in the strip. See
+                // `PaneNaming`.
+                title: PaneNaming.chat,
                 model: controls?.model ?? AppDefaults.fallbackModel,
                 effort: controls?.effort ?? AppDefaults.fallbackEffort,
                 // A request chooses a backend for the first chat and for no other. Every chat

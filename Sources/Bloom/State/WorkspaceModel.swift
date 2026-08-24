@@ -290,12 +290,16 @@ final class WorkspaceModel {
         SwitchTrace.mark("sessions.prepared", workspace: workspace.id)
     }
 
+    /// - Parameter title: what the chat is called. Nil, which is nearly every caller, takes the
+    ///   numbered name the strip gives a new tab: `Chat`, then `Chat 2`. A caller passes one only
+    ///   when the chat is being opened FOR something and the name says which, as the pull request
+    ///   and merge buttons do. See `PaneNaming` for why a chat is never named after its content.
     @discardableResult
-    func createSession(title: String = "New session") async -> Session? {
+    func createSession(title: String? = nil) async -> Session? {
         guard let store else { return nil }
         let session = Session(
             workspaceID: workspace.id,
-            title: title,
+            title: title ?? PaneNaming.nextTitle(base: PaneNaming.chat, taken: sessions.map(\.title)),
             sortOrder: sessions.count
         )
         guard let stored = try? await store.upsert(session) else { return nil }

@@ -198,11 +198,9 @@ final class CenterTabStore {
 
     /// Whether a title is one the panel handed out rather than one a person typed. It named the
     /// first tab of a workspace "Terminal" and the ones after it "Terminal 2", "Terminal 3", which
-    /// is the same pair of shapes `nextTitle` still makes below.
+    /// is the same pair of shapes `PaneNaming` still makes.
     private static func isDefaultTitle(_ title: String) -> Bool {
-        if title == "Terminal" { return true }
-        guard title.hasPrefix("Terminal ") else { return false }
-        return Int(title.dropFirst("Terminal ".count)) != nil
+        PaneNaming.isDefaultTitle(title, base: PaneNaming.terminal)
     }
 
     /// Puts a workspace's tool tabs in a given order.
@@ -356,19 +354,19 @@ final class CenterTabStore {
         return try? JSONDecoder().decode([CenterTab].self, from: data)
     }
 
-    /// "Terminal", then "Terminal 2". The bare first name matches what the bottom panel calls its
-    /// own first shell, and numbering from the count skips a name only when one is already taken.
+    /// "Terminal", then "Terminal 2", by the same rule a chat is named by.
+    ///
+    /// The rule itself is `PaneNaming` in the core, because it is a rule with a case worth pinning
+    /// down and nothing under `Sources/Bloom` can be tested. It used to number from the count of
+    /// what was open, which stepped over a gap: three terminals, close the second, and the next
+    /// one opened as Terminal 4 beside a Terminal 3.
     private static func nextTitle(for kind: CenterTab.Kind, in tabs: [CenterTab]) -> String {
         let base = switch kind {
-        case .terminal: "Terminal"
-        case .browser: "Browser"
+        case .terminal: PaneNaming.terminal
+        case .browser: PaneNaming.browser
         case .review: CenterTab.reviewTitle
         case .notes: CenterTab.notesTitle
         }
-        let taken = Set(tabs.filter { $0.kind == kind }.map(\.title))
-        guard taken.contains(base) else { return base }
-        var index = taken.count + 1
-        while taken.contains("\(base) \(index)") { index += 1 }
-        return "\(base) \(index)"
+        return PaneNaming.nextTitle(base: base, taken: tabs.filter { $0.kind == kind }.map(\.title))
     }
 }

@@ -371,7 +371,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     init(
         id: SessionID = .new(),
         workspaceID: WorkspaceID,
-        title: String = "New session",
+        title: String = PaneNaming.chat,
         agentSessionID: String? = nil,
         model: String = AppDefaults.fallbackModel,
         effort: String = AppDefaults.fallbackEffort,
@@ -413,7 +413,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     public init(
         id: SessionID = .new(),
         workspaceID: WorkspaceID,
-        title: String = "New session",
+        title: String = PaneNaming.chat,
         agentSessionID: String? = nil,
         model: String = AppDefaults.fallbackModel,
         effort: String = AppDefaults.fallbackEffort,
