@@ -110,9 +110,11 @@ import Testing
         let retry = AgentRetry(attempt: 1, maxAttempts: 10, delay: 0.6, status: 529)
 
         #expect(retry.headline == "Anthropic's API is overloaded")
-        #expect(retry.note == "Attempt 1 of 10. It is trying again by itself, and there is "
-            + "nothing for you to do. That is capacity at their end. Nothing you did, and nothing "
-            + "in this workspace.")
+        #expect(retry.note == "Trying again by itself, with nothing for you to do. It is "
+            + "capacity at their end, not anything here.")
+        // The attempt count is a figure the row draws on its own, so the sentence does not open
+        // with it. A surface with no counter asks for both.
+        #expect(retry.summary == "Attempt 1 of 10. " + retry.note)
         // Under five seconds nothing is said about the wait: the sentence would be replaced
         // before it had been read.
         #expect(retry.waitPhrase == nil)
@@ -122,9 +124,8 @@ import Testing
         let retry = AgentRetry(attempt: 9, maxAttempts: 10, delay: 37.186, status: 529)
 
         #expect(retry.headline == "Anthropic's API is overloaded")
-        #expect(retry.note == "Attempt 9 of 10. Nearly out of attempts. If the last one fails the "
-            + "turn stops here and you can send it again. That is capacity at their end. Nothing "
-            + "you did, and nothing in this workspace.")
+        #expect(retry.note == "Nearly out of attempts. If the last one fails the turn stops here "
+            + "and you can send it again. It is capacity at their end, not anything here.")
         #expect(retry.waitPhrase == "Next attempt in about 40 seconds.")
     }
 
@@ -152,7 +153,7 @@ import Testing
         let retry = AgentRetry(attempt: 1, maxAttempts: 10, delay: 1, status: 503)
 
         #expect(retry.headline == "Anthropic's API is failing")
-        #expect(retry.note.contains("a fault at their end (503), not anything here"))
+        #expect(retry.note.contains("It is a fault at their end (503), not anything here."))
         #expect(!retry.trouble.isWorthActingOn)
     }
 
@@ -167,7 +168,7 @@ import Testing
 
         let unreachable = AgentRetry(attempt: 1, maxAttempts: 10, delay: 1, status: nil)
         #expect(unreachable.headline == "Bloom cannot reach Anthropic's API")
-        #expect(unreachable.note.contains("Worth a glance at your connection"))
+        #expect(unreachable.note.contains("Worth a glance at your connection."))
         // The reassurance is dropped here, because it would not be true.
         #expect(!unreachable.note.contains("nothing for you to do"))
     }
@@ -277,5 +278,57 @@ import Testing
 
     @Test func rubbishDrawsNothing() {
         #expect(RateLimitNotice.sentence(forRateLimitEvent: Data("not json".utf8)) == nil)
+    }
+}
+
+/// The result that says `success` while `is_error` is true, which the second capture shows really
+/// happens. See `TurnFailure`.
+@Suite struct TurnFailureTests {
+    private static func result() throws -> AgentResult {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("fixtures/claude-turn-died-mid-response.ndjson")
+        let text = try String(contentsOf: url, encoding: .utf8)
+        let events = text.split(separator: "\n").compactMap { AgentEvent.decode(line: String($0)) }
+        for case .result(let value) in events { return value }
+        throw CocoaError(.fileReadUnknown)
+    }
+
+    /// The shape of the thing: a success subtype on a turn that failed. Reading `subtype` alone,
+    /// which is the obvious way, calls this turn finished.
+    @Test func aSuccessSubtypeCanCarryAFailure() throws {
+        let result = try Self.result()
+
+        #expect(result.subtype == "success")
+        #expect(result.isError)
+        #expect(!result.succeeded)
+        #expect(result.terminalReason == "api_error")
+    }
+
+    @Test func theFailureIsExplainedInBloomsWordsAndThenInTheClis() throws {
+        let failure = try #require(TurnFailure.of(try Self.result()))
+
+        #expect(failure.lead == "The turn stopped part way through, at the API's end rather than "
+            + "yours. Whatever the agent had already changed is still in the worktree, and you "
+            + "can ask again whenever you like.")
+        // Kept whole and unedited. It is somebody else's message.
+        #expect(failure.clisOwnWords
+            == "API Error: Connection lost mid-response. The response above may be incomplete.")
+    }
+
+    /// An ending Bloom has no reading of does not get a sentence pretending otherwise.
+    @Test func anUnknownEndingLeavesTheCliToSpeak() {
+        let result = AgentResult(
+            summary: "Something nobody has seen before.", isError: true, subtype: "success",
+            terminalReason: "reason_from_the_future"
+        )
+        let failure = TurnFailure.of(result)
+        #expect(failure?.lead == nil)
+        #expect(failure?.clisOwnWords == "Something nobody has seen before.")
+    }
+
+    @Test func aTurnThatWorkedHasNothingToSay() {
+        #expect(TurnFailure.of(AgentResult(summary: "done", subtype: "success")) == nil)
     }
 }

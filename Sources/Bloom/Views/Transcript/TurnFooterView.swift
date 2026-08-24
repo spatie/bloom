@@ -122,6 +122,28 @@ struct TurnFooterView: View {
                     .padding(.bottom, TranscriptLayout.inset)
             }
 
+            // A turn that failed used to draw a red mark, a duration and nothing at all, with the
+            // CLI's own explanation parked behind the copy menu. See `TurnFailure`.
+            if let failure {
+                VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
+                    if let lead = failure.lead {
+                        Text(lead)
+                            .foregroundStyle(Palette.textSecondary)
+                    }
+                    // Marked as theirs. It is written in another app's register, and it is the one
+                    // piece of this block Bloom did not write.
+                    if let words = failure.clisOwnWords {
+                        Text("The agent said: \(words)")
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                }
+                .font(Typo.caption)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
+                .padding(.horizontal, TranscriptLayout.inset)
+                .padding(.bottom, TranscriptLayout.inset)
+            }
+
             // Tertiary rather than secondary, and under everything else: it explains a duration
             // somebody may go looking for, and it is not news the moment the turn lands.
             if let recovered {
@@ -148,6 +170,16 @@ struct TurnFooterView: View {
     }
 
     private var succeeded: Bool { result?.succeeded != false }
+
+    /// What a failed turn has to say for itself, or nothing.
+    ///
+    /// Not drawn for a turn somebody stopped: the CLI reports its own SIGTERM as an error, and
+    /// `TurnEnding` already refuses to call that a failure. Quoting the CLI's account of a button
+    /// press would put the same mistake back one line lower.
+    private var failure: TurnFailure? {
+        guard outcome == .failed, let result else { return nil }
+        return TurnFailure.of(result)
+    }
 
     /// How many calls the CLI declined during the turn. Reported on the `result` line, which is
     /// otherwise a plain success: a turn in which every shell call was denied ends with

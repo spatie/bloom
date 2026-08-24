@@ -64,7 +64,11 @@ struct RetryRowView: View {
                 // block instead of as a row with a caption parked beside it.
                 .padding(.leading, TranscriptLayout.glyphWidth + TranscriptLayout.glyphGap)
 
+            // Its own rung of air above it. Set at the block spacing the sentence uses, the bar sat
+            // hard under the last line of the sentence and read as an underline of it rather than
+            // as a clock.
             drain
+                .padding(.top, TranscriptLayout.tight)
                 .padding(.leading, TranscriptLayout.glyphWidth + TranscriptLayout.glyphGap)
         }
         .padding(isRaised ? TranscriptLayout.tight : 0)
@@ -113,14 +117,30 @@ struct RetryRowView: View {
     /// Keyed on the attempt, so each announcement restarts it over that attempt's own delay. A
     /// wait too short to see (the first backoffs are around half a second) draws the track and
     /// nothing else, which is correct: there is nothing to watch.
+    ///
+    /// The still drawing is a plain shape rather than the layer, and not only to hold a
+    /// photograph: `ImageRenderer` paints an `NSViewRepresentable` as a yellow placeholder
+    /// offscreen, so the one page that exists to show this row would have shown a yellow bar.
     @ViewBuilder
     private var drain: some View {
-        NoticeDrainBar(
-            fraction: 1,
-            remaining: isStill ? nil : .seconds(retry.delay),
-            generation: retry.attempt,
-            tint: tint
-        )
+        Group {
+            if isStill {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(tint.opacity(0.12))
+                        Capsule().fill(tint.opacity(0.6))
+                            .frame(width: proxy.size.width * 0.62)
+                    }
+                }
+            } else {
+                NoticeDrainBar(
+                    fraction: 1,
+                    remaining: .seconds(retry.delay),
+                    generation: retry.attempt,
+                    tint: tint
+                )
+            }
+        }
         .frame(height: Metrics.hairline * 2)
         .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
     }

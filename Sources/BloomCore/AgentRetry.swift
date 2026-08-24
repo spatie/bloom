@@ -94,16 +94,22 @@ public struct AgentRetry: Sendable, Hashable {
     /// The line in the row's label column: what went wrong, in Bloom's words.
     public var headline: String { trouble.headline }
 
-    /// The sentence under it: where the run has got to, and whether any of it is the reader's to
-    /// do something about.
+    /// The sentence under it: what the run is doing, and whether any of it is the reader's to do
+    /// something about.
     ///
-    /// Two facts and no more, in this order, because this is read by somebody deciding whether to
-    /// keep waiting: how far along it is, and whether waiting is the right thing. The status code
-    /// is deliberately not in it. A person who wants the number can hover the row; a person
-    /// watching a turn does not need to be taught HTTP to find out that it is not their fault.
+    /// **The attempt count is deliberately not in it.** It was, and read against the drawing it
+    /// was one figure twice: "Attempt 5 of 10." opening a sentence that sits directly under
+    /// "5 of 10". The count belongs where it can be glanced at without reading, and the sentence
+    /// belongs to what the count cannot say.
+    ///
+    /// The status code is not in it either. A person who wants the number can hover the row; a
+    /// person watching a turn does not need to be taught HTTP to find out it is not their fault.
     public var note: String {
-        "\(progress) \(patience.counsel(canAct: trouble.isWorthActingOn)) \(trouble.counsel)"
+        "\(patience.counsel(canAct: trouble.isWorthActingOn)) \(trouble.counsel)"
     }
+
+    /// The whole of it in one line, for a surface with no room to draw a counter of its own.
+    public var summary: String { "\(progress) \(note)" }
 
     /// "Attempt 3 of 10." Its own property because it is the one part of the row that changes
     /// every time, which is what stops the surface reading as frozen.
@@ -256,18 +262,18 @@ public enum RetryTrouble: Sendable, Hashable {
     public var counsel: String {
         switch self {
         case .overloaded:
-            return "That is capacity at their end. Nothing you did, and nothing in this workspace."
+            return "It is capacity at their end, not anything here."
         case .rateLimited:
-            return "That is this account's allowance rather than a fault. What is left of it is "
-                + "in the menu bar."
+            return "It is this account's allowance rather than a fault. What is left of it is in "
+                + "the menu bar."
         case .serverFault(let status):
-            return "That is a fault at their end (\(status)), not anything here."
+            return "It is a fault at their end (\(status)), not anything here."
         case .refused(let status):
-            return "The request came back as \(status), which waiting does not usually clear. "
-                + "If every attempt goes the same way the turn will stop and say so."
+            return "It came back as \(status), which waiting does not usually clear. If every "
+                + "attempt goes the same way the turn stops and says so."
         case .unreachable:
             return "Nothing came back at all, which can be this machine's network as easily as "
-                + "theirs. Worth a glance at your connection while it tries again."
+                + "theirs. Worth a glance at your connection."
         case .unexplained(let status):
             return "It came back as \(status), which Bloom has no reading of."
         }
@@ -324,11 +330,16 @@ public enum RetryPatience: Sendable, Hashable, Comparable {
     public func counsel(canAct: Bool) -> String {
         switch self {
         case .settling:
-            return canAct ? "It is trying again by itself." : "It is trying again by itself, and there is nothing for you to do."
+            return canAct
+                ? "Trying again by itself."
+                : "Trying again by itself, with nothing for you to do."
         case .persisting:
-            return canAct ? "It is still trying, with longer waits between attempts." : "It is still trying by itself, with longer waits between attempts, and there is still nothing for you to do."
+            return canAct
+                ? "Still trying, with longer waits between attempts."
+                : "Still trying by itself, with longer waits between attempts."
         case .lastChances:
-            return "Nearly out of attempts. If the last one fails the turn stops here and you can send it again."
+            return "Nearly out of attempts. If the last one fails the turn stops here and you "
+                + "can send it again."
         }
     }
 

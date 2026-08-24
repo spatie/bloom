@@ -630,6 +630,7 @@ enum Snapshot {
         case diffScope = "diff-scope"
         case pendingDelete = "pending-delete"
         case runningGlyph = "running-glyph"
+        case retries = "retries"
 
         var title: String {
             switch self {
@@ -638,6 +639,7 @@ enum Snapshot {
             case .diffScope: "Diff scope"
             case .pendingDelete: "Pending message delete"
             case .runningGlyph: "Running mark"
+            case .retries: "Retries"
             }
         }
 
@@ -648,6 +650,7 @@ enum Snapshot {
             case .diffScope: CGSize(width: 460, height: 700)
             case .pendingDelete: CGSize(width: 820, height: 900)
             case .runningGlyph: CGSize(width: 700, height: 760)
+            case .retries: CGSize(width: 860, height: 1020)
             }
         }
 
@@ -665,7 +668,7 @@ enum Snapshot {
             case .reviewComments: true
             // The running mark does not, even though it moves: `forcesBusyPulse` is what
             // lets a capture past the frontmost gate, so the heartbeat runs without the keys.
-            case .inspectorTabs, .diffScope, .pendingDelete, .runningGlyph: false
+            case .inspectorTabs, .diffScope, .pendingDelete, .runningGlyph, .retries: false
             }
         }
     }
@@ -686,6 +689,7 @@ enum Snapshot {
         case .diffScope: DiffScopeGallery(app: app)
         case .pendingDelete: PendingDeleteSnapshotGallery()
         case .runningGlyph: RunningGlyphGallery()
+        case .retries: RetrySnapshotGallery()
         }
     }
 
@@ -836,6 +840,10 @@ enum Snapshot {
             ("components", AnyView(ComponentGallery().frame(width: 640, height: 700)), CGSize(width: 640, height: 700)),
             ("permission", AnyView(PermissionSnapshotGallery().frame(width: 720, height: 1560)), CGSize(width: 720, height: 1560)),
             ("tool-rows", AnyView(ToolRowSnapshotGallery().frame(width: 800, height: 720)), CGSize(width: 800, height: 720)),
+            // Offscreen as well as through the window path, which the two pages above cannot be:
+            // the one representable on this page draws a plain shape when it is held still,
+            // precisely so this scene is a photograph of the row rather than of a placeholder.
+            ("retries", AnyView(RetrySnapshotGallery().frame(width: 860, height: 1020)), CGSize(width: 860, height: 1020)),
             // No review-comments and no inspector-tabs scene, deliberately, and for one reason:
             // `ImageRenderer` paints SwiftUI's yellow placeholder over an `NSViewRepresentable`,
             // and each of those two pages exists to show one. The review comment box is the
