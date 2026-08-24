@@ -137,8 +137,13 @@ python3 Tools/icon/dev-tint.py "$WORK/Resources/Bloom.icon/icon.json"
 #   the `Window` scene's title     what the window is called before the first
 #                                  update, and what the Window menu shows if the
 #                                  view above it never renders
-#   WindowProxyIcon                sets `window.title` imperatively, on AppKit,
-#                                  when the selection changes
+#   WindowTitle                    sets `window.title` imperatively, on AppKit,
+#                                  when the selection changes. It was
+#                                  `WindowProxyIcon` and the anchor went stale
+#                                  when the proxy icon was dropped, which is the
+#                                  failure this guard is for and the reason it
+#                                  names the file: `make dev` refused to build
+#                                  until the anchor was pointed here
 #
 # All three are marked rather than only the winner, because which of them wrote
 # the title last is a matter of timing, and a title that loses its mark for a
@@ -187,9 +192,9 @@ with open(path, "w") as handle:
 ' "$file" "$anchor" "$replacement"
 }
 
-patch_source "$WORK/Sources/Bloom/Views/Chrome/WindowProxyIcon.swift" \
-  '        window.title = value.title' \
-  '        window.title = "[DEV] " + value.title'
+patch_source "$WORK/Sources/Bloom/Views/Chrome/Window/WindowTitle.swift" \
+  '        window.title = value' \
+  '        window.title = "[DEV] " + value'
 
 patch_source "$WORK/Sources/Bloom/BloomApp.swift" \
   '        Window("Bloom", id: "main") {' \
