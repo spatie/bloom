@@ -20,6 +20,22 @@ struct BridgeProjectLookupTests {
         #expect(BridgeProjectLookup.find("/Users/me/dev/./flare", in: [flare, bloom]) == .found(flare))
     }
 
+    /// `/tmp` is a symlink to `/private/tmp` on this machine, and a project registered through one
+    /// used to be a miss when named through the other. The `bloom://` link resolved symlinks and
+    /// this did not, which is the divergence that put them on one answer.
+    @Test("a path reached through a symlink is the same project", .scratchDirectory)
+    func byPathThroughASymlink() throws {
+        let real = TestScratch.unique("real-project")
+        try FileManager.default.createDirectory(atPath: real, withIntermediateDirectories: true)
+        let link = TestScratch.unique("linked-project")
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: real)
+
+        let project = Repo(name: "real", path: real, defaultBranch: "main")
+
+        #expect(BridgeProjectLookup.project(atPath: link, in: [project]) == project)
+        #expect(BridgeProjectLookup.find(link, in: [project]) == .found(project))
+    }
+
     @Test("the id finds it, which is what whoami and project_list both print")
     func byID() {
         #expect(BridgeProjectLookup.find(flare.id.rawValue, in: [flare, bloom]) == .found(flare))

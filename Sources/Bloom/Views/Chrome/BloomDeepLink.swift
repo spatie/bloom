@@ -50,8 +50,9 @@ enum BloomDeepLink {
             return
         }
 
-        let requestedPath = canonicalPath(path)
-        guard let repo = app.repos.first(where: { canonicalPath($0.path) == requestedPath }) else {
+        // The same answer `workspace_start` gives to "which project is this path", rather than a
+        // second canonicaliser beside it. See `BridgeProjectLookup.project(atPath:in:)`.
+        guard let repo = BridgeProjectLookup.project(atPath: path, in: app.repos) else {
             app.alert = BloomAlert(
                 title: "Project not found",
                 message: "The path in this link is not one of Bloom's projects: \(path)"
@@ -77,10 +78,4 @@ enum BloomDeepLink {
         return values
     }
 
-    private static func canonicalPath(_ path: String) -> String {
-        URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
-            .path
-    }
 }

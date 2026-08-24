@@ -28,12 +28,7 @@ public enum BridgeProjectLookup: Sendable {
             return .found(byID)
         }
 
-        // Standardised on both sides, so `~/dev/bloom`, `/Users/x/dev/bloom` and a path with a
-        // trailing slash are one project rather than three misses.
-        let wanted = standardised(trimmed)
-        if let byPath = projects.first(where: { standardised($0.path) == wanted }) {
-            return .found(byPath)
-        }
+        if let byPath = project(atPath: trimmed, in: projects) { return .found(byPath) }
 
         let byName = projects.filter { $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }
         switch byName.count {
@@ -82,10 +77,18 @@ public enum BridgeProjectLookup: Sendable {
         return text
     }
 
-    static func standardised(_ path: String) -> String {
-        let expanded = (path as NSString).expandingTildeInPath
-        let standard = (expanded as NSString).standardizingPath
-        guard standard.count > 1, standard.hasSuffix("/") else { return standard }
-        return String(standard.dropLast())
+    /// The project at a path on disk, however that path was written.
+    ///
+    /// `FolderPath.sameFolder` on both sides, so `~/dev/bloom`, `/Users/x/dev/bloom` and a path
+    /// with a trailing slash are one project rather than three misses, and so is a path reached
+    /// through a symlink.
+    ///
+    /// Public because the `bloom://` link resolves a project by path too, and had its own
+    /// canonicaliser. The two did not agree: this one compared the cheap way and the link resolved
+    /// symlinks, so `/tmp/thing` opened a project stored as `/private/tmp/thing` from a link and
+    /// was refused from `workspace_start`. One answer to "which project is this path" now, and it
+    /// is the more forgiving of the two, because a repository reached two ways is one repository.
+    public static func project(atPath path: String, in projects: [Repo]) -> Repo? {
+        projects.first { FolderPath.sameFolder($0.path, path) }
     }
 }
