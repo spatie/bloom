@@ -46,10 +46,90 @@ enum Snapshot {
         exit(1)
     }
 
+    /// Refuses to capture from a binary that is older than the sources beside it.
+    ///
+    /// The companion to the refusal above, and it was bought the same way: by a capture that was
+    /// believed. "Just a terminal" was merged, the picture taken to check it showed a footer with
+    /// no such button, and the button had been in the source the whole time. `.build/debug/Bloom`
+    /// was twenty minutes behind the commit. A PNG carries nothing that says which build made it,
+    /// so a stale one is indistinguishable from a bug, and this one was read as a bug for hours.
+    ///
+    /// Agents share one `.build` here, so a binary behind the tree is the ordinary state. The
+    /// verdict and the sentence are `CaptureFreshness`, in the core, where the suite holds them.
+    ///
+    /// Debug builds only, and only when the package that produced this binary is still beside it,
+    /// which is `.build/<configuration>/Bloom` in a checkout and nothing at all in a shipped copy.
+    static func refuseIfStale(flag: String) {
+        #if DEBUG
+        let verdict = CaptureFreshness.of(
+            builtAt: lastBuildCompleted,
+            newestSourceChangeAt: newestSourceChange
+        )
+        guard let refusal = verdict.refusal(flag: flag) else { return }
+        FileHandle.standardError.write(Data((refusal + "\n").utf8))
+        exit(1)
+        #endif
+    }
+
+    /// When a build last finished, which is not the same question as when the executable was
+    /// last written.
+    ///
+    /// Swift Package Manager decides what to rebuild by hashing content, so a file whose mtime
+    /// moved but whose text did not leaves the executable untouched. Comparing sources against the
+    /// executable alone therefore calls such a tree stale for ever, and no amount of `swift build`
+    /// clears it, which is a refusal nobody could obey. The build record is stamped by every
+    /// successful build, no-ops included, so it answers "has a build been run since that edit",
+    /// which is the question actually being asked. The executable is still taken into account, for
+    /// a tree whose record has been cleared out from under it.
+    private static var lastBuildCompleted: Date? {
+        let record = packageRoot.map { $0.appending(path: ".build/build.db") }
+        return [modifiedAt(Bundle.main.executableURL), modifiedAt(record)].compactMap { $0 }.max()
+    }
+
+    /// The checkout this binary was built in, or nil when it was not built in one.
+    ///
+    /// Derived from the executable rather than from `#filePath`, which is the path of the machine
+    /// that compiled the file and says nothing about where it is being run.
+    private static var packageRoot: URL? {
+        guard let executable = Bundle.main.executableURL else { return nil }
+        // .build/<configuration>/Bloom, so three levels up is the package.
+        let root = executable
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        guard FileManager.default.fileExists(atPath: root.appending(path: "Package.swift").path)
+        else { return nil }
+        return root
+    }
+
+    /// When any Swift file under `Sources` was last written, or nil where there are none to read.
+    ///
+    /// `Sources` alone, not the tests: a test that changed does not change what the app draws, and
+    /// a capture refused because somebody edited a suite would be a refusal nobody would keep.
+    private static var newestSourceChange: Date? {
+        guard let root = packageRoot else { return nil }
+        let sources = root.appending(path: "Sources")
+        guard let walk = FileManager.default.enumerator(
+            at: sources, includingPropertiesForKeys: [.contentModificationDateKey]
+        ) else { return nil }
+
+        var newest: Date?
+        for case let url as URL in walk where url.pathExtension == "swift" {
+            guard let changed = modifiedAt(url) else { continue }
+            if newest.map({ changed > $0 }) ?? true { newest = changed }
+        }
+        return newest
+    }
+
+    private static func modifiedAt(_ url: URL?) -> Date? {
+        try? url?.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    }
+
     /// Blocks the main thread on purpose. This runs before any scene exists, and the process is
     /// going to exit at the end of it either way.
     static func runAndExit() -> Never {
         refuseWithoutDatabase(flag: "--snapshot")
+        refuseIfStale(flag: "--snapshot")
         let semaphore = DispatchSemaphore(value: 0)
         Task { @MainActor in
             await render()
@@ -391,6 +471,7 @@ enum Snapshot {
     /// Waits for the window to exist and settle, captures it, then exits.
     static func scheduleWindowCapture() {
         refuseWithoutDatabase(flag: "--snapshot-window")
+        refuseIfStale(flag: "--snapshot-window")
         Task { @MainActor in
             let path = windowCapturePath
             applyRequestedAppearance()
@@ -738,6 +819,7 @@ enum Snapshot {
 
     static func scheduleGalleryCapture() {
         refuseWithoutDatabase(flag: "--snapshot-gallery")
+        refuseIfStale(flag: "--snapshot-gallery")
         let arguments = CommandLine.arguments
         // Said rather than swallowed. `--snapshot` and `--snapshot-window` each fall back to a
         // path under the temporary directory; this one used to return here and let the app carry

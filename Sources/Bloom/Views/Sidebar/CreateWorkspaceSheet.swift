@@ -87,9 +87,17 @@ struct CreateWorkspaceSheet: View {
     /// tomorrow, and a toggle that reset every time would have to be found every time.
     @AppStorage("create.more") private var createMore = false
 
-    /// Wider than the form was. The composer's footer carries four pickers, a paperclip and the
-    /// create button, and this is the width at which that row draws in full rather than dropping
-    /// its words to `ViewThatFits`.
+    /// Wider than the form was, and on the compact rung of the footer's ladder since the second
+    /// button arrived.
+    ///
+    /// 620 used to be the width at which that row drew in full. "Just a terminal" took the full
+    /// row from 528 points to 691, against the 572 this frame leaves inside its padding, so
+    /// `ViewThatFits` drops to glyph-only pickers here and the sheet has read that way since.
+    /// Measured rather than argued: the words do come back at 740, but only by collapsing the
+    /// spacer between the pickers and the buttons to nothing, which reads as one crowded run of
+    /// controls rather than as two groups. Glyphs with their tooltips is the better of the two, so
+    /// this stays where it is. Do not raise it to "fix" the labels without looking at the row that
+    /// produces.
     private static let width: CGFloat = 620
     /// What the writing area opens at. Five lines, because the question is "what do you want to
     /// work on" and a one-line box answers it with "something short".
