@@ -90,4 +90,35 @@ public enum WorkspaceStartPlan {
         }
         return name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    // MARK: - What terminal mode says about itself
+
+    /// The line under the name field.
+    ///
+    /// **It does not mention seas, and that is the point of it living here.** The sheet used to
+    /// say "Leave it empty and the workspace is named after a sea", which spends a discovery to
+    /// explain a mechanism nobody asked about: the sea catalogue is a thing to find out about from
+    /// the chart and from the notice that fires the first time one is claimed, and a create sheet
+    /// that names it beforehand has told the joke before the punchline. What somebody standing in
+    /// front of an empty field needs is that the field is optional and that something will fill
+    /// it, which is what this says.
+    ///
+    /// Every branch ends the same way. "Nothing is sent to an agent" is the sentence the two
+    /// button sheet never said, and it is the only half here that has to be on screen in every
+    /// state: it is the whole difference between the two modes.
+    ///
+    /// In the core rather than in the view because it is three sentences chosen by two conditions,
+    /// which is a decision, and because a rule about what the app may not say is worth a test that
+    /// fails when somebody puts it back.
+    public static func terminalNote(hasCheckout: Bool, name: String) -> String {
+        let agentless = "Nothing is sent to an agent."
+        guard !hasCheckout else {
+            // A checkout arrives with its own name, so there is no field and nothing to say about
+            // one. What is left worth saying is what the workspace will be.
+            return "The worktree stands on it and a shell opens in the worktree. " + agentless
+        }
+        return name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Leave it empty and Bloom names it for you. " + agentless
+            : "This names the workspace and its branch. " + agentless
+    }
 }

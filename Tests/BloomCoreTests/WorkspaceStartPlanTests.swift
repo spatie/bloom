@@ -197,3 +197,70 @@ struct WorkspaceStartModeTests {
         #expect(!WorkspaceStartMode.terminal.runsAnAgent)
     }
 }
+
+/// What the sheet says under the name field, and the one word it may not use.
+@Suite("What terminal mode says about itself")
+struct TerminalNoteTests {
+    /// The sentence somebody standing in front of an empty field needs: the field is optional,
+    /// and something will fill it.
+    @Test("an empty field promises a name without explaining where it comes from")
+    func emptyFieldPromisesAName() {
+        let note = WorkspaceStartPlan.terminalNote(hasCheckout: false, name: "")
+        #expect(note.contains("Leave it empty and Bloom names it for you"))
+    }
+
+    @Test("a filled field says what it is about to name")
+    func filledFieldSaysWhatItNames() {
+        let note = WorkspaceStartPlan.terminalNote(hasCheckout: false, name: "spike")
+        #expect(note.contains("This names the workspace and its branch"))
+    }
+
+    @Test("whitespace is an empty field")
+    func whitespaceIsEmpty() {
+        #expect(WorkspaceStartPlan.terminalNote(hasCheckout: false, name: "  \n ")
+                == WorkspaceStartPlan.terminalNote(hasCheckout: false, name: ""))
+    }
+
+    /// A pull request brought its own name, so there is no field and nothing to say about one.
+    @Test("a checkout says what the workspace will be instead")
+    func checkoutSaysWhatItWillBe() {
+        let note = WorkspaceStartPlan.terminalNote(hasCheckout: true, name: "")
+        #expect(note.contains("a shell opens in the worktree"))
+        #expect(!note.contains("Leave it empty"))
+    }
+
+    /// The half that is the whole difference between the two modes, and the half the sheet went
+    /// four days without saying at all.
+    @Test("every sentence says that nothing is sent to an agent")
+    func everySentenceSaysNoAgent() {
+        for hasCheckout in [true, false] {
+            for name in ["", "spike"] {
+                let note = WorkspaceStartPlan.terminalNote(hasCheckout: hasCheckout, name: name)
+                #expect(note.hasSuffix("Nothing is sent to an agent."))
+            }
+        }
+    }
+
+    /// **The regression this suite exists for.**
+    ///
+    /// The sheet used to say "Named after a sea", "named after a sea" and "named after the sea" in
+    /// three places at once. The catalogue is still there and still claims, and the chart and the
+    /// notice that fires on a first claim are how somebody is meant to find out about it. A create
+    /// sheet that explains the mechanism up front spends that discovery to answer a question
+    /// nobody asked, and the answer it gives is about Bloom's insides rather than about what the
+    /// person is doing.
+    @Test("no sentence names the mechanism behind the name")
+    func nothingNamesTheMechanism() {
+        let forbidden = ["sea", "ocean"]
+        for hasCheckout in [true, false] {
+            for name in ["", "spike"] {
+                let note = WorkspaceStartPlan
+                    .terminalNote(hasCheckout: hasCheckout, name: name)
+                    .lowercased()
+                for word in forbidden {
+                    #expect(!note.contains(word), "\(note) names \(word)")
+                }
+            }
+        }
+    }
+}

@@ -225,6 +225,28 @@ struct CreateWorkspaceSheet: View {
     /// about the workspace, and the footer is about the turn.
     private var header: some View {
         HStack(spacing: Metrics.spacingSmall) {
+            // The sheet's title, and the reason it is in this band rather than above it.
+            //
+            // The sheet used to open on a segmented control, so the first strong thing on it was
+            // a control rather than a heading and it read as a fragment of a window rather than
+            // as a window. Every other sheet in the app opens with a `Typo.heading` title at the
+            // top left; this one is the odd one out and it was felt before it was named.
+            //
+            // A row of its own would have made three stacked strips before any content, so the
+            // title goes into the strip that was already there and the two controls after it
+            // become its qualifiers: "New workspace, in bloom, from main" reads as one sentence
+            // across the band.
+            //
+            // The horizontal padding is the one the controls beside it carry inside their own
+            // plates, so the title's first letter lands on the same 12 points as the project's
+            // name and as everything below the hairline. Without it the title sat six points
+            // proud of the whole sheet.
+            Text("New workspace")
+                .font(Typo.heading)
+                .foregroundStyle(Palette.textPrimary)
+                .padding(.horizontal, Metrics.spacing)
+                .accessibilityAddTraits(.isHeader)
+
             projectControl
 
             if repo != nil {
@@ -476,8 +498,14 @@ struct CreateWorkspaceSheet: View {
                     .foregroundStyle(Palette.negative)
             }
 
+            // A rung below the title in the band, which is what makes the band the anchor. Both
+            // were `Typo.heading` for one build and the sheet had two things the same size
+            // competing to be read first, which is most of what "janky" was: "New workspace" and
+            // "What do you want to work on?" at fifteen bold, forty points apart. This is the
+            // system's own heading style at reading size, which is what a section inside a titled
+            // sheet is.
             Text(heading)
-                .font(Typo.heading)
+                .font(Typo.title)
                 .foregroundStyle(Palette.textPrimary)
 
             switch mode {
@@ -502,13 +530,20 @@ struct CreateWorkspaceSheet: View {
     /// one is silently dropped: the same trap `projectControl` documents for `NSPopUpButton`. The
     /// words are what carries this control anyway.
     private var modePicker: some View {
-        Picker("Opens with", selection: modeBinding) {
+        // "Start with", not "Start workspace", which is what was asked for and would have said
+        // the title's word back to it eight points underneath. The title names the thing; this
+        // names the choice, and the two halves of the sentence it makes are the segments
+        // themselves: start with a chat with an agent, or start with just a terminal.
+        //
+        // The label is drawn by the picker rather than by a `Text` beside it, so AppKit places it
+        // and VoiceOver gets the association for nothing. `labelsHidden` used to be here, which
+        // is what left the control floating with no introduction.
+        Picker("Start with", selection: modeBinding) {
             ForEach(WorkspaceStartMode.allCases) { candidate in
                 Text(candidate.sheetLabel).tag(candidate)
             }
         }
         .pickerStyle(.segmented)
-        .labelsHidden()
         .fixedSize()
         // Tinted explicitly, like every other coloured control in this window: untinted a
         // segmented control paints its selected cell in the SYSTEM accent, which on a Mac set to
@@ -516,7 +551,6 @@ struct CreateWorkspaceSheet: View {
         // capture: bright system blue beside the sheet's teal Create button.
         .tint(Palette.accentFill)
         .help("Start a chat with an agent, or just cut a worktree and open a shell in it")
-        .accessibilityLabel("Opens with")
     }
 
     /// Writing the choice down, and carrying the draft across with it.
@@ -589,7 +623,9 @@ struct CreateWorkspaceSheet: View {
     private var terminalBox: some View {
         VStack(alignment: .leading, spacing: Metrics.spacingWide) {
             if offersName {
-                TextField("Named after a sea", text: $terminalName)
+                // "Optional", not "Named after a sea". The placeholder's job is to say the field
+                // may be left alone; the line under it says what happens if it is.
+                TextField("Optional", text: $terminalName)
                     .textFieldStyle(.roundedBorder)
                     .font(Typo.body)
                     .focused($isNameFocused)
@@ -608,8 +644,8 @@ struct CreateWorkspaceSheet: View {
             // `AppModel.startWorkspace`, into the worktree the shell is about to stand in, and
             // this is where that is said. Silence is what the two-button sheet did, and it deleted
             // them.
-            if !attachedPaths.isEmpty {
-                Label(attachmentNote, systemImage: "paperclip")
+            if let sentence = attachmentNote {
+                Label(sentence, systemImage: "paperclip")
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -633,9 +669,15 @@ struct CreateWorkspaceSheet: View {
         .composerBox(isFocused: .constant(false))
     }
 
-    /// What terminal mode says about the files that came with the draft.
-    private var attachmentNote: String {
+    /// What terminal mode says about the files that came with the draft, or nothing when there
+    /// are none.
+    ///
+    /// One read of `PromptAttachmentStore` rather than two. It was asked whether the list was
+    /// empty and then asked again for its count, and both go through a shared store and build an
+    /// array, on a property that is read on every pass of the body.
+    private var attachmentNote: String? {
         let count = attachedPaths.count
+        guard count > 0 else { return nil }
         return count == 1
             ? "The file you attached is copied into the worktree."
             : "The \(count) files you attached are copied into the worktree."
@@ -662,27 +704,10 @@ struct CreateWorkspaceSheet: View {
         editorHeight + Metrics.spacingWide + Metrics.rowHeight
     }
 
-    /// What terminal mode says about itself.
-    ///
-    /// Three sentences, and which one is showing is the answer to the question this whole
-    /// direction was chosen to answer: where the words went. A field with something in it says
-    /// what that something will become, because somebody who wrote it in the other box needs to be
-    /// told it is still here and that nothing will read it. An empty field says what empty gets
-    /// you, because a sea is a real name and leaving it alone is a real choice rather than a
-    /// failure to fill something in. A chosen pull request has no name to give, so it says what it
-    /// is going to do instead.
-    ///
-    /// Every one of the three ends the same way. "Nothing is sent to an agent" is the sentence the
-    /// two-button sheet never said, and it is the only one here that has to be on screen in every
-    /// state.
+    /// What terminal mode says about itself. The three sentences and the choice between them are
+    /// `WorkspaceStartPlan`'s, where a test holds them to not naming a sea.
     private var terminalNote: String {
-        guard offersName else {
-            return "The worktree stands on it and a shell opens in the worktree. "
-                + "Nothing is sent to an agent."
-        }
-        return terminalName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "Leave it empty and the workspace is named after a sea. Nothing is sent to an agent."
-            : "This names the workspace and its branch. Nothing is sent to an agent."
+        WorkspaceStartPlan.terminalNote(hasCheckout: !offersName, name: terminalName)
     }
 
     /// What the box is asking for. A review workspace is opened to read something, so the task is
@@ -693,7 +718,9 @@ struct CreateWorkspaceSheet: View {
             switch checkout {
             case .pullRequest(let request): return "Open #\(request.number) in a terminal"
             case .branch(let branch): return "Open \(branch.name) in a terminal"
-            case .none: return "Name this workspace"
+            // Not "Name this workspace". The band above it already says "New workspace", and the
+            // two together read as a stutter.
+            case .none: return "Give it a name"
             }
         }
         switch checkout {
@@ -770,16 +797,17 @@ struct CreateWorkspaceSheet: View {
             // Deliberately nothing. See above.
             EmptyView()
         } else if task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            // Two sentences, because the empty box means two different things. In chat mode
-            // nothing has been written yet and the branch is waiting on it. In terminal mode
-            // empty is a finished answer: `OceanCatalog.shouldClaim` gives a promptless terminal
-            // workspace a sea, and the sea's slug IS the branch.
-            Text(mode.runsAnAgent
-                 ? "The branch is named from what you write"
-                 : "The branch is named after the sea")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .lineLimit(1)
+            // Only chat mode has anything to say here, and only when no model is going to write
+            // the name. Terminal mode has already said it: the line under the name field says
+            // Bloom will name it, and the branch follows the name. A second sentence eight points
+            // lower saying the same thing again was the third place this sheet explained a
+            // mechanism nobody had asked about, and the mechanism is the part that was wrong.
+            if mode.runsAnAgent {
+                Text("The branch is named from what you write")
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+            }
         } else {
             Chip(text: branchPreview, systemImage: "arrow.triangle.branch", monospaced: true)
                 .lineLimit(1)
