@@ -21,6 +21,10 @@ final class SlashCommandCatalog {
 
     private var loadedPath: String?
     private var loadedAt: Date?
+    /// `commands` by name, for the lookup the composer does on every pass. Observed like the list
+    /// it indexes, because the chip's description is drawn from it and has to arrive when the scan
+    /// does.
+    private var byName: [String: SlashCommand] = [:]
     /// The scan that is already running, and the checkout it is running for, so a second caller
     /// joins it rather than starting a duplicate walk of the same directories.
     private var running: Task<[SlashCommand], Never>?
@@ -28,6 +32,27 @@ final class SlashCommandCatalog {
 
     /// How long a list is taken on trust before opening the menu re-reads it.
     static let stalenessWindow: TimeInterval = 3
+
+    /// One catalogue per checkout, shared by every composer pointing at it.
+    ///
+    /// **A composer used to hold its own, and that turned a tab switch into a disk scan.** The
+    /// centre pane is destroyed and rebuilt when the column changes tab, so the fresh catalogue
+    /// that came with it had `loadedPath == nil` and walked six directories to depth six, up to
+    /// five hundred entries each, reading the front of every file it found, for a list the last
+    /// composer had already built. The walk is off the main actor, so what it cost was disk
+    /// contention during the switch and a slash menu that showed its loading state again.
+    ///
+    /// Held for the life of the launch, like `ComposerModelCatalog.shared` and `FileIndex.shared`.
+    /// One entry per checkout the window has visited, each a list of tens of commands, so there is
+    /// nothing here worth evicting.
+    private static var byPath: [String: SlashCommandCatalog] = [:]
+
+    static func shared(for workspacePath: String) -> SlashCommandCatalog {
+        if let held = byPath[workspacePath] { return held }
+        let made = SlashCommandCatalog()
+        byPath[workspacePath] = made
+        return made
+    }
 
     /// Builds the list for a checkout, and does nothing at all if it is already the one held.
     func load(workspacePath: String) async {
@@ -56,8 +81,12 @@ final class SlashCommandCatalog {
     /// Nothing is a real answer and not an error: a draft restored from another machine, or a
     /// mistyped name, still leads with something the CLI will be handed, and the chip that draws
     /// it says only what it can stand behind.
+    ///
+    /// Indexed rather than searched. The composer asks this for the chip and for the chip's hover
+    /// card on every pass, and a scan of every command and skill on the machine is a strange price
+    /// for a lookup by name.
     func command(named name: String) -> SlashCommand? {
-        commands.first { $0.name == name }
+        byName[name]
     }
 
     /// Ranks the list against the text typed after the `/`.
@@ -94,6 +123,11 @@ final class SlashCommandCatalog {
         isLoaded = true
         // Assigning an identical list would still invalidate every view observing it, and this
         // runs every few seconds while a menu is open.
-        if found != commands { commands = found }
+        guard found != commands else { return }
+        commands = found
+        // The FIRST definition of a name wins, which is what the linear search this replaced did.
+        // Two files can define one name, and which of them the chip described is not a thing to
+        // change while making the lookup cheaper.
+        byName = Dictionary(found.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
     }
 }

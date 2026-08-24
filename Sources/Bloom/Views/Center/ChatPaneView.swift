@@ -24,6 +24,12 @@ struct ChatPaneView: View {
 
     /// What the transcript and the composer were given between them, which is what caps how far
     /// the divider between the two can be dragged.
+    ///
+    /// Rounded, and that is a performance decision rather than a tidiness one. Raw, it changed on
+    /// every pixel of a window or sidebar drag, which is once a frame, and every one of those
+    /// changes re-ran this body: the whole transcript subtree and the composer under it, rebuilt to
+    /// move a clamp by one point. See `PaneMeasure`, and `TranscriptGeometry` for the same decision
+    /// taken for the same reason one view down.
     @State private var conversationHeight: CGFloat = 0
 
     /// The conversation's text size, applied here because this pane is exactly what the setting is
@@ -67,7 +73,10 @@ struct ChatPaneView: View {
                 availableHeight: conversationHeight
             )
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+        // Rounded inside the probe rather than after it, because `onGeometryChange` only calls
+        // the action when the value it is given has changed. Rounding here is what stops the
+        // action running at all for the frames that do not cross a step.
+        .onGeometryChange(for: CGFloat.self) { PaneMeasure.room($0.size.height) } action: {
             conversationHeight = $0
         }
         .background(Palette.windowBackground)

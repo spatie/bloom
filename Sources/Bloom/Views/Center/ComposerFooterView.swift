@@ -41,10 +41,12 @@ struct ComposerFooterView: View {
     @State private var extraModels: [String] = []
     @State private var extraEfforts: [String] = []
 
-    /// The output styles this checkout offers. Held here rather than shared, unlike the model
-    /// catalogue below, because its answer depends on which repository the footer is pointing at
-    /// and one composer only ever points at one. `ViewThatFits` still gets a single copy, because
-    /// the three rows it builds are three renders of this one view.
+    /// The output styles this checkout offers.
+    ///
+    /// Shared per checkout, and swapped for the shared one in the task below rather than owned:
+    /// a footer that owned it re-read the disk every time the centre column changed tab, because
+    /// the pane and everything in it is built again on the way back. `ViewThatFits` gets a single
+    /// copy either way, because the three rows it builds are three renders of this one view.
     @State private var outputStyles = ComposerOutputStyleCatalog()
 
     /// Shared, because `ViewThatFits` below builds this row three times and three copies would be
@@ -57,6 +59,17 @@ struct ComposerFooterView: View {
     @State private var isShowingContextDetail = false
 
     var body: some View {
+        // Everything the row is built out of, worked out once.
+        //
+        // `ViewThatFits` builds each of its candidates in order to measure it, so `row` below runs
+        // three times per pass for the one row it draws. Left inside it, the model sections were
+        // assembled three times, the effort list three times, the output styles and their footnote
+        // three times, the permission modes three times, and the context reading formatted twice.
+        // None of that depends on the width, which is the only thing the three candidates differ
+        // in. This file had already hoisted three pieces of state out of the candidates for a
+        // related reason; the work they were doing stayed behind.
+        let choices = self.choices
+
         // The footer is a fixed row of controls in a pane whose width the user owns: the centre
         // column can be dragged to 420 points and then split in two, and at that width the full
         // row does not fit. Left to overflow it clipped from both edges at once, which took the
@@ -64,10 +77,10 @@ struct ComposerFooterView: View {
         // had no way to send. Each step drops the least load-bearing thing left: first the words
         // beside the picker glyphs, then the context reading, which is the one control here that
         // reports rather than does.
-        ViewThatFits(in: .horizontal) {
-            row(isCompact: false, showsContext: true)
-            row(isCompact: true, showsContext: true)
-            row(isCompact: true, showsContext: false)
+        return ViewThatFits(in: .horizontal) {
+            row(isCompact: false, showsContext: true, choices: choices)
+            row(isCompact: true, showsContext: true, choices: choices)
+            row(isCompact: true, showsContext: false, choices: choices)
         }
         // Outside the `ViewThatFits`, so narrowing the pane cannot take the presenter out of the
         // tree while the popover is up.
@@ -86,7 +99,10 @@ struct ComposerFooterView: View {
         // Re-run when the composer moves to another checkout, because a project's own styles are
         // that project's. The scan itself does nothing when the answer is already held and fresh.
         .task(id: project) {
-            if showsAgentControls { await outputStyles.refreshIfStale(project: project) }
+            guard showsAgentControls else { return }
+            let catalog = ComposerOutputStyleCatalog.shared(for: project)
+            outputStyles = catalog
+            await catalog.refreshIfStale(project: project)
         }
     }
 
@@ -96,7 +112,42 @@ struct ComposerFooterView: View {
         list.append(id)
     }
 
-    private func row(isCompact: Bool, showsContext: Bool) -> some View {
+    /// What the row's pickers offer, and what the gauge says. Built once above `ViewThatFits`,
+    /// because none of it depends on which candidate is being measured.
+    private struct Choices {
+        var models: [ComposerModelSection] = []
+        var efforts: [ComposerOption] = []
+        var outputStyles: [ComposerOption] = []
+        var outputStyleDetail: String?
+        var permissionModes: [ComposerOption] = []
+        var context: ContextWindowUsage.Reading?
+    }
+
+    private var choices: Choices {
+        guard showsAgentControls else {
+            // A terminal workspace has no agent, so the only control left is the send button and
+            // none of these lists is asked for.
+            return Choices(context: context?.reading)
+        }
+        return Choices(
+            models: catalog.sections(includingCurrent: controls.model, on: controls.agentKind),
+            efforts: ComposerOption.adding(extraEfforts, to: efforts),
+            // Only when the picker is drawn at all. Codex has no output styles, and scanning the
+            // list to build rows nothing will show is the same waste one level down.
+            outputStyles: controls.offersOutputStyle
+                ? outputStyles.options(includingCurrent: controls.outputStyle)
+                : [],
+            outputStyleDetail: controls.offersOutputStyle
+                ? outputStyles.detail(of: controls.outputStyle)
+                : nil,
+            permissionModes: controls.availablePermissionModes.map {
+                ComposerOption(id: $0.rawValue, label: $0.label)
+            },
+            context: context?.reading
+        )
+    }
+
+    private func row(isCompact: Bool, showsContext: Bool, choices: Choices) -> some View {
         HStack(spacing: Metrics.spacingTight) {
             if showsAgentControls {
                 ComposerOptionMenu(
@@ -104,7 +155,7 @@ struct ComposerFooterView: View {
                     // One section per backend that can run a chat. A flat list of five names says
                     // nothing about which agent each one belongs to, and picking a name here is
                     // picking an agent.
-                    sections: catalog.sections(includingCurrent: controls.model, on: controls.agentKind),
+                    sections: choices.models,
                     selection: controls.model,
                     // No heading. Opus 5 and Sonnet 5 are names, and the chip this opened from is
                     // showing one of them.
@@ -116,7 +167,7 @@ struct ComposerFooterView: View {
                 )
 
                 ComposerOptionMenu(
-                    options: ComposerOption.adding(extraEfforts, to: efforts),
+                    options: choices.efforts,
                     selection: controls.effort,
                     heading: "Reasoning effort",
                     systemImage: "chart.bar.fill",
@@ -131,10 +182,10 @@ struct ComposerFooterView: View {
                 // has no output styles: see `ComposerControls.offersOutputStyle`.
                 if controls.offersOutputStyle {
                     ComposerOptionMenu(
-                        options: outputStyles.options(includingCurrent: controls.outputStyle),
+                        options: choices.outputStyles,
                         // The selected style, in its own words. The CLI's own sentence for the
                         // four it compiles in, and the file's `description` for a custom one.
-                        footnote: outputStyles.detail(of: controls.outputStyle),
+                        footnote: choices.outputStyleDetail,
                         selection: controls.outputStyle,
                         heading: "Output style",
                         systemImage: "textformat",
@@ -145,9 +196,7 @@ struct ComposerFooterView: View {
                 }
 
                 ComposerOptionMenu(
-                    options: controls.availablePermissionModes.map {
-                        ComposerOption(id: $0.rawValue, label: $0.label)
-                    },
+                    options: choices.permissionModes,
                     footnote: controls.missingPermissionModeNote,
                     selection: controls.permissionMode.rawValue,
                     heading: "Permission mode",
@@ -169,8 +218,10 @@ struct ComposerFooterView: View {
 
             // On the far side of the spacer, away from the pickers. It is a reading rather than
             // something to choose, and among the three menus it read as a fourth one.
-            if let context, showsContext {
-                ComposerContextGauge(usage: context, isShowingDetail: $isShowingContextDetail)
+            if let context, let reading = choices.context, showsContext {
+                ComposerContextGauge(
+                    usage: context, reading: reading, isShowingDetail: $isShowingContextDetail
+                )
             }
 
             // A paperclip, not the plus that used to sit here: a plus already means "new session"

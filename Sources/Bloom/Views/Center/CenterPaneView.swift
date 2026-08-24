@@ -18,7 +18,13 @@ struct CenterPaneView: View {
     /// menu does not offer it.
     var isSplit: Bool
 
-    @State private var size: CGSize = .zero
+    /// How big the pane is, read by the two drop closures below and by nothing that is drawn.
+    ///
+    /// In a box rather than in `@State` for the reason `GeometryBox` sets out: the probe writes
+    /// this on every frame of a window or divider drag, and as `@State` every one of those frames
+    /// invalidated this body, and with it whichever transcript, terminal or page the pane is
+    /// holding, to store a number the body never reads.
+    @State private var size = GeometryBox(CGSize.zero)
     @State private var isTargeted = false
     /// Which part of this pane a tab being dragged is currently over, which is the part it would
     /// land in. Nil when no drag is over the pane at all.
@@ -41,7 +47,7 @@ struct CenterPaneView: View {
 
     var body: some View {
         content
-            .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { size.value = $0 }
             // Simultaneous rather than a plain tap: the transcript, the composer and the terminal
             // all want their own clicks, and this only needs to know that one happened.
             .simultaneousGesture(
@@ -58,7 +64,7 @@ struct CenterPaneView: View {
             }
             .onDropSessionUpdated { session in
                 switch session.phase {
-                case .entering, .active: landing = PaneRegion.at(session.location, in: size)
+                case .entering, .active: landing = PaneRegion.at(session.location, in: size.value)
                 default: landing = nil
                 }
             }
@@ -193,7 +199,7 @@ struct CenterPaneView: View {
         // `WorkspaceTabsStore.canAbsorb`.
         guard tabs.canAbsorb(dropped) else { return false }
 
-        guard let placement = PaneRegion.at(location, in: size).placement else {
+        guard let placement = PaneRegion.at(location, in: size.value).placement else {
             tabs.replace(pane: pane, of: tab, with: dropped, in: model)
             return true
         }

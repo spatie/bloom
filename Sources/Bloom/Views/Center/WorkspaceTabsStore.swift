@@ -203,7 +203,17 @@ final class WorkspaceTabsStore {
     /// deliberately does not write the answer back: a view body asks this, and a body may not
     /// mutate observed state.
     func selectedTab(in model: WorkspaceModel) -> PaneContent? {
-        let entries = entries(in: model)
+        selectedTab(in: model, entries: entries(in: model))
+    }
+
+    /// The same answer for a caller that has just derived the strip and would rather not pay for
+    /// it twice.
+    ///
+    /// `entries(in:)` maps the sessions, reads the tool tab list, works out what the tabs have
+    /// absorbed and lays the user's own order over the result, and the tab strip needs the list
+    /// itself as well as the selection. Asking through the parameterless overload above made every
+    /// pass derive it once for the `ForEach` and again in here.
+    func selectedTab(in model: WorkspaceModel, entries: [PaneContent]) -> PaneContent? {
         if let chosen = selected[model.workspace.id], entries.contains(chosen) { return chosen }
 
         // The active conversation, which is what the toolbar, the inspector and the pull request

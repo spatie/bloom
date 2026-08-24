@@ -71,7 +71,29 @@ struct ComposerTextEditor: NSViewRepresentable {
     @Environment(\.chatFont) private var chatFont
 
     static var font: NSFont { NSFont.preferredFont(forTextStyle: .body) }
-    static var lineHeight: CGFloat { NSLayoutManager().defaultLineHeight(for: font) }
+
+    /// How tall one line of the composer's own face is.
+    ///
+    /// **Held, because working it out means building a whole TextKit layout manager.** There is no
+    /// cheaper way to ask: `NSLayoutManager.defaultLineHeight(for:)` is the only thing that answers
+    /// with the number the text system will actually lay a line out at, and the property that
+    /// wrapped it allocated one on every read. It is read to size the editor, to clamp the drag, to
+    /// place the completion menus and to seed four other views' state, eight to ten times per pass
+    /// of the composer's body.
+    ///
+    /// Keyed on the font itself rather than invalidated by a notification. A body font that has
+    /// changed, because the reader changed the system text size, is a different `NSFont` and misses
+    /// the cache on its own; a notification would be a second mechanism to keep in step with the
+    /// first, and the one that could be forgotten.
+    static var lineHeight: CGFloat {
+        let font = font
+        if let held = heldLineHeight, held.font == font { return held.height }
+        let height = NSLayoutManager().defaultLineHeight(for: font)
+        heldLineHeight = (font, height)
+        return height
+    }
+
+    private static var heldLineHeight: (font: NSFont, height: CGFloat)?
 
     /// How far the writing starts from the sides of the box.
     ///
