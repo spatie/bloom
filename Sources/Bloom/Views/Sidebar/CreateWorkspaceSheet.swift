@@ -341,84 +341,18 @@ struct CreateWorkspaceSheet: View {
     /// three are answers to the same question and only ever one of them is in force. Visible
     /// rather than filed under the overflow menu for the reason the base branch always was: it is
     /// the setting here whose wrong value is expensive.
+    ///
+    /// Everything it draws is `WorkspaceSourcePicker`, including the search field a `Menu` could
+    /// not have held. What is left here is what the sheet owns: which project's lists these are,
+    /// and what happens to the one that gets picked.
     private var sourceControl: some View {
-        Menu {
-            Picker("Start from", selection: Binding(
-                get: { checkout == nil ? baseBranch : "" },
-                set: { branch in
-                    guard !branch.isEmpty else { return }
-                    checkout = nil
-                    baseBranch = branch
-                }
-            )) {
-                ForEach(branchOptions, id: \.self) { branch in
-                    Text("New branch from \(branch)").tag(branch)
-                }
-            }
-            .pickerStyle(.inline)
-
-            Section("Review a pull request") {
-                ForEach(checkoutOptions.pullRequests) { request in
-                    Button {
-                        choose(.pullRequest(request))
-                    } label: {
-                        Text(pullRequestLabel(request))
-                    }
-                }
-                if let sentence = pullRequestUnavailable {
-                    Text(sentence)
-                }
-                Button("Pull request by number or URL…") {
-                    referenceProblem = nil
-                    isEnteringReference = true
-                }
-            }
-
-            if !checkoutOptions.branches.isEmpty {
-                Section("Open an existing branch") {
-                    ForEach(checkoutOptions.branches) { branch in
-                        Button(branch.isLocal ? branch.name : "\(branch.name) (remote)") {
-                            choose(.branch(branch))
-                        }
-                    }
-                }
-            }
-        } label: {
-            ComposerControlLabel(
-                systemImage: sourceGlyph,
-                text: sourceLabel,
-                showsMenuIndicator: true
-            )
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Cut a new branch, or open a pull request or an existing branch")
-        .accessibilityLabel("Start from")
-        .accessibilityValue(sourceLabel)
-    }
-
-    private var sourceGlyph: String {
-        switch checkout {
-        case .pullRequest: "arrow.triangle.pull"
-        case .branch, .none: "arrow.triangle.branch"
-        }
-    }
-
-    private var sourceLabel: String {
-        switch checkout {
-        case .pullRequest(let request): "PR #\(request.number)"
-        case .branch(let branch): "on \(branch.name)"
-        case .none: "from \(baseBranch.isEmpty ? (repo?.defaultBranch ?? "") : baseBranch)"
-        }
-    }
-
-    private func pullRequestLabel(_ request: PullRequestListing) -> String {
-        let title = request.title.count > 52
-            ? String(request.title.prefix(52)) + "…"
-            : request.title
-        return "#\(request.number) \(title)" + (request.isDraft ? " (draft)" : "")
+        WorkspaceSourcePicker(
+            offering: offering,
+            checkout: checkout,
+            baseBranch: baseBranch.isEmpty ? (repo?.defaultBranch ?? "") : baseBranch,
+            unavailable: pullRequestUnavailable,
+            onPick: pick(_:)
+        )
     }
 
     /// Why the pull request section is empty, when it is. The three reasons need different
@@ -442,13 +376,13 @@ struct CreateWorkspaceSheet: View {
                 .textFieldStyle(.roundedBorder)
                 .font(Typo.body)
                 .focused($isReferenceFocused)
-                .onSubmit { resolveReference() }
+                .onSubmit { resolveReference(reference) }
                 .disabled(isResolvingReference)
 
             if isResolvingReference {
                 ProgressView().controlSize(.small)
             } else {
-                Button("Open", action: resolveReference)
+                Button("Open") { resolveReference(reference) }
                     .disabled(reference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
@@ -854,6 +788,20 @@ struct CreateWorkspaceSheet: View {
         return WorkspaceStartContext.branchOptions(branches: branches, defaultBranch: repo.defaultBranch)
     }
 
+    /// The three lists the picker ranks, as one value.
+    ///
+    /// The base branches are this sheet's own listing rather than `checkoutOptions.branches`. The
+    /// two are different questions: what may be cut from includes the default branch and every
+    /// head a pull request speaks for, and what may be opened does not. See
+    /// `WorkspaceCheckoutPlan.offeredBranches`.
+    private var offering: WorkspaceSourceOffering {
+        WorkspaceSourceOffering(
+            pullRequests: checkoutOptions.pullRequests,
+            branches: checkoutOptions.branches,
+            baseBranches: branchOptions
+        )
+    }
+
     /// The same question `AppModel` will ask a moment from now, so the hint and what happens cannot
     /// disagree. See `WorkspaceNaming.shouldName` for what each condition rules out.
     ///
@@ -948,6 +896,41 @@ struct CreateWorkspaceSheet: View {
         )
     }
 
+    /// What a row in the source picker means here.
+    ///
+    /// The one that is not a choice about this sheet at all is a branch a live workspace already
+    /// has. Git refuses one branch in two worktrees, so "open it" cannot mean a second workspace;
+    /// it means the workspace that has it, and the sheet has nothing left to ask. That row used to
+    /// be missing from the list entirely, which answered the question by pretending the branch was
+    /// not there.
+    private func pick(_ source: WorkspaceSource) {
+        switch source {
+        case .newBranch(let ref):
+            checkout = nil
+            baseBranch = ref
+            focusTheBox()
+        case .existingBranch(let branch):
+            if let held = WorkspaceCheckoutPlan.workspaceHolding(
+                branch: branch.name, among: app.workspaces
+            ) {
+                app.selection = .workspace(held.id)
+                dismiss()
+                return
+            }
+            choose(.branch(branch))
+        case .pullRequest(.listed(let request)):
+            choose(.pullRequest(request))
+        case .pullRequest(.typed(_, let text)):
+            // A number or a URL, which nothing knows anything about until gh is asked. The box
+            // comes up carrying it so the wait, and any sentence about the wrong repository, have
+            // somewhere to be read.
+            reference = text
+            referenceProblem = nil
+            isEnteringReference = true
+            resolveReference(text)
+        }
+    }
+
     /// Takes a pull request or a branch as the source, and closes anything the choice answers.
     private func choose(_ chosen: WorkspaceCheckout) {
         checkout = chosen
@@ -965,9 +948,11 @@ struct CreateWorkspaceSheet: View {
 
     /// Resolves what was typed into the box. Everything but the drawing is in the core: the
     /// parsing, the repository check and the gh call are `WorkspaceCheckoutResolver`.
-    private func resolveReference() {
+    ///
+    /// The text is passed in rather than read back off `reference`, because the picker's typed row
+    /// writes it and calls this in the same breath.
+    private func resolveReference(_ text: String) {
         guard let repo, !isResolvingReference else { return }
-        let text = reference
         let path = repo.path
         isResolvingReference = true
         referenceProblem = nil
@@ -987,16 +972,25 @@ struct CreateWorkspaceSheet: View {
     /// run in separate tasks, so this one used to see an empty list every time and offer every
     /// branch as though it lived only on the remote. See `WorkspaceCheckoutOptions.load`.
     ///
-    /// Branches already checked out in a live workspace are left out: git refuses to have one
-    /// branch in two worktrees, so offering them would be offering a create that cannot succeed.
+    /// Branches already checked out in a live workspace are listed with the workspace that has
+    /// them named on the row, and selecting one goes there. They used to be left out, because git
+    /// refuses one branch in two worktrees and offering one is offering a create that cannot
+    /// succeed. That is true of the create and wrong about the list: the branch being looked for
+    /// is very often the one that is already open. See `WorkspaceCheckoutPlan.offeredBranches`.
     private func loadCheckouts() async {
         guard let repo else { return }
         isLoadingCheckouts = true
-        let taken = Set(app.workspaces.filter { $0.state == .active }.map(\.branch))
+        let inUse = Dictionary(
+            app.workspaces.filter { $0.state == .active }.map { ($0.branch, $0.name) },
+            // Two live workspaces cannot hold the same branch, so a duplicate here is a row that
+            // has not caught up with a worktree that has gone. The first is as good an answer as
+            // there is, and it is what `workspaceHolding` will find when the row is selected.
+            uniquingKeysWith: { first, _ in first }
+        )
         let options = await WorkspaceCheckoutOptions.load(
             repoPath: repo.path,
             defaultBranch: repo.defaultBranch,
-            takenBranches: taken
+            branchesInUse: inUse
         )
         guard !Task.isCancelled else { return }
         isLoadingCheckouts = false
