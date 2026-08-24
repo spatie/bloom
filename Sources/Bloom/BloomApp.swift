@@ -39,10 +39,14 @@ struct BloomApp: App {
         // to seeing it. See `SwitchProbe`.
         if SwitchProbe.isRequested { SwitchProbe.schedule() }
 
-        // And a last one: `Bloom --menu-probe <out.png>` opens one of the centre pane's split
-        // submenus and photographs it, which nothing else can. Debug builds only. See `MenuProbe`.
+        // And two last ones. `Bloom --menu-probe <out.png>` opens one of the centre pane's split
+        // submenus and photographs it, which nothing else can; `Bloom --menu-action <title>`
+        // performs a real item of a real menu and reports the windows either side of it, which is
+        // the only way to answer "clicking that did nothing". Debug builds only. See `MenuProbe`
+        // and `MenuActionProbe`.
         #if DEBUG
         if MenuProbe.isRequested { MenuProbe.schedule() }
+        if MenuActionProbe.isRequested { MenuActionProbe.schedule() }
         #endif
     }
 
