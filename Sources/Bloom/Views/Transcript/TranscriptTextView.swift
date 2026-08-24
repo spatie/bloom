@@ -16,6 +16,10 @@ struct TranscriptLinkActions: Sendable {
     /// Whether Bloom's own browser could show this address at all. A menu item that opens a blank
     /// tab is worse than a menu item that is not there.
     var canOpenInTab: @MainActor @Sendable (URL) -> Bool = { _ in false }
+    /// A file chip drawn inside the run was clicked. Empty by default, and set by the one row that
+    /// draws chips, because opening a file needs a workspace and the list's shared actions have
+    /// none: see `UserTurnRowView`.
+    var openFile: @MainActor @Sendable (String) -> Void = { _ in }
 }
 
 /// Prose in the transcript, drawn by AppKit so that a link in it behaves like a link.
@@ -223,7 +227,30 @@ final class LinkTextView: NSTextView {
 
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
-        hover(linkRange(at: convert(event.locationInWindow, from: nil)))
+        let point = convert(event.locationInWindow, from: nil)
+        hover(linkRange(at: point))
+        // A chip is a door like a link is, and a text view left to itself shows an I-beam over
+        // the whole run: the pointer is what says the difference before the click does. The link
+        // ranges get theirs from `linkTextAttributes`, which AppKit merges over them; an
+        // attachment is not a link and gets nothing, so it is set here.
+        if filePath(at: point) != nil { NSCursor.pointingHand.set() }
+    }
+
+    /// Opens the file under the pointer, and otherwise lets the text view do what it does.
+    ///
+    /// **Not `NSTextAttachmentCell.trackMouse`, which is how the composer's chips answer a
+    /// click.** That path is the text system's, and the text system offers it to an editable view;
+    /// this one is not editable, and a chip that silently did nothing in half the places it is
+    /// drawn is worse than one drawn twice. Hit tested against the glyph rather than the nearest
+    /// character, for the reason written on `linkRange(at:)`: the empty width to the right of a
+    /// short line reports the last character on it, so without the bounds test a click in the
+    /// white space beside a one-line turn would open its file.
+    override func mouseDown(with event: NSEvent) {
+        guard let path = filePath(at: convert(event.locationInWindow, from: nil)) else {
+            super.mouseDown(with: event)
+            return
+        }
+        actions.openFile(path)
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -268,9 +295,48 @@ final class LinkTextView: NSTextView {
         return range
     }
 
+    /// The file chip under a point, or nothing. See `linkRange(at:)`, whose two tests this shares:
+    /// the character index, and the glyph rectangle that says the pointer is really on it.
+    private func filePath(at point: CGPoint) -> String? {
+        guard let layout = layoutManager, let container = textContainer,
+              let storage = textStorage, storage.length > 0 else { return nil }
+
+        let index = layout.characterIndex(
+            for: point, in: container, fractionOfDistanceBetweenInsertionPoints: nil
+        )
+        guard index < storage.length else { return nil }
+
+        let glyph = layout.glyphIndexForCharacter(at: index)
+        let bounds = layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container)
+        guard bounds.contains(point) else { return nil }
+
+        return storage.attribute(ComposerChipText.pathKey, at: index, effectiveRange: nil) as? String
+    }
+
     private func link(at point: CGPoint) -> URL? {
         guard let range = linkRange(at: point), let storage = textStorage else { return nil }
         return TranscriptTextView.Coordinator.url(from: storage.attribute(.link, at: range.location, effectiveRange: nil) as Any)
+    }
+
+    /// Copying a selection that contains a file chip puts the path back in it.
+    ///
+    /// Without this the clipboard gets `NSTextAttachment`'s object replacement character, which is
+    /// an invisible box in every other app, and the sentence the owner copied out of his own turn
+    /// arrives with a hole where the file was. `ComposerChipText.draft` writes the path back
+    /// inside its backticks, which is the text the agent was handed, so copying a bubble gives
+    /// exactly the message that was sent. The composer carries the same override for the same
+    /// reason; see `ComposerTextView.writeSelection`.
+    override func writeSelection(
+        to pasteboard: NSPasteboard, type: NSPasteboard.PasteboardType
+    ) -> Bool {
+        guard type == .string, let storage = textStorage else {
+            return super.writeSelection(to: pasteboard, type: type)
+        }
+        let text = selectedRanges
+            .map { ComposerChipText.draft(of: storage, in: $0.rangeValue) }
+            .joined(separator: "\n")
+        pasteboard.setString(text, forType: .string)
+        return true
     }
 
     /// The menu over a link, and the ordinary text menu everywhere else.

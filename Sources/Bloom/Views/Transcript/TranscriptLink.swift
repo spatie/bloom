@@ -54,19 +54,34 @@ enum TranscriptLink {
         return output
     }
 
-    /// The same text as an `NSAttributedString`, for `TranscriptTextView`.
+    /// A sent turn as an `NSAttributedString`, for `TranscriptTextView`: the words with their
+    /// addresses marked, and the files in them drawn as the chip the composer drew a moment before
+    /// the message went.
+    ///
+    /// **The files are `NSTextAttachment`s rather than a second view laid beside the text**, and
+    /// that is not a drawing preference. TextKit 1 has no way to put a view inside a line, and a
+    /// bubble that laid its sentence out as a row of text views and chips would lose the wrap, the
+    /// selection across the join, and the one measure `CappedWidth` takes. As one character in the
+    /// storage a chip wraps with the sentence, is selected with it, and copies out as its path.
+    /// `ComposerChipText` already had all of that for the box; this is the same object on the
+    /// other ground.
     ///
     /// Only the `.link` attribute is set on an address here. Its colour and its underline are the
     /// text view's business, because they are not properties of the text: the colour comes from
     /// `linkTextAttributes` and the underline appears only while the pointer is on it. Putting
     /// either in the string would make a link underlined at rest again, and would put an
     /// underline into anything that copied it out.
+    ///
+    /// The addresses are scanned per run of words rather than over the whole turn, because a range
+    /// found in the turn would name the wrong characters once the paths in front of it had each
+    /// collapsed to a single character.
+    @MainActor
     static func attributedString(
-        _ text: String,
-        links: [DetectedLink],
+        _ segments: [AttachmentDraft.Segment],
         font: NSFont,
         color: NSColor,
-        lineSpacing: CGFloat
+        lineSpacing: CGFloat,
+        chipGround: AttachmentChipCell.Ground
     ) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = lineSpacing
@@ -76,21 +91,36 @@ enum TranscriptLink {
         // fit, which for prose is never.
         paragraph.lineBreakMode = .byWordWrapping
 
-        let output = NSMutableAttributedString(
-            string: text,
-            attributes: [
-                .font: font,
-                .foregroundColor: color,
-                .paragraphStyle: paragraph,
-            ]
-        )
+        let output = NSMutableAttributedString()
 
-        for found in links {
-            guard let url = URL(string: found.url), LinkPolicy.opens(url) else { continue }
-            let range = NSRange(found.range, in: text)
-            output.addAttribute(.link, value: url, range: range)
+        for segment in segments {
+            switch segment {
+            case .text(let words):
+                output.append(attributedRun(words, font: font, color: color))
+            case .attachment(let path):
+                output.append(ComposerChipText.chip(for: path, font: font, ground: chipGround))
+            }
         }
+
+        // Said once over the whole turn, so the line a chip sits on is led like every other line.
+        output.addAttribute(
+            .paragraphStyle, value: paragraph, range: NSRange(location: 0, length: output.length)
+        )
         return output
+    }
+
+    @MainActor
+    private static func attributedRun(
+        _ text: String, font: NSFont, color: NSColor
+    ) -> NSAttributedString {
+        let run = NSMutableAttributedString(
+            string: text, attributes: [.font: font, .foregroundColor: color]
+        )
+        for found in LinkScan.links(in: text) {
+            guard let url = URL(string: found.url), LinkPolicy.opens(url) else { continue }
+            run.addAttribute(.link, value: url, range: NSRange(found.range, in: text))
+        }
+        return run
     }
 
     /// What a transcript row does with an address, in one place so every row does the same.

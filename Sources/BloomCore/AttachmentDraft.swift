@@ -72,7 +72,18 @@ public struct AttachmentDraft: Equatable, Sendable {
 
     // MARK: - Reading
 
-    public static func parse(_ draft: String, paths: [String] = []) -> AttachmentDraft {
+    /// - Parameter alsoNaming: A second way for a backticked run to count, asked only when
+    ///   `isAttachment` has already said no.
+    ///
+    ///   Nothing that decides what is SENT passes one, and that is the point of the parameter
+    ///   existing rather than the rule being widened: the composer has to be exact about which
+    ///   files a draft is carrying, because that governs what is copied into the worktree and
+    ///   named to the agent. A turn that has already gone carries nothing, so the transcript can
+    ///   afford a looser question about what the sentence is talking about. See `FileMention`,
+    ///   which is the one caller and which owns that looser rule.
+    public static func parse(
+        _ draft: String, paths: [String] = [], alsoNaming: (String) -> Bool = { _ in false }
+    ) -> AttachmentDraft {
         let known = Set(paths)
         var segments: [Segment] = []
         var pending = ""
@@ -100,7 +111,7 @@ public struct AttachmentDraft: Equatable, Sendable {
             }
 
             let content = String(draft[contentStart..<closing])
-            guard isAttachment(content, known: known) else {
+            guard isAttachment(content, known: known) || alsoNaming(content) else {
                 // Not a file. The opening backtick is text, and the scan resumes just after it so
                 // that the character that closed this span can open the next one.
                 pending.append("`")
