@@ -43,6 +43,11 @@ struct BloomApp: App {
         // a tab in the centre column to seeing it. See `TabProbe`.
         if TabProbe.isRequested { TabProbe.schedule() }
 
+        // And the one that answers "the chat does not scroll smoothly": `Bloom --scroll-probe
+        // <out.json>` walks a long transcript top to bottom and records what each frame cost.
+        // See `ScrollProbe`.
+        if ScrollProbe.isRequested { ScrollProbe.schedule() }
+
         // And two last ones. `Bloom --menu-probe <out.png>` opens one of the centre pane's split
         // submenus and photographs it, which nothing else can; `Bloom --menu-action <title>`
         // performs a real item of a real menu and reports the windows either side of it, which is
