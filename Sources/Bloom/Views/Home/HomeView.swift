@@ -209,12 +209,9 @@ struct HomeView: View {
 
     // MARK: - Empty
 
-    /// Four different sentences, plus the one for a machine with no projects on it at all.
-    ///
-    /// One generic "nothing to show" would be wrong in every case: the fixes are to add a project,
-    /// to start a workspace, to clear the search, to widen the project filter and to stop hiding
-    /// archived, and a placeholder that names none of them leaves the user to guess which of the
-    /// five controls above it did this.
+    /// Five states, drawn. Which one a machine is in, and every word of it, is `HomeEmptyState`
+    /// in the core: the order of those tests is load bearing and was a five-branch `if` chain in
+    /// here, tangled up with the views it produced, where nothing could ask it anything.
     ///
     /// **Why these are still centred, when the rest of Home moved to the leading edge.** macOS
     /// centres a message in a pane that is empty, and only in a pane that is empty: an empty Finder
@@ -231,82 +228,50 @@ struct HomeView: View {
     /// is an iOS proportion, and next to a 22 point search field it was a slab.
     @ViewBuilder
     private var emptyState: (some View)? {
-        if app.repos.isEmpty {
+        if let state = HomeEmptyState.resolve(
+            hasProjects: !app.repos.isEmpty,
+            hasAnyWorkspace: hasAnyWorkspace,
+            isListEmpty: listing.isEmpty,
+            query: filter.query,
+            hasProjectFilter: !filter.projects.isEmpty,
+            projectPhrase: projectPhrase,
+            archivedCount: archived.count
+        ) {
             ContentUnavailableView {
-                // A different heading and a different mark from the sidebar's, for the same
-                // reason as the sentence under it: on first run the two panels are on screen
-                // together and they were the same panel drawn twice. The sidebar's names what is
-                // missing, because it is standing where the projects will be. This one names what
-                // this pane is for.
-                Label("Nothing running yet", systemImage: "square.stack.3d.up")
+                Label(state.title, systemImage: state.symbol)
             } description: {
-                // NOT word for word what the sidebar says, which is what this was.
-                //
-                // The argument for matching it was that two different pitches for one missing
-                // thing read as two different offers. That is true of two pitches; it is not what
-                // this was. On first run both panels are on screen at once, one in the sidebar and
-                // one in the middle of the window, and they were the same sentence printed twice,
-                // eight inches apart, under two headings that also matched. A window that says the
-                // same thing to you twice reads as a rendering bug.
-                //
-                // So the sidebar keeps the pitch, because it is the panel standing where projects
-                // will be and it is the one with the button that adds one. Home says what Home
-                // will show, in the future tense, which is the one thing the sidebar's copy does
-                // not say and the thing that makes the second panel worth reading.
-                Text("Everything running on this Mac will be listed here, newest first.")
+                Text(state.message)
             } actions: {
-                Button("Choose a folder", systemImage: "folder", action: addProject)
-                    .buttonStyle(.borderedProminent)
-                    // Tinted explicitly, like every other prominent button in the app: untinted it
-                    // follows the system accent, which on a Mac set to Graphite is grey glass. See
-                    // `EmptyStateView`, which says the same over the same button.
-                    .tint(Palette.accentFill)
+                action(for: state)
             }
-        } else if !hasAnyWorkspace {
-            ContentUnavailableView {
-                Label("No workspaces yet", systemImage: "square.stack.3d.up")
-            } description: {
-                Text("A workspace gets a branch, a worktree and an agent of its own.")
-            } actions: {
-                Button("New workspace", systemImage: "plus") { requestWorkspace(in: nil) }
-                    .buttonStyle(.borderedProminent)
-                    // Tinted explicitly, like every other prominent button in the app: untinted it
-                    // follows the system accent, which on a Mac set to Graphite is grey glass. See
-                    // `EmptyStateView`, which says the same over the same button.
-                    .tint(Palette.accentFill)
-            }
-        } else if listing.isEmpty {
-            if !filter.query.trimmingCharacters(in: .whitespaces).isEmpty {
-                ContentUnavailableView {
-                    Label("No workspace matches", systemImage: "magnifyingglass")
-                } description: {
-                    // Typographic quotes. Everything else in the window is careful about this,
-                    // and a straight pair in the one sentence that quotes the user reads as a
-                    // string literal that escaped.
-                    Text("Nothing here is called, branched or filed under \u{201C}\(filter.query)\u{201D}.")
-                } actions: {
-                    Button("Clear the search") { app.homeFilter.query = "" }
-                }
-            } else if !filter.projects.isEmpty {
-                ContentUnavailableView {
-                    Label("Nothing in \(projectPhrase)", systemImage: "folder")
-                } description: {
-                    Text("The other projects still have work in them.")
-                } actions: {
-                    Button("Show all projects") { app.homeFilter.projects = [] }
-                }
-            } else {
-                ContentUnavailableView {
-                    Label("Everything here is archived", systemImage: "archivebox")
-                } description: {
-                    Text(
-                        "All \(ArchiveDeletion.count(archived.count, "workspace")) on this Mac have been archived, "
-                            + "and archived ones are being hidden."
-                    )
-                } actions: {
-                    Button("Show archived") { app.homeFilter.hidesArchived = false }
-                }
-            }
+        }
+    }
+
+    /// The way out of each state, which is the reason there are five states rather than one.
+    ///
+    /// The two that are prominent are the two that add something. Clearing a search, widening a
+    /// filter and unhiding archived are all undoing a control that is still on screen directly
+    /// above, so a filled button for them would be shouting about a switch the reader can see.
+    @ViewBuilder
+    private func action(for state: HomeEmptyState) -> some View {
+        switch state {
+        case .noProjects:
+            Button(state.actionTitle, systemImage: "folder", action: addProject)
+                .buttonStyle(.borderedProminent)
+                // Tinted explicitly, like every other prominent button in the app: untinted it
+                // follows the system accent, which on a Mac set to Graphite is grey glass. See
+                // `EmptyStateView`, which says the same over the same button.
+                .tint(Palette.accentFill)
+        case .noWorkspaces:
+            Button(state.actionTitle, systemImage: "plus") { requestWorkspace(in: nil) }
+                .buttonStyle(.borderedProminent)
+                .tint(Palette.accentFill)
+        case .noMatch:
+            Button(state.actionTitle) { app.homeFilter.query = "" }
+        case .noneInChosenProjects:
+            Button(state.actionTitle) { app.homeFilter.projects = [] }
+        case .allArchived:
+            Button(state.actionTitle) { app.homeFilter.hidesArchived = false }
         }
     }
 
