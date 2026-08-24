@@ -64,9 +64,9 @@ struct PulsingDot: View {
 /// The busy dot where it sits next to text: beside "Requesting" and "Working" in the transcript,
 /// and in front of the label of a tab whose agent is mid turn.
 ///
-/// It has an idle state, which `WorkspaceRunningGlyph` has no use for: a tab keeps its dot when
-/// nothing is running and draws it grey, because the mark going missing would move the label.
-/// `Metrics.dot` is sized to sit on a text baseline, which is why the sidebar's copy is wider.
+/// It has an idle state that `WorkspaceRunningGlyph` has no use for: a grey dot, for a call site
+/// that wants the mark to keep its place rather than to disappear. Nothing in the window draws it
+/// today except the component gallery, where it is the other half of the pair being compared.
 ///
 /// It used to hold the whole animation itself, along with a frontmost gate and a `@State` flag to
 /// take a `repeatForever` back down when the window went behind. All three are gone: what decides

@@ -5,7 +5,7 @@ import BloomCore
 ///
 /// A single dot that swells and dims, which is the same mark the transcript sets beside
 /// "Requesting" and "Working" and the same mark a running tab carries. It is drawn by `PulsingDot`
-/// at this column's own size and tint, so the two cannot drift apart.
+/// at this column's own tint, so the two cannot drift apart.
 ///
 /// It replaced a pair of concentric rings whose radial gap breathed, and the argument for those
 /// was a good one: at thirteen points a single element changing size is a dot getting bigger,
