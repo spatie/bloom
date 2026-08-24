@@ -1074,6 +1074,24 @@ struct TranscriptListView: View {
     /// nothing and folded nothing, and is exactly the case this whole file is about.
     private func remember() {
         guard let memory else { return }
+        // **Not while the session is still arriving.** Where the reader is is not settled until the
+        // pane has finished putting them there, and the phases of that arrival reach the handler
+        // above: a programmatic move to the live end ends in `.idle` like any other scroll, and the
+        // geometry behind it is whatever the frame before the move was looking at. So an arrival
+        // wrote down a position the reader was never in, and the last one to land before the pane
+        // was left is the one the next visit reads.
+        //
+        // It surfaced as a return that drew the whole session instead of its tail. The first
+        // return took the tail correctly; every one after it took the full path, because the visit
+        // before had remembered `isAtLiveEnd: false` from an arrival frame where the tail was
+        // three screens tall and the view had not been moved to the end of it yet. Measured with
+        // `--tab-probe`: one return at 113ms with `transcript.tail`, then 189ms, 229ms, 214ms and
+        // 182ms with `transcript.full`.
+        //
+        // `onDisappear` is unaffected and is the call that matters most, because a reader who
+        // arrives, reads what is on screen and switches tab has scrolled nothing: by then the
+        // session has long since arrived and this guard is open.
+        guard arrivalSession == transcript.session.id else { return }
         memory.remember(
             TranscriptPaneState(
                 expanded: expanded,
