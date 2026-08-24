@@ -90,6 +90,11 @@ enum ScrollProbe {
             return fail("no transcript NSScrollView found")
         }
 
+        // Sampled before the sweep and again in the report, because these two disagreeing is
+        // itself a finding: a transcript whose content height changes while it is being scrolled
+        // is one whose rows are still being measured, and every one of those measurements lands
+        // on the main thread inside a frame somebody is waiting for.
+        let heightBefore = scroll.documentView?.frame.height ?? 0
         let travel = scrollableHeight(scroll)
         guard travel > 1 else {
             return fail("the transcript is shorter than its viewport, so there is nothing to scroll")
@@ -107,13 +112,22 @@ enum ScrollProbe {
         await sweep(scroll, travel: travel, sweeps: 1)
         try? await Task.sleep(for: .seconds(1))
 
+        // A marker on disk rather than a line on stderr, so a shell watching for it can start
+        // `sample` against this pid at the moment the measured sweep begins instead of profiling
+        // twenty seconds of a window loading a transcript. Copied from `FrameProbe`, which needed
+        // it for the same reason.
+        try? Data("\(ProcessInfo.processInfo.processIdentifier)".utf8)
+            .write(to: URL(fileURLWithPath: outputPath + ".started"))
+
         recorder.start()
         let wallBefore = CACurrentMediaTime()
         await sweep(scroll, travel: travel, sweeps: sweeps)
         let wall = CACurrentMediaTime() - wallBefore
         recorder.stop()
 
-        write(report(recorder: recorder, travel: travel, wall: wall, scroll: scroll))
+        write(report(
+            recorder: recorder, travel: travel, wall: wall, scroll: scroll, heightBefore: heightBefore
+        ))
         exit(0)
     }
 
@@ -190,7 +204,8 @@ enum ScrollProbe {
     // MARK: - Reporting
 
     private static func report(
-        recorder: FrameRecorder, travel: CGFloat, wall: Double, scroll: NSScrollView
+        recorder: FrameRecorder, travel: CGFloat, wall: Double, scroll: NSScrollView,
+        heightBefore: CGFloat
     ) -> [String: Any] {
         let ms = recorder.intervals.map { $0 * 1000 }.sorted()
         func percentile(_ p: Double) -> Double {
@@ -209,7 +224,8 @@ enum ScrollProbe {
             "frames": ms.count,
             "wallSeconds": wall,
             "travelPoints": travel,
-            "documentHeight": scroll.documentView?.frame.height ?? 0,
+            "documentHeightBefore": heightBefore,
+            "documentHeightAfter": scroll.documentView?.frame.height ?? 0,
             "viewportHeight": scroll.contentView.bounds.height,
             "offsetMin": offsets.min() ?? 0,
             "offsetMax": offsets.max() ?? 0,
