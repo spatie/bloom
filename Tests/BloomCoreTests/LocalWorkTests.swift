@@ -176,7 +176,9 @@ struct LocalWorkTests {
         #expect(status.text == "Merge conflicts")
         // The headline and the button are one decision. They came from two places once, and a
         // conflicted branch with uncommitted work drew "Merge conflicts" over Commit and push.
-        #expect(status.remedy == .merge)
+        // The button is no longer Merge either: GitHub has refused this branch, so the press that
+        // belongs here is the one that resolves the conflict. See `FixConflictsPromptTests`.
+        #expect(status.remedy == .fixConflicts)
     }
 
     @Test("the button offers the remedy the state actually calls for")
