@@ -33,7 +33,10 @@ expect_fails() {
 xpath_text() {
   /usr/bin/python3 - "$1" "$2" <<'PY'
 import sys, xml.etree.ElementTree as ET
-ns = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
+ns = {
+    "sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle",
+    "bloom": "https://runbloom.app/xml-namespaces/bloom",
+}
 node = ET.parse(sys.argv[1]).getroot().find(sys.argv[2], ns)
 if node is None:
     print("")
@@ -47,9 +50,15 @@ PY
 xpath_attr() {
   /usr/bin/python3 - "$1" "$2" "$3" <<'PY'
 import sys, xml.etree.ElementTree as ET
-ns = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
+ns = {
+    "sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle",
+    "bloom": "https://runbloom.app/xml-namespaces/bloom",
+}
 node = ET.parse(sys.argv[1]).getroot().find(sys.argv[2], ns)
-print("" if node is None else node.get(sys.argv[3].replace("sparkle:", "{http://www.andymatuschak.org/xml-namespaces/sparkle}"), ""))
+name = sys.argv[3]
+for prefix, uri in ns.items():
+    name = name.replace(f"{prefix}:", "{" + uri + "}")
+print("" if node is None else node.get(name, ""))
 PY
 }
 
@@ -171,6 +180,42 @@ expect_fails "a build number that is not a number is refused" \
 expect_fails "a zero length enclosure is refused" \
   "$TOOLS/appcast.py" --existing "$FEED" --output "$WORK/bad.xml" --version 1.0.0 \
   --build 1 --url https://example.invalid/x.zip --length 0 --signature S
+
+# The disk image. It rides beside the enclosure and never replaces it: the
+# enclosure is what Sparkle downloads and every installed copy of Bloom already
+# knows how to unpack one, so the checks below are as much about what did not
+# change as about what did.
+IMAGE_FEED="$WORK/appcast-dmg.xml"
+"$TOOLS/appcast.py" --existing "$WORK/does-not-exist.xml" --output "$IMAGE_FEED" \
+  --version 2.0.0 --build 200 --url https://example.invalid/Bloom-2.0.0.zip \
+  --length 4096 --signature SIGDMG --min-system 15.0 \
+  --dmg-url https://example.invalid/Bloom-2.0.0.dmg --dmg-length 123456 2>/dev/null
+
+expect_equal "the disk image is named on the item" \
+  "$(xpath_attr "$IMAGE_FEED" 'channel/item/bloom:diskImage' 'url')" \
+  "https://example.invalid/Bloom-2.0.0.dmg"
+expect_equal "the disk image carries its length" \
+  "$(xpath_attr "$IMAGE_FEED" 'channel/item/bloom:diskImage' 'length')" "123456"
+expect_equal "the disk image says what it is" \
+  "$(xpath_attr "$IMAGE_FEED" 'channel/item/bloom:diskImage' 'type')" "application/x-apple-diskimage"
+expect_equal "the enclosure is still the zip" \
+  "$(xpath_attr "$IMAGE_FEED" 'channel/item/enclosure' 'url')" \
+  "https://example.invalid/Bloom-2.0.0.zip"
+expect_equal "the enclosure still carries the signature" \
+  "$(xpath_attr "$IMAGE_FEED" 'channel/item/enclosure' 'sparkle:edSignature')" "SIGDMG"
+expect_equal "the enclosure length is the zip's, not the image's" \
+  "$(xpath_attr "$IMAGE_FEED" 'channel/item/enclosure' 'length')" "4096"
+
+# Every release up to 0.6.0. Whatever reads this feed has to cope with the
+# element not being there at all, so it has to be genuinely absent rather than
+# present and empty.
+expect_equal "a release without an image has no diskImage element" \
+  "$(xpath_attr "$FEED" 'channel/item/bloom:diskImage' 'url')" ""
+
+expect_fails "an image URL with no length is refused" \
+  "$TOOLS/appcast.py" --existing "$FEED" --output "$WORK/bad.xml" --version 1.0.0 \
+  --build 1 --url https://example.invalid/x.zip --length 1 --signature S \
+  --min-system 15.0 --dmg-url https://example.invalid/x.dmg --dmg-length 0
 
 
 echo "nested-code.sh"

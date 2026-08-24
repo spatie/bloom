@@ -1,9 +1,16 @@
 #!/bin/zsh
-# Builds a Bloom anyone can open, and leaves it in a zip you can send.
+# Builds a Bloom anyone can open, and leaves both a zip and the beach disk
+# image in dist/.
 #
 #   ./Tools/release.sh              build HEAD, which is also `make release`
 #   ./Tools/release.sh <ref>        build that commit or branch
 #   ./Tools/release.sh --tag v1.4.0 stamp that version rather than the plist's
+#   ./Tools/release.sh --no-dmg     skip the image, when you only want the zip
+#
+# The image is the artefact the website hands a person, so it is built here as
+# well as in CI. Building it only in CI would mean the one thing a stranger
+# downloads is the one thing nobody had ever produced on a machine they could
+# look at, and this is where you check it before a tag exists.
 #
 # What this does that ./Tools/master.sh does not: it signs with a real Developer ID,
 # turns on the hardened runtime, sends the result to Apple to be notarised, and
@@ -40,10 +47,12 @@ cd "$(dirname "$0")/.."
 
 REF=HEAD
 TAG=${BLOOM_RELEASE_TAG:-}
+WANT_DMG=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --tag) TAG=$2; shift 2 ;;
+    --no-dmg) WANT_DMG=0; shift ;;
     -*) echo "unknown option: $1" >&2; exit 1 ;;
     *) REF=$1; shift ;;
   esac
@@ -99,13 +108,22 @@ APP="$WORK/.build/release/Bloom.app"
 
 mkdir -p "$OUT"
 ZIP="$OUT/Bloom-$version.zip"
+DMG="$OUT/Bloom-$version.dmg"
+
+DMG_ARGS=()
+[ "$WANT_DMG" -eq 1 ] && DMG_ARGS=(--dmg "$DMG")
 
 # Tools/build.sh signs, but without the hardened runtime, which notarisation
 # requires. Signed again in there rather than teaching Tools/build.sh about it,
 # because a debug build wants to stay easy to attach a debugger to.
 ( cd "$WORK" && "$TOOLS/package-app.sh" \
-    --app "$APP" --zip "$ZIP" --version "$version" --build "$build" )
+    --app "$APP" --zip "$ZIP" "${DMG_ARGS[@]}" --version "$version" --build "$build" )
 
 git worktree remove --force "$WORK" 2>/dev/null || true
 
 echo "==> $ZIP"
+# An if rather than a trailing `&&`: this is the last line of the script, and
+# under `set -e` a false test on the last line is the script's exit status.
+if [ "$WANT_DMG" -eq 1 ]; then
+  echo "==> $DMG"
+fi

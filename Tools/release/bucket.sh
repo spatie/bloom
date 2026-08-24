@@ -89,6 +89,10 @@ case "$ACTION" in
     case "$KEY" in
       *.xml) ARGS+=(--content-type application/xml) ;;
       *.zip) ARGS+=(--content-type application/zip) ;;
+      # Without this the bucket serves a .dmg as application/octet-stream, and
+      # Safari treats that as something it might be able to show rather than
+      # something to save.
+      *.dmg) ARGS+=(--content-type application/x-apple-diskimage) ;;
     esac
     [ -n "$CACHE" ] && ARGS+=(--cache-control "$CACHE")
     [ -n "${BLOOM_S3_ACL:-}" ] && ARGS+=(--acl "$BLOOM_S3_ACL")

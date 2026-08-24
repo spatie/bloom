@@ -4,8 +4,13 @@
     Tools/release/appcast.py --existing appcast.xml --output appcast.xml \
         --version 1.4.0 --build 431 \
         --url https://example/Bloom-1.4.0.zip --length 8123456 \
+        --dmg-url https://example/Bloom-1.4.0.dmg --dmg-length 12345678 \
         --signature <edSignature> --min-system 26.0 \
         --channel beta --notes-file notes.html
+
+The enclosure is the zip and only ever the zip. The disk image, when there is
+one, is named in a bloom:diskImage element beside it, which the website reads
+and Sparkle ignores.
 
 The feed is generated from the release rather than edited by hand. Hand editing
 an appcast is how you ship an enclosure whose length does not match its file,
@@ -36,9 +41,24 @@ import xml.etree.ElementTree as ET
 SPARKLE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 ET.register_namespace("sparkle", SPARKLE)
 
+# The disk image is not Sparkle's business, so it does not go in Sparkle's
+# namespace and it does not go in the enclosure. The enclosure is the zip, and
+# it stays the zip: it is what every installed copy of Bloom already knows how
+# to unpack, and changing it would change how every one of them updates itself.
+# This element sits beside it and says where the same release's .dmg is, for
+# runbloom.app, which reads this feed to decide what /download hands a person.
+# Sparkle keeps the item's unrecognised children in a dictionary and reads the
+# ones it knows, so an element it has never heard of costs it nothing.
+BLOOM = "https://runbloom.app/xml-namespaces/bloom"
+ET.register_namespace("bloom", BLOOM)
+
 
 def sparkle_tag(name: str) -> str:
     return f"{{{SPARKLE}}}{name}"
+
+
+def bloom_tag(name: str) -> str:
+    return f"{{{BLOOM}}}{name}"
 
 
 def item_build(item: ET.Element) -> int:
@@ -129,6 +149,20 @@ def build_item(args: argparse.Namespace) -> ET.Element:
         },
     )
 
+    # Optional, and absent on every item written before disk images existed.
+    # Anything reading this has to cope with it not being there, because the
+    # releases up to 0.6.0 shipped a zip and nothing else.
+    if args.dmg_url:
+        ET.SubElement(
+            item,
+            bloom_tag("diskImage"),
+            {
+                "url": args.dmg_url,
+                "length": str(args.dmg_length),
+                "type": "application/x-apple-diskimage",
+            },
+        )
+
     return item
 
 
@@ -141,6 +175,8 @@ def main() -> int:
     parser.add_argument("--url", required=True, help="public URL of the zip")
     parser.add_argument("--length", required=True, help="size of the zip in bytes")
     parser.add_argument("--signature", required=True, help="sparkle:edSignature")
+    parser.add_argument("--dmg-url", default="", help="public URL of the disk image, if there is one")
+    parser.add_argument("--dmg-length", default="0", help="size of the disk image in bytes")
     # Required rather than defaulted. The floor lives in Resources/Info.plist and the
     # workflow reads it from there; a default here is a second copy of it, and the copy was
     # still saying 15.0 for as long as it took anybody to look. An appcast that understates
@@ -172,6 +208,12 @@ def main() -> int:
 
     if int(args.length) <= 0:
         raise SystemExit("appcast.py: --length must be a positive number of bytes")
+
+    # A disk image element with a zero length would be a URL nobody can check
+    # the size of, which is the shape of a half wired release step rather than
+    # of a release without an image. No URL is fine; a URL with no size is not.
+    if args.dmg_url and int(args.dmg_length) <= 0:
+        raise SystemExit("appcast.py: --dmg-url needs a positive --dmg-length")
 
     root, channel = load_channel(args.existing)
 

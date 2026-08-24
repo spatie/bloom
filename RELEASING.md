@@ -2,8 +2,55 @@
 
 Publish a release on GitHub and `.github/workflows/release.yml` does the rest:
 it builds the tag, signs it with the Developer ID certificate, has Apple
-notarise it, staples the ticket, uploads the zip to the UpCloud bucket, and
-adds the release to the Sparkle appcast that lives beside it.
+notarise it, staples the ticket, wraps the same bundle in the beach disk image
+and has that notarised and stapled too, uploads both files to the UpCloud
+bucket, and adds the release to the Sparkle appcast that lives beside it.
+
+## Two artefacts, and who each one is for
+
+A release produces `Bloom-1.4.0.zip` and `Bloom-1.4.0.dmg`. They hold the same
+signed, notarised and stapled `Bloom.app`, and they exist for two different
+readers.
+
+- **The .dmg is for people.** It is what `runbloom.app/download` redirects to
+  and what every download button on the site leads to. It is the one with the
+  window: the beach, the ribbon out of the app icon, and the drag onto the
+  Applications alias. `Tools/dmg/` draws it.
+- **The .zip is for Sparkle.** It is the appcast enclosure, and it is what every
+  installed copy of Bloom downloads when it updates itself. Sparkle can install
+  from a disk image, but the enclosure is the contract with every copy already
+  out there, so it stays a zip. Do not point the enclosure at the .dmg to save
+  a file.
+
+The site is told where the image is through the appcast, on a
+`bloom:diskImage` element beside the enclosure, in a namespace of our own.
+Sparkle keeps an item's unrecognised children and reads the ones it knows, so
+that element costs it nothing. Items written before disk images existed do not
+have it, and everything reading the feed treats it as optional: `/download`
+falls back to the zip for a release that has no image, which is every release
+up to and including 0.6.0.
+
+Each file needs a notarisation ticket of its own. Stapling the app inside the
+image does not staple the image, and Gatekeeper assesses the file that was
+downloaded, so an unstapled image asks Apple about itself the first time it is
+opened: a wait on a slow connection and a refusal on none. That is why the
+workflow makes two round trips to the notary service, and why it is the long
+step.
+
+The check that catches a missed image ticket is
+
+```sh
+spctl --assess --type open --context context:primary-signature --verbose=2 Bloom-1.4.0.dmg
+```
+
+against the image, not against the app. Assessing the app passes happily on an
+image that was never notarised at all, which is the exact mistake worth having
+a command for. `Tools/release/package-app.sh` runs it, and it is a hard failure.
+
+The disk image window is a scene rendered by headless Chrome, matched against
+the app icon as Chrome rasterises it, so the release runner needs Chrome. The
+workflow checks for it before the build and installs it if the runner image
+ever stops shipping it.
 
 The parts of that which are not YAML live in `Tools/release/`, and `Tools/release.sh`
 calls the same scripts. A local release and a CI release sign and notarise
@@ -31,8 +78,10 @@ replaced rather than added again.
 
 ## Releasing from this machine
 
-`./Tools/release.sh` builds, signs, notarises and staples, and leaves a zip in
-`dist/`. It does not upload anything and does not touch the appcast. It needs:
+`./Tools/release.sh` builds, signs, notarises and staples, and leaves both the
+zip and the disk image in `dist/`. It does not upload anything and does not
+touch the appcast. `--no-dmg` skips the image and its notarisation round trip
+when you only want something to send someone. It needs:
 
 ```sh
 export BLOOM_CODESIGN_IDENTITY="Developer ID Application: Spatie (97KRXCRMAY)"
@@ -225,8 +274,10 @@ missing ones. Nothing prints a value.
 
 ```
 appcast.xml           the feed every copy of Bloom polls, five minute cache
-Bloom-1.4.0.zip       one per release, cached forever
+Bloom-1.4.0.zip       what Sparkle downloads, one per release, cached forever
+Bloom-1.4.0.dmg       what runbloom.app/download hands a person, likewise
 Bloom-1.4.0-beta.1.zip
+Bloom-1.4.0-beta.1.dmg
 ```
 
 The feed URL is `<BLOOM_PUBLIC_BASE_URL>/appcast.xml`, and it is computed from
@@ -235,27 +286,38 @@ address the app polls cannot drift from the address the feed is written to.
 
 ## What has never run
 
-The workflow has not executed. There are no credentials yet, so it cannot have.
-Specifically these have never happened even once:
+The workflow itself has run, and worked: v0.0.1-test and then 0.1.0 through
+0.6.0 each went through it, so importing the .p12, notarising the zip with an
+App Store Connect API key, stapling, the uploads and the appcast are all things
+that have happened for real. This section used to say the opposite, from before
+the first release, and was left saying it for six of them.
 
-- importing the .p12 into a keychain on a runner
-- notarising with an App Store Connect API key
-- stapling and the checks after it
-- any upload to the bucket
-- `Tools/build.sh` substituting the feed URL and public key, which is not written yet
+What has not run is the disk image half, added after 0.6.0:
 
-What has been checked:
+- notarising a .dmg with the API key, and stapling the ticket to it
+- `spctl --assess --type open` against a notarised image
+- uploading a .dmg to the bucket, and the `bloom:diskImage` element reaching
+  the website through the appcast
+- `brew install --cask google-chrome`, which is only reached if a runner image
+  stops shipping Chrome
 
-- the workflow parses and lints clean, including shellcheck over every `run:`
-- `Tools/release/tests/run.sh` passes, 46 checks
-- the order things get signed in was run against a real app with Sparkle
-  embedded in it, signed ad-hoc with the hardened runtime rather than with the
-  certificate, and `codesign --verify --strict --deep` accepts the result
-- `./Tools/release.sh` refuses, before building anything, when there is no Developer
-  ID identity, when the identity is an Apple Development one, and when the
-  notarisation key is half configured
+There is no notarisation credential on any machine here, only the Developer ID
+certificate, so none of that could be tried locally either. What was checked
+locally, against the file rather than against an exit status:
 
-Expect the first real release to need a fix or two anyway.
+- `Tools/dmg/build.sh` produces the image from an app that has already been
+  signed with the hardened runtime, and the app inside the mounted image still
+  passes `codesign --verify --strict --deep`, so the layout step preserves the
+  signature and would preserve a stapled ticket with it
+- the image itself takes a Developer ID signature and passes
+  `codesign --verify --strict`
+- `spctl --assess --type open --context context:primary-signature` on that
+  image is rejected for want of a ticket, which is the check doing its job and
+  the reason it is a hard failure in `package-app.sh`
+
+The zip path is unchanged, so what it does is what it did for 0.6.0.
+
+Expect the first release with an image to need a fix or two anyway.
 
 ## Testing the parts that need no secrets
 

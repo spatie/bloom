@@ -1,8 +1,15 @@
 name: Release
 
 # Publish a release on GitHub and this builds it, signs it, has Apple notarise
-# it, and puts the zip and the Sparkle feed in the bucket. Nothing here creates
-# the release: the tag and the notes are written by a person, and this reacts.
+# it, and puts the zip, the disk image and the Sparkle feed in the bucket.
+# Nothing here creates the release: the tag and the notes are written by a
+# person, and this reacts.
+#
+# Two artefacts, for two different readers. The zip is Sparkle's: it is the
+# appcast enclosure, and it is what every installed copy of Bloom already knows
+# how to unpack. The .dmg is the one a person downloads from runbloom.app, with
+# the beach window and the drag to Applications. They hold the same signed and
+# stapled bundle, and each carries a notarisation ticket of its own.
 #
 # Every value it needs is listed in RELEASING.md. The preflight step below
 # fails on a missing one before anything is built, because finding out that a
@@ -141,6 +148,20 @@ jobs:
           fi
           echo "The Sparkle key pair matches."
 
+      # The disk image window is a scene rendered by headless Chrome, matched
+      # against the app icon as Chrome rasterises it. The runner image ships
+      # Chrome, but that is somebody else's decision to change, and finding out
+      # it had gone after a build and a notarisation round trip is the failure
+      # this step exists to move to the front.
+      - name: Check Chrome is here for the disk image
+        run: |
+          set -euo pipefail
+          if [ ! -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]; then
+            echo "No Chrome on this runner. Installing it."
+            brew install --cask google-chrome
+          fi
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --version
+
       - name: Derive the version
         id: version
         env:
@@ -198,6 +219,10 @@ jobs:
           echo "Feed the app will poll: $BLOOM_UPDATE_FEED_URL"
           ./Tools/build.sh -r
 
+      # Two notarisation round trips, one for the zip and one for the image, so
+      # this is the long step. The image is built from the bundle the zip holds
+      # after that bundle has been stapled, so the app a person drags out of the
+      # image is the same one Apple saw, ticket and all.
       - name: Sign, notarise and staple
         id: package
         env:
@@ -211,12 +236,21 @@ jobs:
           export BLOOM_NOTARY_KEY="$RUNNER_TEMP/notary.p8"
           app="$(swift build -c release --show-bin-path)/Bloom.app"
           zip="$PWD/dist/Bloom-$VERSION.zip"
-          Tools/release/package-app.sh --app "$app" --zip "$zip" \
+          dmg="$PWD/dist/Bloom-$VERSION.dmg"
+          Tools/release/package-app.sh --app "$app" --zip "$zip" --dmg "$dmg" \
             --version "$VERSION" --build "$BUILD"
+          # package-app.sh checks both artefacts itself and stops on a bad one.
+          # Checked again here because a step that exits 0 having produced
+          # nothing is the one failure that reaches the bucket unnoticed.
+          [ -s "$zip" ] || { echo "No zip was produced."; exit 1; }
+          [ -s "$dmg" ] || { echo "No disk image was produced."; exit 1; }
           {
             echo "zip=$zip"
             echo "name=Bloom-$VERSION.zip"
             echo "length=$(stat -f%z "$zip")"
+            echo "dmg=$dmg"
+            echo "dmg_name=Bloom-$VERSION.dmg"
+            echo "dmg_length=$(stat -f%z "$dmg")"
           } >> "$GITHUB_OUTPUT"
 
       # Piped in rather than written to a file, so the Sparkle key never touches
@@ -252,10 +286,12 @@ jobs:
             : > "$RUNNER_TEMP/notes.html"
           fi
 
-      # The zip first, then the feed. In that order a feed is never pointing at
-      # a file that is not there yet. The other way round, every user who checks
-      # for updates in the gap gets an error.
-      - name: Upload the zip
+      # Both files first, then the feed. In that order a feed is never pointing
+      # at a file that is not there yet. The other way round, every user who
+      # checks for updates in the gap gets an error, and the same holds for the
+      # disk image: the appcast is what tells the website the image exists, so
+      # the image has to be in the bucket before the appcast names it.
+      - name: Upload the zip and the disk image
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.UPCLOUD_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.UPCLOUD_SECRET_ACCESS_KEY }}
@@ -267,10 +303,14 @@ jobs:
           BLOOM_S3_ACL: ${{ vars.BLOOM_S3_ACL }}
           ZIP: ${{ steps.package.outputs.zip }}
           NAME: ${{ steps.package.outputs.name }}
+          DMG: ${{ steps.package.outputs.dmg }}
+          DMG_NAME: ${{ steps.package.outputs.dmg_name }}
         run: |
           set -euo pipefail
-          # A zip for a given version never changes, so it can be cached forever.
+          # Neither file for a given version ever changes, so both can be cached
+          # forever.
           Tools/release/bucket.sh put "$ZIP" "$NAME" "public, max-age=31536000, immutable"
+          Tools/release/bucket.sh put "$DMG" "$DMG_NAME" "public, max-age=31536000, immutable"
 
       - name: Update the appcast
         env:
@@ -288,6 +328,8 @@ jobs:
           SIGNATURE: ${{ steps.sparkle.outputs.signature }}
           LENGTH: ${{ steps.package.outputs.length }}
           NAME: ${{ steps.package.outputs.name }}
+          DMG_NAME: ${{ steps.package.outputs.dmg_name }}
+          DMG_LENGTH: ${{ steps.package.outputs.dmg_length }}
           TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
@@ -306,6 +348,8 @@ jobs:
             --url "$(Tools/release/bucket.sh url "$NAME")" \
             --length "$LENGTH" \
             --signature "$SIGNATURE" \
+            --dmg-url "$(Tools/release/bucket.sh url "$DMG_NAME")" \
+            --dmg-length "$DMG_LENGTH" \
             --min-system "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Resources/Info.plist)" \
             --channel "$channel" \
             --notes-file "$RUNNER_TEMP/notes.html" \
@@ -316,13 +360,14 @@ jobs:
           # one means an update nobody is offered.
           Tools/release/bucket.sh put "$RUNNER_TEMP/appcast.xml" appcast.xml "public, max-age=300"
 
-      - name: Attach the zip to the release
+      - name: Attach the zip and the disk image to the release
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
           ZIP: ${{ steps.package.outputs.zip }}
-        run: gh release upload "$TAG" "$ZIP" --clobber
+          DMG: ${{ steps.package.outputs.dmg }}
+        run: gh release upload "$TAG" "$ZIP" "$DMG" --clobber
 
       - name: Say where it went
         env:
@@ -332,6 +377,7 @@ jobs:
           BLOOM_S3_REGION: ${{ vars.UPCLOUD_S3_REGION }}
           BLOOM_PUBLIC_BASE_URL: ${{ vars.BLOOM_PUBLIC_BASE_URL }}
           BLOOM_BUCKET_PREFIX: ${{ vars.BLOOM_BUCKET_PREFIX }}
+          DMG_NAME: ${{ steps.package.outputs.dmg_name }}
           CHANNEL: ${{ steps.version.outputs.resolved_channel }}
           VERSION: ${{ steps.version.outputs.version }}
           BUILD: ${{ steps.version.outputs.build }}
@@ -340,7 +386,8 @@ jobs:
             echo "### Bloom $VERSION ($BUILD)"
             echo
             echo "- channel: $CHANNEL"
-            echo "- download: $(Tools/release/bucket.sh url "$NAME")"
+            echo "- disk image, what runbloom.app/download hands a person: $(Tools/release/bucket.sh url "$DMG_NAME")"
+            echo "- zip, what Sparkle downloads: $(Tools/release/bucket.sh url "$NAME")"
             echo "- appcast: $(Tools/release/bucket.sh url appcast.xml)"
           } >> "$GITHUB_STEP_SUMMARY"
 

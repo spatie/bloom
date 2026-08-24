@@ -1,10 +1,18 @@
 #!/bin/zsh
 # Takes a built Bloom.app and leaves a zip anyone can open: version stamped,
 # signed with a Developer ID and the hardened runtime, notarised by Apple, and
-# with the ticket stapled on.
+# with the ticket stapled on. With --dmg it also leaves the beach disk image,
+# built from that same stapled bundle and notarised and stapled in its own right.
 #
 #   Tools/release/package-app.sh --app <path> --zip <path> --version 1.4.0 --build 431
+#   Tools/release/package-app.sh --app <path> --zip <path> --dmg <path> --version 1.4.0 --build 431
 #   Tools/release/package-app.sh --preflight
+#
+# The two artefacts are for two different readers. The zip is what Sparkle
+# downloads, because that is the enclosure every installed copy of Bloom already
+# knows how to unpack. The disk image is what a person downloads from the site,
+# because that is the one with the artwork and the drag-to-Applications window.
+# Both hold the same signed and stapled bundle.
 #
 # --preflight checks the identity and the notarisation credential and stops.
 # Tools/release.sh runs it before the build, so a missing credential costs a second
@@ -50,6 +58,7 @@ set -euo pipefail
 
 APP=
 ZIP=
+DMG=
 VERSION=
 BUILD=
 PREFLIGHT=0
@@ -58,6 +67,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --app) APP=$2; shift 2 ;;
     --zip) ZIP=$2; shift 2 ;;
+    --dmg) DMG=$2; shift 2 ;;
     --version) VERSION=$2; shift 2 ;;
     --build) BUILD=$2; shift 2 ;;
     --preflight) PREFLIGHT=1; shift ;;
@@ -176,26 +186,43 @@ rm -f "$ZIP"
 # attributes a bundle's signature is partly held in.
 ditto -c -k --keepParent "$APP" "$ZIP"
 
-echo "==> notarising, which takes a few minutes"
-SUBMISSION_JSON="$(mktemp -t bloom-notary)"
-trap 'rm -f "$SUBMISSION_JSON"' EXIT
+# One copy of submit-and-check, because the app and the disk image each need a
+# ticket of their own and a second hand written copy is a second place for the
+# status test below to be left out. That test is the whole point: notarytool
+# exits 0 for a submission it accepted, waited on, and was told was Invalid, so
+# the status in the JSON is what decides and the exit code is not.
+notarise() {
+  local subject=$1
+  echo "==> notarising ${subject:t}, which takes a few minutes"
 
-if ! xcrun notarytool submit "$ZIP" "${NOTARY_ARGS[@]}" --wait --output-format json > "$SUBMISSION_JSON"; then
-  echo "==> notarytool failed" >&2
-  cat "$SUBMISSION_JSON" >&2
-  exit 1
-fi
+  local json
+  json="$(mktemp -t bloom-notary)"
 
-STATUS="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status",""))' "$SUBMISSION_JSON")"
-SUBMISSION_ID="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("id",""))' "$SUBMISSION_JSON")"
+  if ! xcrun notarytool submit "$subject" "${NOTARY_ARGS[@]}" --wait --output-format json > "$json"; then
+    echo "==> notarytool failed" >&2
+    cat "$json" >&2
+    rm -f "$json"
+    exit 1
+  fi
 
-if [ "$STATUS" != "Accepted" ]; then
-  echo "==> notarisation was $STATUS, not Accepted" >&2
-  # The submission log is the only thing that says which file Apple objected to.
-  # Without it the failure is a single word and the next hour is guesswork.
-  [ -n "$SUBMISSION_ID" ] && xcrun notarytool log "$SUBMISSION_ID" "${NOTARY_ARGS[@]}" >&2 || true
-  exit 1
-fi
+  # `verdict` rather than the obvious `status`: in zsh `status` is a read-only
+  # synonym for `?`, and `local status` inside a function is an error that stops
+  # the release right here, after Apple has already been paid the wait.
+  local verdict submission
+  verdict="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status",""))' "$json")"
+  submission="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("id",""))' "$json")"
+  rm -f "$json"
+
+  if [ "$verdict" != "Accepted" ]; then
+    echo "==> notarisation of ${subject:t} was $verdict, not Accepted" >&2
+    # The submission log is the only thing that says which file Apple objected to.
+    # Without it the failure is a single word and the next hour is guesswork.
+    [ -n "$submission" ] && xcrun notarytool log "$submission" "${NOTARY_ARGS[@]}" >&2 || true
+    exit 1
+  fi
+}
+
+notarise "$ZIP"
 
 # The ticket is stapled to the app, not to the zip, so the app is re-zipped
 # afterwards. Without this the receiver has to be online the first time they
@@ -211,3 +238,35 @@ xcrun stapler validate "$APP"
 spctl --assess --type execute --verbose=2 "$APP"
 
 echo "==> $ZIP"
+
+if [ -n "$DMG" ]; then
+  # Built here, from the bundle a few lines above, rather than from a second
+  # build of the same commit: what a person drags into Applications is then
+  # byte for byte the app Apple notarised, ticket included.
+  echo "==> building the disk image"
+  mkdir -p "$(dirname "$DMG")"
+  "$(dirname "$0")/../dmg/build.sh" --app "$APP" --out "$DMG"
+
+  # A disk image carries a notarisation ticket of its own, and stapling the app
+  # inside it does not put one there. Gatekeeper assesses the file that was
+  # downloaded, so an unstapled image asks Apple about itself the first time it
+  # is opened: a wait on a slow connection, and a refusal on no connection at
+  # all. That is the whole reason for the second round trip below.
+  echo "==> signing the disk image"
+  codesign --force --timestamp --sign "$IDENTITY" "$DMG"
+  codesign --verify --strict --verbose=2 "$DMG"
+
+  notarise "$DMG"
+
+  echo "==> stapling the disk image"
+  xcrun stapler staple "$DMG"
+  xcrun stapler validate "$DMG"
+
+  # --type open, and against the image rather than the app. A disk image is a
+  # document being opened, not something being executed, and assessing the app
+  # instead would pass happily on an image that had never been notarised at
+  # all, which is exactly the mistake this line exists to catch.
+  spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+
+  echo "==> $DMG"
+fi
