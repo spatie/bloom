@@ -109,3 +109,17 @@ struct ReviewCommentSnapshotGallery: View {
         }
     }
 }
+
+extension Gallery {
+    /// The registry entry for this page. See `Gallery`.
+///
+/// The one page whose subject is a caret: the review comment field draws its focus ring only in
+/// the key window of the active app.
+    static let reviewComments = Gallery(
+        name: "review-comments",
+        title: "Review comments",
+        size: CGSize(width: 820, height: 900),
+        needsFocus: true,
+        view: { _ in AnyView(ReviewCommentSnapshotGallery()) }
+    )
+}

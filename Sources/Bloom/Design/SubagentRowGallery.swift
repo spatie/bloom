@@ -180,3 +180,17 @@ struct SubagentRowGallery: View {
         .frame(height: 32)
     }
 }
+
+extension Gallery {
+    /// The registry entry for this page. See `Gallery`.
+///
+/// Four panes at the sidebar's 260 point default, side by side, over a second row of three that
+/// traces the removal.
+    static let subagentRows = Gallery(
+        name: "subagent-rows",
+        title: "Subagent rows",
+        size: CGSize(width: 1_180, height: 720),
+        needsFocus: false,
+        view: { _ in AnyView(SubagentRowGallery()) }
+    )
+}

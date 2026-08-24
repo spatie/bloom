@@ -110,3 +110,14 @@ struct InspectorTabStripGallery: View {
         return model
     }
 }
+
+extension Gallery {
+    /// The registry entry for this page. See `Gallery`.
+    static let inspectorTabs = Gallery(
+        name: "inspector-tabs",
+        title: "Inspector tabs",
+        size: CGSize(width: 460, height: 470),
+        needsFocus: false,
+        view: { app in AnyView(InspectorTabStripGallery(app: app)) }
+    )
+}

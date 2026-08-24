@@ -121,3 +121,14 @@ struct PendingDeleteSnapshotGallery: View {
         }
     }
 }
+
+extension Gallery {
+    /// The registry entry for this page. See `Gallery`.
+    static let pendingDelete = Gallery(
+        name: "pending-delete",
+        title: "Pending message delete",
+        size: CGSize(width: 820, height: 900),
+        needsFocus: false,
+        view: { _ in AnyView(PendingDeleteSnapshotGallery()) }
+    )
+}

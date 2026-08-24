@@ -83,3 +83,14 @@ struct RetrySnapshotGallery: View {
         }
     }
 }
+
+extension Gallery {
+    /// The registry entry for this page. See `Gallery`.
+    static let retries = Gallery(
+        name: "retries",
+        title: "Retries",
+        size: CGSize(width: 860, height: 1_020),
+        needsFocus: false,
+        view: { _ in AnyView(RetrySnapshotGallery()) }
+    )
+}

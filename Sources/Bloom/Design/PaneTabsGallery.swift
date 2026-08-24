@@ -194,3 +194,16 @@ private struct Fixture {
     var icon: String
     var isActive: Bool
 }
+
+extension Gallery {
+    /// The registry entry for this page. See `Gallery`.
+///
+/// No field on this page: every tab on it is drawn as a label.
+    static let paneTabs = Gallery(
+        name: "pane-tabs",
+        title: "Pane tabs",
+        size: CGSize(width: 700, height: 720),
+        needsFocus: false,
+        view: { app in AnyView(PaneTabsGallery(app: app)) }
+    )
+}

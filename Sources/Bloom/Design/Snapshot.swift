@@ -715,107 +715,6 @@ enum Snapshot {
         CommandLine.arguments.contains("--snapshot-gallery")
     }
 
-    /// Which gallery `--snapshot-gallery` is being pointed at.
-    ///
-    /// A name rather than a second flag per gallery. Every case here is a page `--snapshot` cannot
-    /// photograph, and mostly for one reason: `ImageRenderer` cannot draw the control the page is
-    /// about. A review comment is written in the composer's own text view, the inspector's tab
-    /// strip is an `NSSegmentedControl`, and rendered offscreen each came out as a yellow bar,
-    /// which is exactly nothing where the whole point is the shape of a control. The other two
-    /// are here because what they show is a pointer or a keyboard on the page, which an offscreen
-    /// render has neither of.
-    ///
-    /// It said "both of these" while holding four cases, which is how long it had been since
-    /// anybody added one and read the paragraph above it.
-    private enum GalleryChoice: String {
-        case reviewComments = "review-comments"
-        case inspectorTabs = "inspector-tabs"
-        case diffScope = "diff-scope"
-        case pendingDelete = "pending-delete"
-        case runningGlyph = "running-glyph"
-        case retries = "retries"
-        case subagentRows = "subagent-rows"
-        case paneTabs = "pane-tabs"
-        case sidebarSelection = "sidebar-selection"
-
-        var title: String {
-            switch self {
-            case .reviewComments: "Review comments"
-            case .inspectorTabs: "Inspector tabs"
-            case .diffScope: "Diff scope"
-            case .pendingDelete: "Pending message delete"
-            case .runningGlyph: "Running mark"
-            case .retries: "Retries"
-            case .subagentRows: "Subagent rows"
-            case .paneTabs: "Pane tabs"
-            case .sidebarSelection: "Sidebar selection"
-            }
-        }
-
-        var size: CGSize {
-            switch self {
-            case .reviewComments: CGSize(width: 820, height: 900)
-            case .inspectorTabs: CGSize(width: 460, height: 470)
-            case .diffScope: CGSize(width: 460, height: 700)
-            case .pendingDelete: CGSize(width: 820, height: 900)
-            case .runningGlyph: CGSize(width: 700, height: 900)
-            case .retries: CGSize(width: 860, height: 1020)
-            // Four panes at the sidebar's 260 point default, side by side, over a second row of
-            // three that traces the removal.
-            case .subagentRows: CGSize(width: 1_180, height: 720)
-            case .paneTabs: CGSize(width: 700, height: 720)
-            case .sidebarSelection: CGSize(width: 520, height: 520)
-            }
-        }
-
-        /// Whether this page has to be photographed in the key window of the active app.
-        ///
-        /// True only where the state under review is a field somebody is typing in: a text view
-        /// draws its focus ring nowhere else. Taking the keys is a rude thing to do to whoever is
-        /// using the machine, so a page that does not need them does not ask.
-        ///
-        /// A `switch` rather than an `==`, for the reason `CLAUDE.md` gives about widened enums: a
-        /// fifth gallery added to this file should have to answer the question rather than
-        /// silently inherit `false`.
-        var needsFocus: Bool {
-            switch self {
-            case .reviewComments: true
-            // The sidebar's selection does, and for the same reason: a source list draws the
-            // emphasized fill only while it holds the keyboard, and that fill is the whole page.
-            case .sidebarSelection: true
-            // The running mark does not, even though it moves: the heartbeat has no frontmost
-            // gate left, so it runs in a window nobody has given the keys to.
-            // The pane tabs page has no field in it either: every tab on it is drawn as a label.
-            case .inspectorTabs, .diffScope, .pendingDelete, .runningGlyph, .retries,
-                 .subagentRows, .paneTabs:
-                false
-            }
-        }
-    }
-
-    private static func gallery(from arguments: [String]) -> GalleryChoice {
-        guard let index = arguments.firstIndex(of: "--gallery"), index + 1 < arguments.count,
-              let choice = GalleryChoice(rawValue: arguments[index + 1])
-        else { return .reviewComments }
-        return choice
-    }
-
-    @ViewBuilder
-    @MainActor
-    private static func galleryView(_ choice: GalleryChoice, app: AppModel) -> some View {
-        switch choice {
-        case .reviewComments: ReviewCommentSnapshotGallery()
-        case .inspectorTabs: InspectorTabStripGallery(app: app)
-        case .diffScope: DiffScopeGallery(app: app)
-        case .pendingDelete: PendingDeleteSnapshotGallery()
-        case .runningGlyph: RunningGlyphGallery()
-        case .retries: RetrySnapshotGallery()
-        case .subagentRows: SubagentRowGallery()
-        case .paneTabs: PaneTabsGallery(app: app)
-        case .sidebarSelection: SidebarSelectionGallery()
-        }
-    }
-
     static func scheduleGalleryCapture() {
         refuseWithoutDatabase(flag: "--snapshot-gallery")
         refuseIfStale(flag: "--snapshot-gallery")
@@ -831,7 +730,12 @@ enum Snapshot {
             exit(1)
         }
         let output = arguments[index + 1]
-        let choice = gallery(from: arguments)
+        // The registry, not a switch. See `Gallery`: nine cases across four parallel switches in
+        // this file is what a page used to cost to add, and what five agents conflicted over in a
+        // day.
+        let index2 = arguments.firstIndex(of: "--gallery").map { $0 + 1 }
+        let named = index2.flatMap { $0 < arguments.count ? arguments[$0] : nil }
+        let choice = Snapshot.gallery(named: named)
 
         Task { @MainActor in
             try? FileManager.default.createDirectory(
@@ -855,7 +759,7 @@ enum Snapshot {
                 window.title = choice.title
                 window.appearance = NSAppearance(named: name == "dark" ? .darkAqua : .aqua)
                 window.contentView = NSHostingView(
-                    rootView: galleryView(choice, app: app)
+                    rootView: choice.view(app)
                         .frame(width: size.width, height: size.height)
                         .background(Palette.windowBackground)
                 )
@@ -871,7 +775,7 @@ enum Snapshot {
                 // two-line comment was photographed in a one-line box.
                 try? await Task.sleep(for: .seconds(2))
 
-                let path = "\(output)/\(choice.rawValue)-\(name).png"
+                let path = "\(output)/\(choice.name)-\(name).png"
                 if captureWindowServerImage(windowNumber: window.windowNumber, to: path) {
                     print(path)
                 } else {
@@ -976,7 +880,7 @@ enum Snapshot {
             // is worth a photograph anyway, since it is exactly what Reduce Motion draws, and it
             // is the only picture of this mark an agent can take without asking to film the
             // owner's screen. The moving figure is `--snapshot-gallery --gallery running-glyph`.
-            ("running-glyph", AnyView(RunningGlyphGallery()), GalleryChoice.runningGlyph.size),
+            ("running-glyph", AnyView(RunningGlyphGallery()), Gallery.runningGlyph.size),
             // No review-comments and no inspector-tabs scene, deliberately, and for one reason:
             // `ImageRenderer` paints SwiftUI's yellow placeholder over an `NSViewRepresentable`,
             // and each of those two pages exists to show one. The review comment box is the

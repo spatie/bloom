@@ -109,3 +109,14 @@ struct DiffScopeGallery: View {
         return model
     }
 }
+
+extension Gallery {
+    /// The registry entry for this page. See `Gallery`.
+    static let diffScope = Gallery(
+        name: "diff-scope",
+        title: "Diff scope",
+        size: CGSize(width: 460, height: 700),
+        needsFocus: false,
+        view: { app in AnyView(DiffScopeGallery(app: app)) }
+    )
+}
