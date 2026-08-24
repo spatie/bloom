@@ -24,11 +24,22 @@ struct ReviewPaneView: View {
         model.changedFiles.first { $0.path == tab.path }
     }
 
-    private var exists: Bool {
-        !tab.path.isEmpty
-            && FileManager.default.fileExists(
-                atPath: (model.workspace.path as NSString).appendingPathComponent(tab.path)
-            )
+    /// Whether the file is still on disk. Resolved when the path or the changes poll moves, and
+    /// never from `body`: this was a computed property calling `FileManager.fileExists`, and
+    /// `body` runs on every frame of a window resize because `.onGeometryChange` writes
+    /// `paneHeight` as the pane grows. That is a `stat` per frame, on the main thread, for the
+    /// whole of a drag.
+    ///
+    /// Nil until the first answer arrives, and read as "assume it is there", so opening a file
+    /// draws it on the frame it was clicked rather than flashing the sentence that says it is
+    /// gone. A file that really has gone says so a frame later.
+    @State private var exists: Bool?
+
+    private var isPresent: Bool { exists ?? true }
+
+    private struct ExistsID: Hashable {
+        var path: String
+        var generation: Int
     }
 
     /// How tall the whole pane is, which caps how far the composer's divider can be dragged.
@@ -66,6 +77,16 @@ struct ReviewPaneView: View {
             guard let session = model.activeSession else { return }
             model.prepareTranscript(for: session.id)
         }
+        // Keyed on the poll as well as the path, because a file can be deleted underneath a reader
+        // who has not moved: the changes generation is what says the worktree has been looked at
+        // again.
+        .task(id: ExistsID(path: tab.path, generation: model.changesGeneration)) {
+            let path = tab.path
+            let absolute = (model.workspace.path as NSString).appendingPathComponent(path)
+            exists = await Task.detached(priority: .userInitiated) {
+                !path.isEmpty && FileManager.default.fileExists(atPath: absolute)
+            }.value
+        }
     }
 
     /// The conversation a turn sent from here joins: the active session's, which already falls
@@ -83,16 +104,9 @@ struct ReviewPaneView: View {
             // the new file's defaults key.
             DiffView(model: model, file: changed)
                 .id(changed.path)
-        } else if exists, FileMediaView.isMedia(path: tab.path) {
-            // An image, a PDF, a video. `FilePreview` reads a file as text and would say there is
-            // nothing to show, which for the screenshot somebody just attached is both wrong and
-            // the whole reason they clicked.
-            FileMediaView(worktree: model.workspace.path, path: tab.path)
-                .id(tab.path)
-        } else if exists {
-            FilePreview(model: model, path: tab.path)
-                .id(tab.path)
         } else if tab.path.isEmpty {
+            // Asked before the two branches below, because with no path there is nothing to look
+            // for and `isPresent` answers optimistically until the first look comes back.
             EmptyStateView(
                 glyph: "doc.text",
                 title: "No file open",
@@ -100,6 +114,15 @@ struct ReviewPaneView: View {
                     ? "Nothing in this worktree differs from \(model.workspace.baseBranch) yet."
                     : "Pick a file in the inspector to read it here."
             )
+        } else if isPresent, FileMediaView.isMedia(path: tab.path) {
+            // An image, a PDF, a video. `FilePreview` reads a file as text and would say there is
+            // nothing to show, which for the screenshot somebody just attached is both wrong and
+            // the whole reason they clicked.
+            FileMediaView(worktree: model.workspace.path, path: tab.path)
+                .id(tab.path)
+        } else if isPresent {
+            FilePreview(model: model, path: tab.path)
+                .id(tab.path)
         } else {
             // A file the agent deleted, or one that was reverted and then removed. Said plainly
             // rather than left as an empty rectangle, which reads as a failure to load.

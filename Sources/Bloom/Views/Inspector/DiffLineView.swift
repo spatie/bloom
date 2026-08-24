@@ -5,7 +5,30 @@ import BloomCore
 ///
 /// The same view serves both layouts. Unified asks for both number columns, side by side asks for
 /// one and is given an explicit width so the two panes stay aligned even when a line is empty.
-struct DiffLineView: View {
+struct DiffLineView: View, Equatable {
+    /// A row redraws when what it holds changes, and not because the closure beside it is a new
+    /// closure. `onComment` is written at the call site as `{ beginDraft(at: $0) }`, so it is a
+    /// freshly allocated function on every pass over the diff, and functions are never equal to
+    /// one another: without this SwiftUI has to assume every row differs from the one it drew a
+    /// moment ago, and a diff of a few hundred realised rows rebuilds all of them whenever
+    /// anything at all moves in the view above.
+    ///
+    /// `onComment` is not among the fields compared, and cannot be. Conforming to `View` makes
+    /// this type main actor isolated, `Equatable.==` is a nonisolated requirement, and a function
+    /// type is not `Sendable`, so a `nonisolated ==` may not so much as ask whether the closure is
+    /// nil. It does not need to: whether the `+` is offered at all is decided by `offeredSpot`
+    /// from `line` and `numbers`, both of which are compared, and the two call sites that ask for
+    /// this comparison are the two halves of one diff and always hand it the same kind of closure.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.line == rhs.line
+            && lhs.language == rhs.language
+            && lhs.carry == rhs.carry
+            && lhs.emphasis == rhs.emphasis
+            && lhs.numbers == rhs.numbers
+            && lhs.width == rhs.width
+            && lhs.isCommented == rhs.isCommented
+    }
+
     /// Which gutters this row shows. Side by side shows one, unified shows both.
     enum Numbers {
         case both

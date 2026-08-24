@@ -14,7 +14,6 @@ import BloomCore
 struct ChangedFileList: View {
     let model: WorkspaceModel
 
-    @State private var hoveredPath: String?
     @State private var pendingRevert: ChangedFile?
     /// A revert that failed, so the user hears about it. It used to be a `try?` that threw the
     /// error away and refreshed the list, which left a file that had not been reverted looking
@@ -174,43 +173,49 @@ struct ChangedFileList: View {
         if let file = item.node.file {
             row(file, depth: item.depth)
         } else {
-            ChangedFolderRow(
-                name: item.node.name,
-                path: item.node.path,
-                isExpanded: !collapsed.contains(item.node.path),
-                depth: item.depth,
-                fullPath: fullPath(item.node.path),
-                action: { toggle(item.node.path) }
-            )
-            .rowBackground(isSelected: false, isHovered: hoveredPath == item.node.path)
+            // The hover is the row's own, and the fill is painted by the wrapper rather than by
+            // the row, for the two reasons `HoverRow` gives.
+            HoverRow(isSelected: false) {
+                ChangedFolderRow(
+                    name: item.node.name,
+                    path: item.node.path,
+                    isExpanded: !collapsed.contains(item.node.path),
+                    depth: item.depth,
+                    fullPath: fullPath(item.node.path),
+                    action: { toggle(item.node.path) }
+                )
+                .equatable()
+            }
             .padding(.horizontal, Metrics.spacingSmall)
-            .onHoverChange { hovering in hover(item.node.path, hovering) }
         }
     }
 
     private func row(_ file: ChangedFile, depth: Int = 0) -> some View {
         let isSelected = model.selectedFilePath == file.path
 
-        return ChangedFileRow(
-            file: file,
-            isSelected: isSelected,
-            fullPath: fullPath(file.path),
-            depth: depth,
-            // Always a selection, never a toggle. Clicking the open row used to close the diff
-            // under the list; there is no diff under the list any more, and a click that
-            // deselected would now close nothing while making the row you just aimed at go quiet.
-            onSelect: {
-                model.selectedFilePath = file.path
-                FileReview.open(path: file.path, in: model)
-                quickLookArm += 1
-            },
-            onRevert: { pendingRevert = file }
-        )
-        // The fill is applied here rather than inside the row so that the row's own body can read
-        // the selection out of the environment and invert its status letter accordingly.
-        .rowBackground(isSelected: isSelected, isHovered: hoveredPath == file.path)
+        // The fill is applied outside the row rather than inside it, so that the row's own body
+        // can read the selection out of the environment and invert its status letter accordingly.
+        // That is also why the hover cannot simply be state on the row: see `HoverRow`.
+        return HoverRow(isSelected: isSelected) {
+            ChangedFileRow(
+                file: file,
+                isSelected: isSelected,
+                fullPath: fullPath(file.path),
+                depth: depth,
+                // Always a selection, never a toggle. Clicking the open row used to close the diff
+                // under the list; there is no diff under the list any more, and a click that
+                // deselected would now close nothing while making the row you just aimed at go
+                // quiet.
+                onSelect: {
+                    model.selectedFilePath = file.path
+                    FileReview.open(path: file.path, in: model)
+                    quickLookArm += 1
+                },
+                onRevert: { pendingRevert = file }
+            )
+            .equatable()
+        }
         .padding(.horizontal, Metrics.spacingSmall)
-        .onHoverChange { hovering in hover(file.path, hovering) }
     }
 
     // MARK: - Actions
@@ -237,10 +242,6 @@ struct ChangedFileList: View {
             collapsed.insert(path)
         }
         rebuild()
-    }
-
-    private func hover(_ path: String, _ hovering: Bool) {
-        hoveredPath = hovering ? path : (hoveredPath == path ? nil : hoveredPath)
     }
 
     private func fullPath(_ relative: String) -> String {

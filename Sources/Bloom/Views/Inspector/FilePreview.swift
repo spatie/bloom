@@ -21,11 +21,6 @@ struct FilePreview: View {
     /// The same cap `FilePathChip` puts on the folder above a diff.
     private static let chipWidth: CGFloat = 170
 
-    /// Below this the bar keeps the filename and the controls and drops the folder beside it.
-    /// The same rule and the same number as `FileHeaderBar`, so the two bars give the folder up at
-    /// the same pane width rather than a few points apart.
-    private static let folderThreshold: CGFloat = 340
-
     @State private var lines: [String] = []
     @State private var carries: [LexState] = []
     @State private var language: Language = .plainText
@@ -115,7 +110,7 @@ struct FilePreview: View {
     /// to say: nothing here has a diff, a revert or two layouts to choose between.
     private var header: some View {
         HStack(spacing: InspectorLayout.gap) {
-            if width >= Self.folderThreshold, !directory.isEmpty {
+            if FileBarLayout.showsDirectory(width: width), !directory.isEmpty {
                 Chip(text: directory)
                     .frame(maxWidth: Self.chipWidth, alignment: .leading)
                     .layoutPriority(-1)
@@ -131,13 +126,7 @@ struct FilePreview: View {
             // holds its text in `FileEditSession` rather than on this view: switching to View,
             // to another file or to another workspace keeps the typing, and the dot is the only
             // thing that says so.
-            if isDirty {
-                Circle()
-                    .fill(Palette.accent)
-                    .frame(width: Metrics.dot, height: Metrics.dot)
-                    .help("Unsaved changes")
-                    .accessibilityLabel("Unsaved changes")
-            }
+            UnsavedEditsDot(session: session, path: absolutePath)
 
             Spacer(minLength: InspectorLayout.tight)
 
@@ -209,8 +198,6 @@ struct FilePreview: View {
                     + "\(FileEditor.sizeLimit / 1_048_576) MB."
         )
     }
-
-    private var isDirty: Bool { session.isDirty(absolutePath) }
 
     private var filename: String { (path as NSString).lastPathComponent }
 
@@ -304,29 +291,54 @@ struct FilePreview: View {
 
         guard !Task.isCancelled else { return }
 
-        let source = model.contents(of: path)
         let detected = Language.detect(path: path)
+        let lineLimit = Self.lineLimit
+        let columnLimit = Self.columnLimit
 
-        guard let source else {
+        // Reading the file, splitting it and measuring its widest line all happen here, in one hop
+        // and off the main actor. The read is the whole file off disk, the split walks all of it,
+        // and the width is a per-character loop over up to five thousand lines: on a large file
+        // that is the window held still for the length of all three. Only the carry pass used to
+        // be moved off, and on a file with no lexer at all that is the one of the four that costs
+        // nothing.
+        let prepared = await Task.detached(priority: .userInitiated) { () -> Prepared? in
+            guard let source = try? String(contentsOfFile: absolute, encoding: .utf8) else {
+                return nil
+            }
+            let all = source.components(separatedBy: "\n")
+            let truncated = all.count > lineLimit
+            let kept = truncated ? Array(all.prefix(lineLimit)) : all
+            return Prepared(
+                lines: kept,
+                carries: CarryPass.states(for: kept, language: detected),
+                maxColumns: min(
+                    kept.reduce(0) { max($0, CodeMetrics.columns(of: $1)) }, columnLimit
+                ),
+                isTruncated: truncated
+            )
+        }.value
+
+        guard !Task.isCancelled else { return }
+
+        guard let prepared else {
             lines = []
             isLoading = false
             return
         }
 
-        let all = source.components(separatedBy: "\n")
-        let truncated = all.count > Self.lineLimit
-        let kept = truncated ? Array(all.prefix(Self.lineLimit)) : all
-
-        let states = await Task.detached(priority: .userInitiated) {
-            CarryPass.states(for: kept, language: detected)
-        }.value
-
-        guard !Task.isCancelled else { return }
-        lines = kept
-        carries = states
+        lines = prepared.lines
+        carries = prepared.carries
         language = detected
-        isTruncated = truncated
-        maxColumns = min(kept.reduce(0) { max($0, CodeMetrics.columns(of: $1)) }, Self.columnLimit)
+        isTruncated = prepared.isTruncated
+        maxColumns = prepared.maxColumns
         isLoading = false
+    }
+
+    /// Everything the reader needs about a file, so the whole of the reading is one hop.
+    private struct Prepared: Sendable {
+        var lines: [String]
+        var carries: [LexState]
+        var maxColumns: Int
+        var isTruncated: Bool
     }
 }

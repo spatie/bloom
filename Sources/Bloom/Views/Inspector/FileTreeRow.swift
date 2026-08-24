@@ -6,7 +6,17 @@ import AppKit
 ///
 /// As with `ChangedFileRow`, the tree paints the selection fill and this row reads it back out of
 /// the environment, which is the only way its own body can invert the marks that carry meaning.
-struct FileTreeRow: View {
+struct FileTreeRow: View, Equatable {
+    /// On the values, not on `action`, which is a fresh closure on every pass over the tree. See
+    /// `ChangedFileRow` for the whole of the reason.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.item.node == rhs.item.node
+            && lhs.item.depth == rhs.item.depth
+            && lhs.isExpanded == rhs.isExpanded
+            && lhs.isChanged == rhs.isChanged
+            && lhs.fullPath == rhs.fullPath
+    }
+
     var item: FileTreeRowItem
     var isExpanded: Bool
     var isChanged: Bool

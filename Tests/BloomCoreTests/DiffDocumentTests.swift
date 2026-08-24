@@ -178,6 +178,59 @@ struct DiffDocumentTests {
 
         #expect(document.maxColumns == 800)
     }
+
+    // MARK: Priming
+
+    @Test("the lines offered for priming are the first printed ones, with their carry")
+    func primesFromTheTop() {
+        let document = DiffDocument.prepare(
+            file: file([
+                line(.context, "/* opened", index: 0),
+                line(.deletion, "gone", index: 1),
+                line(.addition, "here", index: 2),
+                line(.noNewline, "\\ No newline at end of file", index: 3),
+            ]),
+            path: "Sources/Thing.swift"
+        )
+
+        let primed = document.linesToPrime(limit: 3)
+        #expect(primed.map(\.text) == ["/* opened", "gone", "here"])
+        // The carry is the state the line BEGINS in, so the first line of an open block comment
+        // still carries the clean state and the two after it do not.
+        #expect(primed[0].carry == LexState())
+        #expect(primed[1].carry != LexState())
+        #expect(primed[2].carry != LexState())
+    }
+
+    @Test("priming stops at the limit and skips the no-newline marker")
+    func primingIsBounded() {
+        let document = DiffDocument.prepare(
+            file: file([
+                line(.addition, "one", index: 0),
+                line(.addition, "two", index: 1),
+                line(.noNewline, "\\ No newline at end of file", index: 2),
+            ]),
+            path: "Sources/Thing.swift"
+        )
+
+        #expect(document.linesToPrime(limit: 1).map(\.text) == ["one"])
+        #expect(document.linesToPrime(limit: 99).map(\.text) == ["one", "two"])
+        #expect(document.linesToPrime(limit: 0).isEmpty)
+    }
+}
+
+/// One number, asked by both of the bars that draw a file's name, which is why it is in the core
+/// rather than written out as a private constant in each of them.
+@Suite("File bar layout")
+struct FileBarLayoutTests {
+    @Test("the folder is kept above the threshold and dropped below it")
+    func folderFollowsTheWidth() {
+        #expect(FileBarLayout.showsDirectory(width: FileBarLayout.folderThreshold))
+        #expect(FileBarLayout.showsDirectory(width: FileBarLayout.folderThreshold + 1))
+        #expect(!FileBarLayout.showsDirectory(width: FileBarLayout.folderThreshold - 1))
+        // A bar that has not been measured yet has room for nothing.
+        #expect(!FileBarLayout.showsDirectory(width: 0))
+    }
 }
 
 @Suite("Code columns")

@@ -34,11 +34,8 @@ struct FileHeaderBar: View {
     /// apportioned, so it dropped the folder while there was still most of a pane to spare.
     @State private var width: CGFloat = 0
 
-    /// Below this the bar keeps the filename and the controls and drops the folder beside it.
-    /// A readable filename, the collapsed control cluster and the pane's own insets, with just
-    /// enough left for a folder worth reading.
-    private static let folderThreshold: CGFloat = 340
-
+    /// Whether this file is holding unsaved edits. Read where the dialog below is built, never
+    /// from `body`: see `UnsavedEditsDot` for what reading it here used to cost.
     private var isDirty: Bool { session.isDirty(absolutePath) }
 
     private var absolutePath: String {
@@ -49,8 +46,9 @@ struct FileHeaderBar: View {
         HStack(spacing: InspectorLayout.gap) {
             FilePathChip(
                 file: file,
-                hasUnsavedEdits: isDirty,
-                showsDirectory: width >= Self.folderThreshold
+                session: session,
+                absolutePath: absolutePath,
+                showsDirectory: FileBarLayout.showsDirectory(width: width)
             )
 
             // Lower priority than the name beside it, so a wide bar spends its slack on

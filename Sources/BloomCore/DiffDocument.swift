@@ -101,4 +101,29 @@ public struct DiffDocument: Sendable {
             maxColumns: min(maxColumns, columnLimit)
         )
     }
+
+    /// The printed lines a renderer should highlight before anybody asks for them, each with the
+    /// lexer state it begins in.
+    ///
+    /// Every line of a diff was lexed twice. `prepare` above walks the whole file to thread the
+    /// carry state and throws the tokens away, and then the first time a row was built the view's
+    /// own highlight cache lexed the same line again, on the main thread, while the reader was
+    /// waiting to see it. Handing this list to that cache from a background task turns the first
+    /// draw of every row it covers into a lookup.
+    ///
+    /// Bounded, and deliberately from the top: a reader arrives at the first hunk, and the cache
+    /// this feeds holds a few thousand lines in total across every open file, so priming a whole
+    /// large diff would only evict what it had just put in.
+    public func linesToPrime(limit: Int) -> [(text: String, carry: LexState)] {
+        guard limit > 0 else { return [] }
+        var result: [(text: String, carry: LexState)] = []
+        result.reserveCapacity(limit)
+        for hunk in file.hunks {
+            for line in hunk.lines where line.kind != .noNewline {
+                result.append((line.text, carries[line.index] ?? LexState()))
+                if result.count == limit { return result }
+            }
+        }
+        return result
+    }
 }

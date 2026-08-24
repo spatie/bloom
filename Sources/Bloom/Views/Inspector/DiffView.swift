@@ -32,6 +32,16 @@ struct DiffView: View {
     /// Where every pending comment on this file draws, recomputed by `rebuild` so the bands and
     /// the rows they sit under always come from the same pass. See `ReviewPlacements`.
     @State private var placements: [ReviewPlacement] = []
+    /// Which printed lines wear a comment or the open editor, for the row tint. Assigned in the
+    /// same pass as `placements` above, which is the invariant that pass exists to hold. It was a
+    /// computed property building a `Set` out of `placements`, and `isCommented` reads it once per
+    /// rendered row and twice per row in the split layout, so the set was rebuilt from scratch for
+    /// every line of the diff on every pass.
+    @State private var commentedSpots: Set<ReviewSpot> = []
+    /// Highlighting for the top of the diff, warmed off the main thread. Cancelled when another
+    /// file is presented, because those lines are not the ones anybody is about to read. See
+    /// `prime`.
+    @State private var priming: Task<Void, Never>?
     /// The comment being written on this file, read through the model rather than held as view
     /// state, because everything that edits it outlives this view and this view does not: the
     /// editor row sits in a lazy stack and is destroyed when scrolled away, and the whole view is
@@ -118,6 +128,7 @@ struct DiffView: View {
         .onChange(of: isEditable) { _, editable in
             if !editable { mode = .diff }
         }
+        .onDisappear { priming?.cancel() }
         .alert(
             "Could not revert \(file.filename)",
             isPresented: $revertProblem.isPresent(),
@@ -161,6 +172,7 @@ struct DiffView: View {
     // MARK: Loading
 
     private func load() async {
+        priming?.cancel()
         phase = .loading
         rows = []
         expandedRuns = []
@@ -259,6 +271,33 @@ struct DiffView: View {
         fileLines = model.contents(of: path).map(ReviewCommentAnchor.split)
         phase = .ready(document)
         rebuild()
+        prime(document)
+    }
+
+    /// How much of a diff is highlighted before anybody scrolls to it. Several screens, which is
+    /// what a reader gets through before the cache is warm anyway, and far short of the four
+    /// thousand lines `SyntaxCache` holds across every open file: priming a whole large diff would
+    /// evict what it had just put in, and a diff between that limit and `largeDiffLimit` can
+    /// already thrash it by being scrolled.
+    private static let primeLimit = 600
+
+    /// Highlight the top of the diff off the main thread, so the rows a reader actually reaches
+    /// are a lookup rather than a lex.
+    ///
+    /// Every line was lexed twice. `DiffDocument.prepare` walks the file to thread the carry state
+    /// and throws the tokens away, and then `SyntaxCache` lexed the same line again, on the main
+    /// actor, the first time each row was built. The cache is an `NSCache` and documented thread
+    /// safe for exactly this, so the second pass can happen before the first row is asked for.
+    private func prime(_ document: DiffDocument) {
+        let language = document.language
+        let lines = document.linesToPrime(limit: Self.primeLimit)
+        priming?.cancel()
+        priming = Task.detached(priority: .utility) {
+            for line in lines {
+                guard !Task.isCancelled else { return }
+                _ = SyntaxCache.attributed(line: line.text, language: language, carry: line.carry)
+            }
+        }
     }
 
     /// Quiet explanations for the changes that have no lines to show.
@@ -387,6 +426,10 @@ struct DiffView: View {
                 isCommented: isCommented(line, numbers: .both),
                 onComment: { beginDraft(at: $0) }
             )
+            // Every pass over this diff rebuilds every row the stack has already realised, and a
+            // long file realises hundreds. Comparing the row's own values first is what keeps a
+            // second pass free, and the closure above is why it has to be said: see `DiffLineView`.
+            .equatable()
 
         case let .commentBand(placement):
             ReviewCommentBandView(
@@ -404,9 +447,12 @@ struct DiffView: View {
 
         case .commentEditor:
             ReviewCommentEditorView(
+                // Read out of `reviewText` rather than off the draft, so a keystroke invalidates
+                // this one editor instead of everything that had to ask where the editor is. See
+                // `ReviewTextHost`.
                 text: Binding(
-                    get: { model.reviewDrafts[file.path]?.text ?? "" },
-                    set: { model.reviewDrafts[file.path]?.text = $0 }
+                    get: { model.reviewText.drafts[file.path] ?? "" },
+                    set: { model.reviewText.drafts[file.path] = $0 }
                 ),
                 width: width,
                 onCommit: commitDraft,
@@ -441,6 +487,9 @@ struct DiffView: View {
             isCommented: isCommented(line, numbers: numbers),
             onComment: { beginDraft(at: $0) }
         )
+        // For the reason given at the unified call site above, and twice as much of it: the split
+        // layout builds two of these per row.
+        .equatable()
     }
 
     // MARK: - Review comments
@@ -448,13 +497,6 @@ struct DiffView: View {
     /// The pending comments on this one file, which is all a diff of it can place.
     private var fileComments: [ReviewComment] {
         model.reviewComments.filter { $0.filePath == file.path }
-    }
-
-    /// Every printed line wearing a comment or the open editor, for the row tint.
-    private var commentedSpots: Set<ReviewSpot> {
-        var spots = Set(placements.compactMap(\.spot))
-        if let draftSpot { spots.insert(draftSpot) }
-        return spots
     }
 
     /// The spots one rendered row answers for, filtered the way `DiffLineView.offeredSpot` is,
@@ -490,21 +532,19 @@ struct DiffView: View {
         else { return }
         // A second press while text is pending moves the editor, and the text moves with it:
         // clearing it here would be the same silent loss the model-held draft exists to prevent.
-        model.reviewDrafts[file.path] = ReviewDraft(
-            spot: spot,
-            anchor: anchor,
-            text: draft?.text ?? ""
-        )
+        model.reviewDrafts[file.path] = ReviewDraft(spot: spot, anchor: anchor)
     }
 
     private func cancelDraft() {
         model.reviewDrafts[file.path] = nil
+        model.reviewText.drafts[file.path] = nil
     }
 
     /// Return or the Comment button, and nothing else.
     private func commitDraft() {
         guard let draft else { return }
-        let body = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = (model.reviewText.drafts[file.path] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else {
             cancelDraft()
             return
@@ -526,10 +566,13 @@ struct DiffView: View {
     /// scrolling away from it and by walking to another file, and neither is a reason to lose a
     /// rewritten sentence.
     private func editBinding(for id: ReviewCommentID) -> Binding<String>? {
-        guard model.reviewEdits[id] != nil else { return nil }
+        guard model.reviewEdits.contains(id) else { return nil }
+        // Whether the band is open comes off the model, which changes twice per edit; what is in
+        // it comes out of `ReviewTextHost`, which changes on every character. Asking one question
+        // used to answer both, and the answer to the first was rebuilt on every keystroke.
         return Binding(
-            get: { model.reviewEdits[id] ?? "" },
-            set: { model.reviewEdits[id] = $0 }
+            get: { model.reviewText.edits[id] ?? "" },
+            set: { model.reviewText.edits[id] = $0 }
         )
     }
 
@@ -537,14 +580,16 @@ struct DiffView: View {
     /// is in it: the pencil is a point away from the text, and a stray click on it must not be
     /// the thing that resets a paragraph somebody has been rewriting.
     private func beginEdit(of comment: ReviewComment) {
-        guard model.reviewEdits[comment.id] == nil else { return }
-        model.reviewEdits[comment.id] = comment.body
+        guard !model.reviewEdits.contains(comment.id) else { return }
+        model.reviewText.edits[comment.id] = comment.body
+        model.reviewEdits.insert(comment.id)
     }
 
     /// Escape and Cancel. The typed text goes; the comment keeps the body it had. Discarding is
     /// safe here in a way it is not on a click elsewhere, because this is somebody saying so.
     private func cancelEdit(of id: ReviewCommentID) {
-        model.reviewEdits[id] = nil
+        model.reviewEdits.remove(id)
+        model.reviewText.edits[id] = nil
     }
 
     /// Return and Save. What the three answers mean is `ReviewCommentEdit`'s, and a refusal
@@ -552,7 +597,7 @@ struct DiffView: View {
     /// an emptied field is a mistake far more often than it is a request to delete, and the
     /// remove control is right there for when it is not.
     private func commitEdit(of comment: ReviewComment) {
-        guard let typed = model.reviewEdits[comment.id] else { return }
+        guard let typed = model.reviewText.edits[comment.id] else { return }
         switch ReviewCommentEdit.outcome(typed: typed, replacing: comment.body) {
         case .refused:
             return
@@ -632,6 +677,8 @@ struct DiffView: View {
     private func rebuild() {
         guard case let .ready(document) = phase else {
             rows = []
+            placements = []
+            commentedSpots = []
             return
         }
         // Placed in the same pass that lays the rows out, so a band can never survive the row it
@@ -643,6 +690,9 @@ struct DiffView: View {
             currentLines: fileLines,
             revealedNewLines: revealedContextLines(document)
         )
+        var spots = Set(placements.compactMap(\.spot))
+        if let draftSpot { spots.insert(draftSpot) }
+        commentedSpots = spots
         rows = isSideBySide ? splitRows(document) : unifiedRows(document)
 
         // The editor follows its line, and a rebuild can take that line off the screen: a reload
