@@ -86,8 +86,38 @@ all async and the pure helpers on the same types are not, so the test costs no e
 its own. The three helper types above are named in the allow-list because they are what a view
 calls **instead** of reaching for a process itself. `CreateWorkspaceSheet` was the last exception,
 calling `Git.branches` from its own `.task`; that loading and both branch decisions it fed are
-`WorkspaceStartContext` in the core now, tested, so the sheet's entry in the allow-list in
-`Tools/house-rules.sh` is dead and can come off.
+`WorkspaceStartContext` in the core now, tested, so the sheet's entry came off and the allow-list
+in `Tools/house-rules.sh` is back to the three helper types it was meant to hold.
+
+## One subject per file
+
+`AppModel` reached 2,421 lines: four enums and structs stacked above the class, fourteen `MARK`
+sections inside it, and not one of those was a decision anybody took. Each arrived as three methods
+put beside the last three, because the file was already open.
+
+**A type gets a file. A subject gets a file.** A type that has grown a second subject is split with
+an extension in the same directory, named `Type+Subject.swift`. `AppModel+ProjectIcons.swift` and
+`AppModel+TranscriptSearch.swift` are the shape, each opening with a paragraph saying what the file
+is for; `AppModel+Naming.swift` is the same split without that paragraph, and is the poorer for it.
+What stays in `Type.swift` is what nothing else can hold: the stored properties, because Swift has
+none in an extension, the initialiser, and the members that genuinely coordinate between subjects.
+
+Two things decide where the cut goes, and neither is taste. A stored property cannot move, so a
+grouping that needs one moved is the wrong grouping. And `private` is file scoped, so every member
+that leaves either takes the private state it touches with it or forces that state wider. Count the
+widenings before splitting. Five files that keep a type's internals are worth more than nine that
+publish them, and a cut that widens the properties whose doc comments say they have one writer is a
+cut in the wrong place. `Store` is the case that settles it: 2,603 lines around one `private let
+db`, where every extension would have to publish the connection, so it stays as it is.
+
+A long file is not the failure, and `make lint` has no rule here because every threshold tried
+fired on files that were right. A 1,200 line ceiling needs an exception list the day it is written,
+and half of what goes on that list is correct as it stands. Counting top-level types fires on
+`CodexEvent.swift` at twenty-two, `Models.swift` at fourteen and eighty other files besides, every
+one of them fine. `Store` at 2,603 lines is right and `AppModel` at 2,421 was not, and no number
+tells them apart. The failure is a file nobody can find anything in. The question before adding to
+one is whether the thing being added is what the file is about, and the answer to no is a new file
+rather than a longer one.
 
 ## Comments
 
