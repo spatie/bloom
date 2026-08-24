@@ -465,3 +465,54 @@ struct ArchiveCleanupTests {
         )
     }
 }
+
+// MARK: - What a delete reports
+
+/// The bug: `deleteArchived` returned an `Int` over a `try?`, so a refused write and an empty
+/// selection were the same value. The selection cleared, the list reloaded with every row still
+/// in it, and nothing was said.
+@Suite("What a delete reports")
+struct ArchiveDeletionOutcomeTests {
+    @Test("a delete that worked says nothing, because the rows leaving is the report")
+    func silentOnSuccess() {
+        #expect(ArchiveDeletionOutcome.deleted(3).sentence == nil)
+        #expect(ArchiveDeletionOutcome.deleted(3).didDelete)
+    }
+
+    /// Nothing selected is not a failure and must not raise a modal.
+    @Test("deleting nothing is not a refusal")
+    func zeroIsNotARefusal() {
+        #expect(ArchiveDeletionOutcome.deleted(0).sentence == nil)
+        #expect(!ArchiveDeletionOutcome.deleted(0).didDelete)
+    }
+
+    @Test("a refusal says what is safe, whether trying again helps, and quotes no SQL")
+    func aRefusalIsASentence() throws {
+        let outcome = ArchiveDeletionOutcome.refused(
+            complaint: "database disk image is malformed."
+        )
+        let sentence = try #require(outcome.sentence)
+
+        #expect(!outcome.didDelete)
+        // What is at stake, which is nothing.
+        #expect(sentence.contains("they are all still here"))
+        #expect(sentence.contains("No worktree and no branch was involved"))
+        // Whether trying again helps, which here it does not.
+        #expect(sentence.contains("refuse the next attempt the same way"))
+        #expect(sentence.contains("The database said: database disk image is malformed."))
+        #expect(!sentence.contains("DELETE"))
+        #expect(!sentence.contains("?"))
+    }
+
+    /// Home wrote its own `count` and dropped the grouping separator, so the same machine read
+    /// "1000 workspaces" on Home and "1,000 chats" in Archive. One function, one answer.
+    @Test("counts are grouped and pluralised the same way everywhere")
+    func countsAgree() {
+        #expect(ArchiveDeletion.count(1, "workspace") == "1 workspace")
+        #expect(ArchiveDeletion.count(0, "workspace") == "0 workspaces")
+        // Not pinned to a separator: this machine formats a thousand as "1.000" and a runner
+        // formats it "1,000". What the three copies got wrong was having no separator at all.
+        #expect(ArchiveDeletion.count(1_000, "workspace") != "1000 workspaces")
+        #expect(ArchiveDeletion.count(1_000, "workspace").hasSuffix(" workspaces"))
+    }
+}

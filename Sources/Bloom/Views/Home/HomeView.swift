@@ -209,16 +209,16 @@ struct HomeView: View {
         // workspaces" about a machine holding three of them, directly above a panel that says all
         // three exist. Neither half of the readout mentioned them.
         if !filter.isNarrowed, listing.considered == 0, !archived.isEmpty {
-            return "\(count(archived.count, "workspace")), all archived and hidden"
+            return "\(ArchiveDeletion.count(archived.count, "workspace")), all archived and hidden"
         }
 
         var text: String
         if filter.isNarrowed {
-            text = "Showing \(listing.shown) of \(count(listing.considered, "workspace"))"
+            text = "Showing \(listing.shown) of \(ArchiveDeletion.count(listing.considered, "workspace"))"
         } else {
-            text = count(listing.considered, "workspace")
+            text = ArchiveDeletion.count(listing.considered, "workspace")
             if app.repos.count > 1 {
-                text += " across \(count(app.repos.count, "project"))"
+                text += " across \(ArchiveDeletion.count(app.repos.count, "project"))"
             }
         }
 
@@ -241,10 +241,6 @@ struct HomeView: View {
 
     private var hasAnyWorkspace: Bool {
         !app.workspaces.isEmpty || !archived.isEmpty
-    }
-
-    private func count(_ value: Int, _ noun: String) -> String {
-        value == 1 ? "1 \(noun)" : "\(value) \(noun)s"
     }
 
     // MARK: - Empty
@@ -340,7 +336,7 @@ struct HomeView: View {
                     Label("Everything here is archived", systemImage: "archivebox")
                 } description: {
                     Text(
-                        "All \(count(archived.count, "workspace")) on this Mac have been archived, "
+                        "All \(ArchiveDeletion.count(archived.count, "workspace")) on this Mac have been archived, "
                             + "and archived ones are being hidden."
                     )
                 } actions: {

@@ -971,16 +971,30 @@ final class WorkspaceModel {
     /// whole-value write would carry a stale anchor back over a fresh one and pin the note to a
     /// line it has already left. The store's rule says the same in one sentence: an edit changes
     /// the column it names and no others.
+    ///
+    /// The list moves only if the row did. It used to move either way, so a refused write changed
+    /// the text on screen and the next `reload` put the old text back with nothing said in
+    /// between. `addReviewComment` above always got this right; these three did not.
     func editReviewComment(id: ReviewCommentID, body: String) async {
         guard let store else { return }
-        try? await store.updateReviewCommentBody(id: id, body: body)
+        do {
+            try await store.updateReviewCommentBody(id: id, body: body)
+        } catch {
+            report(refused: error)
+            return
+        }
         guard let index = reviewComments.firstIndex(where: { $0.id == id }) else { return }
         reviewComments[index].body = body
     }
 
     func removeReviewComment(id: ReviewCommentID) async {
         guard let store else { return }
-        try? await store.deleteReviewComment(id: id)
+        do {
+            try await store.deleteReviewComment(id: id)
+        } catch {
+            report(refused: error)
+            return
+        }
         reviewComments.removeAll { $0.id == id }
         // A comment that no longer exists cannot be being edited. Left behind, the buffer would
         // be a dictionary that grows for the life of the workspace and, worse, would put the old
@@ -988,15 +1002,36 @@ final class WorkspaceModel {
         reviewEdits[id] = nil
     }
 
+    /// One alert however many rows were refused, because a database that will not take a delete
+    /// will not take the next one either and eight identical modals say nothing the first did not.
+    private func report(refused error: any Error) {
+        app.alert = BloomAlert(
+            title: "That comment was not saved",
+            message: WorkspaceTrouble.reviewCommentUnwritable(
+                complaint: WorkspaceTrouble.complaint(about: error)
+            ).sentence
+        )
+    }
+
     /// Takes exactly the sent comments out, by id rather than by wiping the workspace, so a
     /// comment written in the moment between composing and this call is not silently thrown away
     /// with them.
     func removeReviewComments(ids: [ReviewCommentID]) async {
         guard let store, !ids.isEmpty else { return }
-        for id in ids { try? await store.deleteReviewComment(id: id) }
-        let sent = Set(ids)
+        var removed: [ReviewCommentID] = []
+        var refusal: (any Error)?
+        for id in ids {
+            do {
+                try await store.deleteReviewComment(id: id)
+                removed.append(id)
+            } catch {
+                refusal = refusal ?? error
+            }
+        }
+        let sent = Set(removed)
         reviewComments.removeAll { sent.contains($0.id) }
-        for id in ids { reviewEdits[id] = nil }
+        for id in removed { reviewEdits[id] = nil }
+        if let refusal { report(refused: refusal) }
     }
 
     // MARK: - The worktree listing

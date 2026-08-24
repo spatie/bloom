@@ -23,6 +23,11 @@ struct NotesPaneView: View {
     /// See `WorkspaceNote.needsSave`.
     @State private var saved = ""
     @State private var hasLoaded = false
+    /// Set when the row could not be read, which keeps the editor disabled. Not a bool, because
+    /// the pane has three states and a blank field is the wrong drawing of two of them.
+    @State private var couldNotLoad = false
+    /// Set when a write was refused, cleared by the write that succeeds.
+    @State private var couldNotSave = false
     @State private var saveTask: Task<Void, Never>?
     @FocusState private var isEditing: Bool
 
@@ -70,7 +75,19 @@ struct NotesPaneView: View {
     /// Hit testing off, or the first click would land on the label instead of the caret.
     @ViewBuilder
     private var placeholder: some View {
-        if hasLoaded, text.isEmpty {
+        if couldNotLoad {
+            VStack(alignment: .leading, spacing: Metrics.spacing) {
+                Text(WorkspaceNote.unreadable)
+                    .font(Typo.body)
+                    .foregroundStyle(Palette.textSecondary)
+                    .frame(maxWidth: 380, alignment: .leading)
+                Button("Try again") { Task { await load() } }
+                    .buttonStyle(.bordered)
+                    .font(Typo.label)
+            }
+            .padding(.horizontal, Metrics.inset + 5)
+            .padding(.vertical, Metrics.spacingWide + 8)
+        } else if hasLoaded, text.isEmpty {
             Text("Anything worth remembering about this workspace. It is never sent to the agent on its own.")
                 .font(Typo.body)
                 .foregroundStyle(Palette.textPlaceholder)
@@ -87,9 +104,11 @@ struct NotesPaneView: View {
 
     private var footer: some View {
         HStack(spacing: Metrics.spacing) {
-            Text("Kept with this workspace")
+            // The one place the pane says whether the text is on disk, so a refused write has
+            // somewhere to be seen. It used to say "Kept with this workspace" through a failure.
+            Text(couldNotSave ? WorkspaceNote.unwritable : "Kept with this workspace")
                 .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
+                .foregroundStyle(couldNotSave ? Palette.warning : Palette.textSecondary)
 
             Spacer()
 
@@ -109,12 +128,21 @@ struct NotesPaneView: View {
 
     // MARK: - Loading and saving
 
+    /// Not `try?` and not `?? ""`. A refused read used to be indistinguishable from no note at
+    /// all, so the pane showed a blank page over a real one and the first keystroke wrote the
+    /// blank version over it. A missing row is still an empty note; a database that would not
+    /// answer leaves the field disabled and says so.
     private func load() async {
         guard !hasLoaded, let store = model.store else { return }
-        let stored = (try? await store.note(workspaceID: model.workspace.id))?.body ?? ""
-        text = stored
-        saved = stored
-        hasLoaded = true
+        do {
+            let stored = try await store.note(workspaceID: model.workspace.id)?.body ?? ""
+            text = stored
+            saved = stored
+            couldNotLoad = false
+            hasLoaded = true
+        } catch {
+            couldNotLoad = true
+        }
     }
 
     /// Waits out the typing rather than writing on every keystroke, for the reasons written down on
@@ -139,16 +167,37 @@ struct NotesPaneView: View {
         guard let store = model.store else { return }
         let workspaceID = model.workspace.id
         let body = text
-        saved = body
-        Task { try? await store.saveNote(workspaceID: workspaceID, body: body) }
+        // Detached, so `saved` is set from inside rather than out here. This view is usually gone
+        // by the time the write lands, and a `saved` moved before the write is the same lie the
+        // debounced path told.
+        Task { @MainActor in
+            do {
+                try await store.saveNote(workspaceID: workspaceID, body: body)
+                saved = body
+                couldNotSave = false
+            } catch {
+                couldNotSave = true
+            }
+        }
     }
 
+    /// `saved` moves only when the row actually took the text.
+    ///
+    /// It used to move whatever the write did, and `needsSave` compares against nothing else, so
+    /// one refused write convinced this pane forever that the note was on disk: no further
+    /// autosave fired, `saveNow` returned early, and the text existed only in `@State` until the
+    /// pane went away. Left where it was, the next keystroke tries again.
     private func write() async {
         guard let store = model.store else { return }
         guard WorkspaceNote.needsSave(stored: saved, typed: text) else { return }
         let body = text
-        try? await store.saveNote(workspaceID: model.workspace.id, body: body)
-        saved = body
+        do {
+            try await store.saveNote(workspaceID: model.workspace.id, body: body)
+            saved = body
+            couldNotSave = false
+        } catch {
+            couldNotSave = true
+        }
     }
 
     /// **It does not send the turn**, which is the same rule the browser's screenshot button

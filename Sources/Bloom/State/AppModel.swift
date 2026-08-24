@@ -855,11 +855,18 @@ final class AppModel {
     /// The selection is moved first. A window sitting on `.archived(id)` whose row has just been
     /// deleted would fall through `DetailColumn` to Home, which is the right answer to an
     /// impossible state and the wrong thing to do to somebody who is halfway through tidying up.
+    /// The outcome rather than a count, because a refused write and an empty selection used to be
+    /// the same `0` and the caller could not tell them apart to say so.
     @discardableResult
-    func deleteArchived(_ ids: [WorkspaceID]) async -> Int {
-        guard let store, !ids.isEmpty else { return 0 }
-        let removed = (try? await store.deleteArchivedWorkspaces(ids: ids)) ?? 0
-        guard removed > 0 else { return 0 }
+    func deleteArchived(_ ids: [WorkspaceID]) async -> ArchiveDeletionOutcome {
+        guard let store, !ids.isEmpty else { return .deleted(0) }
+        let removed: Int
+        do {
+            removed = try await store.deleteArchivedWorkspaces(ids: ids)
+        } catch {
+            return .refused(complaint: WorkspaceTrouble.complaint(about: error))
+        }
+        guard removed > 0 else { return .deleted(0) }
 
         if let open = selection.archivedWorkspaceID, ids.contains(open) {
             selection = .archive
@@ -873,7 +880,7 @@ final class AppModel {
             workspaceModels[id] = nil
         }
         invalidateArchived()
-        return removed
+        return .deleted(removed)
     }
 
     /// Rewrites the database so the pages a delete freed go back to the filesystem. Slow on a

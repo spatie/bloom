@@ -67,6 +67,26 @@ public struct WorkspaceNote: Sendable, Hashable {
         body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : body
     }
 
+    /// What the pane says when the row could not be read back.
+    ///
+    /// The read used to turn a refusal into an empty string and mark itself loaded, so a database
+    /// that would not answer showed a blank page over a note that was really there, and the next
+    /// keystroke wrote the blank version over it. The field stays disabled instead, and this says
+    /// why. Here rather than in the view for the reason the rest of this type is: a sentence a
+    /// view owns is a sentence nothing can read back.
+    public static let unreadable = """
+        This note could not be read out of Bloom's database, so it is not being shown and cannot \
+        be edited. Nothing has been lost: it is still in the row it was in. Try again, and if that \
+        fails too, quit Bloom and open it again.
+        """
+
+    /// What the pane says when a write was refused.
+    ///
+    /// The pane used to mark the text saved whatever the write did, and `needsSave` compares
+    /// against exactly that, so one refused write convinced it forever that the note was on disk.
+    /// Leaving `saved` alone is what makes the next keystroke try again, which is why this says so.
+    public static let unwritable = "Not saved. Bloom's database refused the write. Retried as you type."
+
     /// The sentence this note becomes when it is handed to the composer, or nothing when there is
     /// nothing to hand over.
     ///

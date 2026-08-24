@@ -208,6 +208,43 @@ public struct DatabaseSize: Sendable, Hashable {
 /// workspace appears here. What is left is the record: the conversation, what the agent was asked,
 /// what it did, and the review someone wrote on it. `WorkspaceRestore` can bring a workspace back
 /// from a branch and can never bring any of that back, so this confirmation says so plainly.
+/// What came of destroying a set of archived records.
+///
+/// It used to be an `Int` that the one call site discarded, over a store call wrapped in `try?`,
+/// so a refused write and an empty selection were the same value. On a refusal the selection
+/// cleared, the list reloaded, every row was still there, and the reader was told nothing at all.
+/// A count is not an outcome: the two questions are "how many went" and "did it work".
+public enum ArchiveDeletionOutcome: Sendable, Hashable {
+    case deleted(Int)
+    case refused(complaint: String)
+
+    /// What to say, or nothing when there is nothing worth saying.
+    ///
+    /// A successful delete says nothing: the rows leave the list, which is the whole report. Only
+    /// the refusal has a sentence, and it follows `WorkspaceTrouble`'s rule of naming what is
+    /// wrong, what is safe, and whether trying again helps.
+    public var sentence: String? {
+        switch self {
+        case .deleted: return nil
+        case let .refused(complaint):
+            return """
+                Bloom could not delete those archived workspaces, so they are all still here and \
+                nothing has been freed. No worktree and no branch was involved: this is the \
+                database refusing to write, and it will refuse the next attempt the same way. \
+                Quit Bloom and open it again, and if it happens a second time the database itself \
+                needs looking at. The database said: \(complaint)
+                """
+        }
+    }
+
+    /// Whether the rows this was asked about are gone, which is what decides whether a selection
+    /// may be cleared.
+    public var didDelete: Bool {
+        if case let .deleted(count) = self { return count > 0 }
+        return false
+    }
+}
+
 public struct ArchiveDeletion: Sendable, Hashable {
     public let footprints: [ArchivedWorkspaceFootprint]
 
@@ -330,7 +367,11 @@ public struct ArchiveDeletion: Sendable, Hashable {
     /// "1 chat", "3 chats". The same helper `WorkspaceSafetyReport` keeps, for the same reason:
     /// this is read at the moment somebody decides whether to destroy something, which is the
     /// worst place in the app to make them translate "message(s)".
-    static func count(_ value: Int, _ noun: String) -> String {
+    ///
+    /// Public because it was not, and three views wrote it again rather than reach for it. Two of
+    /// the three dropped `.formatted()` while they were at it, so the same machine read "1000
+    /// workspaces" on Home and "1,000 chats" here.
+    public static func count(_ value: Int, _ noun: String) -> String {
         "\(value.formatted()) \(noun)\(value == 1 ? "" : "s")"
     }
 

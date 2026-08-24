@@ -70,6 +70,8 @@ public enum WorkspaceTrouble: Sendable, Equatable {
     /// gone into is still there. See `recording(transcript:complaint:)` for the refusal that
     /// is deliberately not this.
     case transcriptUnwritable(complaint: String)
+    /// Bloom could not write a review comment, so the list on screen is what the row still holds.
+    case reviewCommentUnwritable(complaint: String)
     /// Anything else, in git's own words with the command line dropped.
     case unexplained(String)
 
@@ -213,6 +215,15 @@ public enum WorkspaceTrouble: Sendable, Equatable {
                 while the database is refusing writes, so quit Bloom and open it again; if it \
                 happens a second time the database itself needs looking at. The database said: \
                 \(complaint)
+                """
+
+        case let .reviewCommentUnwritable(complaint):
+            return """
+                Bloom could not save that review comment, so the list is showing what is stored \
+                rather than what you typed. Nothing in the worktree has been touched and no \
+                comment already written has been lost. Trying again will fail the same way while \
+                the database is refusing writes, so quit Bloom and open it again; if it happens a \
+                second time the database itself needs looking at. The database said: \(complaint)
                 """
 
         case let .unexplained(message):
@@ -413,7 +424,7 @@ public enum WorkspaceTrouble: Sendable, Equatable {
     /// holds a `ShellError` on most paths and a `SQLiteError` on the last one. Each has its own
     /// stripper already, and picking between them here is what stops "message [UPDATE workspaces
     /// SET ... VALUES (?, ?, ?)]" reaching a modal the way it did from `readableMessage`.
-    static func complaint(about error: any Error) -> String {
+    public static func complaint(about error: any Error) -> String {
         error is SQLiteError
             ? TranscriptStanding.complaint(about: error)
             : CheckoutStanding.complaint(about: error)

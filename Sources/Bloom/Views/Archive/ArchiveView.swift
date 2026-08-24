@@ -95,13 +95,13 @@ struct ArchiveView: View {
     }
 
     private var summaryOfEverything: String {
-        "\(count(cleanup.footprints.count, "archived workspace")), holding \(ArchiveDeletion.bytes(cleanup.totalBytes))"
+        "\(ArchiveDeletion.count(cleanup.footprints.count, "archived workspace")), holding \(ArchiveDeletion.bytes(cleanup.totalBytes))"
     }
 
     private var summaryOfSelection: String {
         let rows = cleanup.selected(selected, order: order)
         let bytes = rows.reduce(0) { $0 + $1.totalBytes }
-        return "\(count(rows.count, "workspace")) selected, \(ArchiveDeletion.bytes(bytes))"
+        return "\(ArchiveDeletion.count(rows.count, "workspace")) selected, \(ArchiveDeletion.bytes(bytes))"
     }
 
     // MARK: - The list
@@ -231,7 +231,7 @@ struct ArchiveView: View {
     private func subtitle(_ footprint: ArchivedWorkspaceFootprint) -> String {
         var parts = [footprint.repoName, footprint.workspace.branch]
         if footprint.messageCount > 0 {
-            parts.append("\(count(footprint.messageCount, "message")) in \(count(footprint.sessionCount, "chat"))")
+            parts.append("\(ArchiveDeletion.count(footprint.messageCount, "message")) in \(ArchiveDeletion.count(footprint.sessionCount, "chat"))")
         }
         if footprint.branchIsLocal == false {
             parts.append("branch not on this Mac")
@@ -308,8 +308,14 @@ struct ArchiveView: View {
     }
 
     private func delete(_ deletion: ArchiveDeletion) async {
-        await app.deleteArchived(deletion.footprints.map(\.id))
-        selected = []
+        let outcome = await app.deleteArchived(deletion.footprints.map(\.id))
+        // The selection survives a refusal. Clearing it either way was the second half of the
+        // silence: the rows all came back on the reload with nothing ticked and nothing said, so
+        // the gesture looked like it had worked on nothing.
+        if outcome.didDelete { selected = [] }
+        if let sentence = outcome.sentence {
+            app.alert = BloomAlert(title: "Nothing was deleted", message: sentence)
+        }
         await load()
     }
 
@@ -320,7 +326,4 @@ struct ArchiveView: View {
         isCompacting = false
     }
 
-    private func count(_ value: Int, _ noun: String) -> String {
-        "\(value.formatted()) \(noun)\(value == 1 ? "" : "s")"
-    }
 }

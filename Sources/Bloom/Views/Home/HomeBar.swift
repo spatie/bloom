@@ -240,12 +240,8 @@ struct HomeBar: View {
         .help(
             archivedCount == 0
                 ? "Nothing has been archived yet"
-                : "Leave the \(count(archivedCount, "archived workspace")) out of the list"
+                : "Leave the \(ArchiveDeletion.count(archivedCount, "archived workspace")) out of the list"
         )
-    }
-
-    private func count(_ value: Int, _ noun: String) -> String {
-        value == 1 ? "1 \(noun)" : "\(value) \(noun)s"
     }
 
     // MARK: - Actions
