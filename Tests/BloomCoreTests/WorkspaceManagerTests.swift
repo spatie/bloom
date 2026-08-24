@@ -349,4 +349,74 @@ struct WorkspaceManagerTests {
         let manager = WorkspaceManager(store: try makeTestStore("wm"))
         #expect(manager.matches(name, pattern: pattern) == expected)
     }
+    // MARK: - Opening a branch that already exists
+
+    /// A clone of `upstream` with a branch that only ever existed on the remote, which is the
+    /// ordinary shape of a pull request somebody else opened.
+    private func cloneWithRemoteBranch(_ branch: String) async throws -> (TempRepo, TempRepo) {
+        let upstream = try await TempRepo()
+        try await Shell.check("git", ["checkout", "-q", "-b", branch], cwd: upstream.path)
+        try upstream.write("mcp.txt", "figma\n")
+        try await upstream.commit("add the check")
+        try await Shell.check("git", ["checkout", "-q", "main"], cwd: upstream.path)
+
+        let clonePath = TestScratch.unique("bloom-git")
+        try await Shell.check("git", ["clone", "-q", upstream.path, clonePath], cwd: upstream.path)
+        return (upstream, TempRepo(existing: clonePath))
+    }
+
+    @Test("opens a branch that lives only on the remote, and the diff is against the default branch")
+    func opensRemoteOnlyBranch() async throws {
+        let (upstream, clone) = try await cloneWithRemoteBranch("figma-mcp-check")
+        defer { upstream.cleanUp(); clone.cleanUp() }
+        let manager = WorkspaceManager(store: try makeTestStore("wm"))
+        let registered = try await manager.addRepository(at: clone.path)
+
+        let workspace = try await manager.createWorkspace(
+            repo: registered,
+            prompt: "have a look",
+            checkout: .branch(ExistingBranch(name: "figma-mcp-check", isLocal: false))
+        )
+
+        #expect(workspace.branch == "figma-mcp-check")
+        #expect(workspace.name == "figma-mcp-check")
+        // The load-bearing half. A workspace opened ON a branch is measured against the branch it
+        // came from, so the work already on it is what the Changes tab shows. Cutting a new branch
+        // from it would leave this at zero, which is what sent somebody hunting for a bug.
+        #expect(workspace.baseBranch == "main")
+        let stat = try await Git.diffStat(worktree: workspace.path, base: workspace.baseBranch)
+        #expect(stat.files == 1)
+
+        // Tracking, not a detached copy: `Git.baseline`, the push button and the pull request
+        // machinery all read the upstream.
+        let upstreamRef = try await Shell.check(
+            "git", ["rev-parse", "--abbrev-ref", "figma-mcp-check@{upstream}"], cwd: workspace.path
+        )
+        #expect(upstreamRef.trimmed == "origin/figma-mcp-check")
+    }
+
+    @Test("opens a branch the picker called remote but that is already local, under its own name")
+    func opensBranchAlreadyFetched() async throws {
+        let (upstream, clone) = try await cloneWithRemoteBranch("figma-mcp-check")
+        defer { upstream.cleanUp(); clone.cleanUp() }
+        // Fetched by hand, or fetched by the picker's own listing being a moment out of date.
+        try await Shell.check(
+            "git", ["branch", "figma-mcp-check", "origin/figma-mcp-check"], cwd: clone.path
+        )
+        let manager = WorkspaceManager(store: try makeTestStore("wm"))
+        let registered = try await manager.addRepository(at: clone.path)
+
+        let workspace = try await manager.createWorkspace(
+            repo: registered,
+            prompt: "have a look",
+            checkout: .branch(ExistingBranch(name: "figma-mcp-check", isLocal: false))
+        )
+
+        // Not `figma-mcp-check-2`, and not a throw. `worktree add --track -b` refuses a branch
+        // that is already there, and uniquing the name put the row on a branch nothing was on.
+        #expect(workspace.branch == "figma-mcp-check")
+        let worktrees = try await Git.worktrees(of: clone.path)
+        #expect(worktrees.contains { $0.branch == "figma-mcp-check" && $0.path == workspace.path })
+    }
+
 }

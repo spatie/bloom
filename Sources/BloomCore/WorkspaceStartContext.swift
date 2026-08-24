@@ -70,32 +70,51 @@ public struct WorkspaceCheckoutOptions: Sendable {
         self.failure = failure
     }
 
+    /// Both branch listings are read here rather than handed in.
+    ///
+    /// The local half used to arrive from the create sheet, which loaded it in a task of its own,
+    /// and the two tasks raced: this one read the sheet's list before the other had written it, so
+    /// on every open the local half was empty. A branch that had never been pushed was missing
+    /// from the picker altogether, and one that existed on both sides was offered as "(remote)"
+    /// and then checked out with `--track -b`, which git refuses when the local branch is already
+    /// there. Reading it here costs one `for-each-ref`, which is what the sheet was paying anyway,
+    /// and it runs beside the remote listing rather than after it.
     public static func load(
         repoPath: String,
         defaultBranch: String,
-        localBranches: [String],
         takenBranches: Set<String> = []
     ) async -> WorkspaceCheckoutOptions {
-        let remote = (try? await Git.remoteBranches(of: repoPath)) ?? []
-        let branches = WorkspaceCheckoutPlan.offeredBranches(
-            local: localBranches,
-            remote: remote,
-            defaultBranch: defaultBranch,
-            excluding: takenBranches
-        )
+        async let localListing = Git.branches(of: repoPath)
+        async let remoteListing = Git.remoteBranches(of: repoPath)
+        let local = (try? await localListing) ?? []
+        let remote = (try? await remoteListing) ?? []
 
-        let access = await GitHub.access()
-        guard access == .ready else {
-            return WorkspaceCheckoutOptions(branches: branches, access: access)
+        func options(
+            pullRequests: [PullRequestListing] = [],
+            access: GitHubAccess = .ready,
+            failure: String? = nil
+        ) -> WorkspaceCheckoutOptions {
+            WorkspaceCheckoutOptions(
+                pullRequests: pullRequests,
+                branches: WorkspaceCheckoutPlan.offeredBranches(
+                    local: local,
+                    remote: remote,
+                    defaultBranch: defaultBranch,
+                    excluding: takenBranches,
+                    pullRequestHeads: WorkspaceCheckoutPlan.heads(of: pullRequests)
+                ),
+                access: access,
+                failure: failure
+            )
         }
 
+        let access = await GitHub.access()
+        guard access == .ready else { return options(access: access) }
+
         do {
-            let requests = try await GitHub.openPullRequests(repoPath: repoPath)
-            return WorkspaceCheckoutOptions(pullRequests: requests, branches: branches)
+            return options(pullRequests: try await GitHub.openPullRequests(repoPath: repoPath))
         } catch {
-            return WorkspaceCheckoutOptions(
-                branches: branches, failure: error.readableMessage
-            )
+            return options(failure: error.readableMessage)
         }
     }
 }

@@ -86,6 +86,31 @@ struct WorkspaceCheckoutTests {
         #expect(branches.map(\.name) == ["wip"])
     }
 
+    @Test("A head with a pull request open on it is offered as the pull request and not twice")
+    func skipsBranchesWithAnOpenPullRequest() {
+        let requests = [listing(number: 4, head: "figma-mcp-check")]
+        let branches = WorkspaceCheckoutPlan.offeredBranches(
+            local: ["main", "figma-mcp-check", "wip"],
+            remote: ["origin/figma-mcp-check"],
+            defaultBranch: "main",
+            pullRequestHeads: WorkspaceCheckoutPlan.heads(of: requests)
+        )
+        #expect(branches.map(\.name) == ["wip"])
+    }
+
+    @Test("A fork's head does not hide a branch of this repository that shares its name")
+    func keepsBranchesSharingAForkHeadName() {
+        let requests = [listing(number: 4, head: "patch-1", fork: true, owner: "someone")]
+        #expect(WorkspaceCheckoutPlan.heads(of: requests).isEmpty)
+        let branches = WorkspaceCheckoutPlan.offeredBranches(
+            local: ["main", "patch-1"],
+            remote: [],
+            defaultBranch: "main",
+            pullRequestHeads: WorkspaceCheckoutPlan.heads(of: requests)
+        )
+        #expect(branches.map(\.name) == ["patch-1"])
+    }
+
     @Test("Only origin's branches count as remote branches")
     func readsRemoteNames() {
         #expect(WorkspaceCheckoutPlan.remoteBranchName("origin/feature/x") == "feature/x")
@@ -183,6 +208,15 @@ struct WorkspaceCheckoutTests {
     @Test("An existing local branch is opened as it is, not copied under a new name")
     func opensExistingBranchInPlace() {
         let checkout = WorkspaceCheckout.branch(ExistingBranch(name: "wip", isLocal: true))
+        #expect(WorkspaceCheckoutPlan.localBranch(for: checkout, taken: ["main", "wip"]) == "wip")
+    }
+
+    @Test("A branch checked out from the remote keeps its own name on the row")
+    func keepsRemoteBranchNameOnTheRow() {
+        // The picker's `isLocal` is a measurement, not an instruction: a branch listed as remote
+        // whose local copy already exists must still land on that name, or the row names a branch
+        // the worktree is not on.
+        let checkout = WorkspaceCheckout.branch(ExistingBranch(name: "wip", isLocal: false))
         #expect(WorkspaceCheckoutPlan.localBranch(for: checkout, taken: ["main", "wip"]) == "wip")
     }
 

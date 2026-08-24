@@ -955,10 +955,12 @@ struct CreateWorkspaceSheet: View {
 
     /// The pull requests and branches this project can be opened on.
     ///
-    /// Runs after `load`, and reads the branch list it wrote, so the local half of the branch
-    /// section costs no second `git` call. Branches already checked out in a live workspace are
-    /// left out: git refuses to have one branch in two worktrees, so offering them would be
-    /// offering a create that cannot succeed.
+    /// It reads its own branch listing rather than the one `load` writes into `branches`. The two
+    /// run in separate tasks, so this one used to see an empty list every time and offer every
+    /// branch as though it lived only on the remote. See `WorkspaceCheckoutOptions.load`.
+    ///
+    /// Branches already checked out in a live workspace are left out: git refuses to have one
+    /// branch in two worktrees, so offering them would be offering a create that cannot succeed.
     private func loadCheckouts() async {
         guard let repo else { return }
         isLoadingCheckouts = true
@@ -966,7 +968,6 @@ struct CreateWorkspaceSheet: View {
         let options = await WorkspaceCheckoutOptions.load(
             repoPath: repo.path,
             defaultBranch: repo.defaultBranch,
-            localBranches: branches,
             takenBranches: taken
         )
         guard !Task.isCancelled else { return }

@@ -168,11 +168,18 @@ public enum WorkspaceCheckoutPlan {
     /// than a branch, and a worktree cut from it lands on a name nobody typed. The default branch
     /// is dropped too, because it is the one branch that is already checked out in the project
     /// itself and git will refuse it.
+    ///
+    /// A head with a pull request open on it is dropped as well, and that one is not tidiness.
+    /// The two entries would open the same branch under different bases: the branch entry measures
+    /// against the project's default, the pull request entry against the ref the pull request
+    /// actually targets. Offering both is offering a coin flip over what the Changes tab means,
+    /// and the pull request is the one that knows the answer. See `heads(of:)`.
     public static func offeredBranches(
         local: [String],
         remote: [String],
         defaultBranch: String,
-        excluding taken: Set<String> = []
+        excluding taken: Set<String> = [],
+        pullRequestHeads: Set<String> = []
     ) -> [ExistingBranch] {
         var byName: [String: Bool] = [:]
         for name in local where !name.isEmpty { byName[name] = true }
@@ -183,9 +190,19 @@ public enum WorkspaceCheckoutPlan {
         }
         byName[defaultBranch] = nil
         for name in taken { byName[name] = nil }
+        for name in pullRequestHeads { byName[name] = nil }
         return byName
             .map { ExistingBranch(name: $0.key, isLocal: $0.value) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// The branches the offered pull requests are already speaking for.
+    ///
+    /// A fork's head is left out on purpose. It is not a branch of this repository at all, so a
+    /// local or remote branch of the same name is somebody else's unrelated work wearing the same
+    /// word, and hiding it would hide a branch the pull request cannot open in its place.
+    public static func heads(of requests: [PullRequestListing]) -> Set<String> {
+        Set(requests.filter { !$0.isCrossRepository }.map(\.headRefName))
     }
 
     /// `origin/feature/x` as `feature/x`, and nil for anything that is not a branch of the remote.
@@ -243,8 +260,15 @@ public enum WorkspaceCheckoutPlan {
     public static func localBranch(
         for checkout: WorkspaceCheckout, taken: Set<String>
     ) -> String {
-        if case .branch(let branch) = checkout, branch.isLocal {
-            // An existing local branch is the thing being asked for, not a collision with it.
+        if case .branch(let branch) = checkout {
+            // An existing branch is the thing being asked for, not a collision with it, and that
+            // holds whether or not there is a local copy of it yet. This used to ask `isLocal`,
+            // which is a fact the picker measured seconds ago and about the wrong half: a branch
+            // listed as remote that had since been fetched, or that the picker never saw locally
+            // in the first place, was uniqued to `<name>-2` on the row while the worktree was put
+            // on `<name>`, so the workspace's branch column named a branch that did not exist.
+            // Whether a local ref is there is decided by git at the moment of the checkout. See
+            // `WorkspaceManager.open`.
             return branch.name
         }
         let preferred = checkout.preferredLocalBranch

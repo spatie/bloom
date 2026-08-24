@@ -213,14 +213,21 @@ public struct WorkspaceManager: Sendable {
                 try? await Git.removeWorktree(repo: repo.path, path: worktreePath, force: true)
                 throw error
             }
-        case .branch(let existing) where existing.isLocal:
-            try await Git.addWorktree(
-                repo: repo.path, path: worktreePath, branch: existing.name, base: existing.name
-            )
-        case .branch(let existing):
-            try await Git.addTrackingWorktree(
-                repo: repo.path, path: worktreePath, branch: existing.name
-            )
+        case .branch:
+            // Asked of git here rather than read off `ExistingBranch.isLocal`, which is what the
+            // picker measured when the sheet was opened. A branch fetched by hand in between, or
+            // one the picker listed from the remote while a local copy already existed, took the
+            // tracking route: `worktree add --track -b <name>` and git refusing outright because
+            // the branch it was told to create is already there.
+            if await Git.branchExists(branch, in: repo.path) {
+                try await Git.addWorktree(
+                    repo: repo.path, path: worktreePath, branch: branch, base: branch
+                )
+            } else {
+                try await Git.addTrackingWorktree(
+                    repo: repo.path, path: worktreePath, branch: branch
+                )
+            }
         }
 
         try copyFiles(settings.filesToCopy, from: repo.path, to: worktreePath)
