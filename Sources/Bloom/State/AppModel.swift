@@ -1,5 +1,4 @@
 import AppKit
-import SwiftUI
 import Observation
 import BloomCore
 
@@ -15,6 +14,32 @@ struct BloomAlert: Identifiable {
 ///
 /// Everything here is main-actor isolated. `Store` is an actor, so every read is an await, and
 /// the pattern throughout is: mutate through the store, then reload the affected slice.
+///
+/// **This file is the only writer of `repos` and `workspaces`.** That is the rule the split
+/// around it is built on. Seven extensions hold the subjects that used to be stacked in here, and
+/// each one changes those lists through a seam that takes an id and says one thing:
+/// `hideFromSidebar`, `stopHidingFromSidebar`, `forgetWorkspace`, `invalidateArchived`,
+/// `reorderWorkspaces` and `reorderProjects` are all here for that reason, next to the properties
+/// whose doc comments rest on having one writer.
+///
+/// What else stays is what nothing can hold anywhere else: the stored properties, because Swift
+/// has none in an extension, `bootstrap` and `shutdownEverything`, the agent allowances and the
+/// background refresh loop, the running and waiting mirrors, and the small accessors every
+/// extension reads through.
+///
+/// The subjects that left, and where to look:
+///
+/// - `AppModel+Archive.swift`, archiving, undoing it, reading the archive and restoring
+/// - `AppModel+Workspaces.swift`, creating one, starting one, continuing after a merge
+/// - `AppModel+Projects.swift`, adding and removing a project
+/// - `AppModel+WorkspaceBridge.swift`, the tools an agent calls back in with
+/// - `AppModel+WorkspaceEdits.swift`, a name, a pin, a colour, an unread mark
+/// - `AppModel+Navigation.swift`, moving between workspaces and finding one
+/// - `AppModel+Naming.swift`, `AppModel+ProjectIcons.swift`, `AppModel+TranscriptSearch.swift`
+///
+/// The running, waiting and subagent mirrors did NOT leave, and that is deliberate: they would
+/// publish the five properties whose comments rest entirely on having one writer. The answer for
+/// them is an `AgentActivity` object this model owns, which is a redesign rather than a move.
 @MainActor
 @Observable
 final class AppModel {
@@ -177,7 +202,26 @@ final class AppModel {
     /// creating one has to be invisible to SwiftUI: a tracked write here would invalidate, from
     /// inside its own body, every view that had just read the dictionary. What the UI actually
     /// watches is the state inside each model, which stays observable.
-    @ObservationIgnored private var workspaceModels: [WorkspaceID: WorkspaceModel] = [:]
+    /// Internal rather than private because `private` is file scoped and the archive, the
+    /// projects and the bridge all live in extensions of their own now. It was already reachable
+    /// for reading through `model(for:)`; what widening costs is the write, and the two writers
+    /// outside this file both destroy a model whose workspace has genuinely gone.
+    @ObservationIgnored var workspaceModels: [WorkspaceID: WorkspaceModel] = [:]
+
+    /// Workspaces whose row has already left the sidebar while their archive is still running.
+    ///
+    /// The archive hides the row before any filesystem work starts, on purpose, and the store is
+    /// not told until the very end. Between those two moments the store still answers "active",
+    /// and every full read of it, a reload after a rename, after a pin, after an automatic name
+    /// arriving, would put the row back on screen for the rest of the archive. This is how a
+    /// reload knows about a decision the store has not caught up with yet. See
+    /// `WorkspaceListReconciliation.afterStoreReload`.
+    ///
+    /// Outside observation deliberately: nothing draws from it, `reload` is the only reader, and
+    /// the write that matters to the UI is the one it makes to `workspaces`. It sits up here with
+    /// the stored state rather than down beside the archive, because Swift has no stored property
+    /// in an extension and the archive is one now.
+    @ObservationIgnored private var archivingWorkspaceIDs: Set<WorkspaceID> = []
 
     private var refreshTask: Task<Void, Never>?
     private var storeObservationTask: Task<Void, Never>?
@@ -257,7 +301,7 @@ final class AppModel {
             // centre column no tab names any of them.
             TerminalSessionStore.shared.useStore(store)
             BottomPanelDefaults.forget()
-            startBridge(on: store)
+            bridge = makeBridge(on: store)
             await reload()
             // After `reload`, because the stored id is only trustworthy once there is a list to
             // check it against. Before `isLoaded`, so the window never paints Home first and then
@@ -292,107 +336,6 @@ final class AppModel {
         startTranscriptIndexBackfill()
     }
 
-    /// The tools the bridge serves, with the app-side half of `workspace_start` bound in.
-    ///
-    /// The closure is what crosses the boundary. A bridge handler runs off the main actor on a
-    /// background task per connection, and everything that makes a workspace actually run lives
-    /// here: the model that streams setup into the transcript and sends the opening turn. So the
-    /// tool cannot call `WorkspaceManager.start` itself; it hands an order to this, which hops
-    /// back and runs the same sequence the Create sheet runs.
-    ///
-    /// `select: false` is the one difference from the sheet, and it is the point. A workspace
-    /// appearing while somebody is typing in another one must not take the selection out from
-    /// under them.
-    private func bridgeToolbox() -> BridgeToolbox {
-        BridgeToolbox(handlers: [
-            WhoamiTool(),
-            ProjectListTool(),
-            ProjectAddTool(),
-            ProjectHideTool(),
-            ProjectUnhideTool(),
-            WorkspaceListTool(),
-            WorkspaceStartTool { [weak self] order, project, identity, origin in
-                guard let self else { throw AppNotReady.stillStartingUp }
-                return try await self.startWorkspaceForBridge(
-                    order, in: project, from: identity, origin: origin
-                )
-            },
-            WorkspaceMergeTool { [weak self] workspace, pullRequest, method in
-                guard let self else {
-                    return .refused("Bloom is still starting up. Try again in a moment.")
-                }
-                return await self.requestMergeForBridge(workspace, pullRequest, method: method)
-            },
-        ])
-    }
-
-    /// Ask a workspace's agent to merge, because something on the bridge asked for it.
-    ///
-    /// The whole of the app side, and it deliberately does nothing of its own. `requestMerge` is
-    /// what the strip's Merge button calls, so the template the owner may have edited in Settings,
-    /// the project's `.bloom/merge-instructions.md` and the guard that refuses mid turn are all
-    /// reached through one path rather than two. Anything this function added would be a second
-    /// way to move the same state.
-    ///
-    /// The chat's title comes back because the tool's answer has to name where to watch the turn,
-    /// and `requestMerge` has just made that chat the active one.
-    private func requestMergeForBridge(
-        _ workspace: Workspace,
-        _ pullRequest: PullRequest,
-        method: GitHub.MergeMethod
-    ) async -> WorkspaceMergeHandoff {
-        let model = self.model(for: workspace)
-        if let refusal = await model.requestMerge(pullRequest, method: method) {
-            return .refused(refusal)
-        }
-        return .turnBegun(chat: model.activeSession?.title ?? "Merge")
-    }
-
-    /// Start a workspace because something on the bridge asked for one, and answer with just
-    /// enough to name it.
-    ///
-    /// Neither the project nor the origin is worked out here any more. `WorkspaceStartTool`
-    /// decides both, because it is the half that knows which caller is which: an agent may only
-    /// ever be given the project its own workspace is in, and the owner's standalone client names
-    /// one out loud from the list Bloom already has. Two callers, one answer, decided once. This
-    /// side runs the same sequence the Create sheet runs and nothing else.
-    private func startWorkspaceForBridge(
-        _ order: AgentWorkspaceOrder,
-        in repo: Repo,
-        from identity: BridgeIdentity,
-        origin: WorkspaceOrigin
-    ) async throws -> StartedWorkspaceSummary {
-        guard let store else { throw AppNotReady.stillStartingUp }
-
-        // Whatever the calling session runs on, unless the tool was told otherwise. An agent
-        // asking for help wants help from the thing it already trusts. A caller with no session is
-        // the owner's own client, which has nothing to inherit and gets Bloom's defaults.
-        var controls = ComposerControls()
-        if let sessionID = identity.sessionID, let session = try await store.session(id: sessionID) {
-            controls = ComposerControls(session: session, isFastMode: false, outputStyle: OutputStyle.defaultName)
-        }
-        if let agent = order.agent {
-            controls.agentKind = agent
-        }
-
-        let workspace = try await startWorkspace(
-            in: repo,
-            prompt: order.prompt,
-            baseBranch: order.baseBranch,
-            branch: nil,
-            controls: controls,
-            select: false,
-            origin: origin,
-            name: order.name
-        )
-
-        return StartedWorkspaceSummary(
-            workspaceID: workspace.id,
-            name: workspace.name,
-            branch: workspace.branch,
-            path: workspace.path
-        )
-    }
 
     /// The socket an agent's MCP shim forwards to, listening for as long as the app runs.
     ///
@@ -400,15 +343,19 @@ final class AppModel {
     /// so a chat without one behaves exactly as every chat did last week, and an alert on launch
     /// about a feature nobody has used yet would be noise in front of somebody trying to work.
     /// It is logged, because "the tool is not there" needs somewhere to be findable from.
-    private func startBridge(on store: Store) {
+    /// It hands the server back rather than assigning it, so `bridge` keeps its one writer:
+    /// `bootstrap`, in this file, which is the only place that decides what this app is holding.
+    /// The building moved to `AppModel+WorkspaceBridge.swift` with the tools it serves.
+    func makeBridge(on store: Store) -> BridgeServer? {
         do {
             let server = try BridgeServer(store: store, toolbox: bridgeToolbox()) { message in
                 Log.bridge.info("\(message, privacy: .public)")
             }
             try server.start()
-            bridge = server
+            return server
         } catch {
             Log.bridge.error("could not start the workspace bridge: \(error.readableMessage, privacy: .public)")
+            return nil
         }
     }
 
@@ -716,21 +663,6 @@ final class AppModel {
 
     // MARK: - Archived workspaces
 
-    /// Bumped whenever an archive or a restore changes what is archived.
-    ///
-    /// The number itself means nothing. It exists so a view can key a load on it and be reloaded
-    /// exactly when the answer changed. Home used to key on `workspaces.count`, which is not the
-    /// same thing: archive one workspace and restore another and the count is where it started,
-    /// while both lists are different.
-    private(set) var archivedRevision = 0
-
-    /// The archived list, read once and kept until `invalidateArchived` says otherwise.
-    ///
-    /// Outside observation on purpose. Nothing reads it directly; `archivedWorkspaces()` is the
-    /// only way in, and a tracked write from inside an `await` a view is suspended on is the kind
-    /// of mid-update mutation this file avoids everywhere else.
-    @ObservationIgnored private var cachedArchived: [Workspace]?
-
     /// Every workspace that has been archived, newest first is not promised: this is the store's
     /// own order, and the one screen that shows them sorts by recency itself.
     ///
@@ -754,85 +686,33 @@ final class AppModel {
     /// Called from the two places that can change what is archived: a completed archive, and a
     /// completed restore. Not from `reload`, which runs for a diff stat refresh several times a
     /// minute and would turn the cache into a per-refresh database read.
-    private func invalidateArchived() {
+    /// Internal rather than private: the archive and the restore both change what is archived
+    /// and both live in `AppModel+Archive.swift` now. It is a seam of exactly the shape the
+    /// property wants, taking nothing and saying one thing, so `archivedRevision` and
+    /// `cachedArchived` keep their single writer, which is this method.
+    func invalidateArchived() {
         cachedArchived = nil
         archivedRevision &+= 1
     }
 
+    /// Bumped whenever an archive or a restore changes what is archived.
+    ///
+    /// The number itself means nothing. It exists so a view can key a load on it and be reloaded
+    /// exactly when the answer changed. Home used to key on `workspaces.count`, which is not the
+    /// same thing: archive one workspace and restore another and the count is where it started,
+    /// while both lists are different.
+    private(set) var archivedRevision = 0
+
+    /// The archived list, read once and kept until `invalidateArchived` says otherwise.
+    ///
+    /// Outside observation on purpose. Nothing reads it directly; `archivedWorkspaces()` is the
+    /// only way in, and a tracked write from inside an `await` a view is suspended on is the kind
+    /// of mid-update mutation this file avoids everywhere else.
+    @ObservationIgnored private var cachedArchived: [Workspace]?
+
+
     // MARK: - Clearing out the archive
 
-    /// Every archived workspace with what it still holds, and whether its branch is still here.
-    ///
-    /// The branch question is asked once per project rather than once per workspace: `branchExists`
-    /// is a `git show-ref` per call, and a list of forty archived workspaces across three projects
-    /// would be forty processes to answer a question three `for-each-ref` calls answer completely.
-    ///
-    /// Only the local half of the question is asked. `RestoreSource` is the full answer and needs a
-    /// fetch per workspace, which is a network round trip a list cannot afford; a branch that is
-    /// not here may still be on a remote, and `ArchiveDeletion.branchStanding` is careful to say
-    /// that rather than claim the work is gone.
-    func archiveCleanup() async -> ArchiveCleanup {
-        guard let store, var footprints = try? await store.archivedFootprints() else {
-            return ArchiveCleanup(footprints: [])
-        }
-
-        var localBranches: [RepoID: Set<String>] = [:]
-        for repo in repos where footprints.contains(where: { $0.workspace.repoID == repo.id }) {
-            guard let branches = try? await Git.branches(of: repo.path) else { continue }
-            localBranches[repo.id] = Set(branches)
-        }
-        for index in footprints.indices {
-            let workspace = footprints[index].workspace
-            footprints[index].branchIsLocal = localBranches[workspace.repoID]?.contains(workspace.branch)
-        }
-        return ArchiveCleanup(footprints: footprints)
-    }
-
-    func databaseSize() async -> DatabaseSize? {
-        guard let store else { return nil }
-        return try? await store.databaseSize()
-    }
-
-    /// Destroys the records for archived workspaces, and forgets everything the window was holding
-    /// about them.
-    ///
-    /// The selection is moved first. A window sitting on `.archived(id)` whose row has just been
-    /// deleted would fall through `DetailColumn` to Home, which is the right answer to an
-    /// impossible state and the wrong thing to do to somebody who is halfway through tidying up.
-    /// The outcome rather than a count, because a refused write and an empty selection used to be
-    /// the same `0` and the caller could not tell them apart to say so.
-    @discardableResult
-    func deleteArchived(_ ids: [WorkspaceID]) async -> ArchiveDeletionOutcome {
-        guard let store, !ids.isEmpty else { return .deleted(0) }
-        let removed: Int
-        do {
-            removed = try await store.deleteArchivedWorkspaces(ids: ids)
-        } catch {
-            return .refused(complaint: WorkspaceTrouble.complaint(about: error))
-        }
-        guard removed > 0 else { return .deleted(0) }
-
-        if let open = selection.archivedWorkspaceID, ids.contains(open) {
-            selection = .archive
-        }
-        // Torn down rather than only dropped. Everything here was archived, and archiving stops
-        // its agents, so in practice there is nothing left to stop; a model let go of while it
-        // still holds a runner is a writer aimed at rows that have just been deleted, and that is
-        // the shape of failure this whole path was fixed for.
-        for id in ids {
-            workspaceModels[id]?.teardown()
-            workspaceModels[id] = nil
-        }
-        invalidateArchived()
-        return .deleted(removed)
-    }
-
-    /// Rewrites the database so the pages a delete freed go back to the filesystem. Slow on a
-    /// large file and deliberately never automatic. See `Store.compactDatabase`.
-    func compactDatabase() async {
-        guard let store else { return }
-        try? await store.compactDatabase()
-    }
 
     func workspaces(in repo: Repo) -> [Workspace] {
         // `SidebarReorder.drawn` rather than a comparator written here: a restated rule dropped
@@ -942,6 +822,41 @@ final class AppModel {
     /// blocked on a question writes nothing to the worktree, so nothing would ever invalidate the
     /// mark and it would sit wrong until something unrelated happened to move.
     private(set) var waitingWorkspaceIDs: Set<WorkspaceID> = []
+
+    /// Takes a workspace's row out of the sidebar without forgetting the workspace.
+    ///
+    /// The seam the archive reaches for instead of writing `workspaces` itself, and it is two
+    /// writes that belong together: the row leaves, and `archivingWorkspaceIDs` remembers that it
+    /// left, or the next full read of the store would put it straight back. Here rather than in
+    /// `AppModel+Archive.swift` because `private` is file scoped, and `workspaces` is a property
+    /// this file's header claims to be the only writer of. A seam taking nothing but an id keeps
+    /// that claim true.
+    func hideFromSidebar(_ id: WorkspaceID) {
+        archivingWorkspaceIDs.insert(id)
+        workspaces.removeAll { $0.id == id }
+    }
+
+    /// Stops filtering a workspace out of a reload, for an archive that did not happen. Before
+    /// the reload rather than after it: the reload is what puts the row back, and it can only do
+    /// that once this workspace has stopped being filtered out of it.
+    func stopHidingFromSidebar(_ id: WorkspaceID) {
+        archivingWorkspaceIDs.remove(id)
+    }
+
+    /// Drops everything this model still holds about a workspace that has genuinely gone.
+    ///
+    /// Deliberately not the same call as `hideFromSidebar`. An archive hides the row before a
+    /// single byte moves and forgets the rest only if the disk agrees, so those really are two
+    /// moments and a single method would have to be called twice with a flag.
+    ///
+    /// The model goes before the two marks, and the marks are removed rather than recomputed,
+    /// because `noteRunningChanged` reads the model: once it is nil there is nothing left to ask.
+    func forgetWorkspace(_ id: WorkspaceID) {
+        stopHidingFromSidebar(id)
+        workspaceModels[id] = nil
+        runningWorkspaceIDs.remove(id)
+        waitingWorkspaceIDs.remove(id)
+    }
 
     /// Told by `TranscriptModel` whenever a question arrives or is answered. See
     /// `TranscriptModel.setAwaitingPermission`, which is the one place that flag moves.
@@ -1108,1115 +1023,24 @@ final class AppModel {
             .sorted()
     }
 
-    // MARK: - Repos
-
-    /// Adds a folder as a project, or offers to make it into one.
-    ///
-    /// A folder that is not a git repository used to end here, in an alert reading "... is not a
-    /// git repository", which is true and useless: it names the problem and offers nothing. Every
-    /// route in now asks the same questions first, and they are `FolderVerdict.of` in the core,
-    /// which `project_add` over the bridge asks too. A repository is added. A folder that has no
-    /// business becoming one, or a repository that has no business being a project, is refused
-    /// with a reason. Anything else is offered `ProjectSetupSheet`.
-    ///
-    /// - Parameter surface: which window asked, so the offer appears on that one. See
-    ///   `ProjectSetupSurface`.
-    func addRepository(at path: String, presentedIn surface: ProjectSetupSurface = .main) async {
-        guard manager != nil else { return }
-
-        let facts = await RepositoryStarter.inspect(path)
-        switch FolderVerdict.of(facts) {
-        case .alreadyRepository(let root):
-            await addKnownRepository(at: root)
-
-        case .refuse(let refusal):
-            alert = BloomAlert(title: "Bloom will not add this folder", message: refusal.sentence)
-
-        case .offer:
-            await offerToStartRepository(at: facts.path, presentedIn: surface)
-        }
-    }
-
-    /// The original path, for a folder git already recognises.
-    private func addKnownRepository(at path: String) async {
-        guard let manager else { return }
-        do {
-            _ = try await manager.addRepository(at: path)
-        } catch {
-            alert = BloomAlert(title: "Could not add that folder", message: error.readableMessage)
-        }
-    }
-
-    /// Walks the folder off the main actor and raises the offer.
-    ///
-    /// The walk is what the dialog's promises are made of, and a folder with a large
-    /// `node_modules` in it takes long enough to count that doing it here would freeze the window
-    /// between the file panel closing and the sheet appearing.
-    private func offerToStartRepository(at path: String, presentedIn surface: ProjectSetupSurface) async {
-        let contents = await Task.detached { RepositoryStarter.scan(path) }.value
-        let identityProblem = await RepositoryStarter.identityProblem(at: path)
-
-        ProjectSetup.shared.present(ProjectSetup.Request(
-            path: path,
-            contents: contents,
-            surface: surface,
-            identityProblem: identityProblem
-        ))
-    }
-
-    /// Called by `ProjectSetupSheet` once the folder really is a repository.
-    func finishProjectSetup(_ path: String?) async {
-        ProjectSetup.shared.dismiss()
-        guard let path else { return }
-        await addKnownRepository(at: path)
-    }
-
-    /// The one question about removing a project, built from what this window knows.
-    ///
-    /// Assembled here rather than at each of the three places that ask it. They used to filter the
-    /// workspace list themselves and now have a second argument to get right as well, and three
-    /// copies of a filter is how the three of them worded the consequence differently in the first
-    /// place. See `ProjectRemoval`.
-    func projectRemoval(_ repo: Repo) -> Confirmation {
-        let mine = workspaces.filter { $0.repoID == repo.id }
-        return ProjectRemoval.confirmation(
-            for: repo,
-            workspaces: mine,
-            runningAgents: mine.count { isRunning($0) }
-        )
-    }
-
-    /// Forgets a project, and stops its agents first.
-    ///
-    /// The stop is the whole of the fix for a modal that read "Could not store a system row:
-    /// FOREIGN KEY constraint failed". Removing a project deletes its workspaces, their sessions
-    /// and their transcripts by cascade, and this used to do that with the agents still running:
-    /// the next row a turn wrote had no session left to hang from, the foreign key refused it, and
-    /// the runner reported a database fault for something the owner had just asked for.
-    ///
-    /// Awaited rather than signalled, unlike the archive path, because there is no worktree left
-    /// to protect here and no hurry: nothing is on screen waiting for this, and a process that is
-    /// actually gone before the rows go is a race that never has to be diagnosed afterwards. It is
-    /// still only most of the race, which is why `AgentRunner.report` can tell the two apart: a
-    /// runner whose process has exited can still be draining the lines it already read.
-    ///
-    /// The models are dropped as well as torn down. A `WorkspaceModel` left in the table for a
-    /// workspace whose row no longer exists is a second writer with nothing to write to.
-    func removeRepository(_ repo: Repo) async {
-        guard let store else { return }
-
-        // Every model this project has, not only the rows the sidebar is drawing: `workspaces`
-        // holds active ones, and an archived workspace that is still open in a tab has a model too.
-        let doomed = workspaceModels.filter { $0.value.workspace.repoID == repo.id }
-        // Signalled first and waited for second, exactly as `shutdownEverything` does it, so a
-        // project with four running agents costs one SIGTERM escalation rather than four in a row.
-        for (_, model) in doomed { model.stopEverything() }
-        for (id, model) in doomed {
-            await model.shutdown()
-            model.teardown()
-            workspaceModels[id] = nil
-        }
-
-        do {
-            try await store.deleteRepo(id: repo.id)
-        } catch {
-            alert = BloomAlert(
-                title: "Could not remove the project",
-                message: TranscriptStanding.complaint(about: error)
-            )
-        }
-    }
-
-    func toggleCollapsed(_ repo: Repo) async {
-        guard let store else { return }
-        // Toggled against the stored row rather than against the copy the sidebar was drawn
-        // from, so the disclosure cannot also write back a project's name, colour or icon.
-        _ = try? await store.update(repoID: repo.id) { $0.collapsed.toggle() }
-    }
-
-    /// Takes a project out of the sidebar's list, or puts it back.
-    ///
-    /// Nothing else happens, and that is the whole design. The selection is not moved, no chat is
-    /// closed, no agent is stopped, and every workspace this project has goes on running and goes
-    /// on appearing on Home, in search, in the menu bar and in Shortcuts. See `ProjectVisibility`.
-    ///
-    /// Hiding the project of the workspace on screen therefore leaves that workspace exactly where
-    /// it was, with its row simply not drawn. That is not a new state for this pane to be in: the
-    /// workspace filter has always been able to hide the selected row, and the list has always
-    /// carried on showing what is selected regardless.
-    ///
-    /// Toggled against the stored row rather than against the copy the sidebar was drawn from, so
-    /// this cannot also write back a project's name, colour or icon. Same reason as
-    /// `toggleCollapsed` above, and the bug is in `Store.update(repoID:)`.
-    func toggleHidden(_ repo: Repo) async {
-        guard let store else { return }
-        _ = try? await store.update(repoID: repo.id) { $0.hidden.toggle() }
-    }
-
-    func rename(_ repo: Repo, to name: String) async {
-        guard let store, !name.isEmpty else { return }
-        _ = try? await store.update(repoID: repo.id) { $0.name = name }
-    }
-
     // MARK: - Workspaces
 
-    /// Creates the worktree, selects it, kicks off setup, and sends the first prompt once setup
-    /// finishes. The whole flow is one call because that is how it reads to the user.
-    ///
-    /// Thin on purpose. Everything about the workspace itself is `WorkspaceManager.start`, in the
-    /// core, where it can be tested; what is left here is a request, an alert, and the part of the
-    /// tail that is genuinely about this window. Opening a workspace from outside the app has to
-    /// run the same code as opening one from the sheet, and until this was split it could not,
-    /// because the code was on the main actor in a target nothing else can reach.
-    ///
-    /// `opensWith` decides the starting layout, not a mode: see `WorkspaceStartMode`. A terminal
-    /// workspace skips the session and the opening message, because there is nobody to send one
-    /// to, and names its own branch since there is no task to derive one from.
-    ///
-    /// `controls` are the model, effort, permission mode and fast mode chosen in the create
-    /// sheet's composer footer. Nil everywhere else, which keeps those callers exactly as they
-    /// were.
-    ///
-    /// `staged` are attachments written before this worktree existed. They are moved into it here,
-    /// between the worktree being cut and the opening turn being handed over, because that is the
-    /// only moment at which the destination exists and nothing is reading the prompt yet.
-    @discardableResult
-    func createWorkspace(
-        in repo: Repo,
-        prompt: String,
-        baseBranch: String? = nil,
-        opensWith: WorkspaceStartMode = .chat,
-        branch: String? = nil,
-        controls: ComposerControls? = nil,
-        staged: StagedAttachments? = nil,
-        checkout: WorkspaceCheckout? = nil
-    ) async -> Workspace? {
-        do {
-            return try await startWorkspace(
-                in: repo, prompt: prompt, baseBranch: baseBranch, opensWith: opensWith,
-                branch: branch, controls: controls, staged: staged, checkout: checkout
-            )
-        } catch {
-            // Diagnosed rather than reported. `error.readableMessage` on a `ShellError` is the git
-            // command line, its exit status and its stderr, and a project whose folder had stopped
-            // being a checkout put up "`git for-each-ref --format=%(refname:short) refs/heads`
-            // exited 128: fatal: not a git repository". That names no project, says nothing to do,
-            // and hands the reader a command they never ran. See `WorkspaceTrouble`.
-            let trouble = await WorkspaceTrouble.creating(
-                error,
-                project: repo.name,
-                projectPath: repo.path,
-                baseBranch: baseBranch ?? repo.defaultBranch
-            )
-            alert = BloomAlert(title: "Could not create the workspace", message: trouble.sentence)
-            return nil
-        }
-    }
-
-    /// The same thing, for a caller that can be told what went wrong.
-    ///
-    /// An alert is the right answer for somebody standing in front of the sheet and no answer at
-    /// all for a Shortcut, which has its own place to show a sentence and had nowhere to read one
-    /// from. So the alert is one line in the wrapper above and everything else is here, shared,
-    /// rather than a second copy of the flow written for callers without a window.
-    @discardableResult
-    func startWorkspace(
-        in repo: Repo,
-        prompt: String,
-        baseBranch: String? = nil,
-        opensWith: WorkspaceStartMode = .chat,
-        branch: String? = nil,
-        controls: ComposerControls? = nil,
-        staged: StagedAttachments? = nil,
-        select: Bool = true,
-        /// Who asked. Defaulted to the owner because every caller but one is the owner, and
-        /// spelled out by the one that is not. See `WorkspaceOrigin`.
-        origin: WorkspaceOrigin = .user,
-        /// Overrides the name Bloom would derive. Only the bridge passes one; the sheet lets the
-        /// namer do its job.
-        name: String? = nil,
-        /// An existing pull request or branch to open instead of cutting a branch. See
-        /// `WorkspaceCheckout`.
-        checkout: WorkspaceCheckout? = nil
-    ) async throws -> Workspace {
-        guard let manager else { throw AppNotReady.stillStartingUp }
-        isCreatingWorkspace = true
-        defer { isCreatingWorkspace = false }
-
-        // What the task says without the files named in it. The prompt carries its attachments as
-        // paths in the sentence now, and every reader below this line is naming something after
-        // what was asked for: a workspace called `9JVKW4` after the folder a screenshot was copied
-        // into would be a name nobody could recognise.
-        let spoken = AttachmentDraft.withoutAttachments(
-            prompt, paths: staged?.attachments.map(\.path) ?? []
-        )
-
-        // A caller with no controls gets the ones the owner actually chose, not the built-in
-        // fallback. The sheet and the bridge both pass controls; a `bloom://` link, the Services
-        // menu and a Shortcut do not, and those used to open a chat on `opus` whatever the Models
-        // screen said. `ComposerView.prepare` corrected it when the workspace was opened, which
-        // is a race the opening turn can win: a workspace created in the background and never
-        // looked at would run its first turn on a model nobody picked.
-        let effectiveControls: ComposerControls
-        if let controls {
-            effectiveControls = controls
-        } else {
-            effectiveControls = try await resolvedControls(for: repo)
-        }
-
-        // Whether to ask a model for a name at all. Read here rather than inside the closure
-        // below, because it is two facts about this machine that only the main actor holds: the
-        // preference, and whether the CLI is installed.
-        // Never for a checkout. A pull request arrives with a title and a number, and a review
-        // workspace that renamed itself after the task typed into the sheet would hide which pull
-        // request it is.
-        let wantsAName = checkout == nil
-            && shouldNameAutomatically(name: nil, prompt: spoken, opensWith: opensWith)
-
-        // The sea this workspace wears while the model thinks of a real name. Claimed here,
-        // before `manager.start`, because its slug is about to be the branch and the branch has
-        // to exist before the worktree is cut. `OceanCatalog.shouldClaim` holds the rule about
-        // who gets one, in the core where it is tested. A nil store or an exhausted claim falls
-        // back to the plant placeholder below, exactly as before.
-        let pick: OceanPick?
-        if OceanCatalog.shouldClaim(
-            userSuppliedName: name ?? checkout?.workspaceName,
-            userSuppliedBranch: branch,
-            isChatWorkspace: opensWith == .chat,
-            wantsAutomaticName: wantsAName,
-            // A terminal workspace started with nothing written has no other source of a name:
-            // no turn is sent, so no model is asked, and there is no sentence to slug a branch
-            // out of. The sea is both, and it is the name for good rather than a placeholder.
-            hasTask: !spoken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        ) {
-            pick = try? await store?.claimOcean()
-        } else {
-            pick = nil
-        }
-
-        // The sea's slug under the project's branch prefix, by literally the rule
-        // `nameAutomatically` applies to a suggested branch rather than by a copy of it: this used
-        // to write the join and the check out again, under a comment claiming they could not
-        // disagree. Nil hands the branch back to the mechanical slug of the prompt.
-        let seaBranch: String? = pick.flatMap { pick in
-            WorkspaceNaming.prefixedBranch(
-                pick.ocean.slug, prefix: SettingsLoader.load(repo: repo.path).branchPrefix
-            )
-        }
-
-        let request = WorkspaceStartRequest(
-            repo: repo,
-            prompt: spoken,
-            // Almost always the owner: the sheet, a `bloom://` link, the Services menu and a
-            // Shortcut all land here. The exception is the bridge, which passes `.agent` so the
-            // row records who asked and the sidebar can show the lineage.
-            origin: origin,
-            baseBranch: baseBranch,
-            // The claimed sea's slug when there is one, so the branch and the name tell the same
-            // story. `Git.uniqueBranch` still suffixes a collision with an earlier voyage.
-            branch: branch ?? seaBranch,
-            // A terminal workspace is named after the branch the user typed, or after the sea it
-            // just claimed when nothing was typed at all. Either way the name is settled here
-            // rather than left to the namer, because nothing is going to be asked: passing a name
-            // is also what stops `start` returning a placeholder and so what stops `adopt`
-            // kicking off an automatic rename with no first turn to read.
-            name: name ?? (opensWith == .terminal
-                ? WorkspaceStartPlan.terminalName(
-                    userSuppliedBranch: branch, claimedSea: pick?.ocean.name
-                )
-                : nil),
-            checkout: checkout,
-            controls: effectiveControls,
-            opensSession: opensWith == .chat,
-            // The app runs setup itself, through `WorkspaceModel`, so the output streams into the
-            // transcript, a failure raises the one sentence every route says about a failed setup,
-            // and an archive can cancel it. See `adopt`.
-            runsSetup: false
-        )
-
-        let started = try await manager.start(request) { [weak self] in
-            // Nil declines, and the workspace keeps the title git would have given it.
-            guard wantsAName, let self else { return nil }
-            // The AI rename compares against the exact placeholder this closure returns, so the
-            // sea's name goes through here rather than being written on the row afterwards.
-            if let pick { return pick.ocean.name }
-            return await self.placeholderName()
-        }
-
-        await adopt(started, repo: repo, prompt: spoken, opensWith: opensWith, select: select)
-
-        // Only a first discovery says anything. `OceanPick.notice` is nil for a repeat voyage,
-        // which is deliberately not worth a banner.
-        if let notice = pick?.notice {
-            self.notice = BloomNotice(message: notice)
-        }
-
-        // The files come across whichever mode asked for the workspace.
-        //
-        // This used to be inside the `.chat` branch below, so a workspace opened as a terminal
-        // dropped every staged file on the floor: nothing moved them into the worktree, and
-        // `AttachmentStaging.discard` deleted them a moment later. Nothing said so, and the chips
-        // had already gone with the sheet. A screenshot somebody dragged in is a file they wanted
-        // in the worktree, and the shell they are about to get is standing in that worktree, so
-        // the honest answer is to carry it rather than to announce a deletion.
-        var moved: Set<String> = []
-        if let staged, !staged.attachments.isEmpty {
-            moved = Set(
-                AttachmentFiles
-                    .adopt(staged.attachments, from: staged.directory, into: started.workspace.path)
-                    .map(\.path)
-            )
-        }
-
-        // The agent gets the sentence as it was written, files and all, because the paths in it
-        // are already the paths those files have in the worktree: staging lays a draft out under
-        // exactly the layout it will have here, so this is a move and nothing has to be rewritten.
-        // What is taken out is anything that failed to arrive, which is a path to nothing and
-        // worse than one file fewer. Only this half is a chat's: a terminal workspace has no turn
-        // to put a sentence in, which is the whole of the difference between the two.
-        var opening: String? = opensWith == .chat ? prompt : nil
-        if opensWith == .chat, let staged, !moved.isEmpty {
-            opening = AttachmentDraft
-                .parse(prompt, paths: staged.attachments.map(\.path))
-                .keeping { moved.contains($0) }
-        }
-
-        // Setup runs whether or not there is an agent turn to follow it. Only the turn is skipped
-        // for a terminal workspace.
-        await model(for: started.workspace).startSetupThenSend(prompt: opening, repo: repo)
-        return started.workspace
-    }
-
-    /// The model, effort and permission mode the owner has actually chosen for this project.
-    ///
-    /// The same resolution the composer and the create sheet do, so a workspace created without a
-    /// window agrees with one created from the sheet rather than falling back to the built-in.
-    /// Repository settings first, then the Settings screen, then a machine-wide file. See
-    /// `ComposerDefaults.resolve`.
-    private func resolvedControls(for repo: Repo) async throws -> ComposerControls {
-        guard let store else { return ComposerControls() }
-
-        let appDefaults = await AppDefaults.load(from: store)
-        let repoSettings = await Task.detached(priority: .userInitiated) {
-            SettingsLoader.load(repo: repo.path)
-        }.value
-        let resolved = ComposerDefaults.resolve(repo: repoSettings, app: appDefaults)
-
-        // The backend is left at its default rather than derived from the model. Nothing in the
-        // tree maps one to the other: the composer takes it from the picker press, because
-        // choosing a model out of the Codex section IS choosing Codex, and there is no rule that
-        // reads it back off the name. Guessing here would be inventing that rule where the
-        // consequence of getting it wrong is a chat on a backend nobody chose.
-        return ComposerControls(
-            model: resolved.model,
-            effort: resolved.effort,
-            permissionMode: resolved.permissionMode,
-            isFastMode: appDefaults.fastMode
-        )
-    }
-
-    /// What this window does about a workspace that has just been started.
-    ///
-    /// The tail of `createWorkspace`, named and separated so that a caller which is not the sheet
-    /// can decide how much of it applies. `select` is the whole reason: taking the selection is
-    /// right when the owner just pressed Create and wrong when a workspace appears while they are
-    /// typing somewhere else.
-    ///
-    /// Most of what is here is genuinely about a window: which row is selected, which tab the
-    /// workspace opens on, which chat is in front, and the model that will rename it.
-    ///
-    /// `reload` stays, and it is one of the four left in the app now that the store publishes its
-    /// own changes. The order is the reason: the sidebar has to know the row exists before
-    /// anything selects it, and the change feed cannot promise that. It wakes a task, which reads
-    /// the store, which lands some milliseconds after this line. Selecting a workspace the list
-    /// has never heard of leaves the window on a row that is not there, and the observer's reload
-    /// arriving afterwards is a jump rather than a fix. Every deleted `reload` was one whose
-    /// caller did not care when the list caught up. This one does.
-    func adopt(
-        _ started: StartedWorkspace,
-        repo: Repo,
-        prompt: String,
-        opensWith: WorkspaceStartMode,
-        select: Bool
-    ) async {
-        await reload()
-
-        // Nothing waits for this: the worktree exists and the first turn goes out long before a
-        // model has decided what to call it.
-        if let placeholder = started.placeholder {
-            beginAutomaticNaming(
-                workspace: started.workspace,
-                repo: repo,
-                prompt: prompt,
-                placeholder: placeholder
-            )
-        }
-
-        if select { selection = .workspace(started.workspace.id) }
-        WorkspaceStartMode.record(opensWith, workspaceID: started.workspace.id)
-
-        guard let session = started.session else { return }
-        let model = model(for: started.workspace)
-        await model.reloadSessions()
-        model.activeSessionID = session.id
-    }
 
     // MARK: - Continuing after a merge
 
-    /// What pressing Continue on a merged pull request came to.
-    ///
-    /// Three cases rather than an optional sentence, because they read differently to the person
-    /// standing in front of the strip. A refusal is Bloom declining on purpose and naming the
-    /// condition; a failure is git or the network; and the success carries its own line, because
-    /// the branch it cut and the base it cut from are the two things worth confirming.
-    enum ContinuationOutcome {
-        case continued(WorkspaceContinuation)
-        case refused(ContinuationRefusal)
-        case failed(String)
-    }
-
-    /// Carries a merged workspace on to a fresh branch, in place.
-    ///
-    /// Merging leaves a workspace at a dead end: the branch is finished, the pull request is
-    /// closed, and the only move the app offered was to archive it and start again. Starting again
-    /// throws away everything that makes a warmed-up workspace worth having, and none of it is in
-    /// git: the installed dependencies, the copied `.env`, the dev servers on their ports, and
-    /// above all the agent's session, which has read this codebase and been corrected about it for
-    /// an hour. Continuing keeps every one of those and changes only the thing that is genuinely
-    /// finished, which is the branch.
-    ///
-    /// In order: decide, cut, tell the app, tell the agent. The decision is
-    /// `ContinuationGate.decide` in BloomCore and is the only thing here allowed to say yes; the
-    /// git work is `WorkspaceManager.continueOnNewBranch`; and the turn that goes to the agent is
-    /// the `continueAfterMerge` prompt, editable in Settings like every other one.
-    ///
-    /// The session is NOT restarted. That is the point: a new session would know nothing, which is
-    /// the outcome archiving already gives for free.
-    func continueAfterMerge(
-        _ workspace: Workspace, pullRequest: PullRequest
-    ) async -> ContinuationOutcome {
-        guard let manager else { return .failed("Bloom is still starting up.") }
-
-        let facts: ContinuationFacts
-        do {
-            facts = try await manager.continuationFacts(
-                workspace: workspace,
-                // GitHub's own answer, from the strip the button lives in rather than from a
-                // fresh lookup. The strip is the reason the button is on screen at all, so
-                // asking again would only introduce a way for the two to disagree.
-                isPullRequestMerged: pullRequest.isMerged,
-                isAgentRunning: isRunning(workspace)
-            )
-        } catch {
-            return .failed(await trouble(continuing: error, in: workspace).sentence)
-        }
-
-        let branch: String
-        switch ContinuationGate.decide(facts) {
-        case .cut(let cut): branch = cut
-        case .refuse(let refusal): return .refused(refusal)
-        }
-
-        let continuation: WorkspaceContinuation
-        do {
-            continuation = try await manager.continueOnNewBranch(
-                workspace: workspace, branch: branch
-            )
-        } catch {
-            return .failed(await trouble(continuing: error, in: workspace).sentence)
-        }
-
-        await adopt(continuation, pullRequest: pullRequest)
-        return .continued(continuation)
-    }
-
-    /// Both catches above, so the two sentences cannot drift apart.
-    private func trouble(continuing error: any Error, in workspace: Workspace) async -> WorkspaceTrouble {
-        await WorkspaceTrouble.continuing(
-            error,
-            workspace: workspace.name,
-            path: workspace.path,
-            baseBranch: workspace.baseBranch
-        )
-    }
-
-    /// Everything the app has to forget or refresh now that the worktree is on another branch.
-    private func adopt(_ continuation: WorkspaceContinuation, pullRequest: PullRequest) async {
-        let model = model(for: continuation.workspace)
-
-        // The merged pull request belonged to the old branch. Left in place it would keep the
-        // strip purple and keep offering the button that has just been pressed, and the sidebar's
-        // own cache never clears itself: it ignores a nil answer on purpose, so that a slow
-        // network does not make the mark flicker, which means nothing else would ever drop it.
-        model.pullRequest = nil
-        WorkspacePullRequests.shared.forget(continuation.workspace.id)
-
-        // The diff is measured against the base, and the base just moved under it.
-        await model.refreshChanges()
-
-        await tellAgent(about: continuation, pullRequest: pullRequest, in: model)
-    }
-
-    /// Sends the `continueAfterMerge` prompt into the session that was already running here.
-    ///
-    /// Silent when there is no session and none can be made. The branch has already moved by this
-    /// point and that is the part that matters; an alert about a missing session would be raising
-    /// a dialog over the least important half of what was asked for.
-    private func tellAgent(
-        about continuation: WorkspaceContinuation,
-        pullRequest: PullRequest,
-        in model: WorkspaceModel
-    ) async {
-        let template = PromptOverrides().template(for: .continueAfterMerge)
-        let render = continuation.render(template: template, pullRequest: pullRequest.number)
-
-        guard let session = await continuationSession(in: model) else { return }
-        // The reader pressed a button and a turn is about to stream: put them in front of it.
-        model.activeSessionID = session.id
-        await model.transcript(for: session).submit(render.text)
-    }
-
-    /// The session the continue turn goes to: the one the workspace was already using, or a new
-    /// one for a workspace whose agent was never started.
-    private func continuationSession(in model: WorkspaceModel) async -> Session? {
-        if let session = model.activeSession { return session }
-        await model.reloadSessions()
-        if let session = model.activeSession { return session }
-        return await model.createSession(title: "Continue")
-    }
-
-    /// Archives when there is nothing to lose, and asks first when there is.
-    ///
-    /// Nothing is torn down before the decision: a refused archive used to take the workspace's
-    /// shells and dev servers with it anyway, which is a strange thing to happen after being told
-    /// the workspace was too valuable to remove.
-    ///
-    /// Whether an entry point asks even when there is nothing to lose is that entry point's own
-    /// business, and `alwaysConfirm` is how it says so. Exactly one caller passes it: the sidebar
-    /// row's hover archive button, which appears under the pointer unbidden and is the easiest
-    /// way in the app to archive something by accident. The context menu, the Workspace menu, the
-    /// keyboard shortcut and the merged pull request strip all leave it alone, because opening a
-    /// menu or pressing a shortcut is already saying what you mean, and a confirmation with
-    /// nothing to warn about is how a confirmation stops being read.
-    ///
-    /// It is a flag here rather than a second dialog at the call site, and that is deliberate.
-    /// The row used to raise a compact "are you sure" of its own, so a workspace with real work
-    /// in it produced two dialogs of different shapes for one decision: a small one that warned
-    /// about nothing, then a large one listing what was at stake. One question, asked once, in
-    /// one shape.
-    ///
-    /// A merged pull request needs no new logic and gets none. It already clears the commits
-    /// through `isPullRequestMerged`, so what is left to stop an archive is an agent mid turn and
-    /// work that exists nowhere but that directory. Neither is weakened for it.
-    func archive(
-        _ workspace: Workspace, deleteBranch: Bool? = nil, alwaysConfirm: Bool = false
-    ) async {
-        guard let manager, let repo = repo(for: workspace) else {
-            Log.archive.error(
-                "asked to archive \(workspace.name, privacy: .public), but the app has no manager or no project for it"
-            )
-            return
-        }
-
-        let hazards = ArchiveHazards(
-            isAgentRunning: isRunning(workspace),
-            isPullRequestMerged: isPullRequestMerged(workspace),
-            // Resolved here rather than left as nil, because the confirmation has to say whether
-            // the commits are at stake, and only the repository's settings know that when the
-            // caller did not say.
-            isDeletingBranch: deleteBranch ?? SettingsLoader.load(repo: repo.path).deleteBranchOnArchive
-        )
-
-        let report: WorkspaceSafetyReport
-        do {
-            report = try await manager.safetyReport(workspace: workspace, repo: repo)
-        } catch {
-            // Git could not answer, and not knowing what is at stake is not a licence to delete it.
-            // The user still gets the choice, with the reason the check failed in front of them.
-            //
-            // Diagnosed rather than reported, and this is the worst of the four places that used
-            // not to be: it is read while somebody is deciding whether to destroy a worktree, and
-            // `error.readableMessage` on a `ShellError` put a git command line and an exit status
-            // there. See `WorkspaceTrouble.archiving`.
-            let trouble = await WorkspaceTrouble.archiving(
-                error,
-                workspace: workspace.name,
-                path: workspace.path,
-                baseBranch: workspace.baseBranch
-            )
-            pendingArchive = ArchiveRequest(
-                workspace: workspace,
-                report: WorkspaceSafetyReport(),
-                deleteBranch: deleteBranch,
-                problem: "Bloom could not check this workspace for unsaved work. \(trouble.sentence)",
-                hazards: hazards
-            )
-            return
-        }
-
-        let isSafe = report.isSafeToDiscard(
-            deletingBranch: hazards.isDeletingBranch,
-            isPullRequestMerged: hazards.isPullRequestMerged
-        )
-
-        guard isSafe, !hazards.isAgentRunning, !alwaysConfirm else {
-            pendingArchive = ArchiveRequest(
-                workspace: workspace, report: report, deleteBranch: deleteBranch, hazards: hazards
-            )
-            return
-        }
-
-        await performArchive(
-            workspace,
-            repo: repo,
-            deleteBranch: deleteBranch,
-            force: false,
-            report: report,
-            hazards: hazards
-        )
-    }
-
-    /// GitHub's verdict on this workspace's branch, from whichever of the two places has already
-    /// asked: the open workspace's own model, or the store every sidebar row reads.
-    ///
-    /// Never asks itself. A merged pull request only ever makes this check more permissive, so a
-    /// missing answer costs a confirmation rather than a workspace, and an archive that waited on
-    /// the network before it could decide would be worse than the confirmation it saved.
-    private func isPullRequestMerged(_ workspace: Workspace) -> Bool {
-        let pullRequest = workspaceModels[workspace.id]?.pullRequest
-            ?? WorkspacePullRequests.shared.pullRequest(for: workspace.id)
-        return pullRequest?.isMerged ?? false
-    }
-
-    /// The user has seen exactly what would be destroyed and asked for it anyway.
-    ///
-    /// Takes the request as an argument, and that is the whole of the fix for an archive that did
-    /// nothing at all. This used to read `pendingArchive` back out of the model, and by the time
-    /// it ran there was nothing there to read: the confirmation's own dismissal writes `false`
-    /// into the `isPresented` binding, `Binding.isPresent()` turns that into `pendingArchive =
-    /// nil`, and the button's action is a `Task` that reaches the main actor about 270ms later,
-    /// after the dismissal. The guard then failed and the method returned, silently, every single
-    /// time. Pressing "Archive and lose that work" genuinely did nothing.
-    ///
-    /// So nothing here may depend on state a dismissal can clear. The value the dialog was built
-    /// from is the value it acts on.
-    func confirmArchive(_ request: ArchiveRequest) async {
-        pendingArchive = nil
-        guard let repo = repo(for: request.workspace) else {
-            Log.archive.error(
-                "confirmed the archive of \(request.workspace.name, privacy: .public), but its project is gone"
-            )
-            return
-        }
-        // A request that carries a problem has no report at all, only the reason git could not be
-        // asked. Passing it on would let an empty report be read as "nothing was at stake".
-        await performArchive(
-            request.workspace,
-            repo: repo,
-            deleteBranch: request.deleteBranch,
-            force: true,
-            report: request.problem == nil ? request.report : nil,
-            hazards: request.hazards
-        )
-    }
-
-    func cancelPendingArchive() {
-        pendingArchive = nil
-    }
-
-    private func performArchive(
-        _ workspace: Workspace,
-        repo: Repo,
-        deleteBranch: Bool?,
-        force: Bool,
-        report: WorkspaceSafetyReport?,
-        hazards: ArchiveHazards
-    ) async {
-        guard let manager else {
-            Log.archive.error(
-                "archiving \(workspace.name, privacy: .public) stopped before it began: no workspace manager"
-            )
-            return
-        }
-
-        // The agents go first: they are the ones writing to the worktree that is about to be
-        // removed, and `git worktree remove --force` unlinking files under a running agent is how
-        // work gets corrupted rather than merely lost. The shells and dev servers only go once the
-        // removal has actually happened, so a failing archive script does not cost the user their
-        // terminals for nothing.
-        //
-        // This does mean an archive that the manager then refuses has already stopped the agent.
-        // That trade is deliberate and it is the reason the archive script's failure message says
-        // so rather than claiming the workspace is untouched. Moving the teardown after the
-        // script would mean the script running while an agent still writes, which is worse.
-        workspaceModels[workspace.id]?.teardown()
-
-        // Out of the sidebar now, before a single byte moves.
-        //
-        // Archiving used to show nothing at all until every last thing had finished: a safety
-        // report over the whole worktree, an archive script, `git worktree remove` deleting a
-        // `node_modules` file by file, a branch delete, and a reload. On a real project that is
-        // seconds of a window that looks broken, and the report above is the reason people press
-        // the button twice.
-        //
-        // None of that work decides anything the user has not already decided. The decision was
-        // made before this method was called, so the row can go at once and the disk can catch
-        // up. If the disk refuses, the `catch` below reloads from the store, where the row is
-        // still active, and it comes back with the reason in front of it.
-        let previousSelection = selection
-        archivingWorkspaceIDs.insert(workspace.id)
-        workspaces.removeAll { $0.id == workspace.id }
-        if selection.workspaceID == workspace.id { selection = .home }
-
-        do {
-            try await manager.archive(
-                workspace: workspace,
-                repo: repo,
-                deleteBranch: deleteBranch,
-                force: force,
-                isPullRequestMerged: hazards.isPullRequestMerged
-            )
-            // The store agrees the workspace is archived now, so nothing needs protecting from a
-            // reload any more.
-            archivingWorkspaceIDs.remove(workspace.id)
-            // The worktree is gone from disk now. Its shells are sitting in a directory that no
-            // longer exists and its dev servers are still holding their ports, and nothing else in
-            // the app will ever come back for them.
-            await TerminalSessionStore.shared.discard(workspaceID: workspace.id)
-            workspaceModels[workspace.id] = nil
-            // The model is what `noteRunningChanged` reads, so the last word about this workspace
-            // has to be said before it goes.
-            runningWorkspaceIDs.remove(workspace.id)
-            waitingWorkspaceIDs.remove(workspace.id)
-            // One more workspace is archived now, so anything holding the old answer is wrong.
-            invalidateArchived()
-            await offerUndo(of: workspace, repo: repo, report: report)
-            Log.archive.info("archived \(workspace.name, privacy: .public)")
-        } catch let error as WorkspaceError {
-            await undoOptimisticArchive(workspace, restoring: previousSelection)
-            switch error {
-            case .archiveScriptFailed(let status, let output):
-                Log.archive.error(
-                    "the archive script for \(workspace.name, privacy: .public) exited \(status), so nothing was removed"
-                )
-                // Worth its own wording: the manager stops before removing anything, so the user
-                // needs to hear that the worktree is still there rather than fear the worst. It
-                // does not claim the workspace is untouched, because the agent went first: see
-                // the teardown above.
-                //
-                // Titled without the workspace name. Names here are whole sentences, and a title
-                // built from one wraps to three lines of bold text that reads as the warning
-                // itself. The name goes in the message, which has room for it.
-                alert = BloomAlert(
-                    title: "The archive script failed",
-                    message: "\u{201C}\(workspace.name)\u{201D} is still here: its worktree and "
-                        + "its branch are untouched. Any agent it was running has been stopped.\n\n"
-                        + "The script exited with status \(status).\n\n"
-                        // The tail is where a script says why it gave up.
-                        + String(output.trimmingCharacters(in: .whitespacesAndNewlines).suffix(1_000))
-                )
-            case .unsafeToArchive(let fresh):
-                Log.archive.notice(
-                    "\(workspace.name, privacy: .public) changed between the check and the archive, so it is being asked about again"
-                )
-                // Only reachable when the worktree changed between the check and the archive.
-                pendingArchive = ArchiveRequest(
-                    workspace: workspace, report: fresh, deleteBranch: deleteBranch, hazards: hazards
-                )
-            default:
-                Log.archive.error(
-                    "could not archive \(workspace.name, privacy: .public): \(error.readableMessage, privacy: .public)"
-                )
-                await reportArchiveFailure(error, workspace: workspace)
-            }
-        } catch {
-            await undoOptimisticArchive(workspace, restoring: previousSelection)
-            Log.archive.error(
-                "could not archive \(workspace.name, privacy: .public): \(error.readableMessage, privacy: .public)"
-            )
-            await reportArchiveFailure(error, workspace: workspace)
-        }
-    }
-
-    /// Diagnosed rather than reported, for both of the archive's catches.
-    ///
-    /// `error.readableMessage` used to be the message here, so a `ShellError` put "`git worktree
-    /// remove ...` exited 128" in a modal and a refused row put "[UPDATE workspaces SET ...
-    /// VALUES (?, ?, ?)]" in one. Neither said what to do. `WorkspaceTrouble.archiving` asks the
-    /// worktree instead.
-    private func reportArchiveFailure(_ error: any Error, workspace: Workspace) async {
-        let trouble = await WorkspaceTrouble.archiving(
-            error,
-            workspace: workspace.name,
-            path: workspace.path,
-            baseBranch: workspace.baseBranch
-        )
-        alert = BloomAlert(title: "Could not archive the workspace", message: trouble.sentence)
-    }
-
-    /// Workspaces whose row has already left the sidebar while their archive is still running.
-    ///
-    /// The archive hides the row before any filesystem work starts, on purpose, and the store is
-    /// not told until the very end. Between those two moments the store still answers "active",
-    /// and every full read of it, a reload after a rename, after a pin, after an automatic name
-    /// arriving, would put the row back on screen for the rest of the archive. This is how a
-    /// reload knows about a decision the store has not caught up with yet. See
-    /// `WorkspaceListReconciliation.afterStoreReload`.
-    ///
-    /// Outside observation deliberately: nothing draws from it, `reload` is the only reader, and
-    /// the write that matters to the UI is the one it makes to `workspaces`.
-    @ObservationIgnored private var archivingWorkspaceIDs: Set<WorkspaceID> = []
-
-    /// Puts a workspace back in the sidebar after the disk refused to let it go.
-    ///
-    /// Reloaded from the store rather than reinstated from a copy held in memory. `Workspace.state`
-    /// is only written once the removal has actually happened, so a failed archive leaves the row
-    /// exactly as it was, and reading it back is the one version that cannot disagree with what
-    /// every other part of the app is about to read.
-    private func undoOptimisticArchive(_ workspace: Workspace, restoring selection: SidebarSelection) async {
-        // Before the reload rather than after it. The reload is the thing that puts the row back,
-        // and it can only do that once this workspace has stopped being filtered out of it.
-        archivingWorkspaceIDs.remove(workspace.id)
-        await reload()
-        self.selection = selection
-    }
 
     // MARK: - Undoing an archive
 
-    /// Offers Edit > Undo for an archive that really can be taken back.
-    ///
-    /// The test is not "was this archive safe". `WorkspaceSafetyReport.isSafeToDiscard` also weighs
-    /// the commits, because deleting the branch would strand them, and an archive that keeps the
-    /// branch strands nothing: the branch holds the commits and the worktree is a checkout of it.
-    /// What decides is `isRestorableFromBranch`, which asks only whether anything lived in that
-    /// directory and nowhere else. The other two guards are about the same promise:
-    ///
-    /// - The branch is checked on disk rather than inferred from `deleteBranch`, which can also be
-    ///   decided by the repository's settings file. A deleted branch takes the commits with it.
-    /// - An archive script has already wound the workspace down, and Bloom has no idea what it
-    ///   did. Rebuilding the checkout would hand back a workspace whose containers, databases and
-    ///   ports are gone, which is not the workspace that was archived.
-    ///
-    /// A missing report means git could not be asked what was at stake, which is never a reason to
-    /// claim there was nothing.
-    private func offerUndo(
-        of workspace: Workspace, repo: Repo, report: WorkspaceSafetyReport?
-    ) async {
-        guard let manager, undoManager != nil else { return }
-        guard let report, report.isRestorableFromBranch else { return }
-        guard SettingsLoader.load(repo: repo.path).archiveScript == nil else { return }
-        guard await manager.canRestore(workspace: workspace, repo: repo) else { return }
-        registerArchiveUndo(workspace, repo: repo)
-    }
-
-    private func registerArchiveUndo(_ workspace: Workspace, repo: Repo) {
-        guard let undoManager else { return }
-        // The handler runs on the main thread, from the Edit menu or Command+Z, so the isolation
-        // is real rather than assumed away.
-        undoManager.registerUndo(withTarget: self) { model in
-            MainActor.assumeIsolated { model.beginRestore(of: workspace, repo: repo) }
-        }
-        // Named for the action being reversed, which is what every other Mac app puts after
-        // "Undo". SwiftUI's stock Edit menu draws a fixed "Undo" title and only takes the enabled
-        // state from the manager, so this currently shows up in `undoActionName` rather than in
-        // the menu. Spelling it out anyway is what makes the menu title correct the moment that
-        // group is replaced.
-        undoManager.setActionName("Archive Workspace")
-    }
-
-    private func beginRestore(of workspace: Workspace, repo: Repo) {
-        Task { await restore(workspace) }
-    }
 
     // MARK: - Reading an archived workspace, and bringing it back
 
     /// Workspaces whose restore is in flight, so the button that started it can say so and cannot
     /// be pressed twice.
-    private(set) var restoring: Set<WorkspaceID> = []
+    /// Not `private(set)`. `restore` is the only writer and it lives in
+    /// `AppModel+Archive.swift`, so this is the one property the split genuinely publishes. Two
+    /// seams for an insert and a remove would be more code saying less than the property does.
+    var restoring: Set<WorkspaceID> = []
 
-    /// Opens an archived workspace for reading.
-    ///
-    /// Reading and resuming are two different things and this is the first of them. Everything an
-    /// archived workspace ever said is still in the database: the transcript, the sessions, what
-    /// each turn cost. Only the worktree is gone. Before this there was no way to reach any of it
-    /// once the undo had expired, so a workspace archived yesterday took its whole history out of
-    /// the app while its branch sat on disk.
-    ///
-    /// The model is prepared here rather than in the selection setter, because an archived
-    /// workspace is not in `workspaces` and the setter has nowhere to look it up.
-    func openArchived(_ workspace: Workspace) {
-        model(for: workspace)
-        selection = .archived(workspace.id)
-    }
-
-    /// Opens whatever a workspace id points at, live or archived.
-    ///
-    /// The one entry point for "show me this workspace" from outside the window: the menu bar
-    /// item, the Services item, a deep link and the capture harness all arrive here through
-    /// `OpenWorkspaceNotification`. It used to set `.workspace(id)` whatever the id was, and an
-    /// id that had since been archived resolved to no workspace at all, so the window quietly fell
-    /// back to Home. Now an archived id opens the reader instead of nothing.
-    func open(workspaceID id: WorkspaceID) async {
-        if workspaces.contains(where: { $0.id == id }) {
-            selection = .workspace(id)
-            return
-        }
-        guard let archived = await archivedWorkspaces().first(where: { $0.id == id }) else { return }
-        openArchived(archived)
-    }
-
-    /// Where this workspace's branch still is. See `RestoreSource`.
-    ///
-    /// Asks the network, so it is called once by the screen that offers Restore rather than per
-    /// redraw, and never from a body.
-    func restoreSource(for workspace: Workspace) async -> RestoreSource? {
-        guard let manager, let repo = repo(for: workspace) else { return nil }
-        return await manager.restoreSource(workspace: workspace, repo: repo)
-    }
-
-    /// Rebuilds the worktree and puts the workspace back in the sidebar.
-    ///
-    /// This is the second of the two things Restore could mean, and the one that can fail: a
-    /// branch that is gone from this Mac and from the remote leaves nothing to build from. The
-    /// refusal says so and the workspace stays where it is, still readable.
-    ///
-    /// No redo is registered when this arrives from Edit > Undo. Redo of an archive would delete
-    /// a worktree from a menu item, with no safety report in front of it, which is the one thing
-    /// this app is careful never to do.
-    func restore(_ workspace: Workspace) async {
-        guard let manager else { return }
-        guard let repo = repo(for: workspace) else {
-            alert = BloomAlert(
-                title: "Could not bring \(workspace.name) back",
-                message: "Its project is no longer in Bloom, so there is no repository to cut a "
-                    + "worktree from. Add the project again and try once more."
-            )
-            return
-        }
-        guard !restoring.contains(workspace.id) else { return }
-
-        restoring.insert(workspace.id)
-        defer { restoring.remove(workspace.id) }
-
-        do {
-            let outcome = try await manager.restore(workspace: workspace, repo: repo)
-            // The other half of the pair: this workspace has left the archived list.
-            invalidateArchived()
-            await reload()
-            selection = .workspace(outcome.workspace.id)
-            Log.archive.info("restored \(workspace.name, privacy: .public)")
-
-            if let from = outcome.relocatedFrom {
-                // The one notice that waits. Everything else here is news about something
-                // that is now settled; this is a path the user has to go and look at, and it is
-                // the only sentence anywhere that says where their worktree actually is.
-                notice = BloomNotice(
-                    message: "\(outcome.workspace.name) came back to a different place. "
-                        + "Something else is at `\(from)`, so the worktree was rebuilt at "
-                        + "`\(outcome.workspace.path)`.",
-                    dismissal: .untilDismissed
-                )
-            }
-        } catch {
-            Log.archive.error(
-                "could not restore \(workspace.name, privacy: .public): \(error.readableMessage, privacy: .public)"
-            )
-            // Diagnosed rather than reported. A store error reaching here rendered its own SQL,
-            // "message [UPDATE workspaces SET ... VALUES (?, ?, ?)]", and the likeliest git
-            // failure, the branch being checked out in another worktree, arrived as an argv and
-            // an exit status. See `WorkspaceTrouble.restoring`.
-            let trouble = await WorkspaceTrouble.restoring(
-                error,
-                workspace: workspace.name,
-                branch: workspace.branch,
-                project: repo.name,
-                projectPath: repo.path
-            )
-            alert = BloomAlert(
-                title: "Could not bring \(workspace.name) back",
-                message: trouble.sentence
-            )
-        }
-    }
-
-    func rename(_ workspace: Workspace, to name: String) async {
-        guard let store, !name.isEmpty else { return }
-        _ = try? await store.update(workspaceID: workspace.id) { $0.name = name }
-    }
-
-    func togglePinned(_ workspace: Workspace) async {
-        guard let store else { return }
-        // Toggled against the stored row rather than against the copy this view was handed,
-        // so two presses in quick succession cannot both write the same value.
-        _ = try? await store.update(workspaceID: workspace.id) { $0.pinned.toggle() }
-    }
-
-    /// Clears the mark that says a turn finished while you were not looking.
-    ///
-    /// The rule, in full, because three things now depend on it: the Dock badge, the menu bar
-    /// item and the weight of a project's name in the sidebar.
-    ///
-    /// `TranscriptModel.notifyFinished` SETS the flag when a turn ends and the workspace is not
-    /// the selected one. This clears it when the workspace's transcript comes on screen, from
-    /// `WorkspaceModel.onAppear`. The two are exact duals: the flag means "this finished while it
-    /// was not in front of you", and it goes the moment it is.
-    ///
-    /// Two consequences that have each been mistaken for a bug.
-    ///
-    /// The first is that launching clears it for the restored workspace. `restoreLastSelection`
-    /// reopens the window on the workspace it was last on, that workspace's transcript is what
-    /// the window paints, and the finished turn is the last thing in it. Confirmed by capture: a
-    /// workspace with the flag set that is not the restored one keeps it, the restored one does
-    /// not. That is the same rule as any other selection, and the alternative is worse: the badge
-    /// would count the workspace whose transcript is filling the window, and the only way to
-    /// clear it would be to navigate away and back.
-    ///
-    /// The second is that the flag includes turns that failed or were cancelled. That is
-    /// deliberate. An agent that fell over is still something waiting for a person, and it is the
-    /// one most worth being told about; a mark that counted only successes would go quiet exactly
-    /// when something went wrong.
-    func markRead(_ workspace: Workspace) async {
-        guard workspace.unread else { return }
-        await setUnread(workspace, false)
-    }
-
-    /// The mark set by hand, from a workspace row's context menu, in either direction.
-    ///
-    /// **What happens when you mark the workspace you are looking at.** The mark sticks. It is
-    /// worth writing down because the opposite was the obvious guess and it would have made the
-    /// item useless. Nothing re-clears the flag while a workspace stays on screen: the only clear
-    /// is `WorkspaceModel.onAppear`, and the centre column runs that from a `.task(id:)` keyed on
-    /// the workspace id, so it fires when the window ARRIVES on a workspace and not again while it
-    /// sits there. The row goes heavy under the pointer, the badge counts it, and it is still
-    /// there when you come back. `TranscriptModel.markAllRead` is a different mark on a different
-    /// row (`Session.lastReadSeq`, which is where the transcript reopens) and it does not touch
-    /// this one.
-    ///
-    /// The one thing that does clear it is a turn FINISHING in that workspace while you are still
-    /// looking at it, because `TranscriptModel.notifyFinished` writes `unread` either way. That is
-    /// correct rather than a leak: how the turn went is newer information than a reminder set
-    /// before it ended, and you were there to see it.
-    ///
-    /// That is the whole reason this exists in the direction it does. "Mark as Unread" means
-    /// "remind me to come back to this", and a reminder that clears itself while you are still
-    /// standing in front of it is not a reminder.
-    ///
-    /// Narrow, like every other writer of this table: `update` re-reads the row inside the actor
-    /// and changes the one column named. A whole `Workspace` value written from a menu that has
-    /// been open for a few seconds is the bug `Store.update` was written for, three times over.
-    func setUnread(_ workspace: Workspace, _ unread: Bool) async {
-        guard let store else { return }
-        _ = try? await store.update(workspaceID: workspace.id) { $0.unread = unread }
-    }
-
-    /// The colour on a workspace row, or nil to take it off.
-    ///
-    /// Stored as the hex rather than as a position in `WorkspaceColour.all`, so reordering that
-    /// list later cannot recolour rows somebody already marked.
-    func setColour(_ workspace: Workspace, to hex: String?) async {
-        guard let store else { return }
-        _ = try? await store.update(workspaceID: workspace.id) { $0.colour = hex }
-    }
 
     /// What the sidebar's drag ends in.
     ///
@@ -2297,73 +1121,4 @@ final class AppModel {
         try? await store.reorderProjects(changes)
     }
 
-    // MARK: - Navigation
-
-    func selectNextWorkspace(offset: Int) {
-        let ordered = repos.flatMap { workspaces(in: $0) }
-        guard !ordered.isEmpty else { return }
-        guard let current = selection.workspaceID,
-              let index = ordered.firstIndex(where: { $0.id == current }) else {
-            selection = .workspace(ordered[0].id)
-            return
-        }
-        let next = (index + offset + ordered.count) % ordered.count
-        selection = .workspace(ordered[next].id)
-    }
-
-    /// The next workspace with unread agent output, so the user can hop through what finished
-    /// while they were elsewhere.
-    func selectNextUnread() {
-        let ordered = repos.flatMap { workspaces(in: $0) }
-        guard let target = ordered.first(where: { $0.unread && $0.id != selection.workspaceID })
-            ?? ordered.first(where: \.unread) else { return }
-        selection = .workspace(target.id)
-    }
-
-    /// Asks for a folder and adds it, which is the whole of what every "Add project" control
-    /// does. Four views spelled the pair out themselves.
-    func addProjectByAsking() async {
-        guard let path = await ProjectFolderPicker.choose() else { return }
-        await addRepository(at: path)
-    }
-
-    // MARK: - Search
-
-    struct SearchHit: Identifiable {
-        var id: WorkspaceID { workspace.id }
-        var workspace: Workspace
-        var repo: Repo?
-        var reason: String
-        var isArchived = false
-    }
-
-    /// The rule lives in `WorkspaceSearch`, in the core, because Home's filter field and the
-    /// Shortcuts entity query ask the same question and used to answer it differently.
-    ///
-    /// Archived workspaces are searched too, and are passed in rather than read, because the
-    /// archived list is a database read and this is called from a view on every keystroke. They
-    /// come last: a live workspace is nearly always the one being looked for, and an archived hit
-    /// that pushed one down the list would be the search answering a question nobody asked.
-    ///
-    /// Leaving them out was its own bug. Somebody who archives something and then wants it back
-    /// types its name into search first, and search said "No Results" about a workspace whose
-    /// branch was sitting on disk.
-    func search(_ query: String, alsoSearching archived: [Workspace] = []) -> [SearchHit] {
-        let needle = WorkspaceSearch.needle(query)
-        guard !needle.isEmpty else { return [] }
-
-        func hits(in list: [Workspace], isArchived: Bool) -> [SearchHit] {
-            list.compactMap { workspace in
-                let repo = repo(for: workspace)
-                guard let reason = WorkspaceSearch.match(
-                    workspace: workspace, repo: repo, needle: needle
-                ) else { return nil }
-                return SearchHit(
-                    workspace: workspace, repo: repo, reason: reason, isArchived: isArchived
-                )
-            }
-        }
-
-        return hits(in: workspaces, isArchived: false) + hits(in: archived, isArchived: true)
-    }
 }
