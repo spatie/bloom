@@ -94,28 +94,6 @@ struct RowArrival<ID: Hashable>: Equatable {
         arriving.contains(id)
     }
 
-    /// Whether this id was absent from the list the last time the tracker was shown it.
-    ///
-    /// **What a row asks when it is built in the same pass that made it exist.** `arriving` is an
-    /// answer the tracker can only give once it has been shown the new list, and whatever shows it
-    /// runs after the pass that drew the row: a `List` gets away with that because the table builds
-    /// its cell later, and a `LazyVStack` does not, because the row is realised in the pass that
-    /// created it. Filmed against a real turn, twenty-three rows of a transcript were built and
-    /// every one of them read `arriving` as empty. One row faded in that turn, and it was the only
-    /// one not asking this question.
-    ///
-    /// So this asks the other way round: not "have you been told this is new", which needs the
-    /// tracker to have been told, but "is this absent from what you were last told", which does
-    /// not. It stops being true the moment `absorb` takes the new list in, a fraction of a frame
-    /// later, so a row realised at any point after that latches at full opacity. That is the same
-    /// rule `isArriving` gives, arrived at without needing to be first.
-    ///
-    /// The three rules above still hold, because both answers read the same bookkeeping: nothing
-    /// is new to a tracker that has never been filled, and `adopt` replaces `known` wholesale, so
-    /// a session's history and a widened filter are as silent here as they are there.
-    func isNew(_ id: ID) -> Bool {
-        hasFilled && !known.contains(id)
-    }
 }
 
 // MARK: - Drawing it

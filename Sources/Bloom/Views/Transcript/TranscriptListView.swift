@@ -1027,24 +1027,21 @@ struct TranscriptListView: View {
     /// most of a long session, and what follows it is a set lookup on an integer.
     private func isArriving(_ row: TranscriptRow) -> Bool {
         guard TranscriptMotion.fadesOnArrival(row.kind) else { return false }
-        // **Both answers, because the two orderings both happen.**
+        // **`arriving` and nothing else, because only a set difference can tell a new row from an
+        // old one nobody has looked at yet.**
         //
-        // `isNew` was written for the pass that opens a session: every row is built in the same
-        // body evaluation that created it, before `trackArrivals` has taken the list in, so
-        // `arriving` is still empty and only "absent from what you were last told" can be true.
-        // That was filmed and it is real.
+        // `onChange(of: rows.count)` fires the moment the count moves, and a `LazyVStack` does not
+        // build the new row until layout, which is after that. So by the time a row asks, `absorb`
+        // has already taken the new list in and put the arrival in `arriving`: the answer is ready
+        // exactly when it is wanted, and `settlesArrivals` closes the window a moment later.
         //
-        // A row landing mid turn is the other way round. `onChange(of: rows.count)` fires as soon
-        // as the count moves, and a `LazyVStack` does not build the new row until layout, which is
-        // after that: `absorb` has already put the seq into `known`, so `isNew` is false by the
-        // time the row asks, and no tool row in a running turn ever settled. The owner reported
-        // exactly that, watching real turns, while the streaming block above faded correctly
-        // because it passes a literal `true` and asks nothing.
-        //
-        // Neither question is wrong and neither is sufficient. `arriving` answers the second
-        // ordering, `isNew` answers the first, and `settlesArrivals` below bounds how long the
-        // first stays true so a row scrolled back into view months later is not greeted as new.
-        return arrival.isNew(row.seq) || arrival.isArriving(row.seq)
+        // It was briefly `isNew(seq) || isArriving(seq)`, and the first half is what made rows
+        // fade while the reader scrolled up through a long session. `known` only ever holds the
+        // last `arrivalWindow` rows, so every row older than that is absent from it, and "absent"
+        // is not "new": the row was realised for the first time because it came into view, not
+        // because it had just landed. A set difference cannot make that mistake, which is what the
+        // note on `arrivalWindow` says and what only `arriving` actually delivers.
+        return arrival.isArriving(row.seq)
     }
 
     private func toggle(_ seq: Int) {
