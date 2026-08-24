@@ -3,21 +3,30 @@ import BloomCore
 
 /// What the menu bar shows about how much of each provider's allowance is left.
 ///
-/// **The shape is the decision, and it is a decision against a dashboard.** Bloom can know four
-/// windows at once, two from each backend that publishes any, and four stacked bars is a control
-/// panel opened by somebody who came to read one thing. So the panel answers one question in the
-/// place the eye lands first, which is how close you are to the nearest wall and when that wall
-/// lifts, and puts the rest underneath as a ledger of single lines. The headline window is not
-/// repeated in the ledger; it has already been said.
+/// **The shape is a list, in the order the provider's own windows come in, and that is a decision
+/// taken twice.** The first version drew four bars of equal weight and read as a dashboard. The
+/// second promoted whichever window was nearest its wall into a headline with a bigger figure and
+/// left the rest as a ledger of small rows with no figures at all, which is what the owner was
+/// looking at when he asked for this: one row drawn large with a number and two drawn small
+/// without one, and no way to compare a lane in the first against a lane in the second because
+/// they were not even the same length.
 ///
-/// The bar is a lane rather than a capsule, drawn square, because the app's mark is three lanes
-/// arriving and one leaving and this is the one place in the interface where a filled length is
-/// the whole content. A rounded pill here would be the same shape every progress view on the
-/// platform is, which is the shape this panel is trying not to be.
+/// What he asked for instead is the plain reading: each provider in turn, and inside a provider the
+/// shortest window first, so the five hour window sits above the week. Every row carries its own
+/// figure, every lane runs the full width of the panel at the same scale, and nothing is promoted,
+/// so the list holds still instead of reshuffling itself whenever one number crosses another.
+/// `QuotaBoard.lines` is where all of that is decided; this file draws what it is handed.
 ///
-/// A window whose usage the provider has not published gets no lane at all. Claude Code sends a
+/// The lane is drawn square rather than as a capsule, because the app's mark is three lanes
+/// arriving and one leaving and this is the one place in the interface where a filled length is the
+/// whole content. A rounded pill here would be the same shape every progress view on the platform
+/// is, which is the shape this panel is trying not to be.
+///
+/// A window whose usage the provider has not published gets no track at all. Claude Code sends a
 /// figure only once a window has passed its warning threshold, so drawing an empty track for the
-/// other case would tell somebody they had used nothing when what is true is that nobody said.
+/// other case would tell somebody they had used nothing when what is true is that nobody said. The
+/// two cases have to look different and they do: a measured zero is a full track with nothing in
+/// it, and an unmeasured window is a dashed rule and the words.
 ///
 /// **Nothing in here comes from `Palette` or `Typo`, and that is the point.** This is the one view
 /// in Bloom that is not drawn in a Bloom window. It is hosted in an `NSMenu`, sitting on the menu's
@@ -56,16 +65,13 @@ struct QuotaPanel: View {
     var now: Date = Date()
 
     /// The menu sizes itself to its widest item, so this is what decides how wide the whole menu
-    /// is, and it is a measurement rather than a taste. A ledger line is a provider name, a window
-    /// label, a lane or the words "not reported", and a countdown.
+    /// is, and it is a measurement rather than a taste.
     ///
     /// It was 272 when the panel was set at eleven and ten points. Menu size is thirteen or
     /// fourteen depending on the machine, so every column grew, and this is the width measured off
-    /// a capture of the real menu carrying the longest row Bloom can produce today, "Claude Code .
-    /// 5 hours" beside "not reported" beside "in 4h 32m", with nothing truncated and the columns
-    /// still lining up. A menu that reaches a third of the way across the screen to carry two
-    /// percentages is worse than one that wraps nothing, and this is the narrowest that wraps
-    /// nothing.
+    /// a capture of the real menu carrying the longest row Bloom can produce, with nothing
+    /// truncated. It is now also what sets the lane's length, which is the reason it must not
+    /// shrink: every lane in the panel is this wide, so two rows can be compared by eye.
     static let width: CGFloat = 344
 
     /// The two insets are different, and they are AppKit's rather than a choice.
@@ -98,33 +104,33 @@ struct QuotaPanel: View {
         Font(NSFont.menuFont(ofSize: NSFont.menuFont(ofSize: 0).pointSize - 2)).weight(.semibold)
     }
 
-    private var ledger: [AgentQuota] {
-        let headline = board.headline?.id
-        return board.all.filter { $0.id != headline }
+    /// The footnote, one point down from a menu item.
+    ///
+    /// Every row now carries one, where before only the promoted row did, so three or four of them
+    /// stack down the panel and at full menu size they competed with the names above them. One
+    /// point is enough to settle them and not enough to make them a caption: they are still read,
+    /// and "Lifts in 3d" is half the answer somebody opened this for.
+    private static var footFont: Font {
+        Font(NSFont.menuFont(ofSize: NSFont.menuFont(ofSize: 0).pointSize - 1))
     }
+
+    /// How thick a lane is. One value, because every lane is now the same lane.
+    private static let laneHeight: CGFloat = 4
+
+    /// The gap between one window's block and the next.
+    ///
+    /// Wider than anything inside a block, which is what makes three lines read as one row rather
+    /// than as three. It is the only grouping in the panel: there are no rules between rows, since
+    /// a rule every three lines in a 344 point column is a fence around every sheep.
+    private static let rowGap: CGFloat = 12
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             eyebrow
 
-            if let headline = board.headline {
-                headlineBlock(headline)
-            }
-
-            if !ledger.isEmpty {
-                if board.headline != nil {
-                    Rectangle()
-                        .fill(MenuInk.rule)
-                        .frame(height: Metrics.hairline)
-                        .padding(.vertical, Metrics.spacingWide)
-                }
-                // A grid rather than a stack of rows, so the lanes start on one edge and the
-                // countdowns end on one edge whatever the provider is called. Three loose rows
-                // was the first version and the lanes wandered by twenty points down the column.
-                Grid(alignment: .leading, horizontalSpacing: Metrics.spacing, verticalSpacing: Metrics.spacing) {
-                    ForEach(ledger) { quota in
-                        ledgerRow(quota)
-                    }
+            VStack(alignment: .leading, spacing: Self.rowGap) {
+                ForEach(board.lines(at: now)) { line in
+                    row(line)
                 }
             }
 
@@ -149,94 +155,123 @@ struct QuotaPanel: View {
     /// rather than the tertiary rung: tertiary is what AppKit draws a DISABLED item in, and a
     /// heading nobody can read is a heading nobody reads.
     private var eyebrow: some View {
-        Text("LIMITS")
+        Text(QuotaPhrase.heading)
             .font(Self.headingFont)
             .tracking(Typo.microTracking)
             .foregroundStyle(MenuInk.secondary)
-            .padding(.bottom, Metrics.spacingSmall)
+            .padding(.bottom, Metrics.spacingWide)
     }
 
-    // MARK: The headline
+    // MARK: One window
 
-    private func headlineBlock(_ quota: AgentQuota) -> some View {
-        VStack(alignment: .leading, spacing: Metrics.spacing) {
-            HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
-                Text(title(for: quota))
-                    .font(Self.rowFontEmphasised)
+    /// Three lines: who and how much, the lane, and when it lifts.
+    ///
+    /// The figure sits at the panel's trailing edge rather than beside the name, so every figure in
+    /// the panel is on one right hand margin and the column can be read down without reading the
+    /// names. It is `labelColor` and not the severity tint, which is what it used to be:
+    /// photographed on a near-white menu, `systemOrange` at semibold measured about two to one
+    /// against the material, under even the three to one a large glyph has to clear, so the one
+    /// number the panel exists to show was the palest thing on the row. The lane directly under it
+    /// carries the tint instead, which is the job a system colour like `systemOrange` is tuned for.
+    private func row(_ line: QuotaLine) -> some View {
+        VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+            HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingWide) {
+                Text(line.title)
+                    .font(Self.rowFont)
                     .foregroundStyle(MenuInk.primary)
+                    .lineLimit(1)
+                    // Nothing here may be shortened: a menu that says "Claude Code · 5 ho..." has
+                    // failed at the one job it has. The panel is sized so this never bites, and
+                    // this is what makes that a promise rather than a hope.
+                    .fixedSize()
                 Spacer(minLength: Metrics.spacingWide)
-                // `labelColor` and not the severity tint, which is what this used to be.
-                //
-                // Photographed on a near-white menu, `systemOrange` at semibold measures about two
-                // to one against the material, under even the three to one a large glyph has to
-                // clear, so the one number the panel exists to show was the palest thing on the
-                // row. The lane directly under it carries the tint instead, which is the job a
-                // system colour like `systemOrange` is tuned for, and this reads as firmly as the
-                // menu item below it. Severity is not lost: a spent window is a full red lane.
-                Text(percentage(quota) ?? "")
+                Text(line.figure)
                     .font(Self.rowFontEmphasised)
                     .monospacedDigit()
-                    .foregroundStyle(MenuInk.primary)
+                    .foregroundStyle(line.severity == nil ? MenuInk.secondary : MenuInk.primary)
+                    .lineLimit(1)
+                    .fixedSize()
             }
 
-            lane(for: quota, height: 4)
+            lane(line)
 
-            if let resetsAt = quota.resetsAt {
-                Text("Lifts \(QuotaCountdown.phrase(until: resetsAt, from: now))")
-                    .font(Self.rowFont)
+            if !line.footnote.isEmpty {
+                Text(line.footnote)
+                    .font(Self.footFont)
                     .foregroundStyle(MenuInk.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
             }
         }
     }
 
-    // MARK: The ledger
+    // MARK: Parts
 
-    /// One line per window: who and which window on the left, then the lane, then how long. The
-    /// percentage is deliberately absent here. Three numbers on a line is a table, and the lane
-    /// already says the thing the number would, to the precision anybody reads a menu for.
-    private func ledgerRow(_ quota: AgentQuota) -> some View {
-        GridRow {
-            Text(title(for: quota))
-                .font(Self.rowFont)
-                // `labelColor`, the same ink as the menu items under it, because this is a row
-                // label and not a caption. It was the secondary rung and read as one.
-                .foregroundStyle(MenuInk.primary)
-                .lineLimit(1)
-                // The row is wide enough for this and SwiftUI still truncated it, because the two
-                // fixed columns beside it are asked for their width first and the name is left
-                // whatever is over. Nothing here may be shortened: a menu that says
-                // "Claude Code . 5 ho..." has failed at the one job it has.
-                .fixedSize()
-                .gridColumnAlignment(.leading)
-            Group {
-                if quota.fraction != nil {
-                    lane(for: quota, height: 3)
-                } else {
-                    // Not an empty track. An empty track is a claim about how much has gone, and
-                    // the whole point of this case is that nobody made one.
-                    Text("not reported")
-                        .font(Self.rowFont)
-                        .foregroundStyle(MenuInk.secondary)
-                        .lineLimit(1)
+    /// The filled length, or a dashed rule for a window nobody has measured.
+    ///
+    /// The track is a rung of ink rather than a wash of the fill, so an almost empty lane still
+    /// reads as a lane with something in it instead of as a faint smear of colour.
+    /// `tertiaryLabelColor` and not `Palette.border`: the border is a rule tuned to separate two
+    /// panes of a Bloom window, and on the menu's material it came out as very nearly nothing.
+    ///
+    /// The unmeasured case is a dashed rule at the same height and never a track, because a track
+    /// is a claim about how much has gone and the whole point of that case is that nobody made
+    /// one. Dashed rather than absent, so the row keeps the panel's rhythm and so an eye running
+    /// down the column can see that something is there and is not a quantity.
+    @ViewBuilder
+    private func lane(_ line: QuotaLine) -> some View {
+        if let fill = line.fill {
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(MenuInk.track)
+                    Rectangle()
+                        .fill(tint(line.severity))
+                        // Clamped at both ends. A provider reporting 103 percent of an overage
+                        // allowance is a thing that happens and a lane wider than its track draws
+                        // over the text; and at the other end a fraction of a percent of 300
+                        // points rounds to nothing at all, so a window that has been used reads as
+                        // one that has not.
+                        .frame(width: laneFill(fill, of: proxy.size.width))
                 }
             }
-            // Sized to the words rather than to the lane, because the lane would happily be
-            // half this and "not reported" would not, and a column that changes width depending
-            // on which of the two a row is showing is not a column.
-            .frame(width: 92, alignment: .leading)
-            .gridColumnAlignment(.leading)
-            Text(quota.resetsAt.map { QuotaCountdown.phrase(until: $0, from: now) } ?? "")
-                .font(Self.rowFont)
-                .monospacedDigit()
-                .foregroundStyle(MenuInk.secondary)
-                .lineLimit(1)
-                // Pushed to the panel's own edge rather than to the grid's natural width, so the
-                // countdowns end where the headline lane ends. Sized to the longest phrase this
-                // can produce, which lets the column hold still as the numbers count down instead
-                // of the whole menu breathing in and out under the pointer.
-                .frame(minWidth: 78, maxWidth: .infinity, alignment: .trailing)
-                .gridColumnAlignment(.trailing)
+            .frame(height: Self.laneHeight)
+        } else {
+            Rectangle()
+                .fill(MenuInk.track)
+                .frame(height: Metrics.hairline)
+                .mask(alignment: .leading) {
+                    // A dash and a gap, drawn as a repeating gradient rather than as a stroked
+                    // path, because a dashed `Shape` inside a menu item's hosting view is measured
+                    // by `fittingSize` before it has a width to dash across.
+                    LinearGradient(
+                        stops: Self.dashStops,
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                }
+                .frame(height: Self.laneHeight)
         }
+    }
+
+    /// Twenty four dashes across the panel, which at 344 points is a three point mark and a four
+    /// point gap: a rule that reads as broken at arm's length without turning into a texture.
+    private static let dashStops: [Gradient.Stop] = (0..<24).flatMap { index -> [Gradient.Stop] in
+        let step = 1.0 / 24.0
+        let start = Double(index) * step
+        return [
+            .init(color: .white, location: start),
+            .init(color: .white, location: start + step * 0.45),
+            .init(color: .clear, location: start + step * 0.45),
+            .init(color: .clear, location: start + step),
+        ]
+    }
+
+    /// Never wider than the track, and never narrower than the lane is thick, so the shortest
+    /// honest fill is a square rather than a hairline nobody can see.
+    private func laneFill(_ fraction: Double, of width: CGFloat) -> CGFloat {
+        let share = min(max(fraction, 0), 1)
+        guard share > 0 else { return 0 }
+        return min(max(width * share, Self.laneHeight), width)
     }
 
     /// When the figures above were last confirmed, shown only once they are old enough to matter.
@@ -247,9 +282,9 @@ struct QuotaPanel: View {
     /// numbers that are otherwise still the best answer anybody has.
     private func staleNote(_ age: String) -> some View {
         Text("Last checked \(age)")
-            .font(Self.rowFont)
+            .font(Self.footFont)
             .foregroundStyle(MenuInk.secondary)
-            .padding(.top, Metrics.spacingWide)
+            .padding(.top, Self.rowGap)
     }
 
     // MARK: The empty state
@@ -258,6 +293,10 @@ struct QuotaPanel: View {
     /// have to be installed and signed in before they will answer, so a machine with neither lands
     /// here. It says what will fill it rather than announcing an absence, because there is nothing
     /// wrong.
+    ///
+    /// A provider that is simply absent contributes no rows at all, rather than a row explaining
+    /// its own absence. That is `QuotaBoard.make`'s doing and it is the same rule as this one, one
+    /// provider at a time.
     private var emptyState: some View {
         Text(Self.emptySentence)
             .font(Self.rowFont)
@@ -267,66 +306,14 @@ struct QuotaPanel: View {
 
     /// Why the panel is empty, said as a thing that is about to happen rather than as a blank.
     ///
-    /// It names the mechanism, because "nothing reported yet" on its own reads as broken. As Bloom
-    /// stands, both figures arrive on the way out of a turn and nowhere else, so a fresh install
-    /// shows this until the first one finishes.
-    ///
-    /// It no longer says "after the next turn", because Bloom no longer waits to be told. Both
-    /// providers are asked directly, on a schedule, and neither ask costs a turn: Claude Code
-    /// answers a `control_request` of subtype `get_usage`, and the Codex app-server answers
-    /// `account/rateLimits/read`. See `AgentQuotaSources`. What is left here is the genuinely
-    /// empty case: neither CLI installed, neither signed in, or the very first seconds of a launch
-    /// before the first ask has come back.
+    /// It names the mechanism, because "nothing reported yet" on its own reads as broken. It no
+    /// longer says "after the next turn", because Bloom no longer waits to be told: both providers
+    /// are asked directly, on a schedule, and neither ask costs a turn. See `AgentQuotaSources`.
+    /// What is left here is the genuinely empty case: neither CLI installed, neither signed in, or
+    /// the very first seconds of a launch before the first ask has come back.
     static let emptySentence =
         "Nothing reported yet. Bloom asks Claude Code and Codex for their figures every few "
         + "minutes, so this fills in shortly after either one is installed and signed in."
-
-
-    // MARK: Parts
-
-    /// The filled length. Square rather than rounded, and the track is a rung of ink rather than
-    /// a wash of the fill, so an almost empty lane still reads as a lane with something in it
-    /// instead of as a faint smear of colour.
-    ///
-    /// `tertiaryLabelColor` for the track, not `Palette.border`. The border is a rule tuned to
-    /// separate two panes of a Bloom window, and on the menu's material it came out as very nearly
-    /// nothing: the ledger's short lanes read as a stub of colour floating with no track behind
-    /// them. A quarter of the menu's own ink is a track in both appearances and under Reduce
-    /// Transparency, because it is the same ink the menu is drawing everything else with.
-    private func lane(for quota: AgentQuota, height: CGFloat) -> some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Rectangle().fill(MenuInk.track)
-                Rectangle()
-                    .fill(tint(for: quota))
-                    // Clamped at both ends. A provider reporting 103 percent of an overage
-                    // allowance is a thing that happens and a lane wider than its track draws over
-                    // the text; and at the other end the ledger's lane is forty eight points long,
-                    // so six percent of it rounds to nothing at all and a window that has been used
-                    // reads as one that has not.
-                    .frame(width: laneFill(quota.fraction, of: proxy.size.width, thickness: height))
-            }
-        }
-        .frame(height: height)
-    }
-
-    /// Never wider than the track, and never narrower than the lane is thick, so the shortest
-    /// honest fill is a square rather than a hairline nobody can see.
-    private func laneFill(_ fraction: Double?, of width: CGFloat, thickness: CGFloat) -> CGFloat {
-        let share = min(max(fraction ?? 0, 0), 1)
-        guard share > 0 else { return 0 }
-        return min(max(width * share, thickness), width)
-    }
-
-    private func title(for quota: AgentQuota) -> String {
-        "\(quota.provider.label) · \(quota.window.label)"
-    }
-
-    private func percentage(_ quota: AgentQuota) -> String? {
-        // Rounded down, never up. Rounding 0.999 to "100%" says a window is spent while there is
-        // still room in it, which is the one direction this number must not be wrong in.
-        quota.fraction.map { "\(Int((min(max($0, 0), 1) * 100).rounded(.down)))%" }
-    }
 
     /// The severity ramp. Three steps, and the system's colours rather than Bloom's.
     ///
@@ -342,11 +329,16 @@ struct QuotaPanel: View {
     /// it is that Bloom has a mark and a ramp of its own; a menu does not belong to Bloom. On a Mac
     /// set to Graphite this lane comes out grey, and so does every progress bar the system draws
     /// two menus away, which is the agreement worth having here.
-    private func tint(for quota: AgentQuota) -> Color {
-        switch QuotaSeverity.of(quota.fraction) {
+    ///
+    /// Nothing calls this with `nil`: a row with no severity has no lane. It is written to take one
+    /// anyway so that the day somebody gives an unmeasured row a lane, it is grey rather than
+    /// quietly the accent, which would be the panel inventing a measurement.
+    private func tint(_ severity: QuotaSeverity?) -> Color {
+        switch severity {
         case .calm: MenuInk.calm
         case .warning: MenuInk.warning
         case .critical, .spent: MenuInk.critical
+        case nil: MenuInk.track
         }
     }
 }
@@ -363,8 +355,6 @@ private enum MenuInk {
     static var secondary: Color { Color(nsColor: .secondaryLabelColor) }
     /// The empty part of a lane.
     static var track: Color { Color(nsColor: .tertiaryLabelColor) }
-    /// The rule between the headline and the ledger, and it is the menu's own separator.
-    static var rule: Color { Color(nsColor: .separatorColor) }
     static var calm: Color { Color(nsColor: .controlAccentColor) }
     static var warning: Color { Color(nsColor: .systemOrange) }
     static var critical: Color { Color(nsColor: .systemRed) }

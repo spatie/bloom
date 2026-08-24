@@ -865,7 +865,20 @@ enum Snapshot {
                         .padding(.vertical, 8)
                         .background(Color(nsColor: .windowBackgroundColor))
                 ),
-                CGSize(width: QuotaPanel.width + 43, height: 200)
+                CGSize(width: QuotaPanel.width + 43, height: 300)
+            ),
+            // And the states a real ask cannot produce on the machine this runs on: a window
+            // nobody measured, a provider absent, extra usage switched on, a window past its wall.
+            // Invented rather than measured, and that is the difference from the scene above: this
+            // one is a photograph of the drawing rather than of an account, and it exists because
+            // "photograph every state" is not a thing one account can be asked to be.
+            (
+                "limits-states",
+                AnyView(
+                    LimitsStateGallery()
+                        .background(Color(nsColor: .windowBackgroundColor))
+                ),
+                CGSize(width: QuotaPanel.width + 43, height: 1500)
             ),
         ]
 
@@ -1101,5 +1114,98 @@ extension View {
         #else
         return self
         #endif
+    }
+}
+
+/// Every state of the limits panel, on a menu's own ground, one under the other.
+///
+/// The boards are built by hand because the point is the drawing rather than the account: the
+/// machine this renders on has one plan, one set of windows and no extra usage, so four of the
+/// six states below cannot be asked for. The `limits` scene beside this one is the real ask and
+/// stays that way.
+private struct LimitsStateGallery: View {
+    /// A fixed instant, so every countdown in the capture is the same countdown next week.
+    private static let now = Date(timeIntervalSince1970: 1_787_500_000)
+    private static let week: TimeInterval = 604_800
+
+    private static func quota(
+        _ provider: AgentKind,
+        _ window: QuotaWindow,
+        _ used: Double?,
+        after resets: TimeInterval?
+    ) -> AgentQuota {
+        AgentQuota(
+            provider: provider,
+            window: window,
+            measure: used.map { .fraction($0) } ?? .unknown,
+            resetsAt: resets.map { now.addingTimeInterval($0) },
+            observedAt: now
+        )
+    }
+
+    private static let scenes: [(String, [AgentQuota], QuotaFreshness)] = [
+        ("Quiet", [
+            quota(.claudeCode, .named("five_hour"), 0.12, after: 15_600),
+            quota(.claudeCode, .named("seven_day"), 0.09, after: week * 0.85),
+            quota(.codex, .lasting(week, key: "primary"), 0.03, after: week * 0.7),
+        ], .current),
+        ("The ramp, and the owner's own figures", [
+            quota(.claudeCode, .named("five_hour"), 0.04, after: 3900),
+            quota(.claudeCode, .named("seven_day"), 0.60, after: week * 0.535),
+            quota(
+                .claudeCode,
+                QuotaWindow(key: "seven_day_model_fable", label: "Week (Fable)", duration: week),
+                0.71,
+                after: week * 0.535
+            ),
+            quota(.codex, .lasting(week, key: "primary"), 0, after: week * 0.9),
+        ], .current),
+        ("Nobody measured the session window", [
+            quota(.claudeCode, .named("five_hour"), nil, after: 9600),
+            quota(.claudeCode, .named("seven_day"), 0.44, after: week * 0.6),
+            quota(.codex, .lasting(week, key: "primary"), 0, after: week * 0.9),
+        ], .current),
+        ("Codex absent, and one window spent", [
+            quota(.claudeCode, .named("five_hour"), 1, after: 2900),
+            quota(.claudeCode, .named("seven_day"), 0.88, after: week * 0.3),
+        ], .stale(11_000)),
+        ("Model scoped rows and extra usage, both present", [
+            quota(.claudeCode, .named("five_hour"), 0.22, after: 7900),
+            quota(.claudeCode, .named("seven_day"), 0.66, after: week * 0.6),
+            quota(
+                .claudeCode,
+                QuotaWindow(key: "seven_day_model_opus", label: "Week (Opus)", duration: week),
+                0.93,
+                after: week * 0.6
+            ),
+            AgentQuota(
+                provider: .claudeCode,
+                window: QuotaWindow(key: "extra_usage", label: "Extra usage"),
+                measure: .counted(used: 17.2, limit: 50, unit: "USD"),
+                resetsAt: nil,
+                observedAt: now
+            ),
+            quota(.codex, .lasting(week, key: "primary"), 0.58, after: week * 0.45),
+        ], .current),
+        ("Nothing reported at all", [], .current),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(Self.scenes.enumerated()), id: \.offset) { _, scene in
+                Text(scene.0)
+                    .font(Font(NSFont.menuFont(ofSize: 0)).weight(.semibold))
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                    .padding(.leading, 29)
+                    .padding(.top, 20)
+                    .padding(.bottom, 6)
+                QuotaPanel(
+                    board: QuotaBoard.make(from: scene.1, at: Self.now),
+                    freshness: scene.2,
+                    now: Self.now
+                )
+            }
+        }
+        .padding(.bottom, 20)
     }
 }

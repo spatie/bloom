@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Bloom limits panel</title>
+<style>
+  :root {
+    --page: #f2f2f4;
+    --page-ink: #1d1d1f;
+    --page-ink-2: #6e6e73;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 32px 80px;
+    font: 13px/1.4 -apple-system, "SF Pro Text", system-ui, sans-serif;
+    background: var(--page); color: var(--page-ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .lede { color: var(--page-ink-2); max-width: 720px; margin: 0 0 32px; line-height: 1.55; }
+  h2 { font-size: 15px; font-weight: 600; margin: 40px 0 2px; }
+  .note { color: var(--page-ink-2); max-width: 720px; margin: 0 0 14px; line-height: 1.5; font-size: 12.5px; }
+  .pair { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+
+  /* ---- the menu ground ---- */
+  .menu {
+    width: 344px;
+    border-radius: 10px;
+    padding: 6px 0;
+    font: 13px/1.25 -apple-system, "SF Pro Text", system-ui, sans-serif;
+  }
+  .menu.light {
+    background: #f6f6f6ee;
+    box-shadow: 0 0 0 0.5px #00000026, 0 8px 24px #00000024;
+    --ink: #000000;
+    --ink-2: #00000099;
+    --track: #00000040;
+    --rule: #0000001f;
+    --calm: #0a63d8;
+    --warn: #c26a00;
+    --crit: #d02b21;
+    --hi: #00000008;
+  }
+  .menu.dark {
+    background: #3a3a3ceb;
+    box-shadow: 0 0 0 0.5px #ffffff26, 0 8px 24px #00000055;
+    --ink: #ffffff;
+    --ink-2: #ffffff99;
+    --track: #ffffff40;
+    --rule: #ffffff26;
+    --calm: #4c9bff;
+    --warn: #ff9f0a;
+    --crit: #ff6961;
+    --hi: #ffffff0d;
+  }
+  /* a real menu item above and below, so the panel is judged against its neighbours */
+  .item { padding: 3px 14px 3px 29px; color: var(--ink); }
+  .sep { height: 1px; background: var(--rule); margin: 5px 14px 5px 29px; }
+
+  .panel { padding: 4px 14px 8px 29px; }
+  .eyebrow {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+    color: var(--ink-2); margin-bottom: 7px;
+  }
+
+  .row { margin-top: 11px; }
+  .row:first-of-type { margin-top: 0; }
+  .row .head { display: flex; align-items: baseline; gap: 10px; }
+  .row .name { color: var(--ink); white-space: nowrap; }
+  .row .fig {
+    margin-left: auto; color: var(--ink);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .row .fig.quiet { color: var(--ink-2); }
+  .row .foot { color: var(--ink-2); margin-top: 4px; font-size: 12px; }
+  .row .fig { font-weight: 600; }
+
+  .lane { margin-top: 5px; height: 3px; background: var(--track); position: relative; }
+  .lane > i { position: absolute; inset: 0 auto 0 0; display: block; }
+  .lane.calm > i { background: var(--calm); }
+  .lane.warn > i { background: var(--warn); }
+  .lane.crit > i { background: var(--crit); }
+  /* nobody has said. not a track, because a track is a claim about how much has gone */
+  .lane.unsaid {
+    background: none;
+    background-image: repeating-linear-gradient(90deg, var(--track) 0 2px, transparent 2px 5px);
+  }
+  .empty { color: var(--ink-2); line-height: 1.45; }
+  .stale { color: var(--ink-2); font-size: 12px; margin-top: 12px; }
+  .rule { height: 1px; background: var(--rule); margin: 12px 0; }
+  .cap { font-size: 11px; color: var(--page-ink-2); margin: 8px 0 0; }
+</style>
+</head>
+<body>
+
+<h1>Limits panel</h1>
+<p class="lede">344 points wide, which is what the menu is. Drawn on the menu's own ground with a
+real menu item above and below each panel, because that neighbour is what the type and the ink have
+to hold up beside. Left inset 29, right inset 14, both AppKit's.</p>
+
+<div id="scenes"></div>
+
+<script>
+const fmt = (n) => Math.floor(Math.max(0, Math.min(1, n)) * 100) + '%';
+const sev = (f) => f == null ? '' : f >= 0.9 ? 'crit' : f >= 0.8 ? 'warn' : 'calm';
+
+function row(r) {
+  const lead = '';
+  const known = r.used != null;
+  const fig = known ? fmt(r.used) : 'not reported';
+  const lane = known
+    ? `<div class="lane ${sev(r.used)}"><i style="width:${Math.max(r.used > 0 ? 3 : 0, r.used*100)}%"></i></div>`
+    : `<div class="lane unsaid"></div>`;
+  return `<div class="row${lead}">
+    <div class="head"><span class="name">${r.name}</span><span class="fig${known ? '' : ' quiet'}">${fig}</span></div>
+    ${lane}
+    <div class="foot">${r.foot}</div>
+  </div>`;
+}
+
+function panel(rows, opts = {}) {
+  const body = rows.length
+    ? rows.map(row).join('')
+    : `<div class="empty">${opts.empty}</div>`;
+  return `<div class="panel">
+    <div class="eyebrow">LIMITS</div>
+    ${body}
+    ${opts.stale ? `<div class="stale">${opts.stale}</div>` : ''}
+  </div>`;
+}
+
+function menu(mode, rows, opts) {
+  return `<div class="menu ${mode}">
+    <div class="item">New Workspace</div>
+    <div class="sep"></div>
+    ${panel(rows, opts)}
+    <div class="sep"></div>
+    <div class="item">Prevent Sleep While Agents Run</div>
+    <div class="item">Quit Bloom</div>
+  </div>`;
+}
+
+const scenes = [
+  {
+    title: "What Freek is actually looking at, redrawn",
+    note: "His own <code>get_usage</code>, measured this morning. The Fable weekly at 71% is real and " +
+          "the panel throws it away today, so the row it leads with says 60% while the wall he will " +
+          "actually hit says 71%. Each provider in turn, shortest window first, every row carrying " +
+          "its figure, every lane the same length so the four can be compared at all.",
+    rows: [
+      { name: "Claude Code · 5 hours", used: 0.04, foot: "Lifts in 1h 5m" },
+      { name: "Claude Code · Week", used: 0.60, foot: "Lifts in 3d" },
+      { name: "Claude Code · Week (Fable)", used: 0.71,
+        foot: "Lifts in 3d. At this rate it runs out in 1d 7h." },
+      { name: "Codex · Week", used: 0.00, foot: "Lifts in 6d" },
+    ],
+  },
+  {
+    title: "Everything quiet",
+    note: "Nothing is near anything, so nothing is coloured. Ordinary ink is the resting state and " +
+          "orange means something.",
+    rows: [
+      { name: "Claude Code · 5 hours", used: 0.12, foot: "Lifts in 4h 20m" },
+      { name: "Claude Code · Week", used: 0.09, foot: "Lifts in 6d" },
+      { name: "Codex · Week", used: 0.03, foot: "Lifts in 5d" },
+    ],
+  },
+  {
+    title: "The ramp: 80 is orange, 90 is red, both inclusive",
+    note: "Utilisation alone decides the colour, which is the rule as asked for. The figure itself " +
+          "stays in the menu's own ink: <code>systemOrange</code> semibold at menu size measured " +
+          "about 2:1 on a near-white menu when it was tried, so the tint lives on the lane, where a " +
+          "colour survives.",
+    rows: [
+      { name: "Claude Code · 5 hours", used: 0.79, foot: "Lifts in 2h 40m" },
+      { name: "Claude Code · Week", used: 0.80, foot: "Lifts in 4d" },
+      { name: "Claude Code · Week (Opus)", used: 0.89, foot: "Lifts in 4d" },
+      { name: "Codex · Week", used: 0.90, foot: "Lifts in 2d" },
+    ],
+  },
+  {
+    title: "One window nearly full, and the clock is the difference",
+    note: "Both of these are at 95% and both are red, because the ramp is about utilisation. What " +
+          "tells them apart is the sentence: the weekly has six days to run and will not last them, " +
+          "the session lifts in twenty minutes and is a cup of tea.",
+    rows: [
+      { name: "Claude Code · 5 hours", used: 0.95, foot: "Lifts in 20 min" },
+      { name: "Claude Code · Week", used: 0.95,
+        foot: "Lifts in 6d. At this rate it runs out in 7h." },
+      { name: "Codex · Week", used: 0.31, foot: "Lifts in 2d" },
+    ],
+  },
+  {
+    title: "A window nobody has measured",
+    note: "Claude Code publishes a figure only once a window has passed its warning threshold, so " +
+          "early in a five hour window there is a window, a reset time and no number. A dashed lane " +
+          "and the words. It is not a track, because a track is a claim about how much has gone, and " +
+          "it is not absent, because the window is real and lifts at a stated time. It is also not " +
+          "quiet: it has no place on the ramp at all.",
+    rows: [
+      { name: "Claude Code · 5 hours", used: null, foot: "Lifts in 2h 40m" },
+      { name: "Claude Code · Week", used: 0.44, foot: "Lifts in 4d" },
+      { name: "Codex · Week", used: 0.00, foot: "Lifts in 6d" },
+    ],
+  },
+  {
+    title: "Codex absent entirely",
+    note: "Not installed, not signed in, or simply never asked. It contributes no rows rather than a " +
+          "row saying nothing.",
+    rows: [
+      { name: "Claude Code · 5 hours", used: 0.51, foot: "Lifts in 3h 05m" },
+      { name: "Claude Code · Week", used: 0.82,
+        foot: "Lifts in 2d. At this rate it runs out in 9h." },
+    ],
+  },
+  {
+    title: "Model scoped rows and extra usage, both present",
+    note: "The tallest the panel gets. Model scoped weeklies are what actually bite on a Max plan. " +
+          "Extra usage is money rather than a window: it carries an amount instead of a countdown, " +
+          "it has no stated length so it sorts last, and it appears only when the account has it " +
+          "switched on.",
+    rows: [
+      { name: "Claude Code · 5 hours", used: 0.22, foot: "Lifts in 2h 11m" },
+      { name: "Claude Code · Week", used: 0.66, foot: "Lifts in 4d" },
+      { name: "Claude Code · Week (Opus)", used: 0.93,
+        foot: "Lifts in 4d. At this rate it runs out in 6h." },
+      { name: "Claude Code · Week (Sonnet)", used: 0.41, foot: "Lifts in 4d" },
+      { name: "Claude Code · Extra usage", used: 0.34, foot: "$17.20 of $50.00" },
+      { name: "Codex · Week", used: 0.58, foot: "Lifts in 3d" },
+    ],
+  },
+  {
+    title: "Spent, and stale",
+    note: "A window past its wall is a full red lane and the countdown is the only useful thing left " +
+          "on the row. Underneath, a board nobody has been able to refresh for two polls says how old " +
+          "it is instead of implying it is now.",
+    rows: [
+      { name: "Claude Code · 5 hours", used: 1.0, foot: "Lifts in 48 min" },
+      { name: "Claude Code · Week", used: 0.88, foot: "Lifts in 2d" },
+      { name: "Codex · Week", used: 0.12, foot: "Lifts in 6d" },
+    ],
+    stale: "Last checked 3 hours ago",
+  },
+  {
+    title: "Nothing reported at all",
+    note: "Neither CLI installed, neither signed in, or the first seconds of a launch.",
+    rows: [],
+    empty: "Nothing reported yet. Bloom asks Claude Code and Codex for their figures every few " +
+           "minutes, so this fills in shortly after either one is installed and signed in.",
+  },
+];
+
+document.getElementById('scenes').innerHTML = scenes.map(s => `
+  <h2>${s.title}</h2>
+  <p class="note">${s.note}</p>
+  <div class="pair">
+    ${menu('light', s.rows, s)}
+    ${menu('dark', s.rows, s)}
+  </div>
+`).join('');
+</script>
+</body>
+</html>
