@@ -746,6 +746,7 @@ enum Snapshot {
         case retries = "retries"
         case subagentRows = "subagent-rows"
         case paneTabs = "pane-tabs"
+        case sidebarSelection = "sidebar-selection"
 
         var title: String {
             switch self {
@@ -757,6 +758,7 @@ enum Snapshot {
             case .retries: "Retries"
             case .subagentRows: "Subagent rows"
             case .paneTabs: "Pane tabs"
+            case .sidebarSelection: "Sidebar selection"
             }
         }
 
@@ -772,6 +774,7 @@ enum Snapshot {
             // three that traces the removal.
             case .subagentRows: CGSize(width: 1_180, height: 720)
             case .paneTabs: CGSize(width: 700, height: 720)
+            case .sidebarSelection: CGSize(width: 520, height: 520)
             }
         }
 
@@ -787,6 +790,9 @@ enum Snapshot {
         var needsFocus: Bool {
             switch self {
             case .reviewComments: true
+            // The sidebar's selection does, and for the same reason: a source list draws the
+            // emphasized fill only while it holds the keyboard, and that fill is the whole page.
+            case .sidebarSelection: true
             // The running mark does not, even though it moves: `forcesBusyPulse` is what
             // lets a capture past the frontmost gate, so the heartbeat runs without the keys.
             // The pane tabs page has no field in it either: every tab on it is drawn as a label.
@@ -816,6 +822,7 @@ enum Snapshot {
         case .retries: RetrySnapshotGallery()
         case .subagentRows: SubagentRowGallery()
         case .paneTabs: PaneTabsGallery(app: app)
+        case .sidebarSelection: SidebarSelectionGallery()
         }
     }
 
