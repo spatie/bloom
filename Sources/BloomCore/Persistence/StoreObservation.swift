@@ -26,6 +26,7 @@ public enum StoreDomain: String, Sendable, Hashable, CaseIterable {
     case permissionGrants = "permission_grants"
     case permissionAsks = "permission_asks"
     case agentQuotas = "agent_quotas"
+    case quickPrompts = "quick_prompt"
 }
 
 /// Who hears about a committed write, and how they are stopped from drowning in them.
