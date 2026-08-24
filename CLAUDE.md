@@ -140,10 +140,16 @@ two colours are far enough apart. They are here rather than beside the views for
 whole three-target split exists, and they are in their own directory rather than mixed into the
 subjects so that "this is a view's decision, moved" stays visible.
 
-A directory with one file in it is not a subject. Put it in `Support/` and move it out when a
-second one arrives. The app target is grouped the same way, by pane rather than by kind, and
-`Tools/house-rules.sh` names a handful of these paths in its allow-lists, so a move has to update
-it: `make lint` says so immediately, which is the point.
+`Sources/Bloom` is grouped the same way, by **pane rather than by kind**. `Views/` holds one
+directory per region of the window (`Sidebar`, `Center`, `Inspector`, `Home`, `Transcript`,
+`Terminal`, `Chrome`), and the two that outgrew a single directory are split by what they are for
+rather than by what they are: `Center/Composer`, `Center/Panes`, `Center/Attachments`,
+`Center/Browser`; `Chrome/Window`, `Chrome/Settings`, `Chrome/MenuBar`, `Chrome/App`,
+`Chrome/Feedback`, `Chrome/Notices`.
+
+A directory with one file in it is not a subject. Leave it at the folder's root and give it one
+when a second arrives. `Tools/house-rules.sh` names about twenty of these paths in its allow-lists,
+so a move has to update them: `make lint` says so immediately, which is the point.
 
 ## One subject per file
 

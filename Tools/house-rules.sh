@@ -310,10 +310,10 @@ id_type_allowed_lines=(
   'Sources/BloomCore/Persistence/Settings.swift'                  # a run script named in settings
   'Sources/BloomCore/Agent/Codex/CodexModelCatalog.swift'         # a model name the CLI offers
   'Sources/BloomCore/System/EditorCatalog.swift'             # an application, by bundle id
-  'Sources/Bloom/Views/Center/ComposerOption.swift'   # a picker entry, "opus" and friends
-  'Sources/Bloom/Views/Center/CenterTab.swift'        # a tab: a terminal row, a browser or the review pane
+  'Sources/Bloom/Views/Center/Composer/ComposerOption.swift'   # a picker entry, "opus" and friends
+  'Sources/Bloom/Views/Center/Panes/CenterTab.swift'       # a tab: a terminal row, a browser or the review pane
   'Sources/BloomCore/System/TerminalPaneCensus.swift'        # the same tab id, read back off the same bytes
-  'Sources/Bloom/Views/Center/PromptAttachment.swift' # a draft key, which has no session yet
+  'Sources/Bloom/Views/Center/Attachments/PromptAttachment.swift' # a draft key, which has no session yet
   'Sources/Bloom/State/TranscriptModel.swift'         # payload ids, read straight off an event
   'Sources/BloomCore/GitHub/CheckFailureHandoff.swift'       # a GitHub Actions run and job, read out of a URL gh gave us
 )
@@ -355,7 +355,7 @@ echo "==> Views do not run subprocesses"
 # reaching for a process itself.
 subprocess_allowed_files=(
   'Sources/Bloom/Views/Inspector/FileRevert.swift'        # a helper type, not a view
-  'Sources/Bloom/Views/Center/FileIndex.swift'            # a helper type, not a view
+  'Sources/Bloom/Views/Center/Panes/FileIndex.swift'      # a helper type, not a view
   'Sources/Bloom/Views/Terminal/TerminalPersistence.swift' # a helper type, not a view
 )
 while IFS= read -r hit; do
