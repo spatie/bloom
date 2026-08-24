@@ -504,6 +504,23 @@ struct ArchiveDeletionOutcomeTests {
         #expect(!sentence.contains("?"))
     }
 
+    /// Read in a dialogue at the moment something went wrong, so it is broken up for the reason
+    /// `WorkspaceTrouble.sentence` is: one block is a wall somebody skips on the way to the
+    /// button, and the middle paragraph is the one saying nothing was destroyed.
+    @Test("a refusal reads as paragraphs, not one block")
+    func theRefusalIsBrokenUp() throws {
+        let sentence = try #require(
+            ArchiveDeletionOutcome.refused(complaint: "database is malformed.").sentence
+        )
+        let paragraphs = sentence.components(separatedBy: "\n\n")
+        #expect(paragraphs.count >= 3)
+        for paragraph in paragraphs {
+            #expect(!paragraph.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            // Wrapped by the column it is drawn in, never by hand.
+            #expect(!paragraph.contains("\n"))
+        }
+    }
+
     /// Home wrote its own `count` and dropped the grouping separator, so the same machine read
     /// "1000 workspaces" on Home and "1,000 chats" in Archive. One function, one answer.
     @Test("counts are grouped and pluralised the same way everywhere")

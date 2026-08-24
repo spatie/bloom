@@ -224,16 +224,25 @@ public enum ArchiveDeletionOutcome: Sendable, Hashable {
     /// A successful delete says nothing: the rows leave the list, which is the whole report. Only
     /// the refusal has a sentence, and it follows `WorkspaceTrouble`'s rule of naming what is
     /// wrong, what is safe, and whether trying again helps.
+    ///
+    /// In paragraphs for the reason `WorkspaceTrouble.sentence` is: this is read in a dialogue at
+    /// the moment something went wrong, and one block of it is a wall somebody skips on the way
+    /// to the button. The middle paragraph is the one that says nothing was destroyed.
     public var sentence: String? {
         switch self {
         case .deleted: return nil
         case let .refused(complaint):
             return """
-                Bloom could not delete those archived workspaces, so they are all still here and \
-                nothing has been freed. No worktree and no branch was involved: this is the \
-                database refusing to write, and it will refuse the next attempt the same way. \
+                Bloom could not delete those archived workspaces, so they are all still here \
+                and nothing has been freed.
+
+                No worktree and no branch was involved: this is the database refusing to write, \
+                and it will refuse the next attempt the same way.
+
                 Quit Bloom and open it again, and if it happens a second time the database itself \
-                needs looking at. The database said: \(complaint)
+                needs looking at.
+
+                The database said: \(complaint)
                 """
         }
     }

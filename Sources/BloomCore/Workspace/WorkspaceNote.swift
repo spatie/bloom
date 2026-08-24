@@ -74,10 +74,17 @@ public struct WorkspaceNote: Sendable, Hashable {
     /// keystroke wrote the blank version over it. The field stays disabled instead, and this says
     /// why. Here rather than in the view for the reason the rest of this type is: a sentence a
     /// view owns is a sentence nothing can read back.
+    ///
+    /// In paragraphs, like `WorkspaceTrouble.sentence` and for the same reason: it is drawn over
+    /// an empty pane at the moment the note the reader came for is not there, and the middle
+    /// paragraph is the one saying it has not been lost.
     public static let unreadable = """
-        This note could not be read out of Bloom's database, so it is not being shown and cannot \
-        be edited. Nothing has been lost: it is still in the row it was in. Try again, and if that \
-        fails too, quit Bloom and open it again.
+        This note could not be read out of Bloom's database, so it is not being shown and \
+        cannot be edited.
+
+        Nothing has been lost: it is still in the row it was in.
+
+        Try again, and if that fails too, quit Bloom and open it again.
         """
 
     /// What the pane says when a write was refused.

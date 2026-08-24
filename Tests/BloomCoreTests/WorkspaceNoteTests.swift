@@ -145,3 +145,33 @@ struct WorkspaceNoteTests {
         #expect(WorkspaceNote.handoff("") == nil)
     }
 }
+
+/// What the pane says when the database will not answer.
+///
+/// Drawn over an empty pane at the moment the note the reader came for is not there, so it is
+/// broken up for the reason `WorkspaceTrouble.sentence` is.
+@Suite("What a note says when it cannot be read")
+struct WorkspaceNoteTroubleTests {
+    @Test("the unreadable sentence reads as paragraphs")
+    func unreadableIsBrokenUp() {
+        let paragraphs = WorkspaceNote.unreadable.components(separatedBy: "\n\n")
+        #expect(paragraphs.count >= 3)
+        for paragraph in paragraphs {
+            #expect(!paragraph.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            #expect(!paragraph.contains("\n"))
+        }
+    }
+
+    /// The middle one is the whole point: the note is still there.
+    @Test("it says the note has not been lost")
+    func itSaysNothingIsLost() {
+        #expect(WorkspaceNote.unreadable.contains("Nothing has been lost"))
+    }
+
+    /// The footer's line stays one line. It sits on a single row under the editor, where a
+    /// paragraph break would push the pane about rather than help anybody read.
+    @Test("the footer's refusal is left as one line")
+    func theFooterStaysOneLine() {
+        #expect(!WorkspaceNote.unwritable.contains("\n"))
+    }
+}
