@@ -51,6 +51,11 @@ struct ComposerFooterView: View {
     /// three fetches of the Codex model list.
     private var catalog: ComposerModelCatalog { ComposerModelCatalog.shared }
 
+    /// Held here rather than in `ComposerContextGauge`, because two of the three candidates below
+    /// contain that control and `ViewThatFits` throws away the state of the ones it does not
+    /// pick. See the binding on that view.
+    @State private var isShowingContextDetail = false
+
     var body: some View {
         // The footer is a fixed row of controls in a pane whose width the user owns: the centre
         // column can be dragged to 420 points and then split in two, and at that width the full
@@ -63,6 +68,11 @@ struct ComposerFooterView: View {
             row(isCompact: false, showsContext: true)
             row(isCompact: true, showsContext: true)
             row(isCompact: true, showsContext: false)
+        }
+        // Outside the `ViewThatFits`, so narrowing the pane cannot take the presenter out of the
+        // tree while the popover is up.
+        .popover(isPresented: $isShowingContextDetail, arrowEdge: .top) {
+            if let context { ContextWindowDetail(usage: context) }
         }
         .onChange(of: controls.model, initial: true) { _, id in
             remember(id, known: catalog.options(for: controls.agentKind), in: &extraModels)
@@ -160,7 +170,7 @@ struct ComposerFooterView: View {
             // On the far side of the spacer, away from the pickers. It is a reading rather than
             // something to choose, and among the three menus it read as a fourth one.
             if let context, showsContext {
-                ComposerContextGauge(usage: context)
+                ComposerContextGauge(usage: context, isShowingDetail: $isShowingContextDetail)
             }
 
             // A paperclip, not the plus that used to sit here: a plus already means "new session"

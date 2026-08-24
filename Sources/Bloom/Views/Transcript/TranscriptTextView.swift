@@ -11,7 +11,32 @@ enum TranscriptLinkTarget {
 }
 
 /// What the transcript can do with an address, handed in rather than decided here.
-struct TranscriptLinkActions: Sendable {
+///
+/// **`Equatable` on `identity` and on nothing else, and that is the point of the type.** These go
+/// into the environment for the whole transcript, `TranscriptListView` builds them in a computed
+/// property, and a struct of closures cannot be compared, so SwiftUI counted the attribute as
+/// changed on every single body pass and invalidated every reader. That reached straight through
+/// the `.equatable()` the list wraps its rows in, which exists to stop exactly this, and for any
+/// paragraph holding a link it re-entered `InlineNSAttributes.make`, the one attributed-string
+/// builder in the transcript with no cache. The comments on the call site and on
+/// `markdownLinkActions` both claimed the opposite was happening.
+///
+/// The closures do not need comparing. Every one of them is a pure function of the workspace
+/// model `TranscriptLink.actions(for:)` was handed, plus the one row that adds a file door, so
+/// two values with the same identity do the same things.
+struct TranscriptLinkActions: Sendable, Equatable {
+    /// What these actions were built from. The whole of their equality.
+    enum Identity: Hashable, Sendable {
+        /// The default value, which does nothing at all.
+        case inert
+        case workspace(WorkspaceID?)
+        /// The same, with a file chip's door added. Its own case because a value that can open a
+        /// file must never compare equal to one that cannot.
+        case workspaceOpeningFiles(WorkspaceID?)
+    }
+
+    var identity: Identity = .inert
+
     var open: @MainActor @Sendable (URL, TranscriptLinkTarget) -> Void = { _, _ in }
     /// Whether Bloom's own browser could show this address at all. A menu item that opens a blank
     /// tab is worse than a menu item that is not there.
@@ -20,6 +45,8 @@ struct TranscriptLinkActions: Sendable {
     /// draws chips, because opening a file needs a workspace and the list's shared actions have
     /// none: see `UserTurnRowView`.
     var openFile: @MainActor @Sendable (String) -> Void = { _ in }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.identity == rhs.identity }
 }
 
 /// Prose in the transcript, drawn by AppKit so that a link in it behaves like a link.

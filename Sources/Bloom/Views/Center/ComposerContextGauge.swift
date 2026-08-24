@@ -6,8 +6,17 @@ import SwiftUI
 /// something about the next turn that the user may want to act on before sending it.
 struct ComposerContextGauge: View {
     var usage: ContextWindowUsage
+    /// Owned by the footer, not by this view, and the popover is attached there too.
+    ///
+    /// `ComposerFooterView` draws this row inside a `ViewThatFits` with three candidates, and two
+    /// of them contain this control. State inside a candidate is state that goes away when
+    /// `ViewThatFits` picks a different one, so narrowing the pane while the detail was open
+    /// swapped the candidate and took the popover's presenter out of the tree with it. A flag the
+    /// footer holds, and a presenter attached outside the `ViewThatFits`, cannot be swapped out
+    /// from under an open popover. This file had already hoisted three arrays out for the same
+    /// reason.
+    @Binding var isShowingDetail: Bool
 
-    @State private var isShowingDetail = false
     @State private var isHovered = false
 
     /// The bar in the footer. Narrow, because the number beside it is the reading and this only
@@ -49,9 +58,6 @@ struct ComposerContextGauge: View {
                 + "\(ContextWindowUsage.format(usage.used)) of \(ContextWindowUsage.format(usage.limit)) tokens"
                 + (usage.isCrowded ? ", filling up" : "")
         )
-        .popover(isPresented: $isShowingDetail, arrowEdge: .top) {
-            ContextWindowDetail(usage: usage)
-        }
     }
 
     private var bar: some View {

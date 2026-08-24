@@ -84,8 +84,9 @@ extension View {
     /// What every markdown row below this point does with a link.
     ///
     /// Set once, by the view that knows which workspace the transcript belongs to, rather than
-    /// per row: a closure rebuilt per row would be a new value on every pass and would invalidate
-    /// every row that read it.
+    /// per row. That alone was not enough: the value is built in a computed property, so it is a
+    /// fresh struct every pass, and a struct of closures cannot be compared. See
+    /// `TranscriptLinkActions`, which is `Equatable` on its identity for this reason.
     func markdownLinkActions(_ actions: TranscriptLinkActions) -> some View {
         environment(\.markdownLinkActions, actions)
     }

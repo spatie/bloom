@@ -15,8 +15,12 @@ struct StreamingThinkingView: View {
 
     private static let tailLimit = 600
 
+    /// `utf8.count` and not `count`. This is read on every delta of a buffer the file's own
+    /// header says reaches a hundred kilobytes, and `String.count` walks the whole thing to count
+    /// graphemes. A byte count answers the only question being asked, which is "is this longer
+    /// than 600 characters", because a string of n bytes can never hold more than n characters.
     private var tail: String {
-        text.count <= Self.tailLimit
+        text.utf8.count <= Self.tailLimit
             ? text
             : "\u{2026}" + String(text.suffix(Self.tailLimit))
     }

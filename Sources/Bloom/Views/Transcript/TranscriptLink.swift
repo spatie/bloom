@@ -131,6 +131,7 @@ enum TranscriptLink {
     @MainActor
     static func actions(for model: WorkspaceModel?) -> TranscriptLinkActions {
         TranscriptLinkActions(
+            identity: .workspace(model?.workspace.id),
             open: { url, target in
                 switch target {
                 case .externalBrowser:

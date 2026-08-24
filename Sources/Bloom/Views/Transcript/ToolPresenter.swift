@@ -462,9 +462,18 @@ enum ToolPresenter {
 
     /// Collapses every run of whitespace, so a heredoc or a multi line command still occupies
     /// exactly one row. The hard cap keeps a pathological command from costing real layout time.
+    /// Counted rather than measured. `out.count` on a `String` walks it from the start, so asking
+    /// it once per character made this quadratic: about 45,000 index steps for a 300 character
+    /// cap, on a function `ToolRowView` calls inline in `body` with no cache, on every row, twice
+    /// per pointer pass because that row holds `@State isHovered`.
+    ///
+    /// `text.utf8.count` for the reservation for the same reason: `text.count` walks the whole
+    /// input to size a buffer that is capped at 301 anyway, and a byte count is an upper bound on
+    /// a character count, which is all a reservation needs.
     static func oneLine(_ text: String, limit: Int = 300) -> String {
         var out = ""
-        out.reserveCapacity(min(text.count, limit + 1))
+        out.reserveCapacity(min(text.utf8.count, limit + 1))
+        var written = 0
         var pendingSpace = false
 
         for character in text {
@@ -474,10 +483,12 @@ enum ToolPresenter {
             }
             if pendingSpace {
                 out.append(" ")
+                written += 1
                 pendingSpace = false
             }
             out.append(character)
-            if out.count >= limit { return out + "\u{2026}" }
+            written += 1
+            if written >= limit { return out + "\u{2026}" }
         }
         return out
     }

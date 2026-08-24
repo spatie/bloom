@@ -140,7 +140,7 @@ struct WorkspaceEventRow: View {
     /// that to put in it, never below the five it starts at. `SetupTailWindow.lines` is where the
     /// reasoning lives, and it is there rather than here because it is a decision.
     private var runningTail: Int {
-        SetupTailWindow.lines(cap: tailCap, logLines: LogTail.lineCount(event.log))
+        SetupTailWindow.lines(cap: tailCap, logLines: event.logLines)
     }
 
     /// A failure is read rather than glanced at, so it gets twelve lines, or the pane's own share
@@ -496,7 +496,7 @@ struct WorkspaceEventRow: View {
     /// against it would say there is more to show about a log that is entirely on screen, which is
     /// the dead link this note is about.
     private var hasMoreToShow: Bool {
-        LogTail.lineCount(event.log) > (event.isFailure ? failedTail : tailCap)
+        event.logLines > (event.isFailure ? failedTail : tailCap)
     }
 }
 

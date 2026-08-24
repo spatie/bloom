@@ -58,6 +58,45 @@ struct WorkspaceEvent: Identifiable, Equatable {
     var failureSummary: String = ""
     var durationMS: Int?
 
+    /// How many lines `log` holds, counted once when the event is built rather than in a body.
+    ///
+    /// Two body getters asked for it, `runningTail` and `hasMoreToShow`, so a chat pane resize
+    /// paid `LogTail.lineCount` twice per pass per row while the pointer was moving. It scans the
+    /// log's UTF-8, which is already the cheap way to count lines, and the cheapest scan is the
+    /// one that does not happen: this is a pure function of `log`, and `log` changes only when
+    /// the script prints, which is not once per frame.
+    ///
+    /// Stored rather than computed, and that is what forces the initialiser below: a property
+    /// observer does not fire during initialisation, so a memberwise `init` would have left this
+    /// at zero, and a computed property is what was already there.
+    let logLines: Int
+
+    /// Written out because `logLines` is derived rather than passed. The compiler's memberwise
+    /// initialiser would take it as an argument and let a caller state a count that disagrees
+    /// with the log beside it.
+    init(
+        id: String = UUID().uuidString,
+        kind: Kind,
+        outcome: Outcome,
+        title: String,
+        detail: String = "",
+        note: String = "",
+        log: String = "",
+        failureSummary: String = "",
+        durationMS: Int? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.outcome = outcome
+        self.title = title
+        self.detail = detail
+        self.note = note
+        self.log = log
+        self.failureSummary = failureSummary
+        self.durationMS = durationMS
+        self.logLines = LogTail.lineCount(log)
+    }
+
     var isRunning: Bool { outcome == .running }
     var isFailure: Bool { outcome == .failed }
 
@@ -119,6 +158,8 @@ struct WorkspaceEvent: Identifiable, Equatable {
             return WorkspaceEvent(
                 id: "setup", kind: .setup, outcome: .succeeded,
                 title: "Setup finished",
+                // Counted here as well as in the initialiser, and deliberately not shared: this
+                // one is a sentence built before the value exists.
                 detail: lines == 1 ? "1 line of output" : "\(lines) lines of output",
                 log: log, durationMS: durationMS
             )

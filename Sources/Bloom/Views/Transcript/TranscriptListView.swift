@@ -454,8 +454,11 @@ struct TranscriptListView: View {
             // new closure on every pass over the list and would invalidate every row that read it.
             .environment(\.transcriptHoverHost, hoverHost)
             // What a link in any row of this transcript does when it is pressed or chosen from a
-            // menu. Said once for the whole list rather than per row, so it is one value the rows
-            // can compare rather than a new closure on every pass.
+            // menu. Said once for the whole list rather than per row, and comparable: this is a
+            // computed property, so it really is a fresh struct on every pass, and until
+            // `TranscriptLinkActions` was made `Equatable` on its identity SwiftUI counted the
+            // environment attribute as changed every time and invalidated every reader. That went
+            // straight through the `.equatable()` on the rows above.
             .markdownLinkActions(linkActions)
             .overlay {
                 TranscriptHoverOverlay(host: hoverHost)

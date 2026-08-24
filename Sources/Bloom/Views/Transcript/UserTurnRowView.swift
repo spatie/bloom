@@ -219,6 +219,9 @@ extension TranscriptLinkActions {
     func opening(file open: @escaping @MainActor @Sendable (String) -> Void) -> TranscriptLinkActions {
         var copy = self
         copy.openFile = open
+        // The identity moves with the closure, or a bubble that can open a file would compare
+        // equal to the list's value that cannot, and the environment would never see the change.
+        if case let .workspace(id) = identity { copy.identity = .workspaceOpeningFiles(id) }
         return copy
     }
 }
