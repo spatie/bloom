@@ -270,3 +270,27 @@ private actor EventCollector {
         #expect(await client.diagnostics.contains { $0.contains("patch rejected by user") })
     }
 }
+
+/// A request the server takes and never answers.
+///
+/// `send` parked a continuation in `pending` and waited, and the only other thing that resumes one
+/// is the connection closing, so a dropped reply hung its caller until the process died. Nothing
+/// above this layer has a deadline of its own.
+@Suite("A request that is never answered")
+struct CodexRequestTimeoutTests {
+    /// Every call that goes through `send` is a short request and response against a child
+    /// process on this machine, and `turn/start` in particular returns the turn `inProgress`
+    /// rather than waiting for it, so nothing here is legitimately slow.
+    @Test("the default budget is generous rather than tight")
+    func theBudgetIsGenerous() {
+        #expect(CodexClient.requestTimeout >= .seconds(60))
+    }
+
+    @Test("giving up names the method and the budget it spent")
+    func theErrorSaysWhatWasWaitedOn() {
+        let error = CodexClientError.timedOut(method: "thread/start", seconds: 120)
+        #expect(error == .timedOut(method: "thread/start", seconds: 120))
+        #expect(error != .timedOut(method: "turn/start", seconds: 120))
+        #expect(error != .connectionClosed("thread/start"))
+    }
+}

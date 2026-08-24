@@ -342,9 +342,18 @@ public actor AgentRunner {
 
     /// Write one user turn. Starts the process on first use.
     public func send(_ text: String) async throws {
-        try await waitForCancelledRunToExit()
+        // The two settings reads come first, and that ordering is the whole of the fix.
+        //
+        // They were between the wait and the start, and each is a store round trip, so there were
+        // two suspensions in a window that must have none. `cancelNow()` is nonisolated, on
+        // purpose, so it does not queue behind this actor: a Stop landing in that gap signals the
+        // running process, `start()` then finds `handle.current` still non-nil because the child
+        // has not exited yet, short-circuits, and the turn below is written into a process that
+        // is already under SIGTERM. Neither read depends on the previous run being gone, so
+        // nothing is lost by asking first.
         await refreshFastMode()
         await refreshOutputStyle()
+        try await waitForCancelledRunToExit()
         start()
 
         let line = try Self.encodeTurn(text)

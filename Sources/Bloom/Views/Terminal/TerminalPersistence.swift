@@ -24,18 +24,29 @@ final class TerminalPersistence {
     /// rather than against this snapshot.
     private var knownSessions: Set<String> = []
 
+    /// Where tmux is, resolved once for the whole launch.
+    ///
+    /// `Shell.which` walks the merged PATH and stats a candidate per entry, 37 of them on this
+    /// machine, and it was asked twice: here and again in `init`, which runs on the main actor
+    /// during bootstrap. One walk answers both.
+    static let tmuxPath: String? = Shell.which("tmux")
+
     /// Whether tmux is on this machine at all, for the Settings row that has to say so plainly
-    /// rather than letting a user find out when a terminal fails to open. Resolved once, because
-    /// `Shell.which` walks the whole PATH.
-    static let isTmuxInstalled: Bool = Shell.which("tmux") != nil
+    /// rather than letting a user find out when a terminal fails to open.
+    static var isTmuxInstalled: Bool { tmuxPath != nil }
 
     /// The switch as the user set it, which is not the same as whether it can be honoured.
     static var isSwitchedOn: Bool { UserDefaults.standard.bool(forKey: defaultsKey) }
 
     var isAvailable: Bool { command != nil }
 
+    /// **Synchronous disk work on the main actor, deliberately.** It writes tmux's configuration,
+    /// and the path it writes to is handed to `TmuxCommand` in the same breath, so a terminal
+    /// opened a moment later launches against it. Moving the write off the actor would make that
+    /// ordering a race for a saving nobody can feel: the PATH walk is shared now, and what is
+    /// left is one `createDirectory` and one atomic write of a few hundred bytes, once per launch.
     init(databasePath: String) {
-        guard let executable = Shell.which("tmux") else {
+        guard let executable = Self.tmuxPath else {
             command = nil
             return
         }

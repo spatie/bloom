@@ -388,3 +388,66 @@ struct WorkspaceStartTests {
         #expect(try await store.countWorkspaces(startedBy: WorkspaceID("parent")) == 3)
     }
 }
+
+/// The read-and-clear hint about which tab a new workspace opens on.
+///
+/// It read and wrote `UserDefaults.standard` directly, while the sibling `remembered(raw:)` takes
+/// a raw string precisely so the decision can be pinned, and eight other core types take a
+/// `defaults:`. So this one was untestable, and testing it as it stood would have written into
+/// the owner's own `be.spatie.bloom` domain, which is the one thing the house rules say never to
+/// touch.
+@Suite("Opening a new workspace on its terminal")
+struct WorkspaceOpensOnTerminalTests {
+    private func scratchDefaults() -> UserDefaults {
+        let suite = "bloom.tests.startmode.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
+
+    /// Only a terminal workspace leaves anything behind. A chat one is the ordinary case and the
+    /// centre column's own default, so writing a key for it would be a key per workspace ever
+    /// created, forever, saying what would have happened anyway.
+    @Test("only a terminal start records anything")
+    func onlyTerminalRecords() {
+        let defaults = scratchDefaults()
+        let id = WorkspaceID("w1")
+
+        WorkspaceStartMode.record(.chat, workspaceID: id, defaults: defaults)
+        #expect(defaults.object(forKey: WorkspaceStartMode.defaultsKey(workspaceID: id)) == nil)
+
+        WorkspaceStartMode.record(.terminal, workspaceID: id, defaults: defaults)
+        #expect(defaults.bool(forKey: WorkspaceStartMode.defaultsKey(workspaceID: id)))
+    }
+
+    /// Reading clears it, so re-selecting the workspace later does not keep forcing a terminal in
+    /// front of whatever the user has since arranged. That is the whole behaviour and it was
+    /// resting on nothing.
+    @Test("the hint is true exactly once")
+    func trueExactlyOnce() {
+        let defaults = scratchDefaults()
+        let id = WorkspaceID("w1")
+        WorkspaceStartMode.record(.terminal, workspaceID: id, defaults: defaults)
+
+        #expect(WorkspaceStartMode.consumeOpensOnTerminal(workspaceID: id, defaults: defaults))
+        #expect(!WorkspaceStartMode.consumeOpensOnTerminal(workspaceID: id, defaults: defaults))
+        #expect(defaults.object(forKey: WorkspaceStartMode.defaultsKey(workspaceID: id)) == nil)
+    }
+
+    @Test("a workspace nobody recorded anything for opens on its chat")
+    func unknownWorkspacesOpenOnChat() {
+        #expect(!WorkspaceStartMode.consumeOpensOnTerminal(
+            workspaceID: WorkspaceID("never-seen"), defaults: scratchDefaults()
+        ))
+    }
+
+    /// One key per workspace, so consuming one cannot answer for another.
+    @Test("two workspaces do not share the hint")
+    func workspacesDoNotShare() {
+        let defaults = scratchDefaults()
+        WorkspaceStartMode.record(.terminal, workspaceID: WorkspaceID("a"), defaults: defaults)
+
+        #expect(!WorkspaceStartMode.consumeOpensOnTerminal(workspaceID: WorkspaceID("b"), defaults: defaults))
+        #expect(WorkspaceStartMode.consumeOpensOnTerminal(workspaceID: WorkspaceID("a"), defaults: defaults))
+    }
+}

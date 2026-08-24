@@ -224,18 +224,50 @@ public actor CodexClient {
     /// The continuation is filed before the line is written, because a reply can arrive on the
     /// reader task the instant the write lands and a continuation registered afterwards would miss
     /// it. Both halves run on the actor, so the ordering holds.
+    /// How long a request may go unanswered before its caller is let go.
+    ///
+    /// Every call that goes through `send` is a short request and response against a child
+    /// process on this machine: `thread/start`, `thread/resume`, `turn/start`, `turn/steer`,
+    /// `turn/interrupt` and `model/list`. None of them waits for a turn. `turn/start` in
+    /// particular returns the turn `inProgress` and the answer arrives later as a
+    /// `turn/completed` notification, which is written down in docs/CODEX.md, so nothing here is
+    /// legitimately slow and two minutes is generous rather than tight.
+    public static let requestTimeout = Duration.seconds(120)
+
     @discardableResult
-    public func send(_ method: String, params: JSONValue?) async throws -> JSONValue {
+    public func send(
+        _ method: String, params: JSONValue?, timeout: Duration = CodexClient.requestTimeout
+    ) async throws -> JSONValue {
         if let closedReason { throw CodexClientError.connectionClosed(closedReason) }
         guard process != nil else { throw CodexClientError.notInitialized }
 
         let id = CodexRequestID.number(nextRequestID)
         nextRequestID += 1
 
+        // A request the server takes and never answers used to hang its caller until the process
+        // died: the continuation sits in `pending` and the only other thing that ever resumes one
+        // is the connection closing. Nothing above this layer has a deadline of its own, so a
+        // composer waiting on `thread/start` waited forever.
+        let watchdog = Task { [weak self] in
+            try await Task.sleep(for: timeout)
+            await self?.abandon(id, method: method, after: timeout)
+        }
+        defer { watchdog.cancel() }
+
         return try await withCheckedThrowingContinuation { continuation in
             pending[id] = continuation
             write(CodexOutgoing.request(id: id, method: method, params: params))
         }
+    }
+
+    /// Gives up on one request. A no-op when the answer arrived first, which is the ordinary case.
+    private func abandon(_ id: CodexRequestID, method: String, after timeout: Duration) {
+        guard let continuation = pending.removeValue(forKey: id) else { return }
+        continuation.resume(
+            throwing: CodexClientError.timedOut(
+                method: method, seconds: Int(timeout.components.seconds)
+            )
+        )
     }
 
     public func notify(_ method: String, params: JSONValue?) {

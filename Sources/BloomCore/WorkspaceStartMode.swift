@@ -93,18 +93,27 @@ public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable {
         "workspace.opensOnTerminal.\(workspaceID)"
     }
 
-    public static func record(_ mode: WorkspaceStartMode, workspaceID: WorkspaceID) {
+    /// - Parameter defaults: injected for the same reason `remembered(raw:)` takes a raw string
+    ///   rather than reading one. Eight other core types already take this, and a test that wrote
+    ///   to `.standard` would be writing into the owner's own `be.spatie.bloom` domain, which is
+    ///   the one thing `CLAUDE.md` says never to touch. So a decision worth pinning was untestable
+    ///   and testing it would have been actively dangerous.
+    public static func record(
+        _ mode: WorkspaceStartMode, workspaceID: WorkspaceID, defaults: UserDefaults = .standard
+    ) {
         guard mode == .terminal else { return }
-        UserDefaults.standard.set(true, forKey: defaultsKey(workspaceID: workspaceID))
+        defaults.set(true, forKey: defaultsKey(workspaceID: workspaceID))
     }
 
     /// True once, for a workspace created as a terminal one that has not been opened yet. Reading
     /// it clears it, so re-selecting the workspace later does not keep forcing a terminal tab in
     /// front of whatever the user has since arranged.
-    public static func consumeOpensOnTerminal(workspaceID: WorkspaceID) -> Bool {
+    public static func consumeOpensOnTerminal(
+        workspaceID: WorkspaceID, defaults: UserDefaults = .standard
+    ) -> Bool {
         let key = defaultsKey(workspaceID: workspaceID)
-        guard UserDefaults.standard.bool(forKey: key) else { return false }
-        UserDefaults.standard.removeObject(forKey: key)
+        guard defaults.bool(forKey: key) else { return false }
+        defaults.removeObject(forKey: key)
         return true
     }
 }

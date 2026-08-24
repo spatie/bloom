@@ -100,6 +100,12 @@ public enum CodexClientError: Sendable, Error, Equatable {
     case unexpectedResult(method: String)
     /// The handshake did not complete, so nothing else may be sent.
     case notInitialized
+    /// The server accepted a request and never answered it.
+    ///
+    /// There was no such case and no such timeout: `CodexClient.send` parked a continuation in
+    /// `pending` and waited, so a request the server took and dropped hung its caller until the
+    /// process died. Nothing else resumes those continuations except the connection closing.
+    case timedOut(method: String, seconds: Int)
 }
 
 // MARK: - Frames
