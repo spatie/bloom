@@ -3,62 +3,6 @@ import SwiftUI
 import Observation
 import BloomCore
 
-enum SidebarSelection: Hashable {
-    case home
-    case search
-    case workspace(WorkspaceID)
-    /// An archived workspace, open for reading.
-    ///
-    /// Its own case rather than a flag on `workspace`, because an archived workspace is not a
-    /// workspace the window can do anything to. Its worktree is gone, so the inspector has no
-    /// diff to show, the toolbar has nothing to act on, the composer has nowhere to send a prompt
-    /// and every item in the Workspace menu but one points at a directory that is not there.
-    /// Keeping it out of `workspaceID` is what makes all of that fall out for free: the inspector
-    /// hides itself, the menu items grey, the background refresh skips it and nothing tries to
-    /// reopen it on the next launch.
-    case archived(WorkspaceID)
-    /// The list of everything that has been archived, with what each row still costs.
-    ///
-    /// A screen beside Home and Search rather than a settings pane, because it is a list of
-    /// workspaces and the sidebar is where this app keeps those. Settings holds preferences, and
-    /// which transcripts to destroy is not one.
-    case archive
-    /// One subagent of the turn running in a workspace, open for reading.
-    ///
-    /// **It carries its workspace, and `workspaceID` returns it.** That one line is the whole
-    /// selection decision. A subagent has no worktree, no branch, no terminal and nothing to
-    /// commit, so selecting one cannot mean what selecting a workspace means. But the terminal,
-    /// the diff, the composer, the toolbar, the Workspace menu and the session restore all hang
-    /// off `selection.workspaceID`, and every one of them is still about the parent while you read
-    /// a child. So a subagent selection IS a workspace selection, with exactly one thing narrowed:
-    /// the centre column, which shows that subagent's own transcript instead of the chat.
-    ///
-    /// The alternative was a case whose `workspaceID` was nil, and it would have emptied the
-    /// inspector, greyed the menu and stopped the composer the moment you clicked a row to see
-    /// what a subagent said. Nothing about the workspace changed when you did that.
-    ///
-    /// `rememberSelection` therefore stores the parent, which is what should reopen: the subagent
-    /// is gone by the next launch by construction. See `SubagentRoster`.
-    case subagent(WorkspaceID, SubagentID)
-
-    var workspaceID: WorkspaceID? {
-        switch self {
-        case .workspace(let id), .subagent(let id, _): id
-        default: nil
-        }
-    }
-
-    /// The subagent being read, when one is. Only the centre column asks.
-    var subagentID: SubagentID? {
-        if case .subagent(_, let id) = self { return id }
-        return nil
-    }
-
-    var archivedWorkspaceID: WorkspaceID? {
-        if case .archived(let id) = self { return id }
-        return nil
-    }
-}
 
 struct BloomAlert: Identifiable {
     let id = UUID()
