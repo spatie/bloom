@@ -18,14 +18,20 @@ import AppKit
 /// system dialog, is the guard. Owning the dialog is what buys both, and owning it means owning
 /// the key handling, which is written out under `Keys` below.
 ///
-/// **Why a component and not a bespoke merge dialog.** The app asks six of these questions and
+/// **Why a component and not a bespoke merge dialog.** The app asks eleven of these questions and
 /// they have always looked alike. If merging alone became a hand-drawn panel the app would have
 /// two kinds of confirmation, and the difference between them would tell the reader nothing: they
 /// would differ by when they were written rather than by what they ask. So this is the shape all
-/// six are meant to end in. Merging is the only one converted so far, because archiving carries
-/// hazard text and a force path that this does not model yet.
+/// eleven are meant to end in.
 ///
-/// **Why it looks like the system's.** The other five are still system dialogs and they are the
+/// Three are converted: merging, archiving and throwing a queued message away. The other eight
+/// are still `.confirmationDialog`, and the count is written here rather than left to be guessed
+/// because this paragraph said six and one for as long as it took four of them to be written.
+/// They are the revert in the file header bar and the one in the changed file list, the removal
+/// of a project asked from three places (one question, see `ProjectRemoval`), the discard in the
+/// file edit pane and the two in `RootView`.
+///
+/// **Why it looks like the system's.** The eight are still system dialogs and they are the
 /// baseline the reader has in their eye, so every number in `Layout` was read off a real
 /// `.confirmationDialog` in a window capture rather than chosen. The controls are the system's
 /// own `.bordered` buttons, so their plate, their corner radius, their pressed state and their
