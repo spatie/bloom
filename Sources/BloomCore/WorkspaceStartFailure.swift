@@ -77,9 +77,10 @@ public enum WorkspaceStartTrouble: Sendable, Equatable {
     /// Parsing the stderr was the obvious route and it does not work: the two cases that matter
     /// most produce the same string, and the third never reaches git at all, because launching a
     /// subprocess in a directory that has been deleted throws a Cocoa error before git runs and
-    /// that error names only the missing directory's last path component. Three probes against the
-    /// repository answer all three, and they only run once a start has already failed, so the cost
-    /// is paid on the unhappy path alone.
+    /// that error names only the missing directory's last path component. The questions live in
+    /// `CheckoutStanding` because the diff pane and the create sheet have to ask exactly the same
+    /// ones, and they only run once a start has already failed, so the cost is paid on the unhappy
+    /// path alone.
     public static func diagnose(
         _ error: any Error,
         project: String,
@@ -87,39 +88,29 @@ public enum WorkspaceStartTrouble: Sendable, Equatable {
         baseBranch: String,
         wasRequested: Bool
     ) async -> WorkspaceStartTrouble {
-        guard FileManager.default.fileExists(atPath: projectPath),
-              await Git.isRepository(projectPath)
-        else {
+        switch await CheckoutStanding.of(projectPath, branch: baseBranch) {
+        // A folder that is still there but is no longer a checkout is the same news to an agent as
+        // one that has gone: either way there is no repository left to cut from and nothing it can
+        // do about it. The owner is told the two apart, in `WorkspaceTrouble`, because the owner
+        // is the one who can put it back.
+        case .missing, .notACheckout:
             return .projectMissingFromDisk(project: project, path: projectPath)
-        }
 
-        guard await Git.hasCommits(in: projectPath) else {
+        case .noCommitsYet:
             return .noCommitsYet(project: project)
-        }
 
-        if !(await Git.branchExists(baseBranch, in: projectPath)) {
+        case .branchMissing(let branch):
             let branches = (try? await Git.branches(of: projectPath)) ?? []
             return .baseBranchMissing(
-                branch: baseBranch,
+                branch: branch,
                 project: project,
                 wasRequested: wasRequested,
                 branches: branches
             )
+
+        case .fine:
+            return .unexplained(CheckoutStanding.complaint(about: error))
         }
-
-        return .unexplained(plainly(error))
-    }
-
-    /// git's complaint without the command line Bloom built to provoke it.
-    ///
-    /// `ShellError.description` exists for a log, where the argv is the most useful thing in it.
-    /// In front of a model it is the least useful: it is the one part of the failure the caller
-    /// neither chose nor can change.
-    private static func plainly(_ error: any Error) -> String {
-        guard let shell = error as? ShellError else { return error.readableMessage }
-        let stderr = shell.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !stderr.isEmpty else { return "git exited \(shell.status) without saying why." }
-        return stderr.hasSuffix(".") ? stderr : stderr + "."
     }
 
     /// Named branches, capped. A repository with two hundred branches would otherwise spend the

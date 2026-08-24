@@ -757,6 +757,10 @@ final class WorkspaceModel {
         changesTask?.cancel()
         let path = workspace.path
         let base = workspace.baseBranch
+        // Read here rather than inside the task: the failure below names the workspace, because
+        // its worktree path is a directory inside Bloom's workspaces root that the reader neither
+        // chose nor can act on.
+        let name = workspace.name
         let scope = diffScope
         // Only on a refresh somebody asked for, which is an arrival, a finished turn or a press.
         // Those are exactly the moments a commit can have appeared, and the six second poll is
@@ -783,7 +787,14 @@ final class WorkspaceModel {
                     : nil
                 return .success(ChangesAnswer(files: files, local: local, commits: commits))
             } catch {
-                return .failure(GitFailure(message: error.readableMessage))
+                // Diagnosed rather than reported, in the register `WorkspaceStartFailure` set. A
+                // worktree deleted underneath Bloom used to surface here as "`git rev-parse
+                // --verify main^{commit}` exited 128: fatal: not a git repository", which names
+                // neither the workspace nor anything the reader can do. See `WorkspaceTrouble`.
+                let trouble = await WorkspaceTrouble.readingChanges(
+                    error, workspace: name, path: path, baseBranch: base
+                )
+                return .failure(GitFailure(message: trouble.sentence))
             }
         }
         changesTask = task

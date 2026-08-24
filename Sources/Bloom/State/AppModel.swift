@@ -1234,7 +1234,18 @@ final class AppModel {
                 branch: branch, controls: controls, staged: staged, checkout: checkout
             )
         } catch {
-            alert = BloomAlert(title: "Could not create the workspace", message: error.readableMessage)
+            // Diagnosed rather than reported. `error.readableMessage` on a `ShellError` is the git
+            // command line, its exit status and its stderr, and a project whose folder had stopped
+            // being a checkout put up "`git for-each-ref --format=%(refname:short) refs/heads`
+            // exited 128: fatal: not a git repository". That names no project, says nothing to do,
+            // and hands the reader a command they never ran. See `WorkspaceTrouble`.
+            let trouble = await WorkspaceTrouble.creating(
+                error,
+                project: repo.name,
+                projectPath: repo.path,
+                baseBranch: baseBranch ?? repo.defaultBranch
+            )
+            alert = BloomAlert(title: "Could not create the workspace", message: trouble.sentence)
             return nil
         }
     }
