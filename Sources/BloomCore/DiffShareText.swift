@@ -1,6 +1,4 @@
 import Foundation
-import CoreTransferable
-import BloomCore
 
 /// A diff turned into something worth sending someone.
 ///
@@ -12,14 +10,19 @@ import BloomCore
 ///
 /// It is cut to a length a chat message can hold. A four thousand line patch pasted into a channel
 /// is not shared, it is inflicted, and the reader scrolls past it to ask which file it was.
-enum DiffShareText {
+/// In the core, and `SharedDiff: Transferable` is left in the app beside `ShareLink`. Every
+/// line below is `String` and `Int` work with a budget, a column limit, a whole-hunks-or-none
+/// rule and an "N more lines not shown" count maintained by hand across three branches, and none
+/// of that touches AppKit or wants to. It sat in a view, so nothing could ask it whether the
+/// count it prints matches the lines it dropped.
+public enum DiffShareText {
     /// Roughly a screenful in a chat client. Past this the message stops being read.
     private static let lineBudget = 120
     /// A minified bundle is one line of a hundred thousand characters, and the line budget alone
     /// would not catch it.
     private static let columnLimit = 200
 
-    static func make(for file: ChangedFile, diff: FileDiff?) -> String {
+    public static func make(for file: ChangedFile, diff: FileDiff?) -> String {
         let heading = heading(for: file)
 
         guard !file.isBinary else {
@@ -113,21 +116,5 @@ enum DiffShareText {
     private static func clip(_ text: String) -> String {
         guard text.count > columnLimit else { return text }
         return "\(text.prefix(columnLimit))…"
-    }
-}
-
-/// A diff as something `ShareLink` can hand to a sharing service.
-///
-/// The text is rendered on export rather than up front. `FileHeaderBar`'s body runs on every
-/// keystroke in the editor beside it, and a four thousand line patch is only worth turning into a
-/// message when somebody actually asks for one.
-struct SharedDiff: Transferable {
-    var file: ChangedFile
-    /// Nil while the patch is still being read, which `DiffShareText` says so rather than
-    /// pretending there is nothing to share.
-    var diff: FileDiff?
-
-    static var transferRepresentation: some TransferRepresentation {
-        ProxyRepresentation { DiffShareText.make(for: $0.file, diff: $0.diff) }
     }
 }
