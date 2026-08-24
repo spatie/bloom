@@ -1531,11 +1531,21 @@ public enum Git {
     /// what the repository holds at the moment of cutting and the preview has no business guessing.
     public static func branchStem(prompt: String, prefix: String?, branch: String? = nil) -> String {
         if let branch, !branch.isEmpty { return branch }
+        return prefixed(Self.slug(from: prompt), with: prefix)
+    }
 
-        let slug = Self.slug(from: prompt)
-
+    /// A branch name under a project's `branchPrefix`.
+    ///
+    /// Three lines, and it is a function because there were three copies of them: here, in
+    /// `WorkspaceNaming.cleanBranch` where a model's suggestion is prefixed, and in the app where
+    /// a claimed sea's slug is. The third carried a comment saying it applied the same rule as the
+    /// second, which it did by writing it out again, under a comment on this one warning about
+    /// exactly that. What a prefix means, which is a slash and no trimming, is decided here.
+    ///
+    /// An empty prefix is no prefix. A project that has never set one and one that set it to ""
+    /// are the same project.
+    public static func prefixed(_ slug: String, with prefix: String?) -> String {
         guard let prefix, !prefix.isEmpty else { return slug }
-
         return "\(prefix)/\(slug)"
     }
 

@@ -202,12 +202,22 @@ public enum WorkspaceNaming {
         // useless as the branch the workspace already has.
         guard !slug.isEmpty, slug != "workspace" else { return nil }
 
-        var branch = slug
-        if let prefix, !prefix.isEmpty {
-            branch = "\(prefix)/\(slug)"
-        }
-        guard Git.isValidBranchName(branch) else { return nil }
-        return branch
+        return prefixedBranch(slug, prefix: prefix)
+    }
+
+    /// A slug under a project's branch prefix, or nil when prefixing left something git will not
+    /// take.
+    ///
+    /// Checked again even though the slug is already valid on its own, because the prefix is the
+    /// owner's own text and prefixing a valid ref does not always leave one. Nil means "no branch
+    /// from this", and every caller has an ordinary branch to fall back to.
+    ///
+    /// Shared by the two things that get a name from somewhere other than the prompt: a model's
+    /// suggested rename above, and the sea a new workspace is christened after. Those had a copy
+    /// each, so a change to what a prefix means only ever landed on one of them.
+    public static func prefixedBranch(_ slug: String, prefix: String?) -> String? {
+        let branch = Git.prefixed(slug, with: prefix)
+        return Git.isValidBranchName(branch) ? branch : nil
     }
 
     /// Reads `{"name": ..., "branch": ...}` out of the CLI's `--output-format json` envelope.

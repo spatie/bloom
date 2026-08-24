@@ -264,3 +264,41 @@ struct WorkspaceNamingTests {
         #expect(WorkspaceNamingPreferences(defaults: defaults).isEnabled)
     }
 }
+
+/// What a project's `branchPrefix` means, which used to be written out in three places.
+@Suite("Branch prefixes")
+struct BranchPrefixTests {
+    @Test("a prefix is joined with a slash, and an empty one is no prefix")
+    func joining() {
+        #expect(Git.prefixed("dark-mode", with: "freek") == "freek/dark-mode")
+        #expect(Git.prefixed("dark-mode", with: nil) == "dark-mode")
+        #expect(Git.prefixed("dark-mode", with: "") == "dark-mode")
+    }
+
+    @Test("the branch a prompt is cut on carries the prefix the same way")
+    func branchStemAgrees() {
+        #expect(
+            Git.branchStem(prompt: "Add dark mode", prefix: "freek")
+                == Git.prefixed(Git.slug(from: "Add dark mode"), with: "freek")
+        )
+    }
+
+    /// The prefix is the owner's own text, and prefixing a valid ref does not always leave one.
+    @Test("a prefix that leaves something git will not take is refused rather than used")
+    func invalidPrefix() {
+        #expect(WorkspaceNaming.prefixedBranch("dark-mode", prefix: "freek") == "freek/dark-mode")
+        #expect(WorkspaceNaming.prefixedBranch("dark-mode", prefix: "..") == nil)
+        #expect(WorkspaceNaming.prefixedBranch("dark-mode", prefix: "a b") == nil)
+    }
+
+    /// The sea a workspace is christened after and a model's suggested rename take the same route,
+    /// so a change to what a prefix means cannot land on one of them only.
+    @Test("a sea's slug and a suggested branch are prefixed by the same rule")
+    func oneRuleForBothNames() throws {
+        let suggested = try #require(
+            WorkspaceNaming.cleanBranch("dark mode", prefix: "freek")
+        )
+
+        #expect(suggested == WorkspaceNaming.prefixedBranch("dark-mode", prefix: "freek"))
+    }
+}

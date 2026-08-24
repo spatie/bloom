@@ -1254,22 +1254,15 @@ final class AppModel {
             pick = nil
         }
 
-        // The sea's slug under the project's branch prefix, by the same rule `nameAutomatically`
-        // applies to a suggested branch, so the two routes cannot disagree about what a prefix
-        // means. Checked again even though the catalogue validated the bare slug, because the
-        // prefix is the owner's own text and prefixing a valid ref does not always leave one.
-        // Nil hands the branch back to the mechanical slug of the prompt.
-        let seaBranch: String? = {
-            guard let ocean = pick?.ocean else { return nil }
-            let prefix = SettingsLoader.load(repo: repo.path).branchPrefix
-            let candidate: String
-            if let prefix, !prefix.isEmpty {
-                candidate = "\(prefix)/\(ocean.slug)"
-            } else {
-                candidate = ocean.slug
-            }
-            return Git.isValidBranchName(candidate) ? candidate : nil
-        }()
+        // The sea's slug under the project's branch prefix, by literally the rule
+        // `nameAutomatically` applies to a suggested branch rather than by a copy of it: this used
+        // to write the join and the check out again, under a comment claiming they could not
+        // disagree. Nil hands the branch back to the mechanical slug of the prompt.
+        let seaBranch: String? = pick.flatMap { pick in
+            WorkspaceNaming.prefixedBranch(
+                pick.ocean.slug, prefix: SettingsLoader.load(repo: repo.path).branchPrefix
+            )
+        }
 
         let request = WorkspaceStartRequest(
             repo: repo,
