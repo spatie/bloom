@@ -411,7 +411,35 @@ final class AppModel {
                     order, in: project, from: identity, origin: origin
                 )
             },
+            WorkspaceMergeTool { [weak self] workspace, pullRequest, method in
+                guard let self else {
+                    return .refused("Bloom is still starting up. Try again in a moment.")
+                }
+                return await self.requestMergeForBridge(workspace, pullRequest, method: method)
+            },
         ])
+    }
+
+    /// Ask a workspace's agent to merge, because something on the bridge asked for it.
+    ///
+    /// The whole of the app side, and it deliberately does nothing of its own. `requestMerge` is
+    /// what the strip's Merge button calls, so the template the owner may have edited in Settings,
+    /// the project's `.bloom/merge-instructions.md` and the guard that refuses mid turn are all
+    /// reached through one path rather than two. Anything this function added would be a second
+    /// way to move the same state.
+    ///
+    /// The chat's title comes back because the tool's answer has to name where to watch the turn,
+    /// and `requestMerge` has just made that chat the active one.
+    private func requestMergeForBridge(
+        _ workspace: Workspace,
+        _ pullRequest: PullRequest,
+        method: GitHub.MergeMethod
+    ) async -> WorkspaceMergeHandoff {
+        let model = self.model(for: workspace)
+        if let refusal = await model.requestMerge(pullRequest, method: method) {
+            return .refused(refusal)
+        }
+        return .turnBegun(chat: model.activeSession?.title ?? "Merge")
     }
 
     /// Start a workspace because something on the bridge asked for one, and answer with just

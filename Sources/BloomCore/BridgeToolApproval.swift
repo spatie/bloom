@@ -27,6 +27,12 @@ import Foundation
 /// Anything that destroys work. When `workspace_archive` lands it removes a worktree and can
 /// remove a branch with it, and the whole reason Bloom asks before archiving by hand is that the
 /// answer is sometimes no. A tool that can lose work is a tool a person answers for.
+///
+/// `workspace_merge` is off the list too, and it draws the line one step further out. It destroys
+/// nothing: it sends a turn, and the agent that reads it runs the merge in front of the owner. But
+/// what that turn leads to is a call to a server other people share, and unlike a worktree there
+/// is nothing on the far side of it to restore. Bloom answering its own permission question there
+/// would be Bloom deciding to publish, which is the one decision it has never had.
 public enum BridgeToolApproval {
     /// The prefix the CLI puts on an MCP tool's name: `mcp__<server>__<tool>`.
     ///
