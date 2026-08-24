@@ -101,6 +101,19 @@ public enum TranscriptMotion {
         return Arrival(seconds: 0.25, rise: 10)
     }
 
+    /// How long a row takes to unfold when it is clicked open, and to fold back.
+    ///
+    /// The same length a row settles in, taken from `arrival` rather than written again, so the
+    /// two cannot drift: unfolding a tool result and a tool result landing are both "something
+    /// you just did has landed", and this app answers that in one length everywhere. See
+    /// `ProjectVisibilityMotion`, which is pinned to the same number for the same reason.
+    ///
+    /// Nothing under Reduce Motion, and absent rather than zero for the reason `arrival` is: a
+    /// caller cannot then honour half of it and leave a row folded open with no height.
+    public static func disclosure(reduceMotion: Bool) -> Double? {
+        arrival(reduceMotion: reduceMotion)?.seconds
+    }
+
     // MARK: - Going back to the live end
 
     /// How the transcript travels when the reader asks to be taken back to the newest row.

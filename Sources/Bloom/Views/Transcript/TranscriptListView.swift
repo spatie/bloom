@@ -1045,10 +1045,21 @@ struct TranscriptListView: View {
     }
 
     private func toggle(_ seq: Int) {
-        if expanded.contains(seq) {
-            expanded.remove(seq)
+        // The unfold is animated from here rather than inside the row, because the height that
+        // changes is the row's and the state that changes it is the list's: an `.animation` on the
+        // row would be aimed at a value it does not own. `withAnimation` around the mutation is
+        // what carries into the `if` inside `ToolRowView` and lets its transition play.
+        let unfold = {
+            if expanded.contains(seq) {
+                expanded.remove(seq)
+            } else {
+                expanded.insert(seq)
+            }
+        }
+        if let seconds = TranscriptMotion.disclosure(reduceMotion: reduceMotion) {
+            withAnimation(.easeOut(duration: seconds), unfold)
         } else {
-            expanded.insert(seq)
+            unfold()
         }
         // Written down straight away rather than left to the next settled scroll, because
         // unfolding a tool result and switching tab to look at what it did is one gesture, and

@@ -49,6 +49,12 @@ struct ToolRowView: View {
                     .padding(.leading, TranscriptLayout.detailIndent)
                     .padding(.trailing, TranscriptLayout.inset)
                     .padding(.bottom, TranscriptLayout.block)
+                    // Opacity alone, and the height is the animation. The block is inserted at
+                    // its full size and the row grows into it, so the detail fades up as the room
+                    // for it appears; a `.move` here would slide the text against an edge that is
+                    // itself moving, which reads as two animations disagreeing. The unfold is
+                    // started by `TranscriptListView.toggle`, which owns `expanded`.
+                    .transition(.opacity)
             }
         }
         .modifier(ExpandableRow(isHovered: isHovered))
