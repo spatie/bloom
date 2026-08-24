@@ -472,9 +472,11 @@ private struct QuestionOptionStyle: ButtonStyle {
 /// The card also holds three pieces of `@State`, so typing a word into an Other row re-runs all of
 /// them per keystroke.
 ///
-/// Keyed on the request id, which is what the CLI uses to identify one control request and what the
-/// answer is posted back against. The input behind a given id is what the agent sent once; nothing
-/// rewrites it.
+/// Keyed on the request id and the call it is about, which is what the CLI uses to identify one
+/// control request and what the answer is posted back against. The input behind that pair is what
+/// the agent sent once; nothing rewrites it. Both halves, because a request id is only promised to
+/// be unique within the session that issued it and a window holds several sessions at once, where a
+/// `tool_use` id is minted per call.
 @MainActor
 private enum AgentQuestionCache {
     /// A transcript holds few of these, and a card that has scrolled away can afford to parse
@@ -486,7 +488,8 @@ private enum AgentQuestionCache {
     }()
 
     static func questions(in ask: PermissionAsk) -> [AgentQuestion] {
-        let key = ask.requestID as NSString
+        // A separator no id can hold, so two pairs cannot be spelled the same way round.
+        let key = "\(ask.requestID)\u{1}\(ask.toolUseID)" as NSString
         if let cached = values.object(forKey: key) { return cached.value }
 
         let value = AgentQuestionnaire.questions(in: ask.input)
