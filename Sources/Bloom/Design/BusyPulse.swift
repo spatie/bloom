@@ -37,8 +37,8 @@ import BloomCore
 ///
 /// So nothing is stepped and nothing is interpolated here any more. What this publishes is one
 /// number, `epoch`: the `CACurrentMediaTime()` at which the current run of the heartbeat began.
-/// Both marks build a repeating `CAAnimation` whose `beginTime` is derived from it, hand it to a
-/// layer, and never hear from it again. Core Animation runs the interpolation out of process, the
+/// Every mark builds a repeating `CAAnimation` whose `beginTime` is derived from it, hands it to a
+/// layer, and never hears from it again. Core Animation runs the interpolation out of process, the
 /// app is not woken per frame, and the phase lock is stronger than it was: two animations that
 /// share an absolute `beginTime` and have periods in a whole number ratio cannot drift, where two
 /// restarted from a timer could only be as accurate as the timer.
@@ -91,8 +91,8 @@ final class BusyPulse {
     ///
     /// `CACurrentMediaTime()` rather than a `Date`, because that is the clock `CAAnimation`
     /// measures `beginTime` on. It does not advance while the machine is asleep, which is the
-    /// behaviour wanted: a window that comes back from a lid close finds both marks where it left
-    /// them rather than somewhere a wall clock would have carried them.
+    /// behaviour wanted: a window that comes back from a lid close finds every mark where it left
+    /// it rather than somewhere a wall clock would have carried it.
     private(set) var epoch: CFTimeInterval = 0
 
     private init() {}
