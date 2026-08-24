@@ -36,6 +36,17 @@ public final class StreamingProcess: Sendable {
 
     private let state = Mutex(State())
 
+    /// Every extract-and-yield runs here, one at a time, and so does `finish`.
+    ///
+    /// The drains used to take a batch out of the buffer under the `Mutex` and yield it outside,
+    /// with two callers reaching them at once: the pipe's readability handler, and `settle`
+    /// re-entering from its own timer. Batch N+1 could then be yielded before batch N. The buffer
+    /// was protected; the ordering the buffer exists to preserve was not, and `AgentRunner.ingest`
+    /// writes one transcript row per line, so an inversion can land a turn's `result` before the
+    /// assistant events it closes. Serialising the yields is what makes the stream ordered, and
+    /// putting `finish` on the same queue is what stops the stream ending before the lines it owes.
+    private let drainQueue = DispatchQueue(label: "be.spatie.bloom.StreamingProcess.drain")
+
     /// Both streams are built here rather than in a `lazy var`.
     ///
     /// A `lazy var` on a class carries no synchronisation, so two threads reaching `lines` at the
@@ -286,15 +297,23 @@ public final class StreamingProcess: Sendable {
         let limit = deadline ?? DispatchTime.now() + Self.eofHardLimit
         let now = DispatchTime.now()
 
-        let (sawEOF, since) = state.withLock { state -> (Bool, DispatchTime) in
+        let (sawEOF, since, stdoutLive, stderrLive) = state.withLock {
+            state -> (Bool, DispatchTime, Bool, Bool) in
             let exited = state.exitedAt ?? now
             state.exitedAt = exited
             // Counted from the exit as well as from the last byte, so a process that fell silent
             // before exiting still gets the full quiet period for its buffered output to land.
-            return (state.stdoutAtEOF && state.stderrAtEOF, max(state.lastOutputAt, exited))
+            return (
+                state.stdoutAtEOF && state.stderrAtEOF,
+                max(state.lastOutputAt, exited),
+                !state.stdoutAtEOF,
+                !state.stderrAtEOF
+            )
         }
 
-        let quiet = now > since + Self.eofQuietPeriod
+        let pending = (stdoutLive && Self.hasPendingBytes(stdoutPipe.fileHandleForReading))
+            || (stderrLive && Self.hasPendingBytes(stderrPipe.fileHandleForReading))
+        let quiet = now > since + Self.eofQuietPeriod && !pending
         guard sawEOF || quiet || now > limit else {
             DispatchQueue.global().asyncAfter(deadline: now + Self.eofPollInterval) { [weak self] in
                 self?.settle(status: status, deadline: limit)
@@ -302,21 +321,55 @@ public final class StreamingProcess: Sendable {
             return
         }
 
-        drainStdout(final: true)
-        drainStderr(final: true)
-        finish(status: status, error: nil)
+        drainQueue.async { [self] in
+            // Handlers off before the last drain, not after it. `finish` nils them too, but by
+            // then the final drain has already run, which left a handler free to append bytes
+            // between the drain and the close that nothing would ever yield.
+            stdoutPipe.fileHandleForReading.readabilityHandler = nil
+            stderrPipe.fileHandleForReading.readabilityHandler = nil
+            drainStdoutNow(final: true)
+            drainStderrNow(final: true)
+            finish(status: status, error: nil)
+        }
+    }
+
+    /// Whether the kernel is still holding bytes this pipe's reader has not taken.
+    ///
+    /// The quiet period is counted from the last byte a readability handler delivered, so a
+    /// handler the machine has not scheduled for 200ms reads as silence and `settle` closed the
+    /// stream over output that was in the pipe the whole time. `poll` answers the question the
+    /// handler cannot, and answers it without reading: the handler stays the only reader, so no
+    /// two readers can take alternate halves of a line.
+    ///
+    /// Only asked of a pipe that has not reported end of file, because a closed and empty pipe
+    /// reports itself readable and a `read` of it returns nothing. The grandchild case this
+    /// backstop exists for is the opposite: the pipe is open, nobody is writing, and `poll`
+    /// correctly says there is nothing there, so the quiet period still closes it in 200ms.
+    private static func hasPendingBytes(_ handle: FileHandle) -> Bool {
+        var descriptor = pollfd(fd: handle.fileDescriptor, events: Int16(POLLIN), revents: 0)
+        guard poll(&descriptor, 1, 0) > 0 else { return false }
+        return descriptor.revents & Int16(POLLIN) != 0
     }
 
     // MARK: - Draining
 
     private func drainStdout(final: Bool) {
+        drainQueue.async { [self] in drainStdoutNow(final: final) }
+    }
+
+    private func drainStderr(final: Bool) {
+        drainQueue.async { [self] in drainStderrNow(final: final) }
+    }
+
+    /// Both halves of a drain, extraction and yield, on `drainQueue` and nowhere else.
+    private func drainStdoutNow(final: Bool) {
         let extracted = state.withLock {
             Self.extractLines(from: &$0.stdoutBuffer, flushRemainder: final)
         }
         for line in extracted { linesContinuation.yield(line) }
     }
 
-    private func drainStderr(final: Bool) {
+    private func drainStderrNow(final: Bool) {
         let extracted = state.withLock {
             Self.extractLines(from: &$0.stderrBuffer, flushRemainder: final)
         }

@@ -20,15 +20,19 @@ struct ConcurrencySafetyTests {
             arguments: ["-c", "for i in $(seq 1 \(count)); do print -r -- line-$i; done"]
         )
 
+        // Checked as a sequence rather than as a count, because the drains used to yield outside
+        // the lock they extracted under, so two batches could arrive inverted with none lost.
         var seen = 0
-        var last = ""
+        var outOfOrder: String?
         for try await line in process.lines where line.hasPrefix("line-") {
             seen += 1
-            last = line
+            if outOfOrder == nil, line != "line-\(seen)" {
+                outOfOrder = "expected line-\(seen), got \(line)"
+            }
         }
 
         #expect(seen == count)
-        #expect(last == "line-\(count)")
+        #expect(outOfOrder == nil, "\(outOfOrder ?? "")")
         #expect(await process.exitStatus == 0)
     }
 
