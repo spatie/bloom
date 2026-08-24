@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Start from</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ground:#EDF2F3;
+  --card:#FFFFFF;
+  --ink:#0E202D;
+  --ink2:#4A6070;
+  --ink3:#83979F;
+  --line:#D7E1E4;
+  --line2:#E7EEEF;
+  --teal:#0C7A6E;
+  --teal-wash:#E0F1EE;
+  --tide:#197593;
+  --tide-wash:#E2EFF4;
+  --amber:#A2661C;
+  --amber-wash:#F9EEDD;
+  --shadow:0 1px 2px rgba(14,32,45,.06),0 8px 28px rgba(14,32,45,.08);
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --display:"Bricolage Grotesque","IBM Plex Sans",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  --mac:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;
+}
+*{box-sizing:border-box}
+html{-webkit-font-smoothing:antialiased}
+body{
+  margin:0;background:var(--ground);color:var(--ink);
+  font-family:var(--body);font-size:16px;line-height:1.55;font-weight:400;
+}
+.wrap{max-width:1040px;margin:0 auto;padding:0 28px}
+
+/* ---------- shared type ---------- */
+.eyebrow{
+  font-family:var(--mono);font-size:11px;font-weight:500;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);
+}
+h1{
+  font-family:var(--display);font-weight:700;
+  font-size:clamp(38px,6.2vw,68px);line-height:1.02;letter-spacing:-.032em;
+  margin:14px 0 0;max-width:16ch;
+}
+h2{
+  font-family:var(--display);font-weight:600;
+  font-size:clamp(26px,3.4vw,36px);line-height:1.1;letter-spacing:-.024em;
+  margin:0 0 10px;
+}
+h3{font-family:var(--body);font-weight:600;font-size:17px;letter-spacing:-.01em;margin:0 0 6px}
+p{margin:0 0 14px;color:var(--ink2)}
+.lede{font-size:19px;line-height:1.5;color:var(--ink2);max-width:60ch;margin-top:18px}
+code,.ref{font-family:var(--mono);font-size:.88em;font-weight:500}
+.ref{background:var(--tide-wash);color:var(--tide);padding:1px 6px;border-radius:5px;white-space:nowrap}
+.ref.own{background:var(--teal-wash);color:var(--teal)}
+.ref.plain{background:#EEF3F4;color:var(--ink2)}
+
+/* ---------- header ---------- */
+header{padding:72px 0 8px}
+.rule{height:1px;background:var(--line);border:0;margin:0}
+
+/* ---------- section frame ---------- */
+section{padding:64px 0}
+.sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:26px;flex-wrap:wrap}
+.sec-head .eyebrow{padding-top:2px}
+
+/* ---------- the switcher ---------- */
+.stage{
+  background:var(--card);border:1px solid var(--line);border-radius:14px;
+  box-shadow:var(--shadow);overflow:hidden;
+}
+.tabs{display:flex;border-bottom:1px solid var(--line);background:#F7FAFA}
+.tab{
+  appearance:none;border:0;background:none;cursor:pointer;
+  font-family:var(--body);font-size:14px;font-weight:500;color:var(--ink2);
+  padding:16px 20px;text-align:left;flex:1;
+  border-bottom:2px solid transparent;transition:color .18s,border-color .18s,background .18s;
+}
+.tab:hover{background:#F1F6F6;color:var(--ink)}
+.tab:focus-visible{outline:2px solid var(--tide);outline-offset:-3px}
+.tab .verb{display:block;font-weight:600;color:inherit}
+.tab .aside{display:block;font-family:var(--mono);font-size:11px;color:var(--ink3);margin-top:3px;letter-spacing:.02em}
+.tab[aria-selected="true"]{color:var(--ink);background:var(--card);border-bottom-color:var(--teal)}
+.tab[aria-selected="true"] .aside{color:var(--teal)}
+
+/* ---------- branch graph ---------- */
+.graph{position:relative;height:326px;margin:14px 22px 0;isolation:isolate}
+.lane{
+  position:absolute;height:2px;background:var(--line);border-radius:2px;
+  transition:opacity .34s ease,left .42s cubic-bezier(.4,0,.2,1),width .42s cubic-bezier(.4,0,.2,1);
+}
+.lane.live{background:var(--ink);opacity:.75}
+.lane-label{
+  position:absolute;font-family:var(--mono);font-size:11.5px;font-weight:500;
+  color:var(--ink3);transform:translateY(-9px);white-space:nowrap;
+  left:0;width:186px;text-align:right;
+  transition:opacity .34s ease,color .34s ease;
+}
+.lane-label.live{color:var(--ink)}
+.dot{
+  position:absolute;width:9px;height:9px;border-radius:50%;
+  background:var(--card);border:2px solid var(--ink3);margin:-4px 0 0 -4px;
+  transition:opacity .34s ease,border-color .34s ease,left .42s cubic-bezier(.4,0,.2,1),top .42s cubic-bezier(.4,0,.2,1);
+}
+.dot.live{border-color:var(--ink)}
+.fork{position:absolute;overflow:visible;transition:opacity .34s ease}
+.fork path{fill:none;stroke:var(--line);stroke-width:2}
+.fork.live path{stroke:var(--ink);opacity:.75}
+
+.head{
+  position:absolute;width:13px;height:13px;border-radius:50%;
+  background:var(--teal);border:3px solid var(--card);margin:-6px 0 0 -6px;
+  box-shadow:0 0 0 2px var(--teal);
+  transition:left .42s cubic-bezier(.4,0,.2,1),top .42s cubic-bezier(.4,0,.2,1),opacity .34s ease;
+}
+.head-tag{
+  position:absolute;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--teal);
+  background:var(--teal-wash);padding:2px 7px;border-radius:5px;white-space:nowrap;
+  transform:translate(12px,-8px);
+  transition:left .42s cubic-bezier(.4,0,.2,1),top .42s cubic-bezier(.4,0,.2,1),opacity .34s ease;
+}
+
+.caliper{
+  position:absolute;height:34px;border:2px solid var(--tide);border-top:0;
+  border-radius:0 0 6px 6px;
+  transition:left .42s cubic-bezier(.4,0,.2,1),width .42s cubic-bezier(.4,0,.2,1),top .42s cubic-bezier(.4,0,.2,1),opacity .34s ease;
+}
+.caliper-tag{
+  position:absolute;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--tide);
+  background:var(--tide-wash);padding:2px 7px;border-radius:5px;white-space:nowrap;
+  transform:translate(-50%,0);
+  transition:left .42s cubic-bezier(.4,0,.2,1),top .42s cubic-bezier(.4,0,.2,1),opacity .34s ease;
+}
+.caliper.empty{border-left-style:dashed;border-right-style:dashed;border-color:var(--amber)}
+.caliper.empty + .caliper-tag,.caliper-tag.warn{color:var(--amber);background:var(--amber-wash)}
+
+/* ---------- read-out under the graph ---------- */
+.readout{border-top:1px solid var(--line2);background:#FAFCFC;padding:22px 24px 24px}
+.readout-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line2);
+  border:1px solid var(--line2);border-radius:10px;overflow:hidden}
+.cell{background:var(--card);padding:14px 16px}
+.cell dt{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);margin-bottom:6px}
+.cell dd{margin:0;font-size:14px;color:var(--ink);font-weight:450}
+.sentence{font-size:17px;color:var(--ink);margin:0 0 18px;max-width:64ch;font-weight:450}
+.note{
+  display:flex;gap:10px;margin-top:18px;padding:13px 15px;border-radius:9px;
+  background:var(--amber-wash);color:#6B4413;font-size:14px;line-height:1.5;
+}
+.note.good{background:var(--teal-wash);color:#0A5B52}
+.note b{font-weight:600}
+.note .glyph{font-family:var(--mono);font-weight:600;flex:none}
+[hidden]{display:none !important}
+
+/* ---------- mock macOS popover ---------- */
+.mockwrap{display:grid;grid-template-columns:minmax(0,380px) minmax(0,1fr);gap:38px;align-items:start}
+.mock{
+  font-family:var(--mac);background:rgba(252,253,253,.94);
+  border:1px solid rgba(14,32,45,.12);border-radius:11px;
+  box-shadow:0 1px 3px rgba(14,32,45,.1),0 18px 44px rgba(14,32,45,.16);
+  overflow:hidden;user-select:none;
+}
+.mock-search{display:flex;align-items:center;gap:8px;padding:11px 13px;border-bottom:1px solid rgba(14,32,45,.08)}
+.mock-search svg{flex:none;color:#8A9AA3}
+.mock-search .typed{font-size:13.5px;color:#0E202D}
+.mock-search .caret{width:1px;height:15px;background:var(--tide);display:inline-block;animation:blink 1.1s steps(1,end) infinite;vertical-align:-3px}
+@keyframes blink{50%{opacity:0}}
+.mock-group{padding:6px 6px 8px}
+.mock-group + .mock-group{border-top:1px solid rgba(14,32,45,.07)}
+.mock-title{
+  font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;
+  color:#8A9AA3;padding:7px 9px 5px;
+}
+.mock-row{display:flex;align-items:center;gap:9px;padding:6px 9px;border-radius:6px;font-size:13.5px;color:#0E202D}
+.mock-row .g{flex:none;color:#7D939F;display:flex;align-items:center}
+.ic{width:14px;height:14px;flex:none}
+.pillbtn .ic{width:13px;height:13px;color:var(--ink3)}
+.mock-row .name{font-family:var(--mono);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mock-row .title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mock-row .num{font-family:var(--mono);font-size:12.5px;color:#7D939F;flex:none}
+.mock-row .trail{margin-left:auto;font-size:11.5px;color:#8A9AA3;flex:none;display:flex;align-items:center;gap:7px}
+.mock-row .pill{border:1px solid rgba(14,32,45,.16);border-radius:4px;padding:0 5px;font-size:10.5px;color:#7D939F}
+.mock-row.sel{background:var(--tide);color:#fff}
+.mock-row.sel .g,.mock-row.sel .trail,.mock-row.sel .num{color:rgba(255,255,255,.82)}
+.mock-row.sel .pill{border-color:rgba(255,255,255,.4);color:rgba(255,255,255,.85)}
+.mock-row.held .name,.mock-row.held .g{color:#8A9AA3}
+
+.callouts{display:flex;flex-direction:column;gap:2px}
+.callout{display:grid;grid-template-columns:auto 1fr;gap:14px;padding:15px 0;border-bottom:1px solid var(--line)}
+.callout:last-child{border-bottom:0}
+.callout .k{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--tide);background:var(--tide-wash);border-radius:5px;padding:3px 7px;height:fit-content;white-space:nowrap;
+}
+.callout p{margin:0;font-size:14.5px;line-height:1.5}
+.callout strong{color:var(--ink);font-weight:600}
+
+/* ---------- before / after ---------- */
+.ba{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.ba-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;box-shadow:var(--shadow)}
+.ba-card .eyebrow{display:block;margin-bottom:14px}
+.ba-shot{
+  font-family:var(--mac);font-size:13px;background:#F7FAFA;border:1px solid var(--line);
+  border-radius:8px;padding:14px;margin-bottom:14px;color:var(--ink2);
+}
+.pillbtn{
+  display:inline-flex;align-items:center;gap:6px;background:var(--card);
+  border:1px solid rgba(14,32,45,.16);border-radius:7px;padding:5px 9px;
+  font-size:12.5px;color:var(--ink);box-shadow:0 1px 1px rgba(14,32,45,.05);
+}
+.menufake{margin-top:10px;border:1px solid var(--line);border-radius:7px;background:var(--card);padding:5px;font-size:12.5px}
+.menufake div{padding:4px 8px;border-radius:4px;color:var(--ink2);font-family:var(--mono);font-size:11.5px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.menufake .hdr{font-family:var(--body);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink3);padding-top:8px}
+.menufake .buried{color:var(--ink3)}
+.ba-card p{font-size:14.5px;margin:0}
+
+/* ---------- closing ---------- */
+.decision{
+  background:var(--card);border:1px solid var(--line);border-left:3px solid var(--amber);
+  border-radius:0 12px 12px 0;padding:22px 24px;box-shadow:var(--shadow);
+}
+.decision h3{margin-bottom:8px}
+.decision p:last-child{margin-bottom:0}
+footer{padding:44px 0 76px;color:var(--ink3);font-family:var(--mono);font-size:11.5px;letter-spacing:.05em}
+
+@media (max-width:880px){
+  .mockwrap{grid-template-columns:1fr}
+  .ba{grid-template-columns:1fr}
+  .readout-grid{grid-template-columns:1fr}
+  .tabs{flex-direction:column}
+  .tab{border-bottom:1px solid var(--line);border-left:2px solid transparent}
+  .tab[aria-selected="true"]{border-bottom-color:var(--line);border-left-color:var(--teal)}
+  .graph{height:300px;margin-left:14px;margin-right:14px}
+}
+@media (prefers-reduced-motion:reduce){
+  *{transition-duration:.001ms !important;animation-duration:.001ms !important}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="eyebrow">Bloom &middot; new workspace &middot; start from</div>
+    <h1>Every workspace answers two questions.</h1>
+    <p class="lede">
+      Where does the work start, and what is it measured against? One control answers both,
+      and right now it never says which answer you picked. This is what each option really does,
+      and the picker that would make the difference visible before you press Create.
+    </p>
+  </div>
+</header>
+
+<div class="wrap"><hr class="rule"></div>
+
+<!-- ============ THE THREE OPTIONS ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>What each option does</h2>
+      <span class="eyebrow">pick one to redraw the graph</span>
+    </div>
+
+    <div class="stage">
+      <div class="tabs" role="tablist" aria-label="Start from options">
+        <button class="tab" role="tab" id="tab-new" aria-controls="panel" aria-selected="true" data-opt="new">
+          <span class="verb">New branch from&hellip;</span>
+          <span class="aside">start something of your own</span>
+        </button>
+        <button class="tab" role="tab" id="tab-open" aria-controls="panel" aria-selected="false" data-opt="open">
+          <span class="verb">Open an existing branch</span>
+          <span class="aside">carry on someone's work</span>
+        </button>
+        <button class="tab" role="tab" id="tab-pr" aria-controls="panel" aria-selected="false" data-opt="pr">
+          <span class="verb">Review a pull request</span>
+          <span class="aside">read what they proposed</span>
+        </button>
+      </div>
+
+      <div class="graph" id="graph" aria-hidden="true">
+        <!-- lanes -->
+        <div class="lane" id="lane-main"></div>
+        <div class="lane-label" id="label-main">main</div>
+
+        <div class="lane" id="lane-theirs"></div>
+        <div class="lane-label" id="label-theirs">freekmurze/figma-mcp-check</div>
+
+        <div class="lane" id="lane-yours"></div>
+        <div class="lane-label" id="label-yours">freekmurze/use-figma-mcp</div>
+
+        <!-- forks -->
+        <svg class="fork" id="fork-theirs" width="60" height="104"><path d="M0,0 C26,0 34,9 34,38 L34,94"/></svg>
+        <svg class="fork" id="fork-yours" width="60" height="104"><path d="M0,0 C26,0 34,9 34,38 L34,94"/></svg>
+
+        <!-- commits -->
+        <div class="dot" id="d1"></div><div class="dot" id="d2"></div><div class="dot" id="d3"></div>
+        <div class="dot" id="d4"></div><div class="dot" id="d5"></div><div class="dot" id="d6"></div>
+
+        <!-- markers -->
+        <div class="head" id="head"></div>
+        <div class="head-tag" id="head-tag">your worktree sits here</div>
+        <div class="caliper" id="caliper"></div>
+        <div class="caliper-tag" id="caliper-tag">the Changes tab shows this</div>
+      </div>
+
+      <div class="readout" id="panel" role="tabpanel" aria-labelledby="tab-new">
+        <p class="sentence" id="sentence"></p>
+        <dl class="readout-grid">
+          <div class="cell"><dt>Your worktree lands on</dt><dd id="lands"></dd></div>
+          <div class="cell"><dt>Changes are measured from</dt><dd id="measured"></dd></div>
+          <div class="cell"><dt>A pull request would target</dt><dd id="targets"></dd></div>
+        </dl>
+        <div class="note" id="note"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><hr class="rule"></div>
+
+<!-- ============ THE PICKER ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>One list, two verbs</h2>
+      <span class="eyebrow">the proposed picker</span>
+    </div>
+    <p style="max-width:64ch;margin-bottom:30px">
+      Today these three live in a menu with no search, and every branch in the project is in it.
+      A menu you have to scroll is a menu you give up on, which is how you end up cutting a new
+      branch when you meant to open one. A search field and a plain verb on every row fixes both.
+    </p>
+
+    <div class="mockwrap">
+      <div class="mock" aria-hidden="true">
+        <div class="mock-search">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+            <circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 L14 14"/>
+          </svg>
+          <span class="typed">figma<span class="caret"></span></span>
+        </div>
+
+        <div class="mock-group">
+          <div class="mock-title">Open, and carry on</div>
+          <div class="mock-row sel">
+            <span class="g"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="3.4" r="1.7"/><circle cx="4.5" cy="12.6" r="1.7"/><circle cx="11.5" cy="3.4" r="1.7"/><path d="M4.5 5.1v5.8"/><path d="M11.5 5.1v1.3c0 2.1-1.7 3.2-3.6 3.2H6.2"/></svg></span>
+            <span class="name">freekmurze/figma-mcp-check</span>
+            <span class="trail"><span class="pill">remote</span>Select &#8629;</span>
+          </div>
+          <div class="mock-row">
+            <span class="g"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="3.4" r="1.7"/><circle cx="4.5" cy="12.6" r="1.7"/><circle cx="11.5" cy="12.6" r="1.7"/><path d="M4.5 5.1v5.8"/><path d="M11.5 10.9V6.6c0-1.2-.9-2.1-2.1-2.1H7.1"/><path d="M8.7 2.8 7 4.5l1.7 1.7"/></svg></span><span class="num">#362</span>
+            <span class="title">Lay the app-side styling foundation</span>
+          </div>
+          <div class="mock-row held">
+            <span class="g"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="3.4" r="1.7"/><circle cx="4.5" cy="12.6" r="1.7"/><circle cx="11.5" cy="3.4" r="1.7"/><path d="M4.5 5.1v5.8"/><path d="M11.5 5.1v1.3c0 2.1-1.7 3.2-3.6 3.2H6.2"/></svg></span>
+            <span class="name">figma-token-sync</span>
+            <span class="trail">In use by Inspect the changes</span>
+          </div>
+        </div>
+
+        <div class="mock-group">
+          <div class="mock-title">New branch from</div>
+          <div class="mock-row">
+            <span class="g"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="3.4" r="1.7"/><circle cx="4.5" cy="12.6" r="1.7"/><circle cx="11.5" cy="3.4" r="1.7"/><path d="M4.5 5.1v5.8"/><path d="M11.5 5.1v1.3c0 2.1-1.7 3.2-3.6 3.2H6.2"/></svg></span><span class="name">freekmurze/figma-mcp-check</span>
+          </div>
+          <div class="mock-row">
+            <span class="g"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="3.4" r="1.7"/><circle cx="4.5" cy="12.6" r="1.7"/><circle cx="11.5" cy="3.4" r="1.7"/><path d="M4.5 5.1v5.8"/><path d="M11.5 5.1v1.3c0 2.1-1.7 3.2-3.6 3.2H6.2"/></svg></span><span class="name">main</span>
+            <span class="trail"><span class="pill">default</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="callouts">
+        <div class="callout">
+          <span class="k">search</span>
+          <p><strong>One field over everything.</strong> Branch names, pull request titles, numbers and
+            authors. Paste a pull request URL and the row for it appears, including the closed ones
+            and the ones raised against a fork that the list itself does not offer.</p>
+        </div>
+        <div class="callout">
+          <span class="k">verb</span>
+          <p><strong>The same branch can appear twice, under two headings.</strong> That is the point.
+            <em>Open</em> puts you on the branch itself; <em>New branch from</em> cuts a fresh one off its
+            tip. The two sit one above the other so the choice is made with both in view, rather than
+            discovered a day later in an empty Changes tab.</p>
+        </div>
+        <div class="callout">
+          <span class="k">in use</span>
+          <p><strong>A branch already open stays on the list.</strong> Git will not put one branch in two
+            worktrees, so today Bloom quietly drops it, and the branch you are hunting for is simply
+            not there. Better to show it, name the workspace holding it, and let the row take you
+            straight to that workspace.</p>
+        </div>
+        <div class="callout">
+          <span class="k">keys</span>
+          <p><strong>Type, arrow, return.</strong> The same shape as the file menu that opens on
+            <code>@</code> in the composer, so it is one thing to learn rather than two.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><hr class="rule"></div>
+
+<!-- ============ BEFORE / AFTER ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head"><h2>What changes</h2><span class="eyebrow">create sheet, footer control</span></div>
+    <div class="ba">
+      <div class="ba-card">
+        <span class="eyebrow">now</span>
+        <div class="ba-shot">
+          <span class="pillbtn"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="3.4" r="1.7"/><circle cx="4.5" cy="12.6" r="1.7"/><circle cx="11.5" cy="3.4" r="1.7"/><path d="M4.5 5.1v5.8"/><path d="M11.5 5.1v1.3c0 2.1-1.7 3.2-3.6 3.2H6.2"/></svg> from freekmurze/figma-mcp-check &#9662;</span>
+          <div class="menufake">
+            <div class="hdr" style="padding-top:2px">Start from</div>
+            <div>New branch from main</div>
+            <div>New branch from freekmurze/figma-mcp-check</div>
+            <div class="buried">New branch from &hellip; &times; 90 more</div>
+            <div class="hdr">Review a pull request</div>
+            <div class="buried">#362, #356, #357 &hellip;</div>
+            <div class="hdr">Open an existing branch</div>
+            <div class="buried">below the fold</div>
+          </div>
+        </div>
+        <p>Every branch in the project, in a menu, in one flat run. The heading that says
+          <em>open</em> rather than <em>cut</em> sits underneath all of them.</p>
+      </div>
+      <div class="ba-card">
+        <span class="eyebrow">proposed</span>
+        <div class="ba-shot">
+          <span class="pillbtn"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="3.4" r="1.7"/><circle cx="4.5" cy="12.6" r="1.7"/><circle cx="11.5" cy="3.4" r="1.7"/><path d="M4.5 5.1v5.8"/><path d="M11.5 5.1v1.3c0 2.1-1.7 3.2-3.6 3.2H6.2"/></svg> on freekmurze/figma-mcp-check &#9662;</span>
+          <div class="menufake">
+            <div class="hdr" style="padding-top:2px">Opens a searchable panel</div>
+            <div>&#9906;&#65038; type to filter every source at once</div>
+            <div>&#8593;&#8595; to move, &#8629; to choose</div>
+            <div class="hdr">The button says which you picked</div>
+            <div><span style="color:var(--teal)">on &hellip;</span> you are on that branch</div>
+            <div><span style="color:var(--tide)">from &hellip;</span> you cut a new one</div>
+          </div>
+        </div>
+        <p>The button's own wording carries the answer. <b>on</b> means your commits land on that
+          branch; <b>from</b> means a fresh branch off it. One word, and it is on screen the whole time.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><hr class="rule"></div>
+
+<!-- ============ NOT BUILDING ============ -->
+<section>
+  <div class="wrap">
+    <div class="sec-head"><h2>One thing we are not adding</h2><span class="eyebrow">a separate target branch</span></div>
+    <div class="decision">
+      <h3>A target branch picker of its own</h3>
+      <p>Conductor puts the merge target in a second control, defaulting to <span class="ref plain">origin/main</span>.
+        Bloom ties the target to the source instead, and that is worth keeping. Cut a branch from a
+        colleague's work and your pull request should land back on their branch, not on main.
+        A separate target defaulting to main would fill that diff with commits you never wrote,
+        which is the exact mess a review workspace exists to avoid.</p>
+      <p>The problem you hit was not the model. It was that the right route was buried in a menu
+        with ninety branches above it, and nothing on screen afterwards said which of the two you
+        had chosen. Both of those are fixed above.</p>
+    </div>
+  </div>
+</section>
+
+<footer><div class="wrap">Bloom &middot; design note &middot; start from</div></footer>
+
+<script>
+(function(){
+  var G = document.getElementById('graph');
+  var W = function(){ return G.clientWidth; };
+
+  var Y = {main:56, theirs:150, yours:244};
+
+  var OPT = {
+    new: {
+      sentence:'Cuts a brand new branch off the tip of the branch you name, and leaves that branch as the thing everything is measured against.',
+      lands:'A fresh branch of your own, named from your prompt',
+      measured:'freekmurze/figma-mcp-check',
+      targets:'freekmurze/figma-mcp-check',
+      noteClass:'note',
+      noteGlyph:'!',
+      note:'<b>This is the one you picked.</b> The worktree started life identical to the branch you named, so the Changes tab had nothing to draw. It was right. There genuinely was no difference yet, because your branch and their branch were the same commit.',
+      lanes:{main:true, theirs:true, yours:true},
+      live:'yours',
+      head:{lane:'yours', x:0.82},
+      headTag:'your new branch',
+      caliper:{lane:'yours', from:0.66, to:0.82, empty:true},
+      caliperTag:'only what you write from here'
+    },
+    open: {
+      sentence:'Checks out the branch itself. Your commits land on it, beside your colleague’s, and the whole branch is measured against the project’s default.',
+      lands:'freekmurze/figma-mcp-check',
+      measured:'main',
+      targets:'main',
+      noteClass:'note good',
+      noteGlyph:'✓',
+      note:'<b>This is what you wanted.</b> You are working on their branch, and the Changes tab shows every commit on it measured from main, which is the diff you were trying to read.',
+      lanes:{main:true, theirs:true, yours:false},
+      live:'theirs',
+      head:{lane:'theirs', x:0.66},
+      headTag:'your worktree sits here',
+      caliper:{lane:'theirs', from:0.20, to:0.66, empty:false},
+      caliperTag:'the whole branch, measured from main'
+    },
+    pr: {
+      sentence:'Checks out the head branch of a pull request, and measures it against the branch that pull request actually targets, which is not always main.',
+      lands:'The pull request’s own head branch',
+      measured:'Whatever the pull request targets',
+      targets:'Whatever the pull request targets',
+      noteClass:'note good',
+      noteGlyph:'✓',
+      note:'<b>Matches GitHub exactly.</b> A request into a release branch compared against main would show every commit that release branch carries as though the author had written it. Bloom follows the pull request’s own base, so the Changes tab equals the Files tab.',
+      lanes:{main:true, theirs:true, yours:false},
+      live:'theirs',
+      head:{lane:'theirs', x:0.66},
+      headTag:'the pull request’s head',
+      caliper:{lane:'theirs', from:0.20, to:0.66, empty:false},
+      caliperTag:'exactly what the Files tab shows'
+    }
+  };
+
+  var els = {
+    laneMain:document.getElementById('lane-main'),
+    laneTheirs:document.getElementById('lane-theirs'),
+    laneYours:document.getElementById('lane-yours'),
+    labMain:document.getElementById('label-main'),
+    labTheirs:document.getElementById('label-theirs'),
+    labYours:document.getElementById('label-yours'),
+    forkTheirs:document.getElementById('fork-theirs'),
+    forkYours:document.getElementById('fork-yours'),
+    head:document.getElementById('head'),
+    headTag:document.getElementById('head-tag'),
+    cal:document.getElementById('caliper'),
+    calTag:document.getElementById('caliper-tag'),
+    sentence:document.getElementById('sentence'),
+    lands:document.getElementById('lands'),
+    measured:document.getElementById('measured'),
+    targets:document.getElementById('targets'),
+    note:document.getElementById('note'),
+    panel:document.getElementById('panel')
+  };
+  var dots = ['d1','d2','d3','d4','d5','d6'].map(function(id){return document.getElementById(id);});
+
+  // commit positions: lane, fraction of width
+  var COMMITS = [
+    {lane:'main',   x:0.06}, {lane:'main',   x:0.20}, {lane:'main',   x:0.42},
+    {lane:'theirs', x:0.32}, {lane:'theirs', x:0.49}, {lane:'theirs', x:0.66}
+  ];
+
+  function px(f){ return Math.round(f * W()); }
+
+  function draw(key){
+    var o = OPT[key], w = W();
+
+    var X = function(f){ return Math.round(206 + f * (w - 226)); };
+
+    els.laneMain.style.left   = X(0)+'px';
+    els.laneMain.style.width  = (X(1)-X(0))+'px';
+    els.laneMain.style.top    = Y.main+'px';
+    els.labMain.style.top     = Y.main+'px';
+
+    els.laneTheirs.style.left  = X(0.20)+'px';
+    els.laneTheirs.style.width = (X(0.66)-X(0.20))+'px';
+    els.laneTheirs.style.top   = Y.theirs+'px';
+    els.labTheirs.style.top    = Y.theirs+'px';
+
+    els.laneYours.style.left  = X(0.66)+'px';
+    els.laneYours.style.width = (X(0.82)-X(0.66))+'px';
+    els.laneYours.style.top   = Y.yours+'px';
+    els.labYours.style.top    = Y.yours+'px';
+
+    els.forkTheirs.style.left = (X(0.20)-34)+'px';
+    els.forkTheirs.style.top  = Y.main+'px';
+    els.forkYours.style.left  = (X(0.66)-34)+'px';
+    els.forkYours.style.top   = Y.theirs+'px';
+
+    // visibility + which lane is "live"
+    function set(el, on, live){
+      el.style.opacity = on ? 1 : 0;
+      el.classList.toggle('live', !!live);
+    }
+    set(els.laneMain,  o.lanes.main,   o.live==='main');
+    set(els.labMain,   o.lanes.main,   o.live==='main');
+    set(els.laneTheirs,o.lanes.theirs, o.live==='theirs');
+    set(els.labTheirs, o.lanes.theirs, o.live==='theirs');
+    set(els.forkTheirs,o.lanes.theirs, o.live==='theirs');
+    set(els.laneYours, o.lanes.yours,  o.live==='yours');
+    set(els.labYours,  o.lanes.yours,  o.live==='yours');
+    set(els.forkYours, o.lanes.yours,  o.live==='yours');
+
+    COMMITS.forEach(function(c,i){
+      var on = o.lanes[c.lane];
+      dots[i].style.left = X(c.x)+'px';
+      dots[i].style.top  = Y[c.lane]+'px';
+      dots[i].style.opacity = on ? 1 : 0;
+      dots[i].classList.toggle('live', o.live===c.lane);
+    });
+
+    els.head.style.left = X(o.head.x)+'px';
+    els.head.style.top  = Y[o.head.lane]+'px';
+    els.headTag.style.left = X(o.head.x)+'px';
+    els.headTag.style.top  = Y[o.head.lane]+'px';
+    els.headTag.textContent = o.headTag;
+
+    var from = X(o.caliper.from), to = X(o.caliper.to);
+    els.cal.style.left  = from+'px';
+    els.cal.style.width = Math.max(to-from, 6)+'px';
+    els.cal.style.top   = (Y[o.caliper.lane]+10)+'px';
+    els.cal.classList.toggle('empty', o.caliper.empty);
+    els.calTag.style.left = ((from+to)/2)+'px';
+    els.calTag.style.top  = (Y[o.caliper.lane]+52)+'px';
+    els.calTag.textContent = o.caliperTag;
+    els.calTag.classList.toggle('warn', o.caliper.empty);
+
+    els.sentence.textContent = o.sentence;
+    els.lands.textContent    = o.lands;
+    els.measured.textContent = o.measured;
+    els.targets.textContent  = o.targets;
+    els.note.className       = o.noteClass;
+    els.note.innerHTML       = '<span class="glyph">'+o.noteGlyph+'</span><span>'+o.note+'</span>';
+  }
+
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
+  function select(tab){
+    tabs.forEach(function(t){ t.setAttribute('aria-selected', String(t===tab)); });
+    els.panel.setAttribute('aria-labelledby', tab.id);
+    draw(tab.dataset.opt);
+  }
+  tabs.forEach(function(t){
+    t.addEventListener('click', function(){ select(t); });
+    t.addEventListener('keydown', function(e){
+      var i = tabs.indexOf(t);
+      if(e.key==='ArrowRight'||e.key==='ArrowDown'){ e.preventDefault(); tabs[(i+1)%tabs.length].focus(); tabs[(i+1)%tabs.length].click(); }
+      if(e.key==='ArrowLeft'||e.key==='ArrowUp'){ e.preventDefault(); tabs[(i+tabs.length-1)%tabs.length].focus(); tabs[(i+tabs.length-1)%tabs.length].click(); }
+    });
+  });
+
+  var current = 'new';
+  tabs.forEach(function(t){ t.addEventListener('click', function(){ current = t.dataset.opt; }); });
+  window.addEventListener('resize', function(){ draw(current); });
+
+  // The hash names the option, so a link can land on the one being discussed.
+  var wanted = (location.hash || '').replace('#','');
+  var landing = tabs.filter(function(t){ return t.dataset.opt === wanted; })[0];
+  if(landing){ current = wanted; select(landing); } else { draw('new'); }
+})();
+</script>
+</body>
+</html>
