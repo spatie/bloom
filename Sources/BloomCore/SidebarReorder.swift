@@ -175,6 +175,10 @@ extension SidebarReorder {
         /// The sentence a project draws where its rows would be when it has none. It takes an
         /// offset in the run like anything else, and it is never something to move.
         case notice(projectID: RepoID)
+        /// A subagent drawn under the workspace that spawned it. Like the notice it takes an
+        /// offset and never moves, but unlike the notice it appears BETWEEN workspace rows, which
+        /// is why `destination` counts ranks rather than subtracting a lower bound.
+        case subagent(projectID: RepoID)
     }
 
     /// What a drag over the flattened pane turns out to have been.
@@ -227,7 +231,7 @@ extension SidebarReorder {
         guard let grabbed = from.min() else { return .nothing }
 
         switch rows[grabbed] {
-        case .notice:
+        case .notice, .subagent:
             return .nothing
 
         case .project(let id):
@@ -237,13 +241,19 @@ extension SidebarReorder {
             return .project(id: id, to: projectOffset(rows: rows, at: to))
 
         case .workspace(_, let projectID):
+            let owned = workspaceOffsets(rows: rows, projectID: projectID)
             guard let run = workspaceRun(rows: rows, projectID: projectID),
-                  from.allSatisfy({ run.contains($0) }) else { return .nothing }
+                  from.allSatisfy({ owned.contains($0) }) else { return .nothing }
             let landing = min(max(to, run.lowerBound), run.upperBound)
+            // Rank among this project's WORKSPACE rows, not distance from the run's start. The
+            // two were the same number until subagents started drawing between workspace rows,
+            // and subtracting a lower bound across them lands a dragged row one place per
+            // subagent above it. `move(visible:all:from:to:)` counts workspaces and nothing else,
+            // so what it is given has to be counted the same way.
             return .workspace(
                 projectID: projectID,
-                from: IndexSet(from.map { $0 - run.lowerBound }),
-                to: landing - run.lowerBound,
+                from: IndexSet(from.compactMap { owned.firstIndex(of: $0) }),
+                to: owned.filter { $0 < landing }.count,
                 landedOutside: landing != to
             )
         }
@@ -288,14 +298,29 @@ extension SidebarReorder {
         return best
     }
 
-    /// The flat offsets one project's workspace rows occupy, as a range whose bounds are the first
-    /// and last places a row of that project can be dropped at.
-    private static func workspaceRun(rows: [Row], projectID: RepoID) -> Range<Int>? {
-        let offsets = rows.indices.filter { offset in
+    /// The flat offsets of one project's workspace rows, in order.
+    private static func workspaceOffsets(rows: [Row], projectID: RepoID) -> [Int] {
+        rows.indices.filter { offset in
             if case .workspace(_, let owner) = rows[offset] { return owner == projectID }
             return false
         }
-        guard let first = offsets.first, let last = offsets.last else { return nil }
+    }
+
+    /// The flat offsets one project's block occupies, as a range whose bounds are the first and
+    /// last places a row of that project can be dropped at.
+    ///
+    /// The upper bound reaches past the last workspace row over any subagents drawn under it.
+    /// Those rows are part of that workspace's block, so a drop below them is a drop at the end of
+    /// the project rather than outside it, and clamping to the workspace row itself would have
+    /// reported `landedOutside` and shown the "Kept in" note for a drag that landed exactly where
+    /// the insertion line said it would.
+    private static func workspaceRun(rows: [Row], projectID: RepoID) -> Range<Int>? {
+        let offsets = workspaceOffsets(rows: rows, projectID: projectID)
+        guard let first = offsets.first, var last = offsets.last else { return nil }
+        while rows.indices.contains(last + 1), case .subagent(let owner) = rows[last + 1],
+              owner == projectID {
+            last += 1
+        }
         return first..<(last + 1)
     }
 }

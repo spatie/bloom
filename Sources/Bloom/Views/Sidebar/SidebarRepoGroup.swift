@@ -60,6 +60,9 @@ enum SidebarPaneRow: Identifiable {
     /// The project's name travels with the row, because a flat pane cannot say which project a row
     /// is under and so the row has to say it itself. See `SidebarWorkspaceRow`.
     case workspace(Workspace, projectName: String)
+    /// One subagent of the turn running in the workspace above it. Carries its workspace so the
+    /// row knows what selecting it selects, and its project so the reordering can count it.
+    case subagent(SubagentRow, workspaceID: WorkspaceID, repoID: RepoID)
     /// The sentence that stands where a project's rows would be when it has none.
     case notice(repoID: RepoID)
 
@@ -68,6 +71,10 @@ enum SidebarPaneRow: Identifiable {
         switch self {
         case .project(let group): "project:" + group.id.rawValue
         case .workspace(let workspace, _): "workspace:" + workspace.id.rawValue
+        // Scoped by workspace, because `task_id` is the CLI's and two workspaces running at once
+        // are two CLIs with two id spaces.
+        case .subagent(let row, let workspaceID, _):
+            "subagent:" + workspaceID.rawValue + ":" + row.id.rawValue
         case .notice(let repoID): "notice:" + repoID.rawValue
         }
     }
@@ -77,6 +84,7 @@ enum SidebarPaneRow: Identifiable {
         switch self {
         case .project(let group): .project(group.id)
         case .workspace(let workspace, _): .workspace(id: workspace.id, projectID: workspace.repoID)
+        case .subagent(_, _, let repoID): .subagent(projectID: repoID)
         case .notice(let repoID): .notice(projectID: repoID)
         }
     }
@@ -86,7 +94,15 @@ enum SidebarPaneRow: Identifiable {
     /// A folded project contributes its own row and nothing else, which is what makes folding a
     /// change of the rows rather than of a section's state, and is why a collapsed project can
     /// still be dragged: it is one row that carries everything under it.
-    static func rows(_ groups: [SidebarRepoGroup]) -> [SidebarPaneRow] {
+    ///
+    /// - Parameter subagents: the children to draw under each workspace, in the order they were
+    ///   spawned. A closure rather than a field on the group, because a subagent's row changes
+    ///   about once a second while one is running and the groups are rebuilt only when the
+    ///   workspaces, the projects or the filter move. See `AppModel.subagentRows`.
+    static func rows(
+        _ groups: [SidebarRepoGroup],
+        subagents: (WorkspaceID) -> [SubagentRow] = { _ in [] }
+    ) -> [SidebarPaneRow] {
         var rows: [SidebarPaneRow] = []
         for group in groups {
             rows.append(.project(group))
@@ -94,9 +110,15 @@ enum SidebarPaneRow: Identifiable {
             if group.workspaces.isEmpty {
                 rows.append(.notice(repoID: group.id))
             } else {
-                rows.append(
-                    contentsOf: group.workspaces.map { .workspace($0, projectName: group.repo.name) }
-                )
+                for workspace in group.workspaces {
+                    rows.append(.workspace(workspace, projectName: group.repo.name))
+                    // Directly after their workspace and in spawn order, which is what makes the
+                    // reading right even though depth past one is drawn at the same indent. See
+                    // `SubagentRow.rows`.
+                    rows.append(contentsOf: subagents(workspace.id).map {
+                        .subagent($0, workspaceID: workspace.id, repoID: group.id)
+                    })
+                }
             }
         }
         return rows

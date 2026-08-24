@@ -131,6 +131,15 @@ struct SidebarView: View {
                         renaming: $renaming
                     )
                     .tag(SidebarSelection.workspace(workspace.id))
+                case .subagent(let subagent, let workspaceID, _):
+                    SubagentSidebarRow(row: subagent)
+                        // A row with no file to open refuses selection rather than taking it and
+                        // showing an empty pane, which is the worse of the two.
+                        .selectionDisabled(!subagent.opensOutput)
+                        // Never something to pick up. A subagent has no place in the pane of its
+                        // own: it is where it is because of what spawned it.
+                        .moveDisabled(true)
+                        .tag(SidebarSelection.subagent(workspaceID, subagent.id))
                 case .notice:
                     // A sentence about a project, so it is neither selectable nor something to
                     // pick up. `SidebarReorder` refuses it a second time, in case the outline
@@ -208,6 +217,10 @@ struct SidebarView: View {
         }
         .onChange(of: app.repos, initial: true) { _, _ in regroup() }
         .onChange(of: app.workspaces) { _, _ in regroup() }
+        // Rebuilds the run but not the groups. A subagent's row changes about once a second while
+        // one is running, and regrouping on that would filter and sort every project's workspaces
+        // once a second for the whole of a fan-out.
+        .onChange(of: app.subagentRows) { _, _ in reflow() }
         // Rescoped, so widening the filter is not forty rows fading in at once. See `RowArrival`.
         .onChange(of: filter) { _, _ in regroup(rescoped: true) }
         // Rescoped for the same reason the filter is: turning hidden projects on is a whole
@@ -254,7 +267,7 @@ struct SidebarView: View {
             filter: filter,
             showingHidden: showsHiddenProjects
         )
-        paneRows = SidebarPaneRow.rows(groups)
+        paneRows = SidebarPaneRow.rows(groups, subagents: app.subagents(of:))
         // Every workspace the groups hold, a folded project's included. A fold hides rows rather
         // than removing them from the list, and unfolding one already has a movement of its own:
         // counting them out here would make every project the user reopens fade its contents in
@@ -269,6 +282,12 @@ struct SidebarView: View {
         } else {
             arrival.absorb(ids)
         }
+    }
+
+    /// Redraws the run from the groups already computed, for a change that adds or removes rows
+    /// without changing which workspaces are in the pane.
+    private func reflow() {
+        paneRows = SidebarPaneRow.rows(groups, subagents: app.subagents(of:))
     }
 
     // MARK: - Reordering

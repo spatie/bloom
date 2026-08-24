@@ -138,3 +138,49 @@ public struct SubagentTranscript: Sendable, Hashable {
             .joined(separator: "\n")
     }
 }
+
+/// Reading a subagent's transcript off disk.
+///
+/// A file Bloom does not own, in a directory Bloom does not own, written by another process that
+/// may still be writing it. So every failure is a sentence rather than a throw: the pane's job is
+/// to say what it can see, and "the CLI has not written this yet" is a thing it can see.
+public enum SubagentOutput: Sendable {
+    public enum Failure: Error, Sendable, Hashable {
+        /// The notification never named a file.
+        case noFile
+        /// It named one that is not there. The CLI writes the path into the notification and the
+        /// file a moment later, so this is briefly true for a subagent that has just ended.
+        case missing
+        /// It is there and could not be read: permissions, or a symlink whose target has gone.
+        case unreadable(String)
+    }
+
+    /// Read and parse one subagent's transcript.
+    ///
+    /// `path` is `task_notification.output_file`, which is a symlink; `String(contentsOf:)`
+    /// follows it, which is what makes this two lines rather than a resolve and a read.
+    public static func read(path: String?) -> Result<SubagentTranscript, Failure> {
+        guard let path, !path.isEmpty else { return .failure(.noFile) }
+        let url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: url.path) else { return .failure(.missing) }
+        do {
+            return .success(SubagentTranscript.parse(try String(contentsOf: url, encoding: .utf8)))
+        } catch {
+            return .failure(.unreadable(error.localizedDescription))
+        }
+    }
+}
+
+extension SubagentOutput.Failure {
+    /// What the pane says instead of a transcript.
+    public var sentence: String {
+        switch self {
+        case .noFile:
+            "The agent did not say where this subagent's output was written."
+        case .missing:
+            "The agent has not written this subagent's output yet."
+        case .unreadable(let reason):
+            "This subagent's output could not be read. \(reason)"
+        }
+    }
+}

@@ -119,6 +119,16 @@ final class TranscriptModel {
     /// tomorrow has the duration and no explanation, which is where it was before any of this.
     private(set) var recoveredRuns: [Int: RetryRun] = [:]
 
+    /// The subagents this turn has spawned, in the order it spawned them.
+    ///
+    /// One roster per session rather than per workspace, because a workspace with four chats runs
+    /// four turns and the sidebar draws the active chat's. It is deliberately not stored: see
+    /// `SubagentRoster` for the argument, which is that the longest one of these is meant to live
+    /// is a single turn and the CLI's own record of it is already on disk.
+    private(set) var subagents = SubagentRoster() {
+        didSet { app.noteSubagentsChanged(workspaceID: workspace.id) }
+    }
+
     var draft = ""
 
     /// What has been asked for on this session and has not gone yet, oldest first.
@@ -542,6 +552,13 @@ final class TranscriptModel {
         let runner = ensureRunner()
         turnStartedAt = Date()
         wasStoppedByHand = false
+        // **The clearing rule.** The last turn's subagents go here, at the one place a turn
+        // starts, and nowhere else. Clearing them when they finish is the option that reads well
+        // in a screenshot and badly in use: three rows leaving one by one take everything below
+        // them up the pane while you are still reading the third. Clearing them here means a
+        // finished subagent keeps its place, with its tick or its cross and what it answered, for
+        // as long as the turn it belongs to is the last thing that happened.
+        subagents.turnStarted()
         setRunning(true)
         statusLabel = "Starting"
 
@@ -784,6 +801,7 @@ final class TranscriptModel {
             await appendLatestMessages()
             setRunning(false)
             statusLabel = nil
+            subagents.turnEnded()
             await refreshSession()
             app.alert = BloomAlert(
                 title: "The agent stopped in \(workspaceNow.name)",
@@ -802,6 +820,9 @@ final class TranscriptModel {
             fileRecoveredRun()
             setRunning(false)
             statusLabel = nil
+            // Anything still breathing was killed with the turn, whatever the last line about it
+            // said. The rows stay, marked as stopped; they go when the next turn starts.
+            subagents.turnEnded()
             // Token counts, cost and state are all written by the runner as part of handling the
             // same result. Reading them back keeps one writer and avoids double counting.
             await refreshSession()
@@ -834,6 +855,9 @@ final class TranscriptModel {
             // The adapters recognise their own payload and decline the rest, so this one line
             // serves every backend that publishes an allowance and every backend that does not.
             await app.recordQuotas(AgentQuotaAdapters.quotas(fromRateLimitEvent: raw))
+
+        case .subagent(let signal):
+            subagents.apply(signal)
 
         case .hook, .unknown:
             break

@@ -42,6 +42,9 @@ final class WorkspaceModel {
             // written back is still an invalidation, and this one reaches every pane.
             if storedActiveSessionID != newValue { storedActiveSessionID = newValue }
             prepareActiveTranscript()
+            // The sidebar draws the active chat's subagents, so switching tab changes which rows
+            // belong under this workspace even though no roster moved.
+            app.noteSubagentsChanged(workspaceID: workspace.id)
         }
     }
 
@@ -401,6 +404,16 @@ final class WorkspaceModel {
 
     var isRunning: Bool {
         transcripts.values.contains { $0.isRunning }
+    }
+
+    /// The rows for the subagents the ACTIVE chat's turn has spawned.
+    ///
+    /// A pure lookup over existing transcripts, safe from a view body, and deliberately not a
+    /// union over every session: see `AppModel.subagentRows` for why one workspace row must not
+    /// draw four chats' children at once.
+    var activeSubagentRows: [SubagentRow] {
+        guard let transcript = activeTranscript else { return [] }
+        return SubagentRow.rows(transcript.subagents)
     }
 
     /// Whether any session here has an agent stopped and waiting on a person.

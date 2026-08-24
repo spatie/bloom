@@ -23,9 +23,34 @@ enum SidebarSelection: Hashable {
     /// workspaces and the sidebar is where this app keeps those. Settings holds preferences, and
     /// which transcripts to destroy is not one.
     case archive
+    /// One subagent of the turn running in a workspace, open for reading.
+    ///
+    /// **It carries its workspace, and `workspaceID` returns it.** That one line is the whole
+    /// selection decision. A subagent has no worktree, no branch, no terminal and nothing to
+    /// commit, so selecting one cannot mean what selecting a workspace means. But the terminal,
+    /// the diff, the composer, the toolbar, the Workspace menu and the session restore all hang
+    /// off `selection.workspaceID`, and every one of them is still about the parent while you read
+    /// a child. So a subagent selection IS a workspace selection, with exactly one thing narrowed:
+    /// the centre column, which shows that subagent's own transcript instead of the chat.
+    ///
+    /// The alternative was a case whose `workspaceID` was nil, and it would have emptied the
+    /// inspector, greyed the menu and stopped the composer the moment you clicked a row to see
+    /// what a subagent said. Nothing about the workspace changed when you did that.
+    ///
+    /// `rememberSelection` therefore stores the parent, which is what should reopen: the subagent
+    /// is gone by the next launch by construction. See `SubagentRoster`.
+    case subagent(WorkspaceID, SubagentID)
 
     var workspaceID: WorkspaceID? {
-        if case .workspace(let id) = self { return id }
+        switch self {
+        case .workspace(let id), .subagent(let id, _): id
+        default: nil
+        }
+    }
+
+    /// The subagent being read, when one is. Only the centre column asks.
+    var subagentID: SubagentID? {
+        if case .subagent(_, let id) = self { return id }
         return nil
     }
 
@@ -973,6 +998,43 @@ final class AppModel {
     /// existence. Sidebar rows ask this for every visible workspace on every redraw.
     func isAwaitingPermission(_ workspace: Workspace) -> Bool {
         waitingWorkspaceIDs.contains(workspace.id)
+    }
+
+    /// The subagent rows under each workspace, for the sidebar to draw.
+    ///
+    /// An observable mirror written from one place, exactly like `runningWorkspaceIDs` above and
+    /// for exactly the same reason: `workspaceModels` is `@ObservationIgnored`, so a sidebar that
+    /// walked it to find the rows would register a dependency on nothing and would only redraw
+    /// when the diff stat poll happened to reassign `workspaces`. A subagent that finished four
+    /// seconds ago would keep breathing until something unrelated moved.
+    ///
+    /// Keyed by workspace and holding the ACTIVE session's rows only. A workspace with four chats
+    /// runs four turns, and drawing all of their children under one workspace row would say that
+    /// this turn spawned eleven subagents when it spawned two.
+    private(set) var subagentRows: [WorkspaceID: [SubagentRow]] = [:]
+
+    /// Told by `TranscriptModel` whenever its roster moves, and by `WorkspaceModel` whenever the
+    /// active session changes underneath it.
+    ///
+    /// Recomputed from the workspace's model rather than taken from the caller, like its two
+    /// siblings, so a background session's roster cannot land under the workspace row while a
+    /// different chat is the one on screen.
+    func noteSubagentsChanged(workspaceID: WorkspaceID) {
+        let rows = workspaceModels[workspaceID]?.activeSubagentRows ?? []
+        // Ticks arrive about once a second per running subagent and most of them change nothing
+        // the row says. An unconditional write would invalidate every sidebar row in the window
+        // on each one.
+        if rows.isEmpty {
+            if subagentRows[workspaceID] != nil { subagentRows[workspaceID] = nil }
+        } else if subagentRows[workspaceID] != rows {
+            subagentRows[workspaceID] = rows
+        }
+    }
+
+    /// The rows under one workspace, without forcing a `WorkspaceModel` into existence. Asked by
+    /// the sidebar for every visible workspace on every redraw.
+    func subagents(of workspaceID: WorkspaceID) -> [SubagentRow] {
+        subagentRows[workspaceID] ?? []
     }
 
     /// How many workspaces are waiting on the user, for the sidebar's status bar, the Dock badge

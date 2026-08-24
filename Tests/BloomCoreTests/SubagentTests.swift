@@ -318,3 +318,63 @@ import Foundation
         #expect(SubagentTranscript.parse("").isEmpty)
     }
 }
+
+// MARK: - The pane the rows are drawn into
+
+/// Subagent rows appear BETWEEN workspace rows, which is the one place they can break something
+/// that already worked: `onMove` hands back offsets into the drawn run, and every offset below a
+/// running workspace moves by the number of children it is drawing.
+@Suite struct SubagentReorderTests {
+    private let project = RepoID("p")
+
+    /// Two workspaces, the first of them running two subagents.
+    private var rows: [SidebarReorder.Row] {
+        [
+            .project(project),
+            .workspace(id: WorkspaceID("a"), projectID: project),
+            .subagent(projectID: project),
+            .subagent(projectID: project),
+            .workspace(id: WorkspaceID("b"), projectID: project),
+        ]
+    }
+
+    @Test func aSubagentRowIsNeverSomethingToPickUp() {
+        let moved = SidebarReorder.destination(rows: rows, from: IndexSet(integer: 2), to: 1)
+        #expect(moved == .nothing)
+    }
+
+    @Test func draggingTheSecondWorkspaceAboveTheFirstCountsWorkspacesAndNotRows() {
+        // The offsets are 4 and 1 in the drawn run, and 1 and 0 among the project's workspaces.
+        // Subtracting the run's lower bound instead of ranking would have said 3 and 0, which
+        // `move(visible:all:from:to:)` reads as an offset off the end of a two row project.
+        let moved = SidebarReorder.destination(rows: rows, from: IndexSet(integer: 4), to: 1)
+        #expect(moved == .workspace(
+            projectID: project, from: IndexSet(integer: 1), to: 0, landedOutside: false
+        ))
+    }
+
+    @Test func aDropBelowTheLastWorkspacesChildrenIsInsideTheProject() {
+        // The insertion line under the last subagent row is the end of the project, not outside
+        // it, so this must not report `landedOutside` and raise the "Kept in" note.
+        let rows: [SidebarReorder.Row] = [
+            .project(project),
+            .workspace(id: WorkspaceID("a"), projectID: project),
+            .workspace(id: WorkspaceID("b"), projectID: project),
+            .subagent(projectID: project),
+        ]
+        let moved = SidebarReorder.destination(rows: rows, from: IndexSet(integer: 1), to: 4)
+        #expect(moved == .workspace(
+            projectID: project, from: IndexSet(integer: 0), to: 2, landedOutside: false
+        ))
+    }
+
+    @Test func aPaneWithNoSubagentsBehavesExactlyAsItDid() {
+        let rows: [SidebarReorder.Row] = [
+            .project(project),
+            .workspace(id: WorkspaceID("a"), projectID: project),
+            .workspace(id: WorkspaceID("b"), projectID: project),
+        ]
+        #expect(SidebarReorder.destination(rows: rows, from: IndexSet(integer: 2), to: 1)
+            == .workspace(projectID: project, from: IndexSet(integer: 1), to: 0, landedOutside: false))
+    }
+}

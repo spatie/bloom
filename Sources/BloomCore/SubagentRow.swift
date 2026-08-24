@@ -91,7 +91,7 @@ public struct SubagentRow: Sendable, Hashable, Identifiable {
     /// The name. `description` is a phrase the parent wrote for exactly this purpose, so it is
     /// used whole; `subagent_type` stands in when there is none, because a row with no name at
     /// all cannot be told from the row above it.
-    static func title(of subagent: Subagent) -> String {
+    public static func title(of subagent: Subagent) -> String {
         let description = subagent.description.trimmingCharacters(in: .whitespacesAndNewlines)
         if !description.isEmpty { return description }
         let type = subagent.type.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -133,7 +133,7 @@ public struct SubagentRow: Sendable, Hashable, Identifiable {
     }
 
     /// Seconds, the way a row has room to say them.
-    static func duration(_ seconds: Int) -> String {
+    public static func duration(_ seconds: Int) -> String {
         guard seconds > 0 else { return "" }
         guard seconds >= 60 else { return "\(seconds)s" }
         let minutes = seconds / 60

@@ -21,11 +21,35 @@ struct DetailColumn: View {
                 SearchView()
             case .workspace(let id):
                 workspace(id)
+            case .subagent(let workspaceID, let subagentID):
+                subagent(subagentID, in: workspaceID)
             case .archived(let id):
                 archived(id)
             case .archive:
                 ArchiveView()
             }
+        }
+    }
+
+    /// A subagent gets the centre column and nothing else.
+    ///
+    /// Everything outside this column keeps showing the parent workspace, because
+    /// `SidebarSelection.subagent` answers `workspaceID` with it: the terminal is still the
+    /// worktree's terminal, the diff is still the worktree's diff, and the composer still sends to
+    /// the chat that spawned this subagent. What changes is the one pane that was showing a
+    /// conversation, which now shows a different conversation. That is the narrowest thing
+    /// selecting a subagent could mean, and it is deliberate.
+    ///
+    /// An unresolvable subagent lands on the parent workspace rather than on Home, which is the
+    /// one place in this file that is not Home: the workspace is still there and still selected as
+    /// far as every other pane is concerned, so falling back to Home would take the window
+    /// somewhere nobody asked to go.
+    @ViewBuilder
+    private func subagent(_ id: SubagentID, in workspaceID: WorkspaceID) -> some View {
+        if let model = app.existingModel(for: workspaceID) {
+            SubagentOutputView(model: model, subagentID: id)
+        } else {
+            workspace(workspaceID)
         }
     }
 

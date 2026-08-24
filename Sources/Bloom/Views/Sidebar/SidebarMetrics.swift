@@ -58,6 +58,14 @@ enum SidebarMetrics {
     /// indented past the project's icon, and asked for this one.
     static let rowIndent: CGFloat = caretGutter
 
+    /// How far a subagent's row is pushed right of the workspace row it belongs to.
+    ///
+    /// The same step again, so the pane's three levels are evenly spaced and a subagent's mark
+    /// falls where a workspace's name begins. It is the last step this pane gets: a fourth would
+    /// leave a name six characters wide at the 260 point default, which is why `SubagentRow.rows`
+    /// draws a subagent's own children at this indent rather than one further in.
+    static let subagentIndent: CGFloat = caretGutter
+
     /// The gap between a workspace row's status mark and the name beside it.
     ///
     /// Measured off the rows as the system's own `Label` drew them, so that `SidebarRowLabelStyle`
