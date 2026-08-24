@@ -42,9 +42,16 @@ public enum QuickPromptSeed {
     /// What the store keeps the last seeded version under, in the settings table.
     public static let versionKey = "quickPrompts.seedVersion"
 
-    /// The highest `introducedIn` on the list below, written down once so the store has something
-    /// to record without having to search for the maximum.
-    public static let version = 1
+    /// The highest `introducedIn` on the list below.
+    ///
+    /// Derived rather than written down by hand. A constant here has to be bumped every time an
+    /// entry is added, and forgetting is not harmless: the store would insert the new entry,
+    /// record the old version, and insert it again on the next launch. Two tests in
+    /// `QuickPromptTests` pinned that, so it would have failed CI rather than shipped, but a
+    /// maximum read off the list cannot drift from the list at all, which is better than being
+    /// caught drifting. Those tests now hold by construction, and are kept as the statement of
+    /// what must remain true.
+    public static var version: Int { all.map(\.introducedIn).max() ?? 0 }
 
     public static let all: [Entry] = [
         // The one Bloom ships with. It is deletable, like everything else here, and deleting it
