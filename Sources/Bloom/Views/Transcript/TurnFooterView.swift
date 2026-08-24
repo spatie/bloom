@@ -23,8 +23,6 @@ struct TurnFooterView: View {
     private static let visibleFileLimit = 6
 
     @State private var files: [TurnFile] = []
-    @State private var copied = false
-    @State private var copyReset: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -79,19 +77,15 @@ struct TurnFooterView: View {
 
                 Spacer(minLength: TranscriptLayout.tight)
 
-                Button(action: copyAnswer) {
-                    Label("Copy this answer", systemImage: copied ? "checkmark" : "doc.on.doc")
-                        .labelStyle(.iconOnly)
-                        .font(Typo.caption)
-                        .imageScale(.medium)
-                }
-                .buttonStyle(.borderless)
-                .help(copied ? "Copied" : "Copy this answer")
+                CopyButton(text: summaryText, title: "Copy this answer")
 
+                // The menu's three do not flash the tick beside them. It is one button saying
+                // one thing, and it said "Copy this answer" while the raw event was what had
+                // just gone on the pasteboard.
                 Menu {
-                    Button("Copy answer", action: copyAnswer)
-                    Button("Copy files touched", action: copyFiles)
-                    Button("Copy raw event", action: copyRawEvent)
+                    Button("Copy answer") { Clipboard.copy(summaryText) }
+                    Button("Copy files touched") { Clipboard.copy(filesText) }
+                    Button("Copy raw event") { Clipboard.copy(rawEventText) }
                 } label: {
                     Label("More for this turn", systemImage: "ellipsis")
                 }
@@ -196,28 +190,7 @@ struct TurnFooterView: View {
         }
     }
 
-    private func copyAnswer() {
-        copy(summaryText)
-    }
+    private var filesText: String { files.map(\.path).joined(separator: "\n") }
 
-    private func copyFiles() {
-        copy(files.map(\.path).joined(separator: "\n"))
-    }
-
-    private func copyRawEvent() {
-        copy(String(decoding: row.payload, as: UTF8.self))
-    }
-
-    private func copy(_ text: String) {
-        Clipboard.copy(text)
-        copied = true
-        // Cancelled and restarted, so a second copy inside the window does not have the first
-        // one's timer clear the label out from under it a moment later.
-        copyReset?.cancel()
-        copyReset = Task {
-            try? await Task.sleep(for: Clipboard.flashDuration)
-            guard !Task.isCancelled else { return }
-            copied = false
-        }
-    }
+    private var rawEventText: String { String(decoding: row.payload, as: UTF8.self) }
 }

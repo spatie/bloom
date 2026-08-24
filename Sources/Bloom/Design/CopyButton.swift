@@ -8,6 +8,13 @@ import SwiftUI
 /// `Clipboard.flashDuration`, and a tick in place of the sheets while it says so. The wording is
 /// the caller's, so a button over a command says "Copy command" exactly as Settings does.
 ///
+/// It was written and then not adopted: the markdown fence and the turn's footer both kept their
+/// own copy of it, and the footer's had already lost the tick's tint and the "Copied" a screen
+/// reader hears. That is the drift this type exists to stop, so the two of them now call it. The
+/// terminal pane in Settings does not, because it is a titled `.bordered` button rather than this
+/// one wearing a different style, and pretending otherwise would put a mode in here for one call
+/// site.
+///
 /// The flash task is cancelled and restarted rather than left to run, so a second copy inside the
 /// window does not have the first one's timer clear the label out from under it a moment later.
 ///
@@ -21,6 +28,10 @@ struct CopyButton: View {
     /// What the button is for, in the caller's words. Shown as the tooltip and to VoiceOver.
     var title: String = "Copy"
     var isVisible: Bool = true
+    /// The square the control is drawn and hit in, for a caller that has a row of icon buttons to
+    /// line up with. Left alone the button is as big as the glyph in it, which is what a control
+    /// revealed by the pointer inside a block of text wants.
+    var size: CGFloat?
 
     @State private var copied = false
     @State private var reset: Task<Void, Never>?
@@ -32,6 +43,7 @@ struct CopyButton: View {
                 .font(Typo.caption)
                 .imageScale(.medium)
                 .foregroundStyle(copied ? Palette.positive : Palette.textTertiary)
+                .frame(width: size, height: size)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

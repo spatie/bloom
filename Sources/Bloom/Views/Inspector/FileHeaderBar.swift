@@ -244,8 +244,7 @@ struct FileHeaderBar: View {
                 : await model.patch(for: file)
             guard let text, !text.isEmpty else { return }
 
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
+            Clipboard.copy(text)
 
             didCopy = true
             copyReset?.cancel()

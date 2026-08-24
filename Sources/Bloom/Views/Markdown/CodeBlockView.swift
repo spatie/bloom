@@ -10,8 +10,6 @@ public struct CodeBlockView: View {
     private let code: String
     private let language: Language
     private let showsLineNumbers: Bool
-    @State private var copied = false
-    @State private var copyReset: Task<Void, Never>?
     @State private var showsAllLines = false
 
     /// The gutter follows the conversation's text size, otherwise a raised size runs the numbers
@@ -44,17 +42,7 @@ public struct CodeBlockView: View {
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textTertiary)
                 Spacer(minLength: MarkdownMetrics.blockGap)
-                Button(action: copy) {
-                    Label(copied ? "Copied" : "Copy code", systemImage: copied ? "checkmark" : "doc.on.doc")
-                        .labelStyle(.iconOnly)
-                        .font(Typo.caption)
-                        .imageScale(.medium)
-                        .foregroundStyle(copied ? Palette.positive : Palette.textTertiary)
-                        .frame(width: MarkdownMetrics.iconButton, height: MarkdownMetrics.iconButton)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(copied ? "Copied" : "Copy code")
+                CopyButton(text: code, title: "Copy code", size: MarkdownMetrics.iconButton)
             }
             .padding(.horizontal, MarkdownMetrics.blockGap)
             .padding(.vertical, Metrics.spacing)
@@ -102,19 +90,6 @@ public struct CodeBlockView: View {
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.corner)
                 .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
-        }
-    }
-
-    private func copy() {
-        Clipboard.copy(code)
-        copied = true
-        // Cancelled and restarted, so a second copy inside the window does not have the first
-        // one's timer clear the label out from under it a moment later.
-        copyReset?.cancel()
-        copyReset = Task {
-            try? await Task.sleep(for: Clipboard.flashDuration)
-            guard !Task.isCancelled else { return }
-            copied = false
         }
     }
 

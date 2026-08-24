@@ -126,9 +126,7 @@ enum TranscriptLink {
     // MARK: Copying
 
     static func copy(_ url: String) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(url, forType: .string)
+        Clipboard.copy(url)
     }
 
 }
