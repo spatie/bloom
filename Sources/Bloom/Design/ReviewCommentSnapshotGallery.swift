@@ -13,7 +13,9 @@ import BloomCore
 /// grows is a claim about what the buttons under it do: they have to stay put and stay reachable
 /// rather than being pushed out of the band.
 ///
-/// `Snapshot.render` picks this up as the "review-comments" scene, light and dark.
+/// Captured as a real window, light and dark:
+/// `Bloom --snapshot-gallery <dir> --gallery review-comments`. Not by `--snapshot`, which renders
+/// offscreen and paints a yellow placeholder over the one control this page is about.
 struct ReviewCommentSnapshotGallery: View {
     /// The width a diff sheet is drawn at in a comfortable inspector.
     private static let sheet: CGFloat = 760

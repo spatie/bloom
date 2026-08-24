@@ -27,20 +27,29 @@ enum Snapshot {
         return arguments[index + 1]
     }
 
+    /// Refuses to capture anything against a database nobody named.
+    ///
+    /// Refused rather than trusted: every capture flag runs a full `bootstrap`, whose recovery
+    /// writes (resetting running sessions, abandoning pending asks) belong nowhere near a real
+    /// database, and none of the three is DEBUG-gated, so the installed binary run by hand with
+    /// no environment used to aim them at the user's own store, possibly while the real app was
+    /// mid-turn.
+    ///
+    /// Here rather than in `runAndExit`, where it was. `--snapshot` renders offscreen and was
+    /// guarded; `--snapshot-window` and `--snapshot-gallery` boot the whole app and were not, so
+    /// the two flags that do the MORE dangerous thing were the two that did it unguarded.
+    static func refuseWithoutDatabase(flag: String) {
+        guard ProcessInfo.processInfo.environment["BLOOM_DB_PATH"] == nil else { return }
+        FileHandle.standardError.write(Data(
+            "\(flag) captures against a database named by BLOOM_DB_PATH, and refuses to run without one.\n".utf8
+        ))
+        exit(1)
+    }
+
     /// Blocks the main thread on purpose. This runs before any scene exists, and the process is
     /// going to exit at the end of it either way.
     static func runAndExit() -> Never {
-        // Refused rather than trusted: `seededModel` runs a full `bootstrap`, whose recovery
-        // writes (resetting running sessions, abandoning pending asks) belong nowhere near a
-        // real database, and `--snapshot` is not DEBUG-gated, so the installed binary run by
-        // hand with no environment used to aim them at the user's own store, possibly while
-        // the real app was mid-turn.
-        guard ProcessInfo.processInfo.environment["BLOOM_DB_PATH"] != nil else {
-            FileHandle.standardError.write(Data(
-                "--snapshot renders against a database named by BLOOM_DB_PATH, and refuses to run without one.\n".utf8
-            ))
-            exit(1)
-        }
+        refuseWithoutDatabase(flag: "--snapshot")
         let semaphore = DispatchSemaphore(value: 0)
         Task { @MainActor in
             await render()
@@ -53,18 +62,12 @@ enum Snapshot {
     }
 
 
-    // MARK: - Window capture
+    // MARK: - Driving a window that is going to be filmed
+    //
+    // None of the four flags below photograph anything. They put the running app into the state
+    // worth photographing, for a capture that is happening from outside this process, and they
+    // landed under the window capture's MARK one at a time until it named none of them.
 
-    /// Captures the real window, rather than re-rendering views.
-    ///
-    /// `ImageRenderer` cannot draw a `List`, a `SettingsLink` or an `NSViewRepresentable`: it
-    /// paints SwiftUI's yellow "unsupported" placeholder instead, which is useless for judging a
-    /// sidebar built on `List`. Asking the window's own view hierarchy to draw itself into a
-    /// bitmap goes through the real AppKit rendering path, so materials, toolbars and lists all
-    /// come out as the user sees them, and it needs no screen recording permission.
-    ///
-    ///     Bloom --snapshot-window /tmp/shots/window.png [--window-size 900x700]
-    ///           [--sidebar-width 200] [--appearance dark]
     /// Opens a `bloom://` URL in THIS process, a few seconds after launch.
     ///
     /// `open bloom://...` from a shell goes through LaunchServices, which picks whichever copy of
@@ -96,24 +99,10 @@ enum Snapshot {
         }
     }
 
-    /// Opens a workspace and tells the window that agents are working in some of them, then gets
-    /// out of the way and lets the app go on running.
+    /// Whether the busy signals may run while another app is in front.
     ///
-    ///     Bloom --select w1 --running w1,w2,w3
-    ///     Bloom --select w1 --running w1,w2,w3/w1/
-    ///
-    /// Everything else in this file takes one picture and exits, which is enough for a layout and
-    /// is nothing at all for the two busy signals: a single still cannot show motion, so those
-    /// have to be watched on a window that stays up while frames are taken from outside it. This
-    /// is what puts such a window into the state worth watching.
-    ///
-    /// `--running` is a debug build only affordance, and deliberately: it makes the window claim
-    /// something about the user's agents that is not true, and a shipped copy has no business
-    /// being able to say that. `--select` is honoured here as well as by the window capture, so
-    /// the two flags can be given together to a run that is not capturing anything itself.
-    ///
-    /// It also lifts the busy signals' frontmost gate, which `forcesBusyPulse` is. Anything that
-    /// films this window is another process, so this window is not the front one while it is being
+    /// `--running` lifts their frontmost gate as well as setting the state. Anything that films
+    /// this window is another process, so this window is not the front one while it is being
     /// filmed, and the signals would stop on the frame the recorder started. The alternative is a
     /// capture run that repeatedly takes focus off whatever the user is doing, which is worse than
     /// a debug flag.
@@ -197,6 +186,22 @@ enum Snapshot {
         #endif
     }
 
+    /// Opens a workspace and tells the window that agents are working in some of them, then gets
+    /// out of the way and lets the app go on running.
+    ///
+    ///     Bloom --select w1 --running w1,w2,w3
+    ///     Bloom --select w1 --running w1,w2,w3/w1/
+    ///
+    /// Everything else in this file takes one picture and exits, which is enough for a layout and
+    /// is nothing at all for the two busy signals: a single still cannot show motion, so those
+    /// have to be watched on a window that stays up while frames are taken from outside it. This
+    /// is what puts such a window into the state worth watching.
+    ///
+    /// `--running` is a debug build only affordance, and deliberately: it makes the window claim
+    /// something about the user's agents that is not true, and a shipped copy has no business
+    /// being able to say that. `--select` is honoured here as well as by the window capture, so
+    /// the two flags can be given together to a run that is not capturing anything itself.
+    ///
     static func scheduleRunningStateIfRequested() {
         #if DEBUG
         let arguments = CommandLine.arguments
@@ -285,7 +290,8 @@ enum Snapshot {
     /// `--menu-probe` is named by its flag rather than through `MenuProbe.isRequested`, because
     /// that type is compiled into debug builds only and this property is not.
     static var isDrivingTheWindow: Bool {
-        isRequested || isWindowCaptureRequested || FrameProbe.isRequested || SwitchProbe.isRequested
+        isRequested || isWindowCaptureRequested || isGalleryCaptureRequested
+            || FrameProbe.isRequested || SwitchProbe.isRequested
             || CommandLine.arguments.contains("--menu-probe")
     }
 
@@ -340,8 +346,20 @@ enum Snapshot {
         NSApp.appearance = appearance
     }
 
+    /// Captures the real window, rather than re-rendering views.
+    ///
+    /// `ImageRenderer` cannot draw a `List`, a `SettingsLink` or an `NSViewRepresentable`: it
+    /// paints SwiftUI's yellow "unsupported" placeholder instead, which is useless for judging a
+    /// sidebar built on `List`. Asking the window's own view hierarchy to draw itself into a
+    /// bitmap goes through the real AppKit rendering path, so materials, toolbars and lists all
+    /// come out as the user sees them, and it needs no screen recording permission.
+    ///
+    ///     Bloom --snapshot-window /tmp/shots/window.png [--window-size 900x700]
+    ///           [--sidebar-width 200] [--appearance dark]
+    ///
     /// Waits for the window to exist and settle, captures it, then exits.
     static func scheduleWindowCapture() {
+        refuseWithoutDatabase(flag: "--snapshot-window")
         Task { @MainActor in
             let path = windowCapturePath
             applyRequestedAppearance()
@@ -596,11 +614,16 @@ enum Snapshot {
 
     /// Which gallery `--snapshot-gallery` is being pointed at.
     ///
-    /// A name rather than a second flag per gallery. Both of these exist because `ImageRenderer`
-    /// cannot draw the control the page is about: a review comment is written in the composer's
-    /// own text view, and the inspector's tab strip is an `NSSegmentedControl`. Rendered offscreen
-    /// each came out as a yellow bar, which is exactly nothing where the whole point is the shape
-    /// of a control.
+    /// A name rather than a second flag per gallery. Every case here is a page `--snapshot` cannot
+    /// photograph, and mostly for one reason: `ImageRenderer` cannot draw the control the page is
+    /// about. A review comment is written in the composer's own text view, the inspector's tab
+    /// strip is an `NSSegmentedControl`, and rendered offscreen each came out as a yellow bar,
+    /// which is exactly nothing where the whole point is the shape of a control. The other two
+    /// are here because what they show is a pointer or a keyboard on the page, which an offscreen
+    /// render has neither of.
+    ///
+    /// It said "both of these" while holding four cases, which is how long it had been since
+    /// anybody added one and read the paragraph above it.
     private enum GalleryChoice: String {
         case reviewComments = "review-comments"
         case inspectorTabs = "inspector-tabs"
@@ -630,7 +653,16 @@ enum Snapshot {
         /// True only where the state under review is a field somebody is typing in: a text view
         /// draws its focus ring nowhere else. Taking the keys is a rude thing to do to whoever is
         /// using the machine, so a page that does not need them does not ask.
-        var needsFocus: Bool { self == .reviewComments }
+        ///
+        /// A `switch` rather than an `==`, for the reason `CLAUDE.md` gives about widened enums: a
+        /// fifth gallery added to this file should have to answer the question rather than
+        /// silently inherit `false`.
+        var needsFocus: Bool {
+            switch self {
+            case .reviewComments: true
+            case .inspectorTabs, .diffScope, .pendingDelete: false
+            }
+        }
     }
 
     private static func gallery(from arguments: [String]) -> GalleryChoice {
@@ -652,9 +684,18 @@ enum Snapshot {
     }
 
     static func scheduleGalleryCapture() {
+        refuseWithoutDatabase(flag: "--snapshot-gallery")
         let arguments = CommandLine.arguments
+        // Said rather than swallowed. `--snapshot` and `--snapshot-window` each fall back to a
+        // path under the temporary directory; this one used to return here and let the app carry
+        // on launching, so a run that captured nothing looked exactly like a run that worked.
         guard let index = arguments.firstIndex(of: "--snapshot-gallery"),
-              index + 1 < arguments.count else { return }
+              index + 1 < arguments.count else {
+            FileHandle.standardError.write(Data(
+                "--snapshot-gallery needs a directory to write into.\n".utf8
+            ))
+            exit(1)
+        }
         let output = arguments[index + 1]
         let choice = gallery(from: arguments)
 
@@ -789,11 +830,18 @@ enum Snapshot {
             ("components", AnyView(ComponentGallery().frame(width: 640, height: 700)), CGSize(width: 640, height: 700)),
             ("permission", AnyView(PermissionSnapshotGallery().frame(width: 720, height: 1560)), CGSize(width: 720, height: 1560)),
             ("tool-rows", AnyView(ToolRowSnapshotGallery().frame(width: 800, height: 720)), CGSize(width: 800, height: 720)),
-            ("review-comments", AnyView(ReviewCommentSnapshotGallery().frame(width: 800, height: 900)), CGSize(width: 800, height: 900)),
-            // No inspector-tabs scene, deliberately. The strip is a segmented control, which is an
-            // `NSSegmentedControl`, and `ImageRenderer` paints its yellow placeholder over exactly
-            // the thing that page exists to show. It is captured as a real window instead:
-            // `--snapshot-gallery <dir> --gallery inspector-tabs`.
+            // No review-comments and no inspector-tabs scene, deliberately, and for one reason:
+            // `ImageRenderer` paints SwiftUI's yellow placeholder over an `NSViewRepresentable`,
+            // and each of those two pages exists to show one. The review comment box is the
+            // composer's own text view and the inspector's strip is an `NSSegmentedControl`, so
+            // offscreen both come out as a yellow bar. They are captured as real windows instead:
+            // `--snapshot-gallery <dir> --gallery review-comments|inspector-tabs`.
+            //
+            // review-comments was in this list as well until tonight, which was worse than
+            // useless: the two paths write the same `review-comments-<appearance>.png` into the
+            // same directory, so whichever ran second replaced a real photograph with a yellow
+            // bar, and they disagreed about the width while doing it (800 here, 820 there).
+
             // On the menu's own ground rather than the window's, because every colour in this
             // panel is an AppKit semantic one chosen to sit on a menu. See `QuotaPanel`.
             (

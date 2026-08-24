@@ -12,7 +12,10 @@ import BloomCore
 /// request GitHub has reported no runs for, and a pull request with runs. Only the last of them
 /// draws a Checks segment.
 ///
-/// `Snapshot.render` picks this up as the "inspector-tabs" scene, light and dark.
+/// Captured as a real window, light and dark:
+/// `Bloom --snapshot-gallery <dir> --gallery inspector-tabs`. Deliberately not a `--snapshot`
+/// scene: that path renders offscreen and paints a yellow placeholder over the segmented control
+/// this page exists to show.
 struct InspectorTabStripGallery: View {
     /// Held rather than made here: `WorkspaceModel` keeps its app unowned, so something with a
     /// longer life than a `body` has to own it.
