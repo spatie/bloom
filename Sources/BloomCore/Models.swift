@@ -541,6 +541,13 @@ public struct PullRequest: Sendable, Hashable, Codable {
     /// This is the branch merging deletes, so the confirmation names this one rather than the
     /// local checkout's idea of it.
     public var branch: String
+    /// When it stopped being open, whether by merging or by being closed. Nil while it is open,
+    /// and nil from a gh old enough not to report it.
+    ///
+    /// Kept for one decision: gh finds a pull request by branch NAME, and branch names are reused.
+    /// A pull request that ended before the workspace asking about it was created belongs to an
+    /// earlier life of that name. See `PullRequestOwnership`.
+    public var closedAt: Date?
 
     public init(
         number: Int,
@@ -552,7 +559,8 @@ public struct PullRequest: Sendable, Hashable, Codable {
         checks: Checks = .none,
         checksSummary: String = "",
         reviewDecision: String? = nil,
-        branch: String = ""
+        branch: String = "",
+        closedAt: Date? = nil
     ) {
         self.number = number
         self.title = title
@@ -564,6 +572,7 @@ public struct PullRequest: Sendable, Hashable, Codable {
         self.checksSummary = checksSummary
         self.reviewDecision = reviewDecision
         self.branch = branch
+        self.closedAt = closedAt
     }
 }
 

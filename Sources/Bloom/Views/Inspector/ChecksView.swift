@@ -209,9 +209,7 @@ struct ChecksView: View {
             github = state
 
             if state == .ready {
-                let found = await GitHubBridge.checks(
-                    branch: model.workspace.branch, worktree: model.workspace.path
-                )
+                let found = await GitHubBridge.checks(for: model.workspace)
                 runs = found
                 groups = CheckRunGroup.build(from: found)
             }

@@ -334,9 +334,7 @@ public struct WorkspaceListTool: BridgeToolHandling {
     /// over, so the workspace falls back to what Bloom's own database can say about it.
     private func pullRequest(for workspace: Workspace) async -> PullRequest? {
         guard FileManager.default.fileExists(atPath: workspace.path) else { return nil }
-        return try? await GitHub.pullRequest(
-            forBranch: workspace.branch, worktree: workspace.path, maxAge: .seconds(60)
-        )
+        return try? await GitHub.pullRequest(for: workspace, maxAge: .seconds(60))
     }
 
     /// The pull request block, which is `PullRequestStatus` read out loud.

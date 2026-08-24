@@ -72,6 +72,9 @@ private struct PullRequestPayload: Decodable {
     let reviewDecision: String?
     let headRefName: String?
     let statusCheckRollup: [CheckPayload]?
+    /// When the pull request stopped being open. GitHub sets it for merged as well as closed, and
+    /// leaves it null while the pull request is open, so one field answers both.
+    let closedAt: String?
 }
 
 private struct CheckPayload: Decodable {
@@ -143,6 +146,9 @@ public enum GitHub {
     private static let fields = [
         "number", "title", "url", "state", "isDraft", "mergeable",
         "mergeStateStatus", "reviewDecision", "headRefName", "statusCheckRollup",
+        // Read for one reason: telling a pull request that ended before this workspace was
+        // started apart from this workspace's own. See `PullRequestOwnership`.
+        "closedAt",
     ].joined(separator: ",")
 
     public static func isAvailable() async -> Bool {
@@ -424,10 +430,22 @@ public enum GitHub {
                 checks: checks,
                 checksSummary: summary,
                 reviewDecision: payload.reviewDecision,
-                branch: payload.headRefName ?? ""
+                branch: payload.headRefName ?? "",
+                closedAt: payload.closedAt.flatMap(iso8601)
             ),
             runs: runs
         )
+    }
+
+    /// gh prints GitHub's timestamps as they arrive, which is RFC 3339 with a `Z`. A version that
+    /// starts printing fractional seconds is read too, because the alternative is a nil that reads
+    /// as "still open".
+    private static func iso8601(_ text: String) -> Date? {
+        let plain = ISO8601DateFormatter()
+        if let date = plain.date(from: text) { return date }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: text)
     }
 
     private static func normalize(_ payload: CheckPayload) -> CheckRun {

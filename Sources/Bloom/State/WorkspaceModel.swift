@@ -1069,11 +1069,10 @@ final class WorkspaceModel {
     /// - Parameter maxAge: how old a cached answer may be. Zero always asks GitHub.
     func refreshPullRequest(maxAge: Duration = .zero) async {
         pullRequestTask?.cancel()
-        let branch = workspace.branch
-        let path = workspace.path
+        let asked = workspace
 
         let task = Task.detached(priority: .utility) {
-            await GitHubBridge.pullRequest(branch: branch, worktree: path, maxAge: maxAge)
+            await GitHubBridge.pullRequest(for: asked, maxAge: maxAge)
         }
         pullRequestTask = task
         // Only when there is nothing to show, for the same reason the changed file list only

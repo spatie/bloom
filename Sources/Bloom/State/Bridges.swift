@@ -18,17 +18,18 @@ enum GitHubBridge {
     /// before every single `gh pr view`: arriving at a workspace cost two network calls to answer
     /// one question. `GitHubAvailability` already asks that question once and remembers the
     /// answer, expiring only the negative one, because signing in happens outside this app.
+    ///
+    /// The workspace goes in whole rather than as a branch and a path, because the branch name is
+    /// not enough to say which pull request is this one's. See `PullRequestOwnership`.
     static func pullRequest(
-        branch: String, worktree: String, maxAge: Duration = .zero
+        for workspace: Workspace, maxAge: Duration = .zero
     ) async -> PullRequest? {
         guard await GitHubAvailability.shared.isReady() else { return nil }
-        return try? await GitHub.pullRequest(
-            forBranch: branch, worktree: worktree, maxAge: maxAge
-        )
+        return try? await GitHub.pullRequest(for: workspace, maxAge: maxAge)
     }
 
-    static func checks(branch: String, worktree: String) async -> [CheckRun] {
-        (try? await GitHub.checks(forBranch: branch, worktree: worktree)) ?? []
+    static func checks(for workspace: Workspace) async -> [CheckRun] {
+        (try? await GitHub.checks(for: workspace)) ?? []
     }
 
     static func open(_ url: String) {

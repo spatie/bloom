@@ -63,15 +63,12 @@ final class WorkspacePullRequests {
         guard await GitHubAvailability.shared.isReady() else { return }
 
         let id = workspace.id
-        let branch = workspace.branch
-        let path = workspace.path
+        let asked = workspace
 
         let previous = queue
         let lookup = Task { @MainActor in
             await previous.value
-            let fresh = await GitHubBridge.pullRequest(
-                branch: branch, worktree: path, maxAge: Self.maxAge
-            )
+            let fresh = await GitHubBridge.pullRequest(for: asked, maxAge: Self.maxAge)
             // Nil is both "there is no pull request" and "gh could not answer", so the last known
             // answer is kept rather than making the mark flicker back to a plain branch whenever
             // the network is slow.
