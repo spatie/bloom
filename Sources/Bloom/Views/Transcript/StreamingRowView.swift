@@ -83,7 +83,14 @@ struct StreamingRowView: View {
                     .arrivingRow(true)
             }
 
-            if let tool = transcript.streamingToolName {
+            // Before the status line and in place of it, because it is the same slot answering
+            // the same question with more of the truth. "Requesting" beside a live dot for three
+            // minutes is what the retry row exists to replace, and leaving both on screen would
+            // have the tail say the turn is requesting and waiting to request in two rows.
+            if let run = transcript.retryRun {
+                RetryRowView(run: run)
+                    .transaction { $0.animation = nil }
+            } else if let tool = transcript.streamingToolName {
                 StreamingStatusView(glyph: "gearshape", text: "Running \(tool)")
                     .transaction { $0.animation = nil }
             } else if transcript.isRunning, !hasVisibleStream {

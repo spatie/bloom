@@ -20,10 +20,15 @@ struct NoticeDrainBar: NSViewRepresentable {
     /// resume. The view redraws for other reasons too, and re-adding the animation on any of those
     /// would put the bar back to `fraction` and run it again from there.
     var generation: Int
+    /// What the bar is painted in. The accent for a notice, which is what this was written for;
+    /// `RetryRowView` hands it the warning tint so the bar under a turn that has been retrying for
+    /// two minutes belongs to the plate it sits on rather than to the app's own accent.
+    var tint: Color = Palette.accent
 
     func makeNSView(context: Context) -> NoticeDrainBarView { NoticeDrainBarView() }
 
     func updateNSView(_ view: NoticeDrainBarView, context: Context) {
+        view.tint = NSColor(tint)
         view.apply(fraction: fraction, remaining: remaining, generation: generation)
     }
 }
@@ -34,6 +39,11 @@ final class NoticeDrainBarView: NSView {
     private var generation = -1
     private var fraction: Double = 1
     private var remaining: Duration?
+    /// Set by the representable before every `apply`. It is resolved to a `CGColor` inside
+    /// `applyColours`, which is the one place that may do so: see the note there.
+    var tint: NSColor = Palette.accentNSColor {
+        didSet { if tint != oldValue { applyColours() } }
+    }
 
     /// Faster than the twelve frames a second `BrandWater` and `BrandBranching` are capped at, and
     /// for a reason those two do not have: they move soft fields whose brightest pixel changes by
@@ -120,7 +130,7 @@ final class NoticeDrainBarView: NSView {
     /// one taken outside this block stays whatever the window happened to be when the banner opened.
     private func applyColours() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            let accent = Palette.accentNSColor
+            let accent = tint
             // Quiet on purpose. The bar sits under a sentence and must not be the thing that is
             // read first: a tenth of the accent for the ground it runs on, and a little under two
             // thirds for the bar itself, which lands a step below the icon above it in both

@@ -18,6 +18,15 @@ struct TurnFooterView: View {
     /// whole row list, and a footer can only see one turn. `TranscriptModel.stoppedTurnSeq` is
     /// where it is decided, over `StoppedTurn`.
     var wasStopped = false
+    /// A run of retries this turn waited out before it got through, or nothing.
+    ///
+    /// The live waiting row is gone by the time this is drawn, and it must not simply have
+    /// vanished: a footer saying three minutes with nothing in the transcript to account for them
+    /// is the same unexplained silence in the past tense. One sentence, in the caption ink, with
+    /// no advice in it, because it is a note about something that is over.
+    ///
+    /// A turn that failed carries none of this. See `TranscriptModel.abandonRetryRun`.
+    var recovered: RetryRun?
 
     /// More chips than this and the footer stops being a footer.
     private static let visibleFileLimit = 6
@@ -108,6 +117,17 @@ struct TurnFooterView: View {
                 Text(notice)
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, TranscriptLayout.inset)
+                    .padding(.bottom, TranscriptLayout.inset)
+            }
+
+            // Tertiary rather than secondary, and under everything else: it explains a duration
+            // somebody may go looking for, and it is not news the moment the turn lands.
+            if let recovered {
+                Text(recovered.recoveredSentence)
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, TranscriptLayout.inset)
                     .padding(.bottom, TranscriptLayout.inset)

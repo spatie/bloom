@@ -94,6 +94,31 @@ final class TranscriptModel {
     private(set) var thinkingTokens = 0
     private(set) var statusLabel: String?
 
+    /// The turn waiting out an outage, while it is waiting.
+    ///
+    /// Live state rather than rows, for the reason on `AgentRetry`: ten announcements about one
+    /// stuck request are one fact, and nine tenths of it is stale by the time the tenth arrives.
+    /// Cleared the moment anything else arrives, which is what makes the handover to the error row
+    /// clean: a turn that runs out of attempts ends with its failure drawn once, not with a
+    /// waiting row still sitting above it saying it is about to try again.
+    private(set) var retryRun: RetryRun?
+
+    /// Retries inside a subagent, keyed by the Agent call they belong to.
+    ///
+    /// Kept rather than drawn here. A retrying subagent is that subagent's row, and this is the
+    /// fact that row reads. Nothing in this file draws it.
+    private(set) var subagentRetries: [String: AgentRetry] = [:]
+
+    /// Turns that waited and then got through, keyed by the `seq` of the result row that closed
+    /// them, so the footer can account for the minutes.
+    ///
+    /// **This is what happens to the waiting row when it succeeds.** It does not simply vanish,
+    /// because then nothing explains why a turn took three minutes; and it does not stay as it
+    /// was, because a warning plate over a turn that is fine is a lie. It collapses to one quiet
+    /// sentence under the turn, in the footer's own ink. In memory only: a transcript reopened
+    /// tomorrow has the duration and no explanation, which is where it was before any of this.
+    private(set) var recoveredRuns: [Int: RetryRun] = [:]
+
     var draft = ""
 
     /// What has been asked for on this session and has not gone yet, oldest first.
@@ -723,6 +748,9 @@ final class TranscriptModel {
         case .status(let label):
             statusLabel = label.capitalizedFirst
 
+        case .retrying(let retry):
+            absorb(retry)
+
         case .thinkingTokens(let total):
             thinkingTokens = total
 
@@ -736,6 +764,10 @@ final class TranscriptModel {
             }
 
         case .assistantText, .thinking, .toolUse, .toolResult:
+            // Anything at all arriving from the model means the request that was being retried got
+            // through. That is the only signal there is: the CLI announces a retry and never
+            // announces a recovery, so the recovery is the next event of any kind.
+            settleRetryRun()
             clearStreaming()
             await appendLatestMessages()
 
@@ -743,6 +775,11 @@ final class TranscriptModel {
             // The agent died without ever producing a result: a model it does not know, expired
             // credentials, a crash. Nothing else will arrive, so the turn ends here or the composer
             // stays locked for the rest of the launch.
+            //
+            // The waiting row goes without leaving a note. The error row about to be drawn is
+            // already the account of this outage, and two surfaces explaining one failure is
+            // exactly the clutter the waiting row was written to avoid.
+            abandonRetryRun()
             clearStreaming()
             await appendLatestMessages()
             setRunning(false)
@@ -755,8 +792,14 @@ final class TranscriptModel {
             NotificationService.shared.agentFailed(workspace: workspaceNow, message: failure.message)
 
         case .result(let result):
+            // A turn that recovered leaves its sentence on the row that closes it; one that failed
+            // leaves nothing, for the same reason as `.error` above.
+            if result.succeeded { settleRetryRun() } else { abandonRetryRun() }
             clearStreaming()
             await appendLatestMessages()
+            // After the append, deliberately: the row the sentence hangs under is the result row,
+            // and it is not in `rows` until the read above has brought it back from the store.
+            fileRecoveredRun()
             setRunning(false)
             statusLabel = nil
             // Token counts, cost and state are all written by the runner as part of handling the
@@ -795,6 +838,58 @@ final class TranscriptModel {
         case .hook, .unknown:
             break
         }
+    }
+
+    // MARK: - Retries
+
+    /// Folds one announcement into the run it belongs to, starting one if this is the first.
+    ///
+    /// A subagent's retries never touch the turn's own run. They are a different request with a
+    /// different backoff, and mixing them would have the turn's row counting somebody else's
+    /// attempts.
+    private func absorb(_ retry: AgentRetry) {
+        if case .subagent(let agentID, _, _) = retry.scope {
+            subagentRetries[agentID] = retry
+            return
+        }
+        if retryRun != nil {
+            retryRun?.absorb(retry)
+        } else {
+            retryRun = RetryRun(retry)
+        }
+    }
+
+    /// The wait ended and the work carried on. The run stops being live and is held until the turn
+    /// closes, because the row its sentence hangs under is the result row and that does not exist
+    /// yet.
+    ///
+    /// The first run of a turn is the one kept. A turn that hit the outage early, recovered, and
+    /// hit it again later is one story about one evening, and the first attempt count is the one
+    /// that explains the minutes.
+    private func settleRetryRun() {
+        guard let run = retryRun else { return }
+        if settledRun == nil { settledRun = run }
+        retryRun = nil
+        subagentRetries.removeAll()
+    }
+
+    /// Files a settled run under the row that closed the turn, once that row is in `rows`.
+    private func fileRecoveredRun() {
+        guard let run = settledRun, let seq = rows.last?.seq else { return }
+        recoveredRuns[seq] = run
+        settledRun = nil
+    }
+
+    /// A run that has ended in success but whose turn has not closed yet, so the sentence has a
+    /// row to hang under when it does.
+    private var settledRun: RetryRun?
+
+    /// The turn failed. The run is dropped whole: nothing is said about the waiting, because the
+    /// failure is about to say it.
+    private func abandonRetryRun() {
+        retryRun = nil
+        settledRun = nil
+        subagentRetries.removeAll()
     }
 
     // MARK: - Permission asks

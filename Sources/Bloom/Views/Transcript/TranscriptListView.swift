@@ -221,7 +221,10 @@ struct TranscriptListView: View {
                                 permissionMode: transcript.session.permissionMode,
                                 // Only the turn the stop was about, which is at most one of them.
                                 // See `TranscriptModel.stoppedTurnSeq`.
-                                wasStopped: row.seq == stoppedTurnSeq
+                                wasStopped: row.seq == stoppedTurnSeq,
+                                // What is left of a wait this turn spent on somebody else's
+                                // outage, or nothing, which is almost always.
+                                recovered: transcript.recoveredRuns[row.seq]
                             )
                             .arrivingRow(isArriving(row))
                             .padding(.horizontal, TranscriptLayout.inset)

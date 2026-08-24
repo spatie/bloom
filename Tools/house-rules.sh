@@ -282,6 +282,7 @@ id_type_allowed_files=(
   'Sources/BloomCore/AgentEvent.swift'   # Claude Code's stream-json, as measured
   'Sources/BloomCore/CodexEvent.swift'   # the Codex app-server protocol
   'Sources/BloomCore/CodexClient.swift'  # the same protocol's request envelopes
+  'Sources/BloomCore/AgentRetry.swift'   # the same stream-json, one line of it
 )
 # Names that are never a Bloom row, wherever they appear. This list should only
 # ever get shorter. A name not on it is a new mistake.
