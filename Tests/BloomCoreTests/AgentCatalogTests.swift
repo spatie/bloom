@@ -80,6 +80,9 @@ struct AgentCatalogTests {
         #expect(AgentKind.allCases.map(\.executableName) == ["claude", "codex", "cursor-agent", "opencode"])
         // Two backends now, and the two that are not on this list are the ones with no runner.
         #expect(AgentKind.allCases.filter(\.canRunWorkspaces) == [.claudeCode, .codex])
+        // The sentence the settings screen prints, derived so it cannot say Claude Code alone
+        // again once a second backend exists.
+        #expect(AgentKind.runnableSentence == "Claude Code and Codex")
         #expect(AgentKind.claudeCode.loginCommand == "claude /login")
         #expect(AgentKind.codex.loginCommand == "codex login")
         #expect(AgentKind.codex.configPath.hasSuffix("/.codex/config.toml"))

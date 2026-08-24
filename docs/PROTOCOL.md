@@ -15,11 +15,25 @@ claude
   --include-partial-messages
   --verbose
   --permission-mode <auto|acceptEdits|bypassPermissions|plan>
+  --permission-prompt-tool stdio
   --model <opus|sonnet|haiku|...>
+  [--effort <level>]                 only when the session has one
+  [--thinking disabled]              fast mode, and only when it is on
+  [--settings '{"outputStyle":"…"}'] only when a style was chosen
+  [--mcp-config <path>]              the workspace bridge, a file and never inline JSON
   [--resume <agent session id>]
 ```
 
 `--verbose` is required with `-p --output-format stream-json`, otherwise the CLI refuses to run.
+
+`--permission-prompt-tool stdio` is undocumented, absent from `--help`, present in the binary, and
+always on. Without it the CLI answers permission questions on the user's behalf and the answer is
+no, which was every `permission-rule` refusal in every transcript. It does not make the CLI ask
+more: the classifier still approves what it approved before, measured at zero questions over seven
+tool calls in one ordinary turn. The paragraph above `AgentRunner.argv` is where that measurement
+lives, along with why `--settings` takes one object rather than accumulating and why the bridge is
+handed over as a file (argv is visible in `ps`, and an agent runs `ps`).
+
 Working directory is the worktree. Input is NDJSON on stdin, output NDJSON on stdout. stdin stays
 open for the whole session so follow-up turns are just more lines.
 
@@ -166,6 +180,42 @@ busier account in `Tests/fixtures/rate-limits.jsonl`. Three facts, all of which 
 3. **There is no monthly window.** Bloom shows the two it is given and says nothing about a third.
 
 Surface it quietly, never as an error. `AgentQuotaAdapters` is the reader.
+
+### `control_request` / `control_response`
+
+Not an event, a question. With `--permission-prompt-tool stdio` the CLI asks before running a tool
+it is not allowed to run outright, and holds the turn open until an answer arrives on stdin.
+
+```json
+{"type":"control_request","request_id":"…",
+ "request":{"subtype":"can_use_tool","tool_name":"Bash","input":{…},
+            "permission_suggestions":[…]}}
+```
+
+Only `can_use_tool` is lifted out. The other control subtypes are the CLI answering Bloom, or
+asking something Bloom has no business answering, and they stay raw rather than half understood.
+`request` also carries `display_name`, `tool_use_id`, `description`, `decision_reason`,
+`decision_reason_type`, `blocked_path`, `suppress_always_allow_rule`, `requires_user_interaction`
+and `classifier_approvable`, all optional. **`decision_reason` may carry ANSI escapes**, which the
+CLI's own schema says in as many words, so it is stripped before anything renders it.
+
+The answer is one line back:
+
+```json
+{"type":"control_response","response":{"request_id":"…","subtype":"success",
+ "response":{"behavior":"allow"|"deny",…}}}
+```
+
+An allow carries `updatedInput`, which is the input that was asked about and unedited unless the
+tool asked a question the user typed an answer to. A wider scope than once carries
+`updatedPermissions`, which is the CLI's own suggestion aimed at the session. A deny carries
+`message` and `interrupt`. The `request_id` has to match the pending ask or the answer does
+nothing: the CLI refuses a response whose tool disagrees with the question and logs the mismatch.
+`PermissionAsk` reads these and `PermissionAnswer` writes them.
+
+This wire used to fall through to `unknown` and be dropped on the floor, which is exactly what
+"Bloom never asks" looked like from the inside: the CLI was willing to ask and nobody was reading
+the line. A decoder that took the event list above as complete would hang the turn the same way.
 
 ## Rules for the decoder
 

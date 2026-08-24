@@ -21,7 +21,8 @@ frameworks.
 
 - macOS 26 or later
 - Xcode 26 or a Swift 6 toolchain
-- `claude` on your PATH (Claude Code)
+- `claude` (Claude Code) or `codex` on your PATH. Either can drive a chat, and a chat picks one,
+  so a single worktree can hold chats on both
 - `git`, and `gh` if you want the pull request features
 
 ## Building
@@ -84,9 +85,10 @@ meanings, so a script written for Conductor runs unchanged:
 
 Supported settings keys: `scripts.setup`, `scripts.archive`, `scripts.run` (a string, or a table
 of named scripts with a `command`), `scripts.run_mode`, `files_to_copy`, `git.branch_prefix`,
-`git.branch_prefix_type`, `git.delete_branch_on_archive`, `models.default`. A key ending in
-`_file` (`scripts.setup_file`, `scripts.archive_file`) names an executable file relative to the
-repository instead of an inline command.
+`git.branch_prefix_type`, `git.delete_branch_on_archive`, `models.default` and
+`models.claude.default_thinking_level`. A key ending in `_file` (`scripts.setup_file`,
+`scripts.archive_file`) names an executable file relative to the repository instead of an inline
+command.
 
 ### A database per worktree
 
@@ -152,25 +154,30 @@ Same shape as Conductor's, so existing scripts keep working.
 ## How it is put together
 
 ```
-Sources/BloomCore/     No SwiftUI. Everything testable lives here.
-  Shell.swift            Every subprocess goes through here
-  StreamingProcess.swift Long-lived process with a live stdout and an open stdin
-  SQLite.swift           Thin wrapper over the system sqlite3
-  Store.swift            One actor, all persistence
-  Git.swift              Worktrees, branches, diffs, branch naming
-  GitHub.swift           gh wrapper for pull requests and checks
-  TOML.swift             Enough TOML to read a settings file
-  Settings.swift         Layering those files into RepoSettings
-  WorkspaceManager.swift Creating, setting up and archiving a workspace
-  AgentEvent.swift       Decoding the claude stream-json protocol
-  AgentRunner.swift      Supervising one claude process per session
-  DiffParser.swift       Unified diffs into something renderable
-  SyntaxHighlighter.swift Per-line lexers, no dependency, no regex
+Sources/BloomCore/     No SwiftUI. Everything testable lives here, grouped by subject.
+  Agent/                 Running one: the runners, the events, the quotas, the turns
+  Agent/Codex/           The Codex app-server protocol, which is its own vocabulary
+  Bridge/                The unix socket and the MCP tools an agent calls back in with
+  Git/                   Worktrees, branches, diffs, branch naming, diff parsing
+  GitHub/                gh, pull requests, checks
+  Workspace/             Creating, starting, archiving, restoring, a project's settings
+  Transcript/            What a turn is made of: rows, tools, subagents, attachments
+  Persistence/           Store, SQLite, the settings file, the old app's leftovers
+  Model/                 The row types, the typed ids, the lifecycle rules over them
+  Presentation/          Decisions the window needs that hold no UI framework
+  Ocean/                 The chart
+  System/                This Mac: the shell, notifications, updates, other applications
+  Support/               Small things with no subject of their own
 
 Sources/Bloom/         SwiftUI.
-  Design/Theme.swift     Every colour, font and metric, defined once
+  Design/                Every colour, font and metric, defined once, and the galleries
   State/                 AppModel, WorkspaceModel, TranscriptModel
-  Views/                 Sidebar, Center, Transcript, Inspector, Terminal, Markdown, Chrome
+  Intents/               App Intents, Shortcuts and the Services menu
+  System/                The app target's half of talking to this Mac
+  Views/                 One directory per region of the window
+
+Sources/bloom-bridge/  The MCP stdio shim an agent CLI launches. Three lines; everything
+                       worth testing is BridgeShim, in the core, where the suite reaches it.
 ```
 
 ## The documents under `docs/`
@@ -184,7 +191,10 @@ answer to "has this already been worked out" rather than a tour of the code.
 - `docs/CODEX.md` is the same for Codex's JSON-RPC app-server, plus the decisions that shaped
   the Codex backend and the work still outstanding on it.
 - `docs/AGENTS-INTEGRATION.md` is what the four agent CLIs actually put on disk, read off a real
-  machine, and the rule that none of it may be rendered.
+  machine, the rule that none of it may be rendered, and what `claude mcp add` accepts when
+  registering Bloom in a client you started yourself.
+- `docs/BRIDGE.md` is the MCP bridge the other way round: what an agent can ask Bloom to do, which
+  callers may ask for what, and which of those questions Bloom answers for itself.
 - `docs/PLAN.md` is the build order this was written to, kept for the bug reports in it: what
   broke, why, and what now stops it.
 

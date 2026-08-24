@@ -7,9 +7,10 @@ worktree on disk, which is why so much of what follows is about not destroying o
 Longer documents, pointed at rather than repeated here: `README.md` for what the app is,
 `RELEASING.md` for signing, notarising and the appcast, `docs/CODEX.md` for the Codex app-server
 protocol as measured, `docs/PROTOCOL.md` for Claude Code's stream-json,
-`docs/AGENTS-INTEGRATION.md` for how the four CLIs are detected, `docs/PLAN.md` for what is next,
-`docs/start-from.html` for what the create sheet's three sources each do, which is a page to open in a
-browser rather than to read here.
+`docs/AGENTS-INTEGRATION.md` for how the four CLIs are detected, `docs/BRIDGE.md` for the MCP
+bridge an agent calls back in through and which callers may call what, `docs/PLAN.md` for what was
+built and in what order, `docs/start-from.html` for the design note the create sheet's source picker
+was drawn from, which is a page to open in a browser rather than to read here.
 
 ## Three targets, and the line between them
 
@@ -44,6 +45,8 @@ Everything real is a script in `Tools/`; the `Makefile` is the index.
     make master     install ~/Applications/Bloom.app  (see the guard below)
     make dev        install ~/Applications/Bloom Dev.app
     make dev-db     copy the real database into the dev copy
+    make release    sign, notarise and staple a zip and a disk image into dist/
+    make dmg        wrap the newest built .app in the beach disk image
 
 Anything that takes an argument is run directly: `./Tools/test-core.sh DiffParser`,
 `./Tools/master.sh v0.3.0`, `./Tools/dev-build.sh --no-launch`.
@@ -51,7 +54,8 @@ Anything that takes an argument is run directly: `./Tools/test-core.sh DiffParse
 `./Tools/test-core.sh` mirrors the core sources into a throwaway package with no app target, so one
 broken view cannot stop the core suite. Its head documents the environment it reads: `BLOOM_TEST_ID`
 for a stable work and build directory, `BLOOM_TEST_RUNS` to run the suite repeatedly and shake out
-flakes, `BLOOM_LOCAL_AGENTS=1` and `BLOOM_LOCAL_SETTINGS=1` to assert against this machine,
+flakes, `BLOOM_LOCAL_AGENTS=1`, `BLOOM_LOCAL_SETTINGS=1` and `BLOOM_LOCAL_SKILLS=1` to assert
+against this machine, with `BLOOM_LOCAL_PROJECT` naming the checkout the last of those reads,
 `BLOOM_LIVE=1` to drive the real `claude` binary (**this costs money**), and
 `BLOOM_TEST_SWIFT_ARGS` for flags like `--sanitize=thread`.
 
@@ -103,15 +107,16 @@ is that bug written down: a write changes the columns it names and no others. Ad
 ## Views
 
 A type conforming to `View` does not run a subprocess. `Shell` and `Git` are reached from a store,
-a model or a helper type beside the view (`FileRevert`, `FileIndex`, `TerminalPersistence`,
-`WorkspaceModel`), never from a `body` or a button action. `make lint` holds this one too, by
-looking for `await Git.` and `await Shell.` under `Sources/Bloom/Views/`: the subprocess calls are
-all async and the pure helpers on the same types are not, so the test costs no exception list of
-its own. The three helper types above are named in the allow-list because they are what a view
-calls **instead** of reaching for a process itself. `CreateWorkspaceSheet` was the last exception,
-calling `Git.branches` from its own `.task`; that loading and both branch decisions it fed are
-`WorkspaceStartContext` in the core now, tested, so the sheet's entry came off and the allow-list
-in `Tools/house-rules.sh` is back to the three helper types it was meant to hold.
+a model or a helper type beside the view (`FileRevert`, `FileIndex`, `TerminalPersistence`, or
+`WorkspaceModel` over in `State/`), never from a `body` or a button action. `make lint` holds this
+one too, by looking for `await Git.` and `await Shell.` under `Sources/Bloom/Views/`: the subprocess
+calls are all async and the pure helpers on the same types are not, so the test costs no exception
+list of its own. The three of those that live under `Views/` are named in the allow-list because
+they are what a view calls **instead** of reaching for a process itself; `WorkspaceModel` is outside
+that path, so the rule never sees it and needs no entry. `CreateWorkspaceSheet` was the last
+exception, calling `Git.branches` from its own `.task`; that loading and both branch decisions it
+fed are `WorkspaceStartContext` in the core now, tested, so the sheet's entry came off and the
+allow-list in `Tools/house-rules.sh` is back to the three helper types it was meant to hold.
 
 ## Where a file goes
 
@@ -142,10 +147,16 @@ subjects so that "this is a view's decision, moved" stays visible.
 
 `Sources/Bloom` is grouped the same way, by **pane rather than by kind**. `Views/` holds one
 directory per region of the window (`Sidebar`, `Center`, `Inspector`, `Home`, `Transcript`,
-`Terminal`, `Chrome`), and the two that outgrew a single directory are split by what they are for
-rather than by what they are: `Center/Composer`, `Center/Panes`, `Center/Attachments`,
-`Center/Browser`; `Chrome/Window`, `Chrome/Settings`, `Chrome/MenuBar`, `Chrome/App`,
-`Chrome/Feedback`, `Chrome/Notices`.
+`Terminal`, `Chrome`, `Tabs`) and one per thing that gets a window or a sheet of its own
+(`Archive`, `Code`, `Markdown`, `Oceans`, `OpenIn`, `RepoSettings`), and the two that outgrew a
+single directory are split by what they are for rather than by what they are: `Center/Composer`,
+`Center/Panes`, `Center/Attachments`, `Center/Browser`; `Chrome/Window`, `Chrome/Settings`,
+`Chrome/MenuBar`, `Chrome/App`, `Chrome/Feedback`, `Chrome/Notices`.
+
+Four directories sit beside `Views/` and are not panes, because none of them is drawn in one
+place. `Design/` is the theme and the snapshot galleries, `State/` is `AppModel` with its
+extensions and the two models under it, `Intents/` is App Intents, Shortcuts and the Services menu,
+and `System/` is the app target's half of talking to this Mac.
 
 A directory with one file in it is not a subject. Leave it at the folder's root and give it one
 when a second arrives. `Tools/house-rules.sh` names about twenty of these paths in its allow-lists,
@@ -184,10 +195,11 @@ rather than a longer one.
 ## Comments
 
 Comments say **why**, never what, and the good ones name the bug that forced the design. Read the
-head of `Tools/build.sh`, `Store`, or `WindowProxyIcon` for the register: a paragraph that explains
-what was tried, what broke, and what the measurement was. A comment restating the line under it is
-noise; a comment saying "not `.hiddenTitleBar`, because that left the traffic lights floating"
-survives the next person who thinks they have a tidier idea.
+head of `Tools/build.sh`, `Store`, or `WindowChrome` for the register: a paragraph that explains
+what was tried, what broke, and what the measurement was, which in `WindowChrome` is the hex value
+the title bar came out at. A comment restating the line under it is noise; the note in `BloomApp`
+saying "not `.hiddenTitleBar`, because that left the traffic lights floating" survives the next
+person who thinks they have a tidier idea.
 
 ## Prose
 

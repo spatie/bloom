@@ -33,7 +33,7 @@
 # this codebase either stays out of the list or is named in an exception below.
 #
 # **Every search here passes `--untracked`, and that is load bearing.** Six of
-# these seven rules did not, and a plain `git grep` sees only what is tracked, so
+# these eight rules did not, and a plain `git grep` sees only what is tracked, so
 # a brand new file was invisible to all six until somebody staged it. One decoy
 # file inside `Sources/BloomCore` carrying a violation of each raised one finding
 # untracked and six the moment it was added, on identical bytes. That is worst
@@ -255,10 +255,11 @@ done
 echo "==> an id has a type"
 # Every id in Bloom used to be a bare `String`, so `store.update(workspaceID:
 # session.id)` compiled, ran, and updated no row at all. There is no crash and
-# no log line for that, just a workspace that did not archive. `RepoID`,
-# `WorkspaceID`, `SessionID`, `TerminalTabID`, `ReviewCommentID` and
-# `PermissionGrantID` are what stopped it, and the compiler holds the line
-# everywhere they are used.
+# no log line for that, just a workspace that did not archive. The typed ids in
+# Sources/BloomCore/Model/Identifier.swift are what stopped it, eight of them as
+# this is written, and the compiler holds the line everywhere they are used.
+# They are not listed here on purpose: a list that reads as complete and is not
+# is what makes the next reader think their new id is already covered.
 #
 # What the compiler cannot object to is a NEW property declared `var
 # somethingID: String`, because a String is a perfectly good String. That one

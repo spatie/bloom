@@ -16,6 +16,10 @@
 #   BLOOM_TEST_RUNS     how many times to run the suite (default 1)
 #   BLOOM_LOCAL_AGENTS  =1 asserts which agent CLIs exist on this machine
 #   BLOOM_LOCAL_SETTINGS=1 parses the .conductor/settings.toml files on this machine
+#   BLOOM_LOCAL_SKILLS  =1 reads the commands, skills and plugins installed on this machine
+#   BLOOM_LOCAL_PROJECT names the checkout BLOOM_LOCAL_SKILLS reads project commands out of. The
+#                       suite runs from the mirror, so its own working directory is the wrong
+#                       answer and there is nothing to default to
 #   BLOOM_LIVE          =1 drives the real `claude` binary. Costs money.
 #   BLOOM_TEST_SWIFT_ARGS  extra flags for `swift test`, split on spaces. For the runs that are
 #                       not the ordinary one: the nightly workflow passes --sanitize=thread and

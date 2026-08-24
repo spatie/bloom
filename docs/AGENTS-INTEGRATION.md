@@ -21,8 +21,10 @@ log, put on the pasteboard, or included in an error message. When a field is mis
 | OpenCode | `opencode` | `opencode --version` | not installed here |
 
 Resolve the executable through `Shell.which(_:)`, which already augments PATH for a GUI launch.
-Two of the four are not installed on this machine, so "not installed" is a first-class state and
-has to look deliberate, not broken.
+The observed output is the shape to parse and not a version to match: both installed CLIs move
+weekly, and the two figures above were already a release behind a fortnight later. Two of the four
+are not installed on this machine, so "not installed" is a first-class state and has to look
+deliberate, not broken.
 
 ## Claude Code
 
@@ -69,10 +71,12 @@ config directory is `~/.cursor` (exists here, holds `hooks.json`). OpenCode's is
 
 ## What Bloom can actually run
 
-Only Claude Code. The stream-json protocol in `PROTOCOL.md` is the Claude Code one, and
-`AgentRunner` speaks it. Codex, Cursor and OpenCode are detected and configurable, and a
-workspace cannot yet be driven by them. The UI must say so plainly rather than implying a
-connected CLI is a usable backend.
+Claude Code and Codex. The stream-json protocol in `PROTOCOL.md` is Claude Code's and
+`AgentRunner` speaks it; the JSON-RPC app-server protocol in `CODEX.md` is Codex's and
+`CodexRunner` speaks it. Both answer to `SessionRunner`, and `AgentKind.canRunWorkspaces` is the
+one place that decides which backends a chat can be started on. Cursor and OpenCode are detected
+and configurable and neither has a runner, so neither is offered anywhere a chat is started. The
+UI must say so plainly rather than implying a connected CLI is a usable backend.
 
 ## Registering Bloom in a client the owner runs themselves
 
