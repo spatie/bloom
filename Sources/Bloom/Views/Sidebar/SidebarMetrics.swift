@@ -101,6 +101,17 @@ enum SidebarMetrics {
     /// at a glance, which is the one thing this has to do.
     static let hiddenDim: Double = 0.45
 
+    /// How far a selected row's fill is held off each edge of the pane.
+    ///
+    /// The table used to draw its own highlight and inset it for us. The fill is Bloom's now (see
+    /// `SidebarSelectionFill`), and a `listRowBackground` is handed the whole row rect, so the
+    /// inset has to be put back or the selection runs into the window's edge.
+    ///
+    /// Ten points, measured off a capture of the pane as AppKit drew it: the band ran from 10 to
+    /// 249 in a 260 point sidebar. Measured rather than chosen, so the change is a change of
+    /// colour and not of layout.
+    static let selectionInset: CGFloat = 10
+
     /// How large the chevron itself is drawn. Roughly a five point mark: the smallest thing in
     /// the pane, because it is furniture rather than content.
     static let caretSize: CGFloat = 9
