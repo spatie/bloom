@@ -18,8 +18,7 @@ struct TerminalLaunch: Sendable, Hashable {
     /// on top. A GUI-launched app inherits a nearly empty PATH, so without `Shell.environment()`
     /// the shell would not find homebrew, mise, nvm or anything else the user installed.
     static func loginShell(directory: String, extra: [String: String]) -> TerminalLaunch {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let name = (shell as NSString).lastPathComponent
+        let shell = LoginShell.path()
 
         var variables = Shell.environment(extra: extra)
         variables["TERM"] = "xterm-256color"
@@ -28,8 +27,10 @@ struct TerminalLaunch: Sendable, Hashable {
         if variables["LANG"] == nil { variables["LANG"] = "en_US.UTF-8" }
 
         return TerminalLaunch(
-            executable: FileManager.default.isExecutableFile(atPath: shell) ? shell : "/bin/zsh",
-            execName: "-" + name,
+            executable: shell,
+            // From the shell that will actually run, not from `SHELL`. This used to test the
+            // path, fall back, and then name the shell from the value it had just rejected.
+            execName: LoginShell.argumentZero(for: shell),
             arguments: [],
             environment: variables.map { "\($0.key)=\($0.value)" }.sorted(),
             directory: directory
@@ -488,8 +489,11 @@ private final class TerminalProcessObserver: LocalProcessTerminalViewDelegate {
         // observer is not, and capturing the observer itself would send a non-Sendable self.
         let terminal = owner
         // SwiftTerm's LocalProcess dispatches on DispatchQueue.main unless told otherwise, and
-        // LocalProcessTerminalView never tells it otherwise.
-        MainActor.assumeIsolated {
+        // LocalProcessTerminalView never tells it otherwise. That is a reading of SwiftTerm
+        // 1.18.0's source rather than a guarantee it writes down, and the package is pinned
+        // open-ended, so `hopToMain` checks instead of assuming. See `OnMain`: being wrong here
+        // is a fatal trap on a terminal exiting, not a wrong pixel.
+        hopToMain {
             terminal?.handleProcessExit(exitCode)
         }
     }

@@ -53,10 +53,10 @@ final class TerminalPersistence {
     /// The configuration is regenerated on every launch rather than written once, so a Bloom update
     /// that changes an option reaches a machine that already has the file.
     private func writeConfiguration(to path: String) {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let text = TmuxSessions.configuration(
-            defaultShell: FileManager.default.isExecutableFile(atPath: shell) ? shell : "/bin/zsh"
-        )
+        // `LoginShell`, the same as the pty in `TerminalView`. These two decided it separately
+        // and identically, which is one decision too many for a fact both terminals have to agree
+        // about.
+        let text = TmuxSessions.configuration(defaultShell: LoginShell.path())
         let directory = (path as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         try? text.write(toFile: path, atomically: true, encoding: .utf8)

@@ -578,8 +578,7 @@ final class TranscriptModel {
 
     /// The one place a turn starts, reached only from `drain`.
     private func deliver(_ delivery: Delivery) async {
-        guard let store else { return }
-        let runner = ensureRunner()
+        guard let store, let runner = ensureRunner() else { return }
         turnStartedAt = Date()
         wasStoppedByHand = false
         // **The clearing rule.** The last turn's subagents go here, at the one place a turn
@@ -725,11 +724,20 @@ final class TranscriptModel {
     /// the picker on a chat that has already spoken forks a new chat rather than turning this one
     /// into something else, because its rows, its thread and its context all belong to the backend
     /// that made them. See `ComposerBackendChange` and docs/CODEX.md.
-    private func ensureRunner() -> any SessionRunner {
+    /// Nil when the database never opened, rather than a crash.
+    ///
+    /// It was `app.store!`, the one force unwrap in this file where every other reference goes
+    /// through `store` and a `guard let`. It was safe only because its single caller guards four
+    /// lines up, which is a fact about `deliver` rather than about this method. `app.store` stays
+    /// nil forever if the open in `AppModel.bootstrap` throws while `isLoaded` is set true, so a
+    /// second caller of this would take the app down. There is no reason for the guarantee to be
+    /// somewhere other than here.
+    private func ensureRunner() -> (any SessionRunner)? {
+        guard let store else { return nil }
         let runner = self.runner ?? Self.makeRunner(
             session: session,
             workspacePath: workspace.path,
-            store: app.store!,
+            store: store,
             bridge: app.bridge?.register(session: session, workspace: workspace)
         )
         self.runner = runner

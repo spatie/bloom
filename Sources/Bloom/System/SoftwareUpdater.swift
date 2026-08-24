@@ -86,11 +86,15 @@ final class SoftwareUpdater: NSObject, SPUUpdaterDelegate {
 
         controller.startUpdater()
 
+        // `hopToMain` and not `assumeIsolated`: KVO fires on whichever thread mutated the
+        // property and Sparkle documents no thread for either of these. See `OnMain` for why the
+        // difference matters more than it looks, and note `.initial` makes the first of each of
+        // these fire synchronously from right here, which is already the main actor.
         canCheckObservation = updater.observe(\.canCheckForUpdates, options: [.initial, .new]) { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.refreshCanCheck() }
+            hopToMain { self?.refreshCanCheck() }
         }
         automaticChecksObservation = updater.observe(\.automaticallyChecksForUpdates, options: [.initial, .new]) { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.refreshChecksAutomatically() }
+            hopToMain { self?.refreshChecksAutomatically() }
         }
 
         Log.updates.info("Updates on, feed \(feedURL, privacy: .public)")

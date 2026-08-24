@@ -1,5 +1,4 @@
 import Foundation
-import Synchronization
 
 /// A finished git process whose stdout is kept as bytes.
 ///

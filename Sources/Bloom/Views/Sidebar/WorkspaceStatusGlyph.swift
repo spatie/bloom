@@ -92,7 +92,11 @@ struct WorkspaceStatusGlyph: View {
         case .unread, .pullRequestOpen: AnyShapeStyle(Palette.accent)
         case .running: AnyShapeStyle(Palette.running)
         case .changed: AnyShapeStyle(.secondary)
-        default: AnyShapeStyle(.tertiary)
+        // Written out rather than left to a `default`, so a fourteenth status has to be given a
+        // colour instead of silently taking the quietest one. `symbol(for:)` twenty lines above
+        // is exhaustive and breaks the build on a new case; this one did not, so the two could
+        // disagree about whether a new state had been thought about.
+        case .settingUp, .closed, .draft, .clean: AnyShapeStyle(.tertiary)
         }
     }
 }

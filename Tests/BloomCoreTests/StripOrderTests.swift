@@ -157,17 +157,21 @@ struct StripOrderTests {
     }
 
     @Test("what is written always holds each thing exactly once")
-    func alwaysWholeAndUnique() {
+    func alwaysWholeAndUnique() throws {
         let order = StripOrder.rewritten(
             [.tool("t1"), .chat(two), .chat(one)],
             sessions: [one, two], tools: ["t1", "t2"],
             stored: [.tool("t2"), .chat(one)]
         )
 
-        let written = try? #require(order)
-        #expect(written?.count == 4)
-        #expect(Set(written ?? []).count == 4)
-        #expect(Set(written ?? []) == Set(TabSet.all(sessions: [one, two], tools: ["t1", "t2"])))
+        // `try #require` in a throwing test, not `try? #require`. That pair unwrapped the
+        // optional and then wrapped it straight back up, which is what the compiler was calling
+        // redundant and what left the test target with its only warning. A nil here now fails
+        // this test where it happens rather than three optional-chained expectations later.
+        let written = try #require(order)
+        #expect(written.count == 4)
+        #expect(Set(written).count == 4)
+        #expect(Set(written) == Set(TabSet.all(sessions: [one, two], tools: ["t1", "t2"])))
     }
 
     /// The round trip that matters: whatever is written must read back as the strip the user was
