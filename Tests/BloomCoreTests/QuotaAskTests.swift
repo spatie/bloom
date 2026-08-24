@@ -298,6 +298,77 @@ struct RequestedQuotaPayloadTests {
         #expect(opus.window.label == "Week (opus)")
     }
 
+    /// **The account the panel was rebuilt for, answered on 24 August 2026.** Every field below is
+    /// what the CLI actually returned, trimmed of the parts nothing reads. It is here because it
+    /// answers the question the whole redesign started from: why does the panel show three rows?
+    ///
+    /// Because `seven_day_opus`, `seven_day_sonnet` and `seven_day_oauth_apps` came back as JSON
+    /// null, which `JSONValue`'s subscript reads as a missing key. That is right: a null window is
+    /// one the plan does not have. Nothing was being dropped that had been reported, with one
+    /// exception, and it was the important one.
+    private static let maxAccount = """
+    {"session":{"total_cost_usd":0},"subscription_type":"max","rate_limits_available":true,    "rate_limits":{    "five_hour":{"utilization":4,"resets_at":"2026-08-24T10:20:00.415000+00:00"},    "seven_day":{"utilization":60,"resets_at":"2026-08-28T03:00:00.415023+00:00"},    "seven_day_oauth_apps":null,"seven_day_opus":null,"seven_day_sonnet":null,    "extra_usage":{"is_enabled":false,"monthly_limit":null,"used_credits":null,    "utilization":null,"currency":null},    "model_scoped":[{"display_name":"Fable","utilization":71,    "resets_at":"2026-08-28T03:00:00.415206+00:00"}]}}
+    """
+
+    @Test func readsTheModelScopedWeeklyThatWasBeingThrownAway() throws {
+        let quotas = AgentQuotaAdapters.quotas(fromRateLimitEvent: Data(Self.maxAccount.utf8), at: now)
+        let byKey = Dictionary(quotas.map { ($0.window.key, $0) }, uniquingKeysWith: { first, _ in first })
+
+        // Three rows, not two: a null window produces none, and the model scoped weekly produces
+        // one. Before this it produced none either, and the panel led with 60 percent while the
+        // wall the account would actually hit stood at 71.
+        #expect(quotas.count == 3)
+        #expect(byKey["seven_day"]?.fraction == 0.6)
+        #expect(byKey["seven_day_model_fable"]?.fraction == 0.71)
+        // A week, and it has to be, or the row cannot be sorted or paced.
+        #expect(byKey["seven_day_model_fable"]?.window.duration == 604_800)
+        // The provider's own spelling of its own product, capitals and all.
+        #expect(byKey["seven_day_model_fable"]?.window.label == "Week (Fable)")
+    }
+
+    /// A null window is one the plan does not have, which is not the same as one it has and has
+    /// not measured. It produces no row at all, and that is why this account shows two Claude
+    /// windows rather than five.
+    @Test func producesNoRowForAWindowThePlanDoesNotHave() {
+        let quotas = AgentQuotaAdapters.quotas(fromRateLimitEvent: Data(Self.maxAccount.utf8), at: now)
+        #expect(!quotas.contains { $0.window.key.contains("opus") })
+        #expect(!quotas.contains { $0.window.key.contains("oauth") })
+    }
+
+    /// Extra usage switched off comes with a null limit, null credits and a null utilization. A
+    /// row saying nothing about nothing is worse than no row.
+    @Test func showsNoExtraUsageRowUntilTheAccountHasItSwitchedOn() {
+        let quotas = AgentQuotaAdapters.quotas(fromRateLimitEvent: Data(Self.maxAccount.utf8), at: now)
+        #expect(!quotas.contains { $0.window.key == "extra_usage" })
+    }
+
+    /// And when it is switched on it is a row, because it is the wall that comes after the windows
+    /// and it is money. The amounts rather than the percentage, because "$17.20 of $50.00" is a
+    /// thing somebody can act on.
+    @Test func readsExtraUsageAsMoneyOnceItIsSwitchedOn() throws {
+        let enabled = """
+        {"rate_limits_available":true,"rate_limits":{\
+        "extra_usage":{"is_enabled":true,"monthly_limit":50,"used_credits":17.2,\
+        "utilization":34.4,"currency":"USD"}}}
+        """
+        let quotas = AgentQuotaAdapters.quotas(fromRateLimitEvent: Data(enabled.utf8), at: now)
+        let extra = try #require(quotas.first { $0.window.key == "extra_usage" })
+
+        #expect(extra.measure == .counted(used: 17.2, limit: 50, unit: "USD"))
+        #expect(extra.fraction == 0.344)
+        // No reset time and no length, which is true rather than missing: it is a balance against
+        // a monthly ceiling and the provider states neither a turnover instant nor a window.
+        #expect(extra.resetsAt == nil)
+        #expect(extra.window.duration == nil)
+    }
+
+    /// A display name is not a key. Two spellings of one model must not become two rows for one
+    /// window the first time the provider restyles its own labels.
+    @Test func makesOneStableKeyOutOfAModelsDisplayName() {
+        #expect(ClaudeCodeUsageAdapter.slug("Claude Opus 4.5") == "claude_opus_4_5")
+        #expect(ClaudeCodeUsageAdapter.slug("Fable") == "fable")
+    }
+
     /// An API key, Bedrock or Vertex session has no plan limits to report. That is not an error
     /// and not a zero: no rows, nothing written, and the panel keeps saying nothing.
     @Test func writesNothingForAnAccountWithNoPlanLimits() {

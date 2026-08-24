@@ -173,9 +173,18 @@ public enum CodexQuotaAdapter: AgentQuotaAdapter {
 /// The keys are kept exactly as the CLI spells them, which is what makes an answer and a
 /// notification land on the same row rather than on two rows describing one window.
 ///
-/// `model_scoped` and `extra_usage` are read and deliberately dropped, for the reason
-/// `CodexQuotaAdapter` drops `credits`. A per model breakdown is a report, and an extra usage
-/// balance is a wallet; this panel answers how close the nearest wall is.
+/// **`model_scoped` and `extra_usage` were read and dropped, and dropping the first one was the
+/// bug this whole panel had.** Measured against the owner's own Max account on 24 August 2026, the
+/// answer carried `five_hour` at 4 percent, `seven_day` at 60, and
+/// `model_scoped: [{display_name: "Fable", utilization: 71, resets_at: <the weekly's own reset>}]`.
+/// The panel led with 60 percent while the wall the account would actually hit stood at 71, because
+/// the row that said so never got past this file. On a plan with model scoped weeklies those are
+/// the limits that bite, so they are rows now.
+///
+/// `extra_usage` is money rather than a window and it is still not a wallet: it is the thing that
+/// starts being spent the moment a window is spent, with a ceiling of its own, and an account that
+/// has switched it on has a second wall worth the same row. It appears only when `is_enabled` is
+/// true, so an account without it, which is this one, sees exactly what it saw before.
 ///
 /// **`rate_limits_available: false` is not an error and not a zero.** It is an account that has no
 /// plan limits to report, which is every API key, Bedrock and Vertex session. No rows are produced
@@ -199,7 +208,12 @@ public enum ClaudeCodeUsageAdapter: AgentQuotaAdapter {
               let limits = payload["rate_limits"]
         else { return [] }
 
-        return windowKeys.compactMap { key in
+        // A key whose value is JSON null reads as a missing key (see `JSONValue`'s subscript), and
+        // that is why this account shows two Claude rows rather than five: `seven_day_opus`,
+        // `seven_day_sonnet` and `seven_day_oauth_apps` all came back null. A null window is a
+        // window the plan does not have, which is not the same as one it has and has not measured,
+        // and it is right that it produces no row at all.
+        let named: [AgentQuota] = windowKeys.compactMap { key in
             guard let window = limits[key] else { return nil }
             // A window the account has but has not used yet arrives with a null utilization, which
             // is `.unknown` and not zero, exactly as it is on the notification path.
@@ -213,6 +227,83 @@ public enum ClaudeCodeUsageAdapter: AgentQuotaAdapter {
                 observedAt: now
             )
         }
+
+        return named + modelScoped(in: limits, at: now) + extraUsage(in: limits, at: now)
+    }
+
+    /// The weekly windows that count one model rather than everything.
+    ///
+    /// **A week, and that is measured rather than assumed.** The entry carries no length of its
+    /// own, but the CLI's own parallel `limits` array gives the same figure as
+    /// `{"kind":"weekly_scoped","group":"weekly"}`, and its `resets_at` matched `seven_day`'s to
+    /// the microsecond on the account this was read from. A stated length is what lets the row be
+    /// sorted and paced; getting it wrong would cost the pace sentence and the ordering, never the
+    /// percentage.
+    ///
+    /// The key has to be stable across polls, because it is what `Store.recordQuotas` upserts on
+    /// and what `QuotaMerge` matches a later report against, and it has to not collide with the
+    /// plain `seven_day`. The display name normalised into the provider's own naming style is both.
+    /// The label keeps the name exactly as the provider spelled it, capitals included, because it
+    /// is a product name and not a word.
+    static func modelScoped(in limits: JSONValue, at now: Date) -> [AgentQuota] {
+        (limits["model_scoped"]?.arrayValue ?? []).compactMap { entry in
+            guard let name = entry["display_name"]?.stringValue, !name.isEmpty else { return nil }
+            let measure: QuotaMeasure = entry["utilization"]?.doubleValue
+                .map { .fraction($0 / 100) } ?? .unknown
+            return AgentQuota(
+                provider: provider,
+                window: QuotaWindow(
+                    key: "seven_day_model_\(slug(name))",
+                    label: "Week (\(name))",
+                    duration: 604_800
+                ),
+                measure: measure,
+                resetsAt: entry["resets_at"]?.stringValue.flatMap(Self.date(fromISO:)),
+                observedAt: now
+            )
+        }
+    }
+
+    /// A display name as a key: lowercased, and anything that is not a letter or a digit as an
+    /// underscore, so "Claude Opus 4.5" and "claude_opus_4_5" cannot become two rows for one
+    /// window if the provider ever restyles its own labels.
+    static func slug(_ name: String) -> String {
+        String(name.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "_" })
+    }
+
+    /// What the account is allowed to spend once the windows are spent.
+    ///
+    /// Only when it is switched on. `is_enabled: false` comes with a null limit, null credits and a
+    /// null utilization, and a row saying nothing about nothing is worse than no row.
+    ///
+    /// It has no reset time and no length, which is true rather than missing: this is a balance
+    /// against a monthly ceiling and the provider states neither a turnover instant nor a window.
+    /// `QuotaBoard` sorts a window of unknown length last and `QuotaPace` declines to pace it, both
+    /// of which are the right answers for a row that is money.
+    static func extraUsage(in limits: JSONValue, at now: Date) -> [AgentQuota] {
+        guard let extra = limits["extra_usage"], extra["is_enabled"]?.boolValue == true else {
+            return []
+        }
+        let used = extra["used_credits"]?.doubleValue
+        let limit = extra["monthly_limit"]?.doubleValue
+        let currency = extra["currency"]?.stringValue ?? "USD"
+        let measure: QuotaMeasure
+        if let used {
+            // The amounts when they are there, because "$17.20 of $50.00" is a thing somebody can
+            // act on and "34%" of an unnamed sum is not.
+            measure = .counted(used: used, limit: limit, unit: currency)
+        } else if let utilization = extra["utilization"]?.doubleValue {
+            measure = .fraction(utilization / 100)
+        } else {
+            measure = .unknown
+        }
+        return [AgentQuota(
+            provider: provider,
+            window: QuotaWindow(key: "extra_usage", label: "Extra usage"),
+            measure: measure,
+            resetsAt: nil,
+            observedAt: now
+        )]
     }
 
     /// ISO 8601, with and without fractional seconds, because a timestamp that gains milliseconds
