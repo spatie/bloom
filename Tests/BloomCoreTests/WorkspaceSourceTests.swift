@@ -75,10 +75,13 @@ struct WorkspaceSourceTests {
             listing(number: 41, title: "Serialise the drains", author: "freekmurze", head: "drains"),
             listing(number: 42, title: "Rename the sheet", author: "someone", head: "rename"),
         ])
-        #expect(offered.search(query: "drains").open.first?.name.hasPrefix("#41") == true)
-        #expect(offered.search(query: "freekmurze").open.first?.name.hasPrefix("#41") == true)
-        #expect(offered.search(query: "rename").open.first?.name.hasPrefix("#42") == true)
-        #expect(offered.search(query: "serialise").open.first?.name.hasPrefix("#41") == true)
+        // The row is named after the head branch, so all four of these find the same row and it
+        // is called "drains" whichever of the four things the reader happened to remember.
+        #expect(offered.search(query: "drains").open.first?.name == "drains")
+        #expect(offered.search(query: "freekmurze").open.first?.name == "drains")
+        #expect(offered.search(query: "rename").open.first?.name == "rename")
+        #expect(offered.search(query: "serialise").open.first?.name == "drains")
+        #expect(offered.search(query: "serialise").open.first?.detail == "#41 Serialise the drains")
     }
 
     @Test("A branch nothing matches is gone, and so is the whole result when nothing matches")
@@ -99,7 +102,7 @@ struct WorkspaceSourceTests {
             baseBranches: ["main", "wip"]
         ).search(query: "  ")
         #expect(matches.open.count == 2)
-        #expect(matches.open.first?.name.hasPrefix("#7") == true)
+        #expect(matches.open.first?.name == "fix-parser")
         #expect(matches.new.map(\.name) == ["main", "wip"])
     }
 
@@ -188,19 +191,80 @@ struct WorkspaceSourceTests {
 
     // MARK: - The keyboard
 
-    @Test("Down and up walk both sections as one list, and wrap")
-    func stepsThroughBothSections() {
+    @Test("Down and up walk the visible tab, and wrap inside it")
+    func stepsThroughTheVisibleTab() {
+        let matches = offering(
+            branches: [ExistingBranch(name: "wip", isLocal: true), ExistingBranch(name: "old", isLocal: true)],
+            baseBranches: ["main"]
+        ).search(query: "")
+        let rows = matches.rows(in: .existingBranch)
+        let first = rows.first
+        let last = rows.last
+        #expect(first != last)
+        #expect(matches.stepped(from: nil, by: 1, in: .existingBranch) == first)
+        #expect(matches.stepped(from: nil, by: -1, in: .existingBranch) == last)
+        #expect(matches.stepped(from: first, by: 1, in: .existingBranch) == last)
+        #expect(matches.stepped(from: last, by: 1, in: .existingBranch) == first)
+        #expect(WorkspaceSourceMatches().stepped(from: nil, by: 1, in: .newBranch) == nil)
+    }
+
+    @Test("The keyboard cannot step out of the tab that is on screen")
+    func doesNotStepIntoTheHiddenTab() {
         let matches = offering(
             branches: [ExistingBranch(name: "wip", isLocal: true)],
             baseBranches: ["main"]
         ).search(query: "")
-        let first = matches.ordered.first
-        let last = matches.ordered.last
-        #expect(matches.stepped(from: nil, by: 1) == first)
-        #expect(matches.stepped(from: nil, by: -1) == last)
-        #expect(matches.stepped(from: first, by: 1) == last)
-        #expect(matches.stepped(from: last, by: 1) == first)
-        #expect(WorkspaceSourceMatches().stepped(from: nil, by: 1) == nil)
+        // One row in each tab. Stepping in either direction stays put rather than crossing over,
+        // because a highlight in a tab nobody can see is a Return that opens something off screen.
+        let newRows = matches.rows(in: .newBranch)
+        #expect(newRows.count == 1)
+        #expect(matches.stepped(from: newRows.first, by: 1, in: .newBranch) == newRows.first)
+        #expect(matches.stepped(from: newRows.first, by: -1, in: .newBranch) == newRows.first)
+        #expect(matches.rows(in: .existingBranch).contains(newRows[0]) == false)
+    }
+
+    @Test("A pull request whose head gh did not answer keeps its number and title")
+    func fallsBackWhenThereIsNoHead() {
+        let row = WorkspaceSource.pullRequest(.listed(
+            listing(number: 88, title: "Teach it to wait", head: "")
+        ))
+        // An older gh does not answer headRefName. Naming the row after an empty string would draw
+        // a blank line where the branch should be, so the old name is what it falls back to, and
+        // there is no second line to repeat it on.
+        #expect(row.name == "#88 Teach it to wait")
+        #expect(row.detail == nil)
+    }
+
+    @Test("A fork's head is qualified by its owner, because a bare name is somebody else's branch")
+    func qualifiesAForkHead() {
+        let fork = PullRequestListing(
+            number: 91,
+            title: "Add the thing",
+            author: "stranger",
+            headRefName: "patch-1",
+            baseRefName: "main",
+            isCrossRepository: true,
+            headRepositoryOwner: "stranger"
+        )
+        #expect(WorkspaceSource.pullRequest(.listed(fork)).name == "stranger:patch-1")
+        // And the branch of the same name in this repository is left alone, which is the reason
+        // the qualification has to be on screen rather than only in the checkout.
+        #expect(WorkspaceCheckoutPlan.heads(of: [fork]).contains("patch-1") == false)
+    }
+
+    @Test("Each row knows which tab it belongs under")
+    func sortsRowsIntoTabs() {
+        #expect(WorkspaceSource.newBranch(from: "main").tab == .newBranch)
+        #expect(WorkspaceSource.existingBranch(ExistingBranch(name: "wip", isLocal: true)).tab
+            == .existingBranch)
+        #expect(WorkspaceSource.pullRequest(.listed(listing())).tab == .existingBranch)
+    }
+
+    @Test("Stepping a tab wraps, so one key reaches the other tab from either")
+    func stepsBetweenTabs() {
+        #expect(WorkspaceSourceTab.newBranch.stepped(by: 1) == .existingBranch)
+        #expect(WorkspaceSourceTab.newBranch.stepped(by: -1) == .existingBranch)
+        #expect(WorkspaceSourceTab.existingBranch.stepped(by: 1) == .newBranch)
     }
 
     @Test("A highlight that the next keystroke filters away moves to the best row there is")
@@ -210,9 +274,12 @@ struct WorkspaceSourceTests {
             baseBranches: ["main", "wip"]
         )
         let held = WorkspaceSource.existingBranch(ExistingBranch(name: "wip", isLocal: true))
-        #expect(offered.search(query: "wip").settled(after: held) == held)
-        #expect(offered.search(query: "main").settled(after: held)?.name == "main")
-        #expect(WorkspaceSourceMatches().settled(after: held) == nil)
+        #expect(offered.search(query: "wip").settled(after: held, in: .existingBranch) == held)
+        #expect(offered.search(query: "main").settled(after: held, in: .newBranch)?.name == "main")
+        #expect(WorkspaceSourceMatches().settled(after: held, in: .existingBranch) == nil)
+        // Switching tab settles through the same door: the held row is in the other tab, so the
+        // highlight lands on the first row of the one now on screen rather than staying off it.
+        #expect(offered.search(query: "").settled(after: held, in: .newBranch)?.name == "main")
     }
 
     // MARK: - What the button says

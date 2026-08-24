@@ -4,12 +4,19 @@ import BloomCore
 /// Where the work comes from: an open pull request, a branch somebody has already written on, or a
 /// fresh branch cut off a base.
 ///
-/// It replaces a `Menu` that listed "New branch from <name>" for every branch in the project and
+/// It replaced a `Menu` that listed "New branch from <name>" for every branch in the project and
 /// filed "Open an existing branch" under all of them, with no way to search. A colleague's branch
 /// was picked out of the top of that list, which cut a new branch off their head, and the
-/// workspace came up empty with its Changes tab saying nothing differed. So the two verbs are
-/// drawn as two sections, one above the other, with the same branch in both: the choice is made
-/// with both answers in view rather than a screenful apart.
+/// workspace came up empty with its Changes tab saying nothing differed.
+///
+/// The first fix drew the two verbs as two sections of one scrolling list, so the choice could be
+/// made with both answers in view. That was right about the choice and wrong about the search. The
+/// owner went looking for a branch to carry on, typed its name, and did not recognise the row he
+/// got: half the offering was below the fold, the headings scrolled away, and the row that matched
+/// was named after a pull request title rather than after the branch he had typed. So the sections
+/// are tabs now, each carrying a sentence that says where a commit ends up, which is the only real
+/// difference between them and the thing neither heading ever said. The other half of that fix is
+/// `WorkspaceSource.name`, which names a pull request after the branch it lands on.
 ///
 /// A `.popover` rather than a `Menu`, and not by preference. An `NSMenu` cannot contain a text
 /// field, so a menu with a search box in it is not a thing macOS has; the panel is the app's own
@@ -28,6 +35,9 @@ struct WorkspaceSourcePicker: View {
 
     @State private var isPresented = false
     @State private var query = ""
+    /// Which verb is on screen. Opened on the tab the current choice belongs to, so a panel
+    /// reopened after picking a pull request does not start by hiding it.
+    @State private var tab: WorkspaceSourceTab = .newBranch
     /// The highlighted row, held as the row itself and never as an index into the list. A ranked
     /// list reorders under every keystroke, so an index highlights whatever has since moved into
     /// that slot and Return opens something other than what is drawn. `FileMentionMenu` carries
@@ -85,25 +95,26 @@ struct WorkspaceSourcePicker: View {
 
     private var panel: some View {
         // Ranked once for the whole pass, and everything below draws from that one value. The
-        // panel asks three questions of it (is there anything, what goes in each section) and a
-        // ranking run per question is the same list computed three times over a repository's worth
-        // of branches, on every keystroke.
+        // panel asks several questions of it (is this tab empty, what goes in the list) and a
+        // ranking run per question is the same list computed over a repository's worth of branches
+        // several times, on every keystroke.
         let matches = self.matches
         return VStack(alignment: .leading, spacing: 0) {
+            tabs
+            explanation
+            Hairline()
             searchRow
             Hairline()
 
-            if matches.isEmpty {
+            if matches.isEmpty(in: tab) {
                 MenuEmptyRow(
-                    text: query.isEmpty
-                        ? "No branches or pull requests yet"
-                        : "Nothing matches \(query)"
+                    text: query.isEmpty ? emptyTabText : "Nothing matches \(query)"
                 )
             } else {
                 list(matches)
             }
 
-            if let unavailable {
+            if let unavailable, tab == .existingBranch {
                 Hairline()
                 Text(unavailable)
                     .font(Typo.caption)
@@ -114,12 +125,48 @@ struct WorkspaceSourcePicker: View {
             }
         }
         .frame(width: Self.width)
+        .background { tabShortcuts }
         // A fresh query every time it opens. The panel is a way of finding one thing, not a filter
         // somebody set and left, and reopening it onto yesterday's word would hide the list that
         // has since loaded behind it.
         .onAppear {
             query = ""
-            selected = offering.search(query: "").ordered.first
+            tab = checkout == nil ? .newBranch : .existingBranch
+            selected = offering.search(query: "").rows(in: tab).first
+        }
+    }
+
+    private var tabs: some View {
+        Picker("Start from", selection: $tab) {
+            ForEach(WorkspaceSourceTab.allCases) { option in
+                Text(option.title).tag(option)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(.horizontal, Metrics.spacingSmall)
+        .padding(.top, Metrics.spacingSmall)
+        .padding(.bottom, Metrics.spacingTight)
+        .onChange(of: tab) { _, _ in
+            // The highlight cannot stay in a tab nobody can see, so it settles into the new one.
+            selected = matches.settled(after: selected, in: tab)
+        }
+    }
+
+    private var explanation: some View {
+        Text(tab.explanation)
+            .font(Typo.caption)
+            .foregroundStyle(Palette.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.bottom, Metrics.spacingWide)
+    }
+
+    /// What an empty tab says, which differs because the two are empty for different reasons.
+    private var emptyTabText: String {
+        switch tab {
+        case .newBranch: "No branches to start from yet"
+        case .existingBranch: "No branches or pull requests to carry on yet"
         }
     }
 
@@ -131,7 +178,7 @@ struct WorkspaceSourcePicker: View {
 
             MenuSearchField(
                 text: $query,
-                placeholder: "Search branches and pull requests, or paste a pull request",
+                placeholder: tab.searchPlaceholder,
                 onKey: handle(key:)
             )
             .frame(height: Metrics.rowHeight)
@@ -141,7 +188,7 @@ struct WorkspaceSourcePicker: View {
         .onChange(of: query) { _, _ in
             // The highlight follows the list rather than staying where it was: a highlight left
             // pointing at a row the new query filtered out is a Return that does nothing.
-            selected = matches.settled(after: selected)
+            selected = matches.settled(after: selected, in: tab)
         }
     }
 
@@ -149,11 +196,16 @@ struct WorkspaceSourcePicker: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    // The heading says what happens to the work that is already there, because
-                    // "Open" alone reads as "open a copy of". Carrying on somebody's branch is
-                    // what the sheet could not say before.
-                    section("Open, and carry on", rows: matches.open)
-                    section("New branch from", rows: matches.new)
+                    ForEach(matches.rows(in: tab)) { row in
+                        WorkspaceSourceRow(
+                            source: row,
+                            isSelected: row == selected,
+                            onPick: { pick(row) },
+                            onHover: { selected = row }
+                        )
+                        // Identity is the thing the row names, never its position. See `selected`.
+                        .id(row.id)
+                    }
                 }
                 .padding(Metrics.spacingSmall)
             }
@@ -165,41 +217,40 @@ struct WorkspaceSourcePicker: View {
         }
     }
 
-    @ViewBuilder
-    private func section(_ title: String, rows: [WorkspaceSource]) -> some View {
-        if !rows.isEmpty {
-            Text(title)
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .padding(.horizontal, Metrics.spacing)
-                .padding(.top, Metrics.spacingWide)
-                .padding(.bottom, Metrics.spacingTight)
-                .accessibilityAddTraits(.isHeader)
-
-            ForEach(rows) { row in
-                WorkspaceSourceRow(
-                    source: row,
-                    isSelected: row == selected,
-                    onPick: { pick(row) },
-                    onHover: { selected = row }
-                )
-                // Identity is the thing the row names, never its position. See `selected`.
-                .id(row.id)
-            }
-        }
-    }
-
     // MARK: - Keys
+
+    /// Switching tab from the keyboard, on the keys macOS already uses for it.
+    ///
+    /// **Not the left and right arrows**, which was the first idea and is wrong: this panel has a
+    /// search field, and in a text field those two move the insertion point. Claiming them would
+    /// break correcting a typo in the very query the tabs exist to serve. Command+Shift+[ and
+    /// Command+Shift+] are what Safari and Terminal use to move between tabs, and being command
+    /// equivalents they reach the panel while the field holds the keyboard, which the arrows can
+    /// only do by being taken away from the caret first.
+    ///
+    /// Drawn in a `.background` and never seen. A button is how SwiftUI registers a key equivalent
+    /// for a window, and this one has nothing to show: the hint at the foot of the panel is what
+    /// tells anybody the keys exist.
+    private var tabShortcuts: some View {
+        ZStack {
+            Button("Previous tab") { tab = tab.stepped(by: -1) }
+                .keyboardShortcut("[", modifiers: [.command, .shift])
+            Button("Next tab") { tab = tab.stepped(by: 1) }
+                .keyboardShortcut("]", modifiers: [.command, .shift])
+        }
+        .opacity(0)
+        .accessibilityHidden(true)
+    }
 
     /// The panel's whole keyboard. Where the highlight lands is `WorkspaceSourceMatches`, in the
     /// core, because it is a decision and a decision taken in a view is one nothing can test.
     private func handle(key: ComposerKey) -> Bool {
         switch key {
         case .up:
-            selected = matches.stepped(from: selected, by: -1)
+            selected = matches.stepped(from: selected, by: -1, in: tab)
             return true
         case .down:
-            selected = matches.stepped(from: selected, by: 1)
+            selected = matches.stepped(from: selected, by: 1, in: tab)
             return true
         case .returnKey, .commandReturn:
             guard let selected else { return false }

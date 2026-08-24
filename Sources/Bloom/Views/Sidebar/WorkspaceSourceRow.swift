@@ -25,11 +25,28 @@ struct WorkspaceSourceRow: View {
                     .foregroundStyle(isEmphasized ? Palette.selectedEmphasizedText : Palette.textTertiary)
                     .frame(width: Metrics.glyph)
 
-                Text(source.name)
-                    .font(Typo.body)
-                    .foregroundStyle(nameColour)
-                    .lineLimit(1)
-                    .truncationMode(truncation)
+                VStack(alignment: .leading, spacing: Metrics.spacingTight) {
+                    Text(source.name)
+                        .font(Typo.body)
+                        .foregroundStyle(nameColour)
+                        .lineLimit(1)
+                        .truncationMode(truncation)
+
+                    // Only a pull request has one, so the list is not uniformly two lines high.
+                    // A branch with nothing to add would otherwise carry an empty line for the
+                    // sake of a shape.
+                    if let detail = source.detail {
+                        Text(detail)
+                            .font(Typo.caption)
+                            .foregroundStyle(
+                                isEmphasized
+                                    ? Palette.selectedEmphasizedText.opacity(0.75)
+                                    : Palette.textTertiary
+                            )
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
 
                 Spacer(minLength: Metrics.spacingSmall)
 
@@ -45,14 +62,17 @@ struct WorkspaceSourceRow: View {
                 }
             }
             .padding(.horizontal, Metrics.spacing)
-            .frame(height: Metrics.rowHeight)
+            .padding(.vertical, Metrics.spacingTight)
+            // A minimum rather than a fixed height, because a pull request row carries a second
+            // line and a branch row does not. Fixed, the second line was clipped.
+            .frame(minHeight: Metrics.rowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        // The verb is spoken even where the section heading carries it on screen, because a reader
-        // arrowing down the list hears one row at a time and the heading is above all of them.
+        // The verb is spoken even though the tab carries it on screen, because a reader arrowing
+        // down the list hears one row at a time and the tab strip is above all of them.
         .accessibilityLabel("\(source.verb) \(source.name)")
-        .accessibilityValue(source.note ?? "")
+        .accessibilityValue([source.detail, source.note].compactMap { $0 }.joined(separator: ", "))
         // Focused, for the reason spelled out on `SlashCommandRow`.
         .rowBackground(isSelected: isSelected, isHovered: isHovered, isFocused: true)
         .onHover { hovering in
@@ -63,14 +83,16 @@ struct WorkspaceSourceRow: View {
 
     /// Which end of a long name is dropped, and the two answers are opposite.
     ///
-    /// A branch loses its front: `feature/` and a colleague's login are the part everybody shares,
-    /// and the end is what tells two of somebody's `patch-1`s apart. A pull request loses its
-    /// tail, because it opens with the number it is referred to by out loud.
+    /// A ref loses its front: `feature/` and a colleague's login are the part everybody shares,
+    /// and the end is what tells two of somebody's `patch-1`s apart. A row drawn under a pull
+    /// request number loses its tail instead, because it opens with the number it is referred to
+    /// by out loud.
+    ///
+    /// Asked of the name rather than of the case, because which of the two a pull request row is
+    /// now depends on what it knows: it is named after its head branch when gh answered with one,
+    /// and falls back to its number and title when gh did not. See `WorkspaceSource.name`.
     private var truncation: Text.TruncationMode {
-        switch source {
-        case .pullRequest: .tail
-        case .newBranch, .existingBranch: .head
-        }
+        source.name.hasPrefix("#") ? .tail : .head
     }
 
     private var glyph: String {
