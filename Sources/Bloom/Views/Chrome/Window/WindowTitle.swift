@@ -1,33 +1,28 @@
 import AppKit
 import SwiftUI
 
-/// Points the window at the worktree the user is looking at.
+/// Names the window after the workspace the user is looking at.
 ///
-/// A `representedURL` is what makes the title bar behave like every document window on the Mac:
-/// the folder can be dragged straight out of it into a terminal or an editor, and Command-clicking
-/// the title drops down the path from the worktree up to the volume, each level of which opens in
-/// Finder. Bloom's workspaces really are folders on disk, so the affordance is free and the
-/// alternative is copying the path out of the inspector by hand.
+/// **It used to set a `representedURL` as well, and that is deliberately gone.** A represented URL
+/// makes a title bar behave like a document window's: the folder can be dragged out of it, and
+/// Command-clicking the title drops down the path from the worktree up to the volume. Bloom's
+/// workspaces really are folders, so the affordance was free.
 ///
-/// The title travels with it, because a proxy icon with a stale name beside it is worse than none.
-/// On Home there is no folder, so both are cleared rather than left pointing at the last workspace.
-struct WindowProxyIcon: ViewModifier {
+/// What it also does is draw a folder proxy icon in front of the title, and macOS reveals that
+/// icon on hover. The owner asked for it to go: a chat window that grows a folder badge when the
+/// pointer crosses its title reads as a document window, and this is not one. The icon is not
+/// separable from the URL, so hiding the button would be fighting AppKit for a picture it will
+/// put back; the URL goes instead, and the drag and the path menu go with it. If either is ever
+/// wanted again it is one line here.
+///
+/// On Home there is no workspace, so the title says Bloom rather than staying on the last one.
+struct WindowTitle: ViewModifier {
     let app: AppModel
 
     @State private var window: NSWindow?
 
-    /// What the title bar should say and point at, as one value, so a single `onChange` covers
-    /// both and they can never be applied a frame apart.
-    private struct Represented: Equatable {
-        var title: String
-        var url: URL?
-    }
-
-    private var represented: Represented {
-        guard let workspace = app.selectedWorkspace else {
-            return Represented(title: "Bloom", url: nil)
-        }
-        return Represented(title: workspace.name, url: URL(filePath: workspace.path))
+    private var title: String {
+        app.selectedWorkspace?.name ?? "Bloom"
     }
 
     func body(content: Content) -> some View {
@@ -35,19 +30,22 @@ struct WindowProxyIcon: ViewModifier {
             .background(WindowAccessor(window: $window))
             // Two triggers, because either half can arrive first: the window is attached one pass
             // after the view exists, and the selection changes for the rest of the launch.
-            .onChange(of: represented, initial: true) { _, value in apply(value) }
-            .onChange(of: window, initial: true) { _, _ in apply(represented) }
+            .onChange(of: title, initial: true) { _, value in apply(value) }
+            .onChange(of: window, initial: true) { _, _ in apply(title) }
     }
 
-    private func apply(_ value: Represented) {
+    private func apply(_ value: String) {
         guard let window else { return }
-        window.title = value.title
-        window.representedURL = value.url
+        window.title = value
+        // Cleared rather than merely never set. A window restored from a previous launch, or one
+        // that carried a represented URL before this was changed, keeps it otherwise, and the
+        // folder icon would come back for exactly the readers who had already seen it.
+        window.representedURL = nil
     }
 }
 
 extension View {
-    func showsWorktreeInTitleBar(_ app: AppModel) -> some View {
-        modifier(WindowProxyIcon(app: app))
+    func showsWorkspaceInTitleBar(_ app: AppModel) -> some View {
+        modifier(WindowTitle(app: app))
     }
 }

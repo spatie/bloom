@@ -87,7 +87,7 @@ struct BloomApp: App {
                 // is the front one. Here rather than in either of the views that move, because
                 // there are two of them and they have to be on the same clock. See `BusyPulse`.
                 .runsBusyPulse(model)
-                .showsWorktreeInTitleBar(model)
+                .showsWorkspaceInTitleBar(model)
                 .showsAgentsInMenuBar(model)
                 // The title bar is painted in Bloom's chrome rather than in the system's window
                 // material, so the strip across the top belongs to the same window as everything
