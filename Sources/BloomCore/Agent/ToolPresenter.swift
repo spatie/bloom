@@ -391,14 +391,31 @@ public enum ToolPresenter {
         let parts = name.dropFirst("mcp__".count).components(separatedBy: "__")
         let server = parts.first ?? name
         let tool = parts.dropFirst().joined(separator: " ").replacing("_", with: " ")
-        let label = tool.isEmpty ? server : "\(server): \(tool)"
+        // Bloom's own bridge, said as Bloom.
+        //
+        // The wire name is `bloom-workspace-bridge` and it has to stay that, which is not a
+        // convention: `BridgeRegistration.serverName` records the measurement behind it, that a
+        // Codex `-c` override deep-merges a colliding entry leaf by leaf rather than replacing
+        // it, so a server the owner had called `bloom` produced Bloom's binary running under the
+        // owner's arguments and reported itself healthy. The defence is a name nobody would type.
+        //
+        // None of which the reader should have to look at. A row reading
+        // "bloom-workspace-bridge: pane open" names the transport where every other row names the
+        // thing that happened, and the puzzle piece says "some extension" about the app the
+        // reader is already in. Both are a presentation problem and this is the presentation, so
+        // this is where it is answered rather than by moving the name the wire depends on.
+        let isBloom = server == BridgeRegistration.serverName
+        let label = tool.isEmpty
+            ? (isBloom ? "Bloom" : server)
+            : "\(isBloom ? "Bloom" : server): \(tool)"
+        let glyph = isBloom ? "square.stack.3d.up" : "puzzlepiece.extension"
 
         // An MCP server can name a file as plainly as a built in tool does, and one that does gets
         // the same chip. Nothing here knows the server's schema, so the value has to survive the
         // guess before it is believed, which is what `ToolLiteral` does with it.
         if let path = ToolLiteral.of(name: name, input: input) {
             return ToolPresentation(
-                glyph: "puzzlepiece.extension",
+                glyph: glyph,
                 label: label,
                 detail: basename(path),
                 tint: .neutral,
@@ -407,7 +424,7 @@ public enum ToolPresenter {
         }
 
         return ToolPresentation(
-            glyph: "puzzlepiece.extension",
+            glyph: glyph,
             label: label,
             detail: firstScalar(input),
             tint: .neutral

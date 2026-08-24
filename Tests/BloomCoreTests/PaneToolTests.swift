@@ -158,3 +158,42 @@ struct PaneToolTests {
         #expect(!BridgeToolApproval.selfApproved.contains("workspace_merge"))
     }
 }
+
+/// How Bloom's own bridge calls read in a transcript.
+///
+/// The wire name is `bloom-workspace-bridge` and has to stay that: `BridgeRegistration.serverName`
+/// records why, and it is a measurement rather than a convention. What the reader sees is a
+/// separate question and is answered where the reading happens.
+@Suite("Bloom's own tools, as a reader meets them")
+struct BloomBridgePresentationTests {
+    private func present(_ tool: String) -> ToolPresentation {
+        ToolPresenter.present(
+            name: "mcp__\(BridgeRegistration.serverName)__\(tool)", input: .object([:])
+        )
+    }
+
+    /// "bloom-workspace-bridge: pane open" names the transport where every other row names the
+    /// thing that happened.
+    @Test("the transport does not appear in the row")
+    func theTransportIsNotTheLabel() {
+        let row = present("pane_open")
+        #expect(row.label == "Bloom: pane open")
+        #expect(!row.label.contains("bridge"))
+        #expect(!row.label.contains("workspace-bridge"))
+    }
+
+    /// The puzzle piece says "some extension" about the app the reader is already inside.
+    @Test("Bloom's own tools do not wear the extension glyph")
+    func bloomHasItsOwnGlyph() {
+        #expect(present("pane_open").glyph != "puzzlepiece.extension")
+        #expect(present("workspace_start").glyph != "puzzlepiece.extension")
+    }
+
+    /// Somebody else's server is still theirs, named and marked as an extension.
+    @Test("another server is still named after itself")
+    func anotherServerKeepsItsName() {
+        let row = ToolPresenter.present(name: "mcp__linear__create_issue", input: .object([:]))
+        #expect(row.label == "linear: create issue")
+        #expect(row.glyph == "puzzlepiece.extension")
+    }
+}
