@@ -161,7 +161,7 @@ public struct WorkspaceListTool: BridgeToolHandling {
     ///
     /// The point of it is the second half. A model that called this without `include_github` and
     /// then told the owner "none of them have a pull request" would be reporting the absence of a
-    /// question as the absence of an answer, which is the same failure `ProjectAddTrouble` heads
+    /// question as the absence of an answer, which is the same failure `FolderRefusal.agentSentence` heads
     /// off in its own register. So the shape of the answer says what was not asked.
     private func note(
         count: Int,

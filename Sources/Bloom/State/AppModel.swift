@@ -1036,8 +1036,9 @@ final class AppModel {
     ///
     /// A folder that is not a git repository used to end here, in an alert reading "... is not a
     /// git repository", which is true and useless: it names the problem and offers nothing. Every
-    /// route in now asks the same three questions first. A repository is added. A folder that has
-    /// no business becoming one, a home directory or somebody's whole projects folder, is refused
+    /// route in now asks the same questions first, and they are `FolderVerdict.of` in the core,
+    /// which `project_add` over the bridge asks too. A repository is added. A folder that has no
+    /// business becoming one, or a repository that has no business being a project, is refused
     /// with a reason. Anything else is offered `ProjectSetupSheet`.
     ///
     /// - Parameter surface: which window asked, so the offer appears on that one. See
@@ -1047,13 +1048,11 @@ final class AppModel {
 
         let facts = await RepositoryStarter.inspect(path)
         switch FolderVerdict.of(facts) {
-        case .alreadyRepository:
-            await addKnownRepository(at: facts.path)
+        case .alreadyRepository(let root):
+            await addKnownRepository(at: root)
 
         case .refuse(let refusal):
-            alert = BloomAlert(
-                title: "Bloom will not make a repository here", message: refusal.sentence
-            )
+            alert = BloomAlert(title: "Bloom will not add this folder", message: refusal.sentence)
 
         case .offer:
             await offerToStartRepository(at: facts.path, presentedIn: surface)

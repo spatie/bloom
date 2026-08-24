@@ -291,21 +291,43 @@ public enum RepositoryStarter {
 
     /// What git and the file system say about a folder, gathered in one place so the verdict can
     /// stay pure.
-    public static func inspect(_ path: String) async -> FolderFacts {
+    public static func inspect(
+        _ path: String,
+        workspacesRoot: String = WorkspaceManager.workspacesRoot.path,
+        home: String = FileManager.default.homeDirectoryForCurrentUser.path
+    ) async -> FolderFacts {
         let manager = FileManager.default
-        let normalized = FolderPath.normalize((path as NSString).expandingTildeInPath)
+        let expanded = (path as NSString).expandingTildeInPath
+        let normalized = FolderPath.normalize(expanded)
 
         var isDirectory: ObjCBool = false
         let exists = manager.fileExists(atPath: normalized, isDirectory: &isDirectory)
 
-        let isRepository = await Git.isRepository(normalized)
+        // Asked only of a folder that is there. `git rev-parse` run against a path that does not
+        // exist answers about whatever directory the process happens to be in, which is how a
+        // missing path used to come back as a repository.
+        var isRepository = false
+        if exists, isDirectory.boolValue { isRepository = await Git.isRepository(normalized) }
+
+        // Asked only of a repository, because it is the only branch of the verdict that reads it
+        // and because it is a subprocess. Nil from a repository that will not answer falls back
+        // to the path, which is what the rule used before this was gathered at all.
+        var repositoryRoot: String?
+        if isRepository { repositoryRoot = try? await Git.topLevel(of: normalized) }
+
         return FolderFacts(
             path: normalized,
             isRepository: isRepository,
+            repositoryRoot: repositoryRoot,
             enclosingRepository: isRepository ? nil : Git.enclosingRepositoryRoot(of: normalized),
             isWritable: manager.isWritableFile(atPath: normalized),
             isDirectory: exists && isDirectory.boolValue,
-            homeDirectory: manager.homeDirectoryForCurrentUser.path,
+            exists: exists,
+            // The tilde is expanded above, so a path that started with one counts as absolute.
+            // It is the caller's home either way: the bridge runs on this machine.
+            isAbsolute: expanded.hasPrefix("/"),
+            homeDirectory: home,
+            workspacesRoot: workspacesRoot,
             childRepositories: childRepositories(of: normalized)
         )
     }

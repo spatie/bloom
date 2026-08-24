@@ -10,6 +10,8 @@ struct FolderVerdictTests {
         enclosing: String? = nil,
         isWritable: Bool = true,
         isDirectory: Bool = true,
+        exists: Bool = true,
+        isAbsolute: Bool = true,
         children: [String] = []
     ) -> FolderFacts {
         FolderFacts(
@@ -18,14 +20,30 @@ struct FolderVerdictTests {
             enclosingRepository: enclosing,
             isWritable: isWritable,
             isDirectory: isDirectory,
+            exists: exists,
+            isAbsolute: isAbsolute,
             homeDirectory: "/Users/tester",
+            workspacesRoot: "/Users/tester/bloom/workspaces",
             childRepositories: children
         )
     }
 
     @Test("a repository is added, not offered")
     func alreadyRepository() {
-        #expect(FolderVerdict.of(facts(isRepository: true)) == .alreadyRepository)
+        #expect(
+            FolderVerdict.of(facts(isRepository: true))
+                == .alreadyRepository(root: "/Users/tester/dev/thing")
+        )
+    }
+
+    /// The path handed in may be a folder deep inside the repository. What gets registered is the
+    /// repository, and the location rules are asked of it rather than of what was typed.
+    @Test("a folder inside a repository registers the repository")
+    func registersTheTopLevel() {
+        var inside = facts("/Users/tester/dev/thing/src/deep", isRepository: true)
+        inside.repositoryRoot = "/Users/tester/dev/thing"
+
+        #expect(FolderVerdict.of(inside) == .alreadyRepository(root: "/Users/tester/dev/thing"))
     }
 
     @Test("a plain folder is offered")
@@ -79,7 +97,22 @@ struct FolderVerdictTests {
 
     @Test("something that is not a folder is refused")
     func notADirectory() {
-        #expect(FolderVerdict.of(facts(isDirectory: false)) == .refuse(.notADirectory))
+        #expect(
+            FolderVerdict.of(facts(isDirectory: false))
+                == .refuse(.notADirectory("/Users/tester/dev/thing"))
+        )
+    }
+
+    @Test("nothing at the path and a path that is not one get their own answers")
+    func missingAndRelative() {
+        #expect(
+            FolderVerdict.of(facts(exists: false))
+                == .refuse(.nothingThere("/Users/tester/dev/thing"))
+        )
+        #expect(
+            FolderVerdict.of(facts("dev/thing", isAbsolute: false))
+                == .refuse(.notAbsolute("dev/thing"))
+        )
     }
 
     /// The case Conductor gets wrong: it offers to publish `/Users/freek/dev/code`, the folder
@@ -99,9 +132,74 @@ struct FolderVerdictTests {
         #expect(FolderVerdict.of(facts(children: ["vendored", "example-app"])) == .offer)
     }
 
-    @Test("being a repository beats every refusal")
-    func repositoryWins() {
-        #expect(FolderVerdict.of(facts("/Users/tester", isRepository: true)) == .alreadyRepository)
+    /// The three refusals that used to apply to a plain folder only.
+    ///
+    /// A repository can exist in a place that is still not a project, and the owner's file panel
+    /// registered all three of these while `project_add` refused them. Being a repository is what
+    /// makes them reachable, not what excuses them.
+    @Test("a repository in a place that is not a project is still refused")
+    func repositoryDoesNotWin() {
+        #expect(FolderVerdict.of(facts("/Users/tester", isRepository: true))
+            == .refuse(.homeDirectory))
+        #expect(FolderVerdict.of(facts("/", isRepository: true)) == .refuse(.volumeRoot))
+
+        let worktree = facts("/Users/tester/bloom/workspaces/kelp", isRepository: true)
+        #expect(FolderVerdict.of(worktree)
+            == .refuse(.insideBloomsWorkspaces("/Users/tester/bloom/workspaces/kelp")))
+    }
+
+    /// A near miss on the name of Bloom's worktree root must not be read as being inside it.
+    @Test("a sibling of the workspaces folder is not inside it")
+    func prefixIsNotContainment() {
+        let sibling = facts("/Users/tester/bloom/workspaces-old/kelp", isRepository: true)
+
+        #expect(FolderVerdict.of(sibling)
+            == .alreadyRepository(root: "/Users/tester/bloom/workspaces-old/kelp"))
+    }
+}
+
+/// The half of a refusal that is presentation rather than policy.
+///
+/// `FolderVerdict.of` answers both doors. What differs is who is listening: a person can be shown
+/// a short line and offered the file panel again, and a client has to be told in full whether
+/// trying again would help.
+@Suite("Folder refusals, said to a client")
+struct FolderRefusalAgentSentenceTests {
+    /// The refusal this whole vocabulary exists to get right. An agent handed a bare "not a git
+    /// repository" reaches for `git init` through its own Bash tool.
+    @Test("a folder git does not recognise is told not to make it a repository")
+    func doesNotInviteGitInit() {
+        let sentence = FolderRefusal.notARepositoryForAgent(path: "/Users/tester/dev/thing")
+
+        #expect(sentence.contains("git does not recognise it as a repository"))
+        #expect(sentence.contains("neither will running git init"))
+        #expect(sentence.contains("retrying will not help"))
+    }
+
+    /// Every refusal a folder that is NOT a repository can land on. All of them could be
+    /// "answered" by creating one, so all of them have to say that creating one is not the
+    /// caller's to do.
+    @Test("the refusals a plain folder can land on all decline git init", arguments: [
+        FolderRefusal.insideRepository("/Users/tester/dev/outer"),
+        .systemDirectory,
+        .notWritable,
+        .containerOfProjects(["flare", "baton", "mailcoach"]),
+    ])
+    func plainFolderRefusalsDeclineGitInit(refusal: FolderRefusal) {
+        #expect(refusal.agentSentence.lowercased().contains("git init"))
+    }
+
+    /// And every refusal that is about a repository in the wrong place says what to ask for
+    /// instead, because there is a right answer and the caller can reach it on its own.
+    @Test("the refusals a repository can land on name the alternative", arguments: [
+        FolderRefusal.insideBloomsWorkspaces("/Users/tester/bloom/workspaces/kelp"),
+        .homeDirectory,
+        .volumeRoot,
+    ])
+    func repositoryRefusalsNameAnAlternative(refusal: FolderRefusal) {
+        #expect(refusal.agentSentence.contains("Ask again with")
+            || refusal.agentSentence.contains("instead"))
+        #expect(refusal.agentSentence != refusal.sentence)
     }
 }
 

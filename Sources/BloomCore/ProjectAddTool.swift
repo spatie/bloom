@@ -7,9 +7,16 @@ import Foundation
 /// told "add my projects", handed a folder git does not recognise and given a bare "not a git
 /// repository", a model will reach for `git init` through its own Bash tool and make a repository
 /// where the owner never asked for one, with whatever happened to be lying in the folder as its
-/// first commit. `ProjectAddTrouble.notARepository` is written to head that off in words rather
-/// than to hope. Bloom has a whole sheet for turning a folder into a repository, with the owner in
-/// front of it; the bridge does not get a shortcut past it.
+/// first commit. `FolderRefusal.notARepositoryForAgent` is written to head that off in words
+/// rather than to hope. Bloom has a whole sheet for turning a folder into a repository, with the
+/// owner in front of it; the bridge does not get a shortcut past it.
+///
+/// **The rule is not this tool's.** It is `FolderVerdict.of`, which the owner's file panel asks
+/// too. There were two lists of refusals for a while and they had already drifted: this one
+/// refused one of Bloom's own worktrees and a home directory that happened to be a repository,
+/// and the file panel registered both. What is left here is the half that is genuinely about
+/// talking to a client, which is `agentSentence` instead of `sentence` and a JSON answer instead
+/// of a window.
 ///
 /// Owner only. A workspace agent works in the project it was started in, and a tool that let it
 /// register another one would let it widen its own reach without anybody deciding to.
@@ -57,15 +64,22 @@ public struct ProjectAddTool: BridgeToolHandling {
             return .failure("project_add needs the path of the git repository to register.")
         }
 
-        if let trouble = await ProjectAddTrouble.diagnose(path: path) {
-            return .failure(trouble.sentence)
+        let root: String
+        switch await FolderVerdict.of(RepositoryStarter.inspect(path)) {
+        case .alreadyRepository(let resolved):
+            root = resolved
+        case .refuse(let refusal):
+            return .failure(refusal.agentSentence)
+        case .offer:
+            // The owner would be offered the sheet here. A client is not: see the head of this
+            // file for what a model does with a bare "not a git repository".
+            return .failure(FolderRefusal.notARepositoryForAgent(path: path))
         }
 
         do {
             // Asked before adding as well as answered after, so a repeat call can say plainly that
             // it changed nothing. `addRepository` is idempotent and returns the existing row, so
             // without this the second call would look exactly like the first.
-            let root = try await Git.topLevel(of: (path as NSString).expandingTildeInPath)
             let known = try await store.repo(path: root) != nil
 
             let project = try await WorkspaceManager(store: store).addRepository(at: root)
@@ -82,7 +96,7 @@ public struct ProjectAddTool: BridgeToolHandling {
                 ),
             ]))
         } catch {
-            return .failure(ProjectAddTrouble.unexplained(error.readableMessage).sentence)
+            return .failure("Bloom could not add that project: \(error.readableMessage)")
         }
     }
 }

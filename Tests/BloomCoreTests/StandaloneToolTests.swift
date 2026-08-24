@@ -86,7 +86,7 @@ struct ProjectAddToolTests {
         #expect(result.text.contains("\"state\" : \"added\""))
         let projects = try await store.repos()
         #expect(projects.count == 1)
-        #expect(ProjectAddTrouble.resolved(projects[0].path) == ProjectAddTrouble.resolved(repo.path))
+        #expect(FolderPath.resolved(projects[0].path) == FolderPath.resolved(repo.path))
     }
 
     @Test("asking twice changes nothing and says so")
@@ -112,7 +112,7 @@ struct ProjectAddToolTests {
         _ = await ProjectAddTool().call(request(inner), as: .owner, store: store)
 
         let registered = try await store.repos().first?.path ?? ""
-        #expect(ProjectAddTrouble.resolved(registered) == ProjectAddTrouble.resolved(repo.path))
+        #expect(FolderPath.resolved(registered) == FolderPath.resolved(repo.path))
     }
 
     /// The refusal this tool exists to get right. An agent handed a bare "not a git repository"
@@ -156,33 +156,32 @@ struct ProjectAddToolTests {
         let worktree = root + "/feature"
         try await Shell.check("git", ["worktree", "add", "-q", "-b", "feature", worktree], cwd: repo.path)
 
-        let trouble = await ProjectAddTrouble.diagnose(path: worktree, workspacesRoot: root)
+        let verdict = await FolderVerdict.of(
+            RepositoryStarter.inspect(worktree, workspacesRoot: root)
+        )
 
-        guard case .insideBloomsWorkspaces = trouble else {
-            Issue.record("expected the worktree to be refused, and got \(String(describing: trouble))")
+        guard case .refuse(let refusal) = verdict, case .insideBloomsWorkspaces = refusal else {
+            Issue.record("expected the worktree to be refused, and got \(verdict)")
             return
         }
-        #expect(trouble?.sentence.contains("one of Bloom's own workspaces") == true)
+        #expect(refusal.agentSentence.contains("one of Bloom's own workspaces"))
     }
 
     @Test("the home folder is refused even where it is a repository")
     func refusesHome() async throws {
         let repo = try await TempRepo()
 
-        let trouble = await ProjectAddTrouble.diagnose(path: repo.path, home: repo.path)
+        let verdict = await FolderVerdict.of(RepositoryStarter.inspect(repo.path, home: repo.path))
 
-        guard case .tooBroad(_, let what) = trouble else {
-            Issue.record("expected the home folder to be refused, and got \(String(describing: trouble))")
-            return
-        }
-        #expect(what == "your whole home folder")
+        #expect(verdict == .refuse(.homeDirectory))
+        #expect(FolderRefusal.homeDirectory.agentSentence.contains("your whole home folder"))
     }
 
     /// A near miss on the name of Bloom's worktree root must not be read as being inside it.
     @Test("a sibling of the workspaces folder is not inside it")
     func prefixIsNotContainment() {
-        #expect(!ProjectAddTrouble.isInside("/a/workspaces-old/x", of: "/a/workspaces"))
-        #expect(ProjectAddTrouble.isInside("/a/workspaces/x", of: "/a/workspaces"))
+        #expect(!FolderPath.isInside("/a/workspaces-old/x", of: "/a/workspaces"))
+        #expect(FolderPath.isInside("/a/workspaces/x", of: "/a/workspaces"))
     }
 }
 

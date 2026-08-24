@@ -3,7 +3,7 @@ import Foundation
 /// Why `project_hide` and `project_unhide` would not act on a project, in terms a client can act
 /// on.
 ///
-/// Built to the standard `WorkspaceStartTrouble` and `ProjectAddTrouble` set, and for the same
+/// Built to the standard `WorkspaceStartTrouble` and `FolderRefusal.agentSentence` set, and for the same
 /// reasons. Every sentence says what is true, whether trying again will help, and what to try
 /// instead, and none of them quotes an internal path or a command line: the only path either of
 /// these tools ever repeats is one the caller handed in.

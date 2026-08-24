@@ -4,6 +4,16 @@ import Foundation
 
 /// Real git against throwaway directories. Nothing here touches GitHub: every test uses the
 /// `.local` destination, which is the whole point of that case existing.
+/// Whether inspecting `path` comes out as "register the repository at `root`". Compared with
+/// symlinks resolved on both sides, because git answers with the real directory and the scratch
+/// folder these tests work in is reached through `/tmp`, which is a symlink.
+private func registers(_ path: String, as root: String) async -> Bool {
+    guard case .alreadyRepository(let registered) = await FolderVerdict.of(
+        RepositoryStarter.inspect(path)
+    ) else { return false }
+    return FolderPath.resolved(registered) == FolderPath.resolved(root)
+}
+
 @Suite("Starting a repository", .tags(.git), .scratchDirectory)
 struct RepositoryStarterTests {
     /// A folder in the running test's scratch directory, with the given files in it.
@@ -44,7 +54,7 @@ struct RepositoryStarterTests {
 
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
-        #expect(await FolderVerdict.of(RepositoryStarter.inspect(repo.path)) == .alreadyRepository)
+        #expect(await registers(repo.path, as: repo.path))
     }
 
     @Test("a folder inside a repository is spotted by walking up as well as by asking git")
@@ -57,7 +67,7 @@ struct RepositoryStarterTests {
         #expect(Git.enclosingRepositoryRoot(of: inner) != nil)
         // git claims the whole work tree, so this folder never reaches the offer in the first
         // place. The walk is the second line of defence for the cases git declines to claim.
-        #expect(await FolderVerdict.of(RepositoryStarter.inspect(inner)) == .alreadyRepository)
+        #expect(await registers(inner, as: repo.path))
     }
 
     @Test("a folder full of repositories is recognised as a folder of projects")
