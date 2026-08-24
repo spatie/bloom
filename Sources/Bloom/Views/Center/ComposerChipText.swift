@@ -41,9 +41,16 @@ enum ComposerChipText {
     }
 
     /// One file, as the single character that stands for it.
-    static func chip(for path: String, font: NSFont) -> NSAttributedString {
-        let attachment = NSTextAttachment()
-        attachment.attachmentCell = AttachmentChipCell(path: path, font: font)
+    ///
+    /// The ground is named by the caller because the same chip is now drawn on two very different
+    /// ones: the composer's sunken grey, and the accent fill of a sent turn. See
+    /// `AttachmentChipCell.Ground`, which is where the second one's numbers and their measurements
+    /// are written down.
+    static func chip(
+        for path: String, font: NSFont, ground: AttachmentChipCell.Ground = .composer
+    ) -> NSAttributedString {
+        let attachment = FileChipAttachment(path: path, font: font, ground: ground)
+        attachment.attachmentCell = AttachmentChipCell(path: path, font: font, ground: ground)
 
         let chip = NSMutableAttributedString(attachment: attachment)
         chip.addAttributes(
@@ -186,6 +193,48 @@ enum ComposerChipText {
     }
 }
 
+/// A chip that is equal to another chip for the same file, drawn the same way.
+///
+/// **Nothing here is about drawing, and it is not optional.** `NSAttributedString.isEqual(to:)`
+/// compares the attachment objects in the two strings, and `NSObject`'s answer to that is identity,
+/// so two strings built a frame apart from the same sentence came out unequal for ever. Both places
+/// that hold one of these strings decide whether to touch their text storage by comparing the new
+/// string against what they already have, and a comparison that is always false means the storage
+/// is replaced on every update: in the transcript that is once per streamed chunk, and replacing
+/// the storage takes the reader's selection with it. A turn with a path in it could not be
+/// selected while the agent was answering.
+///
+/// Equal means the same file at the same size on the same ground, which is exactly the set of
+/// things that changes what is drawn.
+final class FileChipAttachment: NSTextAttachment {
+    let path: String
+    private let font: NSFont
+    private let ground: AttachmentChipCell.Ground
+
+    init(path: String, font: NSFont, ground: AttachmentChipCell.Ground) {
+        self.path = path
+        self.font = font
+        self.ground = ground
+        super.init(data: nil, ofType: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func isEqual(_ object: Any?) -> Bool {
+        guard let other = object as? FileChipAttachment else { return false }
+        return other.path == path && other.font == font && other.ground == ground
+    }
+
+    override var hash: Int {
+        var hasher = Hasher()
+        hasher.combine(path)
+        hasher.combine(font)
+        return hasher.finalize()
+    }
+}
+
 /// A file drawn where a word would be: the icon Finder gives its kind, then its name, on a plate.
 ///
 /// Deliberately the same object as the chip that used to sit above the box, in everything the eye
@@ -194,7 +243,61 @@ enum ComposerChipText {
 /// `AttachmentChip`, because TextKit 1 has no way to put a view inside a line of text and
 /// `usedRect(for:)`, which is what grows this box a line at a time, is TextKit 1's alone.
 final class AttachmentChipCell: NSTextAttachmentCell {
+    /// What the chip is drawn on, as the three colours that depend on it.
+    ///
+    /// Plain `NSColor`s rather than anything dynamic for the bubble's ground, and that is not
+    /// laziness. An `NSColor` inside a text view resolves against the WINDOW's appearance, and the
+    /// user's bubble names `colorScheme` dark whatever the page is doing, so a dynamic pair here
+    /// would resolve on the light ramp inside a surface that is dark in both appearances. It is
+    /// the same trap `Palette.bubbleTextSelection` is a hard value for, and for the same reason.
+    struct Ground: Equatable {
+        var plate: NSColor
+        var border: NSColor
+        var ink: NSColor
+
+        /// Above the text field: the composer's own raised plate and hairline, taken from the
+        /// palette rather than spelled again here, and still resolved for whichever appearance the
+        /// window is in at the moment of drawing. Both are dynamic colours and converting one back
+        /// to AppKit keeps it dynamic.
+        @MainActor static let composer = Ground(
+            plate: NSColor(Palette.surfaceRaised), border: NSColor(Palette.border), ink: .labelColor
+        )
+
+        /// Inside a sent turn, on the accent fill `UserTurnRowView` draws.
+        ///
+        /// **The plate is DARKER than the bubble it sits in, where every other chip on this fill
+        /// is lighter, and it is darker because the lighter one cannot carry text.**
+        /// `AttachmentChip`, `Chip` and `DiffStatLabel` all sit on the accent fill as the inverted
+        /// ink at twenty percent, which over Spatie Blue composites to `#4791A9`: white on that is
+        /// 3.56 to 1, under the 4.5 floor for body text. Nothing rescues a white plate here.
+        /// Ten percent is 4.32, still short; five percent is 4.76 and passes, but at 1.09 against
+        /// the fill it is a pill nobody can see, which is not a chip, it is a rumour of one.
+        ///
+        /// So this one goes the other way. Spatie Blue at three quarters is `#13586E`, it carries
+        /// the same white ink the sentence around it is set in at 7.93 to 1, and it stands off the
+        /// fill at 1.51, which is the separation the twenty percent plate already had (1.47). It
+        /// reads as a recess in the bubble rather than as a card lying on top of it, which is what
+        /// a path inside a sentence is.
+        ///
+        /// One value rather than a pair, because `Palette.accentFill` is one value in both
+        /// appearances: these ratios are the ratios in light and in dark alike.
+        ///
+        /// The two treatments do not meet in practice. A turn draws these pills for the paths in
+        /// its sentence and `AttachmentChip` for the paths in its trailer, and nothing has written
+        /// a trailer since a file became a word in the sentence. See `AttachmentTrailer`.
+        @MainActor static let userBubble = Ground(
+            plate: NSColor(rgb: 0x13586E),
+            // The plate's own edge, lifted off the plate rather than off the page: 2.34 against
+            // what it encloses and 1.55 against the bubble outside it. A hairline in
+            // `Palette.border` disappears into a fill this saturated, which is the same finding
+            // `AttachmentChip.stroke` records.
+            border: NSColor(rgb: 0x6692A1),
+            ink: .white
+        )
+    }
+
     let path: String
+    private let ground: Ground
     /// The font of the line the chip sits on, which is what it is sized against. Not `font`: an
     /// `NSCell` already has one of those and it means something else.
     private let lineFont: NSFont
@@ -226,7 +329,7 @@ final class AttachmentChipCell: NSTextAttachmentCell {
     private static let maxNameWidth: CGFloat = 170
     private static let cornerRadius: CGFloat = 4
 
-    init(path: String, font: NSFont) {
+    init(path: String, font: NSFont, ground: Ground = .composer) {
         let nameFont = Self.nameFont(for: font)
         let name = (path as NSString).lastPathComponent
         let iconSize = ceil(nameFont.pointSize) + 2
@@ -241,6 +344,7 @@ final class AttachmentChipCell: NSTextAttachmentCell {
 
         self.path = path
         self.lineFont = font
+        self.ground = ground
         self.iconSize = iconSize
         self.nameWidth = nameWidth
         self.chipSize = NSSize(
@@ -273,7 +377,7 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         paragraph.lineBreakMode = .byTruncatingMiddle
         return [
             .font: Self.nameFont(for: lineFont),
-            .foregroundColor: NSColor.labelColor,
+            .foregroundColor: ground.ink,
             .paragraphStyle: paragraph,
         ]
     }
@@ -292,9 +396,9 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         let frame = cellFrame.insetBy(dx: 0, dy: 0.5)
         let plate = NSBezierPath(roundedRect: frame, xRadius: Self.cornerRadius, yRadius: Self.cornerRadius)
 
-        AttachmentChipCell.plateColor.setFill()
+        ground.plate.setFill()
         plate.fill()
-        AttachmentChipCell.borderColor.setStroke()
+        ground.border.setStroke()
         plate.lineWidth = 1
         plate.stroke()
 
@@ -337,12 +441,4 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         composer.openAttachment?(path)
         return true
     }
-
-    // MARK: - Ground
-
-    /// The composer's own raised plate and hairline, taken from the palette rather than spelled
-    /// again here, and still resolved for whichever appearance the window is in at the moment of
-    /// drawing: both are dynamic colours and converting one back to AppKit keeps it dynamic.
-    static let plateColor = NSColor(Palette.surfaceRaised)
-    static let borderColor = NSColor(Palette.border)
 }

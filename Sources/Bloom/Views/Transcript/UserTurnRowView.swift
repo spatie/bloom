@@ -123,8 +123,10 @@ struct UserTurnRowView: View {
             // above the chips would put a blank line inside the bubble.
             if !text.isEmpty {
                 // Written text, not markdown. A question with a `*` in it is a question with a
-                // `*` in it, and the one thing lifted out of it is an address: those are found by
-                // `LinkScan`, which is the same detection the agent's own prose goes through.
+                // `*` in it, and two things only are lifted out of it: an address, found by
+                // `LinkScan`, and a file, found by `FileMention`. Both rules live in the core
+                // where they are tested, and both are the same rules the agent's own prose goes
+                // through.
                 //
                 // Drawn by AppKit rather than by `Text`, and that is the whole of why
                 // `TranscriptTextView` exists: a link inside a selectable `Text` is decoration.
@@ -132,20 +134,20 @@ struct UserTurnRowView: View {
                 // nothing at all. See the note on that type.
                 TranscriptTextView(
                     text: TranscriptLink.attributedString(
-                        text,
-                        links: LinkScan.links(in: text),
+                        FileMention.segments(in: text),
                         font: Typo.body.resolvedNSFont(scale: fontScale, face: chatFont),
                         // White, the same ink a selected row uses on the same fill. Measured 5.2
                         // to 1 on Spatie Blue, which passes AA for body text in both appearances.
                         color: .alternateSelectedControlTextColor,
-                        lineSpacing: TranscriptLayout.proseLeading
+                        lineSpacing: TranscriptLayout.proseLeading,
+                        chipGround: .userBubble
                     ),
                     linkColor: NSColor(Palette.linkInverted),
                     // The measured value from the note above: on the dark ramp the selection is a
                     // muted slate that sits clearly on Spatie Blue and leaves white text alone.
                     // AppKit cannot read the `colorScheme` this bubble sets, so it is named.
                     selectionColor: Palette.bubbleTextSelection,
-                    actions: linkActions
+                    actions: linkActions.opening(file: open)
                 )
             }
 
@@ -204,6 +206,20 @@ struct UserTurnRowView: View {
             return
         }
         hoverHost?.request = TranscriptHoverRequest(card: file, frame: frame)
+    }
+}
+
+extension TranscriptLinkActions {
+    /// The list's shared actions with a door for file chips added.
+    ///
+    /// A copy per bubble rather than a fourth closure on the list's one value, because opening a
+    /// file needs the workspace and the list is handed a session. It costs one struct on the rows
+    /// that draw a bubble, which is a handful in a transcript of hundreds.
+    @MainActor
+    func opening(file open: @escaping @MainActor @Sendable (String) -> Void) -> TranscriptLinkActions {
+        var copy = self
+        copy.openFile = open
+        return copy
     }
 }
 
