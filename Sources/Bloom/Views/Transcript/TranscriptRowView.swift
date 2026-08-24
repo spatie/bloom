@@ -165,10 +165,7 @@ struct TranscriptRowView: View, Equatable {
             )
 
         case .notice:
-            RateLimitRowView(
-                utilization: json?["rate_limit_info"]?["utilization"]?.doubleValue ?? 0,
-                window: json?["rate_limit_info"]?["rateLimitType"]?.stringValue ?? ""
-            )
+            RateLimitRowView(payload: row.payload)
 
         case .system:
             if let info = initInfo {

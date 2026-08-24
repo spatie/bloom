@@ -248,3 +248,34 @@ import Testing
             == "Anthropic's API was overloaded. This turn got through on attempt 4 of 10.")
     }
 }
+
+/// The `rate_limit_event` that rides along in the same capture, and the figure Bloom used to
+/// invent from it.
+@Suite struct RateLimitNoticeTests {
+    /// The real line, from `Tests/fixtures/claude-api-retry.ndjson`. It has a window and a reset
+    /// time and no `utilization` at all, which is the ordinary case: the CLI only sends a figure
+    /// once the account is near its wall.
+    private static let quiet = Data("""
+        {"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1787566800,\
+        "rateLimitType":"five_hour","overageStatus":"rejected",\
+        "overageDisabledReason":"org_level_disabled","isUsingOverage":false}}
+        """.utf8)
+
+    /// The transcript used to print "0% of the five hour window used" for this. Nothing said 0.
+    @Test func anEventWithNoFigureDrawsNoRow() {
+        #expect(RateLimitNotice.sentence(forRateLimitEvent: Self.quiet) == nil)
+    }
+
+    @Test func anEventWithAFigureSaysIt() {
+        let near = Data("""
+            {"type":"rate_limit_event","rate_limit_info":{"status":"allowed",\
+            "resetsAt":1787566800,"rateLimitType":"seven_day","utilization":0.77,\
+            "surpassedThreshold":0.75}}
+            """.utf8)
+        #expect(RateLimitNotice.sentence(forRateLimitEvent: near) == "77% of the week allowance used")
+    }
+
+    @Test func rubbishDrawsNothing() {
+        #expect(RateLimitNotice.sentence(forRateLimitEvent: Data("not json".utf8)) == nil)
+    }
+}
