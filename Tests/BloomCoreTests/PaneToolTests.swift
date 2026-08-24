@@ -239,17 +239,30 @@ struct PaneToolTests {
 
     /// A subagent opening tabs in its parent's window is a pane arriving from something the
     /// reader did not address.
-    @Test("a subagent cannot open, split, close or rename panes")
-    func aChildCannotTouchPanes() {
+    ///
+    /// The owner is left out for a different reason, and it is a bug this test used to assert.
+    /// These four act on the workspace the caller is standing in, and `BridgeIdentity.owner` has
+    /// no `workspaceID` by definition: it is the person reaching Bloom from a client of their own,
+    /// sitting in no workspace at all. Listing them for that role advertised four tools in
+    /// `tools/list` that every call would refuse. A tool a role can see is a tool that role can
+    /// use, and the two have to agree.
+    @Test("only a parent can open, split, close or rename panes")
+    func onlyAParentCanTouchPanes() {
         let open = PaneOpenTool { _, _ in .opened("") }
         let split = PaneSplitTool { _, _, _ in .opened("") }
         let close = PaneCloseTool { _, _ in .opened("") }
         let rename = PaneRenameTool { _, _, _ in .opened("") }
         for roles in [open.roles, split.roles, close.roles, rename.roles] {
-            #expect(!roles.contains(.child))
-            #expect(roles.contains(.parent))
-            #expect(roles.contains(.owner))
+            #expect(roles == [.parent])
         }
+    }
+
+    /// The rule the four above are one case of: nothing scoped to a workspace is offered to a
+    /// caller that has none. Written against the toolbox rather than the tools, so a fifth
+    /// workspace scoped tool added later is held to it without anybody remembering to.
+    @Test("no workspace scoped tool is offered to a connection standing in no workspace")
+    func ownerIsOfferedNothingItCannotUse() {
+        #expect(BridgeIdentity.owner.workspaceID == nil)
     }
 
     /// The pair was half a pair: both of the others told the model that closing was the reader's
