@@ -144,7 +144,7 @@ struct UserTurnRowView: View {
                     // The measured value from the note above: on the dark ramp the selection is a
                     // muted slate that sits clearly on Spatie Blue and leaves white text alone.
                     // AppKit cannot read the `colorScheme` this bubble sets, so it is named.
-                    selectionColor: NSColor(rgb: 0x466288),
+                    selectionColor: Palette.bubbleTextSelection,
                     actions: linkActions
                 )
             }

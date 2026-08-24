@@ -110,6 +110,8 @@ enum Palette {
     /// most visible of the surfaces that now ignore System Settings: the selected sidebar row and
     /// the selected changed file are brand blue on a Mac set to Graphite.
     static let selectedEmphasized = accentFill
+    /// The ink that survives an emphasized fill. `alternateSelectedControlTextColor` is AppKit's
+    /// name for it, and it is the one semantic colour in this file that is right without argument.
     static let selectedEmphasizedText = Color(nsColor: .alternateSelectedControlTextColor)
 
     // MARK: Lines
@@ -135,7 +137,13 @@ enum Palette {
     /// system's second and third.
     static let textTertiary = dynamic(light: 0x8A9AA2, dark: 0x62808E)
 
-    static let textInverted = Color(nsColor: .alternateSelectedControlTextColor)
+    /// Ink on anything Bloom has filled with a colour of its own.
+    ///
+    /// Spelled as the selection's ink rather than built from the same `NSColor` a second time,
+    /// which is what it was. Two names for one value is the arrangement `link` and `accent`
+    /// already have and document; two independent constructions of one value is how the pair
+    /// drifts the first time one of them is retuned.
+    static let textInverted = selectedEmphasizedText
 
     /// What a field says before anything is typed into it. Half ink, where the tertiary label is
     /// a quarter, which is why a placeholder written as `textTertiary` reads as disabled.
@@ -218,6 +226,20 @@ enum Palette {
     /// a pair, because `accentFill` is one value in both appearances and this sits on that fill,
     /// not on the page.
     static let linkInverted = Color(nsColor: NSColor(rgb: 0xCCF9F2))
+
+    /// Selected text inside that same filled bubble.
+    ///
+    /// `textSelection` cannot do this job for the reason written out on `UserTurnRowView`: the
+    /// bubble names `colorScheme` dark whatever the page is doing, AppKit cannot read that, and
+    /// `selectedTextBackgroundColor` resolved on the light ramp is a pale blue that leaves white
+    /// text on it at 1.5 to 1, unreadable exactly while it is being dragged over. This is the
+    /// value the dark ramp resolves to, measured off a probe of the bubble: a muted slate that
+    /// sits clearly on Spatie Blue and carries the same white text at 6.2 to 1.
+    ///
+    /// Named here rather than left as a literal in that view, which is where it was, because it
+    /// is a colour and this is where colours live. It was the one `0xRRGGBB` in the app outside
+    /// the brand artwork.
+    static let bubbleTextSelection = NSColor(rgb: 0x466288)
     /// Healthy, done, passed. The accent, not a green of its own.
     ///
     /// The ramp says so in as many words, and the reference render of this window agrees: its
@@ -387,7 +409,9 @@ enum Palette {
     static let synVariable = dynamic(light: 0x6A3FB5, dark: 0xB49BF0)
     static let synAttribute = dynamic(light: 0x8A6A00, dark: 0xD9B65C)
     static let synOperator = dynamic(light: 0x5A5A60, dark: 0xA8A8B0)
-    static let synConstant = dynamic(light: 0x1C6FBB, dark: 0x7FB3F0)
+    /// A constant is a number as far as this ramp is concerned, and saying so is cheaper than
+    /// keeping two copies of one pair in step.
+    static let synConstant = synNumber
 
     /// A colour that differs between appearances, for the few cases where no semantic colour
     /// means the right thing. Both arguments are plain 0xRRGGBB.

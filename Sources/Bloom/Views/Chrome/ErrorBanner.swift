@@ -22,7 +22,7 @@ struct ErrorBanner: View {
                     .font(Typo.labelEmphasis)
                 Text(message)
                     .font(Typo.label)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             // An error in a developer tool is something you paste somewhere else.
@@ -33,7 +33,7 @@ struct ErrorBanner: View {
             Button("Dismiss", systemImage: "xmark", action: onDismiss)
             .labelStyle(.iconOnly)
             .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Palette.textSecondary)
             .help("Dismiss")
         }
         .padding(Metrics.gutter)
