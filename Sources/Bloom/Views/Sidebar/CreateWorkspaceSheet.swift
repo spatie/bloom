@@ -541,11 +541,10 @@ struct CreateWorkspaceSheet: View {
                     )
                     caret = (prompt as NSString).length
                 }
+                // Written before the focus is moved, because `focusTheBox` reads the mode back
+                // out of it and would otherwise put the keyboard in the box that is leaving.
                 rememberedMode = chosen.rawValue
-                // The keyboard goes to whichever box is now on screen. `ComposerPrompt` takes it
-                // through this binding; the name field has a focus state of its own.
-                isFocused = chosen.runsAnAgent
-                isNameFocused = !chosen.runsAnAgent
+                focusTheBox()
             }
         )
     }
