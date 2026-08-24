@@ -256,6 +256,16 @@ struct RootView: View {
             createStartsOnPullRequest = note.userInfo?[Notification.bloomPullRequestKey] as? Bool == true
             isCreateSheetPresented = true
         }
+        // Presses the create sheet's "Just a terminal" for a capture run, which cannot press a
+        // button. It goes through `createWorkspace` exactly as the button does, sea and all, so
+        // what is photographed is the real workspace rather than a hand-built row that looks like
+        // one. Debug builds only, through the same flag family as `--create-sheet`.
+        .onReceive(NotificationCenter.default.publisher(for: .bloomStartTerminalWorkspace)) { note in
+            let named = note.object as? String
+            let repo = app.repos.first { $0.name == named } ?? app.repos.first
+            guard let repo else { return }
+            Task { await app.createWorkspace(in: repo, prompt: "", opensWith: .terminal) }
+        }
     }
 
     /// The inspector answers one question, what this workspace's agent changed, so on Home it has
@@ -324,6 +334,8 @@ extension Notification.Name {
     static let bloomToggleSidebar = Notification.Name("bloom.toggleSidebar")
     static let bloomShowArchive = Notification.Name("bloom.showArchive")
     static let bloomNewWorkspace = Notification.Name("bloom.newWorkspace")
+    /// Posted only by `Snapshot`, and only in a debug build. See the handler above.
+    static let bloomStartTerminalWorkspace = Notification.Name("bloom.startTerminalWorkspace")
 }
 
 extension Notification {

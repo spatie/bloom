@@ -139,6 +139,37 @@ enum Snapshot {
         #endif
     }
 
+    /// Presses the create sheet's "Just a terminal", so the workspace it makes can be photographed.
+    ///
+    ///     Bloom --terminal-workspace plumage
+    ///
+    /// The button cannot be pressed by a capture run, and the workspace it produces is the whole
+    /// of what there is to look at: which name the sidebar row wears when no model is ever going
+    /// to be asked for one, which tab the column opens on when there is no session at all, and
+    /// which directory the shell is standing in. Building a row by hand to photograph instead
+    /// would be photographing the harness.
+    ///
+    /// Debug builds only, like `--running` and `--notice`, for the same reason: a shipped copy has
+    /// no business cutting a worktree nobody asked for.
+    static func scheduleTerminalWorkspaceIfRequested() {
+        #if DEBUG
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: "--terminal-workspace") else { return }
+        let project = index + 1 < arguments.count && !arguments[index + 1].hasPrefix("--")
+            ? arguments[index + 1]
+            : nil
+
+        Task { @MainActor in
+            // After `bootstrap`, the beat `--open-url` waits for and for the same reason: the
+            // project list this names is not loaded before it.
+            try? await Task.sleep(for: .seconds(3))
+            NotificationCenter.default.post(
+                name: .bloomStartTerminalWorkspace, object: project
+            )
+        }
+        #endif
+    }
+
     /// Raises the corner notice, so it can be filmed.
     ///
     ///     Bloom --notice 4 "Bloom named this workspace X. Its branch is still `y`, because ..."

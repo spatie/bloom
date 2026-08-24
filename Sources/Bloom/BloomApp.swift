@@ -29,6 +29,7 @@ struct BloomApp: App {
         Snapshot.scheduleRunningStateIfRequested()
         Snapshot.scheduleSetupLogExpansionIfRequested()
         Snapshot.scheduleNoticeIfRequested()
+        Snapshot.scheduleTerminalWorkspaceIfRequested()
 
         // A development affordance too: `Bloom --frame-probe <out.json>` drags the sidebar divider
         // and records how long each frame actually took. See `FrameProbe`.
