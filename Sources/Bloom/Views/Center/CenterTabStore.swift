@@ -65,13 +65,29 @@ final class CenterTabStore {
         tabs(for: workspaceID).first { $0.kind == .notes }
     }
 
-    /// What the strip calls a tab. Only a review tab needs asking: it is named after what it is
-    /// showing rather than after itself, so that a file nobody changed is not filed under "All
-    /// changes", and the answer moves as the reader walks the list.
+    /// What the strip calls a tab.
+    ///
+    /// Two kinds are named after what they are showing rather than after themselves, and for the
+    /// same reason: a strip of three of them all called "Review" or all called "Browser" tells the
+    /// reader nothing about which is which.
+    ///
+    /// A review is named after the file under the cursor, so that a file nobody changed is not
+    /// filed under "All changes", and the answer moves as the reader walks the list. A browser is
+    /// named after the page, the way Safari's tabs are; the chain, and everything it has to
+    /// survive, is `BrowserTabTitle`.
     func displayTitle(of tab: CenterTab, in model: WorkspaceModel) -> String {
-        guard tab.kind == .review, !tab.path.isEmpty else { return tab.title }
-        if model.changedFiles.contains(where: { $0.path == tab.path }) { return tab.title }
-        return (tab.path as NSString).lastPathComponent
+        switch tab.kind {
+        case .browser:
+            return BrowserTabTitle.title(
+                page: tab.pageTitle, address: tab.url, fallback: tab.title, isNamed: tab.isNamed
+            )
+        case .review:
+            guard !tab.path.isEmpty else { return tab.title }
+            if model.changedFiles.contains(where: { $0.path == tab.path }) { return tab.title }
+            return (tab.path as NSString).lastPathComponent
+        case .terminal, .notes:
+            return tab.title
+        }
     }
 
     // MARK: - Writing
@@ -220,10 +236,15 @@ final class CenterTabStore {
         apply(ordered, to: workspaceID)
     }
 
+    /// A name somebody typed, which for a browser tab also settles that the page may not rename
+    /// it from here on. See `CenterTab.isNamed`.
     func rename(_ tab: CenterTab, to title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        update(tab) { $0.title = trimmed }
+        update(tab) {
+            $0.title = trimmed
+            $0.isNamed = true
+        }
     }
 
     /// Opens the workspace's review tab on a file, or points the one it already has at it.
@@ -265,9 +286,29 @@ final class CenterTabStore {
     }
 
     /// Called as the page navigates, so the tab remembers where it got to.
+    ///
+    /// **The only thing that ever clears a page title.** A navigation within one host keeps the
+    /// name up while the next page loads, which is what stops the strip flickering through three
+    /// strings a second; a navigation off it drops the name at once, so a tab never claims to be a
+    /// page you have left. The rule is `BrowserTabTitle.survives`.
     func setURL(_ url: String, for tab: CenterTab) {
-        guard !url.isEmpty, url != tab.url else { return }
-        update(tab) { $0.url = url }
+        guard !url.isEmpty else { return }
+        setPage(BrowserTabTitle.BrowserPage(address: url), for: tab)
+    }
+
+    /// Called whenever the web view moves or the page renames itself, with both facts at once.
+    ///
+    /// One entry point for the pair rather than one each, because a title and the navigation that
+    /// brought it arrive in the same update and nothing decides which of two `onChange` bodies
+    /// runs first. `BrowserTabTitle.advance` holds the whole rule.
+    func setPage(_ page: BrowserTabTitle.BrowserPage, for tab: CenterTab) {
+        let showing = BrowserTabTitle.BrowserPage(address: tab.url, title: tab.pageTitle)
+        let next = BrowserTabTitle.advance(from: showing, to: page)
+        guard next != showing else { return }
+        update(tab) {
+            $0.url = next.address
+            $0.pageTitle = next.title
+        }
     }
 
     /// Closes a tab and stops whatever it was running. Any pane showing it goes with it, and the

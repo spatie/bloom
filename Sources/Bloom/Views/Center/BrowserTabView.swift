@@ -65,12 +65,20 @@ struct BrowserTabView: View {
         .task(id: tab.id) {
             address = session.displayAddress
             if address.isEmpty { isAddressFocused = true }
+            // A pane redrawn onto a session that has been loading all along, which is what
+            // switching workspace and coming back is. Nothing changed while this view was gone,
+            // so no `onChange` will fire, and without this the strip would sit on the host until
+            // the reader navigated.
+            tabs.setPage(session.page, for: tab)
         }
-        .onChange(of: session.currentURL) {
+        // The page and the address travel together, so the strip is told once. Two `onChange`
+        // bodies, one per fact, put the title and the navigation that brought it in an order
+        // nothing promises. See `CenterTabStore.setPage`.
+        .onChange(of: session.page) {
             // The page navigated on its own: a link, a redirect, a router. The field follows it,
             // unless the user is in the middle of typing a different address into it.
             if !isAddressFocused { address = session.displayAddress }
-            tabs.setURL(session.displayAddress, for: tab)
+            tabs.setPage(session.page, for: tab)
         }
     }
 

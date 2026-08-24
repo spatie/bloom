@@ -269,7 +269,11 @@ struct SessionTabsView: View {
             isAtPaneEdge: isAtPaneEdge(tab.id),
             surface: Self.pane.surface,
             isRenaming: renamingID == tab.id,
-            editableTitle: tab.title,
+            // What is on the tab, not what the tab is filed under. A browser showing "Spatie"
+            // whose editor opened on "Browser" reads as the rename having gone to the wrong tab,
+            // and the first thing anyone does is select all and retype the name they could
+            // already see.
+            editableTitle: tabs.displayTitle(of: tab, in: model),
             canClose: true,
             canRename: tab.kind != .review && tab.kind != .notes,
             closeTitle: closeTitle(for: tab),

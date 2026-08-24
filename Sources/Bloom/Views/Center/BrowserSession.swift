@@ -34,8 +34,25 @@ final class BrowserSession {
     private(set) var isLoading = false
     /// Where the page actually is, which is not what the user has typed into the address field.
     private(set) var currentURL: URL?
+    /// Where the page is and what it says it is called, as one value.
+    ///
+    /// The pair rather than two properties, because the strip has to be told about both in one
+    /// go: a title and the navigation that brought it arrive in the same update, and a view with
+    /// an `onChange` for each has no way to say which runs first. See
+    /// `BrowserTabTitle.advance`.
+    ///
+    /// The title here is never cleared. WebKit sets `title` to nil the moment a new document
+    /// commits and fills it in a beat later, so mirroring the property exactly would empty this
+    /// between every two pages; holding the last one is what lets the strip keep a name up while
+    /// the next page loads. Whether it is still true of where the tab has got to is decided in
+    /// `BrowserTabTitle`, against the address beside it.
+    private(set) var page = BrowserTabTitle.BrowserPage()
 
     @ObservationIgnored private let navigation = NavigationObserver()
+    /// KVO on `title`, because there is no delegate callback for it: `didFinish` fires before the
+    /// title of a page that sets it from script, and a page that changes its own title while you
+    /// are reading it fires nothing at all.
+    @ObservationIgnored private var titleObservation: NSKeyValueObservation?
 
     init(url: String) {
         Self.preferInspectorDocked()
@@ -50,8 +67,16 @@ final class BrowserSession {
         webView.underPageBackgroundColor = NSColor(Palette.surface)
         navigation.owner = self
         webView.navigationDelegate = navigation
+        titleObservation = webView.observe(\.title, options: [.initial, .new]) { [weak self] view, _ in
+            // On the main thread, measured rather than assumed: WebKit posts every one of these
+            // from there, which is also the only thread its properties may be read on.
+            MainActor.assumeIsolated {
+                self?.adopt(BrowserTabTitle.BrowserPage(title: view.title ?? ""))
+            }
+        }
         // Shown in the address field from the first frame, before anything has been fetched.
         currentURL = BrowserAddress.url(from: url)
+        page = BrowserTabTitle.BrowserPage(address: displayAddress)
         load(url)
     }
 
@@ -109,6 +134,7 @@ final class BrowserSession {
     }
 
     func stop() {
+        titleObservation = nil
         webView.stopLoading()
         webView.navigationDelegate = nil
         // The page view rather than the web view, so an attached inspector comes out of the window
@@ -124,11 +150,27 @@ final class BrowserSession {
         currentURL?.absoluteString ?? ""
     }
 
+    /// The page moved, or renamed itself, or both. One door for all three, and the rule is
+    /// `BrowserTabTitle.advance`.
+    ///
+    /// **The title has to be cleared here as well as in the tab.** Measured against a real web
+    /// view: loading a page with no `<title>` fires the observation with an empty string, which is
+    /// no news rather than no title, so this holds the last name it had. Without the clearing that
+    /// `advance` does on a change of host, a session that had been on spatie.be went on offering
+    /// "Spatie" from every address after it, and the tab, which had correctly dropped the name on
+    /// the navigation, was handed it straight back on the next update.
+    private func adopt(_ page: BrowserTabTitle.BrowserPage) {
+        let next = BrowserTabTitle.advance(from: self.page, to: page)
+        guard next != self.page else { return }
+        self.page = next
+    }
+
     fileprivate func refresh() {
         canGoBack = webView.canGoBack
         canGoForward = webView.canGoForward
         isLoading = webView.isLoading
         if let url = webView.url { currentURL = url }
+        adopt(BrowserTabTitle.BrowserPage(address: displayAddress))
     }
 
     /// Puts Inspect Element in the page's own context menu, and with it the whole Web Inspector.

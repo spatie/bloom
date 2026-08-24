@@ -32,6 +32,22 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
     /// Browser only, and kept up to date as the user navigates, so reopening the workspace lands
     /// on the page they were looking at rather than back on the dev server's front door.
     var url: String = ""
+    /// Browser only: the last title the page reported for itself, tidied by
+    /// `BrowserTabTitle.tidy`, and cleared the moment the tab leaves that host. Empty while a
+    /// first page loads, and empty for a page that never says what it is.
+    ///
+    /// Stored with the rest of the tab, so reopening a workspace puts the page's own name back in
+    /// the strip on the first frame rather than showing the host for the second the page takes to
+    /// load. It is a cache of something the network will say again, which is exactly the sort of
+    /// thing user defaults are for.
+    var pageTitle: String = ""
+    /// Whether `title` is a name somebody typed rather than the one the strip handed out.
+    ///
+    /// Only a browser tab consults it, and it is the reason it cannot be inferred from the string:
+    /// "Browser" is what a new tab is called AND a perfectly good name to type over one, and a tab
+    /// whose owner called it Browser must not then start renaming itself from every page it
+    /// visits.
+    var isNamed: Bool = false
     /// Review only: the file being read, relative to the worktree. Kept here rather than taken
     /// from `WorkspaceModel.selectedFilePath` because that one is only ever a CHANGED file: the
     /// poll drops any selection git no longer reports, which would throw the reader out of a file
@@ -73,14 +89,21 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
         title = try container.decode(String.self, forKey: .title)
         url = try container.decodeIfPresent(String.self, forKey: .url) ?? ""
         path = try container.decodeIfPresent(String.self, forKey: .path) ?? ""
+        pageTitle = try container.decodeIfPresent(String.self, forKey: .pageTitle) ?? ""
+        isNamed = try container.decodeIfPresent(Bool.self, forKey: .isNamed) ?? false
     }
 
-    init(id: String = newID(), workspaceID: WorkspaceID, kind: Kind, title: String, url: String = "", path: String = "") {
+    init(
+        id: String = newID(), workspaceID: WorkspaceID, kind: Kind, title: String,
+        url: String = "", path: String = "", pageTitle: String = "", isNamed: Bool = false
+    ) {
         self.id = id
         self.workspaceID = workspaceID
         self.kind = kind
         self.title = title
         self.url = url
         self.path = path
+        self.pageTitle = pageTitle
+        self.isNamed = isNamed
     }
 }
