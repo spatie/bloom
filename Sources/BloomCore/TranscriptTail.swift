@@ -34,15 +34,27 @@ public enum TranscriptTail {
     /// whole number of turns rather than the back half of one. Only as far as the tail's own length
     /// again: a single turn longer than that is not worth doubling the arrival frame for, and the
     /// history is on its way regardless.
-    public static func start(in kinds: [MessageKind], length: Int = length) -> Int {
-        guard length > 0, kinds.count > length else { return 0 }
+    /// Over any collection of kinds rather than over an array of them, and that is the caller's
+    /// allocation rather than a generality for its own sake. `TranscriptListView` asks this on
+    /// every pass, inside the arrival window the whole mechanism exists to protect, and
+    /// `rows.map(\.kind)` built an array holding every kind in the session to answer a question
+    /// that reads at most twice the tail's length of them. `rows.lazy.map(\.kind)` reads the same
+    /// rows through the same subscript and allocates nothing.
+    ///
+    /// The answer is an offset from the start of the collection, which is what it has always been.
+    public static func start<Kinds: RandomAccessCollection>(
+        in kinds: Kinds, length: Int = length
+    ) -> Int where Kinds.Element == MessageKind, Kinds.Index == Int {
+        let count = kinds.count
+        guard length > 0, count > length else { return 0 }
 
-        let cut = kinds.count - length
+        let first = kinds.startIndex
+        let cut = count - length
         let reach = max(0, cut - length)
         var index = cut
         while index > reach {
             // A turn ends on its result row, so the row after one begins the next turn.
-            if kinds[index - 1] == .result { return index }
+            if kinds[first + index - 1] == .result { return index }
             index -= 1
         }
         return cut

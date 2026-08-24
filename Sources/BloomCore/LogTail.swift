@@ -69,25 +69,45 @@ public enum LogTail {
     /// U+2028, U+2029) are deliberately not counted. A setup script's output does not contain
     /// them, and `SetupDiagnosis.split`, which decides what a LINE of a log actually is, has never
     /// recognised them either: counting them here would have this disagree with what is drawn.
+    /// Walked over the string's own UTF-8 view rather than over `Array(text.utf8)`, which is the
+    /// second half of the same measurement. The byte scan was the cheap part; the copy in front of
+    /// it was not. A log of two hundred thousand characters allocates and fills two hundred
+    /// thousand bytes before a single one of them is looked at, and this is asked from a view body.
+    ///
+    /// One forward pass, because a `String.UTF8View` walks forwards cheaply and backwards through
+    /// its index arithmetic. The trailing newlines the old walk trimmed first are dropped at the
+    /// end instead: separators are counted as they are seen, and the run of them that no content
+    /// follows is taken off the total. That is the same answer, arrived at without knowing where
+    /// the end of the content is until the end is reached.
     public static func lineCount(_ text: String) -> Int {
-        let bytes = Array(text.utf8)
-        var end = bytes.count
-        while end > 0, bytes[end - 1] == 0x0A || bytes[end - 1] == 0x0D { end -= 1 }
-        guard end > 0 else { return 0 }
+        let bytes = text.utf8
+        let end = bytes.endIndex
 
-        var count = 1
-        var index = 0
+        var total = 0
+        /// Separators seen since the last byte that was not one, which at the end of the walk is
+        /// exactly the trailing run the old code trimmed before counting.
+        var sinceContent = 0
+        var sawContent = false
+
+        var index = bytes.startIndex
         while index < end {
             let byte = bytes[index]
+            index = bytes.index(after: index)
             if byte == 0x0D {
-                count += 1
+                total += 1
+                sinceContent += 1
                 // A CRLF is one separator, and one `Character`.
-                index += (index + 1 < end && bytes[index + 1] == 0x0A) ? 2 : 1
+                if index < end, bytes[index] == 0x0A { index = bytes.index(after: index) }
+            } else if byte == 0x0A {
+                total += 1
+                sinceContent += 1
             } else {
-                if byte == 0x0A { count += 1 }
-                index += 1
+                sawContent = true
+                sinceContent = 0
             }
         }
-        return count
+
+        guard sawContent else { return 0 }
+        return 1 + total - sinceContent
     }
 }

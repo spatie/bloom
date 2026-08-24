@@ -87,10 +87,14 @@ struct TranscriptRowView: View, Equatable {
     private var content: some View {
         switch row.kind {
         case .user:
+            // Read once for the row. It walks the stored request's content blocks and joins them,
+            // and both branches below need it: the second used to reach it through `userTurn`, so
+            // an ordinary bubble built the same string twice per pass.
+            let typed = userText
             // A review turn first: its message is mostly scaffolding the reader never typed, so
             // it renders as the typed words plus a chip per comment. `split` is strict and
             // returns nil for everything else, which falls through to the ordinary bubble.
-            if let review = ReviewTurn.split(userText) {
+            if let review = ReviewTurn.split(typed) {
                 UserTurnRowView(
                     text: review.message,
                     reviewChips: review.chips,
@@ -98,9 +102,16 @@ struct TranscriptRowView: View, Equatable {
                     maxWidth: maxBubbleWidth
                 )
             } else {
+                // Attachments reach the agent as paths in the prompt text, which is the only
+                // reference every agent can follow, so this is the point where they are taken back
+                // out of the sentence and handed to the row as files. `AttachmentTrailer.split`
+                // returns the text untouched at the first thing that is not exactly the shape the
+                // composer writes, so a message that merely talks about attached files is never
+                // edited.
+                let turn = AttachmentTrailer.split(typed)
                 UserTurnRowView(
-                    text: userTurn.body,
-                    attachments: userTurn.paths,
+                    text: turn.body,
+                    attachments: turn.paths,
                     workspace: workspace,
                     maxWidth: maxBubbleWidth
                 )
@@ -120,6 +131,7 @@ struct TranscriptRowView: View, Equatable {
             if let use = toolUse {
                 ToolRowView(
                     use: use,
+                    presentation: TranscriptPresentationCache.presentation(rowID: row.id, use: use),
                     workspace: workspace,
                     result: toolResult,
                     isError: row.isError,
@@ -228,17 +240,6 @@ struct TranscriptRowView: View, Equatable {
               case .toolResult(let result)? = TranscriptEventCache.event(rowID: row.id, payload: payload)
         else { return nil }
         return result
-    }
-
-    /// What the user typed, and what they attached to it.
-    ///
-    /// Attachments reach the agent as paths in the prompt text, which is the only reference every
-    /// agent can follow, so this is the point where they are taken back out of the sentence and
-    /// handed to the row as files. `AttachmentTrailer.split` returns the text untouched at the
-    /// first thing that is not exactly the shape the composer writes, so a message that merely
-    /// talks about attached files is never edited.
-    private var userTurn: (body: String, paths: [String]) {
-        AttachmentTrailer.split(userText)
     }
 
     /// A user turn is the line Bloom itself wrote to stdin, so it is read straight out of the

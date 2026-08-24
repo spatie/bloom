@@ -26,8 +26,15 @@ struct TranscriptListView: View {
     /// re-runs this body. See `TranscriptHoverHost`.
     @State private var hoverHost = TranscriptHoverHost()
 
-    /// Only to reach the workspace's model, which is what a link opened in a browser tab needs.
-    /// Nothing in `body` reads anything else off it.
+    /// Two things, and the comment used to claim one.
+    ///
+    /// `linkActions` reaches the workspace's model, which is what a link opened in a browser tab
+    /// needs, and `existingModel` reads nothing observable to answer. `visibleRows` reads
+    /// `pendingTranscriptTarget`, and that one is a real subscription: this body runs again when
+    /// a transcript search sets it and again when the arrival clears it. It stays, because it is
+    /// what keeps a session that was opened on a searched row from drawing a tail the row is not
+    /// in, and two passes per search is not a cost worth moving anything for. What must not
+    /// appear here is a read of anything that moves while a turn runs.
     @Environment(AppModel.self) private var app
 
     /// Every programmatic move to the live end goes through this: opening a session on its end,
@@ -141,13 +148,20 @@ struct TranscriptListView: View {
     private var showsPlaceholder: Bool {
         transcript.isLoaded
             && !transcript.isRunning
-            && !transcript.isStreaming
             && !showsSetup
             // A workspace whose opening prompt is still queued, or whose first message is on its
             // way out, has nothing in its session and a bubble at the bottom of it. An empty state
             // centred over the pane would be drawn straight across the one thing on screen, which
             // is the same mistake `showsSetup` above is here to avoid.
             && transcript.hasNothingToShow
+            // Last, and the position is the point rather than a tidying. `isStreaming` reads the
+            // per-token buffers that `StreamingTailView` exists to keep out of this body: reading
+            // one here subscribes the whole list to it, and every delta of every answer would run
+            // a pass over every realised row. `&&` short-circuits, so a term that is only reached
+            // when a session is loaded, idle, without a setup row and with nothing at all in it is
+            // a term that is never reached while an answer is streaming. It used to sit second,
+            // where the same short circuit saved it by accident.
+            && !transcript.isStreaming
     }
 
     /// The rows this pass draws, which is every row of the session except on the frame that
@@ -169,7 +183,10 @@ struct TranscriptListView: View {
         let rows = transcript.rows
         guard drawnInFull != transcript.session.id else { return rows[...] }
 
-        let start = TranscriptTail.start(in: rows.map(\.kind))
+        // Lazily, so the kinds are read through the rows rather than copied out of them. This is
+        // asked on every pass, inside the arrival window the tail exists to protect, and the walk
+        // reads at most twice the tail's length of them however long the session is.
+        let start = TranscriptTail.start(in: rows.lazy.map(\.kind))
         guard start > 0 else { return rows[...] }
         // A session opens on the first thing the user has not read, and a scroll can only find a
         // row the list is drawing. Anything unread above the tail and there is no tail: opening in
@@ -232,6 +249,12 @@ struct TranscriptListView: View {
                             showSetupLogEnd(proxy, wasAsked: wasAsked)
                         }
                     )
+                    // On the values, because the two closures above are rebuilt on every pass of
+                    // this body and a struct holding a function can never compare equal to itself.
+                    // Without this the feed re-ran its own body every time this list did, and that
+                    // body rebuilds the setup timeline from a log that may be two hundred thousand
+                    // characters long. See `WorkspaceEventsView.==`.
+                    .equatable()
 
                     ForEach(visibleRows) { row in
                         if TranscriptNoise.isHidden(row) {

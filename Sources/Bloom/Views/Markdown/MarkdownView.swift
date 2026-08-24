@@ -2,11 +2,27 @@ import SwiftUI
 import AppKit
 import BloomCore
 
+/// A parsed answer, and everything derived from the parse that a caller would otherwise derive
+/// again on every pass.
 private final class MarkdownBlockBox: NSObject {
     let blocks: [MarkdownBlock]
 
-    init(_ blocks: [MarkdownBlock]) {
+    /// Every address the answer holds, in order and without repeats.
+    ///
+    /// Found once, here, because `LinkPolicy.addresses(in:)` walks the whole block tree and every
+    /// inline run inside it, and `MarkdownView.body` asked for it in front of blocks that were
+    /// already cached: the parse was kept and the walk over its result was not, so a settled row
+    /// paid for it on every pass of the transcript's list. It is a pure function of the blocks, and
+    /// the blocks are what this box exists to hold.
+    let addresses: [String]
+
+    init(_ blocks: [MarkdownBlock], addresses: [String]) {
         self.blocks = blocks
+        self.addresses = addresses
+    }
+
+    convenience init(_ blocks: [MarkdownBlock]) {
+        self.init(blocks, addresses: LinkPolicy.addresses(in: blocks))
     }
 }
 
@@ -19,12 +35,12 @@ private enum MarkdownParseCache {
         return cache
     }()
 
-    static func blocks(for text: String) -> [MarkdownBlock] {
+    static func parsed(for text: String) -> MarkdownBlockBox {
         let key = text as NSString
-        if let cached = values.object(forKey: key) { return cached.blocks }
-        let blocks = MarkdownParser.parse(text)
-        values.setObject(MarkdownBlockBox(blocks), forKey: key, cost: text.utf8.count)
-        return blocks
+        if let cached = values.object(forKey: key) { return cached }
+        let box = MarkdownBlockBox(MarkdownParser.parse(text))
+        values.setObject(box, forKey: key, cost: text.utf8.count)
+        return box
     }
 
     /// The live tail gets a cache of exactly one entry rather than a share of the one above.
@@ -34,13 +50,17 @@ private enum MarkdownParseCache {
     /// streamed answer would evict every finished row in it and leave the visible transcript
     /// re-parsing settled prose on its next redraw. One entry is still worth keeping, because
     /// SwiftUI is free to evaluate a body more than once for the same value.
-    private static var streamed: (text: String, blocks: [MarkdownBlock])?
+    ///
+    /// The addresses in this one are always empty, and that is not an omission: a run that is
+    /// still arriving offers none, so there is nothing for the walk to find and nothing yet worth
+    /// finding. See `MarkdownView.body`.
+    private static var streamed: (text: String, box: MarkdownBlockBox)?
 
-    static func streamingBlocks(for text: String) -> [MarkdownBlock] {
-        if let streamed, streamed.text == text { return streamed.blocks }
-        let blocks = MarkdownParser.parse(text)
-        streamed = (text, blocks)
-        return blocks
+    static func streamingParsed(for text: String) -> MarkdownBlockBox {
+        if let streamed, streamed.text == text { return streamed.box }
+        let box = MarkdownBlockBox(MarkdownParser.parse(text), addresses: [])
+        streamed = (text, box)
+        return box
     }
 }
 
@@ -51,28 +71,29 @@ public struct MarkdownView: View {
 
     /// - Parameter isStreaming: whether this text is still being written. It changes nothing about
     ///   what is drawn, only which cache the parse goes through. See
-    ///   `MarkdownParseCache.streamingBlocks(for:)`.
+    ///   `MarkdownParseCache.streamingParsed(for:)`.
     public init(_ text: String, isStreaming: Bool = false) {
         self.text = text
         self.isStreaming = isStreaming
     }
 
     public var body: some View {
-        let blocks = isStreaming
-            ? MarkdownParseCache.streamingBlocks(for: text)
-            : MarkdownParseCache.blocks(for: text)
         // Which addresses may be opened, and which may not, is `LinkPolicy.opens`. It is not
         // a rule about this view: the user's own bubble is drawn by a different one and goes
-        // through the same door.
-        let addresses = isStreaming ? [] : LinkPolicy.addresses(in: blocks)
-        MarkdownBlocksView(blocks: blocks)
+        // through the same door. The walk that finds them happens where the parse does, so a
+        // settled answer pays for neither twice. See `MarkdownBlockBox.addresses`.
+        //
+        // Not while it is still being written. A menu rebuilt on every token would be work done
+        // for a reader who is not there yet, and there is nothing to copy until the sentence
+        // carrying the address has finished arriving, so the streaming slot holds none.
+        let parsed = isStreaming
+            ? MarkdownParseCache.streamingParsed(for: text)
+            : MarkdownParseCache.parsed(for: text)
+        MarkdownBlocksView(blocks: parsed.blocks)
             .environment(\.markdownIsStreaming, isStreaming)
             .opensTranscriptLinks()
-            // Not while it is still being written. A menu rebuilt on every token would be work
-            // done for a reader who is not there yet, and there is nothing to copy until the
-            // sentence carrying the address has finished arriving. One walk for both takers.
-            .transcriptLinkMenu(addresses)
-            .transcriptLinkActions(addresses)
+            .transcriptLinkMenu(parsed.addresses)
+            .transcriptLinkActions(parsed.addresses)
     }
 }
 
@@ -103,8 +124,11 @@ private struct MarkdownBlocksView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MarkdownMetrics.blockGap) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { offset, block in
-                MarkdownBlockView(block: block, foreground: foreground, isFirst: offset == 0)
+            // Over the indices rather than over `Array(blocks.enumerated())`, which allocates a
+            // second array of pairs every pass to draw the same blocks. The same change is made
+            // everywhere below it, and the identity is what it always was: a block's position.
+            ForEach(blocks.indices, id: \.self) { offset in
+                MarkdownBlockView(block: blocks[offset], foreground: foreground, isFirst: offset == 0)
             }
         }
     }
@@ -229,12 +253,12 @@ private struct MarkdownBlockView: View {
         // A tight list at zero read as one paragraph with dots in it, and a loose one at four was
         // tighter than the gap between the marker and its own text.
         VStack(alignment: .leading, spacing: tight ? Metrics.spacingTight : Metrics.spacing) {
-            ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
+            ForEach(items.indices, id: \.self) { offset in
                 // Baseline, not top: this is the alignment the task list beside it already used,
                 // and top alignment sat the marker a fraction above the line it marks.
                 HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
                     marker(start.map { "\($0 + offset)." } ?? "\u{2022}")
-                    MarkdownBlocksView(blocks: item, foreground: foreground)
+                    MarkdownBlocksView(blocks: items[offset], foreground: foreground)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
@@ -243,7 +267,8 @@ private struct MarkdownBlockView: View {
 
     private func taskList(_ items: [(checked: Bool, inline: [MarkdownInline])]) -> some View {
         VStack(alignment: .leading, spacing: Metrics.spacingTight) {
-            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+            ForEach(items.indices, id: \.self) { index in
+                let item = items[index]
                 HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
                     Image(systemName: item.checked ? "checkmark.square.fill" : "square")
                         .font(Typo.body)
@@ -260,11 +285,11 @@ private struct MarkdownBlockView: View {
         ScrollView(.horizontal) {
             Grid(horizontalSpacing: 0, verticalSpacing: 0) {
                 GridRow {
-                    ForEach(Array(headers.enumerated()), id: \.offset) { column, header in
+                    ForEach(headers.indices, id: \.self) { column in
                         // A header set a rung below the cells under it was the wrong way round.
                         // Same size, heavier, on a fill: that is what makes it read as a header.
                         tableCell(
-                            header,
+                            headers[column],
                             rung: Typo.bodyEmphasis,
                             alignment: alignment(at: column, in: alignments),
                             isLastColumn: column == headers.count - 1,
@@ -273,11 +298,12 @@ private struct MarkdownBlockView: View {
                         .background(Palette.surfaceSunken)
                     }
                 }
-                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                ForEach(rows.indices, id: \.self) { index in
+                    let row = rows[index]
                     GridRow {
-                        ForEach(Array(row.enumerated()), id: \.offset) { column, cell in
+                        ForEach(row.indices, id: \.self) { column in
                             tableCell(
-                                cell,
+                                row[column],
                                 rung: Typo.body,
                                 alignment: alignment(at: column, in: alignments),
                                 isLastColumn: column == row.count - 1,
@@ -438,12 +464,65 @@ private final class InlineAttributesKey: NSObject {
         self.font = font
         self.code = code
         self.color = color
+        cachedHash = Self.hash(of: inline, font: font, code: code, color: color)
+    }
+
+    /// **A weak hash, on purpose, and the equality below is unchanged.**
+    ///
+    /// This was `hasher.combine(inline)`, which walks the recursive tree and SipHashes every string
+    /// in it, so looking a cached paragraph up cost a pass over the whole paragraph. What it was
+    /// guarding is `isEqual`'s `inline == other.inline`, and that comparison almost never walks
+    /// anything: the blocks come out of `MarkdownParseCache`, so both sides are the same array
+    /// buffer and `Array.==` answers on identity alone. The lookup was paying the full price of the
+    /// comparison it exists to avoid.
+    ///
+    /// So the hash is the paragraph's shape rather than its contents: how many runs it has, what
+    /// the first and last of them are, and the presentation. Two paragraphs that agree on all of
+    /// that land in one bucket and are told apart by `isEqual`, which is exact. A weaker hash can
+    /// only cost bucket collisions; it cannot return the wrong string.
+    private static func hash(of inline: [MarkdownInline], font: Font, code: Font, color: Color) -> Int {
         var hasher = Hasher()
-        hasher.combine(inline)
+        hasher.combine(inline.count)
+        if let first = inline.first { combine(first, into: &hasher) }
+        if let last = inline.last, inline.count > 1 { combine(last, into: &hasher) }
         hasher.combine(font)
         hasher.combine(code)
         hasher.combine(color)
-        cachedHash = hasher.finalize()
+        return hasher.finalize()
+    }
+
+    /// How much of a run's text is looked at. Long enough that two paragraphs opening on the same
+    /// few words are still told apart, short enough that the walk is bounded.
+    private static let sample = 24
+
+    /// One run, as a case tag and a bounded amount of what is in it.
+    private static func combine(_ value: MarkdownInline, into hasher: inout Hasher) {
+        switch value {
+        case let .text(text):
+            hasher.combine(0)
+            hasher.combine(text.utf8.count)
+            hasher.combine(text.prefix(sample))
+        case let .code(text):
+            hasher.combine(1)
+            hasher.combine(text.utf8.count)
+            hasher.combine(text.prefix(sample))
+        case let .emphasis(children):
+            hasher.combine(2)
+            hasher.combine(children.count)
+        case let .strong(children):
+            hasher.combine(3)
+            hasher.combine(children.count)
+        case let .strikethrough(children):
+            hasher.combine(4)
+            hasher.combine(children.count)
+        case let .link(text, url):
+            hasher.combine(5)
+            hasher.combine(text.count)
+            hasher.combine(url.utf8.count)
+            hasher.combine(url.prefix(sample))
+        case .lineBreak:
+            hasher.combine(6)
+        }
     }
 
     override var hash: Int { cachedHash }

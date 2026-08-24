@@ -61,11 +61,20 @@ final class TranscriptPayloadKey: NSObject {
 
     override var hash: Int { cachedHash }
 
+    /// The lengths rather than the bytes, and the hash above is what makes that safe.
+    ///
+    /// Two keys reach this having already agreed on a SipHash of the whole payload and on the row
+    /// id. `Data.==` then memcmp'd the payload again, in full, on every cache hit: 1.6MB across
+    /// 189 rows in a real session, on the main thread, on every pass that decodes a row. That is
+    /// the same measurement `TranscriptRowView.==` records for the comparison it refuses to make,
+    /// and the same answer: what identifies a stored row is its id, and its payload is written once
+    /// and never rewritten. The length is kept as the cheap half of the guard the byte comparison
+    /// was, for a row that somehow is rewritten into something of a different size.
     override func isEqual(_ object: Any?) -> Bool {
         guard let other = object as? TranscriptPayloadKey else { return false }
         return cachedHash == other.cachedHash
             && rowID == other.rowID
-            && payload == other.payload
+            && payload.count == other.payload.count
     }
 }
 

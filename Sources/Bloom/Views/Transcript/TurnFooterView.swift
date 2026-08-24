@@ -34,7 +34,25 @@ struct TurnFooterView: View {
     @State private var files: [TurnFile] = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // Read once for the pass, and handed down.
+        //
+        // Every one of these is derived from the turn's result payload, which is one of the larger
+        // ones in the file, and the decode in front of it went through `TranscriptEventCache`
+        // precisely because the footer asks for it more than once. It asked about ten times: the
+        // glyph, its tint, the accessible label, the duration, the copy button's text, the menu's
+        // three items, the note under the row and the failure block under that. Cached or not, a
+        // decode is a dictionary lookup and an enum match per ask, and `outcome` and `appearance`
+        // were rebuilt on top of each one.
+        let result = result
+        let outcome = TurnEnding.of(
+            wasStopped: wasStopped,
+            succeeded: result?.succeeded != false,
+            denials: result?.permissionDenials ?? 0
+        )
+        let appearance = Self.appearance(of: outcome)
+        let summaryText = result?.summary ?? ""
+
+        return VStack(alignment: .leading, spacing: 0) {
             // Inset to the column the footer's own contents start on, rather than to the pane.
             // A rule that stops six points short of the text under it looks like a mistake, and
             // this one closes a turn, so it has to read as drawn on purpose.
@@ -59,7 +77,7 @@ struct TurnFooterView: View {
                     .foregroundStyle(appearance.tint)
                     .accessibilityLabel(outcome.label)
 
-                Text(TurnDuration.format(durationMS))
+                Text(TurnDuration.format(row.durationMS ?? result?.durationMS ?? 0))
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textSecondary)
                     .monospacedDigit()
@@ -76,9 +94,21 @@ struct TurnFooterView: View {
                 // only thing in this row that can be dropped, and the alternative was every one of
                 // them being squeezed to an empty rounded rectangle while the duration and the
                 // two buttons kept their width.
+                //
+                // The second rung is where the ladder narrows rather than a fixed three, because
+                // `ViewThatFits` builds and measures every candidate it is offered until one fits.
+                // A turn that touched two or three files was offering the identical row of all of
+                // them twice before it got anywhere: two full sets of chips built and measured to
+                // draw one, on a turn shape that is most turns.
+                //
+                // Not a condition around the candidate, which is the obvious form and is wrong: an
+                // absent branch is an empty view, an empty view always fits, and the footer would
+                // draw nothing where it used to fall through to the count. The rung below is still
+                // offered when the two agree, and a candidate that has already failed fails again,
+                // so what is drawn is what was drawn before in every case.
                 ViewThatFits(in: .horizontal) {
                     fileChips(limit: Self.visibleFileLimit)
-                    fileChips(limit: 3)
+                    fileChips(limit: files.count > 3 ? 3 : 1)
                     fileChips(limit: 1)
                     countChip
                     Color.clear.frame(width: 0, height: 0)
@@ -124,7 +154,7 @@ struct TurnFooterView: View {
 
             // A turn that failed used to draw a red mark, a duration and nothing at all, with the
             // CLI's own explanation parked behind the copy menu. See `TurnFailure`.
-            if let failure {
+            if outcome == .failed, let result, let failure = TurnFailure.of(result) {
                 VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
                     if let lead = failure.lead {
                         Text(lead)
@@ -160,8 +190,25 @@ struct TurnFooterView: View {
 
     // MARK: Turn facts
 
-    /// Read through the same cache the rows use. The footer asks for the result three times in one
-    /// pass, and a result payload is one of the larger ones in the file.
+    /// Read through the same cache the rows use, once per pass, in `body`. This used to say three
+    /// times, which was a count of the asks rather than a decision about them, and by the time the
+    /// failure block and the copy menu had been added it was about ten. The payload is one of the
+    /// larger ones in the file, and a cached decode is still a lookup and an enum match per ask.
+    ///
+    /// What was built on top of each of those asks is where the rest of the cost was. Four endings
+    /// and their drawing were three computed properties reading each other, so every read of the
+    /// last one decoded the first. `body` now takes the result once, works out the ending once,
+    /// and hands both down.
+    ///
+    /// A turn that failed shows what the CLI said for itself, and only when it really failed. Not
+    /// for a turn somebody stopped: the CLI reports its own SIGTERM as an error, and `TurnEnding`
+    /// already refuses to call that a failure. Quoting the CLI's account of a button press would
+    /// put the same mistake back one line lower.
+    ///
+    /// The denials `TurnEnding` is handed are the calls the CLI declined during the turn, reported
+    /// on the `result` line, which is otherwise a plain success: a turn in which every shell call
+    /// was denied ends with `is_error` false and `subtype` "success", so without them the footer
+    /// put a green tick under an agent that had been stopped at every door.
     private var result: AgentResult? {
         guard case .result(let value)? = TranscriptEventCache.event(rowID: row.id, payload: row.payload) else {
             return nil
@@ -169,33 +216,10 @@ struct TurnFooterView: View {
         return value
     }
 
-    private var succeeded: Bool { result?.succeeded != false }
-
-    /// What a failed turn has to say for itself, or nothing.
-    ///
-    /// Not drawn for a turn somebody stopped: the CLI reports its own SIGTERM as an error, and
-    /// `TurnEnding` already refuses to call that a failure. Quoting the CLI's account of a button
-    /// press would put the same mistake back one line lower.
-    private var failure: TurnFailure? {
-        guard outcome == .failed, let result else { return nil }
-        return TurnFailure.of(result)
-    }
-
-    /// How many calls the CLI declined during the turn. Reported on the `result` line, which is
-    /// otherwise a plain success: a turn in which every shell call was denied ends with
-    /// `is_error` false and `subtype` "success", so without this the footer put a green tick under
-    /// an agent that had been stopped at every door.
-    private var denials: Int { result?.permissionDenials ?? 0 }
-
-    /// Which of the four endings this was, and the sentence it carries. See `TurnEnding`.
-    private var outcome: TurnEnding {
-        TurnEnding.of(wasStopped: wasStopped, succeeded: succeeded, denials: denials)
-    }
-
-    /// The drawing of it. A stop is not a failure and must not borrow the failure's red: it is the
-    /// one ending nothing went wrong in, so it is drawn in the ink an ordinary caption uses, with
-    /// the Stop button's own symbol in the ring the other three endings use.
-    private var appearance: (glyph: String, tint: Color) {
+    /// The drawing of an ending. A stop is not a failure and must not borrow the failure's red: it
+    /// is the one ending nothing went wrong in, so it is drawn in the ink an ordinary caption uses,
+    /// with the Stop button's own symbol in the ring the other three endings use.
+    private static func appearance(of outcome: TurnEnding) -> (glyph: String, tint: Color) {
         switch outcome {
         case .finished: ("checkmark.circle", Palette.positive)
         case .denied: ("hand.raised.circle", Palette.warning)
@@ -204,18 +228,24 @@ struct TurnFooterView: View {
         }
     }
 
-    private var durationMS: Int { row.durationMS ?? result?.durationMS ?? 0 }
-
-    private var summaryText: String { result?.summary ?? "" }
-
     // MARK: Actions
 
     /// Off the main actor: a long turn means decoding every tool call in it, and that must not land
     /// on the frame that scrolled the footer into view.
+    ///
+    /// And only once per turn. This hangs off a `.task`, which runs on every realisation of the
+    /// row, and a `LazyVStack` re-realises a footer every time it is scrolled past: each of those
+    /// was a walk back over up to four hundred rows, decoding every one of them. See
+    /// `TurnScanCache` for why the answer can be kept.
     private func scanFiles() async {
+        if let known = TurnScanCache.files(rowID: row.id) {
+            files = known
+            return
+        }
         let scanned = await Task.detached(priority: .utility) { [rows, seq = row.seq] in
             TurnScan.files(rows: rows, endingAt: seq)
         }.value
+        TurnScanCache.remember(scanned, rowID: row.id)
         files = scanned
     }
 

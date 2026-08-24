@@ -48,6 +48,21 @@ struct LogTailTests {
         #expect(LogTail.lineCount("a\n\nb\n") == 3)
     }
 
+    /// The count is a forward walk over the UTF-8 view now, where it used to trim the trailing
+    /// newlines off a copied byte array before counting. These are the cases the two shapes could
+    /// disagree on: a blank line in front of everything, which counts, against a run of them at
+    /// the end, which does not.
+    @Test("counting agrees at both ends of the log")
+    func countsAtTheEnds() {
+        #expect(LogTail.lineCount("\n\na") == 3)
+        #expect(LogTail.lineCount("\n\na\n\n\n") == 3)
+        #expect(LogTail.lineCount("a\r\nb\r\n") == 2)
+        #expect(LogTail.lineCount("a\rb") == 2)
+        #expect(LogTail.lineCount("a\r") == 1)
+        #expect(LogTail.lineCount("\r\n") == 0)
+        #expect(LogTail.lineCount("\r\n\r\na") == 3)
+    }
+
     @Test("a log of real size is walked from the end rather than copied")
     func handlesALargeLog() {
         let big = (0..<20_000).map { "line \($0)" }.joined(separator: "\n")

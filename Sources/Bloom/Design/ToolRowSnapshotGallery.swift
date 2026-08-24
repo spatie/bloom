@@ -45,8 +45,10 @@ struct ToolRowSnapshotGallery: View {
         _ input: [String: JSONValue],
         isExpanded: Bool = false
     ) -> some View {
-        ToolRowView(
-            use: AgentToolUse(id: id, name: name, input: .object(input)),
+        let use = AgentToolUse(id: id, name: name, input: .object(input))
+        return ToolRowView(
+            use: use,
+            presentation: TranscriptPresenter.present(use),
             workspace: workspace,
             result: nil,
             isError: false,

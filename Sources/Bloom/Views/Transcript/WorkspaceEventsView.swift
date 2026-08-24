@@ -9,7 +9,29 @@ import BloomCore
 /// a tidy one: a setup script flushes new output several times a second, and if the list's own body
 /// read it, every flush would re-run the `ForEach` over every row in the session. Nothing above
 /// this view reads the log, so a running setup redraws these rows and nothing else.
-struct WorkspaceEventsView: View {
+struct WorkspaceEventsView: View, Equatable {
+    /// The feed redraws when the workspace, the run or the pane changes, and not because the two
+    /// closures beside them are new closures.
+    ///
+    /// Functions are never equal to one another, and both of these are built fresh in
+    /// `TranscriptListView.body`, so without this SwiftUI has to assume the feed differs from the
+    /// one it drew a moment ago and re-runs this body on every pass of the transcript's own list.
+    /// That body reads the setup timeline, which is the whole of what the note above is about:
+    /// the read was kept out of the list so a flush redraws these rows and nothing else, and a
+    /// comparison that always fails put the list's passes back on top of it.
+    ///
+    /// **The closures are ignored, and `workspaceID` is what makes that safe.** A view kept by an
+    /// equal comparison keeps the closure it was built with, so what matters is what a stale one
+    /// could still capture. Both close over `TranscriptListView` itself: its `@State` reaches
+    /// through a storage box and is never stale, and the one stored value they reach, the
+    /// transcript, cannot change without the workspace changing, which is compared here.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.workspaceID == rhs.workspaceID
+            && lhs.isRunning == rhs.isRunning
+            && lhs.isFirstThing == rhs.isFirstThing
+            && lhs.paneHeight == rhs.paneHeight
+    }
+
     var workspaceID: WorkspaceID
     /// Whether a setup run is in flight, as the pane above already knows it. The stored state
     /// catches up a moment later, when the workspace row is next read.
@@ -158,6 +180,11 @@ struct WorkspaceEventRow: View {
     private static let expandedTail = TextCap.lineCap
 
     var body: some View {
+        // Read once for the pass. `tail` walks the log backwards from its end, and it was asked
+        // for three times: here, to decide whether there is a block at all, and then again by the
+        // block and by the text inside it.
+        let tail = tail
+
         VStack(alignment: .leading, spacing: 0) {
             if canExpand {
                 ExpandableRowHeader(isExpanded: isExpanded, onToggle: { isExpanded.toggle() }) {
@@ -168,7 +195,7 @@ struct WorkspaceEventRow: View {
             }
 
             if !tail.isEmpty {
-                logBlock
+                logBlock(tail)
             }
 
             if !note.isEmpty {
@@ -290,8 +317,12 @@ struct WorkspaceEventRow: View {
     /// from becoming two hundred views. Those are also the three cases that may wrap: they are
     /// read, so nothing in them may be cut off, and none of them is moving while it is read.
     @ViewBuilder
-    private var tailText: some View {
+    private func tailText(_ tail: String) -> some View {
         if event.isRunning, !isExpanded {
+            // Once per pass rather than twice: the stack draws them and the settle below is keyed
+            // on them, and working them out is a walk over the window and a walk over the log's
+            // trailing newlines.
+            let lines = SetupTailLine.lines(of: tail, endingAt: event.log)
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(lines) { line in
                     Text(line.text)
@@ -342,7 +373,7 @@ struct WorkspaceEventRow: View {
             .clipped()
             .animation(reduceMotion ? nil : Self.settle, value: lines)
         } else {
-            Text(marked)
+            Text(marked(tail))
         }
     }
 
@@ -356,7 +387,7 @@ struct WorkspaceEventRow: View {
     ///
     /// One `AttributedString` rather than a `Text` per line, so a selection still runs across the
     /// whole block and an expanded log stays one view however long it is.
-    private var marked: AttributedString {
+    private func marked(_ tail: String) -> AttributedString {
         guard event.isFailure, !event.failureSummary.isEmpty else { return AttributedString(tail) }
 
         var output = AttributedString()
@@ -369,23 +400,9 @@ struct WorkspaceEventRow: View {
         return output
     }
 
-    private var lines: [SetupTailLine] {
-        SetupTailLine.lines(of: tail, endingAt: event.log)
-    }
-
-    /// How tall one line of the tail is.
-    ///
-    /// Asked of AppKit rather than written down, because it has to be the height SwiftUI actually
-    /// lays a line of this face out on: a number a point out is a window that clips its last line
-    /// or leaves a gap under it, and the conversation can be set at any size. `Typo.code` is the
-    /// callout rung in monospace, and `ScaledFont` rounds the scaled size to a whole point before
-    /// asking for a face, so both steps are repeated here. The same question `ComposerTextEditor`
-    /// asks to size its own rows.
-    private var lineHeight: CGFloat {
-        let size = (NSFont.preferredFont(forTextStyle: .callout).pointSize * fontScale).rounded()
-        let font = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
-        return NSLayoutManager().defaultLineHeight(for: font)
-    }
+    /// How tall one line of the tail is. See `SetupLineHeight`, which is where it is worked out
+    /// and where it is held.
+    private var lineHeight: CGFloat { SetupLineHeight.height(fontScale: fontScale) }
 
     /// One line of travel, and it is over before the next line is due.
     ///
@@ -398,9 +415,9 @@ struct WorkspaceEventRow: View {
 
     /// The same quoted block a tool result is drawn in, rule down the left and all, because it is
     /// the same thing: output from something that ran.
-    private var logBlock: some View {
+    private func logBlock(_ tail: String) -> some View {
         VStack(alignment: .leading, spacing: TranscriptLayout.tight) {
-            tailText
+            tailText(tail)
                 .font(Typo.code)
                 // Every line starts as ordinary output. The failure colours itself, in `marked`,
                 // and nothing else in the block is entitled to the alarm colour.
@@ -555,5 +572,34 @@ struct SetupTailLine: Identifiable, Equatable {
         }
         result.append(SetupTailLine(id: start, text: text))
         return result
+    }
+}
+
+/// How tall one line of a setup log is, at the size the conversation is set to.
+///
+/// Asked of AppKit rather than written down, because it has to be the height SwiftUI actually lays
+/// a line of this face out on: a number a point out is a window that clips its last line or leaves
+/// a gap under it, and the conversation can be set at any size. `Typo.code` is the callout rung in
+/// monospace, and `ScaledFont` rounds the scaled size to a whole point before asking for a face, so
+/// both steps are repeated here. The same question `ComposerTextEditor` asks to size its own rows.
+///
+/// **Held rather than asked, because the row asks it per line per pass.** A running tail draws one
+/// `Text` per line and states each one's height, the block states its own, and `tailCap` divides
+/// the pane by it, so an `NSLayoutManager` was being allocated a dozen times per pass of a row that
+/// redraws several times a second while a script runs. It is a pure function of the text size:
+/// `fontScale` is the app's own setting, and the callout rung it multiplies does not move on macOS,
+/// which has no Dynamic Type for it to track.
+@MainActor
+enum SetupLineHeight {
+    private static var memo: (scale: CGFloat, height: CGFloat)?
+
+    static func height(fontScale: CGFloat) -> CGFloat {
+        if let memo, memo.scale == fontScale { return memo.height }
+
+        let size = (NSFont.preferredFont(forTextStyle: .callout).pointSize * fontScale).rounded()
+        let font = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        let height = NSLayoutManager().defaultLineHeight(for: font)
+        memo = (fontScale, height)
+        return height
     }
 }

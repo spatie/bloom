@@ -157,7 +157,13 @@ struct TranscriptTextView: NSViewRepresentable {
         }
         let proposed = proposal.width.map(Double.init)
         let width = TranscriptTextMeasure.layoutWidth(proposed: proposed)
-        container.containerSize = CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        // Only when it has actually moved. Whether TextKit throws its layout away on being handed
+        // the size it already has is not documented either way, and this is the resize path: every
+        // frame of a divider drag asks every realised row for its size, several times, and the
+        // proposals a `.textSelection(.enabled)` block generates repeat the same widths. Not
+        // depending on the answer costs one comparison.
+        let wanted = CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        if container.containerSize != wanted { container.containerSize = wanted }
         layout.ensureLayout(for: container)
         let used = layout.usedRect(for: container)
         let size = TranscriptTextMeasure.size(
