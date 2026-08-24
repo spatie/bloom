@@ -61,3 +61,66 @@ struct ScrollEndTests {
         #expect(!ScrollEnd.isAtEnd(contentHeight: 1200, viewportHeight: 820, offset: 0))
     }
 }
+
+/// When an offer to go back to the newest row is worth drawing.
+///
+/// The pill read `isAtEnd`, which answers a different question: whether the reader is still
+/// following along, which decides whether an arriving row may move the view. That one is small on
+/// purpose, so the pill appeared after a line and a half of scrolling, over a conversation whose
+/// newest row was still on screen.
+@Suite("Offering the way back")
+struct ScrollEndOfferTests {
+    private func offers(offset: Double, content: Double = 4_000, viewport: Double = 800) -> Bool {
+        ScrollEnd.isWorthOffering(
+            contentHeight: content, viewportHeight: viewport, offset: offset
+        )
+    }
+
+    /// The complaint: a nudge of the wheel is not leaving the conversation.
+    @Test("a line or two of scrolling is not worth an offer")
+    func aNudgeOffersNothing() {
+        // At the very end, and 96 points up, which is what `isAtEnd` still calls "following".
+        #expect(!offers(offset: 3_200))
+        #expect(!offers(offset: 3_104))
+    }
+
+    /// Far enough that the end is somewhere the reader cannot see and would have to work to get
+    /// back to.
+    @Test("a screen and a half away is")
+    func screensAwayOffers() {
+        // 3_200 is the end. A screen and a half is 1_200 points of gap.
+        #expect(!offers(offset: 2_100))
+        #expect(offers(offset: 1_900))
+        #expect(offers(offset: 0))
+    }
+
+    /// Screens rather than points, so the same gesture means the same thing on a tall window and
+    /// a short one.
+    @Test("the distance is measured in screens, not points")
+    func theDistanceScalesWithTheWindow() {
+        // 900 points of gap: over a screen and a half on a short pane, under it on a tall one.
+        #expect(offers(offset: 2_300, content: 4_000, viewport: 500) == true)
+        #expect(offers(offset: 2_300, content: 4_000, viewport: 800) == false)
+    }
+
+    /// The same guards `isAtEnd` has, and for the same reason: a reader can only be away from an
+    /// end that is below them.
+    @Test("a pane with nothing to scroll never offers")
+    func nothingToScrollOffersNothing() {
+        #expect(!ScrollEnd.isWorthOffering(contentHeight: 4_000, viewportHeight: 0, offset: 0))
+        #expect(!ScrollEnd.isWorthOffering(contentHeight: 300, viewportHeight: 800, offset: 0))
+    }
+
+    /// It is not the negation of the other question, and must not become one.
+    @Test("still following along and worth offering are different answers")
+    func theTwoQuestionsDisagreeOnPurpose() {
+        // Half a screen up: no longer pinned to the end, and not yet worth a pill.
+        let content = 4_000.0, viewport = 800.0, offset = 2_800.0
+        #expect(!ScrollEnd.isAtEnd(
+            contentHeight: content, viewportHeight: viewport, offset: offset
+        ))
+        #expect(!ScrollEnd.isWorthOffering(
+            contentHeight: content, viewportHeight: viewport, offset: offset
+        ))
+    }
+}

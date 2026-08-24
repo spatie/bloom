@@ -479,7 +479,7 @@ struct TranscriptListView: View {
                 // moves about once every eleven points of a drag, and the flag moves when the
                 // reader arrives at or leaves the end. So the extra reports are a handful per
                 // scroll, and each of them is a correction the transition form could not make.
-                onScrolledUpChange?(!new.isNearBottom)
+                onScrolledUpChange?(new.isFarFromEnd)
             }
             // A second subscription, on the raw offset, and deliberately not folded into the one
             // above. Everything in `TranscriptGeometry` is quantised precisely so that a drag
@@ -549,6 +549,7 @@ struct TranscriptListView: View {
                 // A session opens at its live end whatever the one being left was scrolled to,
                 // and the anchor is read before the new rows arrive.
                 geometry.isNearBottom = true
+                geometry.isFarFromEnd = false
                 // And said out loud, because the report below is only made when the position
                 // CHANGES, and a pane that arrives on the live end and stays there changes
                 // nothing. Without this the composer keeps whatever the last session told it.
@@ -776,6 +777,11 @@ struct TranscriptListView: View {
             ),
             paneHeight: TranscriptGeometry.height(scroll.containerSize.height),
             isNearBottom: ScrollEnd.isAtEnd(
+                contentHeight: scroll.contentSize.height,
+                viewportHeight: scroll.containerSize.height,
+                offset: scroll.contentOffset.y
+            ),
+            isFarFromEnd: ScrollEnd.isWorthOffering(
                 contentHeight: scroll.contentSize.height,
                 viewportHeight: scroll.containerSize.height,
                 offset: scroll.contentOffset.y

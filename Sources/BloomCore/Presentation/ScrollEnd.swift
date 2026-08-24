@@ -27,6 +27,36 @@ public enum ScrollEnd {
     /// pill over the composer for that would be an offer to go where they already are.
     public static let threshold: Double = 96
 
+    /// How far the reader has to have gone before an offer to take them back is worth making,
+    /// counted in viewport heights.
+    ///
+    /// **A different question from `threshold`, and it has to be.** That one answers "is the
+    /// reader still following along", which decides whether an arriving row may move the view, and
+    /// it is small on purpose: a nudge of the wheel does not mean somebody has left the
+    /// conversation. The pill was reading the same answer, so it appeared the moment a reader
+    /// scrolled a line and a half, over a conversation whose newest row was still on screen.
+    ///
+    /// Screens rather than points, because what makes the offer worth reading is that the end is
+    /// somewhere the reader cannot see and would have to work to get back to. A point count says
+    /// nothing about that on a tall window and too much on a short one. A screen and a half is far
+    /// enough that they have scrolled deliberately, and near enough that the offer arrives while
+    /// they still remember there was a live end.
+    public static let offerAfterScreens: Double = 1.5
+
+    /// Whether the reader is far enough from the end for an offer to go back to be worth drawing.
+    ///
+    /// Built on the same guards as `isAtEnd`, and false wherever that is true: a pane nobody has
+    /// laid out, and content that fits, have no end below the reader to be away from.
+    public static func isWorthOffering(
+        contentHeight: Double,
+        viewportHeight: Double,
+        offset: Double,
+        screens: Double = offerAfterScreens
+    ) -> Bool {
+        guard viewportHeight > 0, contentHeight > viewportHeight else { return false }
+        return contentHeight - offset - viewportHeight > viewportHeight * screens
+    }
+
     public static func isAtEnd(
         contentHeight: Double,
         viewportHeight: Double,

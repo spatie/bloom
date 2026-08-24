@@ -28,6 +28,13 @@ struct TranscriptGeometry: Equatable {
     var paneHeight: CGFloat = 0
     /// Whether the user is close enough to the newest row to count as following along.
     var isNearBottom = true
+    /// Whether the reader is far enough from the end to be offered a way back.
+    ///
+    /// Not `!isNearBottom`. That one decides whether an arriving row may move the view and is
+    /// deliberately small; this decides whether to draw a pill over the composer, and drawing it
+    /// for a line and a half of scrolling is an offer to go where the reader already is. See
+    /// `ScrollEnd.offerAfterScreens`.
+    var isFarFromEnd = false
     /// How far below the viewport the end of the conversation is, already rounded, and read for
     /// one thing only: how long the jump pill's scroll back to the live end should run for.
     ///

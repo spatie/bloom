@@ -139,14 +139,31 @@ struct PaneToolTests {
 
     /// A subagent opening tabs in its parent's window is a pane arriving from something the
     /// reader did not address.
-    @Test("a subagent cannot open panes")
-    func aChildCannotOpenPanes() {
+    @Test("a subagent cannot open, split or close panes")
+    func aChildCannotTouchPanes() {
         let open = PaneOpenTool { _, _ in .opened("") }
         let split = PaneSplitTool { _, _, _ in .opened("") }
-        #expect(!open.roles.contains(.child))
-        #expect(!split.roles.contains(.child))
-        #expect(open.roles.contains(.parent))
-        #expect(split.roles.contains(.parent))
+        let close = PaneCloseTool { _, _ in .opened("") }
+        for roles in [open.roles, split.roles, close.roles] {
+            #expect(!roles.contains(.child))
+            #expect(roles.contains(.parent))
+            #expect(roles.contains(.owner))
+        }
+    }
+
+    /// The pair was half a pair: both of the others told the model that closing was the reader's
+    /// to do, which is asking somebody to tidy up after a tool.
+    @Test("closing takes the same kinds opening does, and none of its own")
+    func closingSpeaksTheSameVocabulary() {
+        let close = PaneCloseTool { _, _ in .opened("") }
+        guard case .object(let schema) = close.tool.inputSchema,
+              case .object(let properties)? = schema["properties"]
+        else { Issue.record("no schema"); return }
+        // A kind and nothing else: no pane id, because a model handed one would be closing
+        // something by a number it guessed.
+        #expect(Set(properties.keys) == ["kind"])
+        // And no required argument, since leaving it out means the focused pane.
+        #expect(schema["required"] == nil)
     }
 
     /// Both add something the reader can see and close, so neither stops a turn to ask.
@@ -154,6 +171,7 @@ struct PaneToolTests {
     func bothAreSelfApproved() {
         #expect(BridgeToolApproval.selfApproved.contains("pane_open"))
         #expect(BridgeToolApproval.selfApproved.contains("pane_split"))
+        #expect(BridgeToolApproval.selfApproved.contains("pane_close"))
         // And the one that asks for a merge is deliberately not.
         #expect(!BridgeToolApproval.selfApproved.contains("workspace_merge"))
     }

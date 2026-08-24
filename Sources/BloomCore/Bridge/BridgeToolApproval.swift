@@ -52,6 +52,10 @@ public enum BridgeToolApproval {
         // different weight from `workspace_merge`, which is deliberately not on this list.
         "pane_open",
         "pane_split",
+        // Closing is on this list for the same reason opening is, and because it refuses the two
+        // cases that would cost anything: it will not empty the centre column, and it cannot name
+        // the review or the notes, which hold the reader's own work.
+        "pane_close",
     ]
 
     /// Whether this ask is Bloom answering itself.

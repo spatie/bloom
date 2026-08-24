@@ -49,6 +49,10 @@ extension AppModel {
                 guard let self else { return .refused("Bloom is still starting up.") }
                 return await self.splitPaneForBridge(order, axis: axis, in: workspaceID)
             },
+            PaneCloseTool { [weak self] kind, workspaceID in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return await self.closePaneForBridge(kind, in: workspaceID)
+            },
             WorkspaceMergeTool { [weak self] workspace, pullRequest, method in
                 guard let self else {
                     return .refused("Bloom is still starting up. Try again in a moment.")
@@ -183,5 +187,68 @@ extension AppModel {
         }
         let where_ = axis == .horizontal ? "beside" : "below"
         return .opened("Opened \(order.kind.title) \(where_) what was already on screen.")
+    }
+
+    /// `pane_close`, through the same surgery the pane's own close control uses.
+    ///
+    /// Two refusals rather than one, because they are different facts and a model that is told
+    /// only "no" cannot tell them apart: nothing of that kind is open, and closing this would
+    /// leave the column empty.
+    func closePaneForBridge(_ kind: PaneKind?, in workspaceID: WorkspaceID) async -> PaneOutcome {
+        guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForPane) }
+        let tabs = WorkspaceTabsStore.shared
+        guard let tab = tabs.selectedTab(in: model) else {
+            return .refused("There is nothing open in that workspace to close.")
+        }
+
+        let layout = tabs.layout(of: tab)
+        let pane: String?
+        if let kind {
+            pane = layout.panes.first {
+                paneKind(of: tabs.content(of: $0, in: tab), in: model.workspace.id) == kind
+            }
+            guard pane != nil else {
+                return .refused(
+                    "There is no \(kind.title.lowercased()) open in the tab in front. Nothing was "
+                        + "closed."
+                )
+            }
+        } else {
+            pane = tabs.focusedPane(of: tab)
+        }
+        guard let pane else { return .refused("There is nothing there to close.") }
+
+        // The last one standing stays. A centre column with nothing in it is a window that looks
+        // broken, and an agent tidying up after itself must not be able to produce one.
+        guard layout.panes.count > 1 else {
+            return .refused(
+                "That is the only pane open, and Bloom will not leave the centre column empty. "
+                    + "Open something else first, or leave this one."
+            )
+        }
+
+        guard tabs.close(pane: pane, in: tab, of: model.workspace.id) else {
+            return .refused("Bloom could not close that pane.")
+        }
+        return .opened(kind.map { "Closed the \($0.title.lowercased())." } ?? "Closed that pane.")
+    }
+
+    /// What a pane is showing, as one of the three kinds a tool may name.
+    ///
+    /// Nil for a review and for the notes, which is what keeps `pane_close` off them: they are the
+    /// two a workspace has exactly one of and they hold the reader's own work rather than the
+    /// agent's, so a tool that cannot name them cannot close them.
+    private func paneKind(of content: PaneContent, in workspaceID: WorkspaceID) -> PaneKind? {
+        switch content {
+        case .chat: return .chat
+        case .tool(let id):
+            let tabs = CenterTabStore.shared.tabs(for: workspaceID)
+            guard let tab = tabs.first(where: { $0.id == id }) else { return nil }
+            switch tab.kind {
+            case .terminal: return .terminal
+            case .browser: return .browser
+            case .review, .notes: return nil
+            }
+        }
     }
 }
