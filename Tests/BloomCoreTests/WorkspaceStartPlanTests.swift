@@ -244,6 +244,53 @@ struct TerminalNoteTests {
     /// **The regression this suite exists for.**
     ///
     /// The sheet used to say "Named after a sea", "named after a sea" and "named after the sea" in
+    // MARK: - What a workspace ends up called
+
+    /// The rule exists so the row drawn while the worktree is being cut and the row drawn
+    /// afterwards cannot say different things. `PendingWorkspace` asks this before `git worktree
+    /// add` runs and `WorkspaceManager` asks it when it builds the stored row, so a case that
+    /// answered differently from the other would be a name changing under the reader the instant
+    /// the workspace became real.
+    @Test("a name that was settled wins over everything")
+    func settledNameWins() {
+        #expect(WorkspaceStartPlan.name(
+            supplied: "Harbour", checkout: nil, prompt: "Fix the login flow"
+        ) == "Harbour")
+        #expect(WorkspaceStartPlan.name(
+            supplied: "Harbour",
+            checkout: .branch(ExistingBranch(name: "feature/x", isLocal: true)),
+            prompt: ""
+        ) == "Harbour")
+    }
+
+    /// An empty string is a name nobody chose. `WorkspaceStartPlan.terminalName` returns the
+    /// branch field as typed, and a field somebody cleared arrives here as "".
+    @Test("an empty name is no name")
+    func emptyNameIsNoName() {
+        #expect(WorkspaceStartPlan.name(
+            supplied: "", checkout: nil, prompt: "Fix the login flow"
+        ) == "Fix the login flow")
+    }
+
+    @Test("a checkout brings its own name")
+    func checkoutBringsItsOwn() {
+        #expect(WorkspaceStartPlan.name(
+            supplied: nil,
+            checkout: .branch(ExistingBranch(name: "feature/x", isLocal: true)),
+            prompt: "ignored"
+        ) == "feature/x")
+    }
+
+    /// The last resort, and it never answers nothing: a row with no name at all is worse than one
+    /// called "New workspace".
+    @Test("nothing settled falls back to the task, and an empty task still has a name")
+    func fallsBackToTheTask() {
+        #expect(WorkspaceStartPlan.name(
+            supplied: nil, checkout: nil, prompt: "Fix the login flow"
+        ) == "Fix the login flow")
+        #expect(!WorkspaceStartPlan.name(supplied: nil, checkout: nil, prompt: "").isEmpty)
+    }
+
     /// three places at once. The catalogue is still there and still claims, and the chart and the
     /// notice that fires on a first claim are how somebody is meant to find out about it. A create
     /// sheet that explains the mechanism up front spends that discovery to answer a question

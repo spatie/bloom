@@ -103,6 +103,7 @@ public struct WorkspaceManager: Sendable {
     ///   route that could have an agent behind it goes through that.
     @discardableResult
     func createWorkspace(
+        id: WorkspaceID = .new(),
         repo: Repo,
         prompt: String,
         name: String? = nil,
@@ -117,10 +118,10 @@ public struct WorkspaceManager: Sendable {
         // coalesced.
         try await WorktreeCutQueue.shared.cut(in: repo.path) {
             if let checkout {
-                return try await open(checkout, repo: repo, name: name, origin: origin)
+                return try await open(checkout, id: id, repo: repo, name: name, origin: origin)
             }
             return try await cut(
-                repo: repo, prompt: prompt, name: name, branch: branch,
+                id: id, repo: repo, prompt: prompt, name: name, branch: branch,
                 baseBranch: baseBranch, origin: origin
             )
         }
@@ -129,6 +130,7 @@ public struct WorkspaceManager: Sendable {
     /// The body of `createWorkspace`, with the whole read-then-act window inside it, so the queue
     /// above has one thing to hold rather than a sequence a caller could enter halfway through.
     private func cut(
+        id: WorkspaceID,
         repo: Repo,
         prompt: String,
         name: String?,
@@ -152,7 +154,12 @@ public struct WorkspaceManager: Sendable {
             preferred: root.appendingPathComponent(directoryName).path
         ) { FileManager.default.fileExists(atPath: $0) }
 
-        try await Git.addWorktree(repo: repo.path, path: worktreePath, branch: finalBranch, base: base)
+        // `branchIsNew: true` rather than letting git check, because `uniqueBranch` above returns a
+        // name that is not in `existingBranches` by construction. This is the one path where that
+        // is known, and it is the path a person is waiting on. See `Git.addWorktree`.
+        try await Git.addWorktree(
+            repo: repo.path, path: worktreePath, branch: finalBranch, base: base, branchIsNew: true
+        )
 
         try copyFiles(settings.filesToCopy, from: repo.path, to: worktreePath)
 
@@ -161,8 +168,9 @@ public struct WorkspaceManager: Sendable {
         // to run is born `.skipped` rather than moved there: there is no run to file, and nothing
         // for `SetupLifecycle` to have done.
         let workspace = Workspace(
+            id: id,
             repoID: repo.id,
-            name: name ?? Git.title(from: prompt),
+            name: WorkspaceStartPlan.name(supplied: name, checkout: nil, prompt: prompt),
             branch: finalBranch,
             path: worktreePath,
             baseBranch: base,
@@ -190,7 +198,11 @@ public struct WorkspaceManager: Sendable {
     /// HEAD and no pull request is worse than no directory: it would be registered with git,
     /// counted by `git worktree list`, and attached to no row anybody could archive.
     private func open(
-        _ checkout: WorkspaceCheckout, repo: Repo, name: String?, origin: WorkspaceOrigin
+        _ checkout: WorkspaceCheckout,
+        id: WorkspaceID,
+        repo: Repo,
+        name: String?,
+        origin: WorkspaceOrigin
     ) async throws -> Workspace {
         let settings = SettingsLoader.load(repo: repo.path)
         let existingBranches = Set(try await Git.branches(of: repo.path))
@@ -233,8 +245,9 @@ public struct WorkspaceManager: Sendable {
         try copyFiles(settings.filesToCopy, from: repo.path, to: worktreePath)
 
         let workspace = Workspace(
+            id: id,
             repoID: repo.id,
-            name: name ?? checkout.workspaceName,
+            name: WorkspaceStartPlan.name(supplied: name, checkout: checkout, prompt: ""),
             branch: branch,
             path: worktreePath,
             baseBranch: checkout.baseBranch(default: repo.defaultBranch),

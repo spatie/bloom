@@ -149,6 +149,18 @@ struct SidebarView: View {
                         .selectedRowInk(
                             isEmphasized: isEmphasized(.subagent(workspaceID, subagent.id))
                         )
+                case .pending(let pending):
+                    // A workspace that does not exist yet, so there is nothing to select, nothing
+                    // to open and nothing to write a `sort_order` onto. Refused here and again in
+                    // `SidebarReorder.destination`, on the same belt-and-braces footing as the
+                    // notice below. It fades in like any other row that turns up: the tracker was
+                    // handed its id in `regroup`, which is also what stops the stored row fading
+                    // in over the top of it a moment later. See `PendingWorkspaceRow`.
+                    PendingWorkspaceRow(pending: pending)
+                        .arrivingRow(arrival.isArriving(pending.id))
+                        .selectionDisabled()
+                        .moveDisabled(true)
+
                 case .notice:
                     // A sentence about a project, so it is neither selectable nor something to
                     // pick up. `SidebarReorder` refuses it a second time, in case the outline
@@ -259,6 +271,15 @@ struct SidebarView: View {
         // one is running, and regrouping on that would filter and sort every project's workspaces
         // once a second for the whole of a fan-out.
         .onChange(of: app.subagentRows) { _, _ in reflow() }
+        // A create appearing, and the same row being retired when the stored one lands. The run
+        // and not the groups, for the same reason: a workspace being cut changes no project's
+        // membership, its filtering or its order.
+        //
+        // `reflow` alone would leave the arrival tracker never told about the id, so the stored
+        // row would fade in on top of the row it is replacing. `regroup` is what feeds it, so this
+        // one goes through the full rebuild: a create is a handful of times an hour, not once a
+        // second, and the cost that argument is about is not here.
+        .onChange(of: app.pendingWorkspaces) { _, _ in regroup() }
         // Rescoped, so widening the filter is not forty rows fading in at once. See `RowArrival`.
         .onChange(of: filter) { _, _ in regroup(rescoped: true) }
         // NOT rescoped, unlike the filter above, and the difference is what the two switches do.
@@ -351,7 +372,9 @@ struct SidebarView: View {
             filter: filter,
             showingHidden: showsHiddenProjects
         )
-        paneRows = SidebarPaneRow.rows(groups, subagents: app.subagents(of:))
+        paneRows = SidebarPaneRow.rows(
+            groups, subagents: app.subagents(of:), pending: pending(in:)
+        )
         // Every workspace the groups hold, a folded project's included. A fold hides rows rather
         // than removing them from the list, and unfolding one already has a movement of its own:
         // counting them out here would make every project the user reopens fade its contents in
@@ -360,7 +383,13 @@ struct SidebarView: View {
         // In the same breath as the rows themselves, rather than from an `onChange` watching
         // `groups`, so a row and the fact that it is new land in one update and the row's first
         // drawn frame is the faded one.
-        let ids = groups.flatMap { $0.workspaces.map(\.id) }
+        //
+        // The workspaces being cut are counted among them, and that is the whole of what makes the
+        // swap silent. `PendingWorkspace` carries the id the stored row will have, so by the time
+        // that row arrives the tracker has already seen the id and does not read it as an arrival:
+        // the row stops being a spinner and starts being a workspace, in place, without a second
+        // settle under it. Left out, every create would fade its row in twice.
+        let ids = groups.flatMap { $0.workspaces.map(\.id) } + app.pendingWorkspaces.map(\.id)
         if rescoped {
             arrival.adopt(ids)
         } else {
@@ -368,10 +397,23 @@ struct SidebarView: View {
         }
     }
 
+    /// The workspaces being cut in one project, in the order they were asked for.
+    ///
+    /// Never filtered. `SidebarFilter` asks a question about a workspace's stored row (does it have
+    /// unread work, does it have changes) and a row that does not exist yet has no answer to
+    /// either, so a create made with Unread showing would vanish the moment it was asked for and
+    /// reappear when it landed. A workspace the owner asked for a second ago is exactly what they
+    /// are looking at the pane to see.
+    private func pending(in repoID: RepoID) -> [PendingWorkspace] {
+        app.pendingWorkspaces.filter { $0.repoID == repoID }
+    }
+
     /// Redraws the run from the groups already computed, for a change that adds or removes rows
     /// without changing which workspaces are in the pane.
     private func reflow() {
-        paneRows = SidebarPaneRow.rows(groups, subagents: app.subagents(of:))
+        paneRows = SidebarPaneRow.rows(
+            groups, subagents: app.subagents(of:), pending: pending(in:)
+        )
     }
 
     // MARK: - Reordering

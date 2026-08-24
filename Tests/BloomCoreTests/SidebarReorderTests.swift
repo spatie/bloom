@@ -364,6 +364,68 @@ struct SidebarReorderTests {
         #expect(SidebarReorder.move(projects: [repo("a", order: 0)], id: RepoID("gone"), to: 0).isEmpty)
     }
 
+    // MARK: - Rows that hang off the end of a project
+
+    /// Alpha with a workspace being cut under its two stored rows.
+    ///
+    ///     0  Alpha
+    ///     1    a1
+    ///     2    a2
+    ///     3    (being cut)
+    ///     4  Beta
+    ///     5    b1
+    private var paneWithPending: [SidebarReorder.Row] {
+        [
+            .project(RepoID("alpha")),
+            .workspace(id: WorkspaceID("a1"), projectID: RepoID("alpha")),
+            .workspace(id: WorkspaceID("a2"), projectID: RepoID("alpha")),
+            .pending(projectID: RepoID("alpha")),
+            .project(RepoID("beta")),
+            .workspace(id: WorkspaceID("b1"), projectID: RepoID("beta")),
+        ]
+    }
+
+    /// The case the row was written for. A workspace being cut is drawn after its project's stored
+    /// rows, so it sits between the last of them and the next project, and a drop below it is a
+    /// drop at the end of that project rather than outside it. Clamping to the last workspace row
+    /// instead reports `landedOutside` and shows the "Kept in" note for a drag that landed exactly
+    /// where the insertion line said it would.
+    @Test("A drop past a workspace being cut is still inside its project")
+    func pendingRowDoesNotEndTheProject() {
+        #expect(SidebarReorder.destination(rows: paneWithPending, from: [1], to: 4) == .workspace(
+            projectID: RepoID("alpha"), from: IndexSet(integer: 0), to: 2, landedOutside: false
+        ))
+    }
+
+    @Test("A workspace being cut cannot be picked up")
+    func pendingRowDoesNotMove() {
+        #expect(SidebarReorder.destination(rows: paneWithPending, from: [3], to: 1) == .nothing)
+    }
+
+    /// It counts as a row for a project header dragged past it, like every other row in the run.
+    /// Beta's header is at 4 with the pending row above it, where it is at 3 without, and a
+    /// boundary that did not count it would put a dragged project on the wrong side of Alpha.
+    @Test("A workspace being cut takes an offset in the run")
+    func pendingRowTakesAnOffset() {
+        #expect(SidebarReorder.destination(rows: paneWithPending, from: [4], to: 0)
+            == .project(id: RepoID("beta"), to: 0))
+    }
+
+    /// A project whose only row is one being cut. There is nothing to reorder, and nothing may be
+    /// dropped into it, but it must not throw the offsets of the projects below it out.
+    @Test("A project with nothing but a workspace being cut moves nothing")
+    func projectOfOnlyPendingRows() {
+        let rows: [SidebarReorder.Row] = [
+            .project(RepoID("alpha")),
+            .pending(projectID: RepoID("alpha")),
+            .project(RepoID("beta")),
+            .workspace(id: WorkspaceID("b1"), projectID: RepoID("beta")),
+        ]
+        #expect(SidebarReorder.destination(rows: rows, from: [1], to: 3) == .nothing)
+        #expect(SidebarReorder.destination(rows: rows, from: [2], to: 0)
+            == .project(id: RepoID("beta"), to: 0))
+    }
+
     // MARK: - Helpers
 
     private func pin(of id: String, in rows: [Workspace]) -> Bool? {

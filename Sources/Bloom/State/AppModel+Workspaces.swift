@@ -151,13 +151,61 @@ extension AppModel {
         // `nameAutomatically` applies to a suggested branch rather than by a copy of it: this used
         // to write the join and the check out again, under a comment claiming they could not
         // disagree. Nil hands the branch back to the mechanical slug of the prompt.
-        let seaBranch: String? = pick.flatMap { pick in
-            WorkspaceNaming.prefixedBranch(
-                pick.ocean.slug, prefix: SettingsLoader.load(repo: repo.path).branchPrefix
-            )
+        //
+        // Off the main actor, like `resolvedControls` above and for the same reason: the load
+        // reads and parses every settings file this project answers to, and this line sits on the
+        // frame that is dismissing the create sheet.
+        let seaBranch: String?
+        if let pick {
+            let path = repo.path
+            let prefix = await Task.detached(priority: .userInitiated) {
+                SettingsLoader.load(repo: path).branchPrefix
+            }.value
+            seaBranch = WorkspaceNaming.prefixedBranch(pick.ocean.slug, prefix: prefix)
+        } else {
+            seaBranch = nil
         }
 
+        // The name settled before anything is cut, rather than inside the closure `manager.start`
+        // calls, and the reason is the row that has to be drawn while the cutting happens.
+        //
+        // `start` asks its namer only when the request carries no name and no checkout, so the
+        // same two conditions decide here whether there is a codename at all. Resolving it up
+        // here changes nothing about what `start` does with it: the closure below hands back this
+        // value, `start` still reports it as `placeholder`, and `adopt` still starts the automatic
+        // rename against it.
+        let suppliedName = name ?? (opensWith == .terminal
+            ? WorkspaceStartPlan.terminalName(
+                userSuppliedBranch: branch, claimedSea: pick?.ocean.name
+            )
+            : nil)
+        let placeholder: String?
+        if suppliedName == nil, checkout == nil, wantsAName {
+            // The AI rename compares against the exact placeholder handed over, so the sea's name
+            // goes through here rather than being written on the row afterwards.
+            if let sea = pick?.ocean.name {
+                placeholder = sea
+            } else {
+                placeholder = await placeholderName()
+            }
+        } else {
+            placeholder = nil
+        }
+
+        // The row goes up now, under the name the stored row is about to carry, and comes down in
+        // `reload` when that row arrives. `WorkspaceStartPlan.name` is the same call
+        // `WorkspaceManager` makes, so the two cannot say different things. See `PendingWorkspace`.
+        let id = WorkspaceID.new()
+        showPending(PendingWorkspace(
+            id: id,
+            repoID: repo.id,
+            name: WorkspaceStartPlan.name(
+                supplied: suppliedName ?? placeholder, checkout: checkout, prompt: spoken
+            )
+        ))
+
         let request = WorkspaceStartRequest(
+            id: id,
             repo: repo,
             prompt: spoken,
             // Almost always the owner: the sheet, a `bloom://` link, the Services menu and a
@@ -169,15 +217,11 @@ extension AppModel {
             // story. `Git.uniqueBranch` still suffixes a collision with an earlier voyage.
             branch: branch ?? seaBranch,
             // A terminal workspace is named after the branch the user typed, or after the sea it
-            // just claimed when nothing was typed at all. Either way the name is settled here
+            // just claimed when nothing was typed at all. Either way the name is settled above
             // rather than left to the namer, because nothing is going to be asked: passing a name
             // is also what stops `start` returning a placeholder and so what stops `adopt`
             // kicking off an automatic rename with no first turn to read.
-            name: name ?? (opensWith == .terminal
-                ? WorkspaceStartPlan.terminalName(
-                    userSuppliedBranch: branch, claimedSea: pick?.ocean.name
-                )
-                : nil),
+            name: suppliedName,
             checkout: checkout,
             controls: effectiveControls,
             opensSession: opensWith == .chat,
@@ -187,13 +231,17 @@ extension AppModel {
             runsSetup: false
         )
 
-        let started = try await manager.start(request) { [weak self] in
-            // Nil declines, and the workspace keeps the title git would have given it.
-            guard wantsAName, let self else { return nil }
-            // The AI rename compares against the exact placeholder this closure returns, so the
-            // sea's name goes through here rather than being written on the row afterwards.
-            if let pick { return pick.ocean.name }
-            return await self.placeholderName()
+        // Nil declines, and the workspace keeps the title git would have given it. The closure is
+        // still how `start` learns the codename, so that it stays the one place deciding whether
+        // there is one; what it hands back was worked out above rather than here.
+        let started: StartedWorkspace
+        do {
+            started = try await manager.start(request) { placeholder }
+        } catch {
+            // The only way out with the row still up. Everything past this line has a stored
+            // workspace behind it, and `reload` retires the pending row against that.
+            forgetPending(id)
+            throw error
         }
 
         await adopt(started, repo: repo, prompt: spoken, opensWith: opensWith, select: select)

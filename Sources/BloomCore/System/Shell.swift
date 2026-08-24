@@ -71,15 +71,46 @@ public enum Shell {
         return env
     }
 
+    /// Where a name was last found, so a lookup is one `stat` rather than a walk of the whole PATH.
+    ///
+    /// `Mutex` rather than `nonisolated(unsafe)`, for the reason given on `EventFanout` in
+    /// `SessionRunner`: this is read from every actor in the app and from the drain threads.
+    private static let found = Mutex<[String: String]>([:])
+
     /// Resolve an executable name to an absolute path using the merged PATH.
+    ///
+    /// **Every subprocess in Bloom starts with one of these, and the walk is not cheap.** It
+    /// rebuilds the merged environment, splits PATH and stats a candidate per entry, 37 of them on
+    /// the owner's machine. `TerminalPersistence.tmuxPath` had already resolved that by hand for
+    /// one binary; the six-second diff poll runs four git calls per workspace and pays for it
+    /// afresh every time, which is a hundred and fifty stats per workspace per pass for an answer
+    /// that has not moved since launch.
+    ///
+    /// **Only a hit is remembered, and it is checked before it is handed back.** A miss must not
+    /// be, because "not installed" is the one answer that legitimately changes while the app is
+    /// running: `GitHubAvailability` re-asks precisely so that signing in to `gh` from a terminal
+    /// is noticed, and `WorkspaceNamer.isAvailable` is asked afresh on every create for the same
+    /// reason. Remembering a miss would make installing a CLI something you have to relaunch
+    /// Bloom to be told about. The one `isExecutableFile` on the remembered path is what makes the
+    /// other direction safe: a binary that has been moved or uninstalled falls through to the full
+    /// walk rather than being reported at a path that is no longer there.
     public static func which(_ name: String) -> String? {
         if name.hasPrefix("/") {
             return FileManager.default.isExecutableFile(atPath: name) ? name : nil
         }
+        if let remembered = found.withLock({ $0[name] }),
+           FileManager.default.isExecutableFile(atPath: remembered) {
+            return remembered
+        }
         for dir in environment()["PATH"]?.components(separatedBy: ":") ?? [] {
             let candidate = (dir as NSString).appendingPathComponent(name)
-            if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                found.withLock { $0[name] = candidate }
+                return candidate
+            }
         }
+        // Nothing to unremember: a name only enters the table when it was found, and a stale entry
+        // has already been rejected by the check above.
         return nil
     }
 

@@ -33,6 +33,27 @@ public enum WorkspaceStartPlan {
         return !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// What a workspace ends up called, from what the caller settled before anything was cut.
+    ///
+    /// **One rule, three callers, and that is the whole reason it is here.** `cut` said
+    /// `name ?? Git.title(from: prompt)` and `open` said `name ?? checkout.workspaceName`, each
+    /// inside `WorkspaceManager` where nothing could reach them. `PendingWorkspace` needs the same
+    /// answer before either of them runs, and a fourth copy of a two-clause fallback is exactly
+    /// how the row drawn during the cut comes to say something other than the row drawn after it.
+    ///
+    /// - Parameter supplied: the name the request carried, or the codename the namer handed out.
+    ///   `WorkspaceManager.start` resolves those two into one value before it gets here.
+    /// - Parameter checkout: a pull request or branch being opened, which brings its own name.
+    /// - Parameter prompt: the task, with its attachments already taken out of it. The last
+    ///   resort, and `Git.title` answers "New workspace" for an empty one rather than nothing.
+    public static func name(
+        supplied: String?, checkout: WorkspaceCheckout?, prompt: String
+    ) -> String {
+        if let supplied, !supplied.isEmpty { return supplied }
+        if let checkout { return checkout.workspaceName }
+        return Git.title(from: prompt)
+    }
+
     /// What a terminal workspace is called.
     ///
     /// A branch somebody typed is the name, because they have already said what this is. Otherwise

@@ -179,6 +179,27 @@ extension SidebarReorder {
         /// offset and never moves, but unlike the notice it appears BETWEEN workspace rows, which
         /// is why `destination` counts ranks rather than subtracting a lower bound.
         case subagent(projectID: RepoID)
+        /// A workspace whose worktree is still being cut. See `PendingWorkspace`.
+        ///
+        /// It takes an offset and never moves, like the two above. It cannot be dragged, because
+        /// there is no stored row to write a `sort_order` onto, and nothing can be dropped past it
+        /// either: it is drawn at the end of its project's block, which is where the row it
+        /// becomes will land, so a drop below it is a drop at the end of the project and the run
+        /// has to reach over it exactly as it reaches over a subagent.
+        case pending(projectID: RepoID)
+
+        /// Whether this row hangs off the end of `projectID`'s workspace rows rather than being
+        /// one of them, so `workspaceRun` knows to reach over it.
+        ///
+        /// A project header, a notice or another project's row all stop the run; these two do not,
+        /// because they are drawn inside the block and a drop below them is still a drop in this
+        /// project.
+        func trails(_ projectID: RepoID) -> Bool {
+            switch self {
+            case .subagent(let owner), .pending(let owner): owner == projectID
+            case .project, .workspace, .notice: false
+            }
+        }
     }
 
     /// What a drag over the flattened pane turns out to have been.
@@ -231,7 +252,7 @@ extension SidebarReorder {
         guard let grabbed = from.min() else { return .nothing }
 
         switch rows[grabbed] {
-        case .notice, .subagent:
+        case .notice, .subagent, .pending:
             return .nothing
 
         case .project(let id):
@@ -309,18 +330,15 @@ extension SidebarReorder {
     /// The flat offsets one project's block occupies, as a range whose bounds are the first and
     /// last places a row of that project can be dropped at.
     ///
-    /// The upper bound reaches past the last workspace row over any subagents drawn under it.
-    /// Those rows are part of that workspace's block, so a drop below them is a drop at the end of
-    /// the project rather than outside it, and clamping to the workspace row itself would have
-    /// reported `landedOutside` and shown the "Kept in" note for a drag that landed exactly where
-    /// the insertion line said it would.
+    /// The upper bound reaches past the last workspace row over any subagents drawn under it, and
+    /// over a pending row drawn after them. Those rows are part of the project's block, so a drop
+    /// below them is a drop at the end of the project rather than outside it, and clamping to the
+    /// workspace row itself would have reported `landedOutside` and shown the "Kept in" note for a
+    /// drag that landed exactly where the insertion line said it would.
     private static func workspaceRun(rows: [Row], projectID: RepoID) -> Range<Int>? {
         let offsets = workspaceOffsets(rows: rows, projectID: projectID)
         guard let first = offsets.first, var last = offsets.last else { return nil }
-        while rows.indices.contains(last + 1), case .subagent(let owner) = rows[last + 1],
-              owner == projectID {
-            last += 1
-        }
+        while rows.indices.contains(last + 1), rows[last + 1].trails(projectID) { last += 1 }
         return first..<(last + 1)
     }
 }

@@ -223,6 +223,36 @@ final class AppModel {
     /// in an extension and the archive is one now.
     @ObservationIgnored private var archivingWorkspaceIDs: Set<WorkspaceID> = []
 
+    /// Workspaces the owner has asked for whose worktree is still being cut.
+    ///
+    /// The mirror of `archivingWorkspaceIDs` above: that one takes a row away before the disk work
+    /// and this one puts one there before the disk work, for the same reason. Pressing Create
+    /// dismissed the sheet onto a window where nothing happened until `git worktree add` had
+    /// finished. See `PendingWorkspace` for why these are not `Workspace` values and are not in
+    /// `workspaces`.
+    ///
+    /// Observed, unlike the archiving set, and the difference is what each one is for. That one
+    /// exists so `reload` can subtract from a list it is about to publish, and the write the
+    /// window sees is the write to `workspaces`. This one is drawn: the sidebar reads it directly,
+    /// so it has to invalidate when a row is added or taken away.
+    ///
+    /// Written only by `showPending` and `forgetPending`, and emptied by `reload` the moment the
+    /// stored row it is standing in for arrives.
+    private(set) var pendingWorkspaces: [PendingWorkspace] = []
+
+    /// Puts a row on screen for a workspace that is about to be cut.
+    func showPending(_ pending: PendingWorkspace) {
+        guard !pendingWorkspaces.contains(where: { $0.id == pending.id }) else { return }
+        pendingWorkspaces.append(pending)
+    }
+
+    /// Takes it away again. Only a create that failed calls this: a create that worked has its row
+    /// taken by `reload`, in the same update that publishes the stored one, so that there is never
+    /// a frame with neither on screen.
+    func forgetPending(_ id: WorkspaceID) {
+        pendingWorkspaces.removeAll { $0.id == id }
+    }
+
     private var refreshTask: Task<Void, Never>?
     private var storeObservationTask: Task<Void, Never>?
     private var quotaObservationTask: Task<Void, Never>?
@@ -437,6 +467,16 @@ final class AppModel {
             // the other place that publishes.
             if repos != loadedRepos { repos = loadedRepos }
             if workspaces != reconciled { workspaces = reconciled }
+            // The stood-in row goes exactly when the real one arrives, and here rather than at the
+            // call site is what makes that true without anybody having to remember an order.
+            // `WorkspaceStartRequest` carries the id, so the row the store just answered with IS
+            // the pending one, and this write lands in the same update as the assignment above:
+            // there is no frame with both on screen and none with neither. A create that never
+            // gets this far is `forgetPending`'s, and it is the only caller.
+            if !pendingWorkspaces.isEmpty {
+                let landed = Set(reconciled.map(\.id))
+                pendingWorkspaces.removeAll { landed.contains($0.id) }
+            }
             // The models hold a copy of their `Workspace`, and this is where those copies go
             // stale. Refreshing here keeps `model(for:)` out of every view body.
             for workspace in workspaces {

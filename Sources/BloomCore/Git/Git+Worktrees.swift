@@ -57,11 +57,25 @@ extension Git {
         return entries
     }
 
+    /// Cuts a worktree, creating the branch when it is not already there.
+    ///
+    /// - Parameter branchIsNew: whether the caller already knows `branch` does not exist, so the
+    ///   `git show-ref` below can be skipped. Nil means ask git, which is right for every caller
+    ///   that has not looked.
+    ///
+    ///   `WorkspaceManager.cut` has looked. It reads the whole branch list and builds the name
+    ///   with `Git.uniqueBranch`, which returns something not in that list by construction, so
+    ///   confirming it is a subprocess spent on a question already answered, on the path between
+    ///   pressing Create and the workspace existing. Passing false rather than true is not a
+    ///   shortcut worth taking anywhere: `worktree add -b` on a branch that does exist fails with
+    ///   git's own words rather than doing something quiet and wrong, so a caller that gets this
+    ///   backwards finds out immediately.
     public static func addWorktree(
         repo: String,
         path: String,
         branch: String,
-        base: String
+        base: String,
+        branchIsNew: Bool? = nil
     ) async throws {
         try validate(branch: branch)
         try validate(ref: base, label: "base branch")
@@ -70,7 +84,8 @@ extension Git {
         let parent = (path as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
 
-        if await branchExists(branch, in: repo) {
+        let exists = if let branchIsNew { !branchIsNew } else { await branchExists(branch, in: repo) }
+        if exists {
             try await check(["worktree", "add", "--", path, branch], in: repo)
         } else {
             try await check(["worktree", "add", "-b", branch, "--", path, base], in: repo)

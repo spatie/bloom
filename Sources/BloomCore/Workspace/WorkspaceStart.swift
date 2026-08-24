@@ -19,6 +19,13 @@ import Foundation
 ///
 /// `origin` has no default and no nil. See `WorkspaceOrigin`.
 public struct WorkspaceStartRequest: Sendable {
+    /// The id the workspace will be stored under.
+    ///
+    /// Decided by the caller rather than by `cut`, so that a caller can draw the row before the
+    /// worktree exists and have the stored row take its place rather than appear beside it. See
+    /// `PendingWorkspace`, which is the whole reason this is here. A caller with nothing to draw
+    /// leaves it alone and gets a fresh one, exactly as before.
+    public var id: WorkspaceID
     public var repo: Repo
     public var prompt: String
     public var baseBranch: String?
@@ -52,6 +59,7 @@ public struct WorkspaceStartRequest: Sendable {
     public var runsSetup: Bool
 
     public init(
+        id: WorkspaceID = .new(),
         repo: Repo,
         prompt: String,
         origin: WorkspaceOrigin,
@@ -63,6 +71,7 @@ public struct WorkspaceStartRequest: Sendable {
         opensSession: Bool = true,
         runsSetup: Bool = false
     ) {
+        self.id = id
         self.repo = repo
         self.prompt = prompt
         self.origin = origin
@@ -150,6 +159,7 @@ extension WorkspaceManager {
         let placeholder = request.name == nil && request.checkout == nil ? await namer() : nil
 
         let workspace = try await createWorkspace(
+            id: request.id,
             repo: request.repo,
             prompt: request.prompt,
             name: request.name ?? placeholder,

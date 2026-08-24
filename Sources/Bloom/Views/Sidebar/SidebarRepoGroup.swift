@@ -63,6 +63,8 @@ enum SidebarPaneRow: Identifiable {
     /// One subagent of the turn running in the workspace above it. Carries its workspace so the
     /// row knows what selecting it selects, and its project so the reordering can count it.
     case subagent(SubagentRow, workspaceID: WorkspaceID, repoID: RepoID)
+    /// A workspace whose worktree is still being cut. See `PendingWorkspace`.
+    case pending(PendingWorkspace)
     /// The sentence that stands where a project's rows would be when it has none.
     case notice(repoID: RepoID)
 
@@ -75,6 +77,10 @@ enum SidebarPaneRow: Identifiable {
         // are two CLIs with two id spaces.
         case .subagent(let row, let workspaceID, _):
             "subagent:" + workspaceID.rawValue + ":" + row.id.rawValue
+        // The same prefix a workspace row uses, deliberately: the pending row and the stored row
+        // it becomes carry one id, so giving them one identity is what makes the swap a row
+        // changing rather than one row leaving and another arriving in its place.
+        case .pending(let pending): "workspace:" + pending.id.rawValue
         case .notice(let repoID): "notice:" + repoID.rawValue
         }
     }
@@ -85,6 +91,7 @@ enum SidebarPaneRow: Identifiable {
         case .project(let group): .project(group.id)
         case .workspace(let workspace, _): .workspace(id: workspace.id, projectID: workspace.repoID)
         case .subagent(_, _, let repoID): .subagent(projectID: repoID)
+        case .pending(let pending): .pending(projectID: pending.repoID)
         case .notice(let repoID): .notice(projectID: repoID)
         }
     }
@@ -99,15 +106,26 @@ enum SidebarPaneRow: Identifiable {
     ///   spawned. A closure rather than a field on the group, because a subagent's row changes
     ///   about once a second while one is running and the groups are rebuilt only when the
     ///   workspaces, the projects or the filter move. See `AppModel.subagentRows`.
+    /// - Parameter pending: the workspaces this project has been asked for whose worktree is still
+    ///   being cut, drawn after its stored rows because that is where the row each one becomes
+    ///   will land: a new workspace takes the next `sort_order` and is not pinned, so
+    ///   `SidebarReorder.drawn` puts it last. A closure for the same reason as `subagents`, and
+    ///   because a create is a change to neither the workspaces nor the projects nor the filter.
+    ///   See `PendingWorkspace`.
     static func rows(
         _ groups: [SidebarRepoGroup],
-        subagents: (WorkspaceID) -> [SubagentRow] = { _ in [] }
+        subagents: (WorkspaceID) -> [SubagentRow] = { _ in [] },
+        pending: (RepoID) -> [PendingWorkspace] = { _ in [] }
     ) -> [SidebarPaneRow] {
         var rows: [SidebarPaneRow] = []
         for group in groups {
             rows.append(.project(group))
             guard !group.repo.collapsed else { continue }
-            if group.workspaces.isEmpty {
+            let waiting = pending(group.id)
+            // A project whose only row is one being cut is not a project with no workspaces, so
+            // the notice stays away: "No workspaces yet" printed directly above the workspace
+            // being made is the sentence answering itself.
+            if group.workspaces.isEmpty, waiting.isEmpty {
                 rows.append(.notice(repoID: group.id))
             } else {
                 for workspace in group.workspaces {
@@ -119,6 +137,7 @@ enum SidebarPaneRow: Identifiable {
                         .subagent($0, workspaceID: workspace.id, repoID: group.id)
                     })
                 }
+                rows.append(contentsOf: waiting.map { .pending($0) })
             }
         }
         return rows
