@@ -187,7 +187,7 @@ struct DeliveryStoreTests {
         )
         try await store.enqueueDelivery(Delivery(targetSessionID: session.id, body: "two"))
 
-        try await store.cancelDelivery(id: one.id)
+        #expect(try await store.cancelDelivery(id: one.id))
         #expect(try await store.pendingDeliveries(sessionID: session.id).map(\.body) == ["two"])
     }
 
@@ -202,7 +202,10 @@ struct DeliveryStoreTests {
         )
         try await store.markDelivered(id: one.id)
 
-        try await store.cancelDelivery(id: one.id)
+        // False, and that is the whole of what the caller needs: it says the sentence was not
+        // taken back rather than that nothing was there, which are two different things to tell
+        // somebody who has just pressed Delete. See `PendingMessageDiscard.alreadySentSentence`.
+        #expect(try await store.cancelDelivery(id: one.id) == false)
         #expect(try await store.pendingDeliveries(sessionID: session.id).isEmpty)
 
         // Still there, rather than deleted: putting it back finds the row the cancel refused to

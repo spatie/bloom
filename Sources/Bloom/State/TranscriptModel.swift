@@ -449,11 +449,58 @@ final class TranscriptModel {
         await deliver(next)
     }
 
+    /// The queued message the owner has asked to delete, and the reason the sheet is up.
+    ///
+    /// Here rather than in the row that draws it because the question outlives the row: the drain
+    /// can retire that delivery while the sheet is open, at which point the row goes and the sheet
+    /// has to be told. A `@State` inside `PendingTurnRowView` would be torn down with the row and
+    /// take the dialog with it silently, which is the one outcome the race must not have.
+    var discarding: Delivery?
+
+    /// Asks before deleting, rather than deleting.
+    ///
+    /// The words are `PendingMessageDiscard`'s, including the promise about where the sentence
+    /// ends up, so the dialog cannot promise something this object then does not do.
+    func askToDiscard(_ delivery: Delivery) {
+        guard PendingMessageDiscard.canDiscard(delivery) else { return }
+        discarding = delivery
+    }
+
     /// Takes one back out of the queue, because whoever asked for it changed their mind.
-    func cancel(_ delivery: Delivery) async {
+    ///
+    /// The recovery is worked out here rather than when the question was asked, because the
+    /// composer is live behind the sheet: what the box holds when the answer comes is what decides
+    /// whether the sentence can go back into it.
+    func confirmDiscard(_ delivery: Delivery) async {
+        discarding = nil
         guard let store else { return }
-        try? await store.cancelDelivery(id: delivery.id)
+        let recovery = PendingMessageDiscard.recovery(of: delivery, composerDraft: draft)
+        let removed = (try? await store.cancelDelivery(id: delivery.id)) ?? false
         await refreshQueue()
+
+        // It went while the question was on screen. The delete loses that race on purpose: see
+        // `PendingMessageDiscard.alreadySentSentence`.
+        guard removed else {
+            app.notice = BloomNotice(message: PendingMessageDiscard.alreadySentSentence)
+            return
+        }
+
+        if case .toComposer(let text) = recovery {
+            draft = text
+            await saveDraft()
+        }
+    }
+
+    /// Closes the question when the message it is about is no longer waiting.
+    ///
+    /// Called from `refreshQueue`, which is the one place this object learns the queue has moved.
+    /// The owner is told, because a dialog that vanishes on its own reads as a bug and because
+    /// what happened underneath it is exactly the thing they were trying to prevent.
+    private func dropDiscardIfDelivered() {
+        guard let discarding else { return }
+        guard !pendingDeliveries.contains(where: { $0.id == discarding.id }) else { return }
+        self.discarding = nil
+        app.notice = BloomNotice(message: PendingMessageDiscard.alreadySentSentence)
     }
 
     /// Re-reads the queue from the table. Public because the moment a workspace's opening prompt
@@ -461,6 +508,7 @@ final class TranscriptModel {
     func refreshQueue() async {
         guard let store else { return }
         pendingDeliveries = (try? await store.pendingDeliveries(sessionID: session.id)) ?? []
+        dropDiscardIfDelivered()
     }
 
     /// The one place a turn starts, reached only from `drain`.

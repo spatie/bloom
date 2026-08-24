@@ -32,9 +32,16 @@ struct PendingTurnRowView: View {
     /// note about everything above it.
     var hold: DeliveryHold?
     var maxWidth: CGFloat
-    var onCancel: @MainActor () -> Void
+    /// Asks to delete this one. It asks rather than deletes: the confirmation and the promise
+    /// about where the sentence ends up are `PendingMessageDiscard`'s, through `TranscriptModel`.
+    var onDelete: @MainActor () -> Void
+    /// Draws the row as though the pointer were on it, for `--snapshot`. An offscreen render has
+    /// no pointer, and the state worth photographing here is the one under it.
+    var pointerInside = false
 
     @State private var isHovered = false
+
+    private var isPointedAt: Bool { isHovered || pointerInside }
 
     /// `UserTurnRowView`'s three numbers, named here so a change to one of them is visibly a
     /// change to both drawings of the same object.
@@ -98,9 +105,16 @@ struct PendingTurnRowView: View {
     /// what was asked for: the bubble holds the owner's words and nothing else, so that the words
     /// look the same before and after they go.
     ///
-    /// Cancel appears on hover and is announced always. A control that only exists under the
-    /// pointer is invisible to anybody driving this with a keyboard or a screen reader, and
-    /// withdrawing something you asked for is not a decoration.
+    /// **Delete is drawn at rest and lights up under the pointer**, where it used to be drawn at
+    /// opacity zero until the pointer arrived. The owner asked for the ability to delete a pending
+    /// message that the app already had, which is what a control nobody can see amounts to. At
+    /// rest it is the tertiary ink of the sentence beside it, so the row reads as one caption
+    /// rather than as a button somebody left on every bubble; under the pointer it takes the link
+    /// colour, which is the app's word for "this does something".
+    ///
+    /// Nothing moves when the pointer arrives, which was already true and stays true for a
+    /// stronger reason: it is the same view at two tints rather than a view appearing. The opacity
+    /// it used to fade was there for exactly this and is gone with the fade.
     ///
     /// **The sentence is last in the row and the row carries no trailing padding**, so its right
     /// edge is the enclosing `VStack`'s trailing edge, which is the bubble's. Nothing here
@@ -108,19 +122,24 @@ struct PendingTurnRowView: View {
     /// construction. The bubble's outline is a `strokeBorder`, which draws inside the frame rather
     /// than astride it, so the frame edge really is the edge you can see.
     ///
-    /// It read wrong before because Cancel was last and the sentence in front of it. The button
-    /// holds its width whether or not it is drawn (that is what stops the sentence sliding
-    /// sideways the moment the pointer arrives), so the sentence sat a button and a gutter and a
-    /// bubble's padding in from the bubble above it, near enough centred under it to look like a
-    /// caption somebody had dropped there rather than a label belonging to that bubble.
+    /// It read wrong before because the button was last and the sentence in front of it. The
+    /// button holds its width whether or not it is drawn, so the sentence sat a button and a
+    /// gutter and a bubble's padding in from the bubble above it, near enough centred under it to
+    /// look like a caption somebody had dropped there rather than a label belonging to that
+    /// bubble.
     @ViewBuilder
     private var caption: some View {
         HStack(spacing: Metrics.gutter) {
-            Button("Cancel", action: onCancel)
-                .linkButton()
+            // Not `linkButton()`, and not `.link` with a tint of its own: measured on this SDK,
+            // `.buttonStyle(.link)` paints the system link colour whatever `.tint` says, so the
+            // resting state came out the same blue as the pointed-at one and the whole point of
+            // the two states was lost. A plain button takes the colour it is given, and
+            // `.pointerStyle` puts back the one thing the link style was buying.
+            Button("Delete", action: onDelete)
+                .buttonStyle(.plain)
+                .foregroundStyle(isPointedAt ? Palette.link : Palette.textTertiary)
+                .pointerStyle(.link)
                 .help("Takes this message back out of the queue. It is not sent.")
-                .opacity(isHovered ? 1 : 0)
-                .accessibilityHidden(false)
 
             if let hold {
                 Text(hold.sentence)

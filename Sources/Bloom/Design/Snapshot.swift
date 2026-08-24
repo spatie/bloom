@@ -605,12 +605,14 @@ enum Snapshot {
         case reviewComments = "review-comments"
         case inspectorTabs = "inspector-tabs"
         case diffScope = "diff-scope"
+        case pendingDelete = "pending-delete"
 
         var title: String {
             switch self {
             case .reviewComments: "Review comments"
             case .inspectorTabs: "Inspector tabs"
             case .diffScope: "Diff scope"
+            case .pendingDelete: "Pending message delete"
             }
         }
 
@@ -619,6 +621,7 @@ enum Snapshot {
             case .reviewComments: CGSize(width: 820, height: 900)
             case .inspectorTabs: CGSize(width: 460, height: 470)
             case .diffScope: CGSize(width: 460, height: 700)
+            case .pendingDelete: CGSize(width: 820, height: 900)
             }
         }
 
@@ -644,6 +647,7 @@ enum Snapshot {
         case .reviewComments: ReviewCommentSnapshotGallery()
         case .inspectorTabs: InspectorTabStripGallery(app: app)
         case .diffScope: DiffScopeGallery(app: app)
+        case .pendingDelete: PendingDeleteSnapshotGallery()
         }
     }
 

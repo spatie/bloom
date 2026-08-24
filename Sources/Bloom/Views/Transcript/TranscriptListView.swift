@@ -175,6 +175,9 @@ struct TranscriptListView: View {
         // Read once for the pass rather than once per footer: resolving it walks the row list,
         // and every realised footer would otherwise pay for its own walk. See `TranscriptModel`.
         let stoppedTurnSeq = transcript.stoppedTurnSeq
+        // Only so the delete confirmation below has a binding to the model's own state. The
+        // question cannot live in this view: see `TranscriptModel.discarding`.
+        @Bindable var transcript = transcript
 
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
@@ -295,7 +298,7 @@ struct TranscriptListView: View {
                                 ? transcript.deliveryHold
                                 : nil,
                             maxWidth: maxBubbleWidth,
-                            onCancel: { Task { await transcript.cancel(delivery) } }
+                            onDelete: { transcript.askToDiscard(delivery) }
                         )
                         .padding(.horizontal, TranscriptLayout.inset)
                         .id(Self.pendingID(delivery.id))
@@ -472,6 +475,33 @@ struct TranscriptListView: View {
                 if showsPlaceholder {
                     TranscriptPlaceholderView(isRunningSetup: isRunningSetup)
                 }
+            }
+            // Deleting a queued message asks first, in the app's own confirmation rather than a
+            // shape of its own: `ConfirmationSheet` says why the app has one of these and not
+            // two. On the list rather than on the row, so the question survives its row leaving,
+            // which is exactly what happens when the queue moves while it is open.
+            //
+            // Not a toast with an undo, which is one gesture instead of two and was the tempting
+            // alternative. What is being weighed here is minutes of somebody's thinking, the
+            // window is the one place it exists, and an undo that is only offered for as long as
+            // a banner is on screen protects it for eight seconds. The question is asked before
+            // the loss, not after it.
+            .confirmation($transcript.discarding) { delivery in
+                let question = PendingMessageDiscard.question(
+                    for: PendingMessageDiscard.recovery(
+                        of: delivery, composerDraft: transcript.draft
+                    )
+                )
+                return Confirmation(
+                    title: question.title,
+                    message: question.message,
+                    confirmLabel: question.confirmLabel,
+                    // Escape lands here. See `ConfirmationSheet` for why no confirmation in this
+                    // app gives its cancel button `.keyboardShortcut(.defaultAction)`.
+                    cancelLabel: question.cancelLabel
+                )
+            } onConfirm: { delivery in
+                Task { await transcript.confirmDiscard(delivery) }
             }
         }
     }

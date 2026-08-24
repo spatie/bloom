@@ -2073,8 +2073,23 @@ public actor Store {
     /// Only while it is still pending. A delivery that has gone is a turn the agent is already
     /// running, and deleting the row would not unsay it; the `WHERE` is what makes a cancel
     /// pressed on the same frame the drain fires a no-op rather than a lie.
-    public func cancelDelivery(id: DeliveryID) throws {
+    ///
+    /// **Returns whether a row actually went**, because a no-op and a delete are two different
+    /// things to tell the owner: one of them means the sentence is gone and the other means the
+    /// agent is already reading it. The caller cannot work that out for itself, and it is the one
+    /// thing the race turns on. See `PendingMessageDiscard.alreadySentSentence`.
+    ///
+    /// The look and the delete are two statements with no suspension between them, which is the
+    /// same reason `update(workspaceID:)` reads inside the actor: nothing else can retire the row
+    /// in the gap, because there is no gap.
+    @discardableResult
+    public func cancelDelivery(id: DeliveryID) throws -> Bool {
+        let pending = try db.query(
+            "SELECT id FROM deliveries WHERE id = ? AND delivered_at IS NULL", [.text(id)]
+        )
+        guard !pending.isEmpty else { return false }
         try db.run("DELETE FROM deliveries WHERE id = ? AND delivered_at IS NULL", [.text(id)])
+        return true
     }
 
     /// Puts one back in the queue after a send that never started a turn.
