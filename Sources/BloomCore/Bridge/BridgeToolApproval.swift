@@ -47,6 +47,11 @@ public enum BridgeToolApproval {
     public static let selfApproved: Set<String> = [
         "whoami",
         "workspace_start",
+        // Both add something the reader can see and close, in the workspace whose agent is
+        // asking and nowhere else. Nothing is destroyed and nothing is hidden, which is a very
+        // different weight from `workspace_merge`, which is deliberately not on this list.
+        "pane_open",
+        "pane_split",
     ]
 
     /// Whether this ask is Bloom answering itself.
