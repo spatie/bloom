@@ -36,6 +36,27 @@ final class WorkspacePullRequests {
         pullRequests[workspaceID]
     }
 
+    /// Records an answer somebody else went and got, including nil.
+    ///
+    /// **This is what makes the class the one holder of the fact.** `WorkspaceModel` used to keep
+    /// a `pullRequest` of its own with a 30 second max age beside this one's 110, and the two were
+    /// read by different surfaces: the sidebar glyph and the Home rail from here, the title bar
+    /// strip, the pull request bar and `InspectorTab.available(for:)` from the model. For one open
+    /// workspace those could disagree for up to two minutes about whether a pull request existed.
+    /// This is the two-blues bug one layer down: not two places deciding a colour, but two places
+    /// holding the fact the colour comes from.
+    ///
+    /// Nil is written here where `refresh` below refuses to write it, and the difference is the
+    /// whole reason both exist. `refresh` is a poll behind a row nobody is looking at, where nil
+    /// means "gh did not answer" at least as often as it means "there is no pull request", and
+    /// making the mark flicker on a slow network is worse than showing a stale one. This is a
+    /// deliberate read for the workspace somebody is looking at, and there nil is an answer.
+    func set(_ pullRequest: PullRequest?, for workspaceID: WorkspaceID) {
+        // Writing an equal value still invalidates every row reading this dictionary.
+        guard pullRequests[workspaceID] != pullRequest else { return }
+        pullRequests[workspaceID] = pullRequest
+    }
+
     /// Drops what is remembered about one workspace, for a caller that knows the answer is now
     /// about a branch this workspace is no longer on.
     ///

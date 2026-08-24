@@ -111,7 +111,23 @@ final class WorkspaceModel {
     /// Why the last refresh could not answer. Non-nil means `changedFiles` is the last list git was
     /// able to produce, not what the worktree looks like now.
     var changesError: String?
-    var pullRequest: PullRequest?
+    /// GitHub's opinion of this workspace's branch, held in `WorkspacePullRequests` and read
+    /// through it rather than stored here.
+    ///
+    /// It was a stored property, and that made two caches for one fact with different max ages:
+    /// 30 seconds here, 110 in the shared one. The sidebar glyph and the Home rail read that one,
+    /// the title bar strip, the pull request bar and `InspectorTab.available(for:)` read this one,
+    /// so for a single open workspace three surfaces could disagree for up to two minutes. Both
+    /// are `@MainActor`, so it was never a data race and TSan would never have seen it.
+    ///
+    /// A computed property rather than a migration of every call site: the shared store is
+    /// `@Observable` too, so reading through it registers the same dependency a stored property
+    /// did, and `model.pullRequest = nil` still means what it meant.
+    var pullRequest: PullRequest? {
+        get { WorkspacePullRequests.shared.pullRequest(for: workspace.id) }
+        set { WorkspacePullRequests.shared.set(newValue, for: workspace.id) }
+    }
+
     var isLoadingPullRequest = false
     /// What the last press on the pull request strip left to say, drawn at the top of the
     /// inspector column.

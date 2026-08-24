@@ -970,8 +970,18 @@ final class AppModel {
 
     /// How many workspaces are waiting on the user, for the sidebar's status bar, the Dock badge
     /// and the menu bar item.
+    ///
+    /// Through `DockBadge.waitingCount`, which had one caller and it was a test. This read
+    /// `waitingWorkspaceIDs.count` directly, and that set is pruned only where somebody remembered
+    /// to, while the number drawn beside it is `DockBadge.unreadCount(in: workspaces)`, which
+    /// filters through the live list. So the badge and the menu bar could say "1 waiting" about a
+    /// workspace neither list shows: a workspace archived while its agent was mid question leaves
+    /// the id behind, and nothing here would ever drop it.
+    ///
+    /// Counting the same list the other half counts is what makes the two agree by construction
+    /// rather than by everybody remembering.
     var waitingCount: Int {
-        waitingWorkspaceIDs.count
+        DockBadge.waitingCount(in: workspaces) { waitingWorkspaceIDs.contains($0.id) }
     }
 
     #if DEBUG

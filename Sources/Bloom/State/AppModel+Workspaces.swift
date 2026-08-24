@@ -396,10 +396,14 @@ extension AppModel {
         let model = model(for: continuation.workspace)
 
         // The merged pull request belonged to the old branch. Left in place it would keep the
-        // strip purple and keep offering the button that has just been pressed, and the sidebar's
-        // own cache never clears itself: it ignores a nil answer on purpose, so that a slow
-        // network does not make the mark flicker, which means nothing else would ever drop it.
-        model.pullRequest = nil
+        // strip purple and keep offering the button that has just been pressed, and the poll
+        // never clears itself: it ignores a nil answer on purpose, so that a slow network does
+        // not make the mark flicker, which means nothing else would ever drop it.
+        //
+        // One line now that there is one cache. It used to be two, and that pair is what the
+        // two-sources-of-truth report was about: the model held its own copy with a 30 second max
+        // age beside the shared one's 110, and forgetting one and not the other was a bug waiting
+        // for the next caller who only knew about one of them.
         WorkspacePullRequests.shared.forget(continuation.workspace.id)
 
         // The diff is measured against the base, and the base just moved under it.
