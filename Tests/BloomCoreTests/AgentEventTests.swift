@@ -22,12 +22,13 @@ private struct Tally {
     var rateLimit = 0
     var retrying = 0
     var error = 0
+    var subagent = 0
     var unknown = 0
 
     var total: Int {
         initialized + assistantText + thinking + toolUse + toolResult + streamDelta + status
             + thinkingTokens + hook + permissionAsk + permissionDecided + result + rateLimit
-            + retrying + error + unknown
+            + retrying + error + subagent + unknown
     }
 
     mutating func count(_ event: AgentEvent) {
@@ -47,6 +48,7 @@ private struct Tally {
         case .rateLimit: rateLimit += 1
         case .retrying: retrying += 1
         case .error: error += 1
+        case .subagent: subagent += 1
         case .unknown: unknown += 1
         }
     }

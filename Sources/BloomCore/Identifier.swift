@@ -88,3 +88,14 @@ public struct PermissionGrantID: Identifier {
     public let rawValue: String
     public init(_ rawValue: String) { self.rawValue = rawValue }
 }
+
+/// One run of the Agent tool inside a session, as the CLI numbers it.
+///
+/// The raw value is `task_id` off `system/task_started`, and it is the CLI's, not Bloom's: it is
+/// the only handle that all four lines about a subagent agree on, and it is what names that
+/// subagent's own transcript on disk. So `new()` is never called for one. It is also not stored,
+/// because a subagent lives for seconds and nothing outlives the turn that spawned it.
+public struct SubagentID: Identifier {
+    public let rawValue: String
+    public init(_ rawValue: String) { self.rawValue = rawValue }
+}

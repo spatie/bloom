@@ -527,6 +527,11 @@ public enum AgentEvent: Sendable {
     case retrying(AgentRetry)
     case rateLimit(Data)
     case error(AgentError)
+    /// One of the four lines the CLI writes about a subagent it has spawned. Purely additive: no
+    /// existing case changed meaning and nothing that was a transcript row stopped being one.
+    /// A subagent's lifecycle is a live signal about the turn in flight, like `.status`, so it is
+    /// not stored. See `SubagentRoster` for why there is no table behind it.
+    case subagent(SubagentSignal)
     case unknown(Data)
 
     /// The original bytes of the line. A stream delta has none worth keeping: it is never stored
@@ -544,7 +549,7 @@ public enum AgentEvent: Sendable {
         case .retrying(let value): value.raw
         case .error(let value): value.raw
         case .rateLimit(let raw), .unknown(let raw): raw
-        case .streamDelta, .status, .thinkingTokens: Data()
+        case .streamDelta, .status, .thinkingTokens, .subagent: Data()
         }
     }
 
@@ -597,7 +602,7 @@ public enum AgentEvent: Sendable {
         case .error: .error
         case .rateLimit: .notice
         case .initialized, .streamDelta, .status, .thinkingTokens, .hook, .permissionDecided,
-             .retrying, .unknown:
+             .retrying, .subagent, .unknown:
             .system
         }
     }
@@ -612,7 +617,8 @@ public enum AgentEvent: Sendable {
         // A retry is not a row either. Ten attempts against one request are one fact, nine
         // tenths of it stale, and the durable record of a run that recovered is the sentence
         // `RetryRun` leaves under the turn rather than ten stored lines.
-        case .streamDelta, .status, .thinkingTokens, .permissionDecided, .retrying: false
+        case .streamDelta, .status, .thinkingTokens, .permissionDecided, .retrying, .subagent:
+            false
         default: true
         }
     }
@@ -654,12 +660,14 @@ public enum AgentEvent: Sendable {
         case "stream_event": return decodeStreamEvent(json, raw: raw)
         case "result": return decodeResult(json, raw: raw)
         case "rate_limit_event": return .rateLimit(raw)
-        // Only the retry block is lifted out here. The rest of `tool_progress` is an elapsed
-        // seconds tick for a call already on screen, and a line this decoder has no reading of
-        // belongs in `.unknown` with its bytes intact rather than half understood.
+        // The only line about a subagent that is not a `system` subtype. It is also the only one
+        // that carries the elapsed seconds a running row reads out, and the only one that carries
+        // a subagent's retries: both go to `.subagent`, because one line decodes to one event and
+        // a retrying subagent is a subagent first. See `SubagentProgress.retry` for how the retry
+        // block gets to the retry surface from here.
         case "tool_progress":
-            guard let retry = AgentRetry.subagentRetry(json, raw: raw) else { return .unknown(raw) }
-            return .retrying(retry)
+            guard let signal = SubagentSignal.decode(json) else { return .unknown(raw) }
+            return .subagent(signal)
         // The sixth type. It used to fall to `.unknown` and be dropped on the floor, which is
         // exactly what "Bloom never asks" looked like from the inside: the CLI was willing to ask
         // and nobody was reading the line. Only `can_use_tool` is lifted out; the other control
@@ -697,6 +705,13 @@ public enum AgentEvent: Sendable {
 
         case "api_retry":
             return .retrying(AgentRetry.turnRetry(json, raw: raw))
+
+        // `task_started`, `task_updated` and `task_notification`. All three fell to `.unknown`
+        // and were dropped, which is what "Bloom cannot see subagents" looked like from the
+        // inside: the CLI has been reporting them all along.
+        case "task_started", "task_updated", "task_notification":
+            guard let signal = SubagentSignal.decode(json) else { return .unknown(raw) }
+            return .subagent(signal)
 
         case "hook_started", "hook_response":
             return .hook(AgentHook(
