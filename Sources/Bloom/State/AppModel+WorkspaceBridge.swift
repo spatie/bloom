@@ -41,6 +41,14 @@ extension AppModel {
                     order, in: project, from: identity, origin: origin
                 )
             },
+            PaneOpenTool { [weak self] order, workspaceID in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return await self.openPaneForBridge(order, in: workspaceID)
+            },
+            PaneSplitTool { [weak self] order, axis, workspaceID in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return await self.splitPaneForBridge(order, axis: axis, in: workspaceID)
+            },
             WorkspaceMergeTool { [weak self] workspace, pullRequest, method in
                 guard let self else {
                     return .refused("Bloom is still starting up. Try again in a moment.")
@@ -116,5 +124,64 @@ extension AppModel {
             branch: workspace.branch,
             path: workspace.path
         )
+    }
+
+    // MARK: - Panes
+
+    /// The live model for the workspace a pane tool is speaking for, or nothing.
+    ///
+    /// A model reaches for these while a turn is running, which is exactly when a workspace can
+    /// have been archived out from under it, so "gone" is a real answer rather than a guard for
+    /// tidiness. The sentence is a constant beside it so the two tools cannot describe the same
+    /// absence differently.
+    private func paneTarget(_ workspaceID: WorkspaceID) -> WorkspaceModel? {
+        guard let workspace = workspaces.first(where: { $0.id == workspaceID }) else { return nil }
+        return model(for: workspace)
+    }
+
+    private static let noWorkspaceForPane =
+        "That workspace is not open in Bloom any more, so there is nowhere to put a pane." 
+
+    /// `pane_open`, through the same door the tab strip's `+` menu uses.
+    ///
+    /// `NewPane.open` and not a copy of it: a chat has to be made in the store before it can be a
+    /// tab, and a terminal deliberately does not start its shell here. Reusing it is what keeps a
+    /// pane an agent asked for identical to one the reader made.
+    func openPaneForBridge(_ order: PaneOrder, in workspaceID: WorkspaceID) async -> PaneOutcome {
+        guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForPane) }
+        let tabs = WorkspaceTabsStore.shared
+        NewPane.open(order.kind, in: model, url: order.url ?? "") { content in
+            // Placed either way, and selected only when asked. A pane opened in the background is
+            // still in the strip, which is the whole point of being able to ask for one: the
+            // agent has put it within reach without taking the reader out of what they are doing.
+            if order.focus {
+                tabs.select(content, in: model)
+            } else {
+                tabs.reveal(content, in: model)
+            }
+        }
+        return .opened(order.confirmation)
+    }
+
+    /// `pane_split`, through the same door Cmd+D uses.
+    ///
+    /// The refusal comes from `PaneSplit`, which is what greys Split Right in the menu, so a pane
+    /// the menu will not divide is one this declines with the menu's own reason rather than with a
+    /// second opinion.
+    func splitPaneForBridge(
+        _ order: PaneOrder, axis: SplitAxis, in workspaceID: WorkspaceID
+    ) async -> PaneOutcome {
+        guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForPane) }
+        let tabs = WorkspaceTabsStore.shared
+        guard let tab = tabs.selectedTab(in: model) else {
+            return .refused(
+                "There is no tab open in that workspace to split. Use pane_open instead."
+            )
+        }
+        NewPane.open(order.kind, in: model, url: order.url ?? "") { content in
+            tabs.split(tab: tab, axis: axis, showing: content)
+        }
+        let where_ = axis == .horizontal ? "beside" : "below"
+        return .opened("Opened \(order.kind.title) \(where_) what was already on screen.")
     }
 }

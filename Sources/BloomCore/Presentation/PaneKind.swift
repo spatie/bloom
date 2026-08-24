@@ -1,4 +1,4 @@
-import BloomCore
+import Foundation
 
 /// The three kinds of thing a pane can be opened on, and what each of them is called.
 ///
@@ -14,17 +14,22 @@ import BloomCore
 /// A review is deliberately not one of these. A workspace has exactly one of it, opening it twice
 /// points the one tab at another file rather than making a second, and `FileReview` is the door
 /// for that. See the note on `CenterTab`.
-enum PaneKind: String, CaseIterable, Identifiable, Sendable {
+///
+/// In the core because the `+` menu is no longer the only thing that names a kind: `pane_open` and
+/// `pane_split` let an agent ask for one over the bridge, and a second list of the same three
+/// words is exactly what the head of this file argues against. The raw values are the wire format
+/// those tools accept, so renaming a case is a change to the tool contract and not only to a menu.
+public enum PaneKind: String, CaseIterable, Identifiable, Sendable {
     case chat
     case terminal
     case browser
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
     /// The names themselves are `PaneNaming` in the core, because what a new pane is CALLED is
     /// the same fact as what the menu item offering one says, and two of the strip's three kinds
     /// were numbering themselves off a second copy of the words.
-    var title: String {
+    public var title: String {
         switch self {
         case .chat: PaneNaming.chat
         case .terminal: PaneNaming.terminal
@@ -34,7 +39,7 @@ enum PaneKind: String, CaseIterable, Identifiable, Sendable {
 
     /// And the glyphs are `PaneGlyph`, for the reason the head of this file gives: the menu item
     /// and the tab it opens have to wear the same mark, and they were stating it separately.
-    var symbol: String {
+    public var symbol: String {
         switch self {
         case .chat: PaneGlyph.chat
         case .terminal: PaneGlyph.terminal
