@@ -53,7 +53,8 @@ struct AgentQuotaModelTests {
     @Test func gradesHowCloseAWindowIsToItsWall() {
         #expect(QuotaSeverity.of(nil) == .calm)
         #expect(QuotaSeverity.of(0.5) == .calm)
-        #expect(QuotaSeverity.of(0.75) == .warning)
+        #expect(QuotaSeverity.of(0.75) == .calm)
+        #expect(QuotaSeverity.of(0.85) == .warning)
         #expect(QuotaSeverity.of(0.94) == .critical)
         #expect(QuotaSeverity.of(1) == .spent)
     }
@@ -96,11 +97,12 @@ struct QuotaBoardTests {
         #expect(board.providers[0].quotas.map(\.window.label) == ["5 hours", "Week"])
     }
 
-    /// The one line the menu leads with: the window nearest its wall, across every provider.
-    @Test func leadsWithTheNearestWall() {
+    /// The window nearest its wall, across every provider. Not what the panel puts first, which is
+    /// each provider in turn shortest window first; this is what a one sentence summary names.
+    @Test func namesTheNearestWall() {
         let board = QuotaBoard.make(from: [
             quota(.claudeCode, .named("five_hour"), 0.42),
-            quota(.claudeCode, .named("seven_day"), 0.77),
+            quota(.claudeCode, .named("seven_day"), 0.85),
             quota(.codex, .lasting(604_800, key: "primary"), 0.06),
         ], at: now)
 

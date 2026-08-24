@@ -221,11 +221,20 @@ public enum QuotaSeverity: Int, Sendable, Hashable, Comparable, CaseIterable {
         lhs.rawValue < rhs.rawValue
     }
 
-    /// The two thresholds are Claude Code's own. Its payload carries `surpassedThreshold: 0.75`
-    /// alongside `"status":"allowed_warning"`, so 75 percent is where the provider itself starts
-    /// to be concerned and Bloom has no business inventing a different number. The second is the
-    /// last tenth, which is where a person still has time to change what they are doing.
-    public static let warningAt = 0.75
+    /// Eighty and ninety, and both are the owner's, asked for in those words after looking at the
+    /// panel with his own account's figures in it.
+    ///
+    /// It was 75 for the warning, taken from Claude Code's own `surpassedThreshold: 0.75` on an
+    /// `allowed_warning` payload, which is a defensible number and is the provider being concerned
+    /// on its own behalf. It is not the same question. The provider warns when it thinks a wall is
+    /// coming; this ramp is somebody deciding whether to start a piece of work, and three quarters
+    /// of a week gone on a Wednesday is not a reason to stop. Ninety is unchanged.
+    ///
+    /// **Both boundaries are inclusive.** Exactly 80 is orange and exactly 90 is red, because a
+    /// person reading "80%" beside an ordinary grey lane and "80%" beside an orange one on two
+    /// different days would be reading a rounding artefact as a state. `QuotaPhrase.figure` rounds
+    /// down, so the first figure that prints as 80 is the first fraction at or over it.
+    public static let warningAt = 0.8
     public static let criticalAt = 0.9
 
     public static func of(_ fraction: Double?) -> QuotaSeverity {
@@ -255,23 +264,31 @@ public struct QuotaBoard: Sendable, Hashable {
 
     public var providers: [Provider]
 
+    /// The window nearest its wall, chosen in `make` because choosing needs the clock.
+    ///
+    /// **Not what the panel puts first.** The panel is a plain list in the provider's own order,
+    /// which is what the owner asked for and which holds still. This is the one window a single
+    /// sentence has to name when there is only room for one: the menu bar's own severity, and the
+    /// sentence VoiceOver reads out over the whole panel. See `rank` for what wins.
+    ///
+    /// Stored rather than computed, because the decision reads a window's reset time against now
+    /// and nothing that asks for it has an instant to hand. A board built by hand rather than by
+    /// `make` names none, which is the honest answer for a value nobody dated.
+    public var headline: AgentQuota?
+
+    public init(providers: [Provider], headline: AgentQuota? = nil) {
+        self.providers = providers
+        self.headline = headline
+    }
+
     public var isEmpty: Bool { providers.isEmpty }
 
     /// Every quota on the board, in the order the panel draws them.
     public var all: [AgentQuota] { providers.flatMap(\.quotas) }
 
-    /// The window closest to its wall, which is what the panel leads with.
-    ///
-    /// Only a window whose fullness is actually known can be the headline. A window Claude has
-    /// mentioned but not measured has no bar to draw and no fullness to compare, so leading with
-    /// it would put "unknown" in the one line that is meant to answer the question.
-    public var headline: AgentQuota? {
-        all.filter { $0.fraction != nil }.max { ($0.fraction ?? 0) < ($1.fraction ?? 0) }
-    }
-
     public var severity: QuotaSeverity { QuotaSeverity.of(headline?.fraction) }
 
-    /// Groups, drops what has turned over, and sorts.
+    /// Groups, drops what has turned over, sorts, and decides what leads.
     ///
     /// Providers keep `AgentKind`'s own declaration order so the panel does not reshuffle itself
     /// when Codex happens to report first, and each provider's windows run shortest first, because
@@ -283,7 +300,52 @@ public struct QuotaBoard: Sendable, Hashable {
             guard let found = grouped[kind], !found.isEmpty else { return nil }
             return Provider(kind: kind, quotas: found.sorted(by: isShorter))
         }
-        return QuotaBoard(providers: providers)
+        let nearest = providers.flatMap(\.quotas)
+            .filter { $0.fraction != nil }
+            .max { rank($0, at: now) < rank($1, at: now) }
+        return QuotaBoard(providers: providers, headline: nearest)
+    }
+
+    /// How much a window deserves the top of the panel, biggest wins.
+    ///
+    /// **It was the largest percentage, and that was wrong twice over.** It led with a weekly at 60
+    /// percent while the same account's model scoped weekly sat at 71, because the second one was
+    /// being thrown away before it ever reached here; and it could not tell a five hour window at
+    /// 95 percent that lifts in twenty minutes from a weekly at 95 percent with six days to run,
+    /// which are a cup of tea and a ruined week.
+    ///
+    /// So three keys, in this order. Severity first, because a window at or past its wall is a
+    /// wall somebody is hitting now and no amount of arithmetic outranks that. Then how far ahead
+    /// of its own clock the window is, which is the whole of the difference between those two
+    /// nineties. Then fullness, which settles a board where nothing has a stated length and is
+    /// exactly the old behaviour for the rows the new one cannot read.
+    ///
+    /// Only a window whose fullness is known can lead. A window Claude has mentioned but not
+    /// measured has no fullness to compare, so leading with it would put "not reported" in the one
+    /// line that exists to answer the question.
+    static func rank(_ quota: AgentQuota, at now: Date) -> (QuotaSeverity, Double, Double) {
+        (
+            QuotaSeverity.of(quota.fraction),
+            QuotaPace.of(quota, at: now)?.overspend ?? 0,
+            quota.fraction ?? 0
+        )
+    }
+
+    /// The rows the panel draws, in the order it draws them.
+    ///
+    /// Lifted out of the view because every part of a row is a decision: what it is called, what
+    /// figure it carries, whether it has a lane at all, and what the sentence under it says.
+    ///
+    /// **The order is `all`'s and nothing is promoted.** An earlier draft moved the window nearest
+    /// its wall to the top and drew it larger, on the argument that the top is where the eye lands.
+    /// The owner asked for the plain reading instead: each provider in turn, and inside a provider
+    /// the shortest window first, so the five hour window sits above the week. That is a list a
+    /// person can learn the shape of, and it holds still: a panel that reshuffles itself because
+    /// one number crossed another is a panel you have to read from scratch every time. The nearest
+    /// wall is still named, in `headline`, which is what the spoken summary and the menu bar's own
+    /// severity read.
+    public func lines(at now: Date = Date(), locale: Locale = .current) -> [QuotaLine] {
+        all.map { QuotaLine.of($0, at: now, locale: locale) }
     }
 
     /// Shortest window first, and a window of unknown length last, since there is nothing to sort
@@ -307,7 +369,15 @@ public struct QuotaBoard: Sendable, Hashable {
 /// and this one are not the same clock.
 public enum QuotaCountdown {
     public static func phrase(until reset: Date, from now: Date = Date()) -> String {
-        let seconds = reset.timeIntervalSince(now)
+        phrase(after: reset.timeIntervalSince(now))
+    }
+
+    /// The same words for a plain length of time, which is what a forecast is.
+    ///
+    /// Split out so "at this rate it runs out in 1d 7h" is spoken by the thing that already says
+    /// "lifts in 3d". Two countdowns in one panel phrased by two pieces of code is how the panel
+    /// ended up saying "Lifts in 3d" on one row and "in 3h 13m" on the next.
+    public static func phrase(after seconds: TimeInterval) -> String {
         guard seconds > 0 else { return "any moment now" }
         if seconds < 60 { return "in under a minute" }
         if seconds < 3600 {
