@@ -183,7 +183,13 @@ public extension Workspace {
         log.count > setupLogLimit ? String(log.suffix(setupLogLimit)) : log
     }
 
-    /// Matches `WorkspaceModel.setupLogLimit`, which caps the copy held in memory during a run.
+    /// The cap on the setup log, wherever it is held.
+    ///
+    /// Two copies of this number, one here and one on the app's `WorkspaceModel`, with a comment
+    /// on each saying it matched the other. They cap the same log: this one as it is written to
+    /// the row, the other as it is held in memory during the run and re-rendered on every append.
+    /// A `swift build` in a cold worktree prints tens of megabytes and none of it is worth
+    /// carrying in either place.
     static let setupLogLimit = 200_000
 }
 

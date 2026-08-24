@@ -141,9 +141,6 @@ final class WorkspaceModel {
 
     // Setup.
     var setupOutput: String = ""
-    /// The tail Bloom keeps in memory. A setup script that prints a megabyte is not unusual, and
-    /// none of it is worth re-rendering on every append.
-    static let setupLogLimit = 200_000
     var isRunningSetup = false
     /// Things Bloom did to this workspace that are worth a line in the transcript: a merge, and
     /// whatever follows it.
@@ -714,8 +711,10 @@ final class WorkspaceModel {
     func appendSetupOutput(_ lines: [String]) {
         guard !lines.isEmpty else { return }
         setupOutput += lines.joined(separator: "\n") + "\n"
-        if setupOutput.count > Self.setupLogLimit {
-            setupOutput = String(setupOutput.suffix(Self.setupLogLimit))
+        // The same cap the row is written under, so the transcript and the stored log agree
+        // about how much of a long setup survives. See `Workspace.setupLogLimit`.
+        if setupOutput.count > Workspace.setupLogLimit {
+            setupOutput = String(setupOutput.suffix(Workspace.setupLogLimit))
         }
     }
 
