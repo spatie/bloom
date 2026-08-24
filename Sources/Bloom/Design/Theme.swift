@@ -45,7 +45,7 @@ enum Palette {
     /// Identical to `surface` on purpose. They are two names for the reading ground because the
     /// call sites mean different things by them, not because the colour differs; if they ever
     /// diverge the window has grown a surface it does not need.
-    static let windowBackground = dynamic(light: 0xFFFFFF, dark: 0x0A1A25)
+    static let windowBackground = dynamic(PaletteInk.windowBackground)
 
     /// The chrome: the sidebar column, the title bar, and every strip of small controls.
     ///
@@ -64,17 +64,17 @@ enum Palette {
     static let sidebarNSColor = dynamicNSColor(light: 0xF1F5F6, dark: 0x0E202D)
 
     /// Content areas: the transcript, the inspector, anything holding text.
-    static let surface = dynamic(light: 0xFFFFFF, dark: 0x0A1A25)
+    static let surface = dynamic(PaletteInk.surface)
 
     /// A raised control: a segmented control's selected cell, a bordered button, a browser chip.
-    static let surfaceRaised = dynamic(light: 0xFFFFFF, dark: 0x16303F)
+    static let surfaceRaised = dynamic(PaletteInk.surfaceRaised)
 
     /// A recessed strip: gutters, hunk headers, tool detail blocks, the composer box, the panel.
     ///
     /// The step off `surface` is deliberately small, five units at most. It reads as recessed
     /// because it has a rule under it, not because it is a different colour, which is what keeps
     /// a window holding a dozen of these from looking like a stack of cards.
-    static let surfaceSunken = dynamic(light: 0xF7FAFA, dark: 0x0C1E2A)
+    static let surfaceSunken = dynamic(PaletteInk.surfaceSunken)
 
     // MARK: Overlays
     //
@@ -103,7 +103,7 @@ enum Palette {
     /// `#DCDCDC` on the light ramp and `#464646` on the dark one. On the deep blue ground that
     /// grey is the one thing in the window with no blue in it at all, so a resting selection read
     /// as a smudge. These are the same two steps, taken along Bloom's ramp instead.
-    static let selected = dynamic(light: 0xDCE7EA, dark: 0x1D4054)
+    static let selected = dynamic(PaletteInk.selected)
     /// Selection in a focused list inside the key window, where macOS uses the accent colour.
     ///
     /// Bloom's accent rather than the system's, for the reason spelled out on `accent`. This is the
@@ -122,7 +122,7 @@ enum Palette {
     /// that the eye reads as nothing, drawn at half a point. That is why the window used to have
     /// no edges. This is a 40 unit step in light and a 30 unit step in dark, and `Metrics.hairline`
     /// draws it at a full point, which is what AppKit's own split view divider has always been.
-    static let border = dynamic(light: 0xD6E0E4, dark: 0x1E3F53)
+    static let border = dynamic(PaletteInk.border)
 
     // MARK: Text
 
@@ -135,7 +135,15 @@ enum Palette {
     /// is meant to be read rather than ignored. The system means it for a disabled control. This
     /// is the rung the interface actually wanted, measured off the mockup and sitting between the
     /// system's second and third.
-    static let textTertiary = dynamic(light: 0x8A9AA2, dark: 0x62808E)
+    ///
+    /// **Retuned when the contrast table was written, and this was the colour that made the case
+    /// for writing one.** It was `#8A9AA2` and `#62808E`, which measured 2.91 to 1 on white, 2.77
+    /// on the sunken surface and 3.27 on the raised dark one, against a floor of 4.5. It is the
+    /// ink for diff gutter numbers, the `+` and `-` markers, check-run durations, workflow group
+    /// headers and about sixty other things meant to be read, and `PullRequestSummary` already
+    /// called one of them "a number nobody can read". The hue is unchanged; the value moved until
+    /// the worst ground cleared AA. See `PaletteContrastTests`, which now says so on every build.
+    static let textTertiary = dynamic(PaletteInk.textTertiary)
 
     /// Ink on anything Bloom has filled with a colour of its own.
     ///
@@ -181,7 +189,7 @@ enum Palette {
     ///
     /// This is for ink and for strokes. A filled control that has to carry white text uses
     /// `accentFill`, which is a different member of the ramp for exactly that reason.
-    static let accent = dynamic(light: 0x0C7A6E, dark: 0x4FD8C4)
+    static let accent = dynamic(PaletteInk.accent)
 
     /// The same pair as an `NSColor`, for the layers that hold a `CGColor` and therefore have to be
     /// handed a colour already resolved against the window's appearance.
@@ -193,7 +201,7 @@ enum Palette {
     /// on it measures 5.2 to 1, which is where macOS's own selection fill sits (4.9 to 1), so a
     /// selected row reads exactly as firmly as it did. Bloom itself cannot do this job: white on
     /// `#4FD8C4` is 1.6 to 1, an unreadable row.
-    static let accentFill = dynamic(light: 0x197593, dark: 0x197593)
+    static let accentFill = dynamic(PaletteInk.accentFill)
 
     /// An address in running text: underlined, and this colour.
     ///
@@ -275,8 +283,12 @@ enum Palette {
     /// and this app puts a dozen small meaning marks in one narrow column: at that volume they
     /// read as a warning light panel rather than as an index. Measured off the reference render,
     /// which is a step darker on the light ground and a step paler and less saturated on the dark
-    /// one. `#B23A2E` measures 6.0 to 1 on white, `#E4695E` 5.2 to 1 on the dark sidebar.
-    static let negative = dynamic(light: 0xB23A2E, dark: 0xE4695E)
+    /// one. `#B23A2E` measures 6.0 to 1 on white.
+    ///
+    /// The dark member was `#E4695E`, which is 5.2 to 1 on the dark sidebar and 4.24 on the raised
+    /// surface, and the raised one is the ground it is drawn on in a card. Lifted three and a half
+    /// percent of its value, hue untouched, to `#EC6D61`, which clears AA on all three.
+    static let negative = dynamic(PaletteInk.negative)
 
     /// The stop control, which is a quieter red than a failure is.
     ///
@@ -285,8 +297,10 @@ enum Palette {
     /// about work that is going perfectly well. This keeps the meaning and drops the volume.
     ///
     /// Two hex values rather than a blend of `negative`, so retuning that does not carry across to
-    /// this: the pair has to be moved with it by hand.
-    static let stop = dynamic(light: 0x994842, dark: 0xCC7B76)
+    /// this: the pair has to be moved with it by hand. Which is exactly what happened when the
+    /// contrast table arrived: the dark member went from `#CC7B76` to `#D07D78`, two percent of
+    /// value, because 4.36 to 1 on the raised surface is under AA.
+    static let stop = dynamic(PaletteInk.stop)
 
     /// Something needs attention but nothing is broken: setup that failed and can be run again,
     /// checks still going, a rate limit. Quieter than `systemOrange`, for the reason written on
@@ -309,7 +323,11 @@ enum Palette {
     ///
     /// The dark member is unchanged and is the reference the light one was aimed at: `#E8A33D` is
     /// what this state is supposed to feel like, and light is the appearance that was failing to.
-    static let warning = dynamic(light: 0x9C6C00, dark: 0xE8A33D)
+    ///
+    /// `#9C6C00` became `#9A6A00` when the contrast table was written, which is one and a half
+    /// percent of value and invisible: it measured 4.39 to 1 on the sunken surface, and the sunken
+    /// surface is where a strip sits.
+    static let warning = dynamic(PaletteInk.warning)
     /// An agent mid turn. The ramp is explicit that this is the accent rather than a green of its
     /// own: "Running, healthy, done. Reuse the accent, do not invent a green."
     static let running = accent
@@ -331,8 +349,13 @@ enum Palette {
     /// it reads as a sibling of the accent rather than as a colour from another app.
     ///
     /// A pair, for the reason `accent` is a pair: `#8250DF` measures 5.0 to 1 on the light
-    /// surface and `#A371F7` measures 5.3 to 1 on the dark one, and neither of them works on the
+    /// surface and the dark member 5.3 to 1 on the dark one, and neither of them works on the
     /// other's ground.
+    ///
+    /// The dark member was GitHub's own `#A371F7` until the contrast table was written. That is
+    /// 4.10 to 1 on the raised surface, and the strip's headline sits on a band over exactly
+    /// that, so it went up three percent of its lightness to `#AA7BF8`. Hue and saturation are
+    /// untouched, so it is still GitHub's violet.
     ///
     /// This is for ink, strokes and a wash of itself: the strip's headline and badge on a landed
     /// pull request, the sidebar's merge mark, and the eight percent band behind all of it. A
@@ -349,13 +372,13 @@ enum Palette {
     /// case, `PullRequestTint` resolves it here, and `WorkspaceStatusGlyph` draws the merge mark
     /// in it, so one landed pull request is one colour in every pane that reports it. Nothing else
     /// moved: passing checks, an open pull request and a closed one keep the tones they had.
-    static let merged = dynamic(light: 0x8250DF, dark: 0xA371F7)
+    static let merged = dynamic(PaletteInk.merged)
 
     /// A merge as a fill with light text on it: the Archive button on a landed pull request.
     ///
     /// One value in both appearances, exactly as `accentFill` is, and it is the LIGHT member of
     /// the pair above rather than a third colour. That is forced by the arithmetic: white on
-    /// `#8250DF` measures 5.05 to 1, and white on `#A371F7` only 3.35, which is under the AA floor
+    /// `#8250DF` measures 5.05 to 1, and white on the dark member only 3.2, which is under the AA floor
     /// for the 13 point label a `.regular` button draws. A pair that is right for ink is wrong for
     /// a fill, and this is the same trap `accent` and `accentFill` document.
     ///
@@ -363,7 +386,7 @@ enum Palette {
     /// percent over the surface. Measured: 4.5 to 1 against the light band `#F5F1FC` and 3.2 to 1
     /// against the dark one `#162136`, both clear of the 3 to 1 a control has to hold to be
     /// findable at all.
-    static let mergedFill = dynamic(light: 0x8250DF, dark: 0x8250DF)
+    static let mergedFill = dynamic(PaletteInk.mergedFill)
 
     // MARK: Diffs
     //
@@ -386,7 +409,7 @@ enum Palette {
     /// Teal against red does separate better than green against red under deuteranopia, which is
     /// a real argument and was weighed. It loses to two things: green for an added line is close
     /// to universal across git tooling, and this is the diff the owner looked at and approved.
-    static let diffPositive = dynamic(light: 0x28CD41, dark: 0x30D158)
+    static let diffPositive = dynamic(PaletteInk.diffPositive)
 
     static let diffAddBackground = diffPositive.opacity(0.13)
     static let diffAddEmphasis = diffPositive.opacity(0.28)
@@ -406,15 +429,15 @@ enum Palette {
 
     // MARK: Syntax
 
-    static let synKeyword = dynamic(light: 0x9B2393, dark: 0xD08EE0)
-    static let synType = dynamic(light: 0x0B7285, dark: 0x5BC8DB)
-    static let synString = dynamic(light: 0xC0392B, dark: 0xE8846E)
-    static let synNumber = dynamic(light: 0x1C6FBB, dark: 0x7FB3F0)
-    static let synComment = dynamic(light: 0x7F8C8D, dark: 0x76767E)
-    static let synFunction = dynamic(light: 0x2F5FD0, dark: 0x89AFF5)
-    static let synVariable = dynamic(light: 0x6A3FB5, dark: 0xB49BF0)
-    static let synAttribute = dynamic(light: 0x8A6A00, dark: 0xD9B65C)
-    static let synOperator = dynamic(light: 0x5A5A60, dark: 0xA8A8B0)
+    static let synKeyword = dynamic(PaletteInk.synKeyword)
+    static let synType = dynamic(PaletteInk.synType)
+    static let synString = dynamic(PaletteInk.synString)
+    static let synNumber = dynamic(PaletteInk.synNumber)
+    static let synComment = dynamic(PaletteInk.synComment)
+    static let synFunction = dynamic(PaletteInk.synFunction)
+    static let synVariable = dynamic(PaletteInk.synVariable)
+    static let synAttribute = dynamic(PaletteInk.synAttribute)
+    static let synOperator = dynamic(PaletteInk.synOperator)
     /// A constant is a number as far as this ramp is concerned, and saying so is cheaper than
     /// keeping two copies of one pair in step.
     static let synConstant = synNumber
@@ -423,6 +446,12 @@ enum Palette {
     /// means the right thing. Both arguments are plain 0xRRGGBB.
     static func dynamic(light: UInt32, dark: UInt32) -> Color {
         Color(nsColor: dynamicNSColor(light: light, dark: dark))
+    }
+
+    /// The same, from the core's table. Every named colour in this file goes through here, so the
+    /// numbers are somewhere `Tests/BloomCoreTests` can walk them: see `PaletteInk`.
+    static func dynamic(_ ink: PaletteInk.Pair) -> Color {
+        dynamic(light: ink.light, dark: ink.dark)
     }
 
     /// The same thing as an `NSColor`, for the handful of places that talk to AppKit directly.
