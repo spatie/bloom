@@ -55,12 +55,22 @@ public struct ExistingBranch: Sendable, Hashable, Identifiable, Codable {
     /// Whether there is a local `refs/heads` copy. False means the branch is only on the remote,
     /// which needs a tracking branch made for it rather than a plain checkout.
     public let isLocal: Bool
+    /// The live workspace already sitting on this branch, by name, or nil when it is free.
+    ///
+    /// Carried on the branch rather than worked out by the picker, because the picker used to be
+    /// handed a list these branches had been taken out of: git refuses one branch in two
+    /// worktrees, so an in-use branch was dropped, and the answer to "where is the branch I was
+    /// working on yesterday" was silence. It is listed and marked instead, and selecting it goes
+    /// to the workspace that has it. See `WorkspaceCheckoutPlan.workspaceHolding`, which is what
+    /// turns this name back into the row to select.
+    public let inUseBy: String?
 
     public var id: String { name }
 
-    public init(name: String, isLocal: Bool) {
+    public init(name: String, isLocal: Bool, inUseBy: String? = nil) {
         self.name = name
         self.isLocal = isLocal
+        self.inUseBy = inUseBy
     }
 }
 
@@ -174,11 +184,19 @@ public enum WorkspaceCheckoutPlan {
     /// against the project's default, the pull request entry against the ref the pull request
     /// actually targets. Offering both is offering a coin flip over what the Changes tab means,
     /// and the pull request is the one that knows the answer. See `heads(of:)`.
+    ///
+    /// A branch a live workspace is already sitting on is NOT dropped. It used to be, because git
+    /// refuses one branch in two worktrees and offering it would be offering a create that cannot
+    /// succeed. That reasoning is right about the create and wrong about the list: the branch
+    /// somebody is looking for is very often the one they were working on yesterday, and a picker
+    /// that answers by not mentioning it reads as a branch that has gone. It is listed with the
+    /// workspace holding it named on the row, and selecting it goes there instead of creating
+    /// anything. See `ExistingBranch.inUseBy`.
     public static func offeredBranches(
         local: [String],
         remote: [String],
         defaultBranch: String,
-        excluding taken: Set<String> = [],
+        inUse: [String: String] = [:],
         pullRequestHeads: Set<String> = []
     ) -> [ExistingBranch] {
         var byName: [String: Bool] = [:]
@@ -189,10 +207,9 @@ public enum WorkspaceCheckoutPlan {
             byName[name] = false
         }
         byName[defaultBranch] = nil
-        for name in taken { byName[name] = nil }
         for name in pullRequestHeads { byName[name] = nil }
         return byName
-            .map { ExistingBranch(name: $0.key, isLocal: $0.value) }
+            .map { ExistingBranch(name: $0.key, isLocal: $0.value, inUseBy: inUse[$0.key]) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 

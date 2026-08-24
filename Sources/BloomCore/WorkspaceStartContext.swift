@@ -79,10 +79,13 @@ public struct WorkspaceCheckoutOptions: Sendable {
     /// and then checked out with `--track -b`, which git refuses when the local branch is already
     /// there. Reading it here costs one `for-each-ref`, which is what the sheet was paying anyway,
     /// and it runs beside the remote listing rather than after it.
+    ///
+    /// `branchesInUse` maps a branch to the live workspace sitting on it, which the picker draws
+    /// on the row rather than using to hide it. See `WorkspaceCheckoutPlan.offeredBranches`.
     public static func load(
         repoPath: String,
         defaultBranch: String,
-        takenBranches: Set<String> = []
+        branchesInUse: [String: String] = [:]
     ) async -> WorkspaceCheckoutOptions {
         async let localListing = Git.branches(of: repoPath)
         async let remoteListing = Git.remoteBranches(of: repoPath)
@@ -100,7 +103,7 @@ public struct WorkspaceCheckoutOptions: Sendable {
                     local: local,
                     remote: remote,
                     defaultBranch: defaultBranch,
-                    excluding: takenBranches,
+                    inUse: branchesInUse,
                     pullRequestHeads: WorkspaceCheckoutPlan.heads(of: pullRequests)
                 ),
                 access: access,

@@ -75,15 +75,20 @@ struct WorkspaceCheckoutTests {
         #expect(branches.first { $0.name == "theirs" }?.isLocal == false)
     }
 
-    @Test("A branch already checked out in a workspace is not offered, because git would refuse")
-    func skipsBranchesInUse() {
+    @Test("A branch a workspace is already on is still offered, wearing the workspace's name")
+    func marksBranchesInUse() {
+        // It used to be dropped, because git refuses one branch in two worktrees. That answered
+        // "where is the branch I was working on yesterday" with silence. The row is offered and
+        // marked instead; selecting it goes to the workspace rather than creating a second one.
         let branches = WorkspaceCheckoutPlan.offeredBranches(
             local: ["main", "wip", "review"],
             remote: [],
             defaultBranch: "main",
-            excluding: ["review"]
+            inUse: ["review": "Quiet Harbour"]
         )
-        #expect(branches.map(\.name) == ["wip"])
+        #expect(branches.map(\.name) == ["review", "wip"])
+        #expect(branches.first { $0.name == "review" }?.inUseBy == "Quiet Harbour")
+        #expect(branches.first { $0.name == "wip" }?.inUseBy == nil)
     }
 
     @Test("A head with a pull request open on it is offered as the pull request and not twice")
@@ -96,6 +101,19 @@ struct WorkspaceCheckoutTests {
             pullRequestHeads: WorkspaceCheckoutPlan.heads(of: requests)
         )
         #expect(branches.map(\.name) == ["wip"])
+    }
+
+    @Test("Being in use does not save a branch from the exclusions that are still right")
+    func keepsExcludingWhatAPullRequestSpeaksFor() {
+        let requests = [listing(number: 4, head: "figma-mcp-check")]
+        let branches = WorkspaceCheckoutPlan.offeredBranches(
+            local: ["main", "figma-mcp-check"],
+            remote: ["origin/HEAD"],
+            defaultBranch: "main",
+            inUse: ["figma-mcp-check": "Coral Bay", "main": "Coral Bay"],
+            pullRequestHeads: WorkspaceCheckoutPlan.heads(of: requests)
+        )
+        #expect(branches.isEmpty)
     }
 
     @Test("A fork's head does not hide a branch of this repository that shares its name")
