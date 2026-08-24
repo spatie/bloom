@@ -38,8 +38,7 @@ struct TranscriptTextMeasureTests {
     @Test("a short run hugs its own words rather than the room it was offered")
     func hugsItsWords() {
         let size = TranscriptTextMeasure.size(
-            widestLine: 52.4, usedHeight: 16, proposed: 456,
-            laidOutAt: 456, lineHeight: 16, hasGlyphs: true
+            widestLine: 52.4, usedHeight: 16, proposed: 456, lineHeight: 16, hasGlyphs: true
         )
         #expect(size == TranscriptTextMeasure.Size(width: 53, height: 16))
     }
@@ -47,8 +46,7 @@ struct TranscriptTextMeasureTests {
     @Test("a run may not report itself wider than the room it was offered")
     func cappedByTheProposal() {
         let size = TranscriptTextMeasure.size(
-            widestLine: 455.8, usedHeight: 64, proposed: 456,
-            laidOutAt: 456, lineHeight: 16, hasGlyphs: true
+            widestLine: 455.8, usedHeight: 64, proposed: 456, lineHeight: 16, hasGlyphs: true
         )
         #expect(size.width == 456)
         #expect(size.height == 64)
@@ -59,8 +57,7 @@ struct TranscriptTextMeasureTests {
     @Test("an ideal size is not capped, because nothing offered any room")
     func idealSizeIsNotCapped() {
         let size = TranscriptTextMeasure.size(
-            widestLine: 2_400, usedHeight: 16, proposed: nil,
-            laidOutAt: TranscriptTextMeasure.idealWidth, lineHeight: 16, hasGlyphs: true
+            widestLine: 2_400, usedHeight: 16, proposed: nil, lineHeight: 16, hasGlyphs: true
         )
         #expect(size.width == 2_400)
     }
@@ -68,8 +65,7 @@ struct TranscriptTextMeasureTests {
     @Test("an empty run takes no space, so an empty paragraph costs no line")
     func emptyRun() {
         let size = TranscriptTextMeasure.size(
-            widestLine: 0, usedHeight: 0, proposed: 456,
-            laidOutAt: 456, lineHeight: 16, hasGlyphs: false
+            widestLine: 0, usedHeight: 0, proposed: 456, lineHeight: 16, hasGlyphs: false
         )
         #expect(size == TranscriptTextMeasure.Size(width: 0, height: 0))
     }
@@ -90,22 +86,78 @@ struct TranscriptTextMeasureTests {
     ])
     func neverReportsNothing(widestLine: Double, usedHeight: Double) {
         let size = TranscriptTextMeasure.size(
-            widestLine: widestLine, usedHeight: usedHeight, proposed: 592,
-            laidOutAt: 592, lineHeight: 16, hasGlyphs: true
+            widestLine: widestLine, usedHeight: usedHeight,
+            proposed: 592, lineHeight: 16, hasGlyphs: true
         )
         #expect(size.width > 0, "a run with words in it reported a width of \(size.width)")
         #expect(size.height > 0, "a run with words in it reported a height of \(size.height)")
     }
 
     /// The same floor with no proposal to fall back on, which is the case that has no obvious
-    /// number in it and is exactly why `layoutWidth` answers with a finite one.
+    /// number in it.
     @Test("the floor holds when nothing was proposed either")
     func theFloorHoldsWithoutAProposal() {
         let size = TranscriptTextMeasure.size(
-            widestLine: 0, usedHeight: 0, proposed: nil,
-            laidOutAt: TranscriptTextMeasure.layoutWidth(proposed: nil), lineHeight: 16, hasGlyphs: true
+            widestLine: 0, usedHeight: 0, proposed: nil, lineHeight: 16, hasGlyphs: true
         )
         #expect(size.width > 0)
         #expect(size.height > 0)
+    }
+
+    // MARK: And the floor never answers with the scratch width
+
+    /// A paragraph of nothing but line breaks, asked what its ideal size is.
+    ///
+    /// This is not a contrived string and the numbers are not invented: measured on the same
+    /// TextKit 1 stack `TranscriptTextView` builds, "\n" lays out two real line fragments, both of
+    /// them zero points wide, so the widest line is zero while the run plainly has glyphs. The
+    /// floor caught it and answered with the width it had just been laid out at, which for a
+    /// question about the ideal size is `idealWidth`. The run reported itself a hundred thousand
+    /// points wide, which is not a smaller failure than the blank row the floor exists to prevent.
+    @Test("a run that drew no ink reports a hair's width, not the scratch measure it was laid out in")
+    func inkFreeRunDoesNotReportTheScratchWidth() {
+        let size = TranscriptTextMeasure.size(
+            widestLine: 0, usedHeight: 32, proposed: nil, lineHeight: 16, hasGlyphs: true
+        )
+        #expect(size.width == TranscriptTextMeasure.floorWidth)
+        #expect(size.height == 32)
+    }
+
+    /// The same run with room offered, which is every placement the layout system ever makes. It
+    /// may have that room and not a point more.
+    @Test("a run that drew no ink falls back to the room it was offered")
+    func inkFreeRunFallsBackToTheProposal() {
+        let size = TranscriptTextMeasure.size(
+            widestLine: 0, usedHeight: 32, proposed: 456, lineHeight: 16, hasGlyphs: true
+        )
+        #expect(size.width == 456)
+    }
+
+    /// The rule the two above are cases of, swept over every proposal this view is asked about and
+    /// every degenerate measurement it could come back with.
+    ///
+    /// `idealWidth` is a container to lay out in, not a size to be drawn at. Nothing here may
+    /// report a width no proposal named and no glyph occupied.
+    @Test("no answer is ever the scratch width unless the ink really is that wide")
+    func neverAnswersWithTheScratchWidth() {
+        let proposals: [Double?] = [nil, .infinity, 0, -20, 1, 456, 592]
+        for proposed in proposals {
+            for widestLine in [0.0, -4.0, 12.0] {
+                for usedHeight in [0.0, 35.0] {
+                    let size = TranscriptTextMeasure.size(
+                        widestLine: widestLine, usedHeight: usedHeight,
+                        proposed: proposed, lineHeight: 16, hasGlyphs: true
+                    )
+                    let place = "widest line \(widestLine), height \(usedHeight), "
+                        + "proposal \(String(describing: proposed))"
+                    #expect(size.width > 0, "\(place) reported a width of \(size.width)")
+                    #expect(size.height > 0, "\(place) reported a height of \(size.height)")
+                    #expect(
+                        size.width < TranscriptTextMeasure.idealWidth,
+                        "\(place) reported a width of \(size.width)"
+                    )
+                }
+            }
+        }
     }
 }
