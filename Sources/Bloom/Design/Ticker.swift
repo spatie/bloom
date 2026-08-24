@@ -37,11 +37,20 @@ final class Ticker {
     private var origin: CFTimeInterval = 0
 
     /// Clears the frame record so each switch reports only its own frames.
+    ///
+    /// **`last` is set to now rather than to nought, and that is a bug fix rather than a tidy-up.**
+    /// Nought means "no previous tick", so the first tick after a run began recorded no interval,
+    /// and the gap it was the end of was the one gap that mattered: the stall between asking for
+    /// the switch and the first frame that could show it. A tab switch measured this way reported
+    /// a worst frame of 20ms over a return whose display link had not run for 290ms, because the
+    /// 290ms was the interval that was thrown away. Timed from here, the first tick of a run is
+    /// measured against the instant the run was asked for, which is what everything else in the
+    /// report is measured against too.
     func beginRun() {
         intervalsMs.removeAll()
         blocksMs.removeAll()
-        last = 0
         origin = CACurrentMediaTime()
+        last = origin
     }
 
     @objc private func tick() {
