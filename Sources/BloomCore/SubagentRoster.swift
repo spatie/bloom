@@ -23,7 +23,7 @@ public struct Subagent: Sendable, Hashable, Identifiable {
     public private(set) var elapsedSeconds: Int = 0
     /// The API refusing it, while it is being refused. Cleared by the first tick that does not
     /// carry one, because a retry that succeeded is not a fact about the subagent any more.
-    public private(set) var retry: SubagentRetry?
+    public private(set) var retry: AgentRetry?
 
     init(_ start: SubagentStart) {
         id = start.id
@@ -48,7 +48,7 @@ public struct Subagent: Sendable, Hashable, Identifiable {
         summary: String = "",
         outputFile: String? = nil,
         elapsedSeconds: Int = 0,
-        retry: SubagentRetry? = nil
+        retry: AgentRetry? = nil
     ) {
         self.id = id
         self.toolUseID = toolUseID

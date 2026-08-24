@@ -631,10 +631,9 @@ public enum AgentEvent: Sendable {
         // Filed under the call it is about, so the row lands where the call would have been.
         case .permissionAsk(let value): value.toolUseID
         case .permissionDecided(let value): value.toolUseID
-        // The Agent call the retrying subagent belongs to, so a row drawn for that call can pick
-        // its own retries out of the stream.
-        case .retrying(let value):
-            if case .subagent(_, let toolUseID, _) = value.scope { toolUseID } else { nil }
+        // Nothing here for a retry. The turn's own `api_retry` belongs to no call, and a
+        // subagent's retry arrives inside a `tool_progress` line, which decodes to `.subagent`
+        // and is filed against its subagent by the roster rather than against a stored row.
         default: nil
         }
     }
@@ -666,7 +665,7 @@ public enum AgentEvent: Sendable {
         // a retrying subagent is a subagent first. See `SubagentProgress.retry` for how the retry
         // block gets to the retry surface from here.
         case "tool_progress":
-            guard let signal = SubagentSignal.decode(json) else { return .unknown(raw) }
+            guard let signal = SubagentSignal.decode(json, raw: raw) else { return .unknown(raw) }
             return .subagent(signal)
         // The sixth type. It used to fall to `.unknown` and be dropped on the floor, which is
         // exactly what "Bloom never asks" looked like from the inside: the CLI was willing to ask
@@ -710,7 +709,7 @@ public enum AgentEvent: Sendable {
         // and were dropped, which is what "Bloom cannot see subagents" looked like from the
         // inside: the CLI has been reporting them all along.
         case "task_started", "task_updated", "task_notification":
-            guard let signal = SubagentSignal.decode(json) else { return .unknown(raw) }
+            guard let signal = SubagentSignal.decode(json, raw: raw) else { return .unknown(raw) }
             return .subagent(signal)
 
         case "hook_started", "hook_response":

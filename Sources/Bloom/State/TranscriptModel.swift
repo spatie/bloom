@@ -103,12 +103,6 @@ final class TranscriptModel {
     /// waiting row still sitting above it saying it is about to try again.
     private(set) var retryRun: RetryRun?
 
-    /// Retries inside a subagent, keyed by the Agent call they belong to.
-    ///
-    /// Kept rather than drawn here. A retrying subagent is that subagent's row, and this is the
-    /// fact that row reads. Nothing in this file draws it.
-    private(set) var subagentRetries: [String: AgentRetry] = [:]
-
     /// Turns that waited and then got through, keyed by the `seq` of the result row that closed
     /// them, so the footer can account for the minutes.
     ///
@@ -868,14 +862,11 @@ final class TranscriptModel {
 
     /// Folds one announcement into the run it belongs to, starting one if this is the first.
     ///
-    /// A subagent's retries never touch the turn's own run. They are a different request with a
-    /// different backoff, and mixing them would have the turn's row counting somebody else's
-    /// attempts.
+    /// Only the turn's own retries reach here. A subagent's arrive on its `tool_progress` line,
+    /// which is a `.subagent` event, and they live on that subagent's row in `subagents`: they are
+    /// a different request with a different backoff, and folding them in here would have the
+    /// turn's row counting somebody else's attempts.
     private func absorb(_ retry: AgentRetry) {
-        if case .subagent(let agentID, _, _) = retry.scope {
-            subagentRetries[agentID] = retry
-            return
-        }
         if retryRun != nil {
             retryRun?.absorb(retry)
         } else {
@@ -894,7 +885,6 @@ final class TranscriptModel {
         guard let run = retryRun else { return }
         if settledRun == nil { settledRun = run }
         retryRun = nil
-        subagentRetries.removeAll()
     }
 
     /// Files a settled run under the row that closed the turn, once that row is in `rows`.
@@ -913,7 +903,6 @@ final class TranscriptModel {
     private func abandonRetryRun() {
         retryRun = nil
         settledRun = nil
-        subagentRetries.removeAll()
     }
 
     // MARK: - Permission asks

@@ -23,8 +23,9 @@ public struct SubagentRow: Sendable, Hashable, Identifiable {
     public enum Detail: Sendable, Hashable {
         /// How long it has been going, while it is going.
         case elapsed(seconds: Int)
-        /// The API is refusing it. Carries the facts; the words are `SubagentRetryPhrase`'s.
-        case retrying(SubagentRetry)
+        /// The API is refusing it. The facts and the words are both `AgentRetry`'s: the sidebar
+        /// and the transcript are two views of one outage and must not name it differently.
+        case retrying(AgentRetry)
         /// What it answered, or why it did not.
         case summary(String)
         case none
@@ -32,7 +33,7 @@ public struct SubagentRow: Sendable, Hashable, Identifiable {
         public var text: String {
             switch self {
             case .elapsed(let seconds): SubagentRow.duration(seconds)
-            case .retrying(let retry): SubagentRetryPhrase.text(retry)
+            case .retrying(let retry): retry.readout
             case .summary(let summary): summary
             case .none: ""
             }

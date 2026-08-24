@@ -30,7 +30,9 @@ public enum SubagentSignal: Sendable, Hashable {
     /// Nil rather than a throw for the same reason every decoder in `AgentEvent` returns nil: a
     /// line off a subprocess is never allowed to end a session, and a shape a later CLI invents
     /// has to fall through to `.unknown` with its bytes intact.
-    public static func decode(_ json: JSONValue) -> SubagentSignal? {
+    /// - Parameter raw: the bytes of the line, which only the retry block keeps: an `AgentRetry`
+    ///   travels with the line it was read from, the same as every other decoded event.
+    public static func decode(_ json: JSONValue, raw: Data = Data()) -> SubagentSignal? {
         switch json["type"]?.stringValue {
         case "tool_progress":
             guard let parent = json["parent_tool_use_id"]?.stringValue else { return nil }
@@ -38,7 +40,11 @@ public enum SubagentSignal: Sendable, Hashable {
                 parentToolUseID: parent,
                 type: json["subagent_type"]?.stringValue ?? "",
                 elapsedSeconds: json["elapsed_time_seconds"]?.intValue ?? 0,
-                retry: SubagentRetry.decode(json["subagent_retry"])
+                // Read by the retry work's own parser rather than by a second one here. The block
+                // spells three of its six fields differently from the turn's `api_retry` and both
+                // spellings are already handled there, so a subagent's retry and the turn's are
+                // one type with a scope on it. See `AgentRetry.subagentRetry`.
+                retry: AgentRetry.subagentRetry(json, raw: raw)
             ))
 
         case "system":
@@ -141,54 +147,21 @@ public struct SubagentProgress: Sendable, Hashable {
     public let parentToolUseID: String
     public let type: String
     public let elapsedSeconds: Int
-    public let retry: SubagentRetry?
+    /// The API refusing this subagent's request, when the tick carries one. `AgentRetry`, not a
+    /// type of this file's own: what a retry is and what it is called belong to the retry surface,
+    /// and a subagent's 529 is the same outage the turn's `api_retry` reports one level up.
+    public let retry: AgentRetry?
 
     public init(
         parentToolUseID: String,
         type: String = "",
         elapsedSeconds: Int = 0,
-        retry: SubagentRetry? = nil
+        retry: AgentRetry? = nil
     ) {
         self.parentToolUseID = parentToolUseID
         self.type = type
         self.elapsedSeconds = elapsedSeconds
         self.retry = retry
-    }
-}
-
-/// The API refusing a subagent's request, and the CLI going round again.
-///
-/// Parsed and carried to the row here because it is a fact about the subagent, which is this
-/// file's subject. **What the row SAYS about it is not written here**: the retry and error
-/// surfaces are one piece of work and its words belong together. See `SubagentRetryPhrase`.
-public struct SubagentRetry: Sendable, Hashable {
-    public let attempt: Int
-    public let maxRetries: Int
-    public let delayMilliseconds: Int
-    /// The HTTP status, 529 for an overloaded API, which is the one this was measured against.
-    public let status: Int
-    public let category: String
-
-    public init(
-        attempt: Int, maxRetries: Int, delayMilliseconds: Int = 0, status: Int = 0,
-        category: String = ""
-    ) {
-        self.attempt = attempt
-        self.maxRetries = maxRetries
-        self.delayMilliseconds = delayMilliseconds
-        self.status = status
-        self.category = category
-    }
-
-    static func decode(_ json: JSONValue?) -> SubagentRetry? {
-        guard let json, let attempt = json["attempt"]?.intValue else { return nil }
-        return SubagentRetry(
-            attempt: attempt,
-            maxRetries: json["max_retries"]?.intValue ?? 0,
-            delayMilliseconds: json["retry_delay_ms"]?.intValue ?? 0,
-            status: json["error_status"]?.intValue ?? 0,
-            category: json["error_category"]?.stringValue ?? ""
-        )
     }
 }
 

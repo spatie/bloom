@@ -12,7 +12,7 @@ import BloomCore
 ///
 /// `--running` starts the heartbeat, since nothing is actually working in a capture.
 struct SubagentRowGallery: View {
-    /// The three subagents in `Tests/fixtures/subagents-529.ndjson`, mid turn.
+    /// The three subagents in `Tests/fixtures/claude-api-retry.ndjson`, mid turn.
     private var working: [Subagent] {
         [
             Subagent(id: SubagentID("1"), description: "Count lines in a.txt",
@@ -21,8 +21,8 @@ struct SubagentRowGallery: View {
                      type: "Explore", outputFile: "/x", elapsedSeconds: 11),
             Subagent(id: SubagentID("3"), description: "Sketch the migration order",
                      type: "Plan", outputFile: "/x", elapsedSeconds: 9,
-                     retry: SubagentRetry(attempt: 2, maxRetries: 10, status: 529,
-                                          category: "overloaded")),
+                     retry: AgentRetry(scope: .subagent(agentID: "3", toolUseID: nil, kind: nil),
+                                       attempt: 2, maxAttempts: 10, delay: 1.1, status: 529)),
         ]
     }
 

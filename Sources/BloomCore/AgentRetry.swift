@@ -115,6 +115,21 @@ public struct AgentRetry: Sendable, Hashable {
     /// every time, which is what stops the surface reading as frozen.
     public var progress: String { "Attempt \(attempt) of \(maxAttempts)." }
 
+    /// The whole of it in the width a sidebar row has, which is about twenty characters.
+    ///
+    /// The subagent rows in the sidebar draw a retry beside a name that is already being
+    /// truncated, so the sentences above do not fit and a phrase had to exist. It is derived
+    /// from the same `RetryTrouble` rather than written beside it: the pane that says a subagent
+    /// is overloaded and the transcript that says the turn is are two views of one outage, and
+    /// the day somebody renames what a 529 is called they must not have to find two files.
+    ///
+    /// The count is in it because a readout that said only "retrying" would sit unchanged for
+    /// three minutes and read as frozen, which is the bug the whole retry surface exists for.
+    public var readout: String {
+        guard maxAttempts > 0 else { return trouble.readout }
+        return "\(trouble.readout) \(attempt)/\(maxAttempts)"
+    }
+
     /// How long until the next attempt, in words, or nothing when saying it would be noise.
     ///
     /// **No ticking countdown, deliberately.** `retry_delay_ms` would support one to the
@@ -164,6 +179,11 @@ public struct AgentRetry: Sendable, Hashable {
     ///
     /// Most `tool_progress` lines are an elapsed-seconds tick and say nothing about trouble, so
     /// this declines rather than inventing an attempt zero for them.
+    ///
+    /// Called from `SubagentSignal.decode`, which reads the whole of the line: the tick, the
+    /// subagent's type and this. The line decodes to one event and it is that subagent's, because
+    /// a retrying subagent is a subagent first, so this is the one parser both levels of the
+    /// retry surface go through.
     public static func subagentRetry(_ json: JSONValue, raw: Data) -> AgentRetry? {
         guard let block = json["subagent_retry"], let agentID = block["agent_id"]?.stringValue
         else { return nil }
@@ -251,6 +271,22 @@ public enum RetryTrouble: Sendable, Hashable {
         case .refused: "Anthropic's API refused the request"
         case .unreachable: "Bloom cannot reach Anthropic's API"
         case .unexplained: "Anthropic's API returned an error"
+        }
+    }
+
+    /// The same diagnosis in the two or three words a 260 point row has space for.
+    ///
+    /// Every one of these is the headline above with its subject removed, because in a sidebar
+    /// the subject is the subagent's own name, sitting immediately to the left of the readout.
+    /// Same diagnosis, same vocabulary, less of it.
+    public var readout: String {
+        switch self {
+        case .overloaded: "overloaded"
+        case .rateLimited: "rate limited"
+        case .serverFault: "API failing"
+        case .refused: "API refused it"
+        case .unreachable: "no answer"
+        case .unexplained: "API error"
         }
     }
 

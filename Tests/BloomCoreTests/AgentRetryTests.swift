@@ -28,18 +28,39 @@ import Testing
         events.compactMap { if case .retrying(let retry) = $0 { retry } else { nil } }
     }
 
+    /// A subagent's retries do not arrive as `.retrying`, and the route is the one thing about
+    /// them that changed when the subagent rows landed.
+    ///
+    /// The block rides on a `tool_progress` line that also carries the subagent's elapsed seconds
+    /// and its type, one line decodes to one event, and a retrying subagent is a subagent first:
+    /// so that line is a `.subagent` and the retry is read off it. Same `AgentRetry`, parsed by
+    /// the same `AgentRetry.subagentRetry`, said in the same words. Every assertion below is the
+    /// one that was made when they came through `.retrying`.
+    private static func subagentRetries(in events: [AgentEvent]) -> [AgentRetry] {
+        events.compactMap {
+            guard case .subagent(.progressed(let progress)) = $0 else { return nil }
+            return progress.retry
+        }
+    }
+
     // MARK: The capture
 
     @Test func liftsEveryRetryOutOfTheRealStream() throws {
-        let retries = Self.retries(in: try Self.fixture("claude-api-retry.ndjson"))
+        let events = try Self.fixture("claude-api-retry.ndjson")
+        let turn = Self.retries(in: events)
+        let subagents = Self.subagentRetries(in: events)
 
-        // One for the turn, ten each for three subagents.
-        #expect(retries.count == 31)
-        #expect(retries.filter { $0.scope == .turn }.count == 1)
-        #expect(Set(retries.compactMap(\.scope.agentID)).count == 3)
+        // One for the turn, ten each for three subagents. Thirty one announcements about one
+        // outage on two levels, whichever event carries them.
+        #expect(turn.count == 1)
+        #expect(turn.allSatisfy { $0.scope == .turn })
+        #expect(subagents.count == 30)
+        #expect(Set(subagents.compactMap(\.scope.agentID)).count == 3)
         // Every one of them was the same outage.
-        #expect(retries.allSatisfy { $0.status == 529 })
-        #expect(retries.allSatisfy { $0.trouble == .overloaded })
+        let all = turn + subagents
+        #expect(all.count == 31)
+        #expect(all.allSatisfy { $0.status == 529 })
+        #expect(all.allSatisfy { $0.trouble == .overloaded })
     }
 
     @Test func readsTheTurnsOwnRetry() throws {
@@ -57,8 +78,9 @@ import Testing
     /// The subagent block spells three of its six fields differently and hides one level down, so
     /// it gets its own assertion rather than riding on the turn's.
     @Test func readsASubagentsRetry() throws {
-        let retry = try #require(Self.retries(in: try Self.fixture("claude-api-retry.ndjson"))
-            .first { $0.scope.agentID == "ae8b434e1a270eeac" })
+        let retry = try #require(
+            Self.subagentRetries(in: try Self.fixture("claude-api-retry.ndjson"))
+                .first { $0.scope.agentID == "ae8b434e1a270eeac" })
 
         #expect(retry.attempt == 1)
         #expect(retry.maxAttempts == 10)
@@ -76,7 +98,7 @@ import Testing
 
     /// The backoff really does grow, which is the fact the escalating wording rests on.
     @Test func theWaitsGetLonger() throws {
-        let one = Self.retries(in: try Self.fixture("claude-api-retry.ndjson"))
+        let one = Self.subagentRetries(in: try Self.fixture("claude-api-retry.ndjson"))
             .filter { $0.scope.agentID == "ae8b434e1a270eeac" }
             .sorted { $0.attempt < $1.attempt }
 
@@ -87,9 +109,23 @@ import Testing
 
     /// A `tool_progress` line with no retry block is not a retry, and must not become one.
     @Test func plainProgressIsNotARetry() throws {
-        let line = #"{"type":"tool_progress","tool_use_id":"t1","elapsed_time_seconds":4}"#
-        guard case .unknown = try #require(AgentEvent.decode(line: line)) else {
-            Issue.record("a progress tick is not a retry")
+        let tick =
+            #"{"type":"tool_progress","parent_tool_use_id":"toolu_1","elapsed_time_seconds":4}"#
+        guard case .subagent(.progressed(let progress)) = try #require(
+            AgentEvent.decode(line: tick))
+        else {
+            Issue.record("a progress tick is a line about a subagent")
+            return
+        }
+        // The tick saying a subagent is four seconds in says nothing about trouble, and inventing
+        // an attempt zero for it would put every working row into a retrying state.
+        #expect(progress.retry == nil)
+
+        // A tick naming no subagent at all is a line this decoder has no reading of, and keeps
+        // its bytes rather than being half understood.
+        let orphan = #"{"type":"tool_progress","tool_use_id":"t1","elapsed_time_seconds":4}"#
+        guard case .unknown = try #require(AgentEvent.decode(line: orphan)) else {
+            Issue.record("a tick naming no subagent belongs in .unknown")
             return
         }
     }
@@ -97,11 +133,19 @@ import Testing
     /// Ten attempts are not ten rows. A stored transcript is history, and nine tenths of a retry
     /// run is stale the moment the next attempt starts.
     @Test func retriesAreNotStoredRows() throws {
-        let retrying = try Self.fixture("claude-api-retry.ndjson").filter {
+        let events = try Self.fixture("claude-api-retry.ndjson")
+        let retrying = events.filter {
             if case .retrying = $0 { return true } else { return false }
         }
         #expect(!retrying.isEmpty)
         #expect(retrying.allSatisfy { !$0.isTranscriptRow })
+        // Nor are the thirty a subagent announced, by exactly the same argument. They travel as
+        // `.subagent` now, and a line that was not a row must not become one by changing route.
+        let ticks = events.filter {
+            if case .subagent(.progressed) = $0 { return true } else { return false }
+        }
+        #expect(ticks.count == 33)
+        #expect(ticks.allSatisfy { !$0.isTranscriptRow })
     }
 
     // MARK: What it says
@@ -219,7 +263,7 @@ import Testing
     // MARK: A run, and what it leaves behind
 
     @Test func aRunFoldsItsAttemptsIntoOneFact() throws {
-        let ten = Self.retries(in: try Self.fixture("claude-api-retry.ndjson"))
+        let ten = Self.subagentRetries(in: try Self.fixture("claude-api-retry.ndjson"))
             .filter { $0.scope.agentID == "ae2e718c9c4fc1a7d" }
             .sorted { $0.attempt < $1.attempt }
 

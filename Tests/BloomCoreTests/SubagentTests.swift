@@ -4,13 +4,18 @@ import Foundation
 
 // MARK: - Replaying the capture
 
-/// `Tests/fixtures/subagents-529.ndjson` is a real 66 line stream-json capture from `claude`
+/// `Tests/fixtures/claude-api-retry.ndjson` is a real 66 line stream-json capture from `claude`
 /// 2.1.241 in which three subagents genuinely spawned, on a night the API was returning 529s.
 /// Every assertion about what the CLI sends is made against it rather than against a shape
 /// somebody remembered, which is the whole reason it was captured.
+///
+/// It arrived here twice, once under this name and once as `subagents-529.ndjson`, because the
+/// same evening was captured for the retry surface and for these rows. Byte for byte the same
+/// file: one copy, read by both suites, since two copies of a capture drift the moment somebody
+/// adds a line to one of them. `AgentRetryTests` reads it for the turn's own retry.
 @Suite struct SubagentCaptureTests {
     private func events() throws -> [AgentEvent] {
-        try bloomFixtureLines("subagents-529.ndjson").compactMap(AgentEvent.decode(line:))
+        try bloomFixtureLines("claude-api-retry.ndjson").compactMap(AgentEvent.decode(line:))
     }
 
     private func roster() throws -> SubagentRoster {
@@ -72,7 +77,28 @@ import Foundation
         let retries = progress.compactMap(\.retry)
         #expect(retries.count == 30)
         #expect(retries.allSatisfy { $0.status == 529 && $0.category == "overloaded" })
-        #expect(retries.first?.maxRetries == 10)
+        #expect(retries.first?.maxAttempts == 10)
+    }
+
+    /// The join, end to end, on the real capture: a `tool_progress` carrying a `subagent_retry`
+    /// has to reach the sidebar as a row in a retrying state, saying the outage in the words the
+    /// transcript uses for the same 529 one level up.
+    @Test func aRetryingSubagentIsARowThatSaysWhy() throws {
+        var roster = SubagentRoster()
+        for event in try events() {
+            guard case .subagent(let signal) = event else { continue }
+            roster.apply(signal)
+            // Stop at the first retry, which is mid turn. The endings arrive later and a finished
+            // row reads out what it answered rather than what went wrong on the way to it.
+            if case .progressed(let progress) = signal, progress.retry != nil { break }
+        }
+
+        let row = try #require(SubagentRow.rows(roster).first {
+            if case .retrying = $0.detail { true } else { false }
+        })
+        #expect(row.mark == .working)
+        #expect(row.detail.text == "overloaded 1/10")
+        #expect(row.spokenValue == "working, being retried, overloaded 1/10")
     }
 
     @Test func nothingInTheCaptureBecomesATranscriptRow() throws {
@@ -205,7 +231,7 @@ import Foundation
 // MARK: - What a row says
 
 @Suite struct SubagentRowTests {
-    private func running(elapsed: Int, retry: SubagentRetry? = nil) -> Subagent {
+    private func running(elapsed: Int, retry: AgentRetry? = nil) -> Subagent {
         Subagent(
             id: SubagentID("a"), description: "Find Store.upsert call sites", type: "Explore",
             state: .running, elapsedSeconds: elapsed, retry: retry
@@ -219,11 +245,29 @@ import Foundation
         #expect(SubagentRow(running(elapsed: 0)).detail.text == "")
     }
 
-    @Test func aRetryingRowCarriesTheFactsAndLeavesTheWordsToTheRetryWork() {
-        let retry = SubagentRetry(attempt: 3, maxRetries: 10, status: 529, category: "overloaded")
+    /// The row carries the retry whole and says it in the retry surface's own words, which is
+    /// what stops the sidebar and the transcript describing one 529 two ways.
+    @Test func aRetryingRowSaysItInTheRetrySurfacesWords() {
+        let retry = AgentRetry(attempt: 3, maxAttempts: 10, delay: 1.1, status: 529)
         let row = SubagentRow(running(elapsed: 4, retry: retry))
         #expect(row.detail == .retrying(retry))
-        #expect(row.spokenValue.hasPrefix("working, being retried"))
+        #expect(row.detail.text == "overloaded 3/10")
+        // The same diagnosis the transcript spells out at length, from the same `RetryTrouble`.
+        #expect(retry.headline == "Anthropic's API is overloaded")
+        #expect(row.detail.text.count <= SubagentRow.detailLimit)
+        #expect(row.spokenValue == "working, being retried, overloaded 3/10")
+    }
+
+    /// A retry the row draws while the count is still climbing has to keep changing, or three
+    /// minutes of waiting look like three minutes of nothing.
+    @Test func theReadoutMovesWithTheAttempts() {
+        let readouts = (1...4).map { attempt in
+            SubagentRow(running(
+                elapsed: 4,
+                retry: AgentRetry(attempt: attempt, maxAttempts: 10, delay: 1, status: 529)
+            )).detail.text
+        }
+        #expect(Set(readouts).count == 4)
     }
 
     @Test func aFinishedRowCarriesWhatItAnswered() {
