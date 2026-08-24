@@ -303,9 +303,9 @@ public enum RepositoryStarter {
         var isDirectory: ObjCBool = false
         let exists = manager.fileExists(atPath: normalized, isDirectory: &isDirectory)
 
-        // Asked only of a folder that is there. `git rev-parse` run against a path that does not
-        // exist answers about whatever directory the process happens to be in, which is how a
-        // missing path used to come back as a repository.
+        // Asked only of a folder that is there. `Git.isRepository` answers false for a missing
+        // path anyway, because the process cannot be launched in it, so this is a subprocess
+        // saved rather than an answer changed.
         var isRepository = false
         if exists, isDirectory.boolValue { isRepository = await Git.isRepository(normalized) }
 
