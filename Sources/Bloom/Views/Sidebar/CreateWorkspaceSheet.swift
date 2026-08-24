@@ -50,7 +50,6 @@ struct CreateWorkspaceSheet: View {
     /// what would have happened anyway rather than a second set of defaults.
     @State private var controls = ComposerControls()
 
-    @State private var mode: WorkspaceStartMode = .chat
     @State private var baseBranch = ""
     @State private var branches: [String] = []
 
@@ -115,17 +114,53 @@ struct CreateWorkspaceSheet: View {
         PromptAttachmentStore.shared.attachments(for: draftID).map(\.path)
     }
 
-    /// Words are required, where in a conversation an attachment alone is enough to send. The
-    /// difference is deliberate: a turn with nothing but a screenshot is a sentence, but a
-    /// workspace with nothing but a screenshot has no name, no branch and nothing for the namer to
-    /// read, and `Git.slug` would call it `workspace`.
+    /// Whether Create may be pressed. Words are required, where in a conversation an attachment
+    /// alone is enough to send: a turn with nothing but a screenshot is a sentence, but a chat
+    /// workspace with nothing but a screenshot has no name, no branch and nothing for the namer
+    /// to read, and `Git.slug` would call it `workspace`.
+    ///
+    /// The rule is `WorkspaceStartPlan.canStart`, in the core, because it decides which routes
+    /// exist and a decision taken here is a decision nothing can test. This one was also wrong:
+    /// it disabled every route on an empty box, including the one route that needs no sentence
+    /// at all.
     private var canCreate: Bool {
-        // A checkout needs no words. Opening a pull request to read it is a complete intention,
-        // and the name and branch come from the pull request rather than from a sentence, so the
-        // one reason the box is mandatory for a new branch does not apply.
-        repo != nil
-            && (checkout != nil || !spokenPrompt.isEmpty)
-            && !app.isCreatingWorkspace
+        WorkspaceStartPlan.canStart(
+            hasProject: repo != nil,
+            prompt: spokenPrompt,
+            hasCheckout: checkout != nil,
+            isChatWorkspace: true,
+            isBusy: app.isCreatingWorkspace
+        )
+    }
+
+    /// Whether "Just a terminal" may be pressed. The same rule, asked about the other route, and
+    /// the difference between the two answers on an empty box is the feature.
+    private var canOpenTerminal: Bool {
+        WorkspaceStartPlan.canStart(
+            hasProject: repo != nil,
+            prompt: spokenPrompt,
+            hasCheckout: checkout != nil,
+            isChatWorkspace: false,
+            isBusy: app.isCreatingWorkspace
+        )
+    }
+
+    /// What the second button in the footer is.
+    ///
+    /// A button rather than a checkbox, and beside Create rather than in the overflow menu it used
+    /// to be a picker in. "Opens with: Terminal" was two clicks inside an ellipsis, had to be found
+    /// before Create was pressed and read after it, and still refused to create anything until a
+    /// sentence had been written for an agent that was never going to be started. A second button
+    /// is one gesture, says what it does, and is the only control on the sheet that a completely
+    /// empty box does not disable.
+    private var terminalAction: ComposerSecondaryAction {
+        ComposerSecondaryAction(
+            title: "Just a terminal",
+            systemImage: "apple.terminal",
+            help: "Cut the worktree and open a shell in it. No chat, and nothing to describe.",
+            isEnabled: canOpenTerminal,
+            action: { create(opensWith: .terminal) }
+        )
     }
 
     var body: some View {
@@ -394,15 +429,6 @@ struct CreateWorkspaceSheet: View {
     /// should not be taking room from the one thing they came here to write.
     private var overflowMenu: some View {
         Menu {
-            // The picker's own title is the section heading, so "Opens with" is still written
-            // above the two rows and the one in force is ticked.
-            Picker("Opens with", selection: $mode) {
-                ForEach(WorkspaceStartMode.allCases) { candidate in
-                    Text(candidate.label).tag(candidate)
-                }
-            }
-            .pickerStyle(.inline)
-
             Section {
                 Text("Worktree in \(WorkspaceManager.workspacesRoot.path)")
             }
@@ -442,9 +468,7 @@ struct CreateWorkspaceSheet: View {
                 mentionRoot: repo?.path ?? NSHomeDirectory(),
                 attachmentRoot: stagingDirectory,
                 attachmentKey: draftID,
-                placeholder: mode == .chat
-                    ? "Describe the task, @mention files, run /commands"
-                    : "Describe what you are about to do, so the branch has a name",
+                placeholder: "Describe the task, @mention files, run /commands",
                 editorHeight: editorHeight,
                 onContentHeightChange: { contentHeight = $0 },
                 onKey: handle(key:),
@@ -459,12 +483,10 @@ struct CreateWorkspaceSheet: View {
                     // exist yet and a style the project defines is already in the repository.
                     project: repo?.path,
                     onAttach: onAttach,
-                    onSend: create,
-                    // A terminal workspace opens a shell and never starts an agent, so the model,
-                    // the effort, the permission mode, fast mode and the paperclip have nothing to
-                    // act on. They were drawn anyway, which made the sheet offer five settings that
-                    // the workspace it was about to create would ignore.
-                    showsAgentControls: mode == .chat
+                    onSend: { create(opensWith: .chat) },
+                    // Beside Create, because it is the other way to finish this sheet. See
+                    // `terminalAction`.
+                    secondary: terminalAction
                 )
             }
 
@@ -491,13 +513,6 @@ struct CreateWorkspaceSheet: View {
 
     private var statusRow: some View {
         HStack(spacing: Metrics.spacingWide) {
-            // The one thing in the overflow menu whose effect is not visible anywhere else on the
-            // sheet, said out loud while it is on. The default needs no chip: chat is what the box
-            // above already looks like.
-            if mode == .terminal {
-                Chip(text: "Opens a terminal", systemImage: "apple.terminal")
-            }
-
             hint
 
             Spacer(minLength: 0)
@@ -620,7 +635,7 @@ struct CreateWorkspaceSheet: View {
         WorkspaceNaming.shouldName(
             userSuppliedName: nil,
             prompt: spokenPrompt.isEmpty ? "a task" : spokenPrompt,
-            isChatWorkspace: mode == .chat,
+            isChatWorkspace: true,
             isEnabled: WorkspaceNamingPreferences().isEnabled,
             isAgentAvailable: isNamingAvailable
         )
@@ -640,7 +655,7 @@ struct CreateWorkspaceSheet: View {
     private func handle(key: ComposerKey) -> Bool {
         switch key {
         case .returnKey, .commandReturn:
-            create()
+            create(opensWith: .chat)
             return true
         case .escape:
             dismiss()
@@ -757,12 +772,17 @@ struct CreateWorkspaceSheet: View {
         NSWorkspace.shared.open(attachment.url(in: stagingDirectory))
     }
 
-    private func create() {
-        guard let repo, canCreate else { return }
+    /// Cuts the worktree, on whichever of the two routes was pressed.
+    ///
+    /// One function for both, because everything below the first line is the same work: the same
+    /// attachments, the same staging, the same "Create more", the same funnel. Only the layout the
+    /// workspace opens on differs, and it is one argument. See `AppModel.createWorkspace`, which
+    /// is the one way a workspace is started whoever is asking.
+    private func create(opensWith chosen: WorkspaceStartMode) {
+        guard let repo, chosen == .chat ? canCreate : canOpenTerminal else { return }
 
         let text = trimmedPrompt
         let base = baseBranch.isEmpty ? repo.defaultBranch : baseBranch
-        let chosen = mode
         let source = checkout
         let chosenControls = controls
 
