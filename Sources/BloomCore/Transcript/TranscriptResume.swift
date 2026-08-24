@@ -111,49 +111,16 @@ public enum TranscriptPlacement: Equatable, Sendable {
 
 /// The rule for what a pane may do with what it remembers.
 public enum TranscriptResume {
-    /// Whether the arrival frame has to draw the whole session rather than `TranscriptTail`'s tail.
+    /// Whether the arrival frame may draw the whole session rather than `TranscriptTail`'s tail.
     ///
     /// **Asked before anything has been laid out**, because it decides what the FIRST pass of the
-    /// list's body draws, so it can read nothing that a measurement has to arrive for. What it may
-    /// read is what the pane wrote down when it left, and one field of that settles it.
-    ///
-    /// **An offset needs the rows above it and the live end does not.** A point down a laid out
-    /// document can only be resolved by laying out everything above it, so a pane coming back to
-    /// one has to draw the session whole. A pane coming back to the live end is coming back to the
-    /// END of the rows, and the end of the tail is the same place as the end of the session: there
-    /// is nothing above the viewport that has to exist for it to be where it is.
-    ///
-    /// This used to answer `remembered != nil`, and drawing in full was the right half of the
-    /// trade against the arrangement it replaced. That one drew the tail on the arrival frame and
-    /// put the history back a hundred milliseconds later whatever the reader was doing, so a
-    /// return cost two main thread stops rather than one, and the second was the larger. Measured
-    /// on a release build at 1440 by 900 against a 3,848 row session: 125ms, 125ms and 104ms for
-    /// the tail, then 169ms, 163ms and 163ms for the history.
-    ///
-    /// What was wrong with it was the timer, not the tail. Measured again with `--tab-probe`
-    /// against the owner's own 1,011 row session, four warm returns to the chat tab cost 218ms,
-    /// 177ms, 128ms and 114ms of stopped main thread, all of it laying out rows thousands of
-    /// points above a viewport that opens at the other end of the document. So the tail comes back
-    /// for the case where nothing above the viewport is needed, and the history goes back behind
-    /// it when the reader asks for it by scrolling towards it rather than on a clock. See
-    /// `TranscriptListView.revealHistoryIfNeeded`.
+    /// list's body draws, so it can read nothing that a measurement has to arrive for. The
+    /// existence of a memory for this pane and this session is the whole of it, and that is enough:
+    /// a pane that has drawn this session before is not arriving at it. The tail exists to keep a
+    /// 269ms layout off the frame that arrives at a session, and the price of it is the same layout
+    /// a hundred milliseconds later; paying that on every return is the trade going the wrong way.
     public static func drawsInFull(_ remembered: TranscriptPaneState?) -> Bool {
-        guard let remembered else { return false }
-        return !remembered.isAtLiveEnd
-    }
-
-    /// Whether this pane is coming back to a session it has drawn before, at the end of it, and so
-    /// holds a history it has not drawn and will only draw if the reader goes looking for it.
-    ///
-    /// The other half of `drawsInFull`, and separate because the two answers are read at different
-    /// moments for different reasons: that one decides what the first pass draws, and this decides
-    /// whether the list still owes a reveal afterwards. A FIRST open also draws the tail, and it
-    /// owes its history on the hundred millisecond timer that has always put it there, because a
-    /// reader arriving at a conversation for the first time has an unread mark and a search result
-    /// to be able to reach and no written down position saying they were at the end.
-    public static func opensOnTheTail(_ remembered: TranscriptPaneState?) -> Bool {
-        guard let remembered else { return false }
-        return remembered.isAtLiveEnd
+        remembered != nil
     }
 
     /// Where a pane opens a session, given what it wrote down when it last left one.
