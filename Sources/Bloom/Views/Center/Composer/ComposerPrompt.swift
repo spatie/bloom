@@ -52,9 +52,10 @@ struct ComposerPrompt<Footer: View>: View {
     /// What clicking a chip does. A conversation opens the file in its review tab; the sheet has
     /// no tabs to open one in and hands it to the Finder instead.
     var onOpenAttachment: @MainActor (PromptAttachment) -> Void
-    /// The footer, handed the action behind its paperclip. Passed in rather than reached for,
-    /// because everything an attachment does lives here and the footer is only the button.
-    @ViewBuilder var footer: (@escaping @MainActor () -> Void) -> Footer
+    /// The footer, handed what it can ask this view to write into the draft. Passed in rather than
+    /// reached for, because everything an attachment and a quick prompt do lives here and the
+    /// footer is only the buttons. See `ComposerPromptActions`.
+    @ViewBuilder var footer: (ComposerPromptActions) -> Footer
 
     @Environment(AppModel.self) private var app
 
@@ -159,7 +160,7 @@ struct ComposerPrompt<Footer: View>: View {
                 placeholder: placeholder
             )
 
-            footer(attachFiles)
+            footer(ComposerPromptActions(attach: attachFiles, insert: insert(quickPrompt:)))
         }
         .composerBox(isFocused: $isFocused, isDropTarget: isDropTarget)
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
@@ -497,6 +498,21 @@ struct ComposerPrompt<Footer: View>: View {
         caret = draft.caretAfterBackspace
         isCommandPreviewed = false
         return true
+    }
+
+    /// A quick prompt chosen from the panel in the footer: its words go into the draft where the
+    /// caret is, and nothing is sent.
+    ///
+    /// Written into the body rather than into the whole draft, exactly as a picked file is: the
+    /// caret the composer holds counts from the start of the prompt written after any `/command`,
+    /// and writing it back through the split is what keeps the command intact.
+    private func insert(quickPrompt: QuickPrompt) {
+        var draft = command
+        let insertion = QuickPromptInsertion.inserting(quickPrompt, into: draft.body, at: caret)
+        draft.body = insertion.text
+        text = draft.text
+        caret = insertion.caret
+        isFocused = true
     }
 
     private func pick(file: FileMatch) {

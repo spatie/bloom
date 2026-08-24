@@ -23,6 +23,10 @@ struct ComposerFooterView: View {
     /// the create sheet the worktree does not exist, so the repository is the honest answer there.
     var project: String?
     var onAttach: @MainActor () -> Void
+    /// What choosing a quick prompt does, or nil where there is nowhere to put one. Nil hides the
+    /// button rather than disabling it: a control that can never do anything is not worth the room
+    /// in a row that already loses its words at 420 points.
+    var onQuickPrompt: (@MainActor (QuickPrompt) -> Void)?
     var onSend: @MainActor () -> Void
     var onStop: @MainActor () -> Void = {}
     /// Whether the row carries the choices the agent runs on.
@@ -58,6 +62,11 @@ struct ComposerFooterView: View {
     /// pick. See the binding on that view.
     @State private var isShowingContextDetail = false
 
+    /// Whether the quick prompt panel is up. Held here for the same reason the flag above it is:
+    /// the button is in all three candidates `ViewThatFits` builds, and state inside a candidate
+    /// belongs to the candidate.
+    @State private var isShowingQuickPrompts = false
+
     var body: some View {
         // Everything the row is built out of, worked out once.
         //
@@ -86,6 +95,17 @@ struct ComposerFooterView: View {
         // tree while the popover is up.
         .popover(isPresented: $isShowingContextDetail, arrowEdge: .top) {
             if let context { ContextWindowDetail(usage: context) }
+        }
+        // Outside the `ViewThatFits` as well, and for the same reason: narrowing the pane must not
+        // take the presenter out of the tree while the panel is up.
+        .popover(isPresented: $isShowingQuickPrompts, arrowEdge: .top) {
+            if let onQuickPrompt {
+                QuickPromptMenu(
+                    catalog: QuickPromptCatalog.shared,
+                    onPick: onQuickPrompt,
+                    onClose: { isShowingQuickPrompts = false }
+                )
+            }
         }
         .onChange(of: controls.model, initial: true) { _, id in
             remember(id, known: catalog.options(for: controls.agentKind), in: &extraModels)
@@ -222,6 +242,25 @@ struct ComposerFooterView: View {
                 ComposerContextGauge(
                     usage: context, reading: reading, isShowingDetail: $isShowingContextDetail
                 )
+            }
+
+            // Beside the paperclip, because those two are the only controls in this row that
+            // answer "what goes into the box" rather than "how should it think". `text.badge.plus`
+            // is literally what pressing it does, and not `sparkles`: every control to the left is
+            // already about an AI, so a sparkle would distinguish nothing.
+            if showsAgentControls, onQuickPrompt != nil {
+                Button {
+                    isShowingQuickPrompts = true
+                } label: {
+                    ComposerControlLabel(
+                        systemImage: "text.badge.plus",
+                        text: nil,
+                        isActive: isShowingQuickPrompts
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("Insert a quick prompt")
+                .accessibilityLabel("Quick prompts")
             }
 
             // A paperclip, not the plus that used to sit here: a plus already means "new session"

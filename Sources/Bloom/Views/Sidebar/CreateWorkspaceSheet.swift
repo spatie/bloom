@@ -531,7 +531,7 @@ struct CreateWorkspaceSheet: View {
             onContentHeightChange: { contentHeight = $0 },
             onKey: handle(key:),
             onOpenAttachment: open(attachment:)
-        ) { onAttach in
+        ) { actions in
             ComposerFooterView(
                 controls: controls,
                 onChange: { controls = $0 },
@@ -540,7 +540,8 @@ struct CreateWorkspaceSheet: View {
                 // The repository, because the worktree this sheet is about to cut does not
                 // exist yet and a style the project defines is already in the repository.
                 project: repo?.path,
-                onAttach: onAttach,
+                onAttach: actions.attach,
+                onQuickPrompt: actions.insert,
                 onSend: create
             )
         }

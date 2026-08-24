@@ -77,6 +77,12 @@ public struct ReviewCommentID: Identifier {
     public init(_ rawValue: String) { self.rawValue = rawValue }
 }
 
+/// One of the owner's own quick prompts, the text of which goes into the composer's draft.
+public struct QuickPromptID: Identifier {
+    public let rawValue: String
+    public init(_ rawValue: String) { self.rawValue = rawValue }
+}
+
 /// A message somebody has asked for that has not gone to the agent yet. See `Delivery`.
 public struct DeliveryID: Identifier {
     public let rawValue: String

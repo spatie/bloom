@@ -737,6 +737,25 @@ public actor Store {
                     try db.execute("ALTER TABLE repos ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;")
                 }
             },
+
+            // The owner's own quick prompts: a short name, a mark, and the words that go into the
+            // composer's draft.
+            //
+            // A table rather than the settings key value pairs. The seven entries in
+            // `PromptOverrides` get away with a key each because their set is closed and Bloom
+            // wrote it; this list grows, is renamed and is deleted from, and every growing list in
+            // Bloom is a row. It hangs off nothing: there is one flat global list, so there is no
+            // foreign key here and no project scope to widen later without a migration.
+            sql("""
+            CREATE TABLE IF NOT EXISTS quick_prompt (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                text TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL
+            );
+            """),
         ]
 
         let current = Int(db.userVersion)
@@ -2198,6 +2217,102 @@ public actor Store {
         try db.run("DELETE FROM review_comments WHERE workspace_id = ?", [.text(workspaceID)])
     }
 
+    // MARK: - Quick prompts
+
+    /// The whole list, in the order the panel draws it before anything is searched for.
+    public func quickPrompts() throws -> [QuickPrompt] {
+        try db.query("SELECT * FROM quick_prompt ORDER BY sort_order, created_at, id")
+            .map(Self.quickPrompt(from:))
+    }
+
+    public func quickPrompt(id: QuickPromptID) throws -> QuickPrompt? {
+        try db.query("SELECT * FROM quick_prompt WHERE id = ?", [.text(id)])
+            .first.map(Self.quickPrompt(from:))
+    }
+
+    /// Writes a new prompt. `insert` rather than `upsert`, because every column here is the
+    /// owner's and a row that already exists is changed through `update(quickPromptID:)`: see the
+    /// rule at the head of this file. A prompt with an id the table already holds is a bug rather
+    /// than an edit, so the insert is left to fail rather than made to overwrite.
+    ///
+    /// The order it lands in is worked out here, inside the actor, so two prompts written in the
+    /// same moment cannot both read the same maximum and share a place in the list.
+    @discardableResult
+    public func insert(_ prompt: QuickPrompt) throws -> QuickPrompt {
+        var row = prompt
+        row.sortOrder = try nextQuickPromptOrder()
+        try insertQuickPromptRow(row)
+        return row
+    }
+
+    /// Changes an existing prompt without writing the columns it did not mean to change.
+    ///
+    /// The same shape as `update(workspaceID:)`, and for the same reason: the row is read here,
+    /// inside the actor, immediately before it is written back, with no suspension in between, so
+    /// a form somebody sat in for a minute cannot carry the rest of the row back to what it looked
+    /// like when they opened it.
+    @discardableResult
+    public func update(
+        quickPromptID: QuickPromptID,
+        _ change: @Sendable (inout QuickPrompt) -> Void
+    ) throws -> QuickPrompt? {
+        guard var row = try quickPrompt(id: quickPromptID) else { return nil }
+        change(&row)
+        try db.run(
+            "UPDATE quick_prompt SET name = ?, symbol = ?, text = ? WHERE id = ?",
+            [.text(row.name), .text(row.symbol), .text(row.text), .text(quickPromptID)]
+        )
+        row.id = quickPromptID
+        return row
+    }
+
+    public func deleteQuickPrompt(id: QuickPromptID) throws {
+        try db.run("DELETE FROM quick_prompt WHERE id = ?", [.text(id)])
+    }
+
+    /// Puts the built-ins in, once ever, and answers with the list as it stands afterwards.
+    ///
+    /// **Deleting a built-in has to stick.** So this compares the version the database has already
+    /// seeded against `QuickPromptSeed.version` rather than comparing the built-in list against the
+    /// table: a prompt the owner deleted is not missing, it is deleted, and nothing here can tell
+    /// those apart by looking at the rows. Adding a second built-in later means a new entry with a
+    /// higher `introducedIn` and a bump of the version, which inserts that one and resurrects
+    /// nothing. See `QuickPromptSeed`.
+    @discardableResult
+    public func seedQuickPrompts(now: Date = Date()) throws -> [QuickPrompt] {
+        let installed = Int(try setting(QuickPromptSeed.versionKey) ?? "") ?? 0
+        let pending = QuickPromptSeed.pending(installed: installed)
+        guard !pending.isEmpty else { return try quickPrompts() }
+
+        var order = try nextQuickPromptOrder()
+        for entry in pending {
+            try insertQuickPromptRow(entry.prompt(sortOrder: order, now: now))
+            order += 1
+        }
+        try setSetting(QuickPromptSeed.versionKey, String(QuickPromptSeed.version))
+        return try quickPrompts()
+    }
+
+    private func nextQuickPromptOrder() throws -> Int {
+        let highest = try db.query("SELECT COALESCE(MAX(sort_order), -1) AS m FROM quick_prompt")
+            .first?.int("m") ?? -1
+        return Int(highest) + 1
+    }
+
+    private func insertQuickPromptRow(_ prompt: QuickPrompt) throws {
+        try db.run(
+            """
+            INSERT INTO quick_prompt (id, name, symbol, text, sort_order, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                .text(prompt.id), .text(prompt.name), .text(prompt.symbol), .text(prompt.text),
+                .int(Int64(prompt.sortOrder)),
+                .double(prompt.createdAt.timeIntervalSince1970),
+            ]
+        )
+    }
+
     // MARK: - Permission grants
 
     /// Every rule granted in one project, newest first. This is the revocation list.
@@ -2543,6 +2658,17 @@ public actor Store {
             outputTokens: Int(row.int("output_tokens") ?? 0),
             costUSD: row.double("cost_usd") ?? 0,
             contextTokens: Int(row.int("context_tokens") ?? 0)
+        )
+    }
+
+    private static func quickPrompt(from row: Row) -> QuickPrompt {
+        QuickPrompt(
+            id: QuickPromptID(row.string("id") ?? newID()),
+            name: row.string("name") ?? "",
+            symbol: row.string("symbol") ?? QuickPrompt.defaultSymbol,
+            text: row.string("text") ?? "",
+            sortOrder: Int(row.int("sort_order") ?? 0),
+            createdAt: row.date("created_at") ?? Date()
         )
     }
 

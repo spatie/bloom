@@ -94,7 +94,7 @@ struct ComposerView: View {
             onContentHeightChange: { contentHeight = $0 },
             onKey: handle(key:),
             onOpenAttachment: open(attachment:)
-        ) { onAttach in
+        ) { actions in
             ComposerFooterView(
                 controls: controls,
                 onChange: apply(controls:),
@@ -102,7 +102,8 @@ struct ComposerView: View {
                 isRunning: transcript.isRunning,
                 canSend: canSend,
                 project: transcript.workspace.path,
-                onAttach: onAttach,
+                onAttach: actions.attach,
+                onQuickPrompt: actions.insert,
                 onSend: send,
                 onStop: transcript.stop
             )
