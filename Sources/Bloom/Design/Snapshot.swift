@@ -219,11 +219,12 @@ enum Snapshot {
         #endif
     }
 
-    /// Presses the create sheet's "Just a terminal", so the workspace it makes can be photographed.
+    /// Creates the workspace the create sheet's terminal mode makes, so it can be photographed.
     ///
     ///     Bloom --terminal-workspace plumage
     ///
-    /// The button cannot be pressed by a capture run, and the workspace it produces is the whole
+    /// Neither the mode nor Create can be reached by a capture run, and the workspace it produces
+    /// is the whole
     /// of what there is to look at: which name the sidebar row wears when no model is ever going
     /// to be asked for one, which tab the column opens on when there is no session at all, and
     /// which directory the shell is standing in. Building a row by hand to photograph instead

@@ -256,8 +256,9 @@ struct RootView: View {
             createStartsOnPullRequest = note.userInfo?[Notification.bloomPullRequestKey] as? Bool == true
             isCreateSheetPresented = true
         }
-        // Presses the create sheet's "Just a terminal" for a capture run, which cannot press a
-        // button. It goes through `createWorkspace` exactly as the button does, sea and all, so
+        // Makes the workspace the create sheet's terminal mode makes, for a capture run, which
+        // cannot choose a mode or press a button. It goes through `createWorkspace` exactly as the
+        // sheet does, sea and all, so
         // what is photographed is the real workspace rather than a hand-built row that looks like
         // one. Debug builds only, through the same flag family as `--create-sheet`.
         .onReceive(NotificationCenter.default.publisher(for: .bloomStartTerminalWorkspace)) { note in
