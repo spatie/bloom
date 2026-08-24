@@ -314,13 +314,14 @@ enum Palette {
     /// own: "Running, healthy, done. Reuse the accent, do not invent a green."
     static let running = accent
 
-    /// A merge: one that has landed, and the button that lands one.
+    /// A pull request that has landed.
     ///
     /// The one meaning in the app that is neither good news nor bad and needed a colour of its
-    /// own. Merging is the end of the workflow and the outcome everything else is aimed at, and
-    /// the only two colours a system confirmation dialog can draw its confirm button in are red
-    /// and grey. Red is what this app spends on losing work, so a red Merge button says the
-    /// opposite of what merging means, and that is the whole reason `ConfirmationSheet` exists.
+    /// own. It was bought to get a red button off the merge confirmation: the only two colours a
+    /// system confirmation dialog can draw its confirm button in are red and grey, red is what
+    /// this app spends on losing work, and that is the whole reason `ConfirmationSheet` exists.
+    /// Owning the dialog is what that argument actually won, and the colour that went on the
+    /// button is `positive` rather than this one. See below.
     ///
     /// Purple rather than a second green, because purple for a merge is not this app's idea:
     /// GitHub has drawn merged in it for a decade and Conductor draws it in `purple-500` on light
@@ -333,16 +334,21 @@ enum Palette {
     /// surface and `#A371F7` measures 5.3 to 1 on the dark one, and neither of them works on the
     /// other's ground.
     ///
-    /// This is for ink, strokes and a wash of itself: the merge confirmation's button label, the
-    /// strip's headline and badge on a landed pull request, the sidebar's merge mark, and the
-    /// eight percent band behind all of it. A filled control that has to carry white text uses
-    /// `mergedFill`, for the reason written there.
+    /// This is for ink, strokes and a wash of itself: the strip's headline and badge on a landed
+    /// pull request, the sidebar's merge mark, and the eight percent band behind all of it. A
+    /// filled control that has to carry white text uses `mergedFill`, for the reason written
+    /// there.
     ///
-    /// It is now the colour of merged as well as the colour of merging. `PullRequestStatus.Tone`
-    /// has a `merged` case, `PullRequestTint` resolves it here, and `WorkspaceStatusGlyph` draws
-    /// the merge mark in it, so one landed pull request is one colour in every pane that reports
-    /// it. Nothing else moved: passing checks, an open pull request and a closed one keep the
-    /// tones they had.
+    /// It is NOT the merge confirmation's button label, which is what it was first spent on. The
+    /// owner reported that from a screenshot: this colour says a pull request HAS merged, so on
+    /// the button that has not merged anything yet it named the state rather than the action, and
+    /// the dialog was wearing its own answer. That button is `positive` now, and
+    /// `ConfirmationTone.completing` carries the rest of the reasoning.
+    ///
+    /// So it is the colour of merged and of nothing else. `PullRequestStatus.Tone` has a `merged`
+    /// case, `PullRequestTint` resolves it here, and `WorkspaceStatusGlyph` draws the merge mark
+    /// in it, so one landed pull request is one colour in every pane that reports it. Nothing else
+    /// moved: passing checks, an open pull request and a closed one keep the tones they had.
     static let merged = dynamic(light: 0x8250DF, dark: 0xA371F7)
 
     /// A merge as a fill with light text on it: the Archive button on a landed pull request.

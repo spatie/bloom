@@ -120,18 +120,16 @@ final class BusyPulse {
 /// set the transcript writes when a turn starts or ends. Nothing here keeps a count of its own:
 /// see that property for what happened the last time a reader did.
 ///
-/// **Reduce Motion is off.** Dropped rather than slowed, matching `ActivityDot`, `RunningRing`,
-/// `RowArrival` and the pane animations. Both marks keep their meaning without it, which is the
-/// test the mockup applied: the rule holds a quiet accent tint and the row holds all three dots at
-/// full strength. Read here rather than at the marks, so a call site cannot keep half the
-/// mechanism.
+/// **Reduce Motion is off.** Dropped rather than slowed, matching `ActivityDot`, `RowArrival` and
+/// the pane animations. Both marks keep their meaning without it, which is the test the mockup
+/// applied: the rule holds a quiet accent tint and the row holds all three dots at full strength.
+/// Read here rather than at the marks, so a call site cannot keep half the mechanism.
 ///
-/// **The window is the front one.** The same rule `RunningRing` follows, for the same reason and
-/// a stronger one. An animation that never stops is what keeps a window off the idle path, and on
-/// a ProMotion display it holds the display link awake for as long as an agent runs, which can be
-/// hours. Behind a browser there is nothing to read anyway, and the resting states mean nothing is
-/// lost when there is: the marks stop moving and stay legible, the way a background window's
-/// chrome stops being tinted.
+/// **The window is the front one.** An animation that never stops is what keeps a window off the
+/// idle path, and on a ProMotion display it holds the display link awake for as long as an agent
+/// runs, which can be hours. Behind a browser there is nothing to read anyway, and the resting
+/// states mean nothing is lost when there is: the marks stop moving and stay legible, the way a
+/// background window's chrome stops being tinted.
 struct BusyPulseDriver: ViewModifier {
     let app: AppModel
 

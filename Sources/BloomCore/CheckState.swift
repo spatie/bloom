@@ -55,6 +55,47 @@ public enum CheckState: Sendable, Hashable {
         }
     }
 
+    /// The mark this state is drawn with, as an SF Symbol name.
+    ///
+    /// A symbol name is usually the drawing's business and `TurnEnding` says so in as many words.
+    /// This one is not, because the property worth holding is not which circle each state gets: it
+    /// is that the six states have six DIFFERENT shapes, so the column can be read by someone who
+    /// cannot tell the amber one from the green one, and by anyone at all on a selected row, where
+    /// `CheckRunRow` drops the tint and the shape is the whole of what is left. That is a claim
+    /// about all six at once, which is exactly the kind of claim a view cannot make and a suite
+    /// can. `CheckStateTests` makes it.
+    ///
+    /// Running was `circle.dashed`, and it was reported from a screenshot: in a list of thirteen
+    /// rows where eleven had passed and two were still going, the two running ones read as absent
+    /// rather than as busy. A dashed outline is mostly gaps, and the gaps are the whole of it:
+    /// measured off the offscreen render at the size the column draws, the ring covered 26 percent
+    /// of the ink a `checkmark.circle.fill` beside it covers. No colour makes up a difference that
+    /// size. `record.circle.fill` covers 91 percent of it, so a run in flight now weighs what a run
+    /// that finished weighs and differs from it by shape and by hue rather than by being fainter.
+    /// It is also what GitHub draws for the same event, which is where the comparison came from.
+    ///
+    /// Queued keeps the clock. It is the state where nothing is executing, and a mark with a
+    /// runner's weight would say something is.
+    public var symbolName: String {
+        switch self {
+        case .queued: "clock"
+        case .running: "record.circle.fill"
+        case .passed: "checkmark.circle.fill"
+        case .failed: "xmark.circle.fill"
+        case .skipped: "minus.circle"
+        case .neutral: "circle"
+        }
+    }
+
+    /// Whether the mark is a solid disc rather than an outline.
+    ///
+    /// The three states a healthy branch actually shows are passed, failed and running, and they
+    /// have to weigh the same or the lightest of them reads as nothing at all. That is the bug
+    /// above, stated as a property the suite can hold rather than as a note in a comment.
+    public var isFilledMark: Bool {
+        symbolName.hasSuffix(".fill")
+    }
+
     /// Colour alone cannot carry this: the glyphs differ in shape too, and VoiceOver gets the word.
     public var description: String {
         switch self {

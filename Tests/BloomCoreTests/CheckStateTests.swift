@@ -76,4 +76,32 @@ struct CheckStateTests {
         #expect(CheckState.running.description == "Running")
         #expect(CheckState.neutral.description == "No result")
     }
+
+    /// The six states in one list, so the two claims below are made about all of them rather than
+    /// about whichever ones somebody remembered.
+    private static let all: [CheckState] = [.queued, .running, .passed, .failed, .skipped, .neutral]
+
+    /// Shape carries the state, not colour. `CheckRunRow` drops the tint on a selected row, so on
+    /// that row the mark is the whole of what is left, and two states sharing a symbol would be
+    /// two states nobody could tell apart there or under any colour vision deficiency.
+    @Test("six states, six different marks")
+    func marksAreDistinct() {
+        let marks = Self.all.map(\.symbolName)
+        #expect(Set(marks).count == marks.count)
+        #expect(!marks.contains(""))
+    }
+
+    /// The bug the running mark was changed for. It was `circle.dashed`, an outline that is mostly
+    /// gaps: 26 percent of the ink of the tick beside it, measured off the render, and in a list of
+    /// thirteen rows where eleven had passed it read as absent rather than as busy. The three
+    /// states a branch under way actually shows have to weigh the same.
+    @Test("the states a live branch shows are all solid marks")
+    func liveStatesAreFilled() {
+        #expect(CheckState.running.isFilledMark)
+        #expect(CheckState.passed.isFilledMark)
+        #expect(CheckState.failed.isFilledMark)
+        // Queued is not, deliberately: nothing is executing, and a runner's weight would say
+        // something is.
+        #expect(!CheckState.queued.isFilledMark)
+    }
 }
