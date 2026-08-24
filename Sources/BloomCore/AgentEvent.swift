@@ -522,6 +522,9 @@ public enum AgentEvent: Sendable {
     /// reopened tomorrow reads.
     case permissionDecided(PermissionResolution)
     case result(AgentResult)
+    /// The turn, or a subagent inside it, waiting out somebody else's outage. A live signal
+    /// rather than a row: see `AgentRetry`.
+    case retrying(AgentRetry)
     case rateLimit(Data)
     case error(AgentError)
     case unknown(Data)
@@ -538,6 +541,7 @@ public enum AgentEvent: Sendable {
         case .permissionAsk(let value): value.raw
         case .permissionDecided: Data()
         case .result(let value): value.raw
+        case .retrying(let value): value.raw
         case .error(let value): value.raw
         case .rateLimit(let raw), .unknown(let raw): raw
         case .streamDelta, .status, .thinkingTokens: Data()
@@ -563,6 +567,7 @@ public enum AgentEvent: Sendable {
         case .toolResult(let value): value.sessionID
         case .hook(let value): value.sessionID
         case .result(let value): value.sessionID
+        case .retrying(let value): value.sessionID
         default: nil
         }
     }
@@ -575,6 +580,7 @@ public enum AgentEvent: Sendable {
         case .toolResult(let value): value.uuid
         case .hook(let value): value.uuid
         case .result(let value): value.uuid
+        case .retrying(let value): value.uuid
         default: nil
         }
     }
@@ -591,7 +597,7 @@ public enum AgentEvent: Sendable {
         case .error: .error
         case .rateLimit: .notice
         case .initialized, .streamDelta, .status, .thinkingTokens, .hook, .permissionDecided,
-             .unknown:
+             .retrying, .unknown:
             .system
         }
     }
@@ -603,7 +609,10 @@ public enum AgentEvent: Sendable {
         switch self {
         // A decision is not a row. The question is the row, and what was decided about it is
         // read back off the ask itself, so answering one must not append anything.
-        case .streamDelta, .status, .thinkingTokens, .permissionDecided: false
+        // A retry is not a row either. Ten attempts against one request are one fact, nine
+        // tenths of it stale, and the durable record of a run that recovered is the sentence
+        // `RetryRun` leaves under the turn rather than ten stored lines.
+        case .streamDelta, .status, .thinkingTokens, .permissionDecided, .retrying: false
         default: true
         }
     }
@@ -616,6 +625,10 @@ public enum AgentEvent: Sendable {
         // Filed under the call it is about, so the row lands where the call would have been.
         case .permissionAsk(let value): value.toolUseID
         case .permissionDecided(let value): value.toolUseID
+        // The Agent call the retrying subagent belongs to, so a row drawn for that call can pick
+        // its own retries out of the stream.
+        case .retrying(let value):
+            if case .subagent(_, let toolUseID, _) = value.scope { toolUseID } else { nil }
         default: nil
         }
     }
@@ -641,6 +654,12 @@ public enum AgentEvent: Sendable {
         case "stream_event": return decodeStreamEvent(json, raw: raw)
         case "result": return decodeResult(json, raw: raw)
         case "rate_limit_event": return .rateLimit(raw)
+        // Only the retry block is lifted out here. The rest of `tool_progress` is an elapsed
+        // seconds tick for a call already on screen, and a line this decoder has no reading of
+        // belongs in `.unknown` with its bytes intact rather than half understood.
+        case "tool_progress":
+            guard let retry = AgentRetry.subagentRetry(json, raw: raw) else { return .unknown(raw) }
+            return .retrying(retry)
         // The sixth type. It used to fall to `.unknown` and be dropped on the floor, which is
         // exactly what "Bloom never asks" looked like from the inside: the CLI was willing to ask
         // and nobody was reading the line. Only `can_use_tool` is lifted out; the other control
@@ -675,6 +694,9 @@ public enum AgentEvent: Sendable {
 
         case "thinking_tokens":
             return .thinkingTokens(json["estimated_tokens"]?.intValue ?? 0)
+
+        case "api_retry":
+            return .retrying(AgentRetry.turnRetry(json, raw: raw))
 
         case "hook_started", "hook_response":
             return .hook(AgentHook(

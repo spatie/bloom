@@ -20,13 +20,14 @@ private struct Tally {
     var permissionDecided = 0
     var result = 0
     var rateLimit = 0
+    var retrying = 0
     var error = 0
     var unknown = 0
 
     var total: Int {
         initialized + assistantText + thinking + toolUse + toolResult + streamDelta + status
             + thinkingTokens + hook + permissionAsk + permissionDecided + result + rateLimit
-            + error + unknown
+            + retrying + error + unknown
     }
 
     mutating func count(_ event: AgentEvent) {
@@ -44,6 +45,7 @@ private struct Tally {
         case .permissionDecided: permissionDecided += 1
         case .result: result += 1
         case .rateLimit: rateLimit += 1
+        case .retrying: retrying += 1
         case .error: error += 1
         case .unknown: unknown += 1
         }
@@ -81,6 +83,9 @@ struct AgentEventTests {
         #expect(tally.hook == 2)
         #expect(tally.result == 1)
         #expect(tally.rateLimit == 1)
+        // The captured session ran on a day the API was well. See `AgentRetryTests` for the
+        // evening it was not.
+        #expect(tally.retrying == 0)
         #expect(tally.error == 0)
         // 3 message_start, 3 message_delta, 3 message_stop, 1 signature_delta and the 3
         // content_block_start events for text and thinking blocks have nothing to render live.
