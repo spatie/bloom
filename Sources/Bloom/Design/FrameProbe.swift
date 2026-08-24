@@ -56,6 +56,24 @@ enum FrameProbe {
     private static var sweeps: Int { Int(value(for: "--probe-sweeps") ?? "") ?? 6 }
     private static var selection: String? { value(for: "--probe-select") }
 
+    /// What the run drags. The sidebar divider, which is what this probe was written for, or the
+    /// window's own bottom right corner, which is the gesture the owner called janky.
+    ///
+    /// A separate flag rather than a fourth driver, because the two gestures cross with the same
+    /// three drivers: a window can be resized by a synthetic hand, at a hand's pace from code, or
+    /// as fast as the run loop will take it.
+    private static var gesture: String { value(for: "--probe-gesture") ?? "sidebar" }
+
+    /// A pane to open on the selected workspace before anything is measured, so a run can name
+    /// what is on screen instead of inheriting whatever the last one left there.
+    private static var requestedPane: PaneKind? {
+        value(for: "--probe-pane").flatMap(PaneKind.init(rawValue:))
+    }
+
+    /// Where a browser pane opened by `--probe-pane browser` should go. A file URL by preference:
+    /// a run that has to reach the network measures the network.
+    private static var paneURL: String { value(for: "--probe-url") ?? "" }
+
     private static var windowSize: CGSize? {
         guard let raw = value(for: "--window-size") else { return nil }
         let parts = raw.split(separator: "x")
@@ -100,19 +118,29 @@ enum FrameProbe {
             try? await Task.sleep(for: .seconds(6))
         }
 
+        if let requestedPane { await openPane(requestedPane) }
+
         // Everything asynchronous that a fresh launch kicks off (status polls, git reads, the
         // first diff) settles here rather than inside the measurement.
         try? await Task.sleep(for: .seconds(4))
 
-        guard let split = sidebarSplitView(in: contentView) else {
-            return fail("no sidebar NSSplitView found")
-        }
-        guard split.arrangedSubviews.count >= 2 else {
-            return fail("sidebar split view has \(split.arrangedSubviews.count) panes")
+        var split: NSSplitView?
+        if gesture != "window" {
+            guard let found = sidebarSplitView(in: contentView) else {
+                return fail("no sidebar NSSplitView found")
+            }
+            guard found.arrangedSubviews.count >= 2 else {
+                return fail("sidebar split view has \(found.arrangedSubviews.count) panes")
+            }
+            split = found
         }
 
-        let recorder = FrameRecorder(view: contentView) { [weak split] in
-            split?.arrangedSubviews.first?.frame.width ?? 0
+        // What the run is supposed to be moving, sampled once a frame: the sidebar's width, or
+        // the window's. A run whose min and max agree measured a window standing still.
+        let recorder = FrameRecorder(view: contentView) { [weak split, weak window] in
+            gesture == "window"
+                ? (window?.frame.width ?? 0)
+                : (split?.arrangedSubviews.first?.frame.width ?? 0)
         }
 
         // A warm pass that is thrown away. The first drag of a launch pays for lazily built
@@ -172,13 +200,94 @@ enum FrameProbe {
     // MARK: - Drivers
 
     private static func drag(
-        split: NSSplitView, window: NSWindow, sweeps: Int, recorder: FrameRecorder?
+        split: NSSplitView?, window: NSWindow, sweeps: Int, recorder: FrameRecorder?
     ) async {
+        if gesture == "window" {
+            switch driver {
+            case "programmatic": await resizeWindow(window, sweeps: sweeps, paced: true)
+            case "throughput": await resizeWindow(window, sweeps: sweeps, paced: false)
+            default: await resizeWindowWithMouse(window, sweeps: sweeps)
+            }
+            return
+        }
+        guard let split else { return }
         switch driver {
         case "programmatic": await dragProgrammatically(split: split, sweeps: sweeps, paced: true)
         case "throughput": await dragProgrammatically(split: split, sweeps: sweeps, paced: false)
         default: await dragWithMouse(split: split, window: window, sweeps: sweeps)
         }
+    }
+
+    // MARK: - The window's own edge
+
+    /// Narrows the window by `travel` and widens it back, `sweeps` times.
+    ///
+    /// The frame is set rather than the content size, and the top left corner is held still, so
+    /// this is the same geometry a hand dragging the bottom right corner produces: the title bar
+    /// does not move and the window grows to the right.
+    ///
+    /// `display: true` is what makes a step cost what a frame of a drag costs. Without it AppKit
+    /// is free to defer the layout, and a hundred steps collapse into one.
+    private static func resizeWindow(_ window: NSWindow, sweeps: Int, paced: Bool) async {
+        let start = window.frame
+        for offset in sweepOffsets(sweeps: sweeps) {
+            var frame = start
+            frame.size.width = start.width + offset
+            window.setFrame(frame, display: true)
+            if paced {
+                try? await Task.sleep(for: .microseconds(8_333))
+            } else {
+                await nextRunLoopTurn()
+            }
+        }
+        window.setFrame(start, display: true)
+        try? await Task.sleep(for: .milliseconds(300))
+    }
+
+    /// The same travel, driven by real events on the window's bottom right corner, so AppKit's own
+    /// live resize path runs: `inLiveResize`, the resize increments, the layer backed redraw and
+    /// whatever coalescing the window server does under a hand.
+    private static func resizeWindowWithMouse(_ window: NSWindow, sweeps: Int) async {
+        guard let screen = window.screen ?? NSScreen.main else { return }
+        // Two points inside the corner, because the resize region straddles the frame edge and a
+        // press exactly on it is as likely to land outside the window as in it.
+        let corner = CGPoint(x: window.frame.maxX - 2, y: window.frame.minY + 2)
+        let flipped = CGPoint(x: corner.x, y: screen.frame.maxY - corner.y)
+
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        try? await Task.sleep(for: .milliseconds(400))
+
+        let done = Mutex(false)
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let sequence = sweepOffsets(sweeps: sweeps)
+        Thread.detachNewThread {
+            post(.leftMouseDown, at: flipped, pid: pid)
+            Thread.sleep(forTimeInterval: 0.05)
+            for offset in sequence {
+                post(.leftMouseDragged, at: CGPoint(x: flipped.x + offset, y: flipped.y), pid: pid)
+                Thread.sleep(forTimeInterval: 1.0 / 120.0)
+            }
+            post(.leftMouseUp, at: flipped, pid: pid)
+            done.withLock { $0 = true }
+        }
+
+        while !done.withLock({ $0 }) {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(4))
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+    }
+
+    /// Opens a pane of the given kind on the selected workspace, exactly as the File menu does,
+    /// and waits for it to settle.
+    private static func openPane(_ kind: PaneKind) async {
+        guard let workspace = AppModel.probeSelectedModel else { return }
+        NewPane.open(kind, in: workspace, url: paneURL) {
+            WorkspaceTabsStore.shared.select($0, in: workspace)
+        }
+        // A browser has a page to load and a terminal has a shell to fork.
+        try? await Task.sleep(for: .seconds(kind == .chat ? 3 : 6))
     }
 
     /// The travel of one sweep, in points, taken INWARDS from wherever the divider starts.
@@ -300,7 +409,7 @@ enum FrameProbe {
     // MARK: - Reporting
 
     private static func report(
-        recorder: FrameRecorder, window: NSWindow, split: NSSplitView
+        recorder: FrameRecorder, window: NSWindow, split: NSSplitView?
     ) -> [String: Any] {
         let intervals = recorder.intervals.map { $0 * 1000 }
         let sorted = intervals.sorted()
@@ -315,6 +424,8 @@ enum FrameProbe {
 
         return [
             "driver": driver,
+            "gesture": gesture,
+            "pane": requestedPane?.rawValue ?? "whatever was open",
             "selection": selection ?? "home",
             // What the window is ACTUALLY showing, rather than what was asked for. `AppModel`
             // reselects the last workspace on launch, so a run that meant to measure Home
@@ -337,11 +448,11 @@ enum FrameProbe {
             "maxMs": sorted.last ?? 0,
             "framesOver16ms": intervals.filter { $0 > 16.7 }.count,
             "framesOver33ms": intervals.filter { $0 > 33.4 }.count,
-            "sidebarWidth": split.arrangedSubviews[0].frame.width,
+            "sidebarWidth": split?.arrangedSubviews[0].frame.width ?? 0,
             // Proof the drag landed. A run whose min and max are the same measured nothing.
-            "sidebarWidthMin": recorder.widths.min() ?? 0,
-            "sidebarWidthMax": recorder.widths.max() ?? 0,
-            "sidebarWidthSteps": Set(recorder.widths).count,
+            "widthMin": recorder.widths.min() ?? 0,
+            "widthMax": recorder.widths.max() ?? 0,
+            "widthSteps": Set(recorder.widths).count,
             "windowSize": ["w": window.frame.width, "h": window.frame.height],
             "dragSteps": sweepOffsets(sweeps: sweeps).count,
             "mainThreadCpuMs": mainThreadCPU * 1000,

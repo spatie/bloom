@@ -302,7 +302,20 @@ final class AppModel {
 
     // MARK: - Lifecycle
 
+    /// The live model, weakly, for the capture and probe flags only.
+    ///
+    /// `FrameProbe` runs outside any view, so it has no environment to read this out of, and it
+    /// has to be able to open a pane on the selected workspace before it measures one. Weak, and
+    /// set here rather than in an initialiser, because `BloomApp` builds this as `@State` and
+    /// SwiftUI is free to build more than one of those before it settles on the one it keeps.
+    @ObservationIgnored static weak var probeInstance: AppModel?
+
+    /// What `--probe-pane` opens a pane on. Nil outside a probe run and outside a selection.
+    @MainActor
+    static var probeSelectedModel: WorkspaceModel? { probeInstance?.selectedModel }
+
     func bootstrap() async {
+        Self.probeInstance = self
         guard store == nil else { return }
         do {
             // Off the main actor. Opening the database creates directories, opens the file and
