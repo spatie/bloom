@@ -530,3 +530,64 @@ struct TranscriptTroubleTests {
         #expect(sentence.contains("The database said: Database disk image is malformed."))
     }
 }
+
+/// The shape of what the owner is told, rather than its words.
+///
+/// These are read under a warning triangle at the moment something has gone wrong, and they were
+/// one block of a hundred and fifty centred words. A wall like that is skipped on the way to the
+/// button, and the paragraph most often skipped is the middle one, which is the one saying nothing
+/// has been destroyed.
+@Suite("Trouble reads as paragraphs")
+struct WorkspaceTroubleShapeTests {
+    /// One of every case, so a case added later has to be added here and answered for.
+    private static let all: [WorkspaceTrouble] = [
+        .projectGone(project: "bloom", path: "/tmp/bloom"),
+        .projectNotACheckout(project: "bloom", path: "/tmp/bloom"),
+        .projectHasNoCommits(project: "bloom"),
+        .baseBranchGone(branch: "main", project: "bloom"),
+        .worktreeGone(workspace: "Sidebar blue"),
+        .worktreeNotACheckout(workspace: "Sidebar blue"),
+        .worktreeBaseBranchGone(branch: "main", workspace: "Sidebar blue"),
+        .archiveWorktreeGone(workspace: "Sidebar blue"),
+        .archiveWorktreeNotACheckout(workspace: "Sidebar blue", path: "/tmp/wt"),
+        .archiveWorktreeNotEmpty(workspace: "Sidebar blue"),
+        .archiveUnexplained(workspace: "Sidebar blue", complaint: "it stopped."),
+        .restoreBranchInUse(branch: "main", workspace: "Sidebar blue", worktree: "/tmp/wt"),
+        .restoreBranchGone(branch: "main", workspace: "Sidebar blue"),
+        .restoreUnexplained(workspace: "Sidebar blue", complaint: "it stopped."),
+        .continueUnexplained(workspace: "Sidebar blue", complaint: "it stopped."),
+        .recordUnwritable(workspace: "Sidebar blue", complaint: "disk image is malformed."),
+        .transcriptUnwritable(complaint: "disk image is malformed."),
+        .reviewCommentUnwritable(complaint: "disk image is malformed."),
+    ]
+
+    @Test("every trouble is broken into paragraphs")
+    func everyTroubleHasParagraphs() {
+        for trouble in Self.all {
+            let paragraphs = trouble.sentence.components(separatedBy: "\n\n")
+            #expect(paragraphs.count >= 2, "\(trouble) is still one block")
+            for paragraph in paragraphs {
+                #expect(!paragraph.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
+
+    /// A paragraph break is not a line break: these are drawn centred in a narrow column that
+    /// wraps them itself, and a hard wrap would fight it.
+    @Test("nothing is wrapped by hand")
+    func nothingIsHardWrapped() {
+        for trouble in Self.all {
+            for paragraph in trouble.sentence.components(separatedBy: "\n\n") {
+                #expect(!paragraph.contains("\n"), "\(trouble) has a hard line break in it")
+            }
+        }
+    }
+
+    /// git's own sentence, with the argv taken off. Bloom does not know enough about it to say
+    /// where a break would belong.
+    @Test("the one Bloom did not write is left alone")
+    func theUnexplainedOneIsPassedThrough() {
+        #expect(WorkspaceTrouble.unexplained("fatal: not a git repository").sentence
+            == "fatal: not a git repository")
+    }
+}

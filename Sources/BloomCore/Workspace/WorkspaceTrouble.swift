@@ -76,154 +76,223 @@ public enum WorkspaceTrouble: Sendable, Equatable {
     case unexplained(String)
 
     /// What the owner is told, whole and on its own.
+    ///
+    /// **In paragraphs, because it is read at the worst possible moment.** Every one of these
+    /// says three things: what is wrong, what is true about it, and the one action that helps.
+    /// They were one block of prose, and a hundred and fifty centred words under a warning
+    /// triangle is a wall somebody skips to reach the button, which loses exactly the middle
+    /// paragraph that says nothing has been destroyed. The breaks are where the three movements
+    /// already were, and not one word changed.
+    ///
+    /// `unexplained` is the exception and stays a single line: it is git's own sentence with the
+    /// argv taken off, and Bloom does not know enough about it to say where a break belongs.
     public var sentence: String {
         switch self {
         case let .projectGone(project, path):
             return """
-                The project '\(project)' is no longer at \(path). It has been moved, renamed or \
-                deleted since Bloom recorded it, so there is no repository left to cut a worktree \
-                from. Put the folder back, or remove the project from the sidebar and add it again \
+                The project '\(project)' is no longer at \(path).
+
+                It has been moved, renamed or deleted since Bloom recorded it, so there is no \
+                repository left to cut a worktree from.
+
+                Put the folder back, or remove the project from the sidebar and add it again \
                 where it lives now.
                 """
 
         case let .projectNotACheckout(project, path):
             return """
-                The folder for the project '\(project)' is still at \(path), but it is not a git \
-                repository any more. Every worktree is cut from the project's own repository, so \
-                nothing can be created here until git knows that folder again. Restore it, or \
-                remove the project from the sidebar and add it again wherever the repository is now.
+                The folder for the project '\(project)' is still at \(path), but it is not a \
+                git repository any more.
+
+                Every worktree is cut from the project's own repository, so nothing can be \
+                created here until git knows that folder again.
+
+                Restore it, or remove the project from the sidebar and add it again wherever the \
+                repository is now.
                 """
 
         case let .projectHasNoCommits(project):
             return """
-                The project '\(project)' has no commits yet. A worktree is cut from a commit, so \
-                there is nothing to start from until the first one is made. Make a commit in the \
-                project and try again.
+                The project '\(project)' has no commits yet.
+
+                A worktree is cut from a commit, so there is nothing to start from until the \
+                first one is made.
+
+                Make a commit in the project and try again.
                 """
 
         case let .baseBranchGone(branch, project):
             return """
-                The project '\(project)' has no branch called '\(branch)' any more, so there is \
-                nothing to cut this worktree from. Choose another base branch, or put that one back.
+                The project '\(project)' has no branch called '\(branch)' any more, so there \
+                is nothing to cut this worktree from.
+
+                Choose another base branch, or put that one back.
                 """
 
         case let .worktreeGone(workspace):
             return """
-                The worktree for '\(workspace)' is not on disk any more. Something outside Bloom \
-                deleted the folder this workspace was working in, so there are no changes left to \
-                read. Its branch is still in the project, so archive this workspace and start a \
-                new one from that branch to carry on.
+                The worktree for '\(workspace)' is not on disk any more.
+
+                Something outside Bloom deleted the folder this workspace was working in, so \
+                there are no changes left to read.
+
+                Its branch is still in the project, so archive this workspace and start a new one \
+                from that branch to carry on.
                 """
 
         case let .worktreeNotACheckout(workspace):
             return """
                 The folder for '\(workspace)' is still there, but git does not know it as a \
                 worktree any more, which is what a folder that was deleted and then recreated \
-                looks like. Its branch is still in the project, so archive this workspace and \
-                start a new one from that branch to carry on.
+                looks like.
+
+                Its branch is still in the project, so archive this workspace and start a new one \
+                from that branch to carry on.
                 """
 
         case let .worktreeBaseBranchGone(branch, workspace):
             return """
-                '\(branch)', the branch '\(workspace)' is measured against, is not in the project \
-                any more, so there is nothing to compare this worktree with. Put that branch back, \
-                or give the workspace a base branch that is still there.
+                '\(branch)', the branch '\(workspace)' is measured against, is not in the \
+                project any more, so there is nothing to compare this worktree with.
+
+                Put that branch back, or give the workspace a base branch that is still there.
                 """
 
         case let .archiveWorktreeGone(workspace):
             return """
-                The worktree for '\(workspace)' is not on disk any more. Something outside Bloom \
-                deleted the folder, so there is no unsaved work left in it and nothing left to \
-                remove. Archiving it destroys nothing that is still there.
+                The worktree for '\(workspace)' is not on disk any more.
+
+                Something outside Bloom deleted the folder, so there is no unsaved work left in \
+                it and nothing left to remove.
+
+                Archiving it destroys nothing that is still there.
                 """
 
         case let .archiveWorktreeNotACheckout(workspace, path):
             return """
-                The folder for '\(workspace)' is still at \(path), and git does not know it as a \
-                worktree any more, which is what a folder that was deleted and then recreated \
-                looks like. A worktree git no longer recognises cannot be handed back, so \
-                archiving cannot finish while that folder is there. Look at what is in it, delete \
-                it yourself, and archive again.
+                The folder for '\(workspace)' is still at \(path), and git does not know it as \
+                a worktree any more, which is what a folder that was deleted and then recreated \
+                looks like.
+
+                A worktree git no longer recognises cannot be handed back, so archiving cannot \
+                finish while that folder is there.
+
+                Look at what is in it, delete it yourself, and archive again.
                 """
 
         case let .archiveWorktreeNotEmpty(workspace):
             return """
-                The worktree for '\(workspace)' holds files that are in no commit, and Bloom will \
-                not delete a worktree holding work that is nowhere else. Nothing has been \
-                removed. Bloom looks for unsaved work before it runs the archive script, so files \
-                that appeared after that, a log or a dump the script left behind, are the usual \
-                reason for this. Archive again and the confirmation will list what is there, so \
-                you can look before you go ahead.
+                The worktree for '\(workspace)' holds files that are in no commit, and Bloom \
+                will not delete a worktree holding work that is nowhere else. Nothing has been \
+                removed.
+
+                Bloom looks for unsaved work before it runs the archive script, so files that \
+                appeared after that, a log or a dump the script left behind, are the usual reason \
+                for this.
+
+                Archive again and the confirmation will list what is there, so you can look \
+                before you go ahead.
                 """
 
         case let .archiveUnexplained(workspace, complaint):
             return """
-                Archiving '\(workspace)' stopped, and Bloom cannot say why. Its worktree is still \
-                a checkout in good order and holds nothing that is not committed, so this is \
-                neither a folder that has moved nor work standing in the way. Nothing has been \
-                removed. The reason given was: \(complaint)
+                Archiving '\(workspace)' stopped, and Bloom cannot say why.
+
+                Its worktree is still a checkout in good order and holds nothing that is not \
+                committed, so this is neither a folder that has moved nor work standing in the \
+                way. Nothing has been removed.
+
+                The reason given was: \(complaint)
                 """
 
         case let .restoreBranchInUse(branch, workspace, worktree):
             return """
-                The branch '\(branch)' is already checked out in the worktree at \(worktree), and \
-                git allows one worktree per branch, so there is nowhere to bring '\(workspace)' \
-                back to. Another workspace on the same branch is the usual reason. Archive that \
-                one, or delete that folder if it is not one of Bloom's, and try again.
+                The branch '\(branch)' is already checked out in the worktree at \(worktree), \
+                and git allows one worktree per branch, so there is nowhere to bring \
+                '\(workspace)' back to.
+
+                Another workspace on the same branch is the usual reason.
+
+                Archive that one, or delete that folder if it is not one of Bloom's, and try \
+                again.
                 """
 
         case let .restoreBranchGone(branch, workspace):
             return """
-                The branch '\(branch)' is not on this Mac and not on any remote Bloom can see, so \
-                the commits '\(workspace)' held cannot be reached by name and there is nothing to \
-                rebuild its worktree from. It stays in Archived, still readable. If somebody else \
-                still has that branch, fetch the project and try again.
+                The branch '\(branch)' is not on this Mac and not on any remote Bloom can see, \
+                so the commits '\(workspace)' held cannot be reached by name and there is nothing \
+                to rebuild its worktree from.
+
+                It stays in Archived, still readable.
+
+                If somebody else still has that branch, fetch the project and try again.
                 """
 
         case let .restoreUnexplained(workspace, complaint):
             return """
-                Bringing '\(workspace)' back stopped, and Bloom cannot say why. Its project is a \
-                checkout in good order and nothing else is holding its branch, so this is neither \
-                a project nor a branch that has gone missing. It stays in Archived, with nothing \
-                lost. The reason given was: \(complaint)
+                Bringing '\(workspace)' back stopped, and Bloom cannot say why.
+
+                Its project is a checkout in good order and nothing else is holding its branch, \
+                so this is neither a project nor a branch that has gone missing. It stays in \
+                Archived, with nothing lost.
+
+                The reason given was: \(complaint)
                 """
 
         case let .continueUnexplained(workspace, complaint):
             return """
-                Continuing '\(workspace)' stopped, and Bloom cannot say why. Its worktree is still \
-                a checkout in good order and the branch it would be cut from is still there, so \
-                this is neither a folder that has moved nor a branch that has gone missing. The \
-                worktree is where it was, on the branch it was on, with everything in it \
-                untouched. The reason given was: \(complaint)
+                Continuing '\(workspace)' stopped, and Bloom cannot say why.
+
+                Its worktree is still a checkout in good order and the branch it would be cut \
+                from is still there, so this is neither a folder that has moved nor a branch that \
+                has gone missing. The worktree is where it was, on the branch it was on, with \
+                everything in it untouched.
+
+                The reason given was: \(complaint)
                 """
 
         case let .recordUnwritable(workspace, complaint):
             return """
                 Bloom finished the disk work for '\(workspace)' and could not write the result \
                 into its own database, so the sidebar and the archive are showing where this \
-                workspace was rather than where it is. Nothing in the worktree is at risk; the \
-                record is the only thing that is wrong. Quit Bloom and open it again, and if it \
-                happens a second time the database itself needs looking at. The database said: \
-                \(complaint)
+                workspace was rather than where it is.
+
+                Nothing in the worktree is at risk; the record is the only thing that is wrong.
+
+                Quit Bloom and open it again, and if it happens a second time the database itself \
+                needs looking at.
+
+                The database said: \(complaint)
                 """
 
         case let .transcriptUnwritable(complaint):
             return """
                 Bloom could not write this turn into its own database, so this conversation is \
-                missing rows from here on. Nothing in the worktree has been touched and every \
-                change the agent has made is still there. Sending again will fail the same way \
-                while the database is refusing writes, so quit Bloom and open it again; if it \
-                happens a second time the database itself needs looking at. The database said: \
-                \(complaint)
+                missing rows from here on.
+
+                Nothing in the worktree has been touched and every change the agent has made is \
+                still there.
+
+                Sending again will fail the same way while the database is refusing writes, so \
+                quit Bloom and open it again; if it happens a second time the database itself \
+                needs looking at.
+
+                The database said: \(complaint)
                 """
 
         case let .reviewCommentUnwritable(complaint):
             return """
-                Bloom could not save that review comment, so the list is showing what is stored \
-                rather than what you typed. Nothing in the worktree has been touched and no \
-                comment already written has been lost. Trying again will fail the same way while \
-                the database is refusing writes, so quit Bloom and open it again; if it happens a \
-                second time the database itself needs looking at. The database said: \(complaint)
+                Bloom could not save that review comment, so the list is showing what is \
+                stored rather than what you typed.
+
+                Nothing in the worktree has been touched and no comment already written has been \
+                lost.
+
+                Trying again will fail the same way while the database is refusing writes, so \
+                quit Bloom and open it again; if it happens a second time the database itself \
+                needs looking at.
+
+                The database said: \(complaint)
                 """
 
         case let .unexplained(message):
