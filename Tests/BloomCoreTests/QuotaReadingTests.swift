@@ -83,6 +83,8 @@ struct QuotaPaceTests {
         let seconds = try #require(pace.runsOutIn)
         #expect(seconds > 100_000 && seconds < 130_000)
         #expect(QuotaCountdown.phrase(after: seconds) == "in 1d 7h")
+        // And said the way a forecast has to be said, which is not the way a reset time is.
+        #expect(QuotaCountdown.rough(after: seconds) == "in about a day")
     }
 
     /// The ordinary case, and the one that must produce no sentence at all: a window that will
@@ -170,9 +172,12 @@ struct QuotaPhraseTests {
         let elapsed = week * 0.4643
         let pressed = quota(.claudeCode, .named("seven_day"), used: 0.71, resets: week - elapsed)
         let calm = quota(.claudeCode, .named("seven_day"), used: 0.2, resets: week - elapsed)
-        #expect(QuotaPhrase.footnote(for: pressed, at: now, locale: english)
-            == "Lifts in 3d. At this rate it runs out in 1d 7h")
-        #expect(QuotaPhrase.footnote(for: calm, at: now, locale: english) == "Lifts in 3d")
+        #expect(QuotaPhrase.footnote(for: pressed, at: now, forecasting: true, locale: english)
+            == "Lifts in 3d. At this rate it runs out in about a day")
+        #expect(QuotaPhrase.footnote(for: calm, at: now, forecasting: true, locale: english)
+            == "Lifts in 3d")
+        // And nothing at all on a row the panel did not pick, however true the arithmetic is.
+        #expect(QuotaPhrase.footnote(for: pressed, at: now, locale: english) == "Lifts in 3d")
     }
 
     /// Money, for the one row that is money rather than a window. "$17.20 of $50.00" is a thing
@@ -300,6 +305,29 @@ struct QuotaLineTests {
         #expect(made.lines(at: now, locale: english).first?.windowKey == "five_hour")
         #expect(made.headline?.window.key == "seven_day")
         #expect(made.severity == .critical)
+    }
+
+    /// **One forecast per panel.** Two rows out of four carried one on the owner's own board, and
+    /// a sentence repeated down a column is a paragraph nobody reads in a menu. The row that gets
+    /// it is the one furthest ahead of its own clock.
+    @Test func letsOnlyTheWorstRowSayWhatItsRateMeans() {
+        let elapsed = week * 0.45
+        let made = board([
+            AgentQuota(
+                provider: .claudeCode,
+                window: QuotaWindow(key: "seven_day_model_fable", label: "Week (Fable)", duration: week),
+                measure: .fraction(0.71),
+                resetsAt: now.addingTimeInterval(week - elapsed),
+                observedAt: now
+            ),
+            quota(.claudeCode, .named("seven_day"), used: 0.62, resets: week - elapsed),
+        ])
+        let lines = made.lines(at: now, locale: english)
+
+        #expect(made.forecastable(at: now)?.window.key == "seven_day_model_fable")
+        #expect(lines.filter { $0.footnote.contains("this rate") }.count == 1)
+        #expect(lines.first { $0.windowKey == "seven_day_model_fable" }?
+            .footnote.contains("At this rate") == true)
     }
 
     /// **The case fullness alone cannot read.** Both of these are at 95 percent and both are red.

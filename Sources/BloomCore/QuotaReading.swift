@@ -131,12 +131,13 @@ public enum QuotaPhrase {
     /// with six days to run and ninety five percent of a five hour window that lifts in twenty
     /// minutes wear the same colour, correctly, because the owner's ramp is about utilisation and a
     /// colour that argued with it would be two rules. The difference between those two situations
-    /// is time, so time says it, in words, on the row it is true of. It appears only when the
-    /// arithmetic actually lands before the window lifts, which is rare and is exactly when it is
-    /// worth reading.
+    /// is time, so time says it, in words. `QuotaBoard.forecastable` picks the one row per panel
+    /// that carries it, because a sentence repeated down a column is a paragraph and a paragraph
+    /// in a menu is not read.
     public static func footnote(
         for quota: AgentQuota,
         at now: Date,
+        forecasting: Bool = false,
         locale: Locale = .current
     ) -> String {
         var parts: [String] = []
@@ -146,8 +147,8 @@ public enum QuotaPhrase {
         if let resetsAt = quota.resetsAt {
             parts.append("Lifts \(QuotaCountdown.phrase(until: resetsAt, from: now))")
         }
-        if let seconds = QuotaPace.of(quota, at: now)?.runsOutIn {
-            parts.append("at this rate it runs out \(QuotaCountdown.phrase(after: seconds))")
+        if forecasting, let seconds = QuotaPace.of(quota, at: now)?.runsOutIn {
+            parts.append("at this rate it runs out \(QuotaCountdown.rough(after: seconds))")
         }
         // Each clause is a sentence, so each one starts as one. Joined without a full stop at the
         // end: this sits under a lane in a menu, where a trailing stop reads as a stray mark.
@@ -223,6 +224,7 @@ public struct QuotaLine: Sendable, Hashable, Identifiable {
     public static func of(
         _ quota: AgentQuota,
         at now: Date,
+        forecasting: Bool = false,
         locale: Locale = .current
     ) -> QuotaLine {
         let fraction = quota.fraction
@@ -233,7 +235,9 @@ public struct QuotaLine: Sendable, Hashable, Identifiable {
             figure: QuotaPhrase.figure(for: quota),
             fill: fraction.map { min(max($0, 0), 1) },
             severity: fraction.map(QuotaSeverity.of),
-            footnote: QuotaPhrase.footnote(for: quota, at: now, locale: locale)
+            footnote: QuotaPhrase.footnote(
+                for: quota, at: now, forecasting: forecasting, locale: locale
+            )
         )
     }
 }

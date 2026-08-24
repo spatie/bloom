@@ -345,7 +345,26 @@ public struct QuotaBoard: Sendable, Hashable {
     /// wall is still named, in `headline`, which is what the spoken summary and the menu bar's own
     /// severity read.
     public func lines(at now: Date = Date(), locale: Locale = .current) -> [QuotaLine] {
-        all.map { QuotaLine.of($0, at: now, locale: locale) }
+        let forecast = forecastable(at: now)
+        return all.map {
+            QuotaLine.of($0, at: now, forecasting: $0.id == forecast?.id, locale: locale)
+        }
+    }
+
+    /// The one window allowed to say what its rate means, which is the one furthest ahead of its
+    /// own clock.
+    ///
+    /// **One per panel, and that is the whole rule.** The first drawing put the sentence on every
+    /// row the arithmetic applied to, which on the owner's own board was two rows out of four and
+    /// on a busier one is three out of five. A sentence repeated down a column is a paragraph, and
+    /// a paragraph in a menu is not read. It is a warning, so exactly one thing gets to carry it,
+    /// and the one that does is the one furthest past its own clock.
+    func forecastable(at now: Date) -> AgentQuota? {
+        all.filter { QuotaPace.of($0, at: now)?.runsOutIn != nil }
+            .max { lhs, rhs in
+                (QuotaPace.of(lhs, at: now)?.overspend ?? 0)
+                    < (QuotaPace.of(rhs, at: now)?.overspend ?? 0)
+            }
     }
 
     /// Shortest window first, and a window of unknown length last, since there is nothing to sort
@@ -372,11 +391,25 @@ public enum QuotaCountdown {
         phrase(after: reset.timeIntervalSince(now))
     }
 
-    /// The same words for a plain length of time, which is what a forecast is.
+    /// A forecast, which is not a countdown and must not sound like one.
     ///
-    /// Split out so "at this rate it runs out in 1d 7h" is spoken by the thing that already says
-    /// "lifts in 3d". Two countdowns in one panel phrased by two pieces of code is how the panel
-    /// ended up saying "Lifts in 3d" on one row and "in 3h 13m" on the next.
+    /// "Runs out in 16h 2m" is a projection off a straight line through a few days of somebody's
+    /// working habits, and the two minutes on the end are a precision nothing here has. A reset
+    /// time is an instant the provider stated; this is arithmetic. So it is coarse and it says
+    /// about, and the row above it still counts down to the minute where counting is honest.
+    public static func rough(after seconds: TimeInterval) -> String {
+        guard seconds > 0 else { return "any moment now" }
+        if seconds < 3600 { return "in under an hour" }
+        if seconds < 86_400 { return "in about \(Int((seconds / 3600).rounded(.down)))h" }
+        let days = Int((seconds / 86_400).rounded(.down))
+        return days == 1 ? "in about a day" : "in about \(days)d"
+    }
+
+    /// The same words for a plain length of time.
+    ///
+    /// Split out so anything measuring a gap rather than a moment says it the way the countdown
+    /// does. Two countdowns in one panel phrased by two pieces of code is how the panel ended up
+    /// saying "Lifts in 3d" on one row and "in 3h 13m" on the next.
     public static func phrase(after seconds: TimeInterval) -> String {
         guard seconds > 0 else { return "any moment now" }
         if seconds < 60 { return "in under a minute" }
