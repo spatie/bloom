@@ -73,6 +73,14 @@ struct WorkspaceRow: View {
                 if isRenaming {
                     TextField("Workspace name", text: $draft)
                         .textFieldStyle(.plain)
+                        // Said rather than inherited, and that is the whole fix. A selected row
+                        // hands its contents `Palette.textInverted`, which is white, because the
+                        // row behind them is the accent fill. An editing field is not on that
+                        // fill: it paints its own light editing background while it has focus, so
+                        // the name being typed came out white on white and the row looked empty.
+                        // The field's own ink is `labelColor`, which is right against that
+                        // background in both appearances and owes nothing to what is behind it.
+                        .foregroundStyle(Palette.textPrimary)
                         .focused($fieldFocused)
                         .onSubmit { commit() }
                         .onExitCommand { renaming = nil }
