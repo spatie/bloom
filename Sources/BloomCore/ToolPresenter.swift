@@ -1,20 +1,26 @@
-import SwiftUI
-import BloomCore
+import Foundation
 
 /// Turns a tool name plus its arbitrary input object into something readable.
+///
+/// In the core, where the decisions can be asked about. Every built-in tool has a bespoke case
+/// deciding which input becomes the label and how each one truncates, and all of it sat in a view:
+/// this file had already conceded `ToolLiteral` to the core "so the presenter cannot answer
+/// differently from the permission panel below it", which is the same argument for the rest of it.
+/// The one thing that kept it here was `ToolPresentation.tint` being a `Color`. It is a `ToolTint`
+/// now, and the colour is one `switch` in the app.
 ///
 /// Every built-in Claude Code tool gets a bespoke case. The parameter names are the ones the CLI
 /// actually sends (see docs/PROTOCOL.md and Tests/fixtures/session-basic.jsonl), and anything unrecognised
 /// still lands on a sensible line rather than nothing, because new tools ship constantly.
-enum ToolPresenter {
-    static func present(_ use: AgentToolUse) -> ToolPresentation {
+public enum ToolPresenter {
+    public static func present(_ use: AgentToolUse) -> ToolPresentation {
         present(name: use.name, input: use.input)
     }
 
     /// The row, and then the one thing about it that is decided in the core: what the argument
     /// literally is. `ToolLiteral` is asked once here rather than per case, so the presenter cannot
     /// answer differently from the permission panel below it, which reads the same type.
-    static func present(name: String, input: JSONValue) -> ToolPresentation {
+    public static func present(name: String, input: JSONValue) -> ToolPresentation {
         var presentation = shape(name: name, input: input)
         presentation.literal = ToolLiteral.of(name: name, input: input)
         return presentation
@@ -51,7 +57,7 @@ enum ToolPresenter {
             glyph: "person.2.badge.gearshape",
             label: "List agents",
             detail: "",
-            tint: Palette.textSecondary
+            tint: .neutral
         )
         default: return fallback(name: name, input: input)
         }
@@ -71,7 +77,7 @@ enum ToolPresenter {
         if let offset = input["offset"]?.intValue, offset > 0 { chips.append(.code("from \(offset)")) }
         if let pages = input["pages"]?.stringValue { chips.append(.code("p\(pages)")) }
 
-        return ToolPresentation(glyph: "doc.text", label: label, detail: file, tint: Palette.accent, chips: chips)
+        return ToolPresentation(glyph: "doc.text", label: label, detail: file, tint: .accent, chips: chips)
     }
 
     private static func write(_ input: JSONValue) -> ToolPresentation {
@@ -87,7 +93,7 @@ enum ToolPresenter {
             glyph: "square.and.pencil",
             label: "Write",
             detail: file,
-            tint: Palette.positive,
+            tint: .positive,
             chips: chips
         )
     }
@@ -104,7 +110,7 @@ enum ToolPresenter {
             glyph: "pencil.line",
             label: "Edit",
             detail: file,
-            tint: Palette.positive,
+            tint: .positive,
             chips: chips
         )
     }
@@ -122,7 +128,7 @@ enum ToolPresenter {
             glyph: "pencil.line",
             label: "Edit",
             detail: file,
-            tint: Palette.positive,
+            tint: .positive,
             chips: chips
         )
     }
@@ -139,7 +145,7 @@ enum ToolPresenter {
             glyph: "book.closed",
             label: "Notebook",
             detail: file,
-            tint: Palette.positive,
+            tint: .positive,
             chips: chips
         )
     }
@@ -162,7 +168,7 @@ enum ToolPresenter {
             glyph: "terminal",
             label: label.isEmpty ? "Bash" : label,
             detail: command,
-            tint: Palette.textSecondary,
+            tint: .neutral,
             chips: chips
         )
     }
@@ -177,7 +183,7 @@ enum ToolPresenter {
             glyph: "terminal.fill",
             label: "Shell output",
             detail: shell,
-            tint: Palette.textSecondary,
+            tint: .neutral,
             chips: chips
         )
     }
@@ -188,7 +194,7 @@ enum ToolPresenter {
             glyph: "terminal",
             label: "Kill shell",
             detail: shell,
-            tint: Palette.negative
+            tint: .negative
         )
     }
 
@@ -204,7 +210,7 @@ enum ToolPresenter {
             glyph: "magnifyingglass",
             label: "Find files",
             detail: input["pattern"]?.stringValue ?? "",
-            tint: Palette.accent,
+            tint: .accent,
             chips: chips
         )
     }
@@ -221,7 +227,7 @@ enum ToolPresenter {
             glyph: "text.magnifyingglass",
             label: "Search",
             detail: input["pattern"]?.stringValue ?? "",
-            tint: Palette.accent,
+            tint: .accent,
             chips: chips
         )
     }
@@ -231,7 +237,7 @@ enum ToolPresenter {
             glyph: "wrench.adjustable",
             label: "Find tools",
             detail: oneLine(input["query"]?.stringValue ?? ""),
-            tint: Palette.textSecondary
+            tint: .neutral
         )
     }
 
@@ -247,7 +253,7 @@ enum ToolPresenter {
             glyph: "person.2",
             label: "Agent: \(type)",
             detail: oneLine(input["description"]?.stringValue ?? ""),
-            tint: Palette.warning,
+            tint: .warning,
             chips: chips
         )
     }
@@ -257,7 +263,7 @@ enum ToolPresenter {
             glyph: "person.2.wave.2",
             label: "Agent output",
             detail: input["task_id"]?.stringValue ?? input["agent_id"]?.stringValue ?? "",
-            tint: Palette.warning
+            tint: .warning
         )
     }
 
@@ -266,7 +272,7 @@ enum ToolPresenter {
             glyph: "person.2.slash",
             label: "Stop agent",
             detail: input["task_id"]?.stringValue ?? input["agent_id"]?.stringValue ?? "",
-            tint: Palette.negative
+            tint: .negative
         )
     }
 
@@ -275,7 +281,7 @@ enum ToolPresenter {
             glyph: "paperplane",
             label: "Message agent",
             detail: oneLine(input["prompt"]?.stringValue ?? input["message"]?.stringValue ?? ""),
-            tint: Palette.warning,
+            tint: .warning,
             chips: (input["agent_id"]?.stringValue).map { [ToolChip.code($0)] } ?? []
         )
     }
@@ -295,7 +301,7 @@ enum ToolPresenter {
             glyph: "checklist",
             label: "Todos",
             detail: "\(items.count) items, \(done) done",
-            tint: Palette.textSecondary,
+            tint: .neutral,
             chips: chips
         )
     }
@@ -305,7 +311,7 @@ enum ToolPresenter {
             glyph: "checkmark.seal",
             label: "Plan ready",
             detail: firstLine(input["plan"]?.stringValue ?? ""),
-            tint: Palette.accent
+            tint: .accent
         )
     }
 
@@ -314,7 +320,7 @@ enum ToolPresenter {
             glyph: "list.bullet.clipboard",
             label: "Plan mode",
             detail: oneLine(input["reason"]?.stringValue ?? "Planning before touching anything"),
-            tint: Palette.accent
+            tint: .accent
         )
     }
 
@@ -330,7 +336,7 @@ enum ToolPresenter {
             glyph: "questionmark.bubble",
             label: "Question",
             detail: oneLine(text),
-            tint: Palette.warning,
+            tint: .warning,
             chips: chips
         )
     }
@@ -341,7 +347,7 @@ enum ToolPresenter {
             glyph: "command",
             label: "Command",
             detail: oneLine(command),
-            tint: Palette.textSecondary
+            tint: .neutral
         )
     }
 
@@ -351,7 +357,7 @@ enum ToolPresenter {
             glyph: "wand.and.stars",
             label: "Skill",
             detail: oneLine(input["args"]?.stringValue ?? ""),
-            tint: Palette.accent,
+            tint: .accent,
             chips: name.isEmpty ? [] : [.code(name)]
         )
     }
@@ -364,7 +370,7 @@ enum ToolPresenter {
             glyph: "globe",
             label: "Fetch",
             detail: host(url),
-            tint: Palette.accent
+            tint: .accent
         )
     }
 
@@ -373,7 +379,7 @@ enum ToolPresenter {
             glyph: "magnifyingglass.circle",
             label: "Web search",
             detail: oneLine(input["query"]?.stringValue ?? ""),
-            tint: Palette.accent
+            tint: .accent
         )
     }
 
@@ -395,7 +401,7 @@ enum ToolPresenter {
                 glyph: "puzzlepiece.extension",
                 label: label,
                 detail: basename(path),
-                tint: Palette.textSecondary,
+                tint: .neutral,
                 chips: [.file(path: path)]
             )
         }
@@ -404,7 +410,7 @@ enum ToolPresenter {
             glyph: "puzzlepiece.extension",
             label: label,
             detail: firstScalar(input),
-            tint: Palette.textSecondary
+            tint: .neutral
         )
     }
 
@@ -416,7 +422,7 @@ enum ToolPresenter {
                 glyph: "wrench.and.screwdriver",
                 label: name,
                 detail: basename(path),
-                tint: Palette.textSecondary,
+                tint: .neutral,
                 chips: [.file(path: path)]
             )
         }
@@ -425,7 +431,7 @@ enum ToolPresenter {
             glyph: "wrench.and.screwdriver",
             label: name,
             detail: firstScalar(input),
-            tint: Palette.textSecondary
+            tint: .neutral
         )
     }
 
@@ -454,7 +460,7 @@ enum ToolPresenter {
 
     // MARK: Text helpers
 
-    static func basename(_ path: String) -> String {
+    public static func basename(_ path: String) -> String {
         let trimmed = path.hasSuffix("/") ? String(path.dropLast()) : path
         guard let last = trimmed.split(separator: "/").last else { return trimmed }
         return String(last)
@@ -470,7 +476,7 @@ enum ToolPresenter {
     /// `text.utf8.count` for the reservation for the same reason: `text.count` walks the whole
     /// input to size a buffer that is capped at 301 anyway, and a byte count is an upper bound on
     /// a character count, which is all a reservation needs.
-    static func oneLine(_ text: String, limit: Int = 300) -> String {
+    public static func oneLine(_ text: String, limit: Int = 300) -> String {
         var out = ""
         out.reserveCapacity(min(text.utf8.count, limit + 1))
         var written = 0
@@ -493,11 +499,11 @@ enum ToolPresenter {
         return out
     }
 
-    static func firstLine(_ text: String) -> String {
+    public static func firstLine(_ text: String) -> String {
         oneLine(text.prefix(while: { $0 != "\n" }).description)
     }
 
-    static func host(_ url: String) -> String {
+    public static func host(_ url: String) -> String {
         guard let parsed = URL(string: url) else { return oneLine(url) }
         return parsed.host() ?? oneLine(url)
     }
@@ -508,13 +514,13 @@ enum ToolPresenter {
     /// which is nearly every file, was reported one line longer here than in the inspector beside
     /// it. The turn footer's rollup is built from this, so a turn that wrote three files read
     /// three lines heavier than the changed file list showed.
-    static func lineCount(_ text: String) -> Int {
+    public static func lineCount(_ text: String) -> Int {
         Git.countLines(text)
     }
 
     /// The first scalar in the input, keys in sorted order so the same tool always shows the same
     /// field rather than whatever the dictionary felt like today.
-    static func firstScalar(_ input: JSONValue) -> String {
+    public static func firstScalar(_ input: JSONValue) -> String {
         guard let object = input.objectValue else { return scalar(input) ?? "" }
         for key in object.keys.sorted() {
             if let value = object[key], let text = scalar(value) { return text }

@@ -50,7 +50,7 @@ enum CodexItemPresenter {
                 glyph: "text.alignleft",
                 label: "Message",
                 detail: "",
-                tint: Palette.textSecondary
+                tint: .neutral
             )
         }
     }
@@ -71,7 +71,7 @@ enum CodexItemPresenter {
             glyph: "terminal",
             label: "Shell",
             detail: command,
-            tint: run.status == .failed ? Palette.negative : Palette.textSecondary,
+            tint: run.status == .failed ? .negative : .neutral,
             chips: chips
         )
     }
@@ -113,11 +113,13 @@ enum CodexItemPresenter {
 
     /// A refusal is not a failure. Nothing broke: somebody said no, and the row must not be the
     /// same alarming red as a command that crashed.
-    private static func tint(for status: CodexRunStatus) -> Color {
+    private static func tint(for status: CodexRunStatus) -> ToolTint {
         switch status {
-        case .failed: Palette.negative
-        case .declined: Palette.textTertiary
-        default: Palette.positive
+        case .failed: .negative
+        // Declined is not a failure and not an outcome: nothing ran. It takes the quiet role the
+        // rest of the transcript's "nothing to report" rows take.
+        case .declined: .neutral
+        default: .positive
         }
     }
 
@@ -129,7 +131,7 @@ enum CodexItemPresenter {
             glyph: "puzzlepiece.extension",
             label: tool.isEmpty ? call.server : "\(call.server): \(tool)",
             detail: call.errorMessage ?? "",
-            tint: call.status == .failed ? Palette.negative : Palette.textSecondary
+            tint: call.status == .failed ? .negative : .neutral
         )
     }
 
@@ -140,21 +142,21 @@ enum CodexItemPresenter {
                 glyph: "safari",
                 label: "Open page",
                 detail: search.url ?? search.query,
-                tint: Palette.textSecondary
+                tint: .neutral
             )
         case "findInPage":
             return ToolPresentation(
                 glyph: "text.magnifyingglass",
                 label: "Find in page",
                 detail: search.query,
-                tint: Palette.textSecondary
+                tint: .neutral
             )
         default:
             return ToolPresentation(
                 glyph: "magnifyingglass",
                 label: "Search the web",
                 detail: search.query,
-                tint: Palette.textSecondary
+                tint: .neutral
             )
         }
     }
@@ -164,7 +166,7 @@ enum CodexItemPresenter {
             glyph: "list.bullet.rectangle",
             label: "Plan",
             detail: ToolPresenter.oneLine(firstLine(of: plan.text)),
-            tint: Palette.textSecondary
+            tint: .neutral
         )
     }
 
@@ -173,7 +175,7 @@ enum CodexItemPresenter {
             glyph: "person.2",
             label: "Sub-agent",
             detail: ToolPresenter.basename(activity.agentPath),
-            tint: Palette.textSecondary,
+            tint: .neutral,
             chips: activity.kind.isEmpty ? [] : [.code(activity.kind)]
         )
     }
@@ -183,7 +185,7 @@ enum CodexItemPresenter {
             glyph: "arrow.down.right.and.arrow.up.left",
             label: "Compacted the conversation",
             detail: "",
-            tint: Palette.textTertiary
+            tint: .neutral
         )
     }
 
@@ -195,7 +197,7 @@ enum CodexItemPresenter {
             glyph: "questionmark.square.dashed",
             label: spaced(type),
             detail: ToolPresenter.oneLine(summary(of: json)),
-            tint: Palette.textTertiary
+            tint: .neutral
         )
     }
 

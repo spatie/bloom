@@ -117,12 +117,12 @@ struct WorkspaceEvent: Identifiable, Equatable {
         }
     }
 
-    private var tint: Color {
+    private var tint: ToolTint {
         switch outcome {
-        case .running: Palette.accent
-        case .succeeded: Palette.positive
-        case .failed: Palette.negative
-        case .skipped: Palette.textSecondary
+        case .running: .accent
+        case .succeeded: .positive
+        case .failed: .negative
+        case .skipped: .neutral
         }
     }
 

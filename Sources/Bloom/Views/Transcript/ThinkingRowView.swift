@@ -1,4 +1,5 @@
 import SwiftUI
+import BloomCore
 
 /// A thinking block, which is worth showing and almost never worth reading in full.
 ///

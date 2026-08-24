@@ -111,7 +111,10 @@ struct ToolRowHeader: View {
         HStack(spacing: TranscriptLayout.glyphGap) {
             TranscriptGlyph(
                 symbol: presentation.glyph,
-                tint: outcome?.tint ?? presentation.tint
+                // The outcome's colour wins where there is one, and the presentation's role
+                // becomes one here. See `ToolTint`: which role a tool row carries is a decision
+                // in the core, and this is where it stops being one.
+                tint: outcome?.tint ?? presentation.tint.colour
             )
 
             // A rung below the prose beside it, and in the secondary colour, because that is the
