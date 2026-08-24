@@ -608,16 +608,18 @@ struct DiffView: View {
 
     /// The between-hunks context lines the reader has revealed, keyed by new-side number, which
     /// `ReviewPlacements` needs because those lines are printed and the hunks do not know it.
+    ///
+    /// Through `DiffGap`, the same as `appendGap` 120 lines below. The arithmetic used to be
+    /// written out in both places, identically, and the two have to agree or a pending review
+    /// comment anchors to a line that is not on screen: one decides which lines are drawn and
+    /// this one decides which lines a comment may attach to.
     private func revealedContextLines(_ document: DiffDocument) -> [Int: String] {
         guard let fileLines else { return [:] }
         var revealed: [Int: String] = [:]
         let hunks = document.file.hunks
-        for (index, hunk) in hunks.enumerated() {
-            let previousEnd = index == 0 ? 1 : hunks[index - 1].newStart + hunks[index - 1].newCount
-            let gap = hunk.newStart - previousEnd
-            guard gap > 0 else { continue }
-            let count = min(revealedGaps[index] ?? 0, gap)
-            for number in (hunk.newStart - count)..<hunk.newStart
+        for index in hunks.indices {
+            guard let gap = DiffGap.between(hunks: hunks, at: index) else { continue }
+            for number in DiffGap.revealed(revealedGaps[index] ?? 0, in: gap)
             where number >= 1 && number - 1 < fileLines.count {
                 revealed[number] = fileLines[number - 1]
             }
@@ -728,6 +730,9 @@ struct DiffView: View {
     }
 
     /// The unchanged region git never printed, between the previous hunk and this one.
+    ///
+    /// Which lines those are is `DiffGap`, in the core, shared with `revealedContextLines` above.
+    /// See that property for what the pair used to be.
     private func appendGap(
         _ rows: inout [DiffRow],
         document: DiffDocument,
@@ -737,23 +742,18 @@ struct DiffView: View {
     ) {
         guard let fileLines else { return }
 
-        let hunks = document.file.hunks
-        let previousEnd: Int = hunkIndex == 0
-            ? 1
-            : hunks[hunkIndex - 1].newStart + hunks[hunkIndex - 1].newCount
-        let gap = hunk.newStart - previousEnd
-        guard gap > 0 else { return }
+        guard let gap = DiffGap.between(hunks: document.file.hunks, at: hunkIndex) else { return }
 
-        let revealed = min(revealedGaps[hunkIndex] ?? 0, gap)
-        let hidden = gap - revealed
+        let requested = revealedGaps[hunkIndex] ?? 0
+        let hidden = DiffGap.hidden(requested, in: gap)
         if hidden > 0 {
             rows.append(.gapExpander(gapID: hunkIndex, hidden: hidden))
         }
-        guard revealed > 0 else { return }
+        let revealed = DiffGap.revealed(requested, in: gap)
+        guard !revealed.isEmpty else { return }
 
-        // Lines are revealed upward from the hunk, the way a reader walks back out of a change.
         let offset = hunk.oldStart - hunk.newStart
-        for number in (hunk.newStart - revealed)..<hunk.newStart {
+        for number in revealed {
             guard number >= 1, number - 1 < fileLines.count else { continue }
             // A negative index cannot collide with a parsed line, so the carry lookup misses and
             // falls back to a clean lexer state, which is the honest answer for a line whose

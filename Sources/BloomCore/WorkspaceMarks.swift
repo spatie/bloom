@@ -44,13 +44,19 @@ public enum WorkspaceUnreadMark {
     /// The item to offer for this workspace, or nil when there should be no item.
     ///
     /// **Archived workspaces get nothing.** An archived row's `unread` is a leftover with nothing
-    /// behind it and nothing that reads it: `HomeListRow.isUnread` refuses to draw the weight for
-    /// an archived row, `DockBadge` counts `AppModel.workspaces`, which holds active workspaces
-    /// only, and the sidebar never lists an archived workspace at all. Opening one goes to
-    /// `ArchivedWorkspaceView`, which deliberately marks nothing read because there is nothing to
-    /// go back to. So an item here would write a flag that no part of the app draws and that the
-    /// user has no way to answer. That is the same reasoning `HomeListRow.isUnread` is written
-    /// out at, and it has to end the same way or the two would disagree about one workspace.
+    /// behind it and nothing that reads it: `DockBadge` counts `AppModel.workspaces`, which holds
+    /// active workspaces only, and the sidebar never lists an archived workspace at all. Opening
+    /// one goes to `ArchivedWorkspaceView`, which deliberately marks nothing read because there
+    /// is nothing to go back to. So an item here would write a flag that no part of the app draws
+    /// and that the user has no way to answer.
+    ///
+    /// The two states also say opposite things: unread means "this wants you", archived means
+    /// "this is done with you". A row cannot be both, and the one the owner acted on last is the
+    /// one that is true.
+    ///
+    /// Home used to restate all of that above a copy of the rule. `isUnread` below is that copy,
+    /// deleted and pointed here, because a rule written twice is a rule that can disagree with
+    /// itself about one workspace.
     ///
     /// Everything else is offered, including a workspace whose agent is mid turn. That mark is
     /// short lived, because the turn writes `unread` when it finishes (see
@@ -59,6 +65,21 @@ public enum WorkspaceUnreadMark {
     public static func action(for workspace: Workspace) -> UnreadMarkAction? {
         guard workspace.state == .active else { return nil }
         return workspace.unread ? .markRead : .markUnread
+    }
+
+    /// Whether a row should draw the unread weight at all.
+    ///
+    /// The same rule as `action(for:)` and deliberately built on it, because it IS the same
+    /// question: an item that would offer "Mark as Read" is an item on a row that is showing as
+    /// unread. `HomeListRow` wrote it out a third time as `!row.isArchived && workspace.unread`,
+    /// with the whole argument for it restated in a comment above, and the comment already said
+    /// the two had to end the same way or they would disagree about one workspace. Two statements
+    /// of a rule that must agree is one statement too many.
+    ///
+    /// It asks `workspace.state` rather than a row's own archived flag, which is the field the
+    /// store writes and the one every other reader of this rule uses.
+    public static func isUnread(_ workspace: Workspace) -> Bool {
+        action(for: workspace) == .markRead
     }
 }
 

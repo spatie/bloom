@@ -233,21 +233,14 @@ struct HomeListRow: View {
         WorkspacePullRequests.shared.pullRequest(for: workspace.id)
     }
 
-    /// Whether the name is set in the unread weight. Archived wins over unread, deliberately.
+    /// Whether the name is set in the unread weight. Archived wins over unread, and the argument
+    /// for that lives with the rule, in `WorkspaceUnreadMark`.
     ///
-    /// The two do meet: archiving does not clear the flag, so a workspace whose agent finished
-    /// while nobody was looking and was archived that evening arrives here both unread and over.
-    /// Three things settle it the same way. The flag would be unclearable: reading an archived
-    /// workspace opens `ArchivedWorkspaceView`, which deliberately marks nothing read because
-    /// there is nothing to go back to, so the row would be heavy forever with no way to answer
-    /// it. It would be the only unread mark in the app that no other part of the app agrees
-    /// with: `DockBadge` counts `AppModel.workspaces`, which holds active workspaces only, and
-    /// the sidebar never lists an archived one at all, so Home would be shouting about a
-    /// workspace the badge and the sidebar both consider settled. And the two states say opposite
-    /// things: unread means "this wants you", archived means "this is done with you". A row
-    /// cannot be both, and the one the user acted on last is the one that is true.
+    /// It was written out here as `!row.isArchived && workspace.unread` with the whole argument
+    /// restated above it, which made three copies of one rule in the app and a comment whose last
+    /// line said the copies had to end the same way or they would disagree about one workspace.
     private var isUnread: Bool {
-        !row.isArchived && workspace.unread
+        WorkspaceUnreadMark.isUnread(workspace)
     }
 
     private var status: WorkspaceStatus {
