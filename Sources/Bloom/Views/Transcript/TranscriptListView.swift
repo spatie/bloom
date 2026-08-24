@@ -161,6 +161,22 @@ struct TranscriptListView: View {
     /// `TranscriptResume.opensOnTheTail`.
     @State private var owesHistory = false
 
+    /// Whether the reader has hold of the view, as opposed to this file moving it.
+    ///
+    /// **This is what tells scrolling towards the history from arriving at the session.** A
+    /// programmatic move to the live end is a value the scroll view applies over the following
+    /// passes, so for several frames after a pane opens its offset is still nought, which reads
+    /// exactly like a reader who has scrolled to the top. Waiting for the arrival to be over does
+    /// not separate them either: the arrival is over as soon as the position has been NAMED, and
+    /// the view is still travelling to it. Measured with `--tab-probe`, both readings fired the
+    /// reveal on the arrival frame of every return and handed the whole saving straight back.
+    ///
+    /// A box rather than `@State`, for the reason `GeometryBox` sets out: nothing in the body
+    /// draws this, and the alternative is a rebuild of every realised row per scroll phase.
+    /// `.animating` is deliberately not a hand on the wheel: it is this file's own glide, which is
+    /// how a pane arrives at the live end in the first place.
+    @State private var isReaderScrolling = GeometryBox(false)
+
     /// Set for the one layout pass that puts the history back underneath the reader, and read by
     /// the size-change anchor.
     ///
@@ -779,6 +795,10 @@ struct TranscriptListView: View {
                 // interruption a drag would be. `.animating` is this app's own travel, which is
                 // the one phase that is not somebody taking hold.
                 follower.isPaused = phase != .idle && phase != .animating
+                // The same reading of the same phases, for the reveal rather than the follower.
+                // See `isReaderScrolling`: this is the difference between a reader scrolling up
+                // towards the history and a pane still travelling to the live end it opened on.
+                isReaderScrolling.value = phase != .idle && phase != .animating
             }
             .overlay {
                 if showsPlaceholder {
@@ -974,13 +994,15 @@ struct TranscriptListView: View {
     /// that has nothing owed.
     private func revealHistoryIfNeeded(approaching offset: Double) {
         guard owesHistory, drawnInFull != transcript.session.id else { return }
-        // **Not until the session has finished arriving, and this is not belt and braces.** A
-        // scroll view reports its geometry from the moment it is laid out, which is several passes
-        // before anything has put it on the live end, and its offset until then is nought. Without
-        // this the reveal fired on the arrival frame every time, measured at 90ms to 109ms into a
-        // return with `transcript.history.revealed` stamped right behind `transcript.tail`, which
-        // is the whole of the saving handed straight back.
-        guard arrivalSession == transcript.session.id else { return }
+        // **Only for a reader who is scrolling, and this is the whole of what makes it work.** A
+        // scroll view reports its geometry from the moment it is laid out, and a pane opening on
+        // the live end is still travelling there for several passes afterwards, so its offset is
+        // nought and reads exactly like somebody who has scrolled to the top. Waiting for the
+        // arrival to be over does not separate the two either, because the arrival is over when
+        // the position has been NAMED and the view is still on its way to it: measured with
+        // `--tab-probe`, both readings stamped `transcript.history.revealed` on the arrival frame
+        // of every return and handed the whole saving back. See `isReaderScrolling`.
+        guard isReaderScrolling.value, arrivalSession == transcript.session.id else { return }
         // Nought until the pane has been measured, and a pane with no height cannot say what a
         // screen ahead of the top means. `TranscriptGeometry.height` reads nought the same way.
         guard geometry.paneHeight > 0, offset < geometry.paneHeight else { return }
