@@ -51,6 +51,8 @@ public actor AgentRunner {
     public nonisolated let sessionID: SessionID
 
     private let store: Store
+    /// See the initialiser. Long enough for SIGTERM, the grace period and the SIGKILL behind it.
+    private let shutdownBudget: Duration
     private let makeProcess: @Sendable (AgentLaunch) -> any AgentProcessing
     private let sink = EventFanout<AgentEvent>()
     /// Held outside the actor so `cancelNow()` can signal a process from synchronous main-actor
@@ -129,11 +131,19 @@ public actor AgentRunner {
     /// that is worth holding.
     private static let stderrTailLimit = 40
 
+    /// - Parameter shutdownBudget: how long a turn waits for a cancelled process to die before it
+    ///   refuses. Five seconds covers SIGTERM, the three second grace period and the SIGKILL
+    ///   behind it, which is the answer for the app. It is a parameter for the same reason
+    ///   `makeProcess` is: the test that proves a turn gives up rather than writing into a dying
+    ///   process hands it a process that never exits, so it waits out the whole budget, and five
+    ///   seconds of one test sleeping was longer than the other three thousand tests took
+    ///   together.
     public init(
         workspacePath: String,
         session: Session,
         store: Store,
         mcpConfigPath: String? = nil,
+        shutdownBudget: Duration = .seconds(5),
         makeProcess: @escaping @Sendable (AgentLaunch) -> any AgentProcessing = AgentRunner.spawn
     ) {
         self.workspacePath = workspacePath
@@ -141,6 +151,7 @@ public actor AgentRunner {
         self.session = session
         self.store = store
         self.mcpConfigPath = mcpConfigPath
+        self.shutdownBudget = shutdownBudget
         self.makeProcess = makeProcess
     }
 
@@ -381,15 +392,14 @@ public actor AgentRunner {
     private func waitForCancelledRunToExit() async throws {
         guard handle.isCancelledRunStillAlive else { return }
 
-        for _ in 0..<Self.shutdownPolls {
+        let deadline = ContinuousClock.now + shutdownBudget
+        while ContinuousClock.now < deadline {
             try? await Task.sleep(for: Self.shutdownPollInterval)
             if handle.current == nil { return }
         }
         throw AgentRunnerError.previousRunStillExiting
     }
 
-    /// Long enough to cover SIGTERM, the three second grace period, and the SIGKILL behind it.
-    private static let shutdownPolls = 200
     private static let shutdownPollInterval = Duration.milliseconds(25)
 
     private func start() {

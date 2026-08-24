@@ -651,7 +651,14 @@ struct AgentRunnerCancellationRaceTests {
         let session = try await makeSession(store)
         let recorder = ProcessRecorder(shutdown: nil)
         let runner = AgentRunner(
-            workspacePath: "/tmp/w", session: session, store: store, makeProcess: recorder.factory
+            workspacePath: "/tmp/w",
+            session: session,
+            store: store,
+            // What is under test is that the wait ends in a refusal rather than in a turn written
+            // into a dying process, and the length of the wait is not part of that. At the app's
+            // five seconds this one test slept longer than the whole rest of the suite ran.
+            shutdownBudget: .milliseconds(200),
+            makeProcess: recorder.factory
         )
 
         try await runner.send("one")

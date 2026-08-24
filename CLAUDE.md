@@ -60,6 +60,28 @@ anything that adds a case to an enum.
 
 Zero warnings, and `make lint` green, before anything is committed.
 
+## Where a green answer comes from
+
+Run tests locally, and run the ones that cover what you touched:
+`./Tools/test-core.sh DiffParser` rather than `make test`, most of the time. **The full suite is
+not a thing to sit and repeat.** The owner is working at this Mac while you run, several agents
+build at once, and a day of that took the load average to 205. A sweep of everything on every edit
+is how his machine stalls, and the machine stalling costs more than the answer is worth.
+
+**The green that counts is CI on a pushed branch.** `.github/workflows/test.yml` builds the app
+target with `-warnings-as-errors`, runs the house rules, parses every script and runs the whole
+core suite on a macOS 26 runner, on hardware that is not his. Push, wait for it, and read what it
+says before calling anything done. `gh run watch` and `gh run list --branch <name>` are how you
+wait without polling the browser.
+
+One detail that has caught people out: that workflow runs on **push to `main` and on pull
+request**, and on nothing else. A branch pushed with no pull request open is not built at all, so
+opening the pull request is part of asking for the answer rather than a step after it.
+
+The nightly workflow is separate and gates nothing: Thread Sanitizer, coverage and dead code, on a
+schedule, because they are too slow to put in front of a push. Read it when you want those
+questions answered, and do not wait on it.
+
 ## Persistence goes through `Store`
 
 One actor, one SQLite file, and one rule: **`upsert` creates a row, `update` modifies one.**

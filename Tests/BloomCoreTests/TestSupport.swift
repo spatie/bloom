@@ -47,6 +47,65 @@ enum TestScratch {
     }
 }
 
+/// One built repository per default branch, kept for the life of the test process.
+///
+/// An actor because the whole point is that the build happens once however many tests ask at the
+/// same moment, and `TempRepo` is already `async`. It lives outside every test's scratch
+/// directory, since those are deleted per test and this outlives all of them.
+actor RepoTemplate {
+    static let shared = RepoTemplate()
+
+    /// The in-flight build rather than the finished path, which is the whole of the
+    /// synchronisation. An actor is re-entrant across `await`, and building a repository is four
+    /// of them, so a dictionary of finished paths let two hundred tests all look, all find
+    /// nothing, and all run `git init` into the same directory. Storing the `Task` happens with
+    /// no suspension between the look and the write, so every caller after the first waits on the
+    /// same build. `AgentCatalog` shares a detection the same way and for the same reason.
+    private var building: [String: Task<String, Error>] = [:]
+    private let root = NSTemporaryDirectory() + "bloom-repo-templates-\(UUID().uuidString)"
+
+    func path(defaultBranch: String) async throws -> String {
+        if let inFlight = building[defaultBranch] { return try await inFlight.value }
+        let root = root
+        let index = building.count
+        let task = Task { try await Self.build(defaultBranch: defaultBranch, at: root, index: index) }
+        building[defaultBranch] = task
+        return try await task.value
+    }
+
+    private static func build(defaultBranch: String, at root: String, index: Int) async throws -> String {
+        let directory = (root as NSString)
+            .appendingPathComponent("template-\(index)-\(defaultBranch)")
+        try FileManager.default.createDirectory(
+            atPath: directory, withIntermediateDirectories: true
+        )
+        try await Shell.check("git", ["init", "-q", "-b", defaultBranch], cwd: directory)
+        // Written rather than set through three `git config` processes, which is exactly what
+        // `git config` would have done to this file and 555 forks cheaper across the suite.
+        let config = (directory as NSString).appendingPathComponent(".git/config")
+        let identity = """
+
+            [user]
+            \temail = test@bloom.local
+            \tname = Bloom Test
+            [commit]
+            \tgpgsign = false
+
+            """
+        let existing = (try? String(contentsOfFile: config, encoding: .utf8)) ?? ""
+        try (existing + identity).write(toFile: config, atomically: true, encoding: .utf8)
+
+        try "hello\n".write(
+            toFile: (directory as NSString).appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try await Shell.check("git", ["add", "-A"], cwd: directory)
+        try await Shell.check("git", ["commit", "-q", "-m", "initial"], cwd: directory)
+        return directory
+    }
+}
+
 /// Gives each test its own scratch directory and deletes it afterwards, pass or fail.
 struct ScratchDirectoryTrait: TestTrait, SuiteTrait, TestScoping {
     var isRecursive: Bool { true }
@@ -129,15 +188,21 @@ func waitUntil(
 struct TempRepo {
     let path: String
 
+    /// Copied from a template rather than built, which is what makes the suite bearable.
+    ///
+    /// Building one repository is six `git` processes: init, three configs, add and commit. The
+    /// suite makes about 190 of them, and a fork on this machine costs roughly twelve
+    /// milliseconds, so those six were a fifth of every `git` process the whole run spawned and a
+    /// third of its system time. A repository with one commit in it is a directory of small files
+    /// with nothing absolute in it, so the first one is built and the rest are copied.
+    ///
+    /// The commit hash is therefore the same in every repository cut from the same template.
+    /// Nothing compares a revision across two repositories, and a test that wants two distinct
+    /// histories makes its own commits on top, which are unique because their timestamps are.
     init(defaultBranch: String = "main") async throws {
+        let template = try await RepoTemplate.shared.path(defaultBranch: defaultBranch)
         path = TestScratch.unique("bloom-git")
-        try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
-        try await Shell.check("git", ["init", "-q", "-b", defaultBranch], cwd: path)
-        try await Shell.check("git", ["config", "user.email", "test@bloom.local"], cwd: path)
-        try await Shell.check("git", ["config", "user.name", "Bloom Test"], cwd: path)
-        try await Shell.check("git", ["config", "commit.gpgsign", "false"], cwd: path)
-        try write("README.md", "hello\n")
-        try await commit("initial")
+        try FileManager.default.copyItem(atPath: template, toPath: path)
     }
 
     /// Wraps a directory that is already a worktree, so the write helpers can be reused.
