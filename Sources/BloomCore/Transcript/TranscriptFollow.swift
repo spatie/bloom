@@ -47,11 +47,18 @@ public enum TranscriptFollow {
 
     /// How quickly the view closes the gap, as the time constant of the approach.
     ///
-    /// A twentieth of a second, which puts a full `takeBack` within half a point of the end in
-    /// about a quarter of a second: the same quarter of a second `TranscriptMotion.glideCeiling`
-    /// gives the jump pill's travel, so a line arriving and a press of the pill settle at the same
-    /// pace. Shorter and there is nothing to see; longer and the view is visibly behind the words.
-    public static let timeConstant: Double = 0.05
+    /// **Was a twentieth of a second, and that was too quick to read.** The arithmetic was right
+    /// and the premise was wrong: a full `takeBack` of 72 points did settle in about a quarter of
+    /// a second, but a single tool row arriving only grows the content by about 28 points, and 28
+    /// points closed on a twentieth of a second time constant is over in roughly 150 milliseconds.
+    /// What that looks like is the jump it was written to replace. The owner's report, watching
+    /// real turns, was that the transcript still went "suddenly to the bottom without any
+    /// animation".
+    ///
+    /// Nearly a tenth of a second instead, which puts an ordinary row's travel at about a quarter
+    /// of a second and a full take-back at about the same as the jump pill's glide. Longer than
+    /// this and the view is visibly behind the words, which is the failure in the other direction.
+    public static let timeConstant: Double = 0.09
 
     /// Within this many points the travel is over. Half a point is under a pixel on every display
     /// this app runs on, so the last of the approach is spent rather than watched.

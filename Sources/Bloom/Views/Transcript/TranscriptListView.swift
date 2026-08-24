@@ -368,6 +368,16 @@ struct TranscriptListView: View {
                                 workspace: transcript.workspace,
                                 maxWidth: maxBubbleWidth
                             )
+                            // The owner's own bubble settles in like every other row that turns
+                            // up. It is the one thing on this screen the reader made happen, and
+                            // it was the only arrival with no settle at all: pressing Return put
+                            // a bubble on screen in a single frame.
+                            //
+                            // Always true rather than asked of the tracker, because this view has
+                            // no seq to ask about. It latches on its own `onAppear` and `sending`
+                            // goes back to nil between turns, so the view is destroyed and rebuilt
+                            // per message and each one settles exactly once.
+                            .arrivingRow(true)
                             .padding(.horizontal, TranscriptLayout.inset)
                             .id(Self.sendingID)
                         } else {
@@ -378,6 +388,7 @@ struct TranscriptListView: View {
                                 workspace: transcript.workspace,
                                 maxWidth: maxBubbleWidth
                             )
+                            .arrivingRow(true)
                             .padding(.horizontal, TranscriptLayout.inset)
                             .id(Self.sendingID)
                         }

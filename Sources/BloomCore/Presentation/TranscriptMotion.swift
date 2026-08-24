@@ -83,7 +83,22 @@ public enum TranscriptMotion {
     /// back, which is exactly the bug the shape of this answer rules out.
     public static func arrival(reduceMotion: Bool) -> Arrival? {
         guard !reduceMotion else { return nil }
-        return Arrival(seconds: 0.22, rise: 5)
+        // Was 0.22 and 5 points, which measured as a settle in a capture and read as a pop in
+        // use: the owner's report was that rows "appear suddenly", watching real turns on a real
+        // machine, which is the measurement that counts. A tool row is only about 28 points tall,
+        // so a five point rise was under a fifth of the row and near the floor of what the eye
+        // resolves against text that is already moving.
+        //
+        // **The travel does the work here, not the length.** Ten points is twice the rise and
+        // reads as a landing; the length moved only from 0.22 to 0.25, and deliberately no
+        // further. Three invariants are chained to this number and the suite holds all three:
+        // `TranscriptMotionTests` keeps the travel under twelve points, because past that a
+        // settle stops being a landing and becomes a slide; `ProjectVisibilityMotion` is pinned
+        // to this length so one confirmation does not read as three apps; and
+        // `SubagentRetention.lingerSeconds` has to stay ten times it, so a longer settle would
+        // have silently held every finished subagent row on screen for longer. A quarter of a
+        // second is the most this can take without dragging that behaviour along with it.
+        return Arrival(seconds: 0.25, rise: 10)
     }
 
     // MARK: - Going back to the live end

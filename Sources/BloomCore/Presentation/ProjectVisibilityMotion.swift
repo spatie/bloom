@@ -33,11 +33,15 @@ public enum ProjectVisibilityMotion: Equatable, Sendable {
 
     /// The one length this pane confirms anything in.
     ///
-    /// `TranscriptMotion.arrival` settles a row in 220 milliseconds and it is the app's own
+    /// `TranscriptMotion.arrival` settles a row in 250 milliseconds and it is the app's own
     /// register for "something you just did has landed". Reusing the number rather than choosing
     /// one is the whole point: hiding a project, unhiding it and turning the filter on are three
     /// versions of the same confirmation and would be three different apps at three lengths.
-    public static let seconds = 0.22
+    ///
+    /// It moved with the row settle, from 220, and `ProjectVisibilityMotionTests` is what made
+    /// that a decision rather than an oversight: it pins the two together and failed the moment
+    /// only one of them changed.
+    public static let seconds = 0.25
 
     /// What one project being hidden or unhidden looks like.
     ///
