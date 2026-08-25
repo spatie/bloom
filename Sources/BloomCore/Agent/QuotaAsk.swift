@@ -135,7 +135,7 @@ public struct ClaudeCodeQuotaSource: AgentQuotaSource {
               response["subtype"]?.stringValue == "success",
               let payload = response["response"]
         else { return nil }
-        return (try? JSONEncoder().encode(payload)) ?? nil
+        return (try? JSONEncoder().encode(payload))
     }
 
     private let executable: String

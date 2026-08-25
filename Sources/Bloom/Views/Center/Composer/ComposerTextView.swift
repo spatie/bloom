@@ -231,7 +231,6 @@ private extension NSPasteboardItem {
     }
 }
 
-
 // MARK: - The pointer on a chip
 
 extension ComposerTextView {

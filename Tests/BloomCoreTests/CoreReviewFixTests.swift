@@ -66,6 +66,11 @@ struct CodexRunnerPersistenceFailureTests {
                 try? await Task.sleep(for: .seconds(5))
                 return nil
             }
+            // Not redundant, whatever the rule thinks. The group's child result is
+            // `AgentEvent?`, so `next()` hands back `AgentEvent??` and this is what flattens
+            // it. Deleting it type checks, changes the type, and makes a timed-out run print
+            // "Optional(nil)".
+            // swiftlint:disable:next redundant_nil_coalescing
             let winner = await group.next() ?? nil
             group.cancelAll()
             return winner
@@ -119,6 +124,11 @@ struct CodexRunnerPersistenceFailureTests {
                 try? await Task.sleep(for: .seconds(2))
                 return nil
             }
+            // Not redundant, whatever the rule thinks. The group's child result is
+            // `AgentEvent?`, so `next()` hands back `AgentEvent??` and this is what flattens
+            // it. Deleting it type checks, changes the type, and makes a timed-out run print
+            // "Optional(nil)".
+            // swiftlint:disable:next redundant_nil_coalescing
             let winner = await group.next() ?? nil
             group.cancelAll()
             return winner

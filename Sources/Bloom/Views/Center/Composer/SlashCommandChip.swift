@@ -106,7 +106,7 @@ struct SlashCommandChip: View {
         } else {
             Image(systemName: glyph)
                 .resizable()
-                .aspectRatio(contentMode: .fit)
+                .scaledToFit()
                 .frame(width: Self.slot, height: Self.slot)
                 .foregroundStyle(Palette.textSecondary)
                 .accessibilityHidden(true)
@@ -125,7 +125,7 @@ struct SlashCommandChip: View {
             Button(action: open) {
                 Image(systemName: "arrow.up.forward.square")
                     .resizable()
-                    .aspectRatio(contentMode: .fit)
+                .scaledToFit()
                     .frame(width: Self.slot, height: Self.slot)
                     .foregroundStyle(isHovered ? Palette.textSecondary : .clear)
                     .contentShape(Rectangle())

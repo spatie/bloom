@@ -283,7 +283,6 @@ struct PermissionGrantTests {
     }
 }
 
-
 /// A question that outlives the window it was asked in.
 ///
 /// The CLI puts no timer on a `can_use_tool` request: it waits until it is answered, until the

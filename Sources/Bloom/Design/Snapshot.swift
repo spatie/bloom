@@ -141,7 +141,6 @@ enum Snapshot {
         exit(0)
     }
 
-
     // MARK: - Driving a window that is going to be filmed
     //
     // None of the four flags below photograph anything. They put the running app into the state
@@ -691,7 +690,6 @@ enum Snapshot {
             exit(0)
         }
     }
-
 
     // MARK: - Gallery capture
 

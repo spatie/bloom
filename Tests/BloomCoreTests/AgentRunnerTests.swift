@@ -772,7 +772,6 @@ private func fixtureSessionLines() throws -> [String] {
     try bloomFixtureLines("session-basic.jsonl")
 }
 
-
 // MARK: - Permission asks
 
 /// Answering the CLI's permission question, and answering it on the user's behalf.

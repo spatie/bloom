@@ -98,7 +98,6 @@ enum TurnScan {
         }
     }
 
-
     /// Rows are stored in sequence order, so finding the turn boundary is a binary search rather
     /// than a walk over every row in the session.
     private static func position(of seq: Int, in rows: [TranscriptRow]) -> Int? {

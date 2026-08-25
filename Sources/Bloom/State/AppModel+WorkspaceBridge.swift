@@ -148,7 +148,7 @@ extension AppModel {
     }
 
     private static let noWorkspaceForPane =
-        "That workspace is not open in Bloom any more, so there is nowhere to put a pane." 
+        "That workspace is not open in Bloom any more, so there is nowhere to put a pane."
 
     /// `pane_open`, through the same door the tab strip's `+` menu uses.
     ///

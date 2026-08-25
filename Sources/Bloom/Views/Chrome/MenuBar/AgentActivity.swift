@@ -55,6 +55,10 @@ final class AgentActivity {
         // agents and drives the running count to zero through the reporter. This covers the gap
         // between those two: a quit that beats SwiftUI to the last update pass still releases
         // here, so the release is provable rather than inferred from process death.
+        // The token is dropped because there is nothing left to remove this from: the observer
+        // is the singleton's own, it fires once as the process ends, and the only thing that
+        // could outlive it is the app itself.
+        // swiftlint:disable:next discarded_notification_center_observer
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { _ in

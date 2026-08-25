@@ -403,8 +403,8 @@ extension Git {
         // Exists only in the worktree, so removing the worktree is the end of it.
         guard manager.fileExists(atPath: there) else { return true }
 
-        let mySize = (try? manager.attributesOfItem(atPath: here)[.size] as? Int) ?? nil
-        let theirSize = (try? manager.attributesOfItem(atPath: there)[.size] as? Int) ?? nil
+        let mySize = (try? manager.attributesOfItem(atPath: here)[.size] as? Int)
+        let theirSize = (try? manager.attributesOfItem(atPath: there)[.size] as? Int)
         if let mySize, let theirSize, mySize != theirSize { return true }
 
         guard let mine = manager.contents(atPath: here) else { return true }

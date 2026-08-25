@@ -90,7 +90,7 @@ extension AppModel {
             guard answer.changes(row) else { return }
             answer.apply(to: &row)
         }
-        guard let row = stored ?? nil,
+        guard let row = stored,
               row.iconPath == answer.iconPath, row.iconSource == answer.iconSource,
               answer.changes(project)
         else { return false }

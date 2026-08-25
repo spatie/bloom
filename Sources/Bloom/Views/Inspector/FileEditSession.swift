@@ -133,8 +133,11 @@ final class FileEditSession {
     nonisolated private static func writing(
         _ text: String, over baseline: EditableFile
     ) -> Result<EditableFile, FileEditorError> {
-        do { return .success(try FileEditor.write(text, over: baseline)) }
-        catch { return .failure(error) }
+        do {
+            return .success(try FileEditor.write(text, over: baseline))
+        } catch {
+            return .failure(error)
+        }
     }
 
     private static func message(for error: FileEditorError) -> String {

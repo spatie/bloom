@@ -297,8 +297,7 @@ public final class StreamingProcess: Sendable {
         let limit = deadline ?? DispatchTime.now() + Self.eofHardLimit
         let now = DispatchTime.now()
 
-        let (sawEOF, since, stdoutLive, stderrLive) = state.withLock {
-            state -> (Bool, DispatchTime, Bool, Bool) in
+        let (sawEOF, since, stdoutLive, stderrLive) = state.withLock { state -> (Bool, DispatchTime, Bool, Bool) in
             let exited = state.exitedAt ?? now
             state.exitedAt = exited
             // Counted from the exit as well as from the last byte, so a process that fell silent

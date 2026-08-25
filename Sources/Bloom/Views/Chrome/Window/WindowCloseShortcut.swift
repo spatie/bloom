@@ -64,6 +64,9 @@ enum WindowCloseShortcut {
     static func apply() {
         watchForTheKey()
         apply(remaining: attempts)
+        // A process-lifetime observer on an enum with no instances, so there is no owner whose
+        // deinit would remove it and no token worth keeping.
+        // swiftlint:disable:next discarded_notification_center_observer
         NotificationCenter.default.addObserver(
             forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil
         ) { _ in

@@ -326,9 +326,9 @@ final class LineCollector: @unchecked Sendable {
 
 // MARK: - Readable failures
 
+// Same package, so no @retroactive is needed or allowed here.
 /// Without this, a failed archive expectation prints every stored property of the report and
 /// buries the one thing the reader needs: what archiving would have destroyed.
-// Same package, so no @retroactive is needed or allowed here.
 extension WorkspaceSafetyReport: CustomTestStringConvertible {
     public var testDescription: String {
         isSafeToDiscard

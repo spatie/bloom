@@ -672,4 +672,3 @@ private final class LiveConnection: Sendable {
         self.client.withLock { $0 = client }
     }
 }
-

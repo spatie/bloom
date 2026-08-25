@@ -49,7 +49,7 @@ struct DiffLineView: View, Equatable {
     var isCommented: Bool = false
     /// Opens the review comment editor at this line. Nil, the default, draws no `+` at all,
     /// which is what every caller that is not the review's own diff wants.
-    var onComment: ((ReviewSpot) -> Void)? = nil
+    var onComment: ((ReviewSpot) -> Void)?
 
     @State private var isHovered = false
     @FocusState private var isPlusFocused: Bool

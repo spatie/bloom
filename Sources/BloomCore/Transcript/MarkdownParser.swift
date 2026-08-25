@@ -601,9 +601,13 @@ private func isBlank(_ line: String) -> Bool {
 private func leadingSpaces(_ line: String) -> Int {
     var count = 0
     for character in line {
-        if character == " " { count += 1 }
-        else if character == "\t" { count += 4 }
-        else { break }
+        if character == " " {
+            count += 1
+        } else if character == "\t" {
+            count += 4
+        } else {
+            break
+        }
     }
     return count
 }
@@ -612,9 +616,7 @@ private func dropLeadingColumns(_ line: String, _ columns: Int) -> String {
     var consumed = 0
     var position = line.startIndex
     while position < line.endIndex, consumed < columns {
-        if line[position] == " " { consumed += 1 }
-        else if line[position] == "\t" { consumed += 4 }
-        else { break }
+        if line[position] == " " { consumed += 1 } else if line[position] == "\t" { consumed += 4 } else { break }
         position = line.index(after: position)
     }
     return String(line[position...])

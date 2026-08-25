@@ -298,7 +298,7 @@ public extension WorkspaceManager {
 
         return ContinuationFacts(
             recordedBranch: workspace.branch,
-            checkedOutBranch: await checkedOut ?? nil,
+            checkedOutBranch: await checkedOut,
             baseBranch: workspace.baseBranch,
             isPullRequestMerged: isPullRequestMerged,
             isAgentRunning: isAgentRunning,

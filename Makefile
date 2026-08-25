@@ -15,11 +15,11 @@
 # tried to second-guess it would be wrong the first time a file moved.
 
 .DEFAULT_GOAL := help
-.PHONY: help build test app run lint master dev dev-db release dmg
+.PHONY: help build test app run lint swiftlint master dev dev-db release dmg
 
 help: ## Show this list
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
-		| awk 'BEGIN {FS = ":.*?## "}; {printf "  make %-9s %s\n", $$1, $$2}'
+		| awk 'BEGIN {FS = ":.*?## "}; {printf "  make %-10s %s\n", $$1, $$2}'
 	@echo
 	@echo "  Anything that takes an argument is run directly. See the head of this file."
 
@@ -37,6 +37,9 @@ run: ## Assemble a release Bloom.app and launch it
 
 lint: ## Check the house rules no off the shelf linter knows
 	./Tools/house-rules.sh
+
+swiftlint: ## Check the rules SwiftLint knows, against .swiftlint.yml
+	./Tools/swiftlint.sh
 
 master: ## Build HEAD and install it to ~/Applications/Bloom.app
 	./Tools/master.sh

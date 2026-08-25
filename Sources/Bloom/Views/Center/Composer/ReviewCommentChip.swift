@@ -80,7 +80,7 @@ struct ReviewCommentChip: View {
         } else {
             Image(systemName: "text.bubble")
                 .resizable()
-                .aspectRatio(contentMode: .fit)
+                .scaledToFit()
                 .frame(width: Self.slot, height: Self.slot)
                 .foregroundStyle(Palette.textSecondary)
                 .accessibilityHidden(true)

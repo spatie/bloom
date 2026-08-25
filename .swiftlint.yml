@@ -1,0 +1,151 @@
+# SwiftLint, tuned. `Tools/swiftlint.sh` runs it, `make swiftlint` is the short name, and the
+# `lint` job in .github/workflows/test.yml runs the same thing on Linux.
+#
+# This sits beside `Tools/house-rules.sh` and does not replace it. The house rules are the
+# conventions no off the shelf linter knows: no em dashes, British spelling, typed ids, a view
+# that does not run a subprocess, only the app target importing a UI framework. SwiftLint is the
+# other half, the things every Swift codebase can get wrong, and the two overlap nowhere.
+#
+# **The default rule set reported 1,634 violations on this tree**, and a rule set that reports
+# 1,634 things is a rule set nobody acts on. So every entry below is a measurement rather than a
+# preference, and the count each disabled rule produced is written next to it, because the next
+# person to wonder whether to turn one back on should not have to run it to find out.
+#
+# What was left in and what it caught, on the run this file was written from:
+#
+#   orphaned_doc_comment found four, and one of them was a real defect: a merge in ae3f9dc had
+#   cut a doc comment in `WorkspaceStartPlanTests` in half and dropped a `// MARK:` into the
+#   wound, leaving three lines documenting nothing at line 244 and the rest of the sentence
+#   stranded fifty lines further down. Nothing else would have said so.
+#
+#   force_try found eleven, every one of them in the suite, none in `Sources`. See
+#   `Tests/.swiftlint.yml` for why the suite is allowed them and `Sources` is not, and for the
+#   one other rule that had to come off there.
+#
+#   discarded_notification_center_observer found three, all deliberate, and all three now carry a
+#   `swiftlint:disable:next` saying why. That is the rule earning its keep: three observers that
+#   are never removed on purpose now say so, and a fourth that is a leak will have to explain
+#   itself.
+#
+#   redundant_nil_coalescing found ten. Eight were `(try? somethingReturningAnOptional()) ?? nil`,
+#   where Swift already flattens `try?` and the coalescing really was doing nothing. Two were not
+#   redundant at all: `await group.next() ?? nil` over a `TaskGroup(of: AgentEvent?.self)` is what
+#   turns `AgentEvent??` into `AgentEvent?`, and deleting it type checks. This rule can change a
+#   type without the compiler objecting, so read what it says about a double optional rather than
+#   applying it. Both sites carry a `swiftlint:disable:next` saying so.
+#
+# One warning from experience. `swiftlint --fix` is not safe to run unread here. It rewrote
+# `let _ = SwitchTrace.mark(...)` to `_ = SwitchTrace.mark(...)` in three view bodies, which is
+# the documented SwiftUI idiom for a side effect inside a `@ViewBuilder`, and the app stopped
+# compiling with "type '()' cannot conform to 'View'". Read the diff.
+
+included:
+  - Sources
+  - Tests
+
+disabled_rules:
+  # Every length and complexity threshold, off for the reason CLAUDE.md gives for having no house
+  # rule about file length: every threshold tried fired on files that were right. `Store` at 2,603
+  # lines is correct and no number tells it apart from an `AppModel` that was not. The counts are
+  # what the defaults produced: file_length 113, type_body_length 65, cyclomatic_complexity 49,
+  # function_body_length 39, function_parameter_count 14, closure_body_length 67, nesting 5.
+  - file_length
+  - type_body_length
+  - function_body_length
+  - closure_body_length
+  - cyclomatic_complexity
+  - function_parameter_count
+  - nesting
+
+  # 248 violations with `ignores_comments: true` already on, and still 49 over two hundred
+  # characters. Almost all of them are a sentence of interface copy or a SwiftUI modifier chain,
+  # so enforcing this would be 248 edits that change no behaviour and improve nothing anyone
+  # reads. The long doc comments CLAUDE.md asks for are a second reason.
+  - line_length
+
+  # 705 violations, and it is the house style rather than a mistake: Swift 6.1 allows a trailing
+  # comma everywhere, and every multi-line literal in this tree has one so that adding a line to
+  # it is a one line diff.
+  - trailing_comma
+
+  # 38 violations. A tuple of three is how `DiffParser`, `SeaChart` and `Store` return a small
+  # answer with no type worth naming, and a struct per return would be worse to read.
+  - large_tuple
+
+  # 81 violations. It wants `String(bytes:encoding:)` over `String(decoding:as: UTF8.self)`. The
+  # failable initialiser is the wrong one here: every use is subprocess output or a file on disk,
+  # where replacing a bad byte and carrying on is right and returning nil is not.
+  - optional_data_string_conversion
+
+  # 13 violations, every one of them the word "master", and every one of them the master build:
+  # `make master`, `Tools/master.sh`, `BuildIdentity.master(commit:)`. It is a build channel, not
+  # a branch. Nothing here is a git default branch, which is `main`.
+  - inclusive_language
+
+  # 5 violations, all of them a call with named callbacks and one trailing content closure, which
+  # is the shape SwiftUI itself uses. Un-trailing the last closure makes each of them longer and
+  # none of them clearer.
+  - multiple_closures_with_trailing_closure
+
+  # 5 violations, and all five are `let _ = SwitchTrace.mark(...)` inside a `@ViewBuilder`, where
+  # `let _ =` is the only spelling that compiles. The rule has an `ignore_swiftui_view_bodies`
+  # option and it is too narrow: it exempts a property literally named `body` and not the
+  # `private var content: some View` that `CenterPaneView` splits its body into. See the warning
+  # in the head of this file for what its autocorrection did.
+  - redundant_discardable_let
+
+  # 10 violations, all in the suite, all `#expect(x == [])`. Two of the ten are behind an optional
+  # chain, where the rewrite is `#expect(x?.isEmpty == true)`, which is worse to read than what it
+  # replaces.
+  - empty_collection_literal
+
+opt_in_rules:
+  # Rules that describe a defect rather than a preference. All of these were at zero when this
+  # file was written except the three noted in the head, so they cost nothing today and are here
+  # to hold the line tomorrow.
+  - discarded_notification_center_observer
+  - unhandled_throwing_task
+  - private_swiftui_state
+  - weak_delegate
+  - overridden_super_call
+  - prohibited_super_call
+  - static_over_final_class
+  - non_overridable_class_declaration
+  - fatal_error_message
+  - explicit_init
+  - yoda_condition
+  - contains_over_filter_is_empty
+  - contains_over_filter_count
+  - contains_over_first_not_nil
+  - first_where
+  - last_where
+  - sorted_first_last
+  - flatmap_over_map_reduce
+  - redundant_nil_coalescing
+  - toggle_bool
+  - joined_default_parameter
+
+identifier_name:
+  # The default floor of three characters fired 188 times on `x`, `y`, `db`, `at` and `to`, which
+  # are the right names for what they hold. What is worth keeping from this rule is the case
+  # convention and a ceiling, so the floor comes off and the rest stays.
+  min_length:
+    warning: 1
+  max_length:
+    warning: 60
+  # `x86_64` is Apple's spelling of an architecture, and `as_` and `where_` are Swift keywords
+  # that have to be spelled around. Backticks were the alternative and read worse.
+  allowed_symbols: ["_"]
+
+custom_rules:
+  # There is no SwiftLint rule for this and there are no violations of it today, which is exactly
+  # when a rule is cheap to add. `no_empty_block` is the near miss: it counts a catch as a
+  # statement block along with every empty `{ }` closure a SwiftUI action passes, so it reports
+  # 103 things here and none of them is a swallowed error.
+  empty_catch:
+    name: "Empty catch"
+    regex: 'catch[^{]*\{[[:space:]]*\}'
+    message: "A catch that does nothing is an error nobody will ever see. Say why, in the block."
+    match_kinds:
+      - keyword
+      - identifier

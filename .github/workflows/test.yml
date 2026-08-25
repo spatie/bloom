@@ -8,7 +8,8 @@ name: Test
 # and one push should tell you everything that is wrong with it rather than one
 # thing at a time.
 #
-#   lint     the workflows, the shell scripts and the house rules, on Linux.
+#   lint     the workflows, the shell scripts, the house rules and SwiftLint,
+#            all on Linux, because not one of them needs a Mac.
 #   build    swift build, which compiles the app target, Sources/Bloom included.
 #            Tools/test-core.sh mirrors only BloomCore into a throwaway package
 #            with no app target, so a view that stops compiling leaves the whole
@@ -113,6 +114,34 @@ jobs:
       # The rules that are ours rather than the language's. See the script.
       - name: Check the house rules
         run: ./Tools/house-rules.sh
+
+      # And the rules that are the language's rather than ours, which is the other half.
+      # `.swiftlint.yml` is tuned rather than default: the head of that file has the counts every
+      # disabled rule produced and why each one is off.
+      #
+      # On Linux, and that is the point of it being in this job. SwiftLint is SwiftSyntax rather
+      # than SourceKit for every rule that does not need a compiler log, so it needs no Xcode and
+      # no Mac, and it took 0.9 seconds over 920 files on the machine this was written on. Putting
+      # it on the macOS build would have added it to a runner that bills at ten times the rate to
+      # answer a question that does not need one.
+      #
+      # `swiftlint-static` rather than `swiftlint`: the same binary linked against nothing, so the
+      # runner needs no Swift runtime installed to run it. Pinned, because this is a binary from
+      # the internet, and renamed onto the PATH so that CI and a developer run the same script
+      # rather than two commands that have to be kept in step by hand.
+      - name: Lint the Swift
+        env:
+          SWIFTLINT_VERSION: 0.65.1
+        run: |
+          set -euo pipefail
+          command -v zsh >/dev/null || sudo apt-get install -y -qq zsh
+          url="https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_VERSION}"
+          curl -sSfL -o swiftlint.zip "$url/swiftlint_linux_amd64.zip"
+          mkdir -p swiftlint-bin
+          unzip -q -j swiftlint.zip swiftlint-static -d swiftlint-bin
+          mv swiftlint-bin/swiftlint-static swiftlint-bin/swiftlint
+          chmod +x swiftlint-bin/swiftlint
+          PATH="$PWD/swiftlint-bin:$PATH" ./Tools/swiftlint.sh
 
   # Compiling Sources/Bloom, which is the question "does the app still build".
   #
