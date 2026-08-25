@@ -229,11 +229,21 @@ final class BrowserSession {
         self.page = next
     }
 
+    /// Reads the whole of the web view's state and writes back only what moved.
+    ///
+    /// **Only what moved, because `@Observable` does not compare.** Setting a property to the value
+    /// it already holds still tells every view reading it to redraw, and one navigation now calls
+    /// this five times: the delegate on start, commit and finish, and KVO on each of the four
+    /// properties it watches. Writing all four every time made a single page load a dozen redraws
+    /// of the centre column for three actual changes. `adopt` has always compared, for the same
+    /// reason and one level down.
     fileprivate func refresh() {
-        canGoBack = webView.canGoBack
-        canGoForward = webView.canGoForward
-        isLoading = webView.isLoading
-        if let url = webView.url { currentURL = url }
+        if canGoBack != webView.canGoBack { canGoBack = webView.canGoBack }
+        if canGoForward != webView.canGoForward { canGoForward = webView.canGoForward }
+        if isLoading != webView.isLoading { isLoading = webView.isLoading }
+        // Nil is a web view that has not loaded anything rather than a page at no address, so the
+        // tab keeps the address it was opened on. See `reload`, which is the other half of that.
+        if let url = webView.url, url != currentURL { currentURL = url }
         adopt(BrowserTabTitle.BrowserPage(address: displayAddress))
     }
 
