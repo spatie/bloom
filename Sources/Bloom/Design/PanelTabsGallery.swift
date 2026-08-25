@@ -22,6 +22,11 @@ struct PanelTabsGallery: View {
 
     private static let panelWidth: CGFloat = 460
 
+    /// The width the panel really offers the strip, and then three that squeeze it. The last is
+    /// narrower than either label on its own, which is where a segmented control stopped drawing
+    /// its second cell at all rather than shortening a word.
+    private static let widths: [CGFloat] = [panelWidth - Metrics.gutter * 2, 320, 220, 150]
+
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.pane) {
             HStack(alignment: .top, spacing: Metrics.pane) {
@@ -35,8 +40,7 @@ struct PanelTabsGallery: View {
 
             captioned("The strip alone, at four widths") {
                 VStack(alignment: .leading, spacing: Metrics.spacingWide) {
-                    ForEach([Self.panelWidth - Metrics.gutter * 2, 320, 220, 150], id: \.self) {
-                        width in
+                    ForEach(Self.widths, id: \.self) { width in
                         strip(width: width)
                     }
                 }
