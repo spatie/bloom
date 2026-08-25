@@ -1174,7 +1174,20 @@ struct TranscriptListView: View {
     /// moves nothing: by then the content size is settled, and an anchor only does anything on a
     /// change of size.
     private func growWindow() {
-        guard drawn.session == transcript.session.id,
+        // **Only once the session has finished arriving, and this is the whole of why the first
+        // build of this measured worse than no window at all.** A list is at offset nought for the
+        // moments between being built and being put on its live end, and offset nought is "near
+        // the top" by any definition: measured with `--frame-probe`, the arrival alone grew the
+        // window four times and the stack ended up holding all 1,582 rows of the session, which is
+        // where it started. `arrivalSession` is set by the reveal, after the positioning, and is
+        // exactly the flag that says the list is where somebody meant it to be.
+        //
+        // The live end is checked as well, because a session whose window is shorter than the pane
+        // is at its top and its bottom at once, and growing it would add rows above a reader who
+        // is reading the newest one.
+        guard arrivalSession == transcript.session.id,
+              !geometry.isNearBottom,
+              drawn.session == transcript.session.id,
               TranscriptWindow.canGrow(from: drawn.start),
               !isGrowing
         else { return }
