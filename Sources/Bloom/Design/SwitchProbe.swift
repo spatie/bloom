@@ -170,58 +170,56 @@ enum SwitchProbe {
         ]
     }
 
-    /// Leaves a reader part way up a conversation, goes somewhere else, and comes back.
+    /// The owner's own report, driven: one conversation left at its top, one at its live end, and
+    /// then switched between.
     ///
-    /// The offsets either side are the whole report. They are not required to be equal to the
-    /// point: the rows above the viewport are re-measured on the way back, so an anchor that lands
-    /// the same ROW at the top can legitimately land a few points from where it was. What would
-    /// fail is landing at the live end (the flag was written when it should not have been), at the
-    /// top (nothing was restored), or at the first unread row, which is what a refused restore
-    /// used to do and is halfway up a long conversation.
+    /// "Scroll one to the top, one to the bottom, switch between them and the position is never
+    /// right." Every earlier run here sat at the live end, which is the one place the flag alone
+    /// can restore, so none of them could see it. The wheel is what makes this faithful: see
+    /// `ProbeHarness.wheel`.
     private static func keepsItsPlace(
         contentView: NSView, ticker: Ticker
     ) async -> [String: JSONValue] {
         guard let app = ProbeHarness.appModel, order.count >= 2 else { return [:] }
-        let subject = order[0]
+        let top = order[0]
+        let bottom = order[order.count - 1]
+        var report: [String: JSONValue] = [:]
 
-        app.selection = .workspace(subject)
+        // One to the top. A wheel scroll rather than a jump, in one large step per frame, because
+        // what is being set up is a reader's position and a reader gets there by scrolling.
+        app.selection = .workspace(top)
         try? await Task.sleep(for: .milliseconds(settle))
-        guard let scroll = ProbeHarness.transcriptScrollView(in: contentView) else { return [:] }
+        if let scroll = ProbeHarness.transcriptScrollView(in: contentView) {
+            for _ in 0..<400 {
+                ProbeHarness.wheel(scroll, by: 300)
+                try? await Task.sleep(for: .milliseconds(8))
+            }
+            try? await Task.sleep(for: .seconds(2))
+            report["topLeft"] = .object(ProbeHarness.scrollPlace(scroll))
+        }
 
-        // A long way up, so the answer cannot be confused with a reader who never left the end.
-        let travel = ProbeHarness.scrollableHeight(of: scroll)
-        let target = max(0, travel - 2_000)
-        scroll.contentView.setBoundsOrigin(CGPoint(x: 0, y: target))
-        scroll.reflectScrolledClipView(scroll.contentView)
-        // Long enough for the scroll to settle and for the pane to write down where it is: the
-        // record is made when a scroll ENDS, which is a phase change rather than a frame.
-        try? await Task.sleep(for: .seconds(2))
-        let left = ProbeHarness.scrollPlace(scroll)
-
-        await switchTo(order[order.count - 1], contentView: contentView, ticker: ticker)
-        await switchTo(subject, contentView: contentView, ticker: ticker)
-
-        let returned = ProbeHarness.scrollPlace(
+        // The other stays where a conversation opens, which is its live end.
+        app.selection = .workspace(bottom)
+        try? await Task.sleep(for: .milliseconds(settle))
+        report["bottomLeft"] = .object(ProbeHarness.scrollPlace(
             ProbeHarness.transcriptScrollView(in: contentView)
-        )
-        var report: [String: JSONValue] = ["left": .object(left), "returned": .object(returned)]
-        if case .number(let before)? = left["offset"], case .number(let after)? = returned["offset"] {
-            report["movedPoints"] = .number(abs(after - before))
+        ))
+
+        // And now the switching, which is the report.
+        var visits: [JSONValue] = []
+        for step in 0..<4 {
+            let target = step.isMultiple(of: 2) ? top : bottom
+            await switchTo(target, contentView: contentView, ticker: ticker)
+            let place = ProbeHarness.scrollPlace(
+                ProbeHarness.transcriptScrollView(in: contentView)
+            )
+            visits.append(.object([
+                "step": .integer(step),
+                "workspace": .string(target == top ? "topOne" : "bottomOne"),
+                "place": .object(place),
+            ]))
         }
-        // **Whether the run tested anything at all**, and it often does not.
-        //
-        // Writing the clip view's origin is not a hand on the wheel: SwiftUI never sees it, so the
-        // list's own `ScrollPosition` goes on standing at `.bottom`, and the next layout pass that
-        // grows the content reapplies that edge and puts the view back at the end. Measured: this
-        // probe asked for two thousand points off the end and reported `atEnd` on both samples.
-        //
-        // So the report says whether the reader was actually moved, and a run that could not move
-        // them is a run whose numbers say nothing about the anchor. Driving it faithfully needs
-        // real scroll wheel events, which need the window in front, which is the owner's keyboard.
-        // See the head of `ProbeHarness.window`.
-        if case .bool(let wasAtEnd)? = left["atEnd"] {
-            report["drove"] = .bool(!wasAtEnd)
-        }
+        report["visits"] = .array(visits)
         return report
     }
 

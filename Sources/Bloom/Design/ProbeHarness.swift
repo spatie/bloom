@@ -240,6 +240,33 @@ struct ProbeHarness {
         ]
     }
 
+    /// Scrolls a view the way a wheel does, from inside this process.
+    ///
+    /// **Writing the clip view's bounds is not scrolling, and the difference is what this exists
+    /// for.** SwiftUI's `ScrollPosition` never sees a bounds write, so it goes on standing at
+    /// whatever edge it was left at and the next layout pass that grows the content puts the view
+    /// back there: a probe that asked for two thousand points off the live end reported `atEnd` on
+    /// both samples. A scroll wheel event goes through the same path a hand does, so the position
+    /// moves off its edge exactly as it would for a reader.
+    ///
+    /// Delivered by calling `scrollWheel(with:)` on the view rather than by posting to the window
+    /// server. Posting would route by where the pointer is, which is somewhere in the owner's own
+    /// window, and would need this app in front. Nothing here takes the pointer, the focus or the
+    /// front. See the head of `window`.
+    static func wheel(_ view: NSView, by points: CGFloat, steps: Int = 1) {
+        for _ in 0..<max(1, steps) {
+            guard let scroll = CGEvent(
+                scrollWheelEvent2Source: nil,
+                units: .pixel,
+                wheelCount: 1,
+                wheel1: Int32(points),
+                wheel2: 0,
+                wheel3: 0
+            ), let event = NSEvent(cgEvent: scroll) else { return }
+            view.scrollWheel(with: event)
+        }
+    }
+
     // MARK: - What a report says about the run
 
     /// Which build, how loaded the machine was, and what the window was.

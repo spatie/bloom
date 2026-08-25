@@ -69,6 +69,10 @@ struct TranscriptListView: View {
     /// re-runs this body. See `TranscriptHoverHost`.
     @State private var hoverHost = TranscriptHoverHost()
 
+    /// Which rows are on screen, so leaving can write down which one the reader was at. Not
+    /// observed and read only outside a body: see `TranscriptVisibleRows`.
+    @State private var visibleRowSeqs = TranscriptVisibleRows()
+
     /// Two things, and the comment used to claim one.
     ///
     /// `linkActions` reaches the workspace's model, which is what a link opened in a browser tab
@@ -424,6 +428,9 @@ struct TranscriptListView: View {
                             .padding(.horizontal, TranscriptLayout.inset)
                             .padding(.bottom, TranscriptLayout.turnGap)
                             .id(row.seq)
+                            .onScrollVisibilityChange(threshold: 0.01) { isVisible in
+                                visibleRowSeqs.note(row.seq, isVisible: isVisible)
+                            }
                         } else {
                             TranscriptRowView(
                                 row: row,
@@ -446,6 +453,11 @@ struct TranscriptListView: View {
                             .arrivingRow(isArriving(row))
                             .padding(.horizontal, TranscriptLayout.inset)
                             .id(row.seq)
+                            // Twice per pass over this row, rather than once a frame for the whole
+                            // stack. See `TranscriptVisibleRows` for what this replaced and why.
+                            .onScrollVisibilityChange(threshold: 0.01) { isVisible in
+                                visibleRowSeqs.note(row.seq, isVisible: isVisible)
+                            }
                         }
                     }
 
@@ -690,6 +702,7 @@ struct TranscriptListView: View {
                 )
                 resumed = TranscriptResume.isResuming(remembered) ? transcript.session.id : nil
                 isGrowing = false
+                visibleRowSeqs.forget()
                 // And nothing in the session being arrived at counts as having arrived. Cleared
                 // here as well as set in `task` for the same reason the window is: leaving a
                 // session before it had settled and coming straight back must not find its own
@@ -1122,6 +1135,11 @@ struct TranscriptListView: View {
             opening = .liveEnd
         case .offset(let y):
             opening = .offset(y)
+        case .row(let seq):
+            // At the top of the pane, which is where it was: the anchor IS the row the reader had
+            // at the top. Not centred, which is what a search result gets, because a search result
+            // is a row somebody is being shown rather than a place somebody is being put back.
+            opening = .row(seq, .top)
         case .first:
             // A search result outranks both of the others. Somebody who clicked a line of a
             // transcript in the search screen asked for that line, and taking them to their unread
@@ -1153,14 +1171,19 @@ struct TranscriptListView: View {
     /// dropped: a reader who arrives, reads what is on screen and switches tab has scrolled
     /// nothing and folded nothing, and is exactly the case this whole file is about.
     private func remember() {
-        // Nothing is written down about a pane that has not drawn anything yet. Its window is
-        // empty, its offset is nought, and both would be restored over a session that has since
-        // loaded. See `TranscriptResume.window`.
-        guard let memory, drawn.window.count > 0 else { return }
+        // Nothing is written down about a pane that has not drawn anything yet, or has not been
+        // laid out yet. Its window is empty and its offset is nought, and both would be restored
+        // over a session that has since loaded. The height is what says a layout has happened, and
+        // it is checked HERE rather than where the memory is read, because nought is a real place
+        // to a reader who is at the top of a conversation. See `TranscriptResume.placement`.
+        guard let memory, drawn.window.count > 0, geometry.paneHeight > 0 else { return }
         memory.remember(
             TranscriptPaneState(
                 expanded: expanded,
                 offset: contentOffset.value,
+                // The row at the top of the pane, which is the place; the offset above is what
+                // answers when there is no row to name. See `TranscriptVisibleRows`.
+                anchorSeq: visibleRowSeqs.topmost,
                 isAtLiveEnd: geometry.isNearBottom,
                 rowCount: transcript.rows.count,
                 // The offset above is a number of points into content that starts at this row.
