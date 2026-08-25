@@ -72,19 +72,23 @@ public struct ExistingBranch: Sendable, Hashable, Identifiable, Codable {
     /// Whether there is a local `refs/heads` copy. False means the branch is only on the remote,
     /// which needs a tracking branch made for it rather than a plain checkout.
     public let isLocal: Bool
-    /// The live workspace already sitting on this branch, by name, or nil when it is free.
+    /// What is already sitting on this branch, or nil when it is free.
     ///
     /// Carried on the branch rather than worked out by the picker, because the picker used to be
     /// handed a list these branches had been taken out of: git refuses one branch in two
     /// worktrees, so an in-use branch was dropped, and the answer to "where is the branch I was
     /// working on yesterday" was silence. It is listed and marked instead, and selecting it goes
     /// to the workspace that has it. See `WorkspaceCheckoutPlan.workspaceHolding`, which is what
-    /// turns this name back into the row to select.
-    public let inUseBy: String?
+    /// turns a workspace holder back into the row to select.
+    ///
+    /// A `BranchHolder` rather than a workspace name, because Bloom's own workspaces are not the
+    /// only thing that holds a branch on this Mac and the day it was a name was the day a
+    /// Conductor worktree read as a free row. See `BranchHolder`.
+    public let inUseBy: BranchHolder?
 
     public var id: String { name }
 
-    public init(name: String, isLocal: Bool, inUseBy: String? = nil) {
+    public init(name: String, isLocal: Bool, inUseBy: BranchHolder? = nil) {
         self.name = name
         self.isLocal = isLocal
         self.inUseBy = inUseBy
@@ -209,11 +213,14 @@ public enum WorkspaceCheckoutPlan {
     /// that answers by not mentioning it reads as a branch that has gone. It is listed with the
     /// workspace holding it named on the row, and selecting it goes there instead of creating
     /// anything. See `ExistingBranch.inUseBy`.
+    ///
+    /// `inUse` is what git says as well as what Bloom's database says. See `BranchHolder.byBranch`
+    /// for why the database on its own was not enough.
     public static func offeredBranches(
         local: [String],
         remote: [String],
         defaultBranch: String,
-        inUse: [String: String] = [:],
+        inUse: [String: BranchHolder] = [:],
         pullRequestHeads: Set<String> = []
     ) -> [ExistingBranch] {
         var byName: [String: Bool] = [:]

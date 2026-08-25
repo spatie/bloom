@@ -65,6 +65,13 @@ struct CreateWorkspaceSheet: View {
     @State private var isEnteringReference = false
     @FocusState private var isReferenceFocused: Bool
     @State private var referenceProblem: String?
+    /// Why the row that was just picked cannot be opened, or nil. See `BranchHolder.refusal`.
+    ///
+    /// Its own state rather than `referenceProblem` because the two are answers to different
+    /// questions and are cleared at different moments: one is about a number typed into a box,
+    /// this is about a branch something else already has. Drawn in the same place, which is the
+    /// full width line under the composer, because a path is unreadable anywhere narrower.
+    @State private var heldProblem: String?
     @State private var isResolvingReference = false
     @State private var branchPrefix: String?
     @State private var isLoading = false
@@ -432,6 +439,13 @@ struct CreateWorkspaceSheet: View {
                     .foregroundStyle(Palette.negative)
             }
 
+            if let heldProblem {
+                Text(heldProblem)
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.negative)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             // A rung below the title in the band, which is what makes the band the anchor. Both
             // were `Typo.heading` for one build and the sheet had two things the same size
             // competing to be read first, which is most of what "janky" was: "New workspace" and
@@ -750,17 +764,17 @@ struct CreateWorkspaceSheet: View {
     }
 
     /// What is worth saying about the chosen checkout beyond its branch: that it has already been
-    /// merged or closed, or that a workspace on that branch is already open. Neither stops the
-    /// create, because both are things somebody does on purpose.
+    /// merged or closed, or that something has taken its branch since.
+    ///
+    /// Merged and closed do not stop the create, because reading the code of something that landed
+    /// last week is a real reason to open one. A held branch does, and not here: `offer` refuses it
+    /// before it can be chosen and `WorkspaceManager.open` refuses it again before git is asked.
+    /// This is the third mechanism and the only one that is only a note, because the branch it
+    /// catches is one taken in the seconds between the picker loading and Create being pressed.
     private var checkoutNote: String? {
         guard let checkout else { return nil }
         if let sentence = WorkspaceCheckoutPlan.warning(for: checkout) { return sentence }
-        if let repo, let held = WorkspaceCheckoutPlan.workspaceHolding(
-            branch: checkout.preferredLocalBranch, in: repo.id, among: app.workspaces
-        ) {
-            return "Already open in \(held.name)"
-        }
-        return nil
+        return holder(of: checkout)?.note
     }
 
     private var noProjects: some View {
@@ -858,6 +872,11 @@ struct CreateWorkspaceSheet: View {
         }
         guard let repo else { return }
 
+        // A refusal is about a branch of the project that was on screen when the row was picked,
+        // so it goes with the project. Left standing, it would name a folder in a repository the
+        // sheet is no longer looking at.
+        heldProblem = nil
+
         // Whichever box the remembered mode has put on screen. The sheet no longer always opens
         // on the writing box, so focusing it unconditionally would put the caret in a view that
         // is not there.
@@ -899,28 +918,22 @@ struct CreateWorkspaceSheet: View {
 
     /// What a row in the source picker means here.
     ///
-    /// The one that is not a choice about this sheet at all is a branch a live workspace already
-    /// has. Git refuses one branch in two worktrees, so "open it" cannot mean a second workspace;
-    /// it means the workspace that has it, and the sheet has nothing left to ask. That row used to
-    /// be missing from the list entirely, which answered the question by pretending the branch was
-    /// not there.
+    /// The two that mean opening something both go through `offer`, which is where the one row
+    /// that is not a choice about this sheet at all is dealt with: a branch something already
+    /// holds. Git refuses one branch in two worktrees, so "open it" cannot mean a second
+    /// workspace. Such a row used to be missing from the list entirely, which answered the
+    /// question by pretending the branch was not there.
     private func pick(_ source: WorkspaceSource) {
+        heldProblem = nil
         switch source {
         case .newBranch(let ref):
             checkout = nil
             baseBranch = ref
             focusTheBox()
         case .existingBranch(let branch):
-            if let repo, let held = WorkspaceCheckoutPlan.workspaceHolding(
-                branch: branch.name, in: repo.id, among: app.workspaces
-            ) {
-                app.selection = .workspace(held.id)
-                dismiss()
-                return
-            }
-            choose(.branch(branch))
+            offer(.branch(branch))
         case .pullRequest(.listed(let request)):
-            choose(.pullRequest(request))
+            offer(.pullRequest(request))
         case .pullRequest(.typed(_, let text)):
             // A number or a URL, which nothing knows anything about until gh is asked. The box
             // comes up carrying it so the wait, and any sentence about the wrong repository, have
@@ -932,11 +945,52 @@ struct CreateWorkspaceSheet: View {
         }
     }
 
+    /// Takes the checkout on unless something already has its branch.
+    ///
+    /// **The gate that stops a create that cannot succeed.** Git allows one worktree per branch,
+    /// and until this existed the only thing that knew about the other worktrees on this Mac was
+    /// git itself: pull request #362's head was held by a Conductor worktree, the row looked free,
+    /// and the refusal arrived as `gh pr checkout`'s stderr in a dialogue. The branch half of the
+    /// picker had always greyed such a row and the pull request half never had, which is why the
+    /// question is asked here, over the checkout, rather than per case.
+    ///
+    /// A branch one of Bloom's own workspaces holds is not a refusal at all: the sheet has nothing
+    /// left to ask and goes there, which is what it has always done. Anything else is named with
+    /// its path, because that is the folder to go and close, and the sentence says what can be had
+    /// instead. See `BranchHolder.refusal`.
+    private func offer(_ chosen: WorkspaceCheckout) {
+        guard let holder = holder(of: chosen) else {
+            choose(chosen)
+            return
+        }
+        let branch = WorkspaceCheckoutPlan.localBranch(for: chosen, taken: Set(branches))
+        if holder.isBloomWorkspace, let repo, let held = WorkspaceCheckoutPlan.workspaceHolding(
+            branch: branch, in: repo.id, among: app.workspaces
+        ) {
+            app.selection = .workspace(held.id)
+            dismiss()
+            return
+        }
+        heldProblem = holder.refusal(branch: branch)
+    }
+
+    /// What already holds the branch this checkout would land on, when something does.
+    ///
+    /// The branch is `localBranch` rather than the head verbatim, because that is the name
+    /// `WorkspaceManager.open` will pass to git: a fork's `patch-1` is opened as
+    /// `<owner>-patch-1`, so asking about `patch-1` would refuse a checkout git would have allowed.
+    private func holder(of chosen: WorkspaceCheckout) -> BranchHolder? {
+        checkoutOptions.holders[
+            WorkspaceCheckoutPlan.localBranch(for: chosen, taken: Set(branches))
+        ]
+    }
+
     /// Takes a pull request or a branch as the source, and closes anything the choice answers.
     private func choose(_ chosen: WorkspaceCheckout) {
         checkout = chosen
         isEnteringReference = false
         referenceProblem = nil
+        heldProblem = nil
         reference = ""
         focusTheBox()
     }
@@ -961,7 +1015,7 @@ struct CreateWorkspaceSheet: View {
             let resolution = await WorkspaceCheckoutResolver.resolve(text, repoPath: path)
             isResolvingReference = false
             switch resolution {
-            case .checkout(let resolved): choose(resolved)
+            case .checkout(let resolved): offer(resolved)
             case .failure(let sentence): referenceProblem = sentence
             }
         }
@@ -973,32 +1027,27 @@ struct CreateWorkspaceSheet: View {
     /// run in separate tasks, so this one used to see an empty list every time and offer every
     /// branch as though it lived only on the remote. See `WorkspaceCheckoutOptions.load`.
     ///
-    /// Branches already checked out in a live workspace are listed with the workspace that has
-    /// them named on the row, and selecting one goes there. They used to be left out, because git
-    /// refuses one branch in two worktrees and offering one is offering a create that cannot
-    /// succeed. That is true of the create and wrong about the list: the branch being looked for
-    /// is very often the one that is already open. See `WorkspaceCheckoutPlan.offeredBranches`.
+    /// Branches already checked out somewhere are listed with a note saying so, and selecting one
+    /// goes to the workspace that has it when it is one of Bloom's. They used to be left out,
+    /// because git refuses one branch in two worktrees and offering one is offering a create that
+    /// cannot succeed. That is true of the create and wrong about the list: the branch being looked
+    /// for is very often the one that is already open. See `WorkspaceCheckoutPlan.offeredBranches`.
+    ///
+    /// "Somewhere" is asked of git rather than of the database, so a worktree Conductor cut, or one
+    /// cut by hand, is as visible as one of Bloom's own. See `BranchHolder`.
     private func loadCheckouts() async {
         guard let repo else { return }
         isLoadingCheckouts = true
-        let inUse = Dictionary(
-            app.workspaces
-                // This project's, not the machine's. A branch name is not unique across projects,
-                // and `main` or `develop` exists in nearly all of them, so an unfiltered list
-                // labelled this project's branch as held by a workspace in another one. See
-                // `WorkspaceCheckoutPlan.workspaceHolding`.
-                .filter { $0.state == .active && $0.repoID == repo.id }
-                .map { ($0.branch, $0.name) },
-            // Two live workspaces in one project cannot hold the same branch, so a duplicate here
-            // is a row that has not caught up with a worktree that has gone. The first is as good
-            // an answer as there is, and it is what `workspaceHolding` finds when the row is
-            // selected.
-            uniquingKeysWith: { first, _ in first }
-        )
         let options = await WorkspaceCheckoutOptions.load(
             repoPath: repo.path,
+            repoID: repo.id,
             defaultBranch: repo.defaultBranch,
-            branchesInUse: inUse
+            // Every workspace the app is holding, filtered to this project's live ones inside
+            // `BranchHolder.names` rather than here, because a filter written in a view is a
+            // filter nothing can test. It got the project half wrong once already: a branch name
+            // is not unique across repositories, and an unfiltered list labelled this project's
+            // `develop` as held by a workspace in another project.
+            workspaces: app.workspaces
         )
         guard !Task.isCancelled else { return }
         isLoadingCheckouts = false

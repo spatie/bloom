@@ -57,17 +57,26 @@ public struct WorkspaceCheckoutOptions: Sendable {
     /// What went wrong talking to GitHub, when something did. Shown rather than swallowed: a
     /// picker that silently lists nothing is indistinguishable from a repository at peace.
     public let failure: String?
+    /// Every branch of this repository that is already checked out somewhere, and by what.
+    ///
+    /// Carried whole as well as folded into `branches`, because a pull request row needs the same
+    /// answer about its head and is not an `ExistingBranch`. That is the row #362 was: the branch
+    /// half of the picker knew the branch was taken and the pull request half did not, so the one
+    /// that reached `git worktree add` was the one that could not have worked.
+    public let holders: [String: BranchHolder]
 
     public init(
         pullRequests: [PullRequestListing] = [],
         branches: [ExistingBranch] = [],
         access: GitHubAccess = .ready,
-        failure: String? = nil
+        failure: String? = nil,
+        holders: [String: BranchHolder] = [:]
     ) {
         self.pullRequests = pullRequests
         self.branches = branches
         self.access = access
         self.failure = failure
+        self.holders = holders
     }
 
     /// Both branch listings are read here rather than handed in.
@@ -80,17 +89,34 @@ public struct WorkspaceCheckoutOptions: Sendable {
     /// there. Reading it here costs one `for-each-ref`, which is what the sheet was paying anyway,
     /// and it runs beside the remote listing rather than after it.
     ///
-    /// `branchesInUse` maps a branch to the live workspace sitting on it, which the picker draws
-    /// on the row rather than using to hide it. See `WorkspaceCheckoutPlan.offeredBranches`.
+    /// **Which branches are taken is asked of git here, once per open of the sheet.**
+    ///
+    /// `git worktree list --porcelain` is one process over a repository with twenty-two worktrees
+    /// on it, which is nothing next to the two branch listings and the gh call already in this
+    /// function, and it is deliberately here rather than anywhere nearer the picker: the ranking
+    /// runs on every keystroke and must stay pure. The answer is folded into the rows and kept
+    /// whole in `holders`, so nothing later has to ask again.
+    ///
+    /// `workspaces` supplies the names. Git says a branch is held and by which folder; only the
+    /// database can say that the folder is a Bloom workspace called Quiet Harbour. Passed as rows
+    /// rather than as a prepared dictionary so the filtering is `BranchHolder.names`, in the core,
+    /// where the suite reaches it. See `BranchHolder`.
     public static func load(
         repoPath: String,
+        repoID: RepoID,
         defaultBranch: String,
-        branchesInUse: [String: String] = [:]
+        workspaces: [Workspace] = []
     ) async -> WorkspaceCheckoutOptions {
         async let localListing = Git.branches(of: repoPath)
         async let remoteListing = Git.remoteBranches(of: repoPath)
+        async let worktreeListing = Git.worktrees(of: repoPath)
         let local = (try? await localListing) ?? []
         let remote = (try? await remoteListing) ?? []
+        let branchesInUse = BranchHolder.byBranch(
+            worktrees: (try? await worktreeListing) ?? [],
+            projectPath: repoPath,
+            workspaceNames: BranchHolder.names(of: workspaces, in: repoID)
+        )
 
         func options(
             pullRequests: [PullRequestListing] = [],
@@ -107,7 +133,8 @@ public struct WorkspaceCheckoutOptions: Sendable {
                     pullRequestHeads: WorkspaceCheckoutPlan.heads(of: pullRequests)
                 ),
                 access: access,
-                failure: failure
+                failure: failure,
+                holders: branchesInUse
             )
         }
 

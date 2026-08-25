@@ -8,53 +8,13 @@ import Foundation
 /// nowhere becomes unreachable the moment the ref goes. Whether removing is safe in the first
 /// place is a much more expensive question, and `Git+Safety.swift` is where it is asked.
 ///
-/// `WorktreeEntry` is one record of `git worktree list --porcelain`, parsed.
-public struct WorktreeEntry: Sendable, Hashable {
-    public var path: String
-    public var head: String
-    public var branch: String?
-    public var isBare: Bool
-    public var isDetached: Bool
-}
+/// `WorktreeEntry` and the parsing of `git worktree list --porcelain` are `WorktreeListing`, in
+/// its own file, because which branches are already taken is a question the create sheet asks
+/// before it is a question this file answers.
 
 extension Git {
     public static func worktrees(of repo: String) async throws -> [WorktreeEntry] {
-        let output = try await check(["worktree", "list", "--porcelain"], in: repo).stdout
-        var entries: [WorktreeEntry] = []
-        var path: String?
-        var head = ""
-        var branch: String?
-        var bare = false
-        var detached = false
-
-        func flush() {
-            guard let path else { return }
-            entries.append(WorktreeEntry(
-                path: path, head: head, branch: branch, isBare: bare, isDetached: detached
-            ))
-        }
-
-        for line in output.components(separatedBy: "\n") {
-            if line.isEmpty {
-                flush()
-                path = nil; head = ""; branch = nil; bare = false; detached = false
-                continue
-            }
-            if line.hasPrefix("worktree ") {
-                path = String(line.dropFirst("worktree ".count))
-            } else if line.hasPrefix("HEAD ") {
-                head = String(line.dropFirst("HEAD ".count))
-            } else if line.hasPrefix("branch ") {
-                let ref = String(line.dropFirst("branch ".count))
-                branch = ref.hasPrefix("refs/heads/") ? String(ref.dropFirst("refs/heads/".count)) : ref
-            } else if line == "bare" {
-                bare = true
-            } else if line == "detached" {
-                detached = true
-            }
-        }
-        flush()
-        return entries
+        WorktreeListing.parse(try await check(["worktree", "list", "--porcelain"], in: repo).stdout)
     }
 
     /// Cuts a worktree, creating the branch when it is not already there.
