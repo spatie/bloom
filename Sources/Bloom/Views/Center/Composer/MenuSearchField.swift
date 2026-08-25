@@ -25,6 +25,12 @@ struct MenuSearchField: NSViewRepresentable {
     /// have taken the caret out of a field somebody was typing in. Absent by default, so a field
     /// that says nothing keeps the arrows the field editor's.
     var onHorizontal: (@MainActor (Int) -> Bool)?
+    /// The type, for the one caller that is not a menu row.
+    ///
+    /// The search screen's field is the only thing on its screen and is set at the size a window's
+    /// search field gets, where every other caller here is a line in a floating panel. Absent by
+    /// default, so a panel keeps the system size it has always had.
+    var font: NSFont?
 
     func makeNSView(context: Context) -> NSTextField {
         let field = NSTextField()
@@ -33,7 +39,7 @@ struct MenuSearchField: NSViewRepresentable {
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = .systemFont(ofSize: NSFont.systemFontSize)
+        field.font = font ?? .systemFont(ofSize: NSFont.systemFontSize)
         field.lineBreakMode = .byTruncatingTail
         field.cell?.usesSingleLineMode = true
         field.stringValue = text
@@ -65,6 +71,12 @@ struct MenuSearchField: NSViewRepresentable {
         var text: Binding<String>
         var onKey: @MainActor (ComposerKey) -> Bool
         var onHorizontal: (@MainActor (Int) -> Bool)?
+    /// The type, for the one caller that is not a menu row.
+    ///
+    /// The search screen's field is the only thing on its screen and is set at the size a window's
+    /// search field gets, where every other caller here is a line in a floating panel. Absent by
+    /// default, so a panel keeps the system size it has always had.
+    var font: NSFont?
         /// Whether the keyboard has been claimed once already. The panel opens because somebody
         /// clicked the control it hangs off and the next thing they do is type, so it is claimed;
         /// claiming it again on a later pass would drag the caret back out of wherever they had

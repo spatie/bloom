@@ -7,10 +7,16 @@ import SwiftUI
 /// was still elided. The name leads because it is what was searched for; everything that places
 /// it sits underneath in one quiet line, which is how Spotlight and Mail lay a result out.
 ///
-/// A `Button` rather than a tapped `HStack`, so keyboard users can reach it and VoiceOver reads it
-/// as one actionable row instead of five loose labels.
+/// A `Button` rather than a tapped `HStack`, so VoiceOver reads it as one actionable row instead
+/// of five loose labels. It used to say that a `Button` is also how a keyboard user reaches it,
+/// and that was only true with Full Keyboard Access turned on, which it is not by default. The
+/// arrows and Return come from the search field above instead: see `SearchView.handle(key:)`.
 struct SearchResultRow: View {
     var hit: AppModel.SearchHit
+    /// Whether the arrows and Return are pointed at this row. It was hard-coded false, so nothing
+    /// on this screen was ever highlighted and the list had no answer to "which one would Return
+    /// open".
+    var isSelected: Bool
     var isHovered: Bool
     var action: () -> Void
 
@@ -69,7 +75,11 @@ struct SearchResultRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .rowBackground(isSelected: false, isHovered: isHovered)
+        // `isFocused` unconditionally, and it is the honest answer rather than a shortcut. The
+        // emphasised fill means "the arrow keys move this", which on this screen is true from the
+        // moment it opens: the field takes the keyboard on appear and forwards both arrows and
+        // Return down here. The window going background still quietens it, inside `RowBackground`.
+        .rowBackground(isSelected: isSelected, isHovered: isHovered, isFocused: true)
         .accessibilityInputLabels([hit.workspace.name])
         .accessibilityHint(hit.isArchived ? "Archived. Opens the transcript." : "")
     }
