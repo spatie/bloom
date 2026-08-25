@@ -112,6 +112,59 @@ struct QuickPromptStoreTests {
         #expect(after.isEmpty)
     }
 
+    /// The seeding rule, reached the other way: through the bridge rather than through the panel.
+    ///
+    /// Here rather than in a second suite of its own, because it is the same question these tests
+    /// already exist to answer and the answer must not depend on which door the delete came
+    /// through. `quick_prompt_delete` calls `Store.deleteQuickPrompt`, which is what the panel's
+    /// own menu calls, and nothing in the four tools writes `QuickPromptSeed.versionKey`. So a
+    /// built-in deleted by an agent is deleted exactly as one deleted by hand is.
+    @Test("a built-in deleted through the bridge stays deleted, and no tool can reseed it")
+    func deletedThroughTheBridgeStaysDeleted() async throws {
+        let path = TestScratch.unique("quick-prompt-bridge-seed") + ".sqlite"
+        let first = try Store(path: path)
+
+        // The listing is the tool that seeds, because the panel does it on first open and the two
+        // have to describe the same library. See `QuickPromptCall`.
+        let listed = await tool(QuickPromptListTool(), on: first)
+        #expect(!listed.isError)
+        let built = try #require(try await first.quickPrompts().first)
+        #expect(built.name == QuickPromptSeed.all.first?.name)
+
+        let deleted = await tool(
+            QuickPromptDeleteTool(), ["id": .string(built.id.rawValue)], on: first
+        )
+        #expect(!deleted.isError)
+        #expect(try await first.quickPrompts().isEmpty)
+
+        // Asking again is the thing that would resurrect it if the rule were "reconcile the list
+        // against the table" rather than "seed once and record it".
+        _ = await tool(QuickPromptListTool(), on: first)
+        #expect(try await first.quickPrompts().isEmpty)
+
+        // A second `Store` on the same file is the next launch, and the panel seeds again there.
+        let relaunched = try Store(path: path)
+        #expect(try await relaunched.seedQuickPrompts().isEmpty)
+        #expect(
+            try await relaunched.setting(QuickPromptSeed.versionKey)
+                == String(QuickPromptSeed.version)
+        )
+    }
+
+    /// One call, through the same door `BridgeDispatch` uses. The identity is the owner's own
+    /// client, which is the only role that may delete.
+    private func tool(
+        _ handler: any BridgeToolHandling,
+        _ arguments: [String: JSONValue] = [:],
+        on store: Store
+    ) async -> BridgeToolResult {
+        await handler.call(
+            MCPRequest(id: .number(1), method: handler.tool.name, params: .object(arguments)),
+            as: .owner,
+            store: store
+        )
+    }
+
     /// A built-in added later is inserted on its own, without putting back anything that was
     /// deleted before it. Driven through the pure half, because the entries a shipped build seeds
     /// are the ones written down in `QuickPromptSeed`.

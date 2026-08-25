@@ -80,7 +80,12 @@ struct BridgeServerTests {
         let listed = try await caller.call(#"{"jsonrpc":"2.0","id":"two","method":"tools/list"}"#)
         #expect(listed["id"] == .string("two"))
         let names = listed["result"]?["tools"]?.arrayValue?.compactMap { $0["name"]?.stringValue }
-        #expect(names == ["whoami"])
+        // What a parent sees from a server built without the app, sorted by name because
+        // `tools/list` is. The rest of a parent's surface (`workspace_start` and the four pane
+        // tools) needs a seam into the window and is added by `AppModel.bridgeToolbox()`, which
+        // there is none of here. The two quick prompt tools are on this list because a quick
+        // prompt is a row in the store and nothing else.
+        #expect(names == ["quick_prompt_create", "quick_prompt_list", "whoami"])
 
         let called = try await caller.call(
             #"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"whoami","arguments":{}}}"#

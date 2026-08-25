@@ -91,7 +91,7 @@ uses, so Bloom and Bloom Dev can never land on one. The landmine there is `socka
 
 ## 3. The tools
 
-Twelve, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role gate. A
+Sixteen, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role gate. A
 list of handlers rather than a switch, because a switch would put every tool in three places: the
 listing, the dispatch and the gate.
 
@@ -105,10 +105,14 @@ listing, the dispatch and the gate.
 | `workspace_list` | Every workspace, its state, its worktree path, its chats and their cost, what an agent is stopped on, what is queued and why | | | ✓ |
 | `workspace_start` | Cut a worktree on a new branch and put an agent in it with a task | ✓ | | ✓ |
 | `workspace_merge` | Ask a workspace's own agent to merge its pull request | | | ✓ |
-| `pane_open` | Open a chat, a terminal or a browser in a new tab of the caller's own workspace | ✓ | | ✓ |
-| `pane_split` | Put one beside what is on screen rather than behind it | ✓ | | ✓ |
-| `pane_close` | Take one back off the screen | ✓ | | ✓ |
-| `pane_rename` | Give a tab a name the reader can find it by | ✓ | | ✓ |
+| `pane_open` | Open a chat, a terminal or a browser in a new tab of the caller's own workspace | ✓ | | |
+| `pane_split` | Put one beside what is on screen rather than behind it | ✓ | | |
+| `pane_close` | Take one back off the screen | ✓ | | |
+| `pane_rename` | Give a tab a name the reader can find it by | ✓ | | |
+| `quick_prompt_list` | The owner's own quick prompts, whole, with the ids the other three take | ✓ | | ✓ |
+| `quick_prompt_create` | Write a new quick prompt into that library | ✓ | | ✓ |
+| `quick_prompt_update` | Change one, field by field, leaving the fields it does not name alone | | | ✓ |
+| `quick_prompt_delete` | Take one out of the library for good | | | ✓ |
 
 **A child sees `whoami` and nothing else.** That is not an oversight and not a cost saving: a child
 is a workspace an agent asked for, which nobody weighed, so it reports and that is all.
@@ -124,15 +128,26 @@ transport failure the CLI may retry or surface as a broken server; an errored re
 model reads and can act on. "You are not allowed to do that" is something to tell the model, not
 something to tell the transport.
 
-### The six that need the app, and the six that do not
+### The six that need the app, and the ten that do not
 
-`BridgeToolbox.standard` holds the six that reach nothing but the store, and it is what a
+`BridgeToolbox.standard` holds the ten that reach nothing but the store, and it is what a
 `BridgeServer` built without the app serves, which is every test that did not ask for more.
-`AppModel.bridgeToolbox()` adds the other six, because starting a workspace has to reach the
+`AppModel.bridgeToolbox()` adds the other six to it, because starting a workspace has to reach the
 main-actor graph that runs one, asking for a merge has to reach the same path the Merge button
 takes, and a pane is a thing the window owns. Each of those crosses the line as an injected closure
 (`WorkspaceStarting`, `WorkspaceMergeRequesting`, `PaneOpening`, `PaneSplitting`, `PaneClosing`,
 `PaneRenaming`), so a pane an agent asks for is the pane the menu makes, unchanged and not copied.
+It adds them **to** `.standard` rather than listing its handlers again, because a copy of that list
+is a copy that drifts: a tool added to the core toolbox and not to the app's would pass every test
+in the suite and never reach the running app.
+
+**The four quick prompt tools are the case that shows where the line really is.** They write, and
+they need no seam at all, because a quick prompt is a row in `quick_prompt` and `Store` is an actor
+a handler on a background task calls directly. The window finds out the way it finds out about
+every other write: the update hook publishes the `quickPrompts` domain and `QuickPromptCatalog`
+re-reads. The panel used to read that list once and never again, so a prompt written over the
+bridge was invisible for the rest of the session; it subscribes now. An injected main-actor closure
+here would have been a second way to write the same row.
 
 `BridgeServer` **never constructs an `AgentRunner`, and nothing added to it ever may.** One runner
 per session is held in main-actor UI object identity, and a handler that built its own would put a
@@ -148,7 +163,7 @@ Nothing here reads or writes a file, runs a command, or touches a repository's c
 worktree path is handed over precisely so the agent uses **its own** tools on an ordinary git
 checkout, which `workspace_list`'s description says out loud.
 
-Nothing archives. `workspace_archive` is not one of the twelve: it removes a worktree and can
+Nothing archives. `workspace_archive` is not one of the sixteen: it removes a worktree and can
 remove a branch with it, and the whole reason Bloom asks before archiving by hand is that the
 answer is sometimes no.
 
@@ -166,6 +181,43 @@ head that off in words rather than to hope.
 A parent cannot name a project, because its own is the only one it may act in, and `project` is
 refused rather than ignored if it names one. The owner's client must name one, because nothing else
 says which.
+
+**One thing on the bridge can now be destroyed, and it is a few lines of the owner's own writing.**
+`quick_prompt_update` overwrites a prompt and `quick_prompt_delete` removes one, and Bloom keeps no
+copy of what was there before. Three things hold that in: both are owner only, so the caller is a
+client the owner is typing into rather than an agent running for ten minutes unattended; neither is
+self-approved, so the call stops and asks a person who is sitting there; and the delete's answer
+carries the whole prompt back, name, mark and text, so `quick_prompt_create` writes it again
+verbatim, which is an undo that costs one call. That last one is what a worktree does not have and
+is why archiving is still not here.
+
+A quick prompt deleted over the bridge is deleted exactly as one deleted in the panel is, because
+it is the same call. **A built-in stays deleted.** Bloom seeds its built-ins once and records the
+seed version it reached, rather than reconciling a list against the table, so a prompt the owner
+threw away is not read back as one that is missing. Nothing in the four tools writes that recorded
+version, so no tool can reseed and none of them can resurrect what it deleted. The one write the
+listing can make is the seeding itself, on a copy of Bloom whose panel has never been opened, which
+is exactly what opening the panel would have done: the tools and the panel have to describe the
+same library, or an agent asked to add "Explain changes" writes a second copy of the prompt Bloom
+is about to insert. See `QuickPromptSeed` and `QuickPromptCall`.
+
+The library is **global**, which is why the two that change it are shaped differently from every
+workspace scoped tool. The pane tools came off `.owner` because they act on the worktree the caller
+is standing in and that role stands in none; a quick prompt belongs to no worktree, so there is
+nothing for the owner's client to be missing and the argument runs the other way. `.parent` keeps
+the two that cannot lose anything, because the owner mostly talks to Bloom from inside Bloom and
+"save that as a quick prompt" is a sentence typed into a workspace chat. It does not get the two
+that overwrite and delete: a parent runs unattended, and a change to a global library decided in
+the middle of one of those turns up weeks later in a project that workspace had nothing to do with.
+
+`quick_prompt_update` is partial, and its description says so before it is called once, because a
+model that reads "update" as "replace" blanks the text every time it fixes a name. A field left out
+keeps the value the row holds. `name` passed as an empty string clears the name, which is a state
+the panel's own form can produce: the row falls back to showing the start of its text. `text`
+cannot be blank, because a prompt with no words in it inserts nothing, and that is the same rule
+the form enforces by disabling Save. A call that names no field at all is refused rather than
+answered with "nothing changed", because the next call a model makes after those two answers is a
+different call.
 
 ### How many a caller may start
 
@@ -207,7 +259,7 @@ So `BridgeToolApproval` names the tools Bloom answers for itself:
 
 | Self-approved | Not |
 | --- | --- |
-| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename` | everything else |
+| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `quick_prompt_list` | everything else |
 
 It is a list rather than "anything with our prefix", so a tool added later is opted in by somebody
 thinking about it rather than by inheriting a decision made before it existed.
@@ -228,6 +280,17 @@ the notes, which hold the reader's own work.
 The project tools are not on it, and that is deliberate rather than an omission: the list is for
 tools an agent must be able to call while nobody is watching, and those are called by the owner's
 own client, where the owner is by definition sitting there to answer.
+
+`quick_prompt_list` is on it and the other three quick prompt tools are not, which is the same test
+applied four times. The listing is offered to `.parent`, so it can be called by an agent running on
+its own, and it reads the owner's library and changes nothing in it: the ask would carry nothing for
+a person to weigh and an unanswered one would hang the turn for no gain. `quick_prompt_create`
+writes a row into a panel nobody is looking at, rather than putting something in front of the
+reader the way a pane does, so it is worth one ask; the cost of that ask is the hang described
+above, and it is accepted because the tool is only ever called on the owner's own instruction, in
+the chat they typed it in, which its description says out loud. `quick_prompt_update` and
+`quick_prompt_delete` take words the owner wrote by hand and there is no undo, which is the clause
+`BridgeRole.owner` is written against.
 
 `workspace_merge` draws the line one step further out. It destroys nothing, it sends a turn. But
 what that turn leads to is a call to a server other people share, and unlike a worktree there is
