@@ -37,8 +37,9 @@ struct BloomAlert: Identifiable {
 /// - `AppModel+Naming.swift`, `AppModel+ProjectIcons.swift`, `AppModel+TranscriptSearch.swift`
 ///
 /// The running, waiting and subagent mirrors did NOT leave, and that is deliberate: they would
-/// publish the five properties whose comments rest entirely on having one writer. The answer for
-/// them is an `AgentActivity` object this model owns, which is a redesign rather than a move.
+/// publish the five properties whose comments rest entirely on having one writer. What DID leave
+/// is the rule they hold, which is `AgentTurns` in the core, where it can be tested; the
+/// mirrors here are what that rule is written into.
 @MainActor
 @Observable
 final class AppModel {
@@ -253,6 +254,7 @@ final class AppModel {
 
     private var refreshTask: Task<Void, Never>?
     private var storeObservationTask: Task<Void, Never>?
+    private var sessionObservationTask: Task<Void, Never>?
     private var quotaObservationTask: Task<Void, Never>?
     private var quotaPollTask: Task<Void, Never>?
     /// When the one asker last went out, and whether it is still out. Together they are what
@@ -353,6 +355,7 @@ final class AppModel {
         identityTask = Task { await GitHubIdentity.resolve() }
         startBackgroundRefresh()
         startObservingStore()
+        startObservingSessions()
         startObservingQuotas()
         startPollingQuotas()
         // Last, and nothing waits for it: the window is already drawn by the time this runs, and
@@ -410,6 +413,8 @@ final class AppModel {
         refreshTask = nil
         storeObservationTask?.cancel()
         storeObservationTask = nil
+        sessionObservationTask?.cancel()
+        sessionObservationTask = nil
         quotaObservationTask?.cancel()
         quotaObservationTask = nil
         quotaPollTask?.cancel()
@@ -596,6 +601,30 @@ final class AppModel {
             for await _ in store.changes(of: [.repos, .workspaces]) {
                 guard let self else { return }
                 await self.reload()
+            }
+        }
+    }
+
+    /// Which chats the store says are mid turn, on a feed of their own.
+    ///
+    /// Separate from the one above because `reload` reads the projects and the workspaces and
+    /// neither of them moves when a turn starts, and because the sessions table is written several
+    /// times a turn where the workspace row is written only when its diff stat actually changes.
+    /// That difference is the whole reason this feed exists: the sidebar's running mark used to
+    /// have no invalidation of its own and was carried by the diff stat refresh reassigning
+    /// `workspaces`, so a turn that wrote nothing to the worktree, an agent reading and running
+    /// commands, never moved anything the mark was watching. See `AgentTurns`.
+    ///
+    /// It reads and it publishes, like the feed above. Read the two rules on `StoreChangeHub`
+    /// before adding anything here.
+    private func startObservingSessions() {
+        guard let store else { return }
+        sessionObservationTask?.cancel()
+        sessionObservationTask = Task { [weak self] in
+            await self?.refreshAgentTurns()
+            for await _ in store.changes(of: [.sessions]) {
+                guard let self else { return }
+                await self.refreshAgentTurns()
             }
         }
     }
@@ -829,26 +858,67 @@ final class AppModel {
     /// Writing it is a tracked mutation, so every reader (the strip, Home's summary line, the
     /// sidebar rows, the menu bar item, the Dock badge and the sleep assertion) is invalidated by
     /// the same thing, at the same moment, and none of them needs a private counter.
+    ///
+    /// **What it is built from moved.** It was written from `TranscriptModel.setRunning` alone,
+    /// which is edge triggered, so one recompute that came out wrong stood for the whole turn and
+    /// a chat with no transcript was never counted at all. It is rebuilt whole by
+    /// `recomputeAgentTurns`, from the store's own session rows and from what the live
+    /// transcripts say, on every write to the sessions table as well as on every edge.
     private(set) var runningWorkspaceIDs: Set<WorkspaceID> = []
 
-    /// Told by `TranscriptModel` whenever a turn starts or ends. See `TranscriptModel.setRunning`,
-    /// which is the one place that flag moves.
+    /// What the store last said about every chat that is mid turn or blocked.
     ///
-    /// The answer is recomputed from the workspace's model rather than taken from the caller,
-    /// because a workspace can hold several sessions and one of them finishing does not mean the
-    /// workspace has stopped working.
-    func noteRunningChanged(workspaceID: WorkspaceID) {
-        let isRunning = workspaceModels[workspaceID]?.isRunning ?? false
-        if isRunning {
-            runningWorkspaceIDs.insert(workspaceID)
-        } else {
-            runningWorkspaceIDs.remove(workspaceID)
-        }
+    /// **The half of the answer that survives a missed signal.** The mirrors used to be written
+    /// only by `TranscriptModel.setRunning`, which is edge triggered and idempotent: it writes
+    /// nothing when the flag has not moved, so a single moment where the recompute came out wrong
+    /// stood for the whole turn, and a turn in a chat this launch had never built a transcript for
+    /// was never reported at all. The sidebar drew "No changes" over an agent running three Bash
+    /// calls, for the length of the turn, and the session row said `running` the whole time.
+    ///
+    /// Outside observation, because nothing draws it: it is an input to `recomputeAgentTurns`,
+    /// which writes the two sets everything actually reads.
+    @ObservationIgnored private var storedActivity: [SessionActivity] = []
+
+    /// Re-reads that half. Called on every write to the sessions table, and once at startup, by
+    /// `startObservingSessions`.
+    func refreshAgentTurns() async {
+        guard let store, let rows = try? await store.sessionActivity() else { return }
+        storedActivity = rows
+        recomputeAgentTurns()
+    }
+
+    /// Told by `TranscriptModel` whenever a turn starts or ends, or a question arrives or is
+    /// answered. See `setRunning` and `setAwaitingPermission`, which are the one place each of
+    /// those flags moves.
+    ///
+    /// One seam for both, because both sets are recomputed whole: what changed is not worth
+    /// naming when the answer is rebuilt from every source either way, and two seams that took an
+    /// id invited the caller to believe only that workspace was being reconsidered.
+    func noteAgentTurnsChanged() {
+        recomputeAgentTurns()
+    }
+
+    /// Rebuilds both mirrors from the store's rows and from what the live transcripts say.
+    ///
+    /// The rule is `AgentTurns`, in the core and tested, and the precedence it holds is the
+    /// reason this is not a union: a live transcript decides its own session, because it hears a
+    /// turn end before the row is written, and a session with no transcript is decided by its row,
+    /// because that is the only thing that knows about a chat nobody has opened.
+    ///
+    /// Each set is written only when it has actually moved. An identical value assigned back is
+    /// still a mutation to the Observation runtime, and this runs on every session write.
+    private func recomputeAgentTurns() {
+        let live = workspaceModels.values.flatMap { $0.liveTurns }
+        let running = AgentTurns.workspaces(.running, stored: storedActivity, live: live)
+        let waiting = AgentTurns.workspaces(.awaitingPermission, stored: storedActivity, live: live)
+        if runningWorkspaceIDs != running { runningWorkspaceIDs = running }
+        if waitingWorkspaceIDs != waiting { waitingWorkspaceIDs = waiting }
     }
 
     /// Workspaces whose agent has stopped and is waiting on a person.
     ///
-    /// A real observable set written from one place, for the reason `runningWorkspaceIDs` is one:
+    /// A real observable set, rebuilt beside its sibling above and by the same call, for the
+    /// reason `runningWorkspaceIDs` is one:
     /// the obvious alternative is to walk `workspaceModels`, and that dictionary is
     /// `@ObservationIgnored`, so a reader that walked it would register a dependency on nothing.
     /// That is precisely how the sidebar strip came to say "Idle" for an hour while agents ran.
@@ -884,28 +954,15 @@ final class AppModel {
     /// single byte moves and forgets the rest only if the disk agrees, so those really are two
     /// moments and a single method would have to be called twice with a flag.
     ///
-    /// The model goes before the two marks, and the marks are removed rather than recomputed,
-    /// because `noteRunningChanged` reads the model: once it is nil there is nothing left to ask.
+    /// Its own rows go before the recompute, and that order is the whole of it. This workspace has
+    /// gone, `ON DELETE CASCADE` has taken its sessions with it, and the rows cached here were
+    /// read before any of that: leaving them in would have the recompute report a running agent in
+    /// a workspace that no longer exists until the next write to the sessions table.
     func forgetWorkspace(_ id: WorkspaceID) {
         stopHidingFromSidebar(id)
         workspaceModels[id] = nil
-        runningWorkspaceIDs.remove(id)
-        waitingWorkspaceIDs.remove(id)
-    }
-
-    /// Told by `TranscriptModel` whenever a question arrives or is answered. See
-    /// `TranscriptModel.setAwaitingPermission`, which is the one place that flag moves.
-    ///
-    /// Recomputed from the workspace's model rather than taken from the caller, for the same
-    /// reason as above: a workspace can hold several sessions, and one of them being answered does
-    /// not mean the workspace has stopped waiting.
-    func noteWaitingChanged(workspaceID: WorkspaceID) {
-        let isWaiting = workspaceModels[workspaceID]?.isAwaitingPermission ?? false
-        if isWaiting {
-            waitingWorkspaceIDs.insert(workspaceID)
-        } else {
-            waitingWorkspaceIDs.remove(workspaceID)
-        }
+        storedActivity.removeAll { $0.workspaceID == id }
+        recomputeAgentTurns()
     }
 
     /// Whether a workspace is blocked on a question, without forcing a `WorkspaceModel` into
@@ -1060,11 +1117,16 @@ final class AppModel {
     /// The workspaces those agents are working in, named so the confirmation can say where the
     /// work would be interrupted rather than only how much of it there is.
     ///
-    /// Named from the models rather than from `workspaces`, because a workspace that has just
-    /// been archived is out of that list while its agent is still being wound down.
+    /// The models first, because a workspace that has just been archived is out of `workspaces`
+    /// while its agent is still being wound down, and `workspaces` second, because the mirror is
+    /// no longer built from the models alone: a chat mid turn in a workspace nobody has opened is
+    /// reported by its session row, and there is no model to take a name from. Counted and named
+    /// have to agree, or the confirmation says "2 agents are working" over one line.
     var runningAgentWorkspaceNames: [String] {
         runningWorkspaceIDs
-            .compactMap { workspaceModels[$0]?.workspace.name }
+            .compactMap { id in
+                workspaceModels[id]?.workspace.name ?? workspaces.first { $0.id == id }?.name
+            }
             .sorted()
     }
 

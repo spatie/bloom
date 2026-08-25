@@ -646,7 +646,7 @@ final class TranscriptModel {
 
         guard storedIsRunning != value else { return }
         storedIsRunning = value
-        app.noteRunningChanged(workspaceID: workspace.id)
+        app.noteAgentTurnsChanged()
     }
 
     /// The one place `isAwaitingPermission` moves, for the same reasons `setRunning` is the one
@@ -656,7 +656,7 @@ final class TranscriptModel {
     private func setAwaitingPermission(_ value: Bool) {
         guard storedIsAwaitingPermission != value else { return }
         storedIsAwaitingPermission = value
-        app.noteWaitingChanged(workspaceID: workspace.id)
+        app.noteAgentTurnsChanged()
     }
 
     /// Recompute from the questions actually outstanding. Called wherever one is added or settled,

@@ -1370,6 +1370,42 @@ public actor Store {
         try db.query("SELECT * FROM sessions WHERE id = ?", [.text(id)]).first.map(Self.session(from:))
     }
 
+    /// Every chat the store says is mid turn or blocked, across every active workspace.
+    ///
+    /// The durable half of "is an agent working here". The runner writes `state` on every move it
+    /// makes, whether or not a window is watching, so this answers for a chat nobody has opened
+    /// this launch and it answers again after a missed signal. See `AgentTurns`, which is what
+    /// weighs it against what the live transcripts say, and the sidebar row that spent a whole
+    /// turn drawing "No changes" over a running agent because nothing asked this question.
+    ///
+    /// Three columns rather than whole rows: this runs on every write to the sessions table, and
+    /// a title, two token counts and a cost are not part of the answer.
+    ///
+    /// The states come from `AgentTurns.Kind` rather than being spelled out here, the way
+    /// `resetRunningSessions` builds its clause out of `SessionLifecycle`, so the rows this hands
+    /// back and the rule that reads them cannot come to different conclusions about which states
+    /// count. Archived chats and archived workspaces are left out: neither can have an agent in it,
+    /// and a sidebar that has no row to draw has nothing to say about one.
+    public func sessionActivity() throws -> [SessionActivity] {
+        let states = AgentTurns.Kind.allCases.map(\.sessionState)
+        let placeholders = states.map { _ in "?" }.joined(separator: ", ")
+        return try db.query(
+            """
+            SELECT s.id AS id, s.workspace_id AS workspace_id, s.state AS state
+            FROM sessions s
+            JOIN workspaces w ON w.id = s.workspace_id
+            WHERE s.archived_at IS NULL AND w.state = ? AND s.state IN (\(placeholders))
+            """,
+            [.text(WorkspaceState.active.rawValue)] + states.map { SQLValue.text($0.rawValue) }
+        ).map { row in
+            SessionActivity(
+                sessionID: SessionID(row.string("id") ?? newID()),
+                workspaceID: WorkspaceID(row.string("workspace_id") ?? ""),
+                state: SessionState(rawValue: row.string("state") ?? "idle") ?? .idle
+            )
+        }
+    }
+
     /// Writes a whole session row. This is how a session is created, and it is worth reaching for
     /// only when the value being written was built here and now.
     ///

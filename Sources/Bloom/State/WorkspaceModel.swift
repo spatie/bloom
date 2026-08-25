@@ -436,10 +436,11 @@ final class WorkspaceModel {
     /// Whether this session's agent is in the middle of a turn.
     ///
     /// The live transcript is the truth wherever one exists, and only existing ones are consulted:
-    /// asking for a transcript would build a model for every session the strip drew.
+    /// asking for a transcript would build a model for every session the strip drew. That
+    /// precedence is `AgentTurns`'s now rather than this method's, so the strip, the workspace
+    /// and the sidebar's mirror cannot come to three different conclusions about one chat.
     func isRunning(_ session: Session) -> Bool {
-        if let transcript = transcripts[session.id] { return transcript.isRunning }
-        return session.state == .running
+        AgentTurns.session(.running, state: session.state, live: liveTurn(for: session.id))
     }
 
     func closeSession(_ session: Session) async {
@@ -500,8 +501,33 @@ final class WorkspaceModel {
         transcript(for: session)
     }
 
+    /// Whether any chat here has an agent mid turn.
+    ///
+    /// The rule is `AgentTurns`, which is the same rule `isRunning(_ session:)` above answers
+    /// one session with and the same rule the sidebar's mirror is rebuilt from. It used to be a
+    /// walk of `transcripts` alone, and that is exactly one of the three different answers this
+    /// app had to the one question: a turn in a chat this launch had never built a transcript for
+    /// was not running as far as this property was concerned, however plainly the session row said
+    /// otherwise.
     var isRunning: Bool {
-        transcripts.values.contains { $0.isRunning }
+        AgentTurns.workspace(.running, sessions: sessions, live: liveTurns)
+    }
+
+    /// What this workspace's live transcripts say about their own sessions, for the rule above and
+    /// for `AppModel`'s mirrors. Only the transcripts that exist: asking for one would build a
+    /// model for every session in the strip.
+    var liveTurns: [AgentTurns.Live] {
+        transcripts.keys.compactMap(liveTurn(for:))
+    }
+
+    private func liveTurn(for sessionID: SessionID) -> AgentTurns.Live? {
+        guard let transcript = transcripts[sessionID] else { return nil }
+        return AgentTurns.Live(
+            sessionID: sessionID,
+            workspaceID: workspace.id,
+            isRunning: transcript.isRunning,
+            isAwaitingPermission: transcript.isAwaitingPermission
+        )
     }
 
     /// The ACTIVE chat's subagents, whole.
@@ -528,7 +554,7 @@ final class WorkspaceModel {
 
     /// Whether any session here has an agent stopped and waiting on a person.
     var isAwaitingPermission: Bool {
-        transcripts.values.contains { $0.isAwaitingPermission }
+        AgentTurns.workspace(.awaitingPermission, sessions: sessions, live: liveTurns)
     }
 
     /// Both callers mean the same thing: this workspace, or the whole app, is going away. So the
