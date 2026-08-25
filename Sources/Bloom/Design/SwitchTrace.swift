@@ -84,10 +84,23 @@ enum SwitchTrace {
         pendingOnScreen.removeAll()
     }
 
-    /// The timeline as JSON-ready values, sorted by when things happened.
-    static func timeline() -> [[String: Any]] {
-        marks
-            .sorted { $0.ms < $1.ms }
-            .map { ["name": $0.name, "ms": $0.ms, "onScreen": $0.onScreen] }
+    /// The timeline as JSON, sorted by when things happened.
+    ///
+    /// `JSONValue` rather than the `[String: Any]` this used to hand back, for the reason written
+    /// at the head of `ProbeHarness`: a dictionary of `Any` is what let a typed id reach
+    /// `JSONSerialization` and kill a twenty minute run on its last line. Nothing that goes into a
+    /// report can be a value JSON cannot carry any more, and the compiler is what says so.
+    static func timeline() -> JSONValue {
+        .array(
+            marks
+                .sorted { $0.ms < $1.ms }
+                .map {
+                    .object([
+                        "name": .string($0.name),
+                        "ms": .number($0.ms),
+                        "onScreen": .bool($0.onScreen),
+                    ])
+                }
+        )
     }
 }

@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import Synchronization
 import BloomCore
 
 /// Times what happens between clicking a workspace in the sidebar and seeing it.
@@ -19,44 +18,29 @@ import BloomCore
 ///
 ///     Bloom --switch-probe /tmp/switch.json --switch-order id1,id2 [--switch-cycles 3]
 ///           [--switch-driver click|programmatic] [--switch-settle 4000] [--window-size 1440x900]
+///
+/// Everything that is not the selection itself is `ProbeHarness`: the flags, the window, the
+/// model, the failure, the report.
 @MainActor
 enum SwitchProbe {
-    static var isRequested: Bool {
-        CommandLine.arguments.contains("--switch-probe")
-    }
+    private static let harness = ProbeHarness(subject: "switch")
+
+    static var isRequested: Bool { harness.isRequested }
 
     // MARK: - Arguments
 
-    private static func value(for flag: String) -> String? {
-        let arguments = CommandLine.arguments
-        guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else {
-            return nil
-        }
-        return arguments[index + 1]
-    }
-
-    private static var outputPath: String {
-        value(for: "--switch-probe") ?? (NSTemporaryDirectory() + "bloom-switch-probe.json")
-    }
-
     private static var order: [WorkspaceID] {
-        (value(for: "--switch-order") ?? "").split(separator: ",").map { WorkspaceID(String($0)) }
+        ProbeHarness.text("--switch-order", or: "")
+            .split(separator: ",")
+            .map { WorkspaceID(String($0)) }
     }
 
-    private static var cycles: Int { Int(value(for: "--switch-cycles") ?? "") ?? 3 }
-    private static var driver: String { value(for: "--switch-driver") ?? "programmatic" }
+    private static var cycles: Int { ProbeHarness.count("--switch-cycles", or: 3) }
+    private static var driver: String { ProbeHarness.text("--switch-driver", or: "programmatic") }
     /// How long a switch is given to finish before the next one starts. Everything asynchronous a
     /// switch kicks off has to be allowed to land inside the timeline, or the report is a
     /// measurement of the settle rather than of the switch.
-    private static var settle: Int { Int(value(for: "--switch-settle") ?? "") ?? 4000 }
-
-    private static var windowSize: CGSize? {
-        guard let raw = value(for: "--window-size") else { return nil }
-        let parts = raw.split(separator: "x")
-        guard parts.count == 2, let width = Double(parts[0]), let height = Double(parts[1])
-        else { return nil }
-        return CGSize(width: width, height: height)
-    }
+    private static var settle: Int { ProbeHarness.count("--switch-settle", or: 4000) }
 
     // MARK: - Entry
 
@@ -64,29 +48,16 @@ enum SwitchProbe {
         Task { @MainActor in await run() }
     }
 
+    /// The state, handed over by the delegate on launch. See `ProbeHarness.attach`, which holds it.
+    static func attach(_ model: AppModel) {
+        guard isRequested else { return }
+        ProbeHarness.attach(model)
+    }
+
     private static func run() async {
-        try? await Task.sleep(for: .seconds(3))
+        let (window, contentView) = await harness.window()
 
-        var window: NSWindow?
-        for _ in 0..<60 {
-            window = NSApp.windows.first {
-                $0.isVisible && $0.contentView != nil && $0.parent == nil
-                    && $0.styleMask.contains(.titled)
-            }
-            if window != nil { break }
-            try? await Task.sleep(for: .milliseconds(250))
-        }
-        guard let window, let contentView = window.contentView else {
-            fail("no window to probe")
-        }
-
-        if let size = windowSize {
-            window.setContentSize(size)
-            window.layoutIfNeeded()
-            try? await Task.sleep(for: .seconds(1))
-        }
-
-        guard !order.isEmpty else { fail("--switch-order named no workspaces") }
+        guard !order.isEmpty else { harness.fail("--switch-order named no workspaces") }
 
         // Everything a fresh launch kicks off settles before the first measurement, so the first
         // switch is not paying for the sidebar's own arrival.
@@ -102,7 +73,7 @@ enum SwitchProbe {
         ticker.start()
         SwitchTrace.isEnabled = true
 
-        var runs: [[String: Any]] = []
+        var runs: [JSONValue] = []
 
         // The first pass is kept and labelled rather than thrown away. A first visit and a return
         // are two different switches: the first has nothing cached and reads the whole transcript
@@ -110,7 +81,7 @@ enum SwitchProbe {
         // answer half the question, and the owner does both all day.
         for id in order {
             let run = await switchTo(id, contentView: contentView, ticker: ticker)
-            runs.append(run.merging(["pass": "cold"]) { current, _ in current })
+            runs.append(.object(run.merging(["pass": .string("cold")]) { current, _ in current }))
             // A short gap only. `switchTo` has already waited out the settle.
             try? await Task.sleep(for: .milliseconds(800))
         }
@@ -118,7 +89,10 @@ enum SwitchProbe {
         for cycle in 0..<cycles {
             for id in order {
                 let run = await switchTo(id, contentView: contentView, ticker: ticker)
-                runs.append(run.merging(["cycle": cycle, "pass": "warm"]) { current, _ in current })
+                let labels: [String: JSONValue] = [
+                    "cycle": .integer(cycle), "pass": .string("warm"),
+                ]
+                runs.append(.object(run.merging(labels) { current, _ in current }))
                 try? await Task.sleep(for: .milliseconds(800))
             }
         }
@@ -130,17 +104,15 @@ enum SwitchProbe {
         SwitchTrace.isEnabled = false
         ticker.stop()
 
-        write([
-            "driver": driver,
-            "configuration": buildConfiguration,
-            "order": order.map(\.rawValue),
-            "cycles": cycles,
-            "settleMs": settle,
-            "windowSize": ["w": window.frame.width, "h": window.frame.height],
-            "loadAverage": systemLoadAverage(),
-            "runs": runs,
-            "rapid": rapid,
-        ])
+        let own: [String: JSONValue] = [
+            "driver": .string(driver),
+            "order": .strings(order.map(\.rawValue)),
+            "cycles": .integer(cycles),
+            "settleMs": .integer(settle),
+            "runs": .array(runs),
+            "rapid": .object(rapid),
+        ]
+        harness.write(.object(own.merging(harness.conditions(window: window)) { mine, _ in mine }))
         exit(0)
     }
 
@@ -148,8 +120,8 @@ enum SwitchProbe {
     @discardableResult
     private static func switchTo(
         _ id: WorkspaceID, contentView: NSView, ticker: Ticker
-    ) async -> [String: Any] {
-        guard let app = model() else {
+    ) async -> [String: JSONValue] {
+        guard let app = ProbeHarness.appModel else {
             FileHandle.standardError.write(Data("switch probe: no app model\n".utf8))
             return [:]
         }
@@ -176,14 +148,14 @@ enum SwitchProbe {
         PaneLayoutTiming.isEnabled = false
 
         return [
-            "workspace": id.rawValue,
-            "name": name,
+            "workspace": .string(id.rawValue),
+            "name": .string(name),
             "marks": SwitchTrace.timeline(),
-            "frameCount": ticker.intervalsMs.count,
-            "blocks": ticker.blocksMs,
-            "paneLayout": PaneLayoutTiming.summary(),
-            "panePasses": PaneLayoutTiming.timeline(),
-            "worstFrameMs": ticker.intervalsMs.max() ?? 0,
+            "frameCount": .integer(ticker.intervalsMs.count),
+            "blocks": .numbers(ticker.blocksMs),
+            "paneLayout": .map(PaneLayoutTiming.summary()),
+            "panePasses": .map(PaneLayoutTiming.timeline()),
+            "worstFrameMs": .number(ticker.intervalsMs.max() ?? 0),
         ]
     }
 
@@ -192,19 +164,21 @@ enum SwitchProbe {
     /// The report is what the window settled on, not what it passed through: the point is that a
     /// refresh started for the workspace being left cannot land on the one being arrived at, and
     /// the way that shows up is the arrived-at workspace holding the other one's file list.
-    private static func rapidSwitches(contentView: NSView, ticker: Ticker) async -> [String: Any] {
-        guard let app = model(), order.count >= 2 else { return [:] }
+    private static func rapidSwitches(
+        contentView: NSView, ticker: Ticker
+    ) async -> [String: JSONValue] {
+        guard let app = ProbeHarness.appModel, order.count >= 2 else { return [:] }
         // The two furthest apart, so a leak is visible rather than plausible: in the fixture the
         // first and last workspaces are in different repositories with different files in them.
         let first = order[0]
         let second = order[order.count - 1]
 
-        var flips: [[String: Any]] = []
+        var flips: [JSONValue] = []
         for step in 0..<8 {
             let target = step.isMultiple(of: 2) ? first : second
             app.selection = .workspace(target)
             try? await Task.sleep(for: .milliseconds(120))
-            flips.append(["step": step, "selected": target.rawValue])
+            flips.append(.object(["step": .integer(step), "selected": .string(target.rawValue)]))
         }
 
         // Everything in flight lands here.
@@ -216,25 +190,25 @@ enum SwitchProbe {
         // list belonging to the other workspace is a stale answer that landed in the wrong place.
         let paths = model?.changedFiles.prefix(4).map(\.path) ?? []
         return [
-            "flips": flips,
-            "settled": settled?.rawValue ?? "",
-            "settledName": app.workspaces.first { $0.id == settled }?.name ?? "",
-            "changedFileCount": model?.changedFiles.count ?? 0,
-            "changedFileSample": Array(paths),
+            "flips": .array(flips),
+            "settled": .string(settled?.rawValue ?? ""),
+            "settledName": .string(app.workspaces.first { $0.id == settled }?.name ?? ""),
+            "changedFileCount": .integer(model?.changedFiles.count ?? 0),
+            "changedFileSample": .strings(paths),
             // Proof the sample belongs to the settled workspace: every path is inside its worktree
             // in the fixture, so a leak from the other one is visible as a different prefix.
-            "worktree": model?.workspace.path ?? "",
-            "isLoadingChanges": model?.isLoadingChanges ?? false,
-            "sessionCount": model?.sessions.count ?? 0,
+            "worktree": .string(model?.workspace.path ?? ""),
+            "isLoadingChanges": .bool(model?.isLoadingChanges ?? false),
+            "sessionCount": .integer(model?.sessions.count ?? 0),
             // The other list a switch fetches with a subprocess, and the one that used to be the
             // previous workspace's for as long as git took to answer.
-            "fileTreeRoots": model?.fileTree[""]?.count ?? 0,
-            "fileTreeSample": (model?.fileTree[""] ?? []).prefix(3).map(\.name),
-            "sessionTitles": model?.sessions.map(\.title) ?? [],
-            "transcriptRows": model?.activeTranscript?.rows.count ?? 0,
-            "otherWorkspaceFileCount": app.existingModel(
-                for: settled == first ? second : first
-            )?.changedFiles.count ?? 0,
+            "fileTreeRoots": .integer(model?.fileTree[""]?.count ?? 0),
+            "fileTreeSample": .strings((model?.fileTree[""] ?? []).prefix(3).map(\.name)),
+            "sessionTitles": .strings(model?.sessions.map(\.title) ?? []),
+            "transcriptRows": .integer(model?.activeTranscript?.rows.count ?? 0),
+            "otherWorkspaceFileCount": .integer(
+                app.existingModel(for: settled == first ? second : first)?.changedFiles.count ?? 0
+            ),
         ]
     }
 
@@ -247,7 +221,7 @@ enum SwitchProbe {
     /// silently. The name comes off the row's accessibility label, which is the same string
     /// VoiceOver reads.
     private static func click(row id: WorkspaceID, contentView: NSView) async {
-        guard let app = model() else { return }
+        guard let app = ProbeHarness.appModel else { return }
         guard let window = contentView.window,
               let name = app.workspaces.first(where: { $0.id == id })?.name,
               let rect = rowRect(named: name, in: contentView) else {
@@ -264,16 +238,10 @@ enum SwitchProbe {
         let flipped = CGPoint(x: onScreen.x, y: screen.frame.maxY - onScreen.y)
 
         let pid = ProcessInfo.processInfo.processIdentifier
-        let done = Mutex(false)
-        Thread.detachNewThread {
-            post(.leftMouseDown, at: flipped, pid: pid)
+        await harness.onEventThread(polling: .milliseconds(2)) {
+            ProbeHarness.post(.leftMouseDown, at: flipped, pid: pid)
             Thread.sleep(forTimeInterval: 0.03)
-            post(.leftMouseUp, at: flipped, pid: pid)
-            done.withLock { $0 = true }
-        }
-        while !done.withLock({ $0 }) {
-            await Task.yield()
-            try? await Task.sleep(for: .milliseconds(2))
+            ProbeHarness.post(.leftMouseUp, at: flipped, pid: pid)
         }
     }
 
@@ -304,62 +272,5 @@ enum SwitchProbe {
         }
         walk(view)
         return parts.isEmpty ? nil : parts.joined(separator: " ")
-    }
-
-    private nonisolated static func post(_ type: CGEventType, at point: CGPoint, pid: pid_t) {
-        guard let event = CGEvent(
-            mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left
-        ) else { return }
-        event.postToPid(pid)
-    }
-
-    // MARK: - Reaching the model
-
-    /// The app's state, handed over by the delegate on launch. Weak, because a probe has no
-    /// business keeping the app alive.
-    private weak static var app: AppModel?
-
-    static func attach(_ model: AppModel) {
-        guard isRequested else { return }
-        app = model
-    }
-
-    private static func model() -> AppModel? { app }
-
-    // MARK: - Reporting
-
-    private static var buildConfiguration: String {
-        #if DEBUG
-        "debug"
-        #else
-        "release"
-        #endif
-    }
-
-    private static func systemLoadAverage() -> Double {
-        var loads = [Double](repeating: 0, count: 3)
-        guard getloadavg(&loads, 3) > 0 else { return 0 }
-        return loads[0]
-    }
-
-    private static func write(_ report: [String: Any]) {
-        // `JSONSerialization` raises on a value it cannot carry rather than throwing one, and an
-        // Objective-C exception is not something `try?` catches, so the probe died on the last
-        // line of a twenty minute run. What it died on was a `WorkspaceID`: this dictionary is
-        // `[String: Any]`, so a typed id goes in without complaint and arrives as `__SwiftValue`.
-        // Asked first, so the same mistake costs a line on stderr instead of the measurements.
-        guard JSONSerialization.isValidJSONObject(report) else {
-            fail("the report holds a value JSON cannot carry, probably an id that needed .rawValue")
-        }
-        let data = (try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted]))
-            ?? Data()
-        try? data.write(to: URL(fileURLWithPath: outputPath))
-        FileHandle.standardError.write(Data("switch probe wrote \(outputPath)\n".utf8))
-    }
-
-    /// `Never`, so the callers above can end the run with it from inside a `guard`.
-    private static func fail(_ message: String) -> Never {
-        FileHandle.standardError.write(Data("switch probe: \(message)\n".utf8))
-        exit(1)
     }
 }

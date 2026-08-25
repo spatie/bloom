@@ -369,16 +369,12 @@ enum Snapshot {
     }
 
     /// `WIDTHxHEIGHT` in points, or nil when the flag is absent or malformed.
+    ///
+    /// The flag reading and the parse are both `ProbeHarness`'s, which is where the six probes
+    /// read the same flag: this file inlined a fifth copy of a three line rule that now has a test
+    /// in `ProbeStatsTests` rather than five readers who each believe it.
     private static var requestedWindowSize: CGSize? {
-        let arguments = CommandLine.arguments
-        guard let index = arguments.firstIndex(of: "--window-size"), index + 1 < arguments.count
-        else { return nil }
-
-        let parts = arguments[index + 1].split(separator: "x")
-        guard parts.count == 2, let width = Double(parts[0]), let height = Double(parts[1])
-        else { return nil }
-
-        return CGSize(width: width, height: height)
+        ProbeHarness.value(for: "--window-size").flatMap(ProbeStats.windowSize)
     }
 
     /// True when this process was started to photograph or measure something rather than to be
