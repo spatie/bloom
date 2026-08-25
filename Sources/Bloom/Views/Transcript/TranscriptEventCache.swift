@@ -7,7 +7,28 @@ import BloomCore
 /// retain its identity. Exact byte equality prevents a cached event from surviving that change.
 @MainActor
 enum TranscriptEventCache {
-    private static let limit = 256
+    /// **Bounded by bytes, not by rows.** `countLimit` was 256, and a real transcript is longer
+    /// than that: the workspace this was measured against holds 1,306 messages, so one scroll from
+    /// the bottom to the top evicted every row and decoded all of them again on the way back.
+    ///
+    /// `ScrollProbe` put a number on it: `AgentEvent.decode` and `JSONValue.parse` together took
+    /// about six per cent of the main thread while nothing was happening but scrolling.
+    ///
+    /// **Be clear about what this did not fix.** Frame times either side of the change are the
+    /// same to within noise: 16.7% of frames late before, 17.0% after, p95 24ms and 23ms, p99 35ms
+    /// and 33ms, over four sweeps of a 1,306 message transcript. The decoding was real waste and
+    /// is worth not doing, but the judder is somewhere else. Forty per cent of the main thread is
+    /// inside `LazySubviewPlacements.placeSubviews` and `StackPlacement.measureBackwards`, and the
+    /// scroll view's content height falls from 18,374 points to 10,167 over a single pass, which
+    /// is SwiftUI replacing estimated row heights with measured ones and re-placing everything
+    /// above. Anybody coming here to make scrolling smoother should start there and not with this.
+    ///
+    /// Zero means no limit on the count, which is what `totalCostLimit` is already for. The bytes
+    /// are the thing worth bounding: a `Write` call carries the whole file the agent wrote, and one
+    /// such row can outweigh a thousand ordinary ones. Eight megabytes holds a long transcript of
+    /// ordinary rows and still evicts when several enormous ones arrive, which is the shape the
+    /// cost limit was chosen for in the first place.
+    private static let limit = 0
     private static let costLimit = 8 * 1_024 * 1_024
 
     private static let events: NSCache<TranscriptPayloadKey, TranscriptEventBox> = {
