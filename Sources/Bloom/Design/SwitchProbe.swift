@@ -208,6 +208,20 @@ enum SwitchProbe {
         if case .number(let before)? = left["offset"], case .number(let after)? = returned["offset"] {
             report["movedPoints"] = .number(abs(after - before))
         }
+        // **Whether the run tested anything at all**, and it often does not.
+        //
+        // Writing the clip view's origin is not a hand on the wheel: SwiftUI never sees it, so the
+        // list's own `ScrollPosition` goes on standing at `.bottom`, and the next layout pass that
+        // grows the content reapplies that edge and puts the view back at the end. Measured: this
+        // probe asked for two thousand points off the end and reported `atEnd` on both samples.
+        //
+        // So the report says whether the reader was actually moved, and a run that could not move
+        // them is a run whose numbers say nothing about the anchor. Driving it faithfully needs
+        // real scroll wheel events, which need the window in front, which is the owner's keyboard.
+        // See the head of `ProbeHarness.window`.
+        if case .bool(let wasAtEnd)? = left["atEnd"] {
+            report["drove"] = .bool(!wasAtEnd)
+        }
         return report
     }
 
