@@ -38,6 +38,10 @@ final class WorkspaceHoverCardPresenter {
     private var pending: Task<Void, Never>?
     private var panel: NSPanel?
     private var hosting: NSHostingView<WorkspaceHoverCardView>?
+    /// The observers and the event monitor, held for as long as this is: a singleton that lives
+    /// for the life of the app never takes them down, and holding them is what says that on
+    /// purpose rather than by omission.
+    private var observers: [any NSObjectProtocol] = []
     private var monitor: Any?
 
     private init() {
@@ -219,9 +223,10 @@ final class WorkspaceHoverCardPresenter {
             NSMenu.didBeginTrackingNotification,
             NSApplication.didResignActiveNotification,
         ] {
-            centre.addObserver(forName: name, object: nil, queue: .main) { _ in
+            let observer = centre.addObserver(forName: name, object: nil, queue: .main) { _ in
                 MainActor.assumeIsolated { WorkspaceHoverCardPresenter.shared.dismiss() }
             }
+            observers.append(observer)
         }
 
         // Local, not global: this only has to know about events going to Bloom, and a global
