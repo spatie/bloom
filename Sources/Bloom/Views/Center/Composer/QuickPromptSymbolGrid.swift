@@ -16,11 +16,11 @@ struct QuickPromptSymbolGrid: View {
     @Binding var symbol: String
 
     private static let columns = Array(
-        repeating: GridItem(.flexible(), spacing: Metrics.spacingSmall), count: 6
+        repeating: GridItem(.flexible(), spacing: Metrics.spacing), count: 6
     )
 
     var body: some View {
-        LazyVGrid(columns: Self.columns, spacing: Metrics.spacingSmall) {
+        LazyVGrid(columns: Self.columns, spacing: Metrics.spacing) {
             ForEach(QuickPrompt.symbols, id: \.self) { name in
                 Button {
                     symbol = name

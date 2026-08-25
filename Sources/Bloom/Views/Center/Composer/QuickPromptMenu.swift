@@ -83,9 +83,6 @@ struct QuickPromptMenu: View {
 
             Hairline()
             newRow
-
-            Hairline()
-            keys
         }
         .onAppear {
             // A fresh query every time it opens. The panel is a way of finding one thing, not a
@@ -203,28 +200,6 @@ struct QuickPromptMenu: View {
     private var newRowTitle: String {
         guard matches.isEmpty, !query.isEmpty else { return "New quick prompt" }
         return "New quick prompt named \u{201C}\(query)\u{201D}"
-    }
-
-    private var keys: some View {
-        HStack(spacing: Metrics.gutter) {
-            key("\u{2191}\u{2193}", "row")
-            key("\u{21A9}", "insert")
-            key("esc", "close")
-        }
-        .padding(.horizontal, Metrics.gutter)
-        .padding(.vertical, Metrics.spacingSmall)
-        .accessibilityHidden(true)
-    }
-
-    private func key(_ mark: String, _ what: String) -> some View {
-        HStack(spacing: Metrics.spacingSmall) {
-            Text(mark)
-                .font(Typo.codeTiny)
-                .foregroundStyle(Palette.textSecondary)
-            Text(what)
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-        }
     }
 
     // MARK: - The form

@@ -31,10 +31,15 @@ struct QuickPromptForm: View {
 
     @FocusState private var isNameFocused: Bool
 
-    private static let textHeight: CGFloat = 92
+    /// Three lines of the shipped prompt with room for a fourth. It was 92, which fitted the text
+    /// exactly and left the box looking full before anything was typed.
+    private static let textHeight: CGFloat = 108
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.spacingWide) {
+        // `Metrics.pane` and `gutter` rather than the tighter rungs the rest of this panel uses.
+        // A list is scanned and wants to be dense; a form is filled in, and at the panel's spacing
+        // the three labels sat on top of their controls and the whole card read as cramped.
+        VStack(alignment: .leading, spacing: Metrics.gutter) {
             heading
 
             field("Name") {
@@ -68,8 +73,9 @@ struct QuickPromptForm: View {
             }
 
             buttons
+                .padding(.top, Metrics.spacingSmall)
         }
-        .padding(Metrics.gutter)
+        .padding(Metrics.pane)
         .onAppear(perform: prepare)
         // Escape leaves the form and goes back to the list, rather than closing the whole panel and
         // losing what was typed with it.
@@ -106,8 +112,14 @@ struct QuickPromptForm: View {
     private var buttons: some View {
         HStack(spacing: Metrics.spacingWide) {
             if editing != nil {
-                Button("Delete", role: .destructive, action: onDelete)
-                    .accessibilityLabel("Delete this quick prompt")
+                // `role: .destructive` alone leaves a bordered button on macOS drawn in the
+                // ordinary label colour, so it read as a third neutral button beside Cancel and
+                // Save. Coloured explicitly, which is what `RepoSettingsView` does for Remove
+                // Project and for the same reason.
+                Button(role: .destructive, action: onDelete) {
+                    Text("Delete").foregroundStyle(Palette.negative)
+                }
+                .accessibilityLabel("Delete this quick prompt")
                 Spacer(minLength: Metrics.spacing)
             } else {
                 Spacer(minLength: Metrics.spacing)
@@ -131,7 +143,7 @@ struct QuickPromptForm: View {
     }
 
     private func field(_ label: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+        VStack(alignment: .leading, spacing: Metrics.spacing) {
             Text(label)
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textTertiary)
