@@ -8,8 +8,14 @@ import BloomCore
 struct SearchView: View {
     @Environment(AppModel.self) private var app
 
-    @FocusState private var fieldFocused: Bool
     @State private var hovered: WorkspaceID?
+    /// The highlighted result, held as the workspace it names and never as an index into the list.
+    /// The list is rebuilt on every keystroke, so an index highlights whatever has since moved
+    /// into that slot and Return opens something other than what is drawn. `WorkspaceSourcePicker`
+    /// carries the same note over the same failure.
+    @State private var selected: WorkspaceID?
+    /// The arrows and Return, decided in the core. See `ListKeyboard`.
+    @State private var keyboard = ListKeyboard()
 
     /// Matching runs when the query or the workspace list changes, not on every redraw. A search
     /// stays on screen while agents run, and each of them updates its diff stat every few seconds.
@@ -32,11 +38,18 @@ struct SearchView: View {
                     .foregroundStyle(Palette.textTertiary)
                     .accessibilityHidden(true)
 
-                TextField("Search workspaces, branches and transcripts", text: $app.searchQuery)
-                    .textFieldStyle(.plain)
-                    .font(.title3)
-                    .foregroundStyle(Palette.textPrimary)
-                    .focused($fieldFocused)
+                // An `NSTextField` rather than SwiftUI's, and for once it is not about drawing.
+                // The results below have no keyboard of their own and must not have one: this
+                // field holds it from the moment the screen opens, and the arrows and Return have
+                // to reach the list from inside it. A focused SwiftUI `TextField` swallows both
+                // arrows and Return in its own field editor, so `onKeyPress` on the view around it
+                // never sees the shape of the event. `MenuSearchField`'s note is the measurement.
+                MenuSearchField(
+                    text: $app.searchQuery,
+                    placeholder: "Search workspaces, branches and transcripts",
+                    onKey: handle(key:),
+                    font: .preferredFont(forTextStyle: .title3)
+                )
 
                 if !app.searchQuery.isEmpty {
                     Button("Clear the search", systemImage: "xmark.circle.fill", action: clear)
@@ -58,7 +71,6 @@ struct SearchView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Palette.windowBackground)
-        .task { fieldFocused = true }
         .task(id: app.archivedRevision) {
             archived = await app.archivedWorkspaces()
             match()
@@ -88,73 +100,88 @@ struct SearchView: View {
         } else if hits.isEmpty && app.transcriptResults.isEmpty {
             ContentUnavailableView.search(text: app.searchQuery)
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: Metrics.spacingTight) {
-                    ForEach(hits) { hit in
-                        SearchResultRow(
-                            hit: hit,
-                            isHovered: hovered == hit.id,
-                            action: { select(hit) }
-                        )
-                        .onHoverChange { inside in
-                            hovered = inside ? hit.id : (hovered == hit.id ? nil : hovered)
-                        }
-                    }
-
-                    if !app.transcriptResults.isEmpty {
-                        // A heading only over the second list. The first one needs none: what a
-                        // workspace is called is what everybody assumes a search field searches,
-                        // and labelling the obvious half made the screen read as a form.
-                        Text("In transcripts")
-                            .font(Typo.caption)
-                            .foregroundStyle(Palette.textTertiary)
-                            .padding(.horizontal, Metrics.inset)
-                            .padding(.top, hits.isEmpty ? 0 : Metrics.inset)
-
-                        // Keyed by the whole value, not by the workspace id, and that is the
-                        // whole of the bug it fixes. Both lists are one `LazyVStack`, and a
-                        // `SearchHit` is identified by its workspace id exactly as these are, so a
-                        // workspace that matched by NAME and in its TRANSCRIPT was the same id
-                        // twice in one lazy container and SwiftUI drew the first and dropped the
-                        // second, leaving a gap. The workspace with the most matches is the one
-                        // most likely to be in both lists, so the row being lost was reliably the
-                        // best answer on the screen.
-                        ForEach(app.transcriptResults, id: \.self) { result in
-                            TranscriptResultRow(
-                                result: result,
-                                workspace: workspace(result.workspaceID),
-                                repo: workspace(result.workspaceID).flatMap { app.repo(for: $0) },
-                                isArchived: archived.contains { $0.id == result.workspaceID },
-                                openWorkspace: { open(result) },
-                                openMatch: { match in Task { await app.open(match) } }
-                            )
-                        }
-                    }
-
-                    if app.isTranscriptIndexIncomplete {
-                        // Said out loud rather than hidden, because a search of a half built index
-                        // is a search that can be wrong, and a wrong "No Results" about work the
-                        // user knows they did is the one answer this screen must never give
-                        // silently.
-                        Label("Still indexing older transcripts", systemImage: "clock")
-                            .font(Typo.caption)
-                            .foregroundStyle(Palette.textTertiary)
-                            .padding(.horizontal, Metrics.inset)
-                            .padding(.top, Metrics.spacingWide)
-                    }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    resultRows
                 }
-                // Vertical only. A row carries its own horizontal inset, and adding a second one
-                // here is what pushed every result a row's inset right of the field above them.
-                .padding(.vertical, Metrics.inset)
-                .column()
+                // The row an arrow key moved to comes into view, which is the other half of the
+                // key.
+                .onChange(of: selected) { _, id in
+                    guard let id else { return }
+                    proxy.scrollTo(id)
+                }
             }
         }
+    }
+
+    @ViewBuilder
+    private var resultRows: some View {
+        LazyVStack(alignment: .leading, spacing: Metrics.spacingTight) {
+            ForEach(hits) { hit in
+                SearchResultRow(
+                    hit: hit,
+                    isSelected: selected == hit.id,
+                    isHovered: hovered == hit.id,
+                    action: { select(hit) }
+                )
+                .onHoverChange { inside in
+                    hovered = inside ? hit.id : (hovered == hit.id ? nil : hovered)
+                }
+            }
+
+            if !app.transcriptResults.isEmpty {
+                // A heading only over the second list. The first one needs none: what a
+                // workspace is called is what everybody assumes a search field searches,
+                // and labelling the obvious half made the screen read as a form.
+                Text("In transcripts")
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .padding(.horizontal, Metrics.inset)
+                    .padding(.top, hits.isEmpty ? 0 : Metrics.inset)
+
+                // Keyed by the whole value, not by the workspace id, and that is the
+                // whole of the bug it fixes. Both lists are one `LazyVStack`, and a
+                // `SearchHit` is identified by its workspace id exactly as these are, so a
+                // workspace that matched by NAME and in its TRANSCRIPT was the same id
+                // twice in one lazy container and SwiftUI drew the first and dropped the
+                // second, leaving a gap. The workspace with the most matches is the one
+                // most likely to be in both lists, so the row being lost was reliably the
+                // best answer on the screen.
+                ForEach(app.transcriptResults, id: \.self) { result in
+                    TranscriptResultRow(
+                        result: result,
+                        workspace: workspace(result.workspaceID),
+                        repo: workspace(result.workspaceID).flatMap { app.repo(for: $0) },
+                        isArchived: archived.contains { $0.id == result.workspaceID },
+                        openWorkspace: { open(result) },
+                        openMatch: { match in Task { await app.open(match) } }
+                    )
+                }
+            }
+
+            if app.isTranscriptIndexIncomplete {
+                // Said out loud rather than hidden, because a search of a half built index
+                // is a search that can be wrong, and a wrong "No Results" about work the
+                // user knows they did is the one answer this screen must never give
+                // silently.
+                Label("Still indexing older transcripts", systemImage: "clock")
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .padding(.horizontal, Metrics.inset)
+                    .padding(.top, Metrics.spacingWide)
+            }
+        }
+        // Vertical only. A row carries its own horizontal inset, and adding a second one here is
+        // what pushed every result a row's inset right of the field above them.
+        .padding(.vertical, Metrics.inset)
+        .column()
     }
 
     // MARK: - Actions
 
     private func match() {
         hits = app.search(app.searchQuery, alsoSearching: archived)
+        settle()
         // The two halves are started together and answer separately. This one is an array already
         // in memory; the other is a hop onto the store actor, and making the names wait for the
         // transcripts would have put a database query in front of the answer that is nearly always
@@ -179,7 +206,53 @@ struct SearchView: View {
 
     private func clear() {
         app.searchQuery = ""
-        fieldFocused = true
+    }
+
+    // MARK: - The keyboard
+
+    /// The arrows and Return, sent up from the field the reader is typing in.
+    ///
+    /// **Only the name hits.** The transcript results underneath are a workspace with its matching
+    /// lines nested inside it, which is a second kind of row and a second thing Return could mean,
+    /// and neither is answered by walking a flat list. They stay where they were: reachable with
+    /// the pointer, and the obvious next piece of this.
+    ///
+    /// No type-select either, and that is the one list here where its absence is right: the field
+    /// six points above the list already is the type-select, and a letter typed at this screen
+    /// should narrow the search rather than jump within its answer.
+    private func handle(key: ComposerKey) -> Bool {
+        let index = selected.flatMap { id in hits.firstIndex { $0.id == id } }
+
+        let listKey: ListKey? = switch key {
+        case .up: .up
+        case .down: .down
+        case .returnKey, .commandReturn: .activate
+        case .escape, .tab: nil
+        }
+        guard let listKey else { return false }
+
+        switch keyboard.outcome(for: listKey, titles: hits.map(\.workspace.name), current: index) {
+        case .move(let row):
+            selected = hits[row].id
+            return true
+        case .activate:
+            guard let index else { return false }
+            select(hits[index])
+            return true
+        case .handled:
+            return true
+        case .ignored:
+            return false
+        }
+    }
+
+    /// Puts the highlight on the best answer, which is the first row, whenever the one it was on
+    /// has gone. That is what makes Return work on the result somebody can see without their
+    /// having to press Down first, and it is what the create sheet's source picker already does.
+    private func settle() {
+        if !hits.contains(where: { $0.id == selected }) {
+            selected = hits.first?.id
+        }
     }
 
     /// An archived hit opens the reader rather than the centre column, which is the same split
