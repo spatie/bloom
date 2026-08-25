@@ -49,11 +49,11 @@ struct SidebarProjectsHeader: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(isHovered ? Palette.textPrimary : Palette.textSecondary)
-            // The shortcut hangs off the button rather than off `BloomCommands`, which is where a
-            // menu bar item would carry it. Command Option A collides with nothing Bloom binds
-            // (I, F, J, K, Up and Down carry that pair today) and with nothing macOS reserves.
-            .keyboardShortcut("a", modifiers: [.command, .option])
-            .help("Add a project folder (⌥⌘A)")
+            // No key equivalent of its own. It used to carry Cmd+Option+A, which was a second key
+            // for a command the File menu already advertises as Shift+Cmd+O, registered on a
+            // hidden button where nothing could announce it. One command with one key, drawn in
+            // the menu bar, beats two keys with one of them undiscoverable. See `BloomCommands`.
+            .help("Add a project folder (⇧⌘O)")
         }
         .contentShape(Rectangle())
         .onHoverChange { isHovered = $0 }

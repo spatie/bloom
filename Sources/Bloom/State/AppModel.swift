@@ -824,11 +824,12 @@ final class AppModel {
         return workspaceModels[id]?.workspace
     }
 
-    /// The workspace a menu item should act on, archived or not.
+    /// The workspace the window is about, archived or not.
     ///
-    /// Only for the items that still mean something once the worktree is gone, which is Copy
-    /// Branch Name and nothing else. Opening an editor or a Finder window on a path that no
-    /// longer exists is not one of them.
+    /// What the title says, so that reading an archived transcript names it rather than falling
+    /// back to "Bloom". The Workspace menu no longer asks: what a menu item acts on is
+    /// `WorkspaceMenuSubject`, which also hears about a row highlighted on Home or in the Archive,
+    /// and which decides per item whether an archived workspace can answer it at all.
     var menuWorkspace: Workspace? {
         selectedWorkspace ?? selectedArchivedWorkspace
     }

@@ -70,7 +70,6 @@ struct ReviewPaneView: View {
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { paneHeight = $0 }
         .background(Palette.surface)
-        .background { shortcuts }
         // A pane can be pointed at a session this launch has never opened, so the transcript is
         // built here rather than assumed, exactly as `CenterPaneView.prepare` does for a chat.
         .task(id: model.activeSession?.id) {
@@ -134,26 +133,4 @@ struct ReviewPaneView: View {
         }
     }
 
-    /// The walk through a change, without the mouse.
-    ///
-    /// Hidden buttons rather than menu commands, for the reason spelled out in `SessionTabsView`:
-    /// the app's menu bar is built elsewhere, and a key equivalent is only offered to the menu bar
-    /// and to the view hierarchy. These are in the hierarchy, and only while a review is actually
-    /// on screen, so the same keys mean nothing while the reader is in a conversation.
-    ///
-    /// Cmd+Option+J and K rather than Conductor's bare j and k. Bare letters are its choice
-    /// because it can suppress them while an input has focus; a SwiftUI window has text fields in
-    /// three columns at once and no such gate, and a review that ate every j typed into the
-    /// composer would be worse than no shortcut at all.
-    private var shortcuts: some View {
-        ZStack {
-            Button("Next Changed File") { FileReview.step(1, in: model) }
-                .keyboardShortcut("j", modifiers: [.command, .option])
-            Button("Previous Changed File") { FileReview.step(-1, in: model) }
-                .keyboardShortcut("k", modifiers: [.command, .option])
-        }
-        .frame(width: 0, height: 0)
-        .opacity(0)
-        .accessibilityHidden(true)
-    }
 }

@@ -18,6 +18,13 @@ struct BloomCommands: Commands {
     /// Nil in every scene but the main window. See `MainWindowFocus`.
     @FocusedValue(\.isMainWindowFocused) private var isMainWindowFocused: Bool?
 
+    /// The row Home or the Archive has highlighted, which is what the Workspace menu acts on when
+    /// the sidebar is not pointing at a workspace itself. See `FocusedMenuValues`.
+    @FocusedValue(\.focusedWorkspaceRow) private var focusedRow: FocusedWorkspaceRow?
+
+    /// The focused window's Save, when it has one. See `FocusedMenuValues`.
+    @FocusedValue(\.saveAction) private var saveAction: SaveAction?
+
     init(model: AppModel) {
         self.model = model
     }
@@ -141,28 +148,52 @@ struct BloomCommands: Commands {
 
             Divider()
 
-            // Cmd+W belongs to the session, not the window. Bloom has no Save item, so a group
-            // anchored after `.saveItem` is dropped whole and Cmd+W falls through to the system
-            // Close, which used to end the process and every agent with it.
+            // Cmd+W belongs to the tab, not the window, and this used to be Close Session, which
+            // is not the same claim. It closed the workspace's active conversation whatever was in
+            // front, so on a browser, a review or the notes it ended a chat in some other pane,
+            // silently whenever that chat was idle. Four kinds of tab could be opened from the
+            // keyboard and none of them could be closed.
             //
-            // It belongs to the session in the MAIN window, though, which is why it is scoped
-            // to that scene below. The menu bar is shared with Settings and with each project's
-            // settings window, and unscoped this item both closed the wrong thing from those
-            // windows and left them with no working Cmd+W of their own.
-            Button("Close Session") {
-                guard let workspace = model.selectedModel,
-                      let session = workspace.activeSession else { return }
-                CloseSessionAlert.shared.close(session, in: workspace)
+            // There is no Close Session beside it, because a conversation IS a tab in this strip
+            // and closing one still asks what `SessionClosure` asks. The obvious second half,
+            // moving Close Session to Shift+Cmd+W, is not available: that key is the window's own
+            // Close and has to stay so. See `WindowDismissal` and `TabClosure`.
+            //
+            // It belongs to the tab in the MAIN window, though, which is why it is scoped to that
+            // scene below. The menu bar is shared with Settings and with each project's settings
+            // window, and unscoped this item both closed the wrong thing from those windows and
+            // left them with no working Cmd+W of their own.
+            Button("Close Tab") {
+                closeSelectedTab()
             }
             .keyboardShortcut("w", modifiers: .command)
-            // Scoped to the main window as well as to there being a session, because this item
-            // holds Cmd+W for the whole app. See `MainWindowFocus`.
-            .disabled(isMainWindowFocused != true || model.selectedModel?.activeSession == nil)
+            // Scoped to the main window as well as to there being a tab, because this item holds
+            // Cmd+W for the whole app. See `MainWindowFocus`.
+            .disabled(isMainWindowFocused != true || closableTab == nil)
 
             Divider()
 
             Button("Add Project Folder…", action: addProjectFolder)
             .keyboardShortcut("o", modifiers: [.command, .shift])
+        }
+
+        // The item this file used to say did not exist. Two views bind Cmd+S (the project settings
+        // window's save bar and the inspector's file editor) and the menu bar advertised neither,
+        // which is a key equivalent nobody can discover.
+        //
+        // `.saveItem` is where every Mac app puts it, under the Close group, and having a real one
+        // there also gives that placement something to anchor against for the first time.
+        //
+        // The key is on the item as well as on the button that publishes the action, which is a tie
+        // AppKit settles in the view hierarchy's favour: the button wins and this item never fires
+        // from the keyboard. That is fine and is why both exist. What this adds is the row, its
+        // key drawn where people look for it, and a target for the pointer. Where nothing has
+        // published a Save the item is disabled, and a disabled item does not consume its key, so a
+        // view that still keeps Cmd+S to itself keeps working. See `FocusedMenuValues`.
+        CommandGroup(replacing: .saveItem) {
+            Button("Save") { saveAction?.perform() }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(saveAction?.isEnabled != true)
         }
 
         CommandGroup(after: .pasteboard) {
@@ -224,6 +255,24 @@ struct BloomCommands: Commands {
             Button("Next Tab") { cycleCentreTab(by: 1) }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
                 .disabled(!canCycleCentreTabs)
+
+            goToTabMenu
+
+            Divider()
+
+            // The walk through a change, which used to be two invisible buttons inside
+            // `ReviewPaneView` carrying Cmd+Option+J and K with no menu item anywhere. The four tab
+            // keys made this move first and wrote down the measurement: a key registered on a
+            // hidden button and on a menu item is not a tie, the button wins and the item never
+            // fires, so it has to be one or the other. Here it is the menu, which greys itself out
+            // when there is nothing to step through and says the keys out loud.
+            Button("Next Changed File") { stepChangedFile(1) }
+                .keyboardShortcut("j", modifiers: [.command, .option])
+                .disabled(!canStepChangedFiles)
+
+            Button("Previous Changed File") { stepChangedFile(-1) }
+                .keyboardShortcut("k", modifiers: [.command, .option])
+                .disabled(!canStepChangedFiles)
 
             Divider()
         }
@@ -296,12 +345,33 @@ struct BloomCommands: Commands {
                 .disabled(!zoom.canResetSize)
         }
 
+        // Every item here used to be gated on `AppModel.selectedWorkspace`, which is the sidebar's
+        // selection and nothing else. On Home the selection is `.home` and in the Archive it is
+        // `.archive`, so a row highlighted in either list left this whole menu greyed out while the
+        // user was pointing straight at the workspace it names. What each item acts on now is
+        // `WorkspaceMenuSubject` in the core, resolved from the selection and from whichever list
+        // has published a row, with the precedence and the archived cases held by its tests.
         CommandMenu("Workspace") {
+            // Rename had no menu item at all: it existed on the row context menus alone, which a
+            // keyboard-only user reaches only through VoiceOver. No key equivalent, because Finder
+            // gives Rename none either and both lists already spend Return on opening a row.
+            Button("Rename") {
+                guard let workspace = workspace(for: .rename) else { return }
+                NotificationCenter.default.post(
+                    name: .bloomRenameWorkspace, object: nil,
+                    userInfo: [Notification.bloomWorkspaceIDKey: workspace.id.rawValue]
+                )
+            }
+            .disabled(workspace(for: .rename) == nil)
+
+            Divider()
+
             Button("Archive Workspace") {
-                archiveSelectedWorkspace()
+                guard let workspace = workspace(for: .archive) else { return }
+                archive(workspace)
             }
             .keyboardShortcut(.delete, modifiers: .command)
-            .disabled(model.selectedWorkspace == nil)
+            .disabled(workspace(for: .archive) == nil)
 
             // The way back, which the menu bar had no item for at all. Before this the only path
             // to `restoreArchived` in the whole app was the undo registered by the archive that
@@ -309,38 +379,36 @@ struct BloomCommands: Commands {
             // anywhere. See `ArchivedWorkspaceView` for why reading it and restoring it are two
             // different things.
             Button("Restore Workspace") {
-                restoreArchivedWorkspace()
+                guard let workspace = restorableWorkspace else { return }
+                Task { await model.restore(workspace) }
             }
-            .disabled(
-                model.selectedArchivedWorkspace == nil
-                    || model.selectedArchivedWorkspace.map { model.restoring.contains($0.id) } == true
-            )
+            .disabled(restorableWorkspace == nil)
 
             Divider()
 
             Button("Open in Editor") {
-                guard let workspace = model.selectedWorkspace else { return }
+                guard let workspace = workspace(for: .openInEditor) else { return }
                 Reveal.inEditor(workspace.path)
             }
             .keyboardShortcut("e", modifiers: [.command, .shift])
-            .disabled(model.selectedWorkspace == nil)
+            .disabled(workspace(for: .openInEditor) == nil)
 
             Button("Reveal in Finder") {
-                guard let workspace = model.selectedWorkspace else { return }
+                guard let workspace = workspace(for: .revealInFinder) else { return }
                 Reveal.inFinder(workspace.path)
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
-            .disabled(model.selectedWorkspace == nil)
+            .disabled(workspace(for: .revealInFinder) == nil)
 
-            // `menuWorkspace`, not `selectedWorkspace`: a branch name is the one thing on this
-            // menu that still means something once the worktree has been removed, and it is what
-            // somebody reading an archived workspace reaches for.
+            // The one item an archived workspace still answers to. A branch name means something
+            // once the worktree has gone, and opening an editor on a path that is not there does
+            // not: that pair is the whole of `WorkspaceMenuSubject.allows`.
             Button("Copy Branch Name") {
-                guard let workspace = model.menuWorkspace else { return }
+                guard let workspace = workspace(for: .copyBranchName) else { return }
                 Clipboard.copy(workspace.branch)
             }
             .keyboardShortcut("c", modifiers: [.command, .shift])
-            .disabled(model.menuWorkspace == nil)
+            .disabled(workspace(for: .copyBranchName) == nil)
 
             Divider()
 
@@ -348,11 +416,14 @@ struct BloomCommands: Commands {
 
             runScriptsMenu
 
+            // The subject's own model rather than the selected one, so a row highlighted on Home
+            // stops the agent that row is about. It is `existingModel`, which only reads: a
+            // workspace this launch has never opened has no transcript to stop anyway.
             Button("Stop Agent") {
-                model.selectedModel?.activeTranscript?.stop()
+                subjectModel?.activeTranscript?.stop()
             }
             .keyboardShortcut(".", modifiers: .command)
-            .disabled(model.selectedModel?.activeTranscript?.isRunning != true)
+            .disabled(subjectModel?.activeTranscript?.isRunning != true)
         }
 
         CommandGroup(replacing: .help) {
@@ -503,6 +574,102 @@ struct BloomCommands: Commands {
         WorkspaceTabsStore.shared.selectNextTab(offset: offset, in: workspace)
     }
 
+    /// Cmd+1 to Cmd+9, and the only place in the app a tab can be reached by name from the
+    /// keyboard.
+    ///
+    /// Bloom bound neither these nor Ctrl+Tab: the full shortcut grep found 74 bindings and not one
+    /// digit, so in a strip of five tabs the fifth was four presses of Cmd+Shift+]. Safari,
+    /// Terminal and Xcode all bind them, and all give 9 to the last tab rather than to the ninth.
+    ///
+    /// A submenu that lists the tabs by their own names rather than nine items called Tab 1, which
+    /// is how Terminal's Window menu draws the same keys, and it means the menu answers "what is
+    /// open in this workspace" as well as carrying the shortcut. Which number reaches which tab is
+    /// `TabCycle.numbered` in the core.
+    @ViewBuilder
+    private var goToTabMenu: some View {
+        if let workspace = model.selectedModel {
+            let entries = WorkspaceTabsStore.shared.entries(in: workspace)
+            Menu("Go to Tab") {
+                ForEach(TabCycle.numbered(entries), id: \.tab) { entry in
+                    tabItem(entry.tab, ordinal: entry.ordinal, in: workspace)
+                }
+            }
+            .disabled(entries.isEmpty)
+        }
+    }
+
+    @ViewBuilder
+    private func tabItem(_ tab: PaneContent, ordinal: Int?, in workspace: WorkspaceModel) -> some View {
+        let button = Button(tabTitle(tab, in: workspace)) {
+            WorkspaceTabsStore.shared.select(tab, in: workspace)
+        }
+        if let ordinal {
+            button.keyboardShortcut(KeyEquivalent(Character("\(ordinal)")), modifiers: .command)
+        } else {
+            button
+        }
+    }
+
+    /// What a tab is called in the strip, so the menu and the strip cannot say two different names
+    /// for one tab.
+    private func tabTitle(_ tab: PaneContent, in workspace: WorkspaceModel) -> String {
+        switch tab {
+        case .chat(let id):
+            let title = workspace.sessions.first { $0.id == id }?.title ?? ""
+            return title.isEmpty ? "Untitled" : title
+        case .tool(let id):
+            guard let tool = CenterTabStore.shared.tabs(for: workspace.workspace.id)
+                .first(where: { $0.id == id }) else { return "Tab" }
+            return CenterTabStore.shared.displayTitle(of: tool, in: workspace)
+        }
+    }
+
+    // MARK: - Closing what is in front
+
+    /// What Cmd+W would close: the tab in front, or the pane of it the keyboard is in. See
+    /// `TabClosure`, which is the rule and which the tests hold.
+    private var closableTab: PaneContent? {
+        guard let workspace = model.selectedModel else { return nil }
+        let tabs = WorkspaceTabsStore.shared
+        guard let tab = tabs.selectedTab(in: workspace) else { return nil }
+        return TabClosure.target(
+            selectedTab: tab,
+            focusedPaneContent: tabs.content(of: tabs.focusedPane(of: tab), in: tab)
+        )
+    }
+
+    /// Closing a conversation still goes through `CloseSessionAlert`, which asks when there is
+    /// something to lose by it and never asks when there is not. That is the whole of what the old
+    /// Close Session did, so nothing about a chat closes more quietly than it used to.
+    private func closeSelectedTab() {
+        guard let workspace = model.selectedModel, let target = closableTab else { return }
+        switch target {
+        case .chat(let id):
+            guard let session = workspace.sessions.first(where: { $0.id == id }) else { return }
+            CloseSessionAlert.shared.close(session, in: workspace)
+        case .tool(let id):
+            guard let tab = CenterTabStore.shared.tabs(for: workspace.workspace.id)
+                .first(where: { $0.id == id }) else { return }
+            Task { await CenterTabStore.shared.close(tab) }
+        }
+    }
+
+    // MARK: - Walking a review
+
+    /// Greyed when there is no review open or nothing changed in the worktree, which is the state
+    /// the two hidden buttons expressed by not existing.
+    private var canStepChangedFiles: Bool {
+        guard let workspace = model.selectedModel, !workspace.changedFiles.isEmpty else {
+            return false
+        }
+        return CenterTabStore.shared.review(for: workspace.workspace.id) != nil
+    }
+
+    private func stepChangedFile(_ delta: Int) {
+        guard let workspace = model.selectedModel else { return }
+        FileReview.step(delta, in: workspace)
+    }
+
     private func closeCentrePane() {
         guard let workspace = model.selectedModel else { return }
         let tabs = WorkspaceTabsStore.shared
@@ -540,6 +707,42 @@ struct BloomCommands: Commands {
         }
     }
 
+    // MARK: - What the Workspace menu is about
+
+    /// The workspace the menu acts on, live or archived, decided by `WorkspaceMenuSubject`.
+    private var subject: WorkspaceMenuSubject? {
+        WorkspaceMenuSubject.resolve(selection: model.selection, focusedRow: focusedRow?.row)
+    }
+
+    /// The workspace an item may act on, or nil, which is the same answer the item's `disabled`
+    /// reads. Asked twice per item on purpose: the action and the greying must not be able to
+    /// disagree, and both are a dictionary lookup over values already in memory.
+    private func workspace(for action: WorkspaceMenuAction) -> Workspace? {
+        guard let subject, subject.allows(action) else { return nil }
+        // The row a list published carries the workspace itself, which is the only way to reach an
+        // ARCHIVED one: `AppModel` deliberately holds live workspaces alone, so an archived row
+        // highlighted on Home is nowhere else in memory.
+        if let focusedRow, focusedRow.workspace.id == subject.id { return focusedRow.workspace }
+        return [model.selectedWorkspace, model.selectedArchivedWorkspace]
+            .compactMap { $0 }
+            .first { $0.id == subject.id }
+    }
+
+    /// Restore, which additionally has to say no while one is already running.
+    private var restorableWorkspace: Workspace? {
+        guard let workspace = workspace(for: .restore),
+              !model.restoring.contains(workspace.id) else { return nil }
+        return workspace
+    }
+
+    /// The live model behind the subject, when this launch has one. Only Stop Agent asks: setup
+    /// and the run scripts need a workspace whose settings have been read, which is the one the
+    /// window is actually showing.
+    private var subjectModel: WorkspaceModel? {
+        guard let id = subject?.liveID else { return nil }
+        return model.existingModel(for: id)
+    }
+
     /// Straight through to `AppModel.archive`, exactly as the sidebar's context menu and the
     /// window title's menu do.
     ///
@@ -549,13 +752,7 @@ struct BloomCommands: Commands {
     /// being read. `AppModel.archive` runs a git safety check and only stops when there is
     /// something specific to lose, and then it says what. Keeping both meant this shortcut alone
     /// asked twice on the dangerous archive and asked a useless question on the safe one.
-    private func archiveSelectedWorkspace() {
-        guard let workspace = model.selectedWorkspace else { return }
+    private func archive(_ workspace: Workspace) {
         Task { await model.archive(workspace) }
-    }
-
-    private func restoreArchivedWorkspace() {
-        guard let workspace = model.selectedArchivedWorkspace else { return }
-        Task { await model.restore(workspace) }
     }
 }

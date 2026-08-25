@@ -84,6 +84,20 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.windowBackground)
+        // What the Workspace menu acts on while this screen is up. Home's selection is its own,
+        // not the app's, so before this the menu bar had no way of hearing about a row that was
+        // visibly highlighted: Archive, Reveal in Finder, Open in Editor and Copy Branch Name all
+        // greyed out on the screen that lists every workspace on the Mac. On the whole pane rather
+        // than on the list, so the row still answers while the keyboard is in the search field, as
+        // it does in Mail. See `FocusedMenuValues`.
+        .focusedValue(\.focusedWorkspaceRow, focusedRow)
+        // Rename from the menu bar. Ignored for a workspace this list is not drawing, so the
+        // sidebar and Home can both listen to one post.
+        .onReceive(NotificationCenter.default.publisher(for: .bloomRenameWorkspace)) { note in
+            guard let raw = note.userInfo?[Notification.bloomWorkspaceIDKey] as? String,
+                  let row = row(for: WorkspaceID(raw)), !row.isArchived else { return }
+            renaming = row.id
+        }
         // Keyed on the revision rather than on the workspace list, which is reassigned every few
         // seconds by the diff stat refresh while this is a database read. `AppModel` bumps the
         // revision from the archive and the restore themselves, so this reloads when the answer
@@ -182,6 +196,14 @@ struct HomeView: View {
             guard let selected, let row = row(for: selected) else { return .ignored }
             open(row)
             return .handled
+        }
+        // Delete on the highlighted row, which is what Mail does with the same key and what this
+        // list answered with nothing at all. Live rows only: an archived row's worktree has
+        // already gone, and destroying its record is the Archive screen's own gesture, behind a
+        // confirmation, because there is no undo for that one.
+        .onDeleteCommand {
+            guard let selected, let row = row(for: selected), !row.isArchived else { return }
+            Task { await app.archive(row.workspace) }
         }
     }
 
@@ -333,6 +355,14 @@ struct HomeView: View {
             if let match = group.rows.first(where: { $0.id == id }) { return match }
         }
         return nil
+    }
+
+    /// The highlighted row, offered to the menu bar. It carries the workspace itself because an
+    /// archived one is nowhere else in memory: `AppModel` holds live workspaces alone, and this
+    /// screen is the only one that lists both. See `FocusedMenuValues`.
+    private var focusedRow: FocusedWorkspaceRow? {
+        guard let selected, let row = row(for: selected) else { return nil }
+        return FocusedWorkspaceRow(workspace: row.workspace, isArchived: row.isArchived)
     }
 
     // MARK: - Actions

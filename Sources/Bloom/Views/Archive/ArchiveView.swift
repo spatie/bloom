@@ -43,6 +43,18 @@ struct ArchiveView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.windowBackground)
+        // What the Workspace menu acts on while this screen is up. The sidebar's selection here is
+        // `.archive`, which names no workspace, so a row highlighted in this list used to leave
+        // Restore and Copy Branch Name greyed out with the workspace they name under the pointer.
+        // Only a single selection publishes: a menu item that acts on one workspace has nothing to
+        // say about eight ticked rows, and the Delete below is what those are for.
+        .focusedValue(\.focusedWorkspaceRow, focusedRow)
+        // Delete on the selection, which is this screen's own verb. It goes through the same
+        // confirmation the menu and the row both use, because there is no undo for this one.
+        .onDeleteCommand {
+            guard !selected.isEmpty else { return }
+            confirming = ArchiveDeletion(cleanup.selected(selected, order: order))
+        }
         .task(id: app.archivedRevision) { await load() }
         .confirmation($confirming) { deletion in
             Confirmation(
@@ -92,6 +104,13 @@ struct ArchiveView: View {
         .padding(.horizontal, Metrics.gutter)
         .frame(height: Metrics.barHeight)
         .tabStripMaterial()
+    }
+
+    /// The one highlighted row, offered to the menu bar. See `FocusedMenuValues`.
+    private var focusedRow: FocusedWorkspaceRow? {
+        guard selected.count == 1, let id = selected.first,
+              let footprint = cleanup.footprints.first(where: { $0.id == id }) else { return nil }
+        return FocusedWorkspaceRow(workspace: footprint.workspace, isArchived: true)
     }
 
     private var summaryOfEverything: String {
