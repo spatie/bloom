@@ -52,6 +52,13 @@ struct TranscriptResumeTests {
         #expect(TranscriptResume.isResuming(state()))
     }
 
+    @Test("a window with nothing in it is not restored, because it would draw a blank transcript")
+    func anEmptyWindowIsNotAWindow() {
+        let remembered = state(drawn: TranscriptWindow(start: 0, end: 0))
+        let window = TranscriptResume.window(remembered, tailStart: 3_920, rowCount: 4_000)
+        #expect(window == TranscriptWindow(start: 3_920, end: 4_000))
+    }
+
     @Test("a window from a session that has since been read again is clamped to it")
     func aStaleWindowIsClamped() {
         let remembered = state(drawn: TranscriptWindow(start: 9_000, end: 9_400))

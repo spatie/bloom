@@ -148,7 +148,11 @@ public enum TranscriptResume {
     public static func window(
         _ remembered: TranscriptPaneState?, tailStart: Int, rowCount: Int
     ) -> TranscriptWindow {
-        guard let remembered else {
+        // A remembered window with no rows in it is not a window anybody was reading in: it is
+        // what a pane wrote down before its session had loaded, and restoring it draws a blank
+        // transcript. Measured, and caught only because the probe reports how many rows are in the
+        // stack: a run that looked like the fastest resize yet was a pane with nothing in it.
+        guard let remembered, remembered.drawn.count > 0 else {
             return TranscriptWindow.opening(rowCount: rowCount, tailStart: tailStart)
         }
         return remembered.drawn.clamped(rowCount: rowCount)

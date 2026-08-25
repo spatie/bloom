@@ -1145,7 +1145,10 @@ struct TranscriptListView: View {
     /// dropped: a reader who arrives, reads what is on screen and switches tab has scrolled
     /// nothing and folded nothing, and is exactly the case this whole file is about.
     private func remember() {
-        guard let memory else { return }
+        // Nothing is written down about a pane that has not drawn anything yet. Its window is
+        // empty, its offset is nought, and both would be restored over a session that has since
+        // loaded. See `TranscriptResume.window`.
+        guard let memory, drawn.window.count > 0 else { return }
         memory.remember(
             TranscriptPaneState(
                 expanded: expanded,
