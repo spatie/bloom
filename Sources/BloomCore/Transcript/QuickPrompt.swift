@@ -17,8 +17,11 @@ public struct QuickPrompt: Identifiable, Sendable, Hashable {
     public var id: QuickPromptID
     /// What the row is called. Short, and searched first.
     public var name: String
-    /// An SF Symbol from `symbols` below. A name rather than an enum case, because the grid can
-    /// grow without every stored row having to still resolve to a case that is on it.
+    /// The mark down the left of the row: either an SF Symbol name from `symbols` below, or one
+    /// emoji. A string rather than an enum case, because the picker can grow without every stored
+    /// row having to still resolve to a case that is on it, and because a row written when this
+    /// held nothing but symbol names still reads back correctly. `QuickPromptMark` is what tells
+    /// the two apart.
     public var symbol: String
     /// The words that go into the draft. Never sent on their own: see `QuickPromptInsertion`.
     public var text: String
@@ -46,22 +49,33 @@ public struct QuickPrompt: Identifiable, Sendable, Hashable {
     /// What a row without an icon gets, and what an unknown symbol name falls back to.
     public static let defaultSymbol = "text.alignleft"
 
-    /// The grid the form offers, and deliberately not a symbol search.
+    /// Every SF Symbol the picker offers, read off `QuickPromptMarkCatalog` rather than written
+    /// out again here.
     ///
-    /// The icon is here to tell five rows apart at a glance rather than to express anything, so a
-    /// browser of six thousand symbols would be a bigger decision than the prompt itself. Eighteen
-    /// is one screenful of six by three, which is small enough to pick from without reading.
-    public static let symbols: [String] = [
-        "text.alignleft", "envelope", "list.bullet", "pencil", "gearshape", "bolt",
-        "checkmark.seal", "exclamationmark.triangle", "arrow.triangle.2.circlepath", "hammer",
-        "magnifyingglass", "scissors", "book", "paintbrush", "ladybug", "shippingbox",
-        "doc.richtext", "sparkles",
-    ]
+    /// It was eighteen names in this file, one band of six by three drawn inline on the form, on
+    /// the argument that a browser of six thousand symbols would be a bigger decision than the
+    /// prompt itself. That argument still holds against a symbol *search*, and the picker is not
+    /// one: it is a hundred marks the owner chose, in nine named bands, behind a square. What
+    /// changed is that eighteen was not enough to tell twenty prompts apart.
+    ///
+    /// Derived rather than duplicated, because a second copy of the list is a copy that drifts,
+    /// and the only thing that would notice is a row drawn with the fallback for no visible reason.
+    public static let symbols: [String] = QuickPromptMarkCatalog.all.compactMap {
+        guard case .symbol(let name) = $0.mark else { return nil }
+        return name
+    }
 
-    /// Whether a stored symbol is one the grid can still show as chosen. A row written by a later
-    /// build, or by hand, is drawn with the fallback rather than with nothing.
+    /// The same list as a set, because `QuickPromptMark` asks it once per row drawn.
+    static let knownSymbols = Set(symbols)
+
+    /// A stored value resolved to something that can actually be drawn: the symbol name, the
+    /// emoji, or the fallback for anything else. Kept under its old name because the column it
+    /// reads is still called `symbol` and every row written before emoji holds one.
+    ///
+    /// A view wants `QuickPromptMark(stored:)` instead, since only that says which of the two it
+    /// got and therefore whether to reach for `Image(systemName:)` or for `Text`.
     public static func resolvedSymbol(_ symbol: String) -> String {
-        symbols.contains(symbol) ? symbol : defaultSymbol
+        QuickPromptMark(stored: symbol).stored
     }
 
     /// The second line of a row: the first stretch of the text itself.

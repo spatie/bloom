@@ -29,10 +29,10 @@ struct QuickPromptRow: View {
                 // is two lines tall, and `Metrics.glyph` beside it read as a speck someone had
                 // dropped rather than as the mark that tells five prompts apart at a glance, which
                 // is the whole job the icon was added for.
-                Image(systemName: QuickPrompt.resolvedSymbol(prompt.symbol))
-                    .imageScale(.medium)
-                    .foregroundStyle(Palette.textSecondary)
-                    .frame(width: Metrics.repoIcon, height: Metrics.repoIcon)
+                // `QuickPromptMarkView` rather than an `Image`, because the mark is an SF Symbol
+                // on most rows and an emoji on some, and the two are not the same size at the same
+                // point size. See its own note.
+                QuickPromptMarkView(stored: prompt.symbol, points: Metrics.repoIcon)
 
                 VStack(alignment: .leading, spacing: Metrics.spacingTight) {
                     Text(prompt.resolvedName)

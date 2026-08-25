@@ -12,14 +12,17 @@ import BloomCore
 ///
 ///     Bloom --snapshot-gallery <dir> --gallery quick-prompts
 ///
-/// Rows rather than the whole `QuickPromptMenu`, and that is the limit of what this page can claim.
-/// The menu owns a search field and a store, and neither belongs in an offscreen render; what it
-/// draws underneath is `QuickPromptRow`, and the row is where every one of those mistakes was.
+/// Two columns: the list on the left, the form on the right. The form is here because the icon
+/// picker replaced an inline grid, and the two things worth looking at are whether an emoji sits
+/// in the same column as a symbol without reading a size larger, and whether the picker hangs off
+/// the well squarely. Neither is visible from the tests, and both are what the last four rounds of
+/// this panel got wrong.
 struct QuickPromptGallery: View {
     var app: AppModel
 
     /// Real prompts rather than lorem: the shipped built-in, one with a long name that has to
-    /// truncate, and one with no name at all, which falls back to its own first line.
+    /// truncate, one with no name at all, which falls back to its own first line, and two marked
+    /// with emoji, which is the case the mark column has to survive.
     private var prompts: [QuickPrompt] {
         [
             QuickPrompt(
@@ -34,11 +37,24 @@ struct QuickPromptGallery: View {
                 text: "Run make test. If anything fails, fix it and run the failing test again on its own.",
                 sortOrder: 1
             ),
+            // The mark that has to hold its own beside the tinted ones on either side of it.
+            QuickPrompt(
+                name: "Hunt the flake",
+                symbol: "\u{1F41B}",
+                text: "Run the failing test twenty times and say what makes it fail.",
+                sortOrder: 2
+            ),
             QuickPrompt(
                 name: "",
                 symbol: "text.alignleft",
                 text: "Walk me through the diff, file by file, and say why each change is there.",
-                sortOrder: 2
+                sortOrder: 3
+            ),
+            QuickPrompt(
+                name: "Ship it",
+                symbol: "\u{1F680}",
+                text: "Push the branch, open the pull request, and wait for the checks.",
+                sortOrder: 4
             ),
             // Longer than the panel by a wide margin, which is the case that has to truncate
             // gracefully rather than push the pencil off the edge or wrap into a third line.
@@ -47,7 +63,7 @@ struct QuickPromptGallery: View {
                     + "from the commits rather than from the diff",
                 symbol: "arrow.triangle.pull",
                 text: "Push the branch and open a pull request. Three sentences, no headings.",
-                sortOrder: 3
+                sortOrder: 5
             ),
             // One word with nowhere to break. Truncation has to cut it rather than let it push
             // everything else out of the row.
@@ -55,21 +71,53 @@ struct QuickPromptGallery: View {
                 name: "Regenerate\u{200B}TheSnapshotFixturesForEveryGalleryPageInOneGo",
                 symbol: "camera",
                 text: "Run every gallery capture and replace the fixtures under Tests.",
-                sortOrder: 4
+                sortOrder: 6
             ),
         ]
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.pane) {
-            panel("The first row, highlighted on opening", selected: 0)
-            panel("Further down the list", selected: 3)
-            panel("Nothing written yet", selected: nil, empty: true)
+        HStack(alignment: .top, spacing: Metrics.pane) {
+            VStack(alignment: .leading, spacing: Metrics.pane) {
+                panel("The first row, highlighted on opening", selected: 0)
+                panel("Nothing written yet", selected: nil, empty: true)
+                form("Name and icon, a symbol chosen", prompt: prompts[0])
+                Spacer(minLength: 0)
+            }
+
+            VStack(alignment: .leading, spacing: Metrics.pane) {
+                form("An emoji chosen", prompt: prompts[4])
+                // Both tabs, and the tab each opens on is read off the mark the prompt already
+                // carries, so these two are also the test of that.
+                form("The picker, open on the well", prompt: prompts[0], picking: true)
+                form("The same picker on a prompt marked with an emoji",
+                     prompt: prompts[4], picking: true)
+                Spacer(minLength: 0)
+            }
         }
         .padding(Metrics.pane)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Palette.surface)
         .environment(app)
+    }
+
+    /// The form, in its own plate, at the width the panel opens at.
+    private func form(
+        _ caption: String, prompt: QuickPrompt, picking: Bool = false
+    ) -> some View {
+        captioned(caption) {
+            QuickPromptForm(
+                editing: prompt,
+                startsPickingMark: picking,
+                onCancel: {}, onSave: { _, _, _ in }, onDelete: {}
+            )
+            .frame(width: 380)
+            .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metrics.corner + 2))
+            .overlay {
+                RoundedRectangle(cornerRadius: Metrics.corner + 2)
+                    .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+            }
+        }
     }
 
     /// `emphasized: false` draws the same row through the same code with the window read as
@@ -78,11 +126,7 @@ struct QuickPromptGallery: View {
     private func panel(
         _ caption: String, selected: Int?, empty: Bool = false, emphasized: Bool = true
     ) -> some View {
-        VStack(alignment: .leading, spacing: Metrics.spacingWide) {
-            Text(caption)
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-
+        captioned(caption) {
             VStack(alignment: .leading, spacing: 0) {
                 searchLine
                 Hairline()
@@ -125,6 +169,15 @@ struct QuickPromptGallery: View {
                 RoundedRectangle(cornerRadius: Metrics.corner + 2)
                     .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
             }
+        }
+    }
+
+    private func captioned(_ caption: String, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: Metrics.spacingWide) {
+            Text(caption)
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textTertiary)
+            content()
         }
     }
 
@@ -174,7 +227,7 @@ extension Gallery {
     static let quickPrompts = Gallery(
         name: "quick-prompts",
         title: "Quick prompts",
-        size: CGSize(width: 460, height: 1080),
+        size: CGSize(width: 880, height: 1400),
         needsFocus: false,
         view: { app in AnyView(QuickPromptGallery(app: app)) }
     )
