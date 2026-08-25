@@ -43,16 +43,19 @@ struct QuickPromptRow: View {
                         .lineLimit(1)
 
                     // The words themselves, so a name chosen badly six weeks ago is still
-                    // recoverable from the row.
-                    Text(prompt.preview)
-                        .font(Typo.caption)
-                        .foregroundStyle(
-                            isEmphasized
-                                ? Palette.selectedEmphasizedText.opacity(0.75)
-                                : Palette.textTertiary
-                        )
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                    // recoverable from the row. Absent when the prompt has no name of its own,
+                    // because then the line above IS the preview and the row said it twice.
+                    if prompt.hasSeparatePreview {
+                        Text(prompt.preview)
+                            .font(Typo.caption)
+                            .foregroundStyle(
+                                isEmphasized
+                                    ? Palette.selectedEmphasizedText.opacity(0.75)
+                                    : Palette.textTertiary
+                            )
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                 }
 
                 Spacer(minLength: Metrics.spacingSmall)

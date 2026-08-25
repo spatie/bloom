@@ -96,7 +96,7 @@ struct QuickPromptGallery: View {
                 newLine
             }
             // The panel's own plate, since a popover's chrome is not here to draw it.
-            .frame(width: 320)
+            .frame(width: 380)
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metrics.corner + 2))
             .overlay {
                 RoundedRectangle(cornerRadius: Metrics.corner + 2)
@@ -151,7 +151,7 @@ extension Gallery {
     static let quickPrompts = Gallery(
         name: "quick-prompts",
         title: "Quick prompts",
-        size: CGSize(width: 400, height: 760),
+        size: CGSize(width: 460, height: 780),
         needsFocus: false,
         view: { app in AnyView(QuickPromptGallery(app: app)) }
     )

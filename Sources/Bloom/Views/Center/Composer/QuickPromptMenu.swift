@@ -47,7 +47,10 @@ struct QuickPromptMenu: View {
     }
 
     /// Wide enough for a name and a line of the prompt under it without either being cut.
-    private static let width: CGFloat = 320
+    /// Wider than the composer's other menus, because a row here carries a name somebody wrote
+    /// rather than a file path, and at 320 the useful half of "Run the tests and fix whatever comes
+    /// back failing" was behind an ellipsis.
+    private static let width: CGFloat = 380
 
     /// How far the scrolling list holds its rows off the panel's edge.
     ///
