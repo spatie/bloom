@@ -55,6 +55,48 @@ struct RunningGlyphGallery: View {
                 }
             }
 
+            // What the sidebar drew INSTEAD, on the day this page was next opened.
+            //
+            // A workspace whose agent was mid turn showed `circle.dotted`, the mark for a worktree
+            // that matches its base branch, because `WorkspaceStatus.resolve` was handed
+            // `isRunning: false` and fell through every test to `.clean`. The report called it "a
+            // hollow dashed ring", and the first hour of reading went into working out which of
+            // the column's two rings that was: `.clean`'s dotted circle, or `.settingUp`'s
+            // spinner. Both are here so nobody has to ask again, and so the distance between the
+            // dot and either ring can be seen rather than described. The state that produced it is
+            // `AgentTurns` in the core.
+            VStack(alignment: .leading, spacing: 8) {
+                Text("The marks it was mistaken for")
+                    .font(Typo.label)
+                    .foregroundStyle(Palette.textSecondary)
+                HStack(alignment: .top, spacing: 24) {
+                    named("Running") { WorkspaceRunningGlyph() }
+                    named("No changes") { WorkspaceStatusGlyph(status: .clean) }
+                    named("Setting up") { WorkspaceStatusGlyph(status: .settingUp) }
+                }
+            }
+
+            // The same three on the selection fill, because that is where the report saw them and
+            // because every meaning colour in the palette is unreadable there: on a selected row
+            // the shape is the whole of what a mark says. See `WorkspaceStatusGlyph.isOnSelection`.
+            VStack(alignment: .leading, spacing: 8) {
+                Text("The same three, selected")
+                    .font(Typo.label)
+                    .foregroundStyle(Palette.textSecondary)
+                HStack(alignment: .top, spacing: 24) {
+                    named("Running") { WorkspaceRunningGlyph(isOnSelection: true) }
+                    named("No changes") {
+                        WorkspaceStatusGlyph(status: .clean, isOnSelection: true)
+                    }
+                    named("Setting up") {
+                        WorkspaceStatusGlyph(status: .settingUp, isOnSelection: true)
+                    }
+                }
+                .padding(8)
+                .background(Palette.accentFill)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+
             VStack(alignment: .leading, spacing: 8) {
                 Text("Four rows, one heartbeat")
                     .font(Typo.label)
@@ -133,7 +175,9 @@ extension Gallery {
     static let runningGlyph = Gallery(
         name: "running-glyph",
         title: "Running mark",
-        size: CGSize(width: 700, height: 900),
+        // Taller than it was, for the two rows that name what this mark was mistaken for. A page
+        // that clips is a page whose last section nobody knows is there.
+        size: CGSize(width: 700, height: 1240),
         needsFocus: false,
         view: { _ in AnyView(RunningGlyphGallery()) }
     )
