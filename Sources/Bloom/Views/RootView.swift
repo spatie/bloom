@@ -304,10 +304,19 @@ extension Notification.Name {
     static let bloomNewWorkspace = Notification.Name("bloom.newWorkspace")
     /// Posted only by `Snapshot`, and only in a debug build. See the handler above.
     static let bloomStartTerminalWorkspace = Notification.Name("bloom.startTerminalWorkspace")
+    /// The Workspace menu's Rename, aimed at whichever list is drawing that row.
+    ///
+    /// A notification rather than a flag on `AppModel`, for the same reason the create sheet is
+    /// one: the field belongs to a row inside a list, the list owns the one field that can be open
+    /// at a time, and a menu item cannot reach into either. Both lists listen, and each ignores a
+    /// workspace it is not drawing, so the post can be made without knowing which is on screen.
+    static let bloomRenameWorkspace = Notification.Name("bloom.renameWorkspace")
 }
 
 extension Notification {
     /// Whether a `bloomNewWorkspace` post wants the sheet opened on the pull request route. Absent
     /// on every other post, which is the ordinary new branch opening.
     static let bloomPullRequestKey = "bloom.newWorkspace.pullRequest"
+    /// Which workspace a `bloomRenameWorkspace` post is about, as its raw id.
+    static let bloomWorkspaceIDKey = "bloom.workspaceID"
 }

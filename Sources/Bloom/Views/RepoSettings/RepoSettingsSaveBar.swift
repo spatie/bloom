@@ -33,6 +33,17 @@ struct RepoSettingsSaveBar: View {
         .padding(.horizontal, Metrics.pane)
         .padding(.vertical, Metrics.inset)
         .background(Palette.surface)
+        // The same Save, offered to the menu bar, which had no Save item at all while this view
+        // held Cmd+S: a key equivalent nothing advertises is one nobody finds. The button keeps the
+        // key, because a hierarchy button beats a menu item for it either way; what the menu gets
+        // is the row, its shortcut drawn beside it, and a target for the pointer. See
+        // `FocusedMenuValues`.
+        .focusedValue(
+            \.saveAction,
+            SaveAction(subject: "project settings", isEnabled: model.isDirty) {
+                Task { await model.save() }
+            }
+        )
     }
 
     @ViewBuilder

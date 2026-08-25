@@ -294,6 +294,26 @@ struct SidebarView: View {
                 .fadesArrivals)
         }
         .onChange(of: listSelection) { _, _ in commitSelection() }
+        // Delete on a selected row, which every Mac list that can delete binds and which
+        // `onDeleteCommand` appeared nowhere in this app to answer. It is the menu item's own
+        // action rather than a second path to the same place: `AppModel.archive` runs the git
+        // safety check, says what is at stake when there is anything, and registers the undo, so
+        // the reflex costs no more here than Shift+Cmd+Delete does from the menu.
+        .onDeleteCommand {
+            guard let id = app.selection.workspaceID,
+                  let workspace = app.workspaces.first(where: { $0.id == id }) else { return }
+            Task { await app.archive(workspace) }
+        }
+        // Rename from the menu bar, which reaches the field this list owns. A workspace this pane
+        // is not drawing is ignored, so Home and the sidebar can both listen to one post.
+        .onReceive(NotificationCenter.default.publisher(for: .bloomRenameWorkspace)) { note in
+            guard let raw = note.userInfo?[Notification.bloomWorkspaceIDKey] as? String else {
+                return
+            }
+            let id = WorkspaceID(raw)
+            guard app.workspaces.contains(where: { $0.id == id }) else { return }
+            renaming = id
+        }
         // Moving off a row has to close whatever field was open on it, or the rename would carry
         // on editing a workspace that is no longer on screen.
         .onChange(of: app.selection, initial: true) { _, target in
