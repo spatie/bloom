@@ -31,7 +31,6 @@ struct UserTurnRowView: View {
     var reviewChips: [ReviewTurnRecord.Chip] = []
     /// Which worktree those paths are relative to, and which review the chips open into.
     var workspace: Workspace
-    var maxWidth: CGFloat
 
     @Environment(AppModel.self) private var app
     /// The list's one value, set in `TranscriptListView`, rather than actions built per bubble:
@@ -45,6 +44,17 @@ struct UserTurnRowView: View {
     /// Where a hovered chip says it is, so the card is drawn over the scroll view rather than
     /// inside a bubble that would clip it. See `TranscriptHoverOverlay`.
     @Environment(\.transcriptHoverHost) private var hoverHost
+    /// The width this bubble may fill, read from the object the list hands down rather than from a
+    /// number the list passes in. See `TranscriptBubbleWidth`: reading it HERE is what keeps a pane
+    /// being made narrower from invalidating every tool row in the session.
+    @Environment(\.transcriptBubbleWidth) private var bubbleWidth
+
+    /// What a bubble drawn outside a transcript is capped at, which is every use of this view that
+    /// is not the list: nothing else puts one up today, and a bubble with no cap at all would run
+    /// the full width of whatever it landed in.
+    private static let uncappedFallback: CGFloat = 560
+
+    private var maxWidth: CGFloat { bubbleWidth?.cap ?? Self.uncappedFallback }
 
     /// The pill inside the sentence the pointer is currently on, reported by `LinkTextView` the
     /// moment it arrives. Nil for every bubble nobody is pointing at, which is what keeps the

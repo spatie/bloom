@@ -42,20 +42,6 @@ struct TranscriptRowView: View, Equatable {
             && lhs.row.parentToolUseID == rhs.row.parentToolUseID
             && lhs.isExpanded == rhs.isExpanded
             && lhs.isNested == rhs.isNested
-            // Only a `.user` row reads it. `maxBubbleWidth` caps a speech bubble and reaches
-            // `UserTurnRowView` from the two branches of `content` that draw one; every other kind
-            // of row is handed it and never looks.
-            //
-            // It was compared for all of them, and it is the one field here that moves during a
-            // drag: `TranscriptGeometry.cap` steps every eight points, so widening the inspector
-            // failed this comparison on most frames and rebuilt every realised row, tool rows and
-            // prose rows included, for a number none of them draw with. The layout those rows owe
-            // the new width is unavoidable and is not what this is about; rebuilding the view tree
-            // to produce it is.
-            //
-            // Scoped rather than dropped, because dropping it would leave a bubble at the width it
-            // was built for while the pane moved out from under it.
-            && (lhs.row.kind != .user || lhs.maxBubbleWidth == rhs.maxBubbleWidth)
             && lhs.workspace.id == rhs.workspace.id
             && lhs.workspace.path == rhs.workspace.path
             // A question being answered has to redraw the row that asked it, and the decision is
@@ -72,9 +58,6 @@ struct TranscriptRowView: View, Equatable {
     var workspace: Workspace
     var isExpanded = false
     var isNested = false
-    /// The width a user bubble is allowed to fill, handed down because the enclosing scroll view
-    /// already measured it and a per row measurement would not size to its content.
-    var maxBubbleWidth: CGFloat = 560
     /// What the project is called, so a permission row can name where a rule would apply. Handed
     /// down for the same reason `workspace` is: it is constant for a whole transcript.
     var projectName: String = ""
@@ -111,8 +94,7 @@ struct TranscriptRowView: View, Equatable {
                 UserTurnRowView(
                     text: review.message,
                     reviewChips: review.chips,
-                    workspace: workspace,
-                    maxWidth: maxBubbleWidth
+                    workspace: workspace
                 )
             } else {
                 // Attachments reach the agent as paths in the prompt text, which is the only
@@ -125,8 +107,7 @@ struct TranscriptRowView: View, Equatable {
                 UserTurnRowView(
                     text: turn.body,
                     attachments: turn.paths,
-                    workspace: workspace,
-                    maxWidth: maxBubbleWidth
+                    workspace: workspace
                 )
             }
 
