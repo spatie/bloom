@@ -174,7 +174,13 @@ public enum TranscriptResume {
         // of a scroll target layout, and measured on this list that layout costs too much to keep:
         // p99 went from 21.8ms to 39.2ms scrolling a 225 row chat with nothing else changed. So
         // the row is what an AppKit list would buy, and until then this is the honest fallback.
-        guard remembered.offset > 0 else { return .first }
+        // **Nought is a place: it is the top of the conversation.** This used to refuse it, on the
+        // reasoning that a pane which has never been laid out reports nought and restoring that
+        // would be a restore of nothing. The pane not being laid out is a fact about the PANE, and
+        // it belongs where the memory is written rather than where it is read: `remember` declines
+        // to write anything until the pane has a height. What was left here was a reader who had
+        // scrolled to the very top of a long conversation being told they had no place at all, and
+        // sent to their first unread row instead. That is the second half of the report.
         return .offset(remembered.offset)
     }
 }

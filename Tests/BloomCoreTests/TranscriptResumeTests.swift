@@ -125,11 +125,9 @@ struct TranscriptResumeTests {
         #expect(placement == .first)
     }
 
-    @Test("the top of the content is a first open rather than a restored nought")
-    func topIsNotRestored() {
-        let placement = TranscriptResume.placement(
-            for: state(offset: 0), rowCount: 400
-        )
-        #expect(placement == .first)
+    @Test("the top of a conversation is a place, and is restored")
+    func theTopIsAPlace() {
+        #expect(TranscriptResume.placement(for: state(offset: 0), rowCount: 400) == .offset(0))
     }
+
 }

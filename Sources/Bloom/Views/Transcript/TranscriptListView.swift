@@ -1153,10 +1153,12 @@ struct TranscriptListView: View {
     /// dropped: a reader who arrives, reads what is on screen and switches tab has scrolled
     /// nothing and folded nothing, and is exactly the case this whole file is about.
     private func remember() {
-        // Nothing is written down about a pane that has not drawn anything yet. Its window is
-        // empty, its offset is nought, and both would be restored over a session that has since
-        // loaded. See `TranscriptResume.window`.
-        guard let memory, drawn.window.count > 0 else { return }
+        // Nothing is written down about a pane that has not drawn anything yet, or has not been
+        // laid out yet. Its window is empty and its offset is nought, and both would be restored
+        // over a session that has since loaded. The height is what says a layout has happened, and
+        // it is checked HERE rather than where the memory is read, because nought is a real place
+        // to a reader who is at the top of a conversation. See `TranscriptResume.placement`.
+        guard let memory, drawn.window.count > 0, geometry.paneHeight > 0 else { return }
         memory.remember(
             TranscriptPaneState(
                 expanded: expanded,
