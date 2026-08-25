@@ -170,6 +170,11 @@ public enum Shell {
         outReader.stackSize = 512 * 1_024
         errReader.stackSize = 512 * 1_024
 
+        // Installed before `run()`, never after. See `ProcessExitGate`: a child that exits before
+        // the handler exists never calls it, and the wait below would never end.
+        let exit = ProcessExitGate()
+        process.terminationHandler = { _ in exit.signal() }
+
         try process.run()
 
         outReader.start()
@@ -188,9 +193,7 @@ public enum Shell {
         }
 
         await withTaskCancellationHandler {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                process.terminationHandler = { _ in continuation.resume() }
-            }
+            await exit.wait()
         } onCancel: {
             if process.isRunning { process.terminate() }
         }

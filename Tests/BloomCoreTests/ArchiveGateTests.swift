@@ -117,6 +117,31 @@ struct ArchiveGateTests {
         #expect(await Git.branchExists(workspace.branch, in: repo.path))
     }
 
+    /// The branch delete is the one step of an archive that does not touch the worktree, so it is
+    /// the one step that still ran when the worktree was not there. That is also the moment
+    /// nothing is guarding it: the safety report finds no worktree, reads as "nothing at stake",
+    /// and the confirmation the owner would have answered never appears.
+    ///
+    /// Found through `make dev-db`, which points the copied workspace rows at a root that does not
+    /// exist and leaves `repos.path` real, so archiving in Bloom Dev deleted a branch in the
+    /// owner's own repository.
+    @Test("a workspace whose worktree is gone keeps its branch", .tags(.destructive))
+    func aMissingWorktreeKeepsItsBranch() async throws {
+        let (repo, registered, manager, workspace) = try await makeWorkspace()
+        defer { repo.cleanUp() }
+
+        // Remove the worktree behind Bloom's back, which is the state a detached dev database is
+        // in for every one of its rows.
+        try await Git.removeWorktree(repo: repo.path, path: workspace.path, force: true)
+        #expect(FileManager.default.fileExists(atPath: workspace.path) == false)
+        #expect(await Git.branchExists(workspace.branch, in: repo.path))
+
+        try await manager.archive(workspace: workspace, repo: registered, deleteBranch: true)
+
+        // Archived, and the branch is still there to be deleted by hand if that is really wanted.
+        #expect(await Git.branchExists(workspace.branch, in: repo.path))
+    }
+
     @Test("a squash merged branch is refused by git alone and cleared by GitHub", .tags(.destructive))
     func squashMergeIsClearedByThePullRequest() async throws {
         let (repo, registered, manager, workspace) = try await makeWorkspace()

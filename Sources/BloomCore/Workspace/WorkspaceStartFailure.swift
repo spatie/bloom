@@ -48,7 +48,6 @@ public enum WorkspaceStartTrouble: Sendable, Equatable {
                 """
 
         case let .baseBranchMissing(branch, project, wasRequested, branches):
-            let whichBranches = Self.listing(branches)
             let opening = wasRequested
                 ? "Bloom could not start that workspace because the project '\(project)' has no "
                     + "branch called '\(branch)'."
@@ -59,6 +58,12 @@ public enum WorkspaceStartTrouble: Sendable, Equatable {
                 return opening + " It has no branches at all, so there is nothing to cut from. "
                     + "Do not retry with another name. Say so and carry on with your own work."
             }
+            // Below the guard, not above it. It used to be the first line of this case, three
+            // lines before the emptiness check written to protect it, and `listing` reached
+            // `shown[-1]` on an empty list and killed the app. Reached whenever a project has
+            // commits but no local branches, and whenever `Git.branches` throws and a `try?` turns
+            // that into an empty array, which is the same call that produced this failure.
+            let whichBranches = Self.listing(branches)
             let hasOne = branches.count == 1
             return opening
                 + (hasOne ? " Its only branch is \(whichBranches)." : " Its branches are \(whichBranches).")
@@ -115,10 +120,19 @@ public enum WorkspaceStartTrouble: Sendable, Equatable {
 
     /// Named branches, capped. A repository with two hundred branches would otherwise spend the
     /// whole tool result listing them, and the caller only needs enough to pick one.
+    /// Total over its input, including the empty list.
+    ///
+    /// The caller guards emptiness and used to do it three lines too late, which trapped. The
+    /// guard is in the right place now and this answers for nothing anyway, because a sentence
+    /// built from no branches is a sentence with no business being built. Two agreeing mechanisms,
+    /// because the one that was supposed to be enough was not.
     private static func listing(_ branches: [String]) -> String {
         let shown = branches.prefix(10).map { "'\($0)'" }
         let rest = branches.count - shown.count
-        var text = shown.count == 1 ? shown[0] : shown.dropLast().joined(separator: ", ") + " and " + shown[shown.count - 1]
+        guard let last = shown.last else { return "" }
+        var text = shown.count == 1
+            ? last
+            : shown.dropLast().joined(separator: ", ") + " and " + last
         if rest > 0 { text += ", and \(rest) more" }
         return text
     }

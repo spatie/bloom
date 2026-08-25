@@ -549,6 +549,10 @@ public struct WorkspaceManager: Sendable {
         // written where the destructive work starts rather than where the row is finally saved.
         guard workspace.state == .active else { return }
 
+        // Read before anything is removed, because the removal below is what makes it false.
+        // See the branch delete near the end of this method for what it guards.
+        let worktreeWasOnDisk = FileManager.default.fileExists(atPath: workspace.path)
+
         let settings = SettingsLoader.load(repo: repo.path)
         let shouldDeleteBranch = deleteBranch ?? settings.deleteBranchOnArchive
 
@@ -606,7 +610,23 @@ public struct WorkspaceManager: Sendable {
 
         try await Git.removeWorktree(repo: repo.path, path: workspace.path, force: force)
 
-        if shouldDeleteBranch {
+        // **Only when the worktree was really there.** Deleting a branch is the one step here
+        // that does not touch the worktree at all, so it is the one step that still happens when
+        // the worktree is not on disk, and that is exactly when nothing is protecting it: the
+        // safety report finds no worktree, reads as "nothing at stake", and the confirmation the
+        // owner would have answered never appears.
+        //
+        // `make dev-db` is how this was found. It points the copied workspace rows at a root that
+        // does not exist so the dev copy cannot delete a real worktree, and deliberately leaves
+        // `repos.path` real so there is something to read a diff from. A branch delete needs only
+        // the repository, so archiving in Bloom Dev with `delete_branch_on_archive` set deleted a
+        // branch in the owner's own repository, silently.
+        //
+        // It is the right rule for the real app too. What this setting is for is tidying up the
+        // branch belonging to a worktree Bloom has just removed. A worktree Bloom never found is a
+        // state Bloom did not make, and a branch left behind can be deleted by hand later, where a
+        // branch deleted here cannot be brought back.
+        if shouldDeleteBranch, worktreeWasOnDisk {
             do {
                 try await Git.deleteBranch(workspace.branch, in: repo.path)
             } catch {
