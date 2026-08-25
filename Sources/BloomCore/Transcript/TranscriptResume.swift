@@ -51,24 +51,6 @@ public struct TranscriptPaneState: Equatable, Sendable {
         }
     }
 
-    /// The width the rows were laid out at and the scale they were drawn at, which are the two
-    /// things that decide how tall a row is and so what a point of offset means.
-    ///
-    /// Optional at both ends, and that is the rule rather than a convenience: a pane that has not
-    /// been laid out yet has no width to offer, and a measurement nobody has taken cannot
-    /// contradict one that was. The alternative was to treat "not measured" as "different" and
-    /// throw away every restored position on the frame the geometry had not landed on yet, which
-    /// is most of them.
-    public struct Measure: Equatable, Sendable {
-        public var width: Double
-        public var fontScale: Double
-
-        public init(width: Double, fontScale: Double) {
-            self.width = width
-            self.fontScale = fontScale
-        }
-    }
-
     /// The sequence numbers of the rows the reader had unfolded.
     public var expanded: Set<Int>
     /// Where the view was, in points from the top of the content.
@@ -81,7 +63,6 @@ public struct TranscriptPaneState: Equatable, Sendable {
     public var isAtLiveEnd: Bool
     /// How many rows the session held when this was written. See `TranscriptResume.placement`.
     public var rowCount: Int
-    public var measure: Measure?
     /// The rows the list was drawing when the offset was taken.
     ///
     /// The offset is a number of points into the content, and the content is exactly these rows,
@@ -94,14 +75,12 @@ public struct TranscriptPaneState: Equatable, Sendable {
         offset: Double,
         isAtLiveEnd: Bool,
         rowCount: Int,
-        measure: Measure?,
         drawn: TranscriptWindow = TranscriptWindow(start: 0, end: 0)
     ) {
         self.expanded = expanded
         self.offset = offset
         self.isAtLiveEnd = isAtLiveEnd
         self.rowCount = rowCount
-        self.measure = measure
         self.drawn = drawn
     }
 }
@@ -168,8 +147,7 @@ public enum TranscriptResume {
     /// the first unread row, which is what a session nobody has read wants.
     public static func placement(
         for remembered: TranscriptPaneState?,
-        rowCount: Int,
-        measure: TranscriptPaneState.Measure?
+        rowCount: Int
     ) -> TranscriptPlacement {
         guard let remembered, rowCount > 0 else { return .first }
         // A session with fewer rows than it had is not the session that offset was measured in.
@@ -181,10 +159,21 @@ public enum TranscriptResume {
         // width change moves nobody who was there, because the end is a place rather than a
         // measurement, so this is asked before the measure is looked at.
         if remembered.isAtLiveEnd { return .liveEnd }
-        // A point into a document laid out at another width, or at another text size, is a point
-        // into a different document. Rather than land the reader at a plausible looking wrong
-        // place, this opens the way a fresh visit does.
-        if let measure, let was = remembered.measure, was != measure { return .first }
+        // **A point measured at another width is used anyway, and that is a reversal.**
+        //
+        // It used to be refused, on the argument that a point into a document laid out at another
+        // width is a point into a different document and landing the reader at a plausible looking
+        // wrong place is worse than opening the way a fresh visit does. The first half of that is
+        // true and the second half turned out to be the bug the owner reported: opening the way a
+        // fresh visit does means opening at the first unread row, and after an agent has worked
+        // while somebody was on another workspace, that row is the middle of a long conversation.
+        // Roughly where they were beats a screen they have never seen.
+        //
+        // What would settle it properly is remembering the ROW rather than the point, which
+        // survives every width and every re-measurement. SwiftUI will say which row is at the top
+        // of a scroll target layout, and measured on this list that layout costs too much to keep:
+        // p99 went from 21.8ms to 39.2ms scrolling a 225 row chat with nothing else changed. So
+        // the row is what an AppKit list would buy, and until then this is the honest fallback.
         guard remembered.offset > 0 else { return .first }
         return .offset(remembered.offset)
     }

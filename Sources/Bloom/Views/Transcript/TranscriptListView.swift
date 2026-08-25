@@ -1116,8 +1116,7 @@ struct TranscriptListView: View {
         // pane was on another tab and those rows are rows the reader is now looking at.
         switch TranscriptResume.placement(
             for: memory?.remembered(session: transcript.session.id),
-            rowCount: transcript.rows.count,
-            measure: currentMeasure
+            rowCount: transcript.rows.count
         ) {
         case .liveEnd:
             opening = .liveEnd
@@ -1147,21 +1146,6 @@ struct TranscriptListView: View {
 
     // MARK: Remembering where the reader was
 
-    /// What this pane is now, or nothing if it has not been laid out yet.
-    ///
-    /// The bubble cap rather than the container width, because that is the number this view
-    /// actually holds and it is a step function of the width: see `TranscriptGeometry`, which
-    /// explains why the raw width is deliberately not kept. `paneHeight` is nought until the first
-    /// layout, and that is what tells an unmeasured pane apart from a narrow one.
-    ///
-    /// Read off the object rather than out of `geometry` since the cap moved there. Both callers
-    /// are outside `body`, so this reads `cap` without subscribing this view to it, which is the
-    /// whole point of the object.
-    private var currentMeasure: TranscriptPaneState.Measure? {
-        guard geometry.paneHeight > 0 else { return nil }
-        return TranscriptPaneState.Measure(width: bubbleWidth.cap, fontScale: fontScale)
-    }
-
     /// Writes down where the reader is, for the pane to find when it is built again.
     ///
     /// Called when a scroll settles, when a row is folded or unfolded, and when the pane goes
@@ -1179,7 +1163,6 @@ struct TranscriptListView: View {
                 offset: contentOffset.value,
                 isAtLiveEnd: geometry.isNearBottom,
                 rowCount: transcript.rows.count,
-                measure: currentMeasure,
                 // The offset above is a number of points into content that starts at this row.
                 // Written down together because they are one measurement: see `TranscriptWindow`.
                 drawn: drawn.window
