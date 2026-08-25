@@ -19,7 +19,7 @@ struct TranscriptResumeTests {
         isAtLiveEnd: Bool = false,
         rowCount: Int = 400,
         measure: TranscriptPaneState.Measure? = nil,
-        drawnStart: Int = 0
+        drawn: TranscriptWindow = TranscriptWindow(start: 0, end: 400)
     ) -> TranscriptPaneState {
         TranscriptPaneState(
             expanded: expanded,
@@ -27,7 +27,7 @@ struct TranscriptResumeTests {
             isAtLiveEnd: isAtLiveEnd,
             rowCount: rowCount,
             measure: measure ?? self.measure(),
-            drawnStart: drawnStart
+            drawn: drawn
         )
     }
 
@@ -35,13 +35,15 @@ struct TranscriptResumeTests {
 
     @Test("a pane that has never held this session draws the tail")
     func nothingRememberedDrawsTheTail() {
-        #expect(TranscriptResume.window(nil, tailStart: 3_920, rowCount: 4_000) == 3_920)
+        let window = TranscriptResume.window(nil, tailStart: 3_920, rowCount: 4_000)
+        #expect(window == TranscriptWindow(start: 3_920, end: 4_000))
     }
 
     @Test("a pane coming back to a session goes back to the window it was reading in")
     func aReturnGoesBackToItsWindow() {
-        let remembered = state(drawnStart: 3_600)
-        #expect(TranscriptResume.window(remembered, tailStart: 3_920, rowCount: 4_000) == 3_600)
+        let remembered = state(drawn: TranscriptWindow(start: 3_600, end: 4_000))
+        let window = TranscriptResume.window(remembered, tailStart: 3_920, rowCount: 4_000)
+        #expect(window == TranscriptWindow(start: 3_600, end: 4_000))
     }
 
     @Test("a pane with nothing written down is arriving, and one with a memory is coming back")
@@ -52,8 +54,9 @@ struct TranscriptResumeTests {
 
     @Test("a window from a session that has since been read again is clamped to it")
     func aStaleWindowIsClamped() {
-        let remembered = state(drawnStart: 9_000)
-        #expect(TranscriptResume.window(remembered, tailStart: 20, rowCount: 100) == 100)
+        let remembered = state(drawn: TranscriptWindow(start: 9_000, end: 9_400))
+        let window = TranscriptResume.window(remembered, tailStart: 20, rowCount: 100)
+        #expect(window == TranscriptWindow(start: 100, end: 100))
     }
 
     // MARK: Where it opens

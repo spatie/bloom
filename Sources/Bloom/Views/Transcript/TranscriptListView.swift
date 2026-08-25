@@ -34,7 +34,7 @@ struct TranscriptListView: View {
         let rows = transcript.rows
         _drawn = State(initialValue: Drawn(
             session: transcript.session.id,
-            start: TranscriptResume.window(
+            window: TranscriptResume.window(
                 remembered,
                 tailStart: TranscriptTail.start(in: rows.lazy.map(\.kind)),
                 rowCount: rows.count
@@ -165,8 +165,8 @@ struct TranscriptListView: View {
     /// name a row in a conversation nobody is looking at.
     private struct Drawn: Equatable {
         var session: SessionID
-        /// The first row drawn, as an index into `transcript.rows`. See `TranscriptWindow`.
-        var start: Int
+        /// The rows drawn, as indices into `transcript.rows`. See `TranscriptWindow`.
+        var window: TranscriptWindow
     }
 
     @State private var drawn: Drawn
@@ -262,8 +262,8 @@ struct TranscriptListView: View {
     /// `TurnFooterView` hands to `TurnScan` to walk backwards through, and neither could be right
     /// over a slice that starts in the middle.
     private var visibleRows: ArraySlice<TranscriptRow> {
-        let rows = transcript.rows
-        return rows[min(windowStart, rows.count)...]
+        let window = drawnWindow
+        return transcript.rows[window.start..<window.end]
     }
 
     /// The first row of the session this pass hands to the stack.
@@ -273,13 +273,23 @@ struct TranscriptListView: View {
     /// rows out from under the reader. What is computed here is the one thing that cannot be
     /// state: a row somebody has asked for by name has to be in the list on the very pass that
     /// asks for it, and `position` pins the answer the moment it has used it.
-    private var windowStart: Int {
+    private var drawnWindow: TranscriptWindow {
         let rows = transcript.rows
-        let tailStart = drawn.session == transcript.session.id
-            ? min(drawn.start, rows.count)
-            : TranscriptTail.start(in: rows.lazy.map(\.kind))
+        guard drawn.session == transcript.session.id else {
+            return TranscriptWindow.opening(
+                rowCount: rows.count,
+                tailStart: TranscriptTail.start(in: rows.lazy.map(\.kind)),
+                mustReach: mustReachIndex
+            )
+        }
+        let held = drawn.window.clamped(rowCount: rows.count)
+        // A row asked for by name that the held window does not reach moves the window to it.
+        // Everything else leaves it exactly where growth and the arrival put it.
+        guard let mustReach = mustReachIndex, mustReach < held.start || mustReach >= held.end else {
+            return held
+        }
         return TranscriptWindow.opening(
-            rowCount: rows.count, tailStart: tailStart, mustReach: mustReachIndex
+            rowCount: rows.count, tailStart: held.start, mustReach: mustReach
         )
     }
 
@@ -550,6 +560,11 @@ struct TranscriptListView: View {
             }
             .onScrollGeometryChange(for: TranscriptGeometry.self, of: Self.measure) { _, new in
                 geometry = new
+                // The bottom half of the window, and it needs neither an anchor nor a flag: rows
+                // added BELOW the viewport move nothing at all. A window with a bottom edge only
+                // exists after a session was opened on an old row, and reaching the end of it is
+                // the reader asking for what came next. See `TranscriptWindow`.
+                if new.isNearBottom { growWindowDown() }
                 // The state, every time, rather than only on a transition of it.
                 //
                 // This one fact had three copies: SwiftUI's own last projection, this view's
@@ -648,7 +663,7 @@ struct TranscriptListView: View {
                 // conversation.
                 drawn = Drawn(
                     session: transcript.session.id,
-                    start: TranscriptResume.window(
+                    window: TranscriptResume.window(
                         remembered,
                         tailStart: TranscriptTail.start(in: transcript.rows.lazy.map(\.kind)),
                         rowCount: transcript.rows.count
@@ -690,13 +705,13 @@ struct TranscriptListView: View {
                 // right, and it is still before anything has been drawn from it.
                 drawn = Drawn(
                     session: transcript.session.id,
-                    start: TranscriptResume.window(
+                    window: TranscriptResume.window(
                         memory?.remembered(session: transcript.session.id),
                         tailStart: TranscriptTail.start(in: transcript.rows.lazy.map(\.kind)),
                         rowCount: transcript.rows.count
                     )
                 )
-                TranscriptDrawn.note(transcript.rows.count - drawn.start)
+                TranscriptDrawn.note(drawn.window.count)
                 // Whatever the session arrived with, taken in without a fade. This runs whether
                 // or not the row count changed, which matters: two sessions can hold the same
                 // number of rows, and then nothing else would have told the tracker it is
@@ -752,10 +767,10 @@ struct TranscriptListView: View {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard !Task.isCancelled else { return }
                 let settled = TranscriptWindow.settling(
-                    from: drawn.start, rowCount: transcript.rows.count
+                    from: drawn.window, rowCount: transcript.rows.count
                 )
-                drawn = Drawn(session: transcript.session.id, start: settled)
-                TranscriptDrawn.note(transcript.rows.count - settled)
+                drawn = Drawn(session: transcript.session.id, window: settled)
+                TranscriptDrawn.note(settled.count)
                 // **The number the whole of this is about.** The work stamp is the instant the
                 // history was asked for; the vsync stamp is the first frame that could show it,
                 // and the display link cannot run while the main thread is laying rows out. The
@@ -995,6 +1010,15 @@ struct TranscriptListView: View {
     /// the pill, which is the whole of what `catchUp` is for.
     private func goToLiveEnd() {
         catchUp?.cancel()
+        // The live end has to be IN the window before anything can travel to it, and a reader who
+        // is far enough from the end to press this is often reading a window that does not hold
+        // it. The tail rather than everything in between, for `TranscriptWindow.liveEnd`'s reason:
+        // the rows being left behind are not rows anybody is about to look at.
+        if drawn.session == transcript.session.id,
+           drawn.window.canGrowDown(rowCount: transcript.rows.count) {
+            drawn.window = TranscriptWindow.liveEnd(rowCount: transcript.rows.count)
+            TranscriptDrawn.note(drawn.window.count)
+        }
 
         let move = TranscriptMotion.liveEndMove(distance: geometry.reachToEnd, reduceMotion: reduceMotion)
         switch move {
@@ -1051,12 +1075,13 @@ struct TranscriptListView: View {
         didPosition = true
 
         // The window this opening is resolved against, pinned before anything below can take the
-        // reason for it away. `windowStart` widens to hold a search result or an unread mark, and
+        // reason for it away. `drawnWindow` moves to hold a search result or an unread mark, and
         // both of those are gone moments from now: the target is taken a few lines down and the
         // session is marked read at the foot of this function. Left computed, the window would
         // narrow again on the next pass and take the rows the reader was just sent to out from
         // under them. See `mustReachIndex`.
-        drawn = Drawn(session: transcript.session.id, start: windowStart)
+        drawn = Drawn(session: transcript.session.id, window: drawnWindow)
+        TranscriptDrawn.note(drawn.window.count)
 
         // A pane coming back to a session it has already drawn is put back where the reader left
         // it, and none of the three openings below applies: they are all answers to "where should
@@ -1130,7 +1155,7 @@ struct TranscriptListView: View {
                 measure: currentMeasure,
                 // The offset above is a number of points into content that starts at this row.
                 // Written down together because they are one measurement: see `TranscriptWindow`.
-                drawnStart: drawn.start
+                drawn: drawn.window
             ),
             session: transcript.session.id
         )
@@ -1173,6 +1198,20 @@ struct TranscriptListView: View {
     /// layout pass the growth causes and not merely the state write that asks for it. Clearing it
     /// moves nothing: by then the content size is settled, and an anchor only does anything on a
     /// change of size.
+    /// Puts the rest of the conversation back, a chunk at a time, below what is drawn.
+    ///
+    /// The mirror of `growWindow` and much the simpler half. Nothing moves when content is added
+    /// under the viewport, so there is no anchor to arrange and no flag to hold: it can run on the
+    /// arrival frame as happily as on a scroll, which matters because a session opened on an old
+    /// row is at the bottom of its own short window from the moment it is drawn.
+    private func growWindowDown() {
+        guard drawn.session == transcript.session.id,
+              drawn.window.canGrowDown(rowCount: transcript.rows.count)
+        else { return }
+        drawn.window = drawn.window.grownDown(rowCount: transcript.rows.count)
+        TranscriptDrawn.note(drawn.window.count)
+    }
+
     private func growWindow() {
         // **Only once the session has finished arriving, and this is the whole of why the first
         // build of this measured worse than no window at all.** A list is at offset nought for the
@@ -1188,12 +1227,12 @@ struct TranscriptListView: View {
         guard arrivalSession == transcript.session.id,
               !geometry.isNearBottom,
               drawn.session == transcript.session.id,
-              TranscriptWindow.canGrow(from: drawn.start),
+              drawn.window.canGrowUp,
               !isGrowing
         else { return }
         isGrowing = true
-        drawn.start = TranscriptWindow.grown(from: drawn.start)
-        TranscriptDrawn.note(transcript.rows.count - drawn.start)
+        drawn.window = drawn.window.grownUp()
+        TranscriptDrawn.note(drawn.window.count)
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(120))
             isGrowing = false

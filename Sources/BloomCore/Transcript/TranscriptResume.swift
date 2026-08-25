@@ -82,12 +82,12 @@ public struct TranscriptPaneState: Equatable, Sendable {
     /// How many rows the session held when this was written. See `TranscriptResume.placement`.
     public var rowCount: Int
     public var measure: Measure?
-    /// The first row the list was drawing when the offset was taken, as an index into the session.
+    /// The rows the list was drawing when the offset was taken.
     ///
-    /// The offset is a number of points into the content, and the content starts at this row, so
-    /// the two are one measurement and are useless apart: restoring the offset into a window that
-    /// starts somewhere else lands the reader somewhere else. See `TranscriptWindow`.
-    public var drawnStart: Int
+    /// The offset is a number of points into the content, and the content is exactly these rows,
+    /// so the two are one measurement and are useless apart: restoring the offset into a window
+    /// that holds different rows lands the reader somewhere else. See `TranscriptWindow`.
+    public var drawn: TranscriptWindow
 
     public init(
         expanded: Set<Int>,
@@ -95,14 +95,14 @@ public struct TranscriptPaneState: Equatable, Sendable {
         isAtLiveEnd: Bool,
         rowCount: Int,
         measure: Measure?,
-        drawnStart: Int = 0
+        drawn: TranscriptWindow = TranscriptWindow(start: 0, end: 0)
     ) {
         self.expanded = expanded
         self.offset = offset
         self.isAtLiveEnd = isAtLiveEnd
         self.rowCount = rowCount
         self.measure = measure
-        self.drawnStart = drawnStart
+        self.drawn = drawn
     }
 }
 
@@ -147,9 +147,11 @@ public enum TranscriptResume {
 
     public static func window(
         _ remembered: TranscriptPaneState?, tailStart: Int, rowCount: Int
-    ) -> Int {
-        guard let remembered else { return min(max(0, tailStart), max(0, rowCount)) }
-        return min(max(0, remembered.drawnStart), max(0, rowCount))
+    ) -> TranscriptWindow {
+        guard let remembered else {
+            return TranscriptWindow.opening(rowCount: rowCount, tailStart: tailStart)
+        }
+        return remembered.drawn.clamped(rowCount: rowCount)
     }
 
     /// Where a pane opens a session, given what it wrote down when it last left one.
