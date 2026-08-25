@@ -247,17 +247,38 @@ final class TranscriptModel {
         // rows and at most a handful of them are questions.
         let decisions = (try? await store.permissionAskDecisions(sessionID: session.id)) ?? [:]
 
-        var built: [TranscriptRow] = []
-        var index: [String: Int] = [:]
-        for message in messages {
-            Self.absorb(message, decisions: decisions, into: &built, indexByRefID: &index)
-        }
-        rows = built
-        indexByRefID = index
+        // Off the main actor, and not for tidiness. The fold below is the one place in the app
+        // that JSON-parses a whole session in one go: `ParentProbe.parentToolUseID` materialises
+        // every message's payload to read one top level key, `ToolResultSummary.decode` does it
+        // again for every tool result, which is the largest payload in the file, and
+        // `PermissionAsk.decode` a third time for every question. Measured with `--switch-probe`
+        // on a release build against the 1,306 message workspace: 35ms of main thread between
+        // `transcript.read.start` and `transcript.rows.built`, in the middle of the wait between
+        // clicking a workspace in the sidebar and seeing it.
+        //
+        // It is safe to move because it was already written to be moved. `absorb` is static and
+        // folds into a list handed to it rather than into the model's own, which is what the
+        // paragraph at the head of this function is about, so nothing observable exists until the
+        // assignment below.
+        let built = await Task.detached(priority: .userInitiated) {
+            var rows: [TranscriptRow] = []
+            var index: [String: Int] = [:]
+            for message in messages {
+                Self.absorb(message, decisions: decisions, into: &rows, indexByRefID: &index)
+            }
+            return (rows: rows, index: index)
+        }.value
+
+        rows = built.rows
+        indexByRefID = built.index
+        // Stays on the main actor, because it reads `TranscriptEventCache` and that cache is the
+        // main actor's. It can afford to: it walks backwards and stops as soon as it has both
+        // numbers, which is within a few rows of the end whatever the session's length.
+        //
         // The one place the whole list is walked, because it is also the one place there is a
         // whole list to walk. Everything after this folds in what arrived. Nothing is held from
         // before: this is a session being read from the start.
-        contextUsage = ContextWindowUsage.latest(in: built)
+        contextUsage = ContextWindowUsage.latest(in: built.rows)
         SwitchTrace.mark("transcript.rows.built", workspace: workspace.id)
         SwitchTrace.markOnScreen("transcript.rows.built", workspace: workspace.id)
 
@@ -274,7 +295,9 @@ final class TranscriptModel {
     /// Handed the list and the reference index it is folding into rather than reaching for the
     /// model's own, so that the same rule can build a whole session's rows somewhere nothing can
     /// see them. See `read(from:)` for why that matters.
-    private static func absorb(
+    /// Nonisolated, so `read(from:)` can run the whole session's worth of it off the main actor.
+    /// It touches nothing but its arguments, which is what made the move a two line change.
+    nonisolated private static func absorb(
         _ message: Message,
         decisions: [String: String],
         into rows: inout [TranscriptRow],

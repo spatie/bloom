@@ -16,11 +16,24 @@ import BloomCore
 ///
 /// The cost limit the event cache carries has no equivalent here. A `ToolPresentation` is a glyph
 /// name, two short strings and a handful of chips, all of them already truncated to a line, so the
-/// count limit is the whole of what needs bounding.
+/// count is the whole of what needs bounding. Only the number was wrong.
 @MainActor
 enum TranscriptPresentationCache {
-    /// Comfortably more than a screen of rows, and the same figure `TranscriptEventCache` holds.
-    private static let limit = 256
+    /// **Every tool row a long session can hold, rather than a screen of them.**
+    ///
+    /// It was 256, on the argument that this is "the same figure `TranscriptEventCache` holds".
+    /// That figure had already been retired next door, and for a reason that applies here word for
+    /// word: the workspace this was measured against holds 1,306 messages, so one scroll from the
+    /// bottom of it to the top evicted every entry and recomputed all of them on the way back.
+    /// What is recomputed is `TranscriptPresenter.present`, which for a Codex workspace decodes
+    /// the whole item out of the call's input and for a `Write` counts the lines of the entire
+    /// file the agent wrote.
+    ///
+    /// A count rather than a cost, unlike the event cache, because the thing being held really is
+    /// small and bounded: the strings in a `ToolPresentation` are already cut to one line before
+    /// they get here, so eight thousand of them is a couple of megabytes at worst, where eight
+    /// thousand payloads would be the transcript itself.
+    private static let limit = 8_192
 
     private static let values: NSCache<NSNumber, ToolPresentationBox> = {
         let cache = NSCache<NSNumber, ToolPresentationBox>()
