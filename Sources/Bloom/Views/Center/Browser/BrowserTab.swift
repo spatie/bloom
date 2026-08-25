@@ -74,6 +74,26 @@ enum BrowserTab {
     /// conversations the strip is mostly for. It is the same argument `CenterTab` already makes
     /// for the review tab, and the way to a second browser is unchanged: the strip's `+` menu
     /// still adds one, and this reuses whichever browser tab is last in the strip.
+    /// Opens the window a page asked for, as a browser tab of the workspace's, in front.
+    ///
+    /// **A new tab every time, which is the one place this disagrees with `open` below.** That one
+    /// is a reader choosing an address out of a transcript, where a tab per link would bury the
+    /// conversations the strip is mostly for. This is a page that has said the document it is
+    /// showing should stay where it is, so pointing the workspace's existing browser at somewhere
+    /// else would be the single outcome `target="_blank"` rules out.
+    ///
+    /// Through `CenterTabStore.add` and `WorkspaceTabsStore.reveal` like everything else in this
+    /// type, so a window a page opened is exactly the tab a browser tab normally is: closable,
+    /// nameable, splittable, and with the same address field over it. How many of these a page may
+    /// have is `BrowserPopups`, which has already answered by the time this is called.
+    static func openWindow(_ url: URL, in model: WorkspaceModel) {
+        guard canOpen(url) else { return }
+        let tab = CenterTabStore.shared.add(
+            kind: .browser, workspaceID: model.workspace.id, url: url.absoluteString
+        )
+        WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
+    }
+
     static func open(_ url: URL, in model: WorkspaceModel) {
         guard canOpen(url) else { return }
         let address = url.absoluteString

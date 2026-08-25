@@ -49,6 +49,19 @@ final class BrowserSession {
     private(set) var page = BrowserTabTitle.BrowserPage()
 
     @ObservationIgnored private let navigation = NavigationObserver()
+    @ObservationIgnored private let ui = BrowserUIObserver()
+
+    /// What this pane can ask the window around it for, which the session cannot do itself. Set by
+    /// the pane drawing it, on every update. See `BrowserPaneHost`.
+    ///
+    /// `@ObservationIgnored` because it is assigned from inside SwiftUI's own update pass: a
+    /// tracked write from there invalidates the view that is mid update, which is the recursion
+    /// `AppModel.model(for:)` documents at length.
+    @ObservationIgnored var host = BrowserPaneHost()
+
+    /// How many windows the page in this session may open, and what happens when it asks for more.
+    /// The rule is in the core; this is the count for this one page.
+    @ObservationIgnored private var popups = BrowserPopups()
 
     /// KVO on everything the toolbar reads, because the navigation delegate does not see every
     /// navigation.
@@ -89,6 +102,8 @@ final class BrowserSession {
         webView.underPageBackgroundColor = NSColor(Palette.surface)
         navigation.owner = self
         webView.navigationDelegate = navigation
+        ui.owner = self
+        webView.uiDelegate = ui
         observations = [
             webView.observe(\.title, options: [.initial, .new]) { [weak self] view, _ in
                 // On the main thread, measured rather than assumed: WebKit posts every one of
@@ -260,10 +275,30 @@ final class BrowserSession {
         }
     }
 
+    /// The page asked for a window of its own, through `target="_blank"` or `window.open`.
+    ///
+    /// The whole decision is `BrowserPopups` in the core, so this is the wiring and nothing else:
+    /// a tab in front, silence, or one sentence to the reader. See `BrowserUIObserver` for why the
+    /// answer is a Bloom tab rather than a panel of WebKit's own.
+    func openWindow(_ url: URL?) {
+        switch popups.request(url) {
+        case .open(let url):
+            host.openTab(url)
+        case .refuse:
+            break
+        case .refuseAndSay(let notice):
+            host.report(notice)
+        }
+    }
+
     func stop() {
         observations = []
         webView.stopLoading()
         webView.navigationDelegate = nil
+        // With the navigation delegate, and for the same reason: a page whose pane has gone must
+        // not be able to put a tab in front of the reader or a panel over the window.
+        webView.uiDelegate = nil
+        host = BrowserPaneHost()
         // The page view rather than the web view, so an attached inspector comes out of the window
         // with the page instead of being left in the wrapper on its own. Releasing this session
         // would get there anyway, WebKit takes an inspector down with the page it is inspecting,

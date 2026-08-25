@@ -44,7 +44,7 @@ struct BrowserTabView: View {
         VStack(spacing: 0) {
             toolbar(session)
             Hairline()
-            BrowserWebView(session: session, paneMenu: pageMenu)
+            BrowserWebView(session: session, paneMenu: pageMenu, host: host)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Palette.surface)
@@ -105,6 +105,24 @@ struct BrowserTabView: View {
             submit: {
                 session.load(address)
                 isAddressFocused = false
+            }
+        )
+    }
+
+    /// What the page in this pane may ask the window for.
+    ///
+    /// Built here rather than on the session because this is the level that knows which workspace
+    /// the tab belongs to, and a session must not learn that: it outlives every view that draws it.
+    /// The model is captured weakly, so a browser tab left open on a workspace nobody has selected
+    /// for an hour is not what keeps that workspace's model alive.
+    private var host: BrowserPaneHost {
+        BrowserPaneHost(
+            openTab: { [weak model] url in
+                guard let model else { return }
+                BrowserTab.openWindow(url, in: model)
+            },
+            report: { [weak app] notice in
+                app?.alert = BloomAlert(title: notice.title, message: notice.message)
             }
         )
     }
