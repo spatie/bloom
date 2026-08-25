@@ -397,6 +397,9 @@ echo "==> a catch says something"
 # Two spellings, because both are how it actually gets typed: the whole thing on
 # one line, and the brace on its own line under it. A catch with a comment in it
 # is not empty and is the way to say the error is deliberately ignored.
+# Single quoted, and SC2016 has to be told so: `$0` in here is awk's whole line
+# and not a shell parameter, so expanding it is the one thing this must not do.
+# shellcheck disable=SC2016
 empty_catch_awk='
   previous ~ /catch[^{]*\{[[:space:]]*$/ && $0 ~ /^[[:space:]]*\}[[:space:]]*$/ {
     printf "%s:%d:%s\n", FILENAME, NR - 1, previous
