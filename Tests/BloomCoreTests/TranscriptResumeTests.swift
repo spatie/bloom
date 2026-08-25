@@ -9,18 +9,24 @@ import Testing
 /// inside one is a rule nothing can hold still.
 @Suite("Transcript resume")
 struct TranscriptResumeTests {
+    private func measure(width: Double = 900, fontScale: Double = 1) -> TranscriptPaneState.Measure {
+        TranscriptPaneState.Measure(width: width, fontScale: fontScale)
+    }
+
     private func state(
         expanded: Set<Int> = [],
-        anchorSeq: Int? = 120,
+        offset: Double = 1_200,
         isAtLiveEnd: Bool = false,
         rowCount: Int = 400,
+        measure: TranscriptPaneState.Measure? = nil,
         drawn: TranscriptWindow = TranscriptWindow(start: 0, end: 400)
     ) -> TranscriptPaneState {
         TranscriptPaneState(
             expanded: expanded,
-            anchorSeq: anchorSeq,
+            offset: offset,
             isAtLiveEnd: isAtLiveEnd,
             rowCount: rowCount,
+            measure: measure ?? self.measure(),
             drawn: drawn
         )
     }
@@ -64,65 +70,116 @@ struct TranscriptResumeTests {
 
     @Test("a pane that has never held this session opens the way it always did")
     func nothingRemembered() {
-        #expect(TranscriptResume.placement(for: nil, rowCount: 400) == .first)
+        let placement = TranscriptResume.placement(
+            for: nil, rowCount: 400, measure: measure()
+        )
+        #expect(placement == .first)
     }
 
     @Test("a session with no rows opens the way it always did")
     func emptySession() {
-        #expect(TranscriptResume.placement(for: state(), rowCount: 0) == .first)
+        #expect(TranscriptResume.placement(for: state(), rowCount: 0, measure: measure()) == .first)
     }
 
-    @Test("a reader who left at the end is put back at the end, not at the row that was there")
-    func liveEndOutranksTheAnchor() {
+    @Test("a reader who left at the end is put back at the end, not at the offset")
+    func liveEndOutranksTheOffset() {
         let placement = TranscriptResume.placement(
-            for: state(anchorSeq: 120, isAtLiveEnd: true), rowCount: 400
+            for: state(offset: 9_000, isAtLiveEnd: true), rowCount: 400, measure: measure()
         )
         #expect(placement == .liveEnd)
     }
 
-    /// The case the flag exists for, and the one the owner reported: a turn ran while the pane was
-    /// on another workspace, so the end has moved and the row that used to be at the top of the
-    /// pane is not where anybody wants to be put back.
+    /// The case the flag exists for: a turn ran while the pane was on another tab, so the content
+    /// grew and the number of points that meant the end names the middle now.
     @Test("the end still means the end after the session has grown")
     func liveEndAfterGrowth() {
         let placement = TranscriptResume.placement(
-            for: state(anchorSeq: 120, isAtLiveEnd: true, rowCount: 400), rowCount: 6_000
+            for: state(offset: 9_000, isAtLiveEnd: true, rowCount: 400),
+            rowCount: 6_000, measure: measure()
         )
         #expect(placement == .liveEnd)
     }
 
-    @Test("a reader who left part way up is put back at the row they were reading")
-    func theAnchorRowIsRestored() {
-        #expect(TranscriptResume.placement(for: state(anchorSeq: 120), rowCount: 400) == .row(120))
+    @Test("a reader who left part way up is put back there")
+    func offsetIsRestored() {
+        let placement = TranscriptResume.placement(
+            for: state(offset: 1_200), rowCount: 400, measure: measure()
+        )
+        #expect(placement == .offset(1_200))
     }
 
-    @Test("a session that has grown under a scrolled reader keeps their row")
+    @Test("a session that has grown under a scrolled reader keeps their offset")
     func growthDoesNotMoveAReader() {
         let placement = TranscriptResume.placement(
-            for: state(anchorSeq: 120, rowCount: 400), rowCount: 900
+            for: state(offset: 1_200, rowCount: 400), rowCount: 900, measure: measure()
         )
-        #expect(placement == .row(120))
-    }
-
-    /// The whole reason the place is a row. A width change, a text size change and the lazy stack
-    /// replacing its guessed heights with measured ones all move every point in the document and
-    /// none of them move a row. The three refusals this suite used to hold are gone with the
-    /// offset they existed to protect.
-    @Test("nothing about how the pane is drawn can stale a row")
-    func aRowSurvivesEveryMeasurement() {
-        #expect(TranscriptResume.placement(for: state(anchorSeq: 7), rowCount: 400) == .row(7))
+        #expect(placement == .offset(1_200))
     }
 
     /// Rows are appended and never removed while a pane is away, so fewer of them means the
-    /// session was read again from the start and nothing written about the old one carries.
-    @Test("a session with fewer rows than it had is not the one that anchor was taken in")
+    /// session was read again from the start and nothing measured against the old one carries.
+    @Test("a session with fewer rows than it had is not the one that offset was measured in")
     func shrunkSessionIsNotResumed() {
-        let placement = TranscriptResume.placement(for: state(rowCount: 400), rowCount: 12)
+        let placement = TranscriptResume.placement(
+            for: state(rowCount: 400), rowCount: 12, measure: measure()
+        )
         #expect(placement == .first)
     }
 
-    @Test("a pane that never saw a row at its top opens the way a fresh visit does")
-    func noAnchorOpensFresh() {
-        #expect(TranscriptResume.placement(for: state(anchorSeq: nil), rowCount: 400) == .first)
+    @Test("an offset measured at another width is a point into another document")
+    func widthChangeStalesTheOffset() {
+        let placement = TranscriptResume.placement(
+            for: state(measure: measure(width: 900)), rowCount: 400, measure: measure(width: 640)
+        )
+        #expect(placement == .first)
+    }
+
+    @Test("and so is one measured at another text size")
+    func fontScaleChangeStalesTheOffset() {
+        let placement = TranscriptResume.placement(
+            for: state(measure: measure(fontScale: 1)),
+            rowCount: 400, measure: measure(fontScale: 1.2)
+        )
+        #expect(placement == .first)
+    }
+
+    /// A width change moves nobody who was at the end, because the end is a place rather than a
+    /// measurement.
+    @Test("a width change does not throw away the live end")
+    func widthChangeKeepsTheLiveEnd() {
+        let placement = TranscriptResume.placement(
+            for: state(isAtLiveEnd: true, measure: measure(width: 900)),
+            rowCount: 400, measure: measure(width: 640)
+        )
+        #expect(placement == .liveEnd)
+    }
+
+    /// The frame the geometry has not landed on yet, which is most arrival frames. A measurement
+    /// nobody has taken must not be allowed to contradict one that was.
+    @Test("a pane that has not been measured yet keeps the offset it was given")
+    func unmeasuredPaneKeepsTheOffset() {
+        let placement = TranscriptResume.placement(
+            for: state(offset: 1_200, measure: measure(width: 900)), rowCount: 400, measure: nil
+        )
+        #expect(placement == .offset(1_200))
+    }
+
+    @Test("and so does one whose last visit was never measured")
+    func unmeasuredMemoryKeepsTheOffset() {
+        let unmeasured = TranscriptPaneState(
+            expanded: [], offset: 1_200, isAtLiveEnd: false, rowCount: 400, measure: nil
+        )
+        let placement = TranscriptResume.placement(
+            for: unmeasured, rowCount: 400, measure: measure(width: 640)
+        )
+        #expect(placement == .offset(1_200))
+    }
+
+    @Test("the top of the content is a first open rather than a restored nought")
+    func topIsNotRestored() {
+        let placement = TranscriptResume.placement(
+            for: state(offset: 0), rowCount: 400, measure: measure()
+        )
+        #expect(placement == .first)
     }
 }

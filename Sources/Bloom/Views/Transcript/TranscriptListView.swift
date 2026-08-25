@@ -138,10 +138,21 @@ struct TranscriptListView: View {
         case liveEnd
         /// A row, and where in the pane it was put.
         case row(Int, UnitPoint)
-
+        /// A number of points down the content, which only a pane coming back to a session it has
+        /// already drawn ever has. See `TranscriptResume`.
+        case offset(Double)
     }
 
     @State private var opening: Opening?
+
+    /// Where the scroll view is now, so that leaving the pane can write it down.
+    ///
+    /// In a box rather than in `@State` for the reason `GeometryBox` sets out: this is written on
+    /// every frame of every scroll, and as `@State` every one of those frames would re-run this
+    /// body and with it every realised row, to store a number the body never reads. It is
+    /// deliberately not folded into `TranscriptGeometry` either: every value in there is quantised
+    /// so that a drag stops writing state, and a raw offset would undo that for all of them.
+    @State private var contentOffset = GeometryBox(0.0)
 
     /// How far below the viewport the end of the conversation is, read for one thing only: how
     /// long the jump pill's scroll back to the live end should run for.
@@ -328,28 +339,6 @@ struct TranscriptListView: View {
         )
     }
 
-    /// Everything typed and waiting to go, at the foot of the list.
-    ///
-    /// Lifted out of the stack because the stack's body is at the type checker's limit: adding
-    /// `scrollTargetLayout` to it was enough to push the whole expression past what it will solve
-    /// in reasonable time, and this is the piece with the most inference in it.
-    @ViewBuilder
-    private var queuedRows: some View {
-        ForEach(transcript.waitingDeliveries) { delivery in
-            PendingTurnRowView(
-                delivery: delivery,
-                // One sentence for the queue, at the foot of it. See the note on
-                // `PendingTurnRowView.caption`.
-                hold: delivery.id == transcript.waitingDeliveries.last?.id
-                    ? transcript.deliveryHold
-                    : nil,
-                onDelete: { transcript.askToDiscard(delivery) }
-            )
-            .padding(.horizontal, TranscriptLayout.inset)
-            .id(Self.pendingID(delivery.id))
-        }
-    }
-
     var body: some View {
         // The first pass of this body after a tab switch, which is where the rebuilt list starts.
         // Stamped once per timeline, so the passes that follow it cost nothing to ignore.
@@ -505,20 +494,20 @@ struct TranscriptListView: View {
                     // be said belongs. Drawn from the workspace's queue rather than from a row, so
                     // none of it can reach the agent before it is actually sent: see
                     // `PendingTurnRowView` and `WorkspaceEvent`, which is the same rule.
-                    //
-                    // Its own property rather than an expression in the stack, because the stack
-                    // is long enough that one more modifier on it tips the type checker over. See
-                    // `queuedRows`.
-                    queuedRows
+                    ForEach(transcript.waitingDeliveries) { delivery in
+                        PendingTurnRowView(
+                            delivery: delivery,
+                            // One sentence for the queue, at the foot of it. See the note on
+                            // `PendingTurnRowView.caption`.
+                            hold: delivery.id == transcript.waitingDeliveries.last?.id
+                                ? transcript.deliveryHold
+                                : nil,
+                            onDelete: { transcript.askToDiscard(delivery) }
+                        )
+                        .padding(.horizontal, TranscriptLayout.inset)
+                        .id(Self.pendingID(delivery.id))
+                    }
                 }
-                // What lets `ScrollPosition` say WHICH row is at the top of the pane, which is
-                // what a reader's place is written down as. Without a target layout the position
-                // can only speak in edges and points, and a point into a transcript is not a
-                // place: see `TranscriptPaneState.anchorSeq`.
-                //
-                // No `scrollTargetBehavior` with it, deliberately. That is the modifier that makes
-                // a scroll SNAP to a row, and a conversation is read continuously.
-                .scrollTargetLayout()
                 .padding(.vertical, TranscriptLayout.block)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 // Inside the content, so the scroll view behind the transcript can be found by
@@ -611,6 +600,14 @@ struct TranscriptListView: View {
                 // reader arrives at or leaves the end. So the extra reports are a handful per
                 // scroll, and each of them is a correction the transition form could not make.
                 onScrolledUpChange?(new.isFarFromEnd)
+            }
+            // A second subscription, on the raw offset, and deliberately not folded into the one
+            // above. Everything in `TranscriptGeometry` is quantised precisely so that a drag
+            // stops writing state; a raw offset in that value would undo the quantisation for all
+            // of it. This one writes a box, which SwiftUI cannot see, so a scroll costs one
+            // closure call per frame and no pass over this list. See `contentOffset`.
+            .onScrollGeometryChange(for: Double.self) { $0.contentOffset.y } action: { _, new in
+                contentOffset.value = new
             }
             // Where the reader ends up, written down for the pane that is built next. On the end
             // of a gesture rather than during one: see `remember`.
@@ -1119,16 +1116,13 @@ struct TranscriptListView: View {
         // pane was on another tab and those rows are rows the reader is now looking at.
         switch TranscriptResume.placement(
             for: memory?.remembered(session: transcript.session.id),
-            rowCount: transcript.rows.count
+            rowCount: transcript.rows.count,
+            measure: currentMeasure
         ) {
         case .liveEnd:
             opening = .liveEnd
-        case .row(let seq):
-            // At the top of the pane, which is where it was when it was written down: the anchor
-            // IS the row the reader had at the top. Not centred, which is what a search result
-            // gets, because a search result is a row somebody is being shown rather than a place
-            // somebody is being put back.
-            opening = .row(seq, .top)
+        case .offset(let y):
+            opening = .offset(y)
         case .first:
             // A search result outranks both of the others. Somebody who clicked a line of a
             // transcript in the search screen asked for that line, and taking them to their unread
@@ -1153,6 +1147,21 @@ struct TranscriptListView: View {
 
     // MARK: Remembering where the reader was
 
+    /// What this pane is now, or nothing if it has not been laid out yet.
+    ///
+    /// The bubble cap rather than the container width, because that is the number this view
+    /// actually holds and it is a step function of the width: see `TranscriptGeometry`, which
+    /// explains why the raw width is deliberately not kept. `paneHeight` is nought until the first
+    /// layout, and that is what tells an unmeasured pane apart from a narrow one.
+    ///
+    /// Read off the object rather than out of `geometry` since the cap moved there. Both callers
+    /// are outside `body`, so this reads `cap` without subscribing this view to it, which is the
+    /// whole point of the object.
+    private var currentMeasure: TranscriptPaneState.Measure? {
+        guard geometry.paneHeight > 0 else { return nil }
+        return TranscriptPaneState.Measure(width: bubbleWidth.cap, fontScale: fontScale)
+    }
+
     /// Writes down where the reader is, for the pane to find when it is built again.
     ///
     /// Called when a scroll settles, when a row is folded or unfolded, and when the pane goes
@@ -1167,13 +1176,10 @@ struct TranscriptListView: View {
         memory.remember(
             TranscriptPaneState(
                 expanded: expanded,
-                // The row at the top of the pane, which SwiftUI is already tracking for the list:
-                // see `scrollTargetLayout` on the stack. Nil while nothing has been laid out, and
-                // nil for a top row that is not one of the session's own (the setup log's, or a
-                // queued message's), which is the honest answer in both cases.
-                anchorSeq: scrollPosition.viewID(type: Int.self),
+                offset: contentOffset.value,
                 isAtLiveEnd: geometry.isNearBottom,
                 rowCount: transcript.rows.count,
+                measure: currentMeasure,
                 // The offset above is a number of points into content that starts at this row.
                 // Written down together because they are one measurement: see `TranscriptWindow`.
                 drawn: drawn.window
@@ -1194,6 +1200,13 @@ struct TranscriptListView: View {
             proxy.scrollTo(seq, anchor: anchor)
         case .liveEnd:
             scrollPosition.scrollTo(edge: .bottom)
+        case .offset(let y):
+            // A point rather than an edge or a row, and it needs neither of the two dances above.
+            // The content is already whole on the frame this runs on, so nothing grows underneath
+            // it and there is nothing for the reveal to put back; and the value it is being moved
+            // to is a value the state does not already hold, so one update is a change SwiftUI
+            // applies. See the reveal in `task` for why the LIVE END takes two.
+            scrollPosition.scrollTo(y: y)
         case nil:
             break
         }

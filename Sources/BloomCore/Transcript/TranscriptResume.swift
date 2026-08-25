@@ -33,10 +33,9 @@ import Foundation
 ///
 /// `placement` answers about the place, and the folds are handed back whatever it says, because
 /// the two have different lifetimes. A fold is about a row: it survives the pane being made
-/// narrower, the text being made bigger and the session growing.
-///
-/// The place is about a row now too, and it did not used to be. See `TranscriptPaneState.anchorSeq`
-/// for what a point offset cost and why nothing here refuses a restore any more.
+/// narrower, the text being made bigger and the session growing. An offset is a number of points
+/// into a laid out document, and every one of those changes makes it a number into a different
+/// document.
 public struct TranscriptPaneState: Equatable, Sendable {
     /// One pane's memory of one conversation. Both halves are needed: a split tab can hold the
     /// same session in two panes, each scrolled somewhere else, and an unsplit tab's pane is
@@ -52,24 +51,28 @@ public struct TranscriptPaneState: Equatable, Sendable {
         }
     }
 
+    /// The width the rows were laid out at and the scale they were drawn at, which are the two
+    /// things that decide how tall a row is and so what a point of offset means.
+    ///
+    /// Optional at both ends, and that is the rule rather than a convenience: a pane that has not
+    /// been laid out yet has no width to offer, and a measurement nobody has taken cannot
+    /// contradict one that was. The alternative was to treat "not measured" as "different" and
+    /// throw away every restored position on the frame the geometry had not landed on yet, which
+    /// is most of them.
+    public struct Measure: Equatable, Sendable {
+        public var width: Double
+        public var fontScale: Double
+
+        public init(width: Double, fontScale: Double) {
+            self.width = width
+            self.fontScale = fontScale
+        }
+    }
+
     /// The sequence numbers of the rows the reader had unfolded.
     public var expanded: Set<Int>
-    /// The row that was at the top of the viewport, by sequence number.
-    ///
-    /// **A row rather than a point, and that is the whole of this type's history.** It was a
-    /// number of points into the content, with the pane's width and text size written down beside
-    /// it so a restore could refuse when either had changed. Both halves of that were wrong. The
-    /// content height is not stable even when nothing changes: measured on a release build over a
-    /// 225 row chat, after a full warm pass, it moves 4,769 points to 3,730 during a single scroll
-    /// as the lazy stack replaces the heights it guessed with the heights it measured. A point
-    /// into that document names a different row a moment later, and the refusal that was supposed
-    /// to protect the reader dropped them at their first unread row instead, which after an agent
-    /// has worked while they were away is the middle of the conversation.
-    ///
-    /// A row is the same row at any width, at any text size, and whatever the stack currently
-    /// believes the rows above it are worth. Nil for a pane that never saw a row at its top,
-    /// which is a pane that was never laid out.
-    public var anchorSeq: Int?
+    /// Where the view was, in points from the top of the content.
+    public var offset: Double
     /// Whether that offset was the live end.
     ///
     /// Kept as a flag rather than inferred from the offset, because a turn can run while the
@@ -78,6 +81,7 @@ public struct TranscriptPaneState: Equatable, Sendable {
     public var isAtLiveEnd: Bool
     /// How many rows the session held when this was written. See `TranscriptResume.placement`.
     public var rowCount: Int
+    public var measure: Measure?
     /// The rows the list was drawing when the offset was taken.
     ///
     /// The offset is a number of points into the content, and the content is exactly these rows,
@@ -87,15 +91,17 @@ public struct TranscriptPaneState: Equatable, Sendable {
 
     public init(
         expanded: Set<Int>,
-        anchorSeq: Int?,
+        offset: Double,
         isAtLiveEnd: Bool,
         rowCount: Int,
+        measure: Measure?,
         drawn: TranscriptWindow = TranscriptWindow(start: 0, end: 0)
     ) {
         self.expanded = expanded
-        self.anchorSeq = anchorSeq
+        self.offset = offset
         self.isAtLiveEnd = isAtLiveEnd
         self.rowCount = rowCount
+        self.measure = measure
         self.drawn = drawn
     }
 }
@@ -107,8 +113,8 @@ public enum TranscriptPlacement: Equatable, Sendable {
     case first
     /// The reader left at the live end, so that is where they are put back.
     case liveEnd
-    /// The reader left this row at the top of the pane, so that is where it goes back.
-    case row(Int)
+    /// The reader left this many points down, and the document is the same document.
+    case offset(Double)
 }
 
 /// The rule for what a pane may do with what it remembers.
@@ -162,21 +168,24 @@ public enum TranscriptResume {
     /// the first unread row, which is what a session nobody has read wants.
     public static func placement(
         for remembered: TranscriptPaneState?,
-        rowCount: Int
+        rowCount: Int,
+        measure: TranscriptPaneState.Measure?
     ) -> TranscriptPlacement {
         guard let remembered, rowCount > 0 else { return .first }
-        // A session with fewer rows than it had is not the session that anchor was taken in.
+        // A session with fewer rows than it had is not the session that offset was measured in.
         // Rows are appended and never removed while a pane is away, so this is a transcript that
         // was read again from the start rather than one that grew, and nothing written about the
         // old one carries.
         guard remembered.rowCount <= rowCount else { return .first }
         // The end has moved if a turn ran while the reader was away, and it is still the end. A
-        // reader who was at the live end wants the live end, not the row that used to be there.
+        // width change moves nobody who was there, because the end is a place rather than a
+        // measurement, so this is asked before the measure is looked at.
         if remembered.isAtLiveEnd { return .liveEnd }
-        // The row they were reading. There is nothing left to refuse: the width check and the text
-        // size check that used to live here existed to protect a point offset, and a row does not
-        // need protecting from either. See `TranscriptPaneState.anchorSeq`.
-        if let seq = remembered.anchorSeq { return .row(seq) }
-        return .first
+        // A point into a document laid out at another width, or at another text size, is a point
+        // into a different document. Rather than land the reader at a plausible looking wrong
+        // place, this opens the way a fresh visit does.
+        if let measure, let was = remembered.measure, was != measure { return .first }
+        guard remembered.offset > 0 else { return .first }
+        return .offset(remembered.offset)
     }
 }
