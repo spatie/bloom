@@ -43,6 +43,10 @@ The suite can be narrowed, which `make` does not wrap:
 ./Tools/test-core.sh DiffParser   # one suite
 ```
 
+There is no `.xcodeproj`, on purpose. Open `Package.swift` in Xcode and you get the targets, the
+schemes, the debugger and the previews; `CLAUDE.md` has the section explaining what a checked-in
+project file would and would not add.
+
 There is also a small set of live tests that drive the real `claude` binary end to end: a full
 turn with tool use, session resume across two runner instances, and cancellation. They spend
 tokens, so they are opt-in:
