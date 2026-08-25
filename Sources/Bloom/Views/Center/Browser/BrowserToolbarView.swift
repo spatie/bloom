@@ -11,9 +11,11 @@ import BloomCore
 /// one in the window still hand rolling that with a fixed frame and two foreground colours, which
 /// is exactly the "app's approximation of a Mac control" the pane is meant to stop looking like.
 ///
-/// The disabled colour stays explicit. `.accessoryBar` dims a disabled label, but the browser's
-/// arrows are disabled most of the time on a fresh page, and `Palette.textTertiary` is the rung
-/// this window uses for a control that is there and cannot be pressed.
+/// The disabled colour stays explicit, because a foreground style set here is a style
+/// `.accessoryBar` will not dim on its own: with `Palette.textTertiary`, which is the rung this
+/// window uses for small print, a dead Back arrow was a shade off the live Forward arrow next to it
+/// and read as pressable. `Palette.textDisabled` is the system's own answer for a control that is
+/// there and cannot be pressed, and its note carries what that page showed.
 struct BrowserToolbarButton: View {
     var control: BrowserToolbar.Control
     var action: @MainActor () -> Void
@@ -22,7 +24,7 @@ struct BrowserToolbarButton: View {
         Button(action: action) {
             Label(control.name, systemImage: control.symbol)
                 .labelStyle(.iconOnly)
-                .foregroundStyle(control.isEnabled ? Palette.textSecondary : Palette.textTertiary)
+                .foregroundStyle(control.isEnabled ? Palette.textSecondary : Palette.textDisabled)
         }
         .buttonStyle(.accessoryBar)
         .disabled(!control.isEnabled)
@@ -66,15 +68,19 @@ struct BrowserToolbarView: View {
     private static let focusRingWidth: CGFloat = 2
 
     var body: some View {
-        HStack(spacing: Metrics.spacing) {
+        HStack(spacing: Metrics.spacingWide) {
             // **The pair, joined by air rather than by a plate.** Safari draws back and forward as
-            // one control with a shared background, and the honest way to say that here is the
-            // spacing scale: nothing is between these two and a group's worth of it is on either
-            // side, which is what `Metrics.spacing` and `spacingWide` are named for. A shared fill
-            // was tried on paper and rejected: `Palette.surfaceRaised` is this window's raised
-            // control, meaning a selected segment or a chip, so a filled pill around two of the
-            // five glyphs in this bar would read as the pair being switched on. The bar has one
-            // filled thing in it and it is the address field, which is a place to type.
+            // one control, and the honest way to say that in this window is the spacing scale:
+            // nothing at all between these two, and `spacingWide`, which is named for the gap
+            // between the groups a row falls into, on either side of the pair.
+            //
+            // A shared fill was the other option and it was rejected. `Palette.surfaceRaised` is
+            // this window's raised control, meaning a selected segment or a chip, so a filled pill
+            // around two of the five glyphs in this bar would read as those two being switched on.
+            // The bar has exactly one filled thing in it and it is the address field, which is a
+            // place to type rather than a pair of buttons. What that costs is honest: the pair is
+            // a group and not a single control, and a reader who is looking for Safari's one piece
+            // of chrome will notice.
             HStack(spacing: 0) {
                 BrowserToolbarButton(control: toolbar.back, action: goBack)
                     .modifier(HistoryMenu(entries: backHistory, go: goToHistory))
