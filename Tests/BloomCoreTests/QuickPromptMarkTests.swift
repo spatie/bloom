@@ -86,9 +86,36 @@ struct QuickPromptMarkTests {
         #expect(Set(all.map(\.id)).count == all.count)
         #expect(Set(QuickPrompt.symbols).count == QuickPrompt.symbols.count)
         #expect(QuickPrompt.symbols.count >= 60)
-        #expect(QuickPromptMarkCatalog.sections.allSatisfy { !$0.choices.isEmpty })
-        #expect(Set(QuickPromptMarkCatalog.sections.map(\.name)).count
-            == QuickPromptMarkCatalog.sections.count)
+        for kind in QuickPromptMarkKind.allCases {
+            let bands = QuickPromptMarkCatalog.sections(kind)
+            #expect(!bands.isEmpty, "\(kind)")
+            #expect(bands.allSatisfy { !$0.choices.isEmpty }, "\(kind)")
+            #expect(Set(bands.map(\.id)).count == bands.count, "\(kind)")
+        }
+    }
+
+    /// The two tabs hold two kinds of thing and nothing in between: a symbol never turns up under
+    /// Emojis, which is the whole reason the split is worth having.
+    @Test("Each tab holds only its own kind of mark, and every mark is in one of them")
+    func tabsSplitTheCatalogue() {
+        let icons = QuickPromptMarkCatalog.sections(.icons).flatMap(\.choices)
+        let emoji = QuickPromptMarkCatalog.sections(.emoji).flatMap(\.choices)
+        #expect(icons.allSatisfy { !$0.mark.isEmoji })
+        #expect(emoji.allSatisfy { $0.mark.isEmoji })
+        #expect(icons.count + emoji.count == QuickPromptMarkCatalog.all.count)
+        for choice in QuickPromptMarkCatalog.all {
+            let tab = QuickPromptMarkCatalog.kind(of: choice.mark)
+            #expect(QuickPromptMarkCatalog.sections(tab).contains { $0.choices.contains(choice) })
+        }
+    }
+
+    /// The emoji tab draws no heading, because the tab is the heading. The icon tab draws one over
+    /// every band.
+    @Test("The icon bands are named and the emoji band is not")
+    func headings() {
+        #expect(QuickPromptMarkCatalog.sections(.icons).allSatisfy { $0.name != nil })
+        #expect(QuickPromptMarkCatalog.sections(.emoji).allSatisfy { $0.name == nil })
+        #expect(QuickPromptMarkCatalog.sections(.emoji).count == 1)
     }
 
     /// The labels are what the field is matched against, so an empty one is a mark that can only
@@ -123,44 +150,56 @@ struct QuickPromptMarkTests {
 
     // MARK: - Searching
 
-    @Test("An empty query is the whole catalogue")
+    @Test("An empty query is the whole of the tab")
     func emptyQuery() {
-        #expect(QuickPromptMarkCatalog.filtered(query: "  ").map(\.name)
-            == QuickPromptMarkCatalog.sections.map(\.name))
+        for kind in QuickPromptMarkKind.allCases {
+            #expect(QuickPromptMarkCatalog.filtered(kind, query: "  ").map(\.id)
+                == QuickPromptMarkCatalog.sections(kind).map(\.id), "\(kind)")
+        }
     }
 
     @Test("A band's own name keeps the whole band")
     func matchesTheHeading() {
-        let sections = QuickPromptMarkCatalog.filtered(query: "test")
+        let sections = QuickPromptMarkCatalog.filtered(.icons, query: "test")
         let tests = sections.first { $0.name == "Tests and checks" }
-        #expect(tests?.choices.count
-            == QuickPromptMarkCatalog.sections.first { $0.name == "Tests and checks" }?.choices.count)
+        #expect(tests?.choices.count == QuickPromptMarkCatalog.sections(.icons)
+            .first { $0.name == "Tests and checks" }?.choices.count)
     }
 
     @Test("A word out of a symbol's name keeps that symbol")
     func matchesTheLabel() {
-        let kept = QuickPromptMarkCatalog.filtered(query: "triangle").flatMap(\.choices)
+        let kept = QuickPromptMarkCatalog.filtered(.icons, query: "triangle").flatMap(\.choices)
         #expect(kept.contains { $0.mark == .symbol("arrow.triangle.pull") })
         #expect(kept.allSatisfy { $0.mark.stored.contains("triangle") })
     }
 
     @Test("An emoji is found by the word it was given")
     func matchesEmojiKeywords() {
-        let kept = QuickPromptMarkCatalog.filtered(query: "rocket").flatMap(\.choices)
+        let kept = QuickPromptMarkCatalog.filtered(.emoji, query: "rocket").flatMap(\.choices)
         #expect(kept.map(\.mark) == [.emoji("\u{1F680}")])
+    }
+
+    /// The field sits under the tabs and belongs to the one that is open. A query that reached
+    /// into the other tab would put emoji in the icon grid and there would be no saying which tab
+    /// Return was about to choose from.
+    @Test("A query never reaches into the tab that is not open")
+    func searchesOneTabOnly() {
+        #expect(QuickPromptMarkCatalog.filtered(.icons, query: "rocket").isEmpty)
+        #expect(QuickPromptMarkCatalog.filtered(.emoji, query: "triangle").isEmpty)
     }
 
     @Test("A query nothing carries keeps nothing")
     func matchesNothing() {
-        #expect(QuickPromptMarkCatalog.filtered(query: "zzzznope").isEmpty)
+        #expect(QuickPromptMarkCatalog.filtered(.icons, query: "zzzznope").isEmpty)
+        #expect(QuickPromptMarkCatalog.filtered(.emoji, query: "zzzznope").isEmpty)
     }
 
     // MARK: - The keyboard
 
     @Test("Stepping clamps at both ends rather than wrapping")
     func stepsAndClamps() {
-        let sections = QuickPromptMarkCatalog.sections
-        let all = QuickPromptMarkCatalog.all
+        let sections = QuickPromptMarkCatalog.sections(.icons)
+        let all = sections.flatMap(\.choices)
         #expect(QuickPromptMarkCatalog.stepped(sections, from: nil, by: 1) == all.first?.mark)
         #expect(QuickPromptMarkCatalog.stepped(sections, from: nil, by: -1) == all.last?.mark)
         #expect(QuickPromptMarkCatalog.stepped(sections, from: all[0].mark, by: 1) == all[1].mark)
@@ -169,9 +208,9 @@ struct QuickPromptMarkTests {
             == all.last?.mark)
     }
 
-    @Test("Stepping crosses from one band into the next, because it is one list")
+    @Test("Stepping crosses from one band into the next, because a tab is one list")
     func stepsAcrossBands() {
-        let sections = QuickPromptMarkCatalog.sections
+        let sections = QuickPromptMarkCatalog.sections(.icons)
         guard let firstBand = sections.first, let secondBand = sections.dropFirst().first else {
             Issue.record("the catalogue needs at least two bands")
             return
@@ -188,7 +227,7 @@ struct QuickPromptMarkTests {
 
     @Test("The highlight survives a query that keeps its mark, and moves when it does not")
     func settles() {
-        let sections = QuickPromptMarkCatalog.filtered(query: "triangle")
+        let sections = QuickPromptMarkCatalog.filtered(.icons, query: "triangle")
         #expect(QuickPromptMarkCatalog.settled(sections, after: .symbol("arrow.triangle.pull"))
             == .symbol("arrow.triangle.pull"))
         #expect(QuickPromptMarkCatalog.settled(sections, after: .symbol("bolt"))

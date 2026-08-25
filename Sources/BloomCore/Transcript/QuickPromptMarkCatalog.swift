@@ -18,21 +18,44 @@ public struct QuickPromptMarkChoice: Sendable, Hashable, Identifiable {
     }
 }
 
-/// A band of the picker, under a quiet heading.
+/// A band of one of the picker's tabs, under a quiet heading.
 public struct QuickPromptMarkSection: Sendable, Hashable, Identifiable {
-    public let name: String
+    /// The heading, or nil for a tab that is one band and needs none. The emoji are the second
+    /// case: a heading over the only thing in the tab says nothing the tab has not already said.
+    public let name: String?
     public let choices: [QuickPromptMarkChoice]
 
-    public var id: String { name }
+    public var id: String { name ?? "" }
 
-    public init(name: String, choices: [QuickPromptMarkChoice]) {
+    public init(name: String?, choices: [QuickPromptMarkChoice]) {
         self.name = name
         self.choices = choices
     }
 }
 
-/// Everything a quick prompt can be marked with, grouped by what somebody would be writing a
-/// prompt about.
+/// The picker's two tabs.
+///
+/// **Two tabs rather than one scrolling list with the emoji at the foot of it.** They are
+/// different kinds of thing and they are searched differently: a symbol is found by words out of
+/// its own name, and an emoji has no name, only whatever word somebody files it under. In one list
+/// every trip to the emoji went past a hundred symbols first.
+public enum QuickPromptMarkKind: String, Sendable, Hashable, CaseIterable, Identifiable {
+    case icons
+    case emoji
+
+    public var id: String { rawValue }
+
+    /// What the tab is labelled. "Emojis" rather than "Emoji", which is the plural the owner uses.
+    public var title: String {
+        switch self {
+        case .icons: "Icons"
+        case .emoji: "Emojis"
+        }
+    }
+}
+
+/// Everything a quick prompt can be marked with: a tab of SF Symbols in named bands, and a tab of
+/// emoji.
 ///
 /// **Grouped, and searchable by the group's own name.** A hundred symbols in one band is a wall,
 /// and a name like `checkmark.seal` is not what anybody types when they want the mark for a test
@@ -48,7 +71,8 @@ public struct QuickPromptMarkSection: Sendable, Hashable, Identifiable {
 /// works: `QuickPromptMark` classifies by the character's own properties, so an emoji pasted into
 /// the row by hand is drawn as an emoji even though this list has never heard of it.
 public enum QuickPromptMarkCatalog {
-    public static let sections: [QuickPromptMarkSection] = [
+    /// The SF Symbols, in bands named after what somebody would be writing a prompt about.
+    public static let iconSections: [QuickPromptMarkSection] = [
         QuickPromptMarkSection(name: "Writing", choices: symbols([
             "text.alignleft", "text.quote", "square.and.pencil", "pencil.and.outline",
             "doc.text", "doc.richtext", "doc.plaintext", "note.text",
@@ -89,7 +113,11 @@ public enum QuickPromptMarkCatalog {
             "clock", "timer", "calendar", "hourglass", "flag", "star", "heart", "pin", "bell",
             "chart.bar", "chart.line.uptrend.xyaxis",
         ])),
-        QuickPromptMarkSection(name: "Emoji", choices: emoji([
+    ]
+
+    /// The emoji, one unnamed band because the tab they are in is their heading.
+    public static let emojiSections: [QuickPromptMarkSection] = [
+        QuickPromptMarkSection(name: nil, choices: emoji([
             "\u{1F41B}": "bug", "\u{2705}": "check pass green", "\u{274C}": "cross fail red",
             "\u{26A0}\u{FE0F}": "warning", "\u{1F680}": "rocket ship launch",
             "\u{1F525}": "fire hot", "\u{2728}": "sparkles polish", "\u{1F3AF}": "target aim",
@@ -110,26 +138,46 @@ public enum QuickPromptMarkCatalog {
             "\u{1F512}": "lock secure", "\u{1F511}": "key secret",
             "\u{1F4CC}": "pin keep", "\u{1F9CA}": "ice freeze cold",
             "\u{1FA84}": "wand magic", "\u{1F480}": "skull dead danger",
-            "\u{1F422}": "turtle slow",
+            "\u{1F422}": "turtle slow", "\u{1F501}": "repeat retry again",
+            "\u{1F9F5}": "thread string", "\u{1F5D1}\u{FE0F}": "bin delete remove",
+            "\u{1F3F7}\u{FE0F}": "label tag",
         ])),
     ]
 
-    /// Every choice, in the order the picker draws them. The flat list the keyboard steps through.
-    public static let all: [QuickPromptMarkChoice] = sections.flatMap(\.choices)
+    /// The bands one tab holds.
+    public static func sections(_ kind: QuickPromptMarkKind) -> [QuickPromptMarkSection] {
+        switch kind {
+        case .icons: iconSections
+        case .emoji: emojiSections
+        }
+    }
 
-    /// The sections a query keeps, each holding only the choices it kept.
+    /// Which tab a mark belongs in, so the picker opens on the one holding the mark the prompt
+    /// already carries rather than always on the first.
+    public static func kind(of mark: QuickPromptMark) -> QuickPromptMarkKind {
+        mark.isEmoji ? .emoji : .icons
+    }
+
+    /// Every choice in both tabs. The list `QuickPrompt.symbols` is read off, and the one a test
+    /// walks to check that nothing is offered twice.
+    public static let all: [QuickPromptMarkChoice] =
+        (iconSections + emojiSections).flatMap(\.choices)
+
+    /// The bands of one tab that a query keeps, each holding only the choices it kept. The other
+    /// tab is not searched: the field sits under the tabs and belongs to whichever is open.
     ///
     /// Containment rather than the fuzzy match the prompt list uses. A symbol name is two or three
     /// short words, so a subsequence match keeps most of a hundred of them for most queries, which
     /// is the same failure `QuickPromptTests.bodyIsNotFuzzy` records about matching a paragraph
     /// loosely: a filter that keeps everything cannot say that nothing matched.
-    public static func filtered(query: String) -> [QuickPromptMarkSection] {
+    public static func filtered(_ kind: QuickPromptMarkKind, query: String) -> [QuickPromptMarkSection] {
+        let bands = sections(kind)
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !needle.isEmpty else { return sections }
-        return sections.compactMap { section in
-            // The heading counts as a word of every choice under it, which is how "test" finds
+        guard !needle.isEmpty else { return bands }
+        return bands.compactMap { section in
+            // A heading counts as a word of every choice under it, which is how "test" finds
             // `checkmark.seal` and "git" finds `arrow.triangle.branch`.
-            if section.name.lowercased().contains(needle) { return section }
+            if section.name?.lowercased().contains(needle) == true { return section }
             let kept = section.choices.filter {
                 $0.label.contains(needle) || $0.mark.stored.lowercased().contains(needle)
             }

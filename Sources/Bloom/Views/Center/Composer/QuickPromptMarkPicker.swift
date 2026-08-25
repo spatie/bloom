@@ -1,7 +1,7 @@
 import SwiftUI
 import BloomCore
 
-/// The card behind the icon well: a search field and a hundred and fifty marks in named bands.
+/// The card behind the icon well: two tabs, a search field, and a hundred and fifty marks.
 ///
 /// **Drawn inside the panel rather than in a `.popover` of its own, and that is a deliberate
 /// refusal.** The form is already inside the composer's popover, and a popover opened from within
@@ -21,6 +21,9 @@ struct QuickPromptMarkPicker: View {
     var onChoose: @MainActor (QuickPromptMark) -> Void
     var onClose: @MainActor () -> Void
 
+    /// Which tab is open. It starts on the one holding the mark the prompt already carries, so
+    /// somebody editing a prompt marked with an emoji is not shown a hundred symbols first.
+    @State private var kind = QuickPromptMarkKind.icons
     @State private var query = ""
     /// Where Return would go. Held as the mark itself and never as an index, for the reason
     /// `QuickPromptMenu.selected` writes down: a filtered list renumbers under every keystroke.
@@ -40,29 +43,77 @@ struct QuickPromptMarkPicker: View {
     /// About seven rows. Enough that a band and the start of the next one are visible together,
     /// which is what tells a reader that there is more under it.
     private static let gridHeight: CGFloat = 232
-    /// What the whole card comes to, which `QuickPromptForm` has to make room for.
-    static let height = gridHeight + Metrics.rowHeight + Metrics.spacingSmall * 2 + Metrics.hairline
+    /// What the whole card comes to, which `QuickPromptForm` has to make room for: the tab strip,
+    /// the search field, the rule between them and the grid.
+    static let height = gridHeight + Metrics.rowHeight + Metrics.barHeight
+        + Metrics.spacingSmall * 2 + Metrics.hairline
 
     private var sections: [QuickPromptMarkSection] {
-        QuickPromptMarkCatalog.filtered(query: query)
+        QuickPromptMarkCatalog.filtered(kind, query: query)
     }
 
     var body: some View {
         let sections = self.sections
         return MenuPanel {
+            tabs
             searchRow
             Hairline()
             grid(sections)
         }
         .frame(width: Self.width)
         .onAppear {
+            let current = QuickPromptMark(stored: selection)
+            // Through a local, not through `kind` a line later: reading a `@State` back in the
+            // closure that wrote it is a race nobody should have to think about twice.
+            let tab = QuickPromptMarkCatalog.kind(of: current)
+            kind = tab
             highlighted = QuickPromptMarkCatalog.settled(
-                QuickPromptMarkCatalog.sections, after: QuickPromptMark(stored: selection)
+                QuickPromptMarkCatalog.sections(tab), after: current
             )
         }
         .onChange(of: query) { _, _ in
             highlighted = QuickPromptMarkCatalog.settled(self.sections, after: highlighted)
         }
+    }
+
+    /// Icons or emoji. Two words rather than a segmented control: `.pickerStyle(.segmented)` is a
+    /// form control, and it read as one, a bordered slab across the top of a card that is
+    /// otherwise a menu. This is the treatment the inspector's own tab row uses.
+    private var tabs: some View {
+        HStack(spacing: Metrics.spacingTight) {
+            ForEach(QuickPromptMarkKind.allCases) { tab in
+                Button {
+                    choose(tab: tab)
+                } label: {
+                    Text(tab.title)
+                        .font(kind == tab ? Typo.captionEmphasis : Typo.caption)
+                        .foregroundStyle(kind == tab ? Palette.textPrimary : Palette.textTertiary)
+                        .padding(.horizontal, Metrics.spacingWide)
+                        .padding(.vertical, Metrics.spacingSmall)
+                        .background {
+                            RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+                                .fill(kind == tab ? Palette.selected : Color.clear)
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(kind == tab ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Self.inset)
+        .padding(.top, Metrics.spacingWide)
+        .frame(height: Metrics.barHeight, alignment: .bottom)
+    }
+
+    /// Switching tabs clears the query with it. The field belongs to the tab under it, and a query
+    /// carried across meant landing in Emojis with "hammer" still in the box and nothing to show
+    /// for it.
+    private func choose(tab: QuickPromptMarkKind) {
+        guard kind != tab else { return }
+        kind = tab
+        query = ""
+        highlighted = QuickPromptMarkCatalog.sections(tab).first?.choices.first?.mark
     }
 
     private var searchRow: some View {
@@ -74,7 +125,7 @@ struct QuickPromptMarkPicker: View {
 
             MenuSearchField(
                 text: $query,
-                placeholder: "Search icons and emoji",
+                placeholder: kind == .icons ? "Search icons" : "Search emoji",
                 onKey: handle(key:),
                 onHorizontal: handle(horizontal:)
             )
@@ -115,9 +166,11 @@ struct QuickPromptMarkPicker: View {
 
     private func band(_ section: QuickPromptMarkSection) -> some View {
         VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-            Text(section.name)
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
+            if let name = section.name {
+                Text(name)
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textTertiary)
+            }
 
             LazyVGrid(
                 columns: Array(
@@ -191,7 +244,10 @@ struct QuickPromptMarkPicker: View {
             onClose()
             return true
         case .tab:
-            return false
+            // The one other thing this card can do, and the field under the tabs is where a hand
+            // already is. Tab moves nothing else here: the card holds one field and a grid.
+            choose(tab: kind == .icons ? .emoji : .icons)
+            return true
         }
     }
 

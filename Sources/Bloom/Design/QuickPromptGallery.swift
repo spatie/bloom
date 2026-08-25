@@ -81,13 +81,17 @@ struct QuickPromptGallery: View {
             VStack(alignment: .leading, spacing: Metrics.pane) {
                 panel("The first row, highlighted on opening", selected: 0)
                 panel("Nothing written yet", selected: nil, empty: true)
+                form("Name and icon, a symbol chosen", prompt: prompts[0])
                 Spacer(minLength: 0)
             }
 
             VStack(alignment: .leading, spacing: Metrics.pane) {
-                form("Name and icon, a symbol chosen", prompt: prompts[0])
                 form("An emoji chosen", prompt: prompts[4])
+                // Both tabs, and the tab each opens on is read off the mark the prompt already
+                // carries, so these two are also the test of that.
                 form("The picker, open on the well", prompt: prompts[0], picking: true)
+                form("The same picker on a prompt marked with an emoji",
+                     prompt: prompts[4], picking: true)
                 Spacer(minLength: 0)
             }
         }
@@ -223,7 +227,7 @@ extension Gallery {
     static let quickPrompts = Gallery(
         name: "quick-prompts",
         title: "Quick prompts",
-        size: CGSize(width: 880, height: 1180),
+        size: CGSize(width: 880, height: 1400),
         needsFocus: false,
         view: { app in AnyView(QuickPromptGallery(app: app)) }
     )
