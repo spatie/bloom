@@ -75,6 +75,10 @@ final class BrowserSession {
     /// what holds each download's delegate alive, since `WKDownload.delegate` is weak.
     private(set) var downloads: [BrowserDownloadItem] = []
 
+    /// Find in Page: whether the bar is up, what is in it and how the last search went. The rules
+    /// are `BrowserFind` in the core.
+    private(set) var find = BrowserFind()
+
     /// KVO on everything the toolbar reads, because the navigation delegate does not see every
     /// navigation.
     ///
@@ -116,6 +120,9 @@ final class BrowserSession {
         webView.navigationDelegate = navigation
         ui.owner = self
         webView.uiDelegate = ui
+        // Weak, because the web view is owned by this session: a strong capture here would be the
+        // session holding itself through its own subview.
+        webView.findCommand = { [weak self] command in self?.perform(command) }
         observations = [
             webView.observe(\.title, options: [.initial, .new]) { [weak self] view, _ in
                 // On the main thread, measured rather than assumed: WebKit posts every one of
@@ -331,6 +338,58 @@ final class BrowserSession {
     /// must not count as one: the reader silenced a page, not an address.
     fileprivate func pageCommitted() {
         dialogs.pageCommitted()
+    }
+
+    // MARK: - Find in page
+
+    /// One of the four things the keyboard asks of Find in Page, from the Edit menu or from the
+    /// key equivalents `BrowserPageWebView` claims while the page holds the keyboard.
+    func perform(_ command: BrowserFindCommand) {
+        switch command {
+        case .show: find.show()
+        case .next: step(backwards: false)
+        case .previous: step(backwards: true)
+        case .hide: find.hide()
+        }
+    }
+
+    /// The field changed. Searched on every keystroke, which is what find does on this platform:
+    /// the reader watches the page move under the words they are typing.
+    func typeInFind(_ text: String) {
+        find.type(text)
+        step(backwards: false)
+    }
+
+    /// Looks for what is in the field, and records whether it was there.
+    ///
+    /// **The bar can say "Not found" and nothing else, and that is WebKit's limit rather than a
+    /// decision.** `WKFindResult` carries one property, `matchFound`. There is no count and no
+    /// index, and the only way to get one would be to run a script of Bloom's own over somebody
+    /// else's logged-in page, which is what the head of `BrowserPaneCommand` argues at length that
+    /// this pane does not do.
+    ///
+    /// The answer is dropped if the field has moved on while WebKit was looking, so a fast typist
+    /// never sees "Not found" from two keystrokes ago.
+    private func step(backwards: Bool) {
+        guard find.canStep else { return find.settle(matched: false) }
+
+        let query = find.query
+        let configuration = WKFindConfiguration()
+        configuration.backwards = backwards
+        configuration.caseSensitive = find.isCaseSensitive
+        // Round the end and on, because a find bar that stopped at the bottom of the page with no
+        // count to explain why would read as having lost the match it just had.
+        configuration.wraps = true
+
+        Task { [weak self] in
+            guard let self else { return }
+            // A throw here is a page that went away under the search, which is a navigation
+            // committing between the call and the answer. That is not a match, and it is not
+            // worth a sentence either: the bar will be searched again on the next keystroke.
+            let result = try? await webView.find(query, configuration: configuration)
+            guard find.query == query else { return }
+            find.settle(matched: result?.matchFound ?? false)
+        }
     }
 
     // MARK: - Downloads
