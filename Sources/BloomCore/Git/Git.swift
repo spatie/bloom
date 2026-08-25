@@ -102,15 +102,19 @@ public enum Git {
         outReader.stackSize = 512 * 1_024
         errReader.stackSize = 512 * 1_024
 
+        // Installed before `run()`, never after. See `ProcessExitGate`: a git call that finishes
+        // before the handler exists never calls it, and this wait would never end. Most git calls
+        // here pass no timeout, so nothing would break the hang afterwards either.
+        let exit = ProcessExitGate()
+        process.terminationHandler = { _ in exit.signal() }
+
         try process.run()
 
         outReader.start()
         errReader.start()
 
         await withTaskCancellationHandler {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                process.terminationHandler = { _ in continuation.resume() }
-            }
+            await exit.wait()
         } onCancel: {
             if process.isRunning { process.terminate() }
         }

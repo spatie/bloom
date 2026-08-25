@@ -147,7 +147,36 @@ public actor CodexRunner: SessionRunner {
     /// is expected to survive.
     public nonisolated func cancelNow() {
         handle.markCancelled()
-        Task { await self.interrupt() }
+        Task { await self.stopTurn() }
+    }
+
+    /// Stop, as the button means it: file the questions and then interrupt the turn.
+    ///
+    /// **This used to interrupt and nothing else.** `shutdown` already drained the pending asks
+    /// and wrote down why, and Stop is the other half of the same moment: a question left pending
+    /// keeps its buttons on a row nobody can answer any more, and the next launch's sweep files it
+    /// as "Bloom was not running when this was asked", which is untrue and is not what the person
+    /// saw. The Claude Code side has answered them on this path all along, which is why the two
+    /// backends disagreed about what Stop did.
+    ///
+    /// Answered before the interrupt rather than after, for the reason `AgentRunner.cancelNow`
+    /// gives: an answer written after the thing that closes the turn is an answer the model never
+    /// receives.
+    private func stopTurn() async {
+        await filePendingAsks()
+        await interrupt()
+    }
+
+    /// Answers every question this turn can no longer answer, and files it as stopped.
+    ///
+    /// One copy, called from `stopTurn` and from `shutdown`. They are the same event seen from two
+    /// distances (the turn ended, the chat ended) and they were two pieces of code, one of which
+    /// was missing.
+    private func filePendingAsks() async {
+        for ask in pending.drain() {
+            await write(answerTo: ask, decision: .decline)
+            await close(ask, as: PermissionAskOutcome.stopped, note: "")
+        }
     }
 
     /// The chat is going away: quit, close, or the worktree being archived. Kill the server.
@@ -211,10 +240,7 @@ public actor CodexRunner: SessionRunner {
     /// The chat can be sent to again afterwards: the thread id is stored, so the next turn
     /// reconnects and resumes rather than starting a new conversation.
     public func shutdown() async {
-        for ask in pending.drain() {
-            await write(answerTo: ask, decision: .decline)
-            await close(ask, as: PermissionAskOutcome.stopped, note: "")
-        }
+        await filePendingAsks()
         // Stated here as well as in `interrupt`, because a chat can be closed while it is idle
         // and can be closed while it is mid turn. `SessionLifecycle` refuses a stop on a session
         // with no turn open, so the one that did not happen writes nothing.

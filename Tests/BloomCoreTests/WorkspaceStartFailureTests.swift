@@ -161,6 +161,35 @@ struct WorkspaceStartFailureTests {
         }
     }
 
+    /// The case that used to kill the app.
+    ///
+    /// `listing` was called three lines above the guard written to protect it, so a project with
+    /// commits and no local branches reached `shown[-1]` and trapped. The suite covered one branch
+    /// and twenty five and never zero, which is the only count that crashed. Reachable from an
+    /// agent's `workspace_start`, and also whenever `Git.branches` throws and a `try?` turns that
+    /// into an empty array.
+    @Test("a project with no branches at all is a sentence rather than a crash")
+    func noBranchesAtAll() {
+        let sentence = WorkspaceStartTrouble.baseBranchMissing(
+            branch: "main", project: "flare", wasRequested: false, branches: []
+        ).sentence
+
+        #expect(sentence.contains("no branches at all"))
+        #expect(sentence.contains("Do not retry"))
+        #expect(!sentence.isEmpty)
+    }
+
+    @Test("one branch reads as one, and two read as a pair")
+    func listsSmallCounts() {
+        func sentence(_ branches: [String]) -> String {
+            WorkspaceStartTrouble.baseBranchMissing(
+                branch: "nope", project: "flare", wasRequested: true, branches: branches
+            ).sentence
+        }
+        #expect(sentence(["main"]).contains("Its only branch is 'main'."))
+        #expect(sentence(["main", "wip"]).contains("Its branches are 'main' and 'wip'."))
+    }
+
     /// A repository with two hundred branches would otherwise spend the whole tool result listing
     /// them.
     @Test("the branch listing is capped")
