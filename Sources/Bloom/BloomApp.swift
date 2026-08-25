@@ -48,6 +48,13 @@ struct BloomApp: App {
         // See `ScrollProbe`.
         if ScrollProbe.isRequested { ScrollProbe.schedule() }
 
+        // And the one that answers "resizing is not smooth when there is a chat, a browser and a
+        // change list on screen at once": `Bloom --resize-probe <out.json>` puts all three up and
+        // then drags the window's own edge. `FrameProbe --probe-gesture window` measures the same
+        // gesture with whatever happened to be showing; this one measures the arrangement the
+        // complaint is about. See `ResizeProbe`.
+        if ResizeProbe.isRequested { ResizeProbe.schedule() }
+
         // And the one that answers "the battery menu says Bloom is using significant energy":
         // `Bloom --idle-probe <out.json> --idle-worktrees <list>` runs the diff stat pass the six
         // second loop runs and reports what it cost in process time and in subprocesses. It is the
