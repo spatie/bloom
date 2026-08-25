@@ -2,14 +2,6 @@ import AppKit
 import SwiftUI
 import BloomCore
 
-/// Where a link the reader chose should be opened.
-enum TranscriptLinkTarget {
-    /// The system's default browser, which is what a plain click does.
-    case externalBrowser
-    /// A browser tab in Bloom's own centre column.
-    case browserTab
-}
-
 /// What the transcript can do with an address, handed in rather than decided here.
 ///
 /// **`Equatable` on `identity` and on nothing else, and that is the point of the type.** These go
@@ -21,26 +13,36 @@ enum TranscriptLinkTarget {
 /// builder in the transcript with no cache. The comments on the call site and on
 /// `markdownLinkActions` both claimed the opposite was happening.
 ///
-/// The closures do not need comparing. Every one of them is a pure function of the workspace
-/// model `TranscriptLink.actions(for:)` was handed, plus the one row that adds a file door, so
-/// two values with the same identity do the same things.
+/// The closures do not need comparing. Every one of them is a pure function of the workspace model
+/// and the pane `TranscriptLink.actions(for:pane:)` was handed, plus the one row that adds a file
+/// door, so two values with the same identity do the same things.
 struct TranscriptLinkActions: Sendable, Equatable {
     /// What these actions were built from. The whole of their equality.
+    ///
+    /// The pane is half of it because a split lands in the pane the transcript is drawn in, so two
+    /// halves of a split tab showing the same conversation do two different things with the same
+    /// link and must not compare equal.
     enum Identity: Hashable, Sendable {
         /// The default value, which does nothing at all.
         case inert
-        case workspace(WorkspaceID?)
+        case workspace(WorkspaceID?, pane: String?)
         /// The same, with a file chip's door added. Its own case because a value that can open a
         /// file must never compare equal to one that cannot.
-        case workspaceOpeningFiles(WorkspaceID?)
+        case workspaceOpeningFiles(WorkspaceID?, pane: String?)
     }
 
     var identity: Identity = .inert
 
     var open: @MainActor @Sendable (URL, TranscriptLinkTarget) -> Void = { _, _ in }
-    /// Whether Bloom's own browser could show this address at all. A menu item that opens a blank
-    /// tab is worse than a menu item that is not there.
-    var canOpenInTab: @MainActor @Sendable (URL) -> Bool = { _ in false }
+    /// What this address may be opened into, asked at the moment the menu is raised so that the
+    /// answer is about the column as it is now. The rule is `TranscriptLinkMenu` in the core; this
+    /// is only how the transcript reaches it with what the window can do.
+    ///
+    /// The default answers as a transcript with no column behind it, which is what a value nobody
+    /// has filled in is: the external browser and nothing else.
+    var items: @MainActor @Sendable (URL) -> [TranscriptLinkItem] = {
+        TranscriptLinkMenu.items(for: $0, placement: .detached)
+    }
     /// A file chip drawn inside the run was clicked. Empty by default, and set by the one row that
     /// draws chips, because opening a file needs a workspace and the list's shared actions have
     /// none: see `UserTurnRowView`.
@@ -374,17 +376,19 @@ final class LinkTextView: NSTextView {
     /// The menu over a link, and the ordinary text menu everywhere else.
     ///
     /// Extended rather than replaced: over prose this is whatever AppKit offers a selectable text
-    /// view, which is where Copy and Look Up live, and losing that to gain three link items would
+    /// view, which is where Copy and Look Up live, and losing that to gain four link items would
     /// be a poor trade. AppKit's own link items are dropped, because "Open Link" without saying
-    /// where, next to two items that do say, reads as a third destination.
+    /// where, next to items that do say, reads as one more destination.
+    ///
+    /// Which openings there are is `TranscriptLinkMenu` in the core rather than a chain of `if`s
+    /// here. This draws them.
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
         guard let url = link(at: point) else { return super.menu(for: event) }
 
         let menu = NSMenu()
-        menu.addItem(item("Open in External Browser", url: url, target: .externalBrowser))
-        if actions.canOpenInTab(url) {
-            menu.addItem(item("Open in Browser Tab", url: url, target: .browserTab))
+        for offered in actions.items(url) {
+            menu.addItem(item(offered.title, url: url, target: offered.target))
         }
         menu.addItem(.separator())
         let copy = NSMenuItem(title: "Copy Link", action: #selector(copyLink(_:)), keyEquivalent: "")

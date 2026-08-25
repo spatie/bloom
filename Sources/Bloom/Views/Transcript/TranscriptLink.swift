@@ -172,13 +172,19 @@ enum TranscriptLink {
 
     /// What a transcript row does with an address, in one place so every row does the same.
     ///
-    /// A plain click goes to the system's browser. The in-app tab is only ever reached by
-    /// choosing it from the menu, which is the difference the owner asked for: opening a page is
-    /// an action, and the quieter of the two destinations is the one that has to be asked for.
+    /// A plain click goes to the system's browser. Everywhere in Bloom's own window is only ever
+    /// reached by choosing it from the menu, which is the difference the owner asked for: opening a
+    /// page is an action, and the quieter destinations are the ones that have to be asked for.
+    ///
+    /// `pane` is which pane of the centre column this transcript is drawn in, and nil for one the
+    /// window cannot place. It is what a split divides: beside or below the conversation that
+    /// named the address, rather than beside whichever pane happens to hold the keyboard, because
+    /// a right click in a pane does not move the focus to it and splitting the other half of a
+    /// tab would be the one thing the reader did not ask for.
     @MainActor
-    static func actions(for model: WorkspaceModel?) -> TranscriptLinkActions {
+    static func actions(for model: WorkspaceModel?, pane: String? = nil) -> TranscriptLinkActions {
         TranscriptLinkActions(
-            identity: .workspace(model?.workspace.id),
+            identity: .workspace(model?.workspace.id, pane: pane),
             open: { url, target in
                 switch target {
                 case .externalBrowser:
@@ -187,10 +193,18 @@ enum TranscriptLink {
                 case .browserTab:
                     guard let model else { return }
                     BrowserTab.open(url, in: model)
+                case .split(let axis):
+                    guard let model, let pane else { return }
+                    BrowserTab.split(url, in: model, pane: pane, axis: axis)
                 }
             },
-            canOpenInTab: { url in
-                model != nil && BrowserTab.canOpen(url)
+            // Asked on each right click rather than held, because the column is rearranged while
+            // the transcript stands still: the tab in front, and whether this pane is still one of
+            // its panes, are both true of the moment the menu opens and of no other.
+            items: { url in
+                TranscriptLinkMenu.items(
+                    for: url, placement: BrowserTab.placement(of: pane, in: model)
+                )
             }
         )
     }
