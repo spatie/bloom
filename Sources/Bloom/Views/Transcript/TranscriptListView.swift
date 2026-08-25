@@ -696,6 +696,7 @@ struct TranscriptListView: View {
                         rowCount: transcript.rows.count
                     )
                 )
+                TranscriptDrawn.note(transcript.rows.count - drawn.start)
                 // Whatever the session arrived with, taken in without a fade. This runs whether
                 // or not the row count changed, which matters: two sessions can hold the same
                 // number of rows, and then nothing else would have told the tracker it is
@@ -754,6 +755,7 @@ struct TranscriptListView: View {
                     from: drawn.start, rowCount: transcript.rows.count
                 )
                 drawn = Drawn(session: transcript.session.id, start: settled)
+                TranscriptDrawn.note(transcript.rows.count - settled)
                 // **The number the whole of this is about.** The work stamp is the instant the
                 // history was asked for; the vsync stamp is the first frame that could show it,
                 // and the display link cannot run while the main thread is laying rows out. The
@@ -1178,6 +1180,7 @@ struct TranscriptListView: View {
         else { return }
         isGrowing = true
         drawn.start = TranscriptWindow.grown(from: drawn.start)
+        TranscriptDrawn.note(transcript.rows.count - drawn.start)
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(120))
             isGrowing = false

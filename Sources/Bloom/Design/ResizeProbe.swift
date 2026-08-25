@@ -218,6 +218,7 @@ enum ResizeProbe {
             "arrangement": .string(arrangement),
             "workspace": .string(workspace.workspace.id.rawValue),
             "workspaceName": .string(workspace.workspace.name),
+            "drawnRows": .integer(TranscriptDrawn.rows),
             "sessionRows": .integer(workspace.activeTranscript?.rows.count ?? 0),
             // The three claims the timings below are worthless without. See the head of this file.
             "panes": .integer(panes),
