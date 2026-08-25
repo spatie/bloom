@@ -154,6 +154,19 @@ struct TranscriptListView: View {
     /// so that a drag stops writing state, and a raw offset would undo that for all of them.
     @State private var contentOffset = GeometryBox(0.0)
 
+    /// How far below the viewport the end of the conversation is, read for one thing only: how
+    /// long the jump pill's scroll back to the live end should run for.
+    ///
+    /// In a box rather than in `TranscriptGeometry`, which is `@State`. It used to be a field of
+    /// it, quantised to a quarter of a pane so that a reader dragging the scroller crossed a
+    /// handful of steps rather than writing state once a frame. That is the right treatment for a
+    /// scroll and the wrong one for a window resize, where the CONTENT height moves on every frame
+    /// and crosses a step every few: each crossing re-ran this body and rebuilt every row the
+    /// stack had realised, to store a number that is only ever read inside a button's action. See
+    /// `TranscriptBubbleWidth`, which carries the same argument for the bubble cap, and
+    /// `GeometryBox` for why a box is not observed.
+    @State private var reachToEnd = GeometryBox(0.0)
+
     /// The text scale the rows are being drawn at, read for one thing: an offset written down at
     /// one size is a point into a document laid out at another. See `TranscriptPaneState.Measure`.
     @Environment(\.fontScale) private var fontScale
@@ -558,6 +571,12 @@ struct TranscriptListView: View {
             .onScrollGeometryChange(for: CGFloat.self, of: Self.bubbleCapOf) { _, new in
                 bubbleWidth.cap = new
             }
+            // And the reach, on a subscription of its own for the same reason: what it writes is a
+            // box rather than state, so a window resize moving the content height no longer runs
+            // this body. See `reachToEnd`.
+            .onScrollGeometryChange(for: Double.self, of: Self.reachOf) { _, new in
+                reachToEnd.value = new
+            }
             .onScrollGeometryChange(for: TranscriptGeometry.self, of: Self.measure) { _, new in
                 geometry = new
                 // The bottom half of the window, and it needs neither an anchor nor a flag: rows
@@ -933,6 +952,14 @@ struct TranscriptListView: View {
         scroll.contentOffset.y < scroll.containerSize.height
     }
 
+    private static func reachOf(_ scroll: ScrollGeometry) -> Double {
+        TranscriptGeometry.reach(
+            contentHeight: scroll.contentSize.height,
+            viewportHeight: scroll.containerSize.height,
+            offset: scroll.contentOffset.y
+        )
+    }
+
     private static func measure(_ scroll: ScrollGeometry) -> TranscriptGeometry {
         TranscriptGeometry(
             paneHeight: TranscriptGeometry.height(scroll.containerSize.height),
@@ -946,11 +973,6 @@ struct TranscriptListView: View {
                 viewportHeight: scroll.containerSize.height,
                 offset: scroll.contentOffset.y
             ),
-            reachToEnd: TranscriptGeometry.reach(
-                contentHeight: scroll.contentSize.height,
-                viewportHeight: scroll.containerSize.height,
-                offset: scroll.contentOffset.y
-            )
         )
     }
 
@@ -1020,7 +1042,9 @@ struct TranscriptListView: View {
             TranscriptDrawn.note(drawn.window.count)
         }
 
-        let move = TranscriptMotion.liveEndMove(distance: geometry.reachToEnd, reduceMotion: reduceMotion)
+        let move = TranscriptMotion.liveEndMove(
+            distance: reachToEnd.value, reduceMotion: reduceMotion
+        )
         switch move {
         case .jump:
             scrollPosition.scrollTo(edge: .bottom)
