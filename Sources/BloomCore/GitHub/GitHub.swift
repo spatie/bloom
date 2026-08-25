@@ -431,21 +431,10 @@ public enum GitHub {
                 checksSummary: summary,
                 reviewDecision: payload.reviewDecision,
                 branch: payload.headRefName ?? "",
-                closedAt: payload.closedAt.flatMap(iso8601)
+                closedAt: parseDate(payload.closedAt)
             ),
             runs: runs
         )
-    }
-
-    /// gh prints GitHub's timestamps as they arrive, which is RFC 3339 with a `Z`. A version that
-    /// starts printing fractional seconds is read too, because the alternative is a nil that reads
-    /// as "still open".
-    private static func iso8601(_ text: String) -> Date? {
-        let plain = ISO8601DateFormatter()
-        if let date = plain.date(from: text) { return date }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: text)
     }
 
     private static func normalize(_ payload: CheckPayload) -> CheckRun {
@@ -472,6 +461,12 @@ public enum GitHub {
         )
     }
 
+    /// Every timestamp gh prints, read in one place.
+    ///
+    /// There were two of these twenty five lines apart, over the same JSON from the same command,
+    /// and they disagreed about the case below: `closedAt` went through the copy with no zero time
+    /// guard, so a pull request Go had never closed came back closed in the year one rather than
+    /// not closed at all. The copy that knew about it was the one used for check runs.
     private static func parseDate(_ value: String?) -> Date? {
         // gh marshals a Go `time.Time` that was never set as year one rather than omitting it, so
         // a check that has not started carries a real, parseable, meaningless date at both ends of
