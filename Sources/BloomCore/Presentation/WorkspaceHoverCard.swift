@@ -22,8 +22,10 @@ import Foundation
 public struct WorkspaceHoverCard: Sendable, Hashable {
     /// The counts, or nil when the worktree matches its base and there is nothing to count.
     ///
-    /// Nil rather than two zeroes, because "+0 -0" is a line saying nothing and the card has to
-    /// say something else in its place. See `changes`.
+    /// Nil rather than two zeroes, because "+0 -0" is a line saying nothing. Nothing stands in
+    /// its place either: `state` a line below is `WorkspaceStatus.clean`, whose own label already
+    /// reads "No changes", and the card drew those two words twice before the picture was looked
+    /// at.
     public struct Diff: Sendable, Hashable {
         public var additions: Int
         public var deletions: Int
@@ -91,14 +93,6 @@ public struct WorkspaceHoverCard: Sendable, Hashable {
         self.pullRequest = pullRequest
         self.age = age
     }
-
-    /// What to say where the counts would be when there are none.
-    ///
-    /// The line the counts sit on is the branch's line, and a branch with nothing after it reads
-    /// as a card that failed to load its numbers rather than as a clean worktree. Three words in
-    /// the quiet ink is the whole fix, and it is here rather than in the view so the empty case is
-    /// something the suite can hold.
-    public static let noChanges = "No changes"
 
     /// The card for one sidebar row.
     ///

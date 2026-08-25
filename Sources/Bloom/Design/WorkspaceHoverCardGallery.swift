@@ -210,7 +210,7 @@ extension Gallery {
     static let hoverCard = Gallery(
         name: "hover-card",
         title: "Workspace hover card",
-        size: CGSize(width: 1_120, height: 900),
+        size: CGSize(width: 1_120, height: 620),
         needsFocus: false,
         view: { _ in AnyView(WorkspaceHoverCardGallery()) }
     )

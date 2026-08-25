@@ -65,15 +65,17 @@ struct WorkspaceHoverCardView: View {
 
             Spacer(minLength: Metrics.spacingSmall)
 
+            // Nothing at all when there is nothing to count, rather than the words "No changes".
+            // Photographed both ways: the state line two rows down is `WorkspaceStatus.clean`,
+            // whose label is those same two words, so the card said "No changes" twice in a
+            // hundred points of each other and read as a stutter rather than as an empty
+            // worktree. The state line is the one that keeps it, because it is where every other
+            // card puts its verdict.
             if let diff = card.diff {
                 // The window's one diff stat, not a second one. It abbreviates past a thousand,
                 // which is what every other pair of counts in the app does, so a card and the row
                 // it opened out of cannot report the same worktree two different ways.
                 DiffStatLabel(additions: diff.additions, deletions: diff.deletions)
-            } else {
-                Text(WorkspaceHoverCard.noChanges)
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
             }
         }
     }
@@ -110,7 +112,14 @@ struct WorkspaceHoverCardView: View {
         }
     }
 
-    /// The state in words, the pull request, and how long ago.
+    /// The state in words with the numbers behind it, and under that the pull request and the age.
+    ///
+    /// **Two lines rather than one, and the picture is what decided it.** All four were on one
+    /// line first, and photographed the failing case read "Checks failing 1 of 12 required checks
+    /// f... #362 1d ago": four unrelated facts fighting over 296 points, with the only one that
+    /// says WHY the checks failed the one that got cut. The state and its detail are one
+    /// sentence, so they keep a line; the number and the age are each a single token and share
+    /// the next.
     ///
     /// The pull request is drawn as `#362` in the same monospaced digits `PullRequestBadge` uses
     /// and with none of its chrome: no rim, no arrow, no hover fill. That is deliberate and it is
@@ -120,38 +129,43 @@ struct WorkspaceHoverCardView: View {
     /// exactly that. The way out to GitHub is the badge itself, one row-click away in the
     /// inspector strip.
     private var footer: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
-            Text(card.state)
-                .font(Typo.captionEmphasis)
-                .foregroundStyle(WorkspaceStatusGlyph.tint(for: card.status))
-                .lineLimit(1)
-                .layoutPriority(1)
-
-            if let detail = card.detail {
-                Text(detail)
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textSecondary)
+        VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+            HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
+                Text(card.state)
+                    .font(Typo.captionEmphasis)
+                    .foregroundStyle(WorkspaceStatusGlyph.tint(for: card.status))
                     .lineLimit(1)
-                    .truncationMode(.tail)
+                    .layoutPriority(1)
+
+                if let detail = card.detail {
+                    Text(detail)
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
+                Spacer(minLength: 0)
             }
 
-            if let pullRequest = card.pullRequest {
-                // `verbatim`, for the reason `PullRequestBadge` writes down: an interpolated `Int`
-                // inside a `LocalizedStringKey` is formatted for the locale, and a machine set to
-                // Dutch drew "#2.631" for a pull request GitHub calls 2631.
-                Text(verbatim: "#\(pullRequest.number)")
+            HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
+                if let pullRequest = card.pullRequest {
+                    // `verbatim`, for the reason `PullRequestBadge` writes down: an interpolated
+                    // `Int` inside a `LocalizedStringKey` is formatted for the locale, and a
+                    // machine set to Dutch drew "#2.631" for a pull request GitHub calls 2631.
+                    Text(verbatim: "#\(pullRequest.number)")
+                        .font(Typo.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.textSecondary)
+                }
+
+                Spacer(minLength: Metrics.spacingSmall)
+
+                Text(card.age)
                     .font(Typo.caption)
                     .monospacedDigit()
-                    .foregroundStyle(Palette.textSecondary)
-                    .layoutPriority(1)
+                    .foregroundStyle(Palette.textTertiary)
             }
-
-            Spacer(minLength: Metrics.spacingSmall)
-
-            Text(card.age)
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .layoutPriority(1)
         }
     }
 

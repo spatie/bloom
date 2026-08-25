@@ -75,7 +75,8 @@ struct WorkspaceHoverCardTests {
     }
 
     /// The empty case, and the reason `diff` is optional rather than two zeroes: "+0 -0" is a
-    /// line that says nothing, so the card has to have something else to draw there.
+    /// line that says nothing. The state carries the fact instead, which is why nothing is drawn
+    /// where the counts would be.
     @Test("A workspace with nothing changed carries no counts at all")
     func noChanges() {
         let card = WorkspaceHoverCard.make(workspace: workspace(), now: Self.now)
@@ -83,7 +84,6 @@ struct WorkspaceHoverCardTests {
         #expect(card.diff == nil)
         #expect(card.status == .clean)
         #expect(card.state == "No changes")
-        #expect(WorkspaceHoverCard.noChanges == "No changes")
     }
 
     /// Files touched without a line changing, which is what a rename or a mode change is. The
