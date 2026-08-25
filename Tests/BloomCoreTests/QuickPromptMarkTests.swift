@@ -128,6 +128,23 @@ struct QuickPromptMarkTests {
         }
     }
 
+    /// The eighteen the inline grid offered before the picker replaced it, written out rather than
+    /// derived, because the point is that this list is fixed and the catalogue is not. A prompt
+    /// somebody marked two years ago has to come back marked the same way, and dropping one of
+    /// these while rearranging a hundred would show up as a row quietly redrawn with the fallback.
+    @Test("Every mark the grid used to offer is still offered")
+    func theOldGridStillResolves() {
+        let grid = [
+            "text.alignleft", "envelope", "list.bullet", "pencil", "gearshape", "bolt",
+            "checkmark.seal", "exclamationmark.triangle", "arrow.triangle.2.circlepath", "hammer",
+            "magnifyingglass", "scissors", "book", "paintbrush", "ladybug", "shippingbox",
+            "doc.richtext", "sparkles",
+        ]
+        for symbol in grid {
+            #expect(QuickPromptMark(stored: symbol) == .symbol(symbol), "\(symbol)")
+        }
+    }
+
     @Test("The fallback is a mark the picker offers")
     func fallbackIsOnOffer() {
         #expect(QuickPrompt.symbols.contains(QuickPrompt.defaultSymbol))

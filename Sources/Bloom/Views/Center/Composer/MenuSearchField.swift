@@ -45,6 +45,9 @@ struct MenuSearchField: NSViewRepresentable {
         context.coordinator.onKey = onKey
         context.coordinator.onHorizontal = onHorizontal
         context.coordinator.text = $text
+        // Written on every pass, not just at `makeNSView`. The icon picker changes it when its tab
+        // changes, and set once the Emojis tab was captioned "Search icons".
+        if field.placeholderString != placeholder { field.placeholderString = placeholder }
         // Only when it differs. Writing the value back on every pass would move the insertion
         // point to the end of the field mid word.
         if field.stringValue != text { field.stringValue = text }

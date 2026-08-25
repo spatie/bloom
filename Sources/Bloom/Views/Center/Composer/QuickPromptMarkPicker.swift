@@ -40,9 +40,11 @@ struct QuickPromptMarkPicker: View {
     private static let markPoints: CGFloat = 17
 
     static let width = CGFloat(columns) * cell + inset * 2
-    /// About seven rows. Enough that a band and the start of the next one are visible together,
-    /// which is what tells a reader that there is more under it.
-    private static let gridHeight: CGFloat = 232
+    /// Seven rows of cells and the padding around them, which is exactly what the emoji band comes
+    /// to: at 232 the Emojis tab ended in a finger's width of empty card, because it is one band
+    /// that does not scroll and the height had been picked for the tab that does. The icon tab
+    /// still scrolls, and a band ending part way down is what tells a reader there is more.
+    private static let gridHeight: CGFloat = 7 * cell + Metrics.spacingWide * 2
     /// What the whole card comes to, which `QuickPromptForm` has to make room for: the tab strip,
     /// the search field, the rule between them and the grid.
     static let height = gridHeight + Metrics.rowHeight + Metrics.barHeight

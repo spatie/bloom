@@ -74,7 +74,7 @@ public enum QuickPromptMarkCatalog {
     /// The SF Symbols, in bands named after what somebody would be writing a prompt about.
     public static let iconSections: [QuickPromptMarkSection] = [
         QuickPromptMarkSection(name: "Writing", choices: symbols([
-            "text.alignleft", "text.quote", "square.and.pencil", "pencil.and.outline",
+            "text.alignleft", "text.quote", "pencil", "square.and.pencil", "pencil.and.outline",
             "doc.text", "doc.richtext", "doc.plaintext", "note.text",
             "list.bullet", "list.number", "checklist", "book", "book.closed", "newspaper",
         ])),
@@ -95,15 +95,16 @@ public enum QuickPromptMarkCatalog {
         ])),
         QuickPromptMarkSection(name: "Search and files", choices: symbols([
             "magnifyingglass", "doc.text.magnifyingglass", "folder", "tray.full", "archivebox",
-            "externaldrive", "square.stack.3d.up", "map", "binoculars", "paperclip",
+            "externaldrive", "square.stack.3d.up", "map", "binoculars", "paperclip", "camera",
         ])),
         QuickPromptMarkSection(name: "Cleaning up", choices: symbols([
             "trash", "scissors", "paintbrush", "paintbrush.pointed", "wand.and.rays",
             "sparkles", "sparkle", "minus.circle", "bandage",
         ])),
         QuickPromptMarkSection(name: "Shipping", choices: symbols([
-            "paperplane", "airplane", "globe", "network", "server.rack", "icloud.and.arrow.up",
-            "square.and.arrow.up", "antenna.radiowaves.left.and.right", "lock", "key",
+            "paperplane", "envelope", "airplane", "globe", "network", "server.rack",
+            "icloud.and.arrow.up", "square.and.arrow.up",
+            "antenna.radiowaves.left.and.right", "lock", "key",
         ])),
         QuickPromptMarkSection(name: "Asking and thinking", choices: symbols([
             "questionmark.circle", "lightbulb", "brain", "graduationcap", "person", "person.2",
@@ -140,7 +141,11 @@ public enum QuickPromptMarkCatalog {
             "\u{1FA84}": "wand magic", "\u{1F480}": "skull dead danger",
             "\u{1F422}": "turtle slow", "\u{1F501}": "repeat retry again",
             "\u{1F9F5}": "thread string", "\u{1F5D1}\u{FE0F}": "bin delete remove",
-            "\u{1F3F7}\u{FE0F}": "label tag",
+            "\u{1F3F7}\u{FE0F}": "label tag", "\u{1F9ED}": "compass explore find",
+            "\u{1F4CA}": "chart stats numbers", "\u{1F575}\u{FE0F}": "detective investigate",
+            "\u{1F517}": "link url", "\u{1F9EF}": "extinguisher hotfix",
+            "\u{1FA79}": "plaster patch fix", "\u{23F1}\u{FE0F}": "stopwatch timing",
+            "\u{1F5C2}\u{FE0F}": "files folders",
         ])),
     ]
 

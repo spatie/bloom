@@ -22,8 +22,9 @@ struct QuickPromptMarkView: View {
     var tint: Color = Palette.textSecondary
 
     /// How much smaller an emoji is set than the symbol beside it. Measured off the gallery render
-    /// rather than reasoned about: at 1.0 the emoji were plainly the larger mark.
-    private static let emojiScale: CGFloat = 0.82
+    /// rather than reasoned about: at 1.0 the emoji were plainly the larger mark, and at
+    /// 0.82 the bug in the list read a size under the seal above it.
+    private static let emojiScale: CGFloat = 0.86
     /// A `Text` box reserves room under the baseline for descenders and an emoji uses none of it,
     /// so a centred emoji sits that much high. This puts it back down.
     private static let emojiRise: CGFloat = 0.06
