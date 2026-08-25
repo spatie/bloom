@@ -96,17 +96,6 @@ struct ComposerFooterView: View {
         .popover(isPresented: $isShowingContextDetail, arrowEdge: .top) {
             if let context { ContextWindowDetail(usage: context) }
         }
-        // Outside the `ViewThatFits` as well, and for the same reason: narrowing the pane must not
-        // take the presenter out of the tree while the panel is up.
-        .popover(isPresented: $isShowingQuickPrompts, arrowEdge: .top) {
-            if let onQuickPrompt {
-                QuickPromptMenu(
-                    catalog: QuickPromptCatalog.shared,
-                    onPick: onQuickPrompt,
-                    onClose: { isShowingQuickPrompts = false }
-                )
-            }
-        }
         .onChange(of: controls.model, initial: true) { _, id in
             remember(id, known: catalog.options(for: controls.agentKind), in: &extraModels)
         }
@@ -253,14 +242,36 @@ struct ComposerFooterView: View {
                     isShowingQuickPrompts = true
                 } label: {
                     ComposerControlLabel(
+                        // Named while there is room, and a glyph alone only when there is not.
+                        // The paperclip beside it can afford to be a glyph forever because
+                        // everybody already knows what a paperclip does; this is a new idea with
+                        // no icon anybody has learned, and unlabelled it is a button people do not
+                        // press. It drops its word on the same step the pickers drop theirs.
                         systemImage: "text.badge.plus",
-                        text: nil,
+                        text: isCompact ? nil : "Quick prompts",
                         isActive: isShowingQuickPrompts
                     )
                 }
                 .buttonStyle(.plain)
                 .help("Insert a quick prompt")
                 .accessibilityLabel("Quick prompts")
+                // On the button, not on the row around it. It was hoisted outside the
+                // `ViewThatFits` alongside the context gauge's, and a popover anchors to the view
+                // it is attached to: from there it hung off the middle of the whole footer, with
+                // its arrow pointing at whichever control happened to be at the centre.
+                //
+                // The gauge's has to be out there, because `showsContext: false` takes the gauge
+                // out of the tree at narrow widths and would take an open popover with it. This
+                // button is in all three variants of the row, so it has nothing to be saved from.
+                .popover(isPresented: $isShowingQuickPrompts, arrowEdge: .top) {
+                    if let onQuickPrompt {
+                        QuickPromptMenu(
+                            catalog: QuickPromptCatalog.shared,
+                            onPick: onQuickPrompt,
+                            onClose: { isShowingQuickPrompts = false }
+                        )
+                    }
+                }
             }
 
             // A paperclip, not the plus that used to sit here: a plus already means "new session"
