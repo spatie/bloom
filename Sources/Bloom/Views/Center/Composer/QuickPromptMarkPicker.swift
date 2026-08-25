@@ -76,13 +76,13 @@ struct QuickPromptMarkPicker: View {
     private static let markPoints: CGFloat = 18
 
     static let width = CGFloat(columns) * cell + inset * 2
-    /// Five rows of cells, and the padding under them.
+    /// Five rows of cells, and the padding around them.
     ///
     /// Five rather than the seven it was. The card hangs in a gap the form opens for it, so every
     /// row of it is a row the panel grows by, and a popover that grows by three hundred points to
     /// show a grid has taken over the window. Both tabs scroll at five, which is the other half of
     /// it: a band cut off part way down is what tells a reader there is more.
-    private static let gridHeight: CGFloat = 5 * cell + Metrics.spacingWide
+    private static let gridHeight: CGFloat = 5 * cell + Metrics.spacingWide * 2
 
     private var sections: [QuickPromptMarkSection] {
         QuickPromptMarkCatalog.filtered(kind, query: query)
@@ -95,6 +95,12 @@ struct QuickPromptMarkPicker: View {
                 searchRow
             }
             .padding(Self.inset)
+
+            // The two controls are fixed and the grid under them moves, and without a line between
+            // them a band heading scrolled half under the field read as a heading that had been
+            // cut off rather than as one on its way past. The header block's own padding was not
+            // enough to say which of the two it was.
+            Hairline()
 
             grid(sections)
         }
@@ -213,7 +219,7 @@ struct QuickPromptMarkPicker: View {
                         }
                     }
                     .padding(.horizontal, Self.inset)
-                    .padding(.bottom, Self.inset)
+                    .padding(.vertical, Self.inset)
                 }
                 .frame(height: Self.gridHeight)
                 .onChange(of: highlighted) { _, mark in
