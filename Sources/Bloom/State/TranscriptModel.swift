@@ -601,7 +601,16 @@ final class TranscriptModel {
 
     /// The one place a turn starts, reached only from `drain`.
     private func deliver(_ delivery: Delivery) async {
-        guard let store, let runner = ensureRunner() else { return }
+        guard let store else { return }
+        // A `return` used to stand here, and the sentence went nowhere: `drain` has already
+        // retired this delivery from the queue and drawn it as sent, so a quiet return leaves a
+        // bubble claiming to have been said to an agent that was never built. It needs the
+        // database open, so it is close to impossible, and a message of the owner's disappearing
+        // without a word is not a thing to leave resting on that.
+        guard let runner = ensureRunner() else {
+            await abandon(delivery, saying: "Bloom could not open an agent for this chat.")
+            return
+        }
         turnStartedAt = Date()
         wasStoppedByHand = false
         // **The clearing rule.** The last turn's subagents go here, at the one place a turn
@@ -625,23 +634,41 @@ final class TranscriptModel {
         } catch {
             setRunning(false)
             statusLabel = nil
-            // Nothing was said after all, so the bubble that said it was going stops claiming so.
-            // The restore below puts it back in the queue, where it is drawn as pending again.
-            sending = nil
-            // Nothing was said, so the delivery goes back to being pending rather than reading as
-            // sent. It used to go back into the composer, which was right when the composer was
-            // the only place an unsent prompt could live and is wrong now that there is a queue:
-            // a failed start with three messages behind it would have pasted one of them over the
-            // top of whatever the user was typing, and lost its place in the order. An unsent
-            // prompt is often minutes of thought and this app holds the only copy of it; it stays
-            // where it can be read, edited by cancelling it, and sent again.
-            try? await store.restoreDelivery(id: delivery.id)
-            await refreshQueue()
-            Log.composer.error(
-                "the agent would not start, so the prompt stayed in the queue: \(error.readableMessage, privacy: .public)"
-            )
-            app.alert = BloomAlert(title: "Could not start the agent", message: error.readableMessage)
+            await abandon(delivery, saying: error.readableMessage)
         }
+    }
+
+    /// A turn that could not start, said out loud and put back in the queue.
+    ///
+    /// **The row is the part that was missing, and silence is what this bug cost.** An alert says
+    /// it once, to whoever is looking at that moment, and then it is gone; the transcript is where
+    /// somebody goes a minute later to work out what happened, and it held nothing at all. So the
+    /// account of it goes in as an `.error` row, drawn by `AgentErrorRowView` beside every other
+    /// way a turn can fail, and the alert stays for the person who is watching now.
+    ///
+    /// The delivery goes back to being pending rather than reading as sent. It used to go back
+    /// into the composer, which was right when the composer was the only place an unsent prompt
+    /// could live and is wrong now that there is a queue: a failed start with three messages
+    /// behind it would have pasted one of them over the top of whatever the user was typing, and
+    /// lost its place in the order. An unsent prompt is often minutes of thought and this app
+    /// holds the only copy of it; it stays where it can be read, cancelled and sent again.
+    private func abandon(_ delivery: Delivery, saying complaint: String) async {
+        guard let store else { return }
+
+        // Nothing was said after all, so the bubble that said it was going stops claiming so.
+        sending = nil
+        try? await store.restoreDelivery(id: delivery.id)
+        await refreshQueue()
+
+        Log.composer.error(
+            "the agent would not start, so the prompt stayed in the queue: \(complaint, privacy: .public)"
+        )
+
+        let row = AgentError.notStarted(message: complaint)
+        _ = try? await store.appendNext(sessionID: session.id, kind: .error, payload: row.raw)
+        await appendLatestMessages()
+
+        app.alert = BloomAlert(title: "Could not start the agent", message: complaint)
     }
 
     func saveDraft() async {

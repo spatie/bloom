@@ -258,6 +258,7 @@ struct AgentExitTests {
             .reported("Error: x"),
             .silent,
             .storage("storing an event: disk full"),
+            .notStarted("Bloom could not open an agent for this chat."),
         ]
 
         for cause in causes {
