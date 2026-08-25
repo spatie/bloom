@@ -82,6 +82,33 @@ struct PaneToolTests {
         }
     }
 
+    /// `pane_open` is self-approved, so nobody is asked before the pane appears, and the address
+    /// is chosen by the agent rather than typed by the owner. It used to take any scheme, so a
+    /// tool call could render a local file in the owner's window with no prompt.
+    @Test("a browser pane opens http and https, and refuses anything else")
+    func refusesSchemesTheOwnerDidNotChoose() {
+        for url in ["file:///Users/freek/.ssh/id_rsa", "ftp://example.com", "bloom://open"] {
+            let outcome = PaneOrder.parse(
+                kind: "browser", url: url, focus: nil, tool: "pane_open"
+            )
+            guard case .refused(let why) = outcome else {
+                Issue.record("\(url) was not refused")
+                continue
+            }
+            #expect(why.contains("http and https"))
+        }
+
+        for url in ["http://localhost:3000", "https://runbloom.app"] {
+            guard case .order(let order) = PaneOrder.parse(
+                kind: "browser", url: url, focus: nil, tool: "pane_open"
+            ) else {
+                Issue.record("\(url) was refused")
+                continue
+            }
+            #expect(order.url == url)
+        }
+    }
+
     // MARK: - Focus
 
     /// "Open me a terminal" means the terminal, in front.

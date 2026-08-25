@@ -111,6 +111,23 @@ public struct PaneOrder: Sendable, Equatable {
             )
         }
 
+        // **An agent picks this address, and `pane_open` is self-approved**, so the owner is not
+        // asked before a pane appears. `BrowserAddress` passes anything carrying a scheme straight
+        // through, which is right for an address field a person types into and wrong here: it let
+        // a tool call render `file:///` anywhere on the disk in the owner's own window, with no
+        // prompt and nothing on screen saying where it came from. A browser pane in this app is
+        // for a workspace's dev server, so it takes the two schemes a dev server speaks.
+        //
+        // The address field itself is deliberately not narrowed. A person typing into it is the
+        // one choosing, which is the whole difference.
+        if let url, !url.isEmpty, let scheme = URL(string: url)?.scheme?.lowercased(),
+           scheme != "http", scheme != "https" {
+            return .refused(
+                "A browser pane opens http and https addresses. '\(scheme)' is not one Bloom will "
+                    + "open on your behalf."
+            )
+        }
+
         let focus: Bool
         switch rawFocus {
         case .none, .null: focus = true
