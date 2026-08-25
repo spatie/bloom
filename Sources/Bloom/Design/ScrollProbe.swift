@@ -59,7 +59,7 @@ enum ScrollProbe {
             try? await Task.sleep(for: .seconds(8))
         }
 
-        guard let scroll = transcriptScrollView(in: contentView) else {
+        guard let scroll = ProbeHarness.transcriptScrollView(in: contentView) else {
             harness.fail("no transcript NSScrollView found")
         }
 
@@ -68,7 +68,7 @@ enum ScrollProbe {
         // is one whose rows are still being measured, and every one of those measurements lands
         // on the main thread inside a frame somebody is waiting for.
         let heightBefore = scroll.documentView?.frame.height ?? 0
-        let travel = scrollableHeight(scroll)
+        let travel = ProbeHarness.scrollableHeight(of: scroll)
         guard travel > 1 else {
             harness.fail("the transcript is shorter than its viewport, so there is nothing to scroll")
         }
@@ -98,32 +98,6 @@ enum ScrollProbe {
             heightBefore: heightBefore
         ))
         exit(0)
-    }
-
-    // MARK: - Finding the transcript
-
-    /// The transcript's scroll view, picked as the one with the most to scroll.
-    ///
-    /// By document height rather than by position or by class name. The window holds several
-    /// scroll views (the sidebar, the inspector's file list, the transcript, sometimes a diff),
-    /// and a private SwiftUI class name would be a guess a future release breaks silently. A
-    /// transcript with a few thousand messages in it is an order of magnitude taller than any of
-    /// the others, so "the tallest" is not a tie worth worrying about. A run against a workspace
-    /// with three messages in it would be measuring the wrong view, and would also be measuring
-    /// nothing, which is why an unscrollable answer is a failure rather than a zero.
-    private static func transcriptScrollView(in root: NSView) -> NSScrollView? {
-        var found: [NSScrollView] = []
-        func walk(_ view: NSView) {
-            if let scroll = view as? NSScrollView { found.append(scroll) }
-            for subview in view.subviews { walk(subview) }
-        }
-        walk(root)
-        return found.max { scrollableHeight($0) < scrollableHeight($1) }
-    }
-
-    private static func scrollableHeight(_ scroll: NSScrollView) -> CGFloat {
-        let document = scroll.documentView?.frame.height ?? 0
-        return max(0, document - scroll.contentView.bounds.height)
     }
 
     // MARK: - Driving

@@ -191,6 +191,55 @@ struct ProbeHarness {
         }
     }
 
+    // MARK: - The transcript's scroll view
+
+    /// The transcript's scroll view, picked as the one with the most to scroll.
+    ///
+    /// By document height rather than by position or by class name. The window holds several
+    /// scroll views (the sidebar, the inspector's file list, the transcript, sometimes a diff),
+    /// and a private SwiftUI class name would be a guess a future release breaks silently. A
+    /// transcript with a few hundred messages in it is an order of magnitude taller than any of
+    /// the others.
+    ///
+    /// Here rather than in `ScrollProbe`, which is where it was written, because `SwitchProbe`
+    /// needs the same view to answer a different question: where a workspace switch left the
+    /// reader.
+    static func transcriptScrollView(in root: NSView) -> NSScrollView? {
+        var found: [NSScrollView] = []
+        func walk(_ view: NSView) {
+            if let scroll = view as? NSScrollView { found.append(scroll) }
+            for subview in view.subviews { walk(subview) }
+        }
+        walk(root)
+        return found.max { scrollableHeight(of: $0) < scrollableHeight(of: $1) }
+    }
+
+    static func scrollableHeight(of scroll: NSScrollView) -> CGFloat {
+        let document = scroll.documentView?.frame.height ?? 0
+        return max(0, document - scroll.contentView.bounds.height)
+    }
+
+    /// Where a transcript is standing, as a report says it.
+    ///
+    /// `atEnd` is the one that matters to a reader: "I was at the bottom, I went away, I came
+    /// back". A tolerance rather than an exact equality, because the live end of a list whose
+    /// last row has just been measured is a point or two away from the bottom of the content.
+    static func scrollPlace(_ scroll: NSScrollView?) -> [String: JSONValue] {
+        guard let scroll else { return ["found": .bool(false)] }
+        let offset = Double(scroll.contentView.bounds.origin.y)
+        let content = Double(scroll.documentView?.frame.height ?? 0)
+        let viewport = Double(scroll.contentView.bounds.height)
+        let reach = max(0, content - viewport - offset)
+        return [
+            "found": .bool(true),
+            "offset": .number(offset),
+            "contentHeight": .number(content),
+            "viewportHeight": .number(viewport),
+            "reachToEnd": .number(reach),
+            "atEnd": .bool(reach <= 4),
+        ]
+    }
+
     // MARK: - What a report says about the run
 
     /// Which build, how loaded the machine was, and what the window was.

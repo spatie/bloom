@@ -150,6 +150,11 @@ enum SwitchProbe {
         return [
             "workspace": .string(id.rawValue),
             "name": .string(name),
+            // Where the switch left the reader, which is the whole of what "it did not keep my
+            // place" means. See `ProbeHarness.scrollPlace`.
+            "place": .object(ProbeHarness.scrollPlace(
+                ProbeHarness.transcriptScrollView(in: contentView)
+            )),
             "marks": SwitchTrace.timeline(),
             "frameCount": .integer(ticker.intervalsMs.count),
             "blocks": .numbers(ticker.blocksMs),
