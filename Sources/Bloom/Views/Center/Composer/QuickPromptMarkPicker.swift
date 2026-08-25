@@ -65,7 +65,7 @@ struct QuickPromptMarkPicker: View {
     /// and narrower ones turn nine bands into a very long scroll. It was eight, at a cell smaller
     /// than the glyph in it wanted; a column came off rather than the card growing, because the
     /// card now sits inside the form's own width and has nowhere to grow into.
-    static let columns = 7
+    private static let columns = 7
     /// A cell, and the hit target with it. Larger than `Metrics.barHeight`, which is the smallest
     /// square this app asks anybody to click, because the owner read the grid as cramped: at 32
     /// around a 17 point mark there were seven points of air, and an emoji fills its em box where a
@@ -75,7 +75,7 @@ struct QuickPromptMarkPicker: View {
     /// The point size a mark is drawn at inside its cell. See `QuickPromptMarkView`.
     private static let markPoints: CGFloat = 18
 
-    static let width = CGFloat(columns) * cell + inset * 2
+    private static let width = CGFloat(columns) * cell + inset * 2
     /// Five rows of cells, and the padding around them.
     ///
     /// Five rather than the seven it was. The card hangs in a gap the form opens for it, so every
