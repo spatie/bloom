@@ -18,6 +18,24 @@
 	<string>1</string>
 	<key>CFBundleIconName</key>
 	<string>Bloom</string>
+	<!--
+	    The one accent, rather than two.
+
+	    `Palette.accent` overrides `controlAccentColor` for everything Bloom draws itself, and that
+	    reached nothing AppKit draws: 37 toggles, every focus ring and every text selection stayed
+	    the user's blue, so one Settings pane held a Bloom-blue selected row and a system-blue
+	    switch. This key points AppKit at the `AccentColor` set in Assets.car, which
+	    `Tools/build.sh` compiles from Resources/Assets.xcassets, and `NSColor.controlAccentColor`
+	    then answers Spatie Blue for this process. Everything derived from it follows:
+	    `keyboardFocusIndicatorColor`, `selectedTextBackgroundColor` and
+	    `selectedContentBackgroundColor` were measured moving with it.
+
+	    It only wins where the user has not chosen an accent, which is the Multicolour default. A
+	    Mac set to Pink or to Graphite keeps that choice and this key is ignored, measured with a
+	    probe rather than assumed. See `Palette.accent` for the whole of it.
+	-->
+	<key>NSAccentColorName</key>
+	<string>AccentColor</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>NSHighResolutionCapable</key>

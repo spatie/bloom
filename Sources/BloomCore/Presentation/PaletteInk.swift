@@ -56,4 +56,33 @@ public enum PaletteInk {
     public static let synVariable = Pair(light: 0x6A3FB5, dark: 0xB49BF0)
     public static let synAttribute = Pair(light: 0x8A6A00, dark: 0xD9B65C)
     public static let synOperator = Pair(light: 0x5A5A60, dark: 0xA8A8B0)
+
+    /// What AppKit derives from `accentFill` for the ground under selected text, measured rather
+    /// than chosen.
+    ///
+    /// This is the one pair here Bloom does not draw. `Palette.textSelection` is
+    /// `selectedTextBackgroundColor` and stays semantic, because the selection has to follow Full
+    /// Keyboard Access and the key window the way the system's does. What changed is what the
+    /// system derives it FROM: `NSAccentColorName` in the bundle's Info.plist points
+    /// `controlAccentColor` at the `AccentColor` set in Assets.car, which carries `accentFill`, and
+    /// every colour AppKit computes off the accent moves with it. Before that the selection was
+    /// `#B3D7FF` and `#3F638B`, the system blue's, while the row selection two hundred points away
+    /// was Bloom's, which is the two-blues complaint at its most visible.
+    ///
+    /// A derived colour is exactly the kind of claim that used to go in a doc comment and never be
+    /// checked again, so it is a number here instead: read off `NSColor.selectedTextBackgroundColor`
+    /// in a bundle carrying this accent, in both appearances, and asserted by
+    /// `PaletteContrastTests`. It sits BEHIND text, so the day somebody retunes `accentFill` up the
+    /// ramp, the test says whether the selection still carries a label rather than leaving it to be
+    /// noticed while dragging over a paragraph.
+    ///
+    /// It only describes a Mac left on the Multicolour default. A user who has chosen an accent in
+    /// System Settings gets their own derivation and this pair is not what is on screen, which is
+    /// the same caveat `Palette.accent` carries about the whole mechanism.
+    public static let accentTextSelection = Pair(light: 0xBAD6DF, dark: 0x46626B)
+
+    /// The ink AppKit puts on that ground: `selectedTextColor`, which resolves to plain black and
+    /// plain white rather than to `labelColor`. Stated so the assertion measures the pair that is
+    /// really on screen instead of assuming the text colour.
+    public static let selectedTextInk = Pair(light: 0x000000, dark: 0xFFFFFF)
 }

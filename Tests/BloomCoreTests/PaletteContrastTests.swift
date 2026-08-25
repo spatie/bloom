@@ -129,6 +129,51 @@ struct PaletteContrastTests {
         }
     }
 
+    /// The accent stopped being only Bloom's business the day `NSAccentColorName` went into the
+    /// bundle, and this is the floor that came with it.
+    ///
+    /// Before that the accent reached only what Bloom drew, so a wrong one was a wrong chip. Now
+    /// AppKit derives the ground under selected text from it, and that ground sits behind a
+    /// paragraph somebody is reading while they drag over it: `selectedTextBackgroundColor` is a
+    /// fill with a label on it, in the one state where the reader cannot move the label out of the
+    /// way. `PaletteInk.accentTextSelection` is what the system derived from `accentFill`, measured
+    /// in both appearances, and this asks the question that matters about it.
+    ///
+    /// The floor is the text one rather than the non-text one, deliberately. The whole point of a
+    /// selection is that the words under it stay words.
+    @Test("selected text is still readable on the ground the accent derives")
+    func selectedTextClearsItsFloor() {
+        for (appearance, isDark) in Self.appearances {
+            let ratio = Contrast.ratio(
+                PaletteInk.selectedTextInk.member(dark: isDark),
+                PaletteInk.accentTextSelection.member(dark: isDark)
+            )
+            #expect(
+                ratio >= Contrast.textFloor,
+                "selected text on the accent's selection fill, \(appearance): \(ratio.rounded(to: 2)) to 1"
+            )
+        }
+    }
+
+    /// The other half of the same question, and the one a retune is likelier to break. A selection
+    /// nobody can see is a selection that has to be guessed at, and the fill is a pale wash on the
+    /// light ramp: `#BAD6DF` on white is a step of 1.4, which is under any text floor and is not
+    /// meant to clear one, but it has to be findable.
+    @Test("a selection can be seen against the page it is on")
+    func aSelectionIsFindable() {
+        for (appearance, isDark) in Self.appearances {
+            for (groundName, ground) in Self.grounds {
+                let ratio = Contrast.ratio(
+                    PaletteInk.accentTextSelection.member(dark: isDark), ground.member(dark: isDark)
+                )
+                #expect(
+                    ratio >= 1.2,
+                    "the selection fill on \(groundName), \(appearance): \(ratio.rounded(to: 2)) to 1"
+                )
+            }
+        }
+    }
+
     /// The tab strip's own two colours, which is the one control in the window whose fill and ink
     /// were chosen together rather than inherited from a list row.
     ///
