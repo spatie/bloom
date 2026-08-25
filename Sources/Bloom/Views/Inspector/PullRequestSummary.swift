@@ -26,10 +26,11 @@ struct PullRequestSummary: View {
     /// still running, which is not the same as "nothing", and is drawn as nothing extra.
     var localWork: LocalWork?
     var isWorking: Bool
-    /// The workspace's agent is mid turn. Every button in this strip works by composing a turn and
-    /// sending it, and an agent runs one turn at a time, so none of them can do anything until
-    /// this one is over. `PullRequestCreator` takes the same fact for the same reason, and both
-    /// say it in the same words: `PullRequestStatus.agentBusyReason`.
+    /// The workspace's agent is mid turn. Every button in this strip works by composing a turn
+    /// and sending it, and an agent runs one turn at a time, so a press made now joins the chat's
+    /// queue and goes when this turn ends. That is what the buttons say while it is true;
+    /// `PullRequestCreator` takes the same fact for the same reason, and both say it in the same
+    /// words: `PullRequestStatus.agentBusyReason`.
     var isAgentBusy: Bool
     var onMerge: (GitHub.MergeMethod) -> Void
     /// Hands the outstanding work to the workspace's agent to commit and push.
@@ -372,7 +373,7 @@ struct PullRequestSummary: View {
             .buttonStyle(.borderedProminent)
             .tint(status.tone.fill)
             .controlSize(.regular)
-            .disabled(isAgentBusy)
+            // Not disabled mid turn. See `PullRequestStatus.agentBusyReason`.
             .help(
                 isAgentBusy
                     ? PullRequestStatus.agentBusyReason
@@ -432,7 +433,7 @@ struct PullRequestSummary: View {
             .buttonStyle(.borderedProminent)
             .tint(status.tone.fill)
             .controlSize(.regular)
-            .disabled(isAgentBusy)
+            // Not disabled mid turn. See `PullRequestStatus.agentBusyReason`.
             .help(
                 isAgentBusy
                     ? PullRequestStatus.agentBusyReason
@@ -492,7 +493,9 @@ struct PullRequestSummary: View {
             .buttonStyle(.borderedProminent)
             .tint(status.tone.fill)
             .controlSize(.regular)
-            .disabled(!status.canMerge || isAgentBusy)
+            // A busy agent is not in here any more, only a pull request GitHub will not merge.
+            // See `PullRequestStatus.agentBusyReason`.
+            .disabled(!status.canMerge)
             // Disabled controls do not explain themselves, and "why is this greyed out" is the
             // whole question a blocked pull request raises.
             .help(blockedReason ?? "Squash and merge, or choose another method")
@@ -500,11 +503,11 @@ struct PullRequestSummary: View {
 
     // MARK: - Text
 
-    /// Why nothing here can be pressed, or nil when something can.
+    /// What the Merge button has to say for itself, or nil when there is nothing.
     ///
     /// The busy turn comes first. It is true of every button in this strip rather than of one of
-    /// them, and it is the reason that goes away on its own, so a reader who hovers a grey button
-    /// while their agent is working is told to wait rather than told about a draft.
+    /// them, and it is the reason that goes away on its own, so a reader hovering while their
+    /// agent is working is told where their press will land rather than told about a draft.
     private var blockedReason: String? {
         isAgentBusy ? PullRequestStatus.agentBusyReason : status.blockedReason
     }

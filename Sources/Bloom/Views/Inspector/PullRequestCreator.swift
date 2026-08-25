@@ -182,9 +182,9 @@ struct PullRequestCreator: View {
             .buttonStyle(.borderedProminent)
             .tint(Palette.accentFill)
             .controlSize(.regular)
-            // Only for a turn that is already running, which ends on its own. A branch with
-            // nothing on it does not draw this button at all: see `body`.
-            .disabled(isAgentBusy)
+            // Never disabled for a turn that is already running: the request queues behind it.
+            // See `PullRequestStatus.agentBusyReason`. A branch with nothing on it does not draw
+            // this button at all: see `body`.
             .help(helpText)
     }
 

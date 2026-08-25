@@ -1326,14 +1326,18 @@ final class WorkspaceModel {
     /// it down exactly the path the composer uses, which is also why the request appears in the
     /// transcript and streams back like anything else the user typed.
     ///
+    /// **A press lands whatever the chat is doing**, and this is where all four of the strip's
+    /// buttons state that. Each of them used to open with `guard !isRunning else { return "…is
+    /// still working. Wait for the turn to finish, then ask again." }`, written when the composer
+    /// was the only way into a chat and a second message really would have interleaved with the
+    /// first. There is a queue now. Everything a person types goes into it and waits its turn, so
+    /// a button that refuses is the one route into a conversation that behaves differently from
+    /// every other, and what it produced was a press that looked like it had done nothing. The
+    /// request joins the queue like a typed message, is drawn as a pending bubble that says when
+    /// it goes, and can be cancelled there. See `Delivery` and `DeliveryHold`.
+    ///
     /// Returns nil on success, or the sentence to put in front of the user.
     func requestPullRequest(overrides: PromptOverrides = PromptOverrides()) async -> String? {
-        // One agent, one turn. Sending into a running turn would interleave with whatever the user
-        // asked for a moment ago, and the runner writes both into the same transcript.
-        guard !isRunning else {
-            return "\(workspace.name) is still working. Wait for the turn to finish, then ask again."
-        }
-
         let template = overrides.template(for: .createPullRequest)
         let wanted = Set(PromptTemplate.variableNames(in: template))
 
@@ -1374,16 +1378,12 @@ final class WorkspaceModel {
     /// agent knows what it changed, how this project words a commit and what to do when the push
     /// is rejected. A message this app invented would be in the repository's history forever.
     ///
-    /// The same guard and the same route as `requestPullRequest`, so both buttons in the strip
-    /// behave identically: one agent, one turn, and the session comes forward so the reader is
-    /// looking at the answer to the button they pressed.
+    /// The same route as `requestPullRequest`, so both buttons in the strip behave identically:
+    /// the request joins the chat's queue whatever the chat is doing, and the session comes
+    /// forward so the reader is looking at the answer to the button they pressed.
     ///
     /// Returns nil on success, or the sentence to put in front of the user.
     func requestPush(overrides: PromptOverrides = PromptOverrides()) async -> String? {
-        guard !isRunning else {
-            return "\(workspace.name) is still working. Wait for the turn to finish, then ask again."
-        }
-
         let template = overrides.template(for: .pushLocalWork)
         let wanted = Set(PromptTemplate.variableNames(in: template))
 
@@ -1423,8 +1423,8 @@ final class WorkspaceModel {
     /// It also puts the merge behind the permission mode the person already chose. A button
     /// running `gh pr merge` is outside all of that by construction; a turn is not.
     ///
-    /// The same guard and the same route as `requestPullRequest` and `requestPush`, so all three
-    /// buttons in the strip behave identically.
+    /// The same route as `requestPullRequest` and `requestPush`, so all three buttons in the
+    /// strip behave identically, queue included.
     ///
     /// Returns nil on success, or the sentence to put in front of the user.
     func requestMerge(
@@ -1432,11 +1432,6 @@ final class WorkspaceModel {
         method: GitHub.MergeMethod,
         overrides: PromptOverrides = PromptOverrides()
     ) async -> String? {
-        guard !isRunning else {
-            return "\(workspace.name) is still working. Wait for the turn to finish, then press "
-                + "Merge again."
-        }
-
         guard let session = await sessionForPullRequest(titledIfNew: "Merge") else {
             return "Could not open a session in \(workspace.name) to send the request to."
         }
@@ -1478,7 +1473,7 @@ final class WorkspaceModel {
     /// already said the branch does not apply to its base, so the only thing that press could
     /// produce was the agent running `gh pr merge` and reading the refusal back out.
     ///
-    /// The same guard and the same route as the other three buttons in the strip, with two
+    /// The same route as the other three buttons in the strip, with two
     /// differences that are both about what this turn does NOT do. There is no instructions file,
     /// because nothing here acts on a server and the project's conventions for resolving a
     /// conflict are already in front of the agent; and there is no confirmation in front of it,
@@ -1489,11 +1484,6 @@ final class WorkspaceModel {
         _ pullRequest: PullRequest,
         overrides: PromptOverrides = PromptOverrides()
     ) async -> String? {
-        guard !isRunning else {
-            return "\(workspace.name) is still working. Wait for the turn to finish, then press "
-                + "Fix merge conflicts again."
-        }
-
         guard let session = await sessionForPullRequest(titledIfNew: "Fix merge conflicts") else {
             return "Could not open a session in \(workspace.name) to send the request to."
         }

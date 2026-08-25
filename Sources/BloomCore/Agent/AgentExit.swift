@@ -19,6 +19,9 @@ public enum AgentExitCause: Sendable, Hashable {
     case silent
     /// Bloom could not write the row. The agent is not what failed.
     case storage(String)
+    /// The turn never reached a process. Nothing was launched and nothing was said to the agent,
+    /// so there is no exit status and no output: the string is Bloom's own account of why.
+    case notStarted(String)
 }
 
 /// What an `.error` row says, in words a person can act on.
@@ -57,6 +60,7 @@ public struct AgentExit: Sendable, Hashable {
     /// The label in the row's first column.
     public var title: String {
         if case .storage = cause { return "Not saved" }
+        if case .notStarted = cause { return "Not sent" }
         return status.map { "Agent exited (\($0))" } ?? "Agent error"
     }
 
@@ -72,6 +76,8 @@ public struct AgentExit: Sendable, Hashable {
         case .silent:
             "It stopped without printing anything."
         case .storage(let message):
+            Self.oneLine(message)
+        case .notStarted(let message):
             Self.oneLine(message)
         }
     }
@@ -108,6 +114,12 @@ public struct AgentExit: Sendable, Hashable {
             """
             The agent itself kept running. It is Bloom's copy of the conversation that is missing \
             a row, so check that the disk is not full, then reopen the workspace.
+            """
+        case .notStarted:
+            """
+            Nothing was said to the agent and nothing in this worktree was touched. Your message \
+            is back in the queue above the composer, so it goes with your next one, and you can \
+            cancel it there if you would rather send something else.
             """
         }
     }
@@ -147,6 +159,15 @@ public struct AgentExit: Sendable, Hashable {
         if json?["subtype"]?.stringValue == "storage" {
             let message = json?["message"]?.stringValue ?? ""
             let cause: AgentExitCause = message.isEmpty ? .silent : .storage(message)
+            return AgentExit(status: status, cause: cause, detail: message)
+        }
+
+        // Same bargain as storage above, and for the same reason: a turn that never started
+        // carries a sentence of Bloom's and no stderr, so reading it as a process exit would draw
+        // an empty row about a process that was never launched.
+        if json?["subtype"]?.stringValue == "notStarted" {
+            let message = json?["message"]?.stringValue ?? ""
+            let cause: AgentExitCause = message.isEmpty ? .silent : .notStarted(message)
             return AgentExit(status: status, cause: cause, detail: message)
         }
 

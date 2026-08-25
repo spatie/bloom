@@ -376,6 +376,11 @@ public struct AgentResult: Sendable, Hashable {
     public let permissionDenials: Int
     public let uuid: String?
     public let sessionID: String?
+    /// `origin.kind`, and empty when the line named none.
+    ///
+    /// Which is every result an owner's prompt has produced: the CLI states an origin only for a
+    /// turn it started for a reason of its own. See `StrayResult`, which is the one reader.
+    public let origin: String
 
     public init(
         usage: AgentUsage = .zero,
@@ -390,7 +395,8 @@ public struct AgentResult: Sendable, Hashable {
         terminalReason: String? = nil,
         permissionDenials: Int = 0,
         uuid: String? = nil,
-        sessionID: String? = nil
+        sessionID: String? = nil,
+        origin: String = ""
     ) {
         self.usage = usage
         self.summary = summary
@@ -405,6 +411,7 @@ public struct AgentResult: Sendable, Hashable {
         self.permissionDenials = permissionDenials
         self.uuid = uuid
         self.sessionID = sessionID
+        self.origin = origin
     }
 
     public var succeeded: Bool { !isError && subtype == "success" }
@@ -437,6 +444,28 @@ extension AgentError {
         }
         let payload = (try? JSONEncoder().encode(StorageFailure(message: message)))
             ?? Data(#"{"type":"error","subtype":"storage"}"#.utf8)
+        return AgentError(message: message, raw: payload)
+    }
+
+    /// The `.error` row Bloom writes when a turn never reached a process at all.
+    ///
+    /// **Silence is the worst thing this app can do to a prompt.** A message that was queued,
+    /// retired from the queue and then handed to nothing left the transcript showing a sentence
+    /// that had apparently been sent, with nothing behind it and nothing to read. The alert that
+    /// went up said so once and was gone; the transcript, which is where somebody looks a minute
+    /// later to work out what happened, said nothing at all.
+    ///
+    /// So the account of it is a row, in the transcript, in the same place every other failure of
+    /// a turn is drawn. `AgentExit` reads this subtype back and carries the words. Nothing was
+    /// launched here, so there is no exit status and no stderr to put in it.
+    public static func notStarted(message: String) -> AgentError {
+        struct StartFailure: Encodable {
+            let type = "error"
+            let subtype = "notStarted"
+            let message: String
+        }
+        let payload = (try? JSONEncoder().encode(StartFailure(message: message)))
+            ?? Data(#"{"type":"error","subtype":"notStarted"}"#.utf8)
         return AgentError(message: message, raw: payload)
     }
 }
@@ -884,7 +913,8 @@ public enum AgentEvent: Sendable {
             terminalReason: json["terminal_reason"]?.stringValue,
             permissionDenials: json["permission_denials"]?.arrayValue?.count ?? 0,
             uuid: json["uuid"]?.stringValue,
-            sessionID: json["session_id"]?.stringValue
+            sessionID: json["session_id"]?.stringValue,
+            origin: json["origin"]?["kind"]?.stringValue ?? ""
         ))
     }
 }

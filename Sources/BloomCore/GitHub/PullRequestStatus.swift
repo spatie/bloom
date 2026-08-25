@@ -60,14 +60,21 @@ public struct PullRequestStatus: Sendable, Hashable {
         case fixConflicts
     }
 
-    /// Why the strip's buttons are dead while the workspace's agent is mid turn.
+    /// What the strip's buttons say about themselves while the workspace's agent is mid turn.
     ///
     /// Here rather than in the two views that say it, because it is one fact about how every one
     /// of these buttons works: none of them does anything itself, they all compose a turn, and an
     /// agent runs one turn at a time. `PullRequestCreator` and `PullRequestSummary` both show it,
     /// and a sentence written out twice is a sentence that gets improved once.
+    ///
+    /// **They used to be dead while it said this, and are not any more.** A disabled button and a
+    /// press that quietly refused were two ways of saying the same thing, and both of them left
+    /// somebody pressing again to find out whether the first press had counted. The turn goes into
+    /// the chat's queue instead, drawn above the composer as a pending message that says when it
+    /// goes and can be cancelled there. See `WorkspaceModel.requestPullRequest`.
     public static let agentBusyReason =
-        "The agent is working. The request is sent as a turn, so it has to wait for this one."
+        "The agent is working. The request is sent as a turn, so it waits in the queue for this "
+            + "one to finish."
 
     public init(
         tone: Tone,

@@ -449,7 +449,10 @@ public actor AgentRunner {
         do {
             for try await line in lines {
                 guard let event = AgentEvent.decode(line: line) else { continue }
-                if case .result = event { sawResult = true }
+                // A stray result does not count as the turn having reported itself. Letting it
+                // would mean a process that printed one and then died on a non-zero status
+                // exited without `finish` ever drawing the error row that says so.
+                if case .result(let result) = event, !StrayResult.isStray(result) { sawResult = true }
                 await ingest(event)
             }
         } catch {
@@ -472,6 +475,18 @@ public actor AgentRunner {
     /// Persist one event, apply whatever it says about the session, then hand it to the UI.
     /// Internal rather than private so tests can exercise persistence without a process.
     func ingest(_ event: AgentEvent) async {
+        // A result for a turn Bloom never asked for closes nothing, and it is dropped here rather
+        // than further down because every reader of a result treats one as a turn boundary: the
+        // footer, the token counts, `SessionLifecycle`, and the drain that starts the next queued
+        // message. The line is still written, as a `system` row, so the record of what the CLI
+        // said stays whole and nothing in the transcript draws a turn that never happened. See
+        // `StrayResult` for the tenth of a second this cost.
+        if case .result(let result) = event, StrayResult.isStray(result) {
+            Self.log.info("ignored a result for a turn Bloom did not start: \(result.origin, privacy: .public)")
+            await persist(kind: .system, payload: event.raw)
+            return
+        }
+
         if event.isTranscriptRow || persistsStreamDeltas {
             var durationMS: Int?
             if case .result(let result) = event { durationMS = result.durationMS }
