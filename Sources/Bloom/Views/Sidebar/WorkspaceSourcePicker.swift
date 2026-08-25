@@ -136,17 +136,17 @@ struct WorkspaceSourcePicker: View {
         }
     }
 
+    /// `PanelTabs` rather than a segmented picker, and its own note carries the three measurements
+    /// that bought it. The one that shows here is the inset: `Metrics.gutter`, the same margin the
+    /// sentence under it and the search row below that already keep, so the strip starts and ends
+    /// on the panel's own lines. The segmented control could not do that at any inset, because it
+    /// sized to its two labels and this stack aligns leading, which is what left it short of the
+    /// right edge with a gap after it.
     private var tabs: some View {
-        Picker("Start from", selection: $tab) {
-            ForEach(WorkspaceSourceTab.allCases) { option in
-                Text(option.title).tag(option)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .padding(.horizontal, Metrics.spacingSmall)
-        .padding(.top, Metrics.spacingSmall)
-        .padding(.bottom, Metrics.spacingTight)
+        PanelTabs("Start from", tabs: WorkspaceSourceTab.allCases, selection: $tab) { $0.title }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.top, Metrics.spacingWide)
+        .padding(.bottom, Metrics.spacingWide)
         .onChange(of: tab) { _, _ in
             // The highlight cannot stay in a tab nobody can see, so it settles into the new one.
             selected = matches.settled(after: selected, in: tab)
