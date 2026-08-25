@@ -18,13 +18,15 @@ import BloomCore
 /// (see `PaletteInk.accentTextSelection`) and can say nothing at all about whether a switch came
 /// out teal.
 ///
-/// **Two things this page cannot show, said here rather than left to be wondered about.** The focus
-/// ring is drawn round the first responder in a key window, and this page is captured with
-/// `needsFocus` false because taking the keyboard off whoever is at the machine is not worth a
-/// picture, so the ring is shown as its colour on a plate rather than round a real field. And the
-/// selection is `selectedTextBackgroundColor` with the ink AppKit really puts on it, painted rather
-/// than dragged over, for the same reason: an unfocused text view draws the unemphasised grey
-/// instead and the page would be photographing the wrong colour.
+/// **What this page cannot show, said here rather than left to be wondered about.** All three
+/// have the same cause: an accented control, a focus ring and a text selection are all drawn in a
+/// neutral grey while their window is not key, and this page is captured with `needsFocus` false
+/// because taking the keyboard off whoever is at the machine is not worth a picture. So the ring
+/// and the selection are shown as their colours on a plate rather than round a real field and under
+/// a real drag, and the on switch is drawn grey, because `.switch` is an `NSSwitch` that reads its
+/// window where the tick box, the radio and the slider read the environment this page sets. The
+/// four swatches on the right are what those three would be drawn in, which is the same question
+/// answered one step indirectly.
 ///
 /// The last row is the control that deliberately does not follow, and it is here so the next person
 /// does not read its absence as a bug. See `InspectorToolbar` and `SettingsView`: a segmented
@@ -46,6 +48,14 @@ struct SystemAccentGallery: View {
                         // taking the keys off whoever is at the machine to earn it. The window is
                         // still inactive; only these controls are told to draw as though it were
                         // not.
+                        //
+                        // It moves the tick box, the radio, the slider and the prominent button,
+                        // and it does NOT move the switch, which is the one control this page most
+                        // wants to show: `.switch` is an `NSSwitch` under there and it reads its
+                        // real window rather than the environment, so the on switch on this page is
+                        // grey and is the only thing here that is lying. What it draws when the
+                        // window is key is `controlAccentColor`, which is the top swatch on the
+                        // right, so the page still answers the question, one step indirectly.
                         .environment(\.controlActiveState, .key)
                 }
                 Spacer(minLength: 0)
