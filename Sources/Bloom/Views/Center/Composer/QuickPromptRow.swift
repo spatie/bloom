@@ -20,8 +20,6 @@ struct QuickPromptRow: View {
     var onEdit: @MainActor () -> Void
     var onDelete: @MainActor () -> Void
 
-    @Environment(\.controlActiveState) private var activeState
-
     @State private var isHovered = false
 
     var body: some View {
@@ -32,14 +30,18 @@ struct QuickPromptRow: View {
                 // dropped rather than as the mark that tells five prompts apart at a glance, which
                 // is the whole job the icon was added for.
                 Image(systemName: QuickPrompt.resolvedSymbol(prompt.symbol))
-                    .imageScale(.large)
-                    .foregroundStyle(isEmphasized ? Palette.selectedEmphasizedText : Palette.textSecondary)
+                    .imageScale(.medium)
+                    .foregroundStyle(Palette.textSecondary)
                     .frame(width: Metrics.repoIcon, height: Metrics.repoIcon)
 
                 VStack(alignment: .leading, spacing: Metrics.spacingTight) {
                     Text(prompt.resolvedName)
-                        .font(Typo.body)
-                        .foregroundStyle(isEmphasized ? Palette.selectedEmphasizedText : Palette.textPrimary)
+                        // `label` and not `body`: the scale's own note calls this rung the
+                        // workhorse for row labels and anything scanned rather than read, which is
+                        // what a menu row is. At `body` the panel was set a rung above the controls
+                        // it hangs off. `FileMentionRow` and `SlashCommandRow` are on this rung.
+                        .font(Typo.label)
+                        .foregroundStyle(Palette.textPrimary)
                         .lineLimit(1)
 
                     // The words themselves, so a name chosen badly six weeks ago is still
@@ -48,11 +50,7 @@ struct QuickPromptRow: View {
                     if prompt.hasSeparatePreview {
                         Text(prompt.preview)
                             .font(Typo.caption)
-                            .foregroundStyle(
-                                isEmphasized
-                                    ? Palette.selectedEmphasizedText.opacity(0.75)
-                                    : Palette.textTertiary
-                            )
+                            .foregroundStyle(Palette.textTertiary)
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
@@ -77,6 +75,11 @@ struct QuickPromptRow: View {
         .buttonStyle(.plain)
         .accessibilityLabel(prompt.resolvedName)
         .accessibilityValue(prompt.preview)
+        // The labels above set no emphasized colour, and that is the other half of this decision.
+        // They used to switch to white whenever the row was selected and the window was active,
+        // which was right while the fill was the accent one and became white text on light grey the
+        // moment it was not. The fill is always quiet now, so the text is always the ordinary ink.
+        //
         // **The quiet fill, not the accent one**, and this is the one place in the composer's menus
         // that differs. `RowBackground` paints the accent when a list has the keyboard, and here it
         // has not: the keyboard is in the search field above, and the list is driven by arrows the
@@ -106,11 +109,7 @@ struct QuickPromptRow: View {
         Button(action: onEdit) {
             Image(systemName: "pencil")
                 .imageScale(.small)
-                .foregroundStyle(
-                    isEmphasized
-                        ? Palette.selectedEmphasizedText.opacity(0.85)
-                        : Palette.textTertiary
-                )
+                .foregroundStyle(Palette.textTertiary)
                 .frame(width: Metrics.rowHeight - Metrics.spacingWide,
                        height: Metrics.rowHeight - Metrics.spacingWide)
                 // No plate. A filled square inside the selection made the row read as a card with
@@ -121,11 +120,5 @@ struct QuickPromptRow: View {
         .buttonStyle(.plain)
         .help("Edit this quick prompt")
         .accessibilityLabel("Edit \(prompt.resolvedName)")
-    }
-
-    /// Whether the row is about to be painted with the accent colour. The labels set their own
-    /// colour, so the inverted foreground `rowBackground` installs never reaches them on its own.
-    private var isEmphasized: Bool {
-        isSelected && activeState != .inactive
     }
 }
