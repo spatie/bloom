@@ -249,7 +249,7 @@ struct QuickPromptToolRoleTests {
         ]))
         #expect(
             Set(BridgeToolbox.standard.tools(for: .parent).map(\.name))
-                .intersection(["quick_prompt_update", "quick_prompt_delete"]).isEmpty
+                .isDisjoint(with: ["quick_prompt_update", "quick_prompt_delete"])
         )
     }
 
