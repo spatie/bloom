@@ -63,6 +63,11 @@ final class BrowserSession {
     /// The rule is in the core; this is the count for this one page.
     @ObservationIgnored private var popups = BrowserPopups()
 
+    /// How the page's own questions are put up, and how many it may ask. The rule is in the core;
+    /// this is the count for this one page, and it is reset by a document committing.
+    @ObservationIgnored private var dialogs = BrowserDialogs()
+    @ObservationIgnored private let dialogPresenter = BrowserDialogPresenter()
+
     /// KVO on everything the toolbar reads, because the navigation delegate does not see every
     /// navigation.
     ///
@@ -291,8 +296,42 @@ final class BrowserSession {
         }
     }
 
+    /// One of `alert`, `confirm` or `prompt`, asked by the page.
+    ///
+    /// Whether it goes up at all, what Bloom's own line above it says and how much of the page's
+    /// words are drawn is `BrowserDialogs` in the core. Putting it on the window is
+    /// `BrowserDialogPresenter`. What is here is the wiring, and one fact neither of those can
+    /// hold: the reader ticking the box silences THIS session's page, so the answer comes back
+    /// through the same call that asked.
+    func ask(
+        _ kind: BrowserDialogs.Kind,
+        message: String,
+        defaultText: String = "",
+        from name: String?
+    ) async -> BrowserDialogAnswer {
+        switch dialogs.request(kind, message: message, defaultText: defaultText, from: name) {
+        case .suppress:
+            return .dismissed
+        case .show(let presentation):
+            let answer = await dialogPresenter.ask(kind, presentation, over: webView.window)
+            if answer.isSilenced { dialogs.silence() }
+            return answer
+        }
+    }
+
+    /// A document committed in this pane, which is what gives a page that was silenced its voice
+    /// back. Called from the navigation delegate, because a `pushState` is not one of these and
+    /// must not count as one: the reader silenced a page, not an address.
+    fileprivate func pageCommitted() {
+        dialogs.pageCommitted()
+    }
+
     func stop() {
         observations = []
+        // Before the web view is let go, so a page waiting on an answer gets one. Never calling
+        // WebKit's completion handler hangs that page for ever, and a closing tab must not leave a
+        // sheet standing on the window either. See `BrowserDialogPresenter`.
+        dialogPresenter.dismiss()
         webView.stopLoading()
         webView.navigationDelegate = nil
         // With the navigation delegate, and for the same reason: a page whose pane has gone must
@@ -421,6 +460,10 @@ private final class NavigationObserver: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         owner?.refresh()
+        // A new document, so a page the reader had told to stop asking may ask again. This is the
+        // one callback that means it: `didStartProvisionalNavigation` fires for a load that may
+        // yet fail, and a failed load leaves the old document in place.
+        owner?.pageCommitted()
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
