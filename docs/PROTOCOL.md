@@ -157,6 +157,20 @@ Last line of a turn.
 `modelUsage.<model>.contextWindow` is where the context-window size comes from, so a
 "how full is the context" gauge can be drawn.
 
+**It is the last line of a turn, and not always of the turn you sent.** The CLI starts turns of
+its own, and when it does the result carries an `origin` object naming why:
+
+```json
+{"type":"result","subtype":"success","is_error":false,"duration_ms":60,
+ "duration_api_ms":0,"num_turns":0,"result":"","origin":{"kind":"task-notification"},...}
+```
+
+Measured on 25 August 2026, twice, in two workspaces. Both times a `--resume` brought back a
+session that had a background task notification waiting for it, and the CLI ran that as a turn
+before it read anything from stdin: `init`, this line, then a second `init` for the turn the user
+had actually sent. A result answering a prompt names no origin at all. See `StrayResult`, which is
+the bug that cost.
+
 ### `rate_limit_event`
 
 One per turn, and it carries **one window**, never a set:

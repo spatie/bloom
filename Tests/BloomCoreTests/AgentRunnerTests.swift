@@ -575,6 +575,55 @@ struct AgentRunnerPersistenceTests {
         #expect(try await store.session(id: session.id)?.state == .failed)
     }
 
+    @Test("a result for a turn Bloom never started closes nothing")
+    func ignoresAStrayResult() async throws {
+        let store = try makeTestStore("agent")
+        let session = try await makeSession(store)
+        // Mid turn, because that is the whole of the bug: the owner's prompt had just gone and the
+        // CLI answered a background task notification of its own before it read it.
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session.with { $0.apply(.turnStarted) }, store: store
+        )
+
+        let line = #"""
+        {"type":"result","subtype":"success","is_error":false,"duration_api_ms":0,"num_turns":0,\
+        "session_id":"s1","total_cost_usd":0,"result":"","origin":{"kind":"task-notification"},\
+        "duration_ms":60,"uuid":"u"}
+        """#.replacingOccurrences(of: "\\\n", with: "")
+        await runner.ingest(try #require(AgentEvent.decode(line: line)))
+
+        // Still running, so the transcript does not draw a footer, the sidebar does not call the
+        // workspace idle, and the queue does not hand the next message to a turn already in flight.
+        #expect(await runner.currentSession.state == .running)
+
+        // The line is kept, because the record of what the CLI said stays whole. As a system row,
+        // which nothing renders as a turn: a `.result` row is a turn boundary by definition.
+        let stored = try await store.messages(sessionID: session.id)
+        #expect(stored.map(\.kind) == [.system])
+        #expect(stored.first?.durationMS == nil)
+    }
+
+    @Test("the real result behind a stray one still ends the turn")
+    func stillEndsOnTheRealResult() async throws {
+        let store = try makeTestStore("agent")
+        let session = try await makeSession(store)
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session.with { $0.apply(.turnStarted) }, store: store
+        )
+
+        let stray = #"""
+        {"type":"result","subtype":"success","is_error":false,"duration_api_ms":0,"num_turns":0,\
+        "result":"","origin":{"kind":"task-notification"},"duration_ms":60,"uuid":"u1"}
+        """#.replacingOccurrences(of: "\\\n", with: "")
+        await runner.ingest(try #require(AgentEvent.decode(line: stray)))
+
+        let real = try #require(try fixtureSessionLines().last { $0.contains("\"type\":\"result\"") })
+        await runner.ingest(try #require(AgentEvent.decode(line: real)))
+
+        #expect(try await store.session(id: session.id)?.state == .idle)
+        #expect(try await store.messages(sessionID: session.id).map(\.kind) == [.system, .result])
+    }
+
     @Test("continues the sequence of an already stored transcript")
     func continuesSeq() async throws {
         let store = try makeTestStore("agent")
