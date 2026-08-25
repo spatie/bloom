@@ -129,6 +129,28 @@ struct TranscriptTextView: NSViewRepresentable {
         // would find a second, different set, and it runs on the text as it is laid out.
         view.isAutomaticLinkDetectionEnabled = false
         view.isAutomaticDataDetectionEnabled = false
+        // And no spell checker. Measured with `--scroll-probe` and `sample` over a 1,104 row
+        // conversation, `NSTextCheckingOperation` was running on three worker threads at once at
+        // USER_INTERACTIVE quality of service, 383 samples of a twelve second scroll, almost all
+        // of it inside `NSSpellChecker.userReplacementsDictionary` doing a linear
+        // `containsObject:` over the user's replacement list. Every text view the lazy stack
+        // realises starts one.
+        //
+        // **Be clear about what this bought, because it is not smoothness.** Frame times either
+        // side of the change are the same to within noise on an idle Mac with cores to spare:
+        // p95 19.0ms and 19.4ms, p99 25.5ms and 26.6ms over four sweeps. What it removes is about
+        // four tenths of a second of CPU per twelve seconds of scrolling, at the highest quality
+        // of service the system has, on a laptop that is usually on battery. `TranscriptEventCache`
+        // records the same shape of finding for the same reason.
+        //
+        // Nothing is lost either way. This view is `isEditable = false`: it draws an agent's
+        // answer and a sentence the user has already sent, neither of which anybody can correct
+        // here, so a red underline under the agent's spelling is an offer with nothing behind it.
+        // `SourceEditor` turns the same four off for the same reason.
+        view.isContinuousSpellCheckingEnabled = false
+        view.isGrammarCheckingEnabled = false
+        view.isAutomaticSpellingCorrectionEnabled = false
+        view.isAutomaticTextReplacementEnabled = false
         view.usesFontPanel = false
         view.usesFindBar = false
         // A text view inside a scroll view of SwiftUI's making must never scroll itself.
