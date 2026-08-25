@@ -237,7 +237,10 @@ extension ComposerTextView {
     /// How long the pointer has to rest before the card opens. The same delay the chips above the
     /// box used, for the same reason: crossing the line on the way to the send button should show
     /// nothing.
-    private static var hoverDelay: Duration { .milliseconds(350) }
+    ///
+    /// It is `Motion.hoverCardDelay` now rather than a number here, because the sidebar's own
+    /// hover card asks the identical question and two answers to it would be two windows.
+    private static var hoverDelay: Duration { Motion.hoverCardDelay }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()

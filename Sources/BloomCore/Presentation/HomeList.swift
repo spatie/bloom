@@ -353,4 +353,19 @@ public enum HomeAge {
 
         return "\(years)y"
     }
+
+    /// The same age with the word on it, for somewhere that has room for the word.
+    ///
+    /// Home's rows do not: they are a dense list under a heading that already says "2 days ago",
+    /// so "ago" on every row of the group says nothing. A card that opens beside one row is the
+    /// opposite case, and "6d" alone there reads as a measurement rather than as a time.
+    ///
+    /// Built on `short` rather than beside it, which is the whole reason it is here and not in
+    /// the card. Every threshold, and the future-dated timestamp a clock change produces, is
+    /// decided once. The one thing it cannot pass through is "now", because "now ago" is not
+    /// English.
+    public static func phrase(for date: Date, now: Date = Date()) -> String {
+        let age = short(for: date, now: now)
+        return age == "now" ? "just now" : "\(age) ago"
+    }
 }

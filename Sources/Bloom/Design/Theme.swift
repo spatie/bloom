@@ -725,6 +725,22 @@ enum Motion {
     /// a half.
     static let sweep: Animation = .easeInOut(duration: 3)
 
+    /// How long the pointer has to rest before a card opens under it: the composer's file chip,
+    /// and the sidebar row's.
+    ///
+    /// Not an animation, which is why it stands slightly apart from the rest of this file, and
+    /// here anyway because it is the same kind of decision: how the window responds to a pointer.
+    /// It was a private constant inside `ComposerTextView` and a second one would have been the
+    /// first thing `WorkspaceHoverCardPresenter` wrote, which is how two surfaces end up
+    /// answering one question differently.
+    ///
+    /// The question is whether the pointer is RESTING on something or crossing it. A sidebar row
+    /// is 32 points tall and thirty of them are stacked, so a hand sweeping the pane at a
+    /// comfortable thousand points a second crosses one in about thirty milliseconds: anything
+    /// above a couple of hundred already tells the two apart, and what the rest buys is that a
+    /// deliberate pause somewhere in the middle of a sweep does not open a card either. Longer
+    /// than this and resting on a row starts to feel like nothing is going to happen.
+    static let hoverCardDelay: Duration = .milliseconds(350)
 }
 
 // MARK: - Materials
