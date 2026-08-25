@@ -253,4 +253,68 @@ struct QuickPromptMarkTests {
             == sections.first?.choices.first?.mark)
         #expect(QuickPromptMarkCatalog.settled([], after: .symbol("bolt")) == nil)
     }
+
+    // MARK: - Rows
+
+    @Test("A band is cut into full rows with a short one at the end")
+    func cutsRows() {
+        let band = QuickPromptMarkSection(
+            name: "Nine", choices: (0..<9).map {
+                QuickPromptMarkChoice(mark: .symbol("bolt.\($0)"), label: "\($0)")
+            }
+        )
+        let rows = band.rows(across: 4)
+        #expect(rows.map(\.choices.count) == [4, 4, 1])
+        #expect(rows.flatMap(\.choices) == band.choices)
+    }
+
+    /// The row's id is what a `ScrollViewReader` is given, so two rows sharing one would scroll to
+    /// whichever SwiftUI reached first.
+    @Test("Every row of every band carries an id of its own")
+    func rowIDsAreDistinct() {
+        let rows = (QuickPromptMarkCatalog.iconSections + QuickPromptMarkCatalog.emojiSections)
+            .flatMap { $0.rows(across: 7) }
+        #expect(Set(rows.map(\.id)).count == rows.count)
+        #expect(rows.allSatisfy { !$0.choices.isEmpty })
+    }
+
+    @Test("A band nothing is left of, and a width of nothing, are both no rows")
+    func cutsNothing() {
+        let band = QuickPromptMarkSection(name: nil, choices: [])
+        #expect(band.rows(across: 7).isEmpty)
+        #expect(QuickPromptMarkCatalog.emojiSections[0].rows(across: 0).isEmpty)
+    }
+
+    // MARK: - Throwing one away
+
+    @Test("The question names the prompt it is about")
+    func asksAboutTheNamedPrompt() {
+        #expect(QuickPromptDeletion.title(for: "Ship it") == "Delete \u{201C}Ship it\u{201D}?")
+        #expect(QuickPromptDeletion.title(for: "  Ship it  ") == "Delete \u{201C}Ship it\u{201D}?")
+    }
+
+    @Test("A prompt with no name of its own is still asked about")
+    func asksAboutTheUnnamedPrompt() {
+        #expect(QuickPromptDeletion.title(for: "") == "Delete this quick prompt?")
+        #expect(QuickPromptDeletion.title(for: "   ") == "Delete this quick prompt?")
+    }
+
+    /// A prompt with no name is listed by its own first line, which runs to seventy two characters.
+    /// The dialog is 260 points wide, so the title is cut rather than allowed to push the buttons
+    /// off the bottom of it.
+    @Test("A name longer than the dialog is cut rather than wrapped")
+    func cutsALongName() {
+        let long = String(repeating: "a", count: QuickPrompt.previewLength)
+        let title = QuickPromptDeletion.title(for: long)
+        #expect(title.contains("\u{2026}"))
+        #expect(title.count < long.count)
+        #expect(!title.contains(long))
+    }
+
+    @Test("The question says what is lost rather than asking whether you are sure")
+    func saysWhatIsLost() {
+        #expect(!QuickPromptDeletion.message.lowercased().contains("are you sure"))
+        #expect(QuickPromptDeletion.message.contains("cannot be brought back"))
+        #expect(QuickPromptDeletion.confirmLabel == "Delete Prompt")
+    }
 }

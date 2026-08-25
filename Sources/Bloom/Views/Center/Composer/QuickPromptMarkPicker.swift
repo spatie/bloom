@@ -11,10 +11,14 @@ import BloomCore
 /// reason it had no well at all. The well is worth having, so what changed is where the card is
 /// drawn, not whether the risk was real.
 ///
-/// It is `MenuPanel`, which is the same card the composer's completion menus float in, positioned
-/// under the well by `QuickPromptForm`. Everything a popover would have given it, a shadow, a
-/// border, the menu material and a click outside that dismisses it, it has; what it gives up is
-/// being able to hang past the edge of the panel, which is why the form makes room underneath.
+/// It is `MenuPanel`, which is the same card the composer's completion menus float in, opened into
+/// a gap `QuickPromptForm` makes under the well. It used to be drawn over the form, and the owner
+/// reported it as a panel that had escaped: it covered the Text field and the Save button, and its
+/// left edge ran into the panel's own rounded corner. A card hung in room made for it covers
+/// nothing, so all the shadow and the border are left to say is that it floats.
+///
+/// **Nothing in the grid is lazy, and that is the bug this file was opened for.** See
+/// `QuickPromptMarkSection.rows(across:)`.
 struct QuickPromptMarkPicker: View {
     /// The mark the prompt carries now, so the picker opens on it rather than at the top.
     var selection: String
@@ -23,89 +27,136 @@ struct QuickPromptMarkPicker: View {
 
     /// Which tab is open. It starts on the one holding the mark the prompt already carries, so
     /// somebody editing a prompt marked with an emoji is not shown a hundred symbols first.
-    @State private var kind = QuickPromptMarkKind.icons
+    @State private var kind: QuickPromptMarkKind
     @State private var query = ""
     /// Where Return would go. Held as the mark itself and never as an index, for the reason
     /// `QuickPromptMenu.selected` writes down: a filtered list renumbers under every keystroke.
     @State private var highlighted: QuickPromptMark?
 
-    /// Eight to a row. Wider rows put the marks further apart than the eye can take in at once,
-    /// and narrower ones turn nine bands into a very long scroll.
-    static let columns = 8
-    /// A cell, and the hit target with it. Thirty two is the smallest square this app asks anybody
-    /// to click at (`Metrics.barHeight`), and the mark inside it is set well under that.
-    private static let cell: CGFloat = 32
+    /// **Both are settled here rather than in an `onAppear`, which is where they were.**
+    ///
+    /// `kind` defaulted to `.icons` and was corrected once the card had appeared, so the first pass
+    /// of every open built the scroll view against nine bands of symbols and then replaced the
+    /// whole of its content. Instrumented, that is exactly what it did: opening the picker on a
+    /// prompt marked with a rocket printed `kind=icons bands=9` and then `kind=emoji bands=1`, one
+    /// frame apart, every time. A scroll view whose content is swapped out from under it the frame
+    /// after it is created is the one event that happens once per open, and the owner's report was
+    /// about a first open. A `@State` given its value in `init` never has that frame.
+    init(
+        selection: String,
+        onChoose: @escaping @MainActor (QuickPromptMark) -> Void,
+        onClose: @escaping @MainActor () -> Void
+    ) {
+        self.selection = selection
+        self.onChoose = onChoose
+        self.onClose = onClose
+
+        let current = QuickPromptMark(stored: selection)
+        let tab = QuickPromptMarkCatalog.kind(of: current)
+        _kind = State(initialValue: tab)
+        _highlighted = State(
+            initialValue: QuickPromptMarkCatalog.settled(
+                QuickPromptMarkCatalog.sections(tab), after: current
+            )
+        )
+    }
+
+    /// Seven to a row. Wider rows put the marks further apart than the eye can take in at once,
+    /// and narrower ones turn nine bands into a very long scroll. It was eight, at a cell smaller
+    /// than the glyph in it wanted; a column came off rather than the card growing, because the
+    /// card now sits inside the form's own width and has nowhere to grow into.
+    static let columns = 7
+    /// A cell, and the hit target with it. Larger than `Metrics.barHeight`, which is the smallest
+    /// square this app asks anybody to click, because the owner read the grid as cramped: at 32
+    /// around a 17 point mark there were seven points of air, and an emoji fills its em box where a
+    /// symbol does not, so the rows read as touching even where the numbers said they were not.
+    private static let cell: CGFloat = 36
     private static let inset: CGFloat = Metrics.spacingWide
     /// The point size a mark is drawn at inside its cell. See `QuickPromptMarkView`.
-    private static let markPoints: CGFloat = 17
+    private static let markPoints: CGFloat = 18
 
     static let width = CGFloat(columns) * cell + inset * 2
-    /// Seven rows of cells and the padding around them, which is exactly what the emoji band comes
-    /// to: at 232 the Emojis tab ended in a finger's width of empty card, because it is one band
-    /// that does not scroll and the height had been picked for the tab that does. The icon tab
-    /// still scrolls, and a band ending part way down is what tells a reader there is more.
-    private static let gridHeight: CGFloat = 7 * cell + Metrics.spacingWide * 2
-    /// What the whole card comes to, which `QuickPromptForm` has to make room for: the tab strip,
-    /// the search field, the rule between them and the grid.
-    static let height = gridHeight + Metrics.rowHeight + Metrics.barHeight
-        + Metrics.spacingSmall * 2 + Metrics.hairline
+    /// Five rows of cells, and the padding under them.
+    ///
+    /// Five rather than the seven it was. The card hangs in a gap the form opens for it, so every
+    /// row of it is a row the panel grows by, and a popover that grows by three hundred points to
+    /// show a grid has taken over the window. Both tabs scroll at five, which is the other half of
+    /// it: a band cut off part way down is what tells a reader there is more.
+    private static let gridHeight: CGFloat = 5 * cell + Metrics.spacingWide
 
     private var sections: [QuickPromptMarkSection] {
         QuickPromptMarkCatalog.filtered(kind, query: query)
     }
 
     var body: some View {
-        let sections = self.sections
-        return MenuPanel {
-            tabs
-            searchRow
-            Hairline()
+        MenuPanel {
+            VStack(alignment: .leading, spacing: Metrics.spacingWide) {
+                tabs
+                searchRow
+            }
+            .padding(Self.inset)
+
             grid(sections)
         }
         .frame(width: Self.width)
-        .onAppear {
-            let current = QuickPromptMark(stored: selection)
-            // Through a local, not through `kind` a line later: reading a `@State` back in the
-            // closure that wrote it is a race nobody should have to think about twice.
-            let tab = QuickPromptMarkCatalog.kind(of: current)
-            kind = tab
-            highlighted = QuickPromptMarkCatalog.settled(
-                QuickPromptMarkCatalog.sections(tab), after: current
-            )
-        }
         .onChange(of: query) { _, _ in
             highlighted = QuickPromptMarkCatalog.settled(self.sections, after: highlighted)
         }
     }
 
-    /// Icons or emoji. Two words rather than a segmented control: `.pickerStyle(.segmented)` is a
-    /// form control, and it read as one, a bordered slab across the top of a card that is
-    /// otherwise a menu. This is the treatment the inspector's own tab row uses.
+    /// Icons or emoji, as a pill on a sunken track.
+    ///
+    /// Not `.pickerStyle(.segmented)`, which is a form control and read as one: a bordered slab
+    /// across the top of a card that is otherwise a menu. It was two bare words before this, and
+    /// the owner read the strip they sat on as an unfinished grey band, because the card's own
+    /// padding was all that separated them from the field under them.
+    ///
+    /// **Local, and it should not stay that way.** `PanelTabs` in `Design/` is this control,
+    /// written for the create sheet's two tabs, and its own note names this picker as the second
+    /// caller. It was not on `main` when this was written. The colours and the two states here are
+    /// its, so adopting it is a deletion rather than a redesign.
     private var tabs: some View {
-        HStack(spacing: Metrics.spacingTight) {
+        HStack(spacing: 0) {
             ForEach(QuickPromptMarkKind.allCases) { tab in
-                Button {
-                    choose(tab: tab)
-                } label: {
-                    Text(tab.title)
-                        .font(kind == tab ? Typo.captionEmphasis : Typo.caption)
-                        .foregroundStyle(kind == tab ? Palette.textPrimary : Palette.textTertiary)
-                        .padding(.horizontal, Metrics.spacingWide)
-                        .padding(.vertical, Metrics.spacingSmall)
-                        .background {
-                            RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                                .fill(kind == tab ? Palette.selected : Color.clear)
-                        }
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(kind == tab ? .isSelected : [])
+                tabCell(tab)
             }
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, Self.inset)
-        .padding(.top, Metrics.spacingWide)
-        .frame(height: Metrics.barHeight, alignment: .bottom)
+        .padding(Metrics.spacingTight)
+        .background {
+            RoundedRectangle(cornerRadius: Metrics.corner)
+                .fill(Palette.surfaceSunken)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: Metrics.corner)
+                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("What to mark this prompt with")
+    }
+
+    private func tabCell(_ tab: QuickPromptMarkKind) -> some View {
+        let isSelected = kind == tab
+        return Button {
+            choose(tab: tab)
+        } label: {
+            Text(tab.title)
+                // The weight carries the choice as well as the fill does, which is what keeps the
+                // strip readable for somebody who cannot separate two greys.
+                .font(isSelected ? Typo.labelEmphasis : Typo.label)
+                .foregroundStyle(isSelected ? Palette.textPrimary : Palette.textTertiary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Metrics.spacingSmall)
+                .background {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+                            .fill(Palette.selected)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     /// Switching tabs clears the query with it. The field belongs to the tab under it, and a query
@@ -118,12 +169,17 @@ struct QuickPromptMarkPicker: View {
         highlighted = QuickPromptMarkCatalog.sections(tab).first?.choices.first?.mark
     }
 
+    /// The field, on a plate of its own.
+    ///
+    /// The plate is the whole change. An `NSTextField` with no border and no background, sat under
+    /// a magnifying glass on the card's own ground, had an edge nowhere, and the owner read it as a
+    /// caption rather than as somewhere to type. This is the box `QuickPromptForm` draws round its
+    /// own text editor, out of the same two values and for the same reason.
     private var searchRow: some View {
         HStack(spacing: Metrics.spacing) {
             Image(systemName: "magnifyingglass")
                 .imageScale(.small)
                 .foregroundStyle(Palette.textTertiary)
-                .frame(width: Metrics.repoIcon)
 
             MenuSearchField(
                 text: $query,
@@ -131,10 +187,16 @@ struct QuickPromptMarkPicker: View {
                 onKey: handle(key:),
                 onHorizontal: handle(horizontal:)
             )
-            .frame(height: Metrics.rowHeight)
         }
-        .padding(.horizontal, Self.inset)
-        .padding(.vertical, Metrics.spacingSmall)
+        .padding(.horizontal, Metrics.spacing)
+        .frame(height: Metrics.rowHeight)
+        .background(
+            Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+        }
     }
 
     @ViewBuilder
@@ -145,13 +207,13 @@ struct QuickPromptMarkPicker: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: Metrics.spacingWide, pinnedViews: []) {
+                    VStack(alignment: .leading, spacing: Metrics.gutter) {
                         ForEach(sections) { section in
                             band(section)
                         }
                     }
                     .padding(.horizontal, Self.inset)
-                    .padding(.vertical, Metrics.spacingWide)
+                    .padding(.bottom, Self.inset)
                 }
                 .frame(height: Self.gridHeight)
                 .onChange(of: highlighted) { _, mark in
@@ -163,6 +225,10 @@ struct QuickPromptMarkPicker: View {
                     proxy.scrollTo(mark.stored, anchor: .center)
                 }
             }
+            // A tab change builds a new scroll view rather than swapping the content of the one
+            // that is up. Nothing then has to reason about an offset, a measured height or a row
+            // belonging to the other tab, because none of them survives the change.
+            .id(kind)
         }
     }
 
@@ -174,42 +240,42 @@ struct QuickPromptMarkPicker: View {
                     .foregroundStyle(Palette.textTertiary)
             }
 
-            LazyVGrid(
-                columns: Array(
-                    repeating: GridItem(.fixed(Self.cell), spacing: 0), count: Self.columns
-                ),
-                spacing: 0
-            ) {
-                ForEach(section.choices) { choice in
-                    cell(choice)
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(section.rows(across: Self.columns)) { row in
+                    HStack(spacing: 0) {
+                        ForEach(row.choices) { choice in
+                            cell(choice)
+                        }
+                    }
                 }
             }
         }
     }
 
+    /// One mark, in two states that used to look alike.
+    ///
+    /// **The mark the prompt carries is the loud one and the keyboard is the quiet one**, and it
+    /// was the other way round. A teal ring on one cell and a teal fill on another were on screen
+    /// at once, and a reader could not say which was which. Only one of the two is a fact about the
+    /// prompt; the other is where Return would go, and it moves under every arrow press and every
+    /// twitch of the pointer. So the fact wears the accent fill this app paints a chosen thing in
+    /// everywhere else, and the transient one wears `Palette.hover`, the wash a row gets under the
+    /// pointer, which says nothing louder than "here".
     private func cell(_ choice: QuickPromptMarkChoice) -> some View {
+        let isChosen = choice.mark == QuickPromptMark(stored: selection)
         let isHighlighted = choice.mark == highlighted
-        let isCurrent = choice.mark == QuickPromptMark(stored: selection)
         return Button {
             onChoose(choice.mark)
         } label: {
             QuickPromptMarkView(
                 stored: choice.mark.stored,
                 points: Self.markPoints,
-                tint: isHighlighted ? Palette.selectedEmphasizedText : Palette.textSecondary
+                tint: isChosen ? Palette.selectedEmphasizedText : Palette.textSecondary
             )
             .frame(width: Self.cell, height: Self.cell)
             .background {
                 RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                    .fill(isHighlighted ? Palette.selectedEmphasized : Color.clear)
-            }
-            // The mark the prompt already carries, when the keyboard is somewhere else. A ring
-            // rather than a second fill: two filled cells read as two things chosen.
-            .overlay {
-                if isCurrent && !isHighlighted {
-                    RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                        .strokeBorder(Palette.accent, lineWidth: Metrics.hairline)
-                }
+                    .fill(fill(chosen: isChosen, highlighted: isHighlighted))
             }
             .contentShape(Rectangle())
         }
@@ -218,7 +284,12 @@ struct QuickPromptMarkPicker: View {
         .onHover { if $0 { highlighted = choice.mark } }
         .help(choice.label)
         .accessibilityLabel(choice.label)
-        .accessibilityAddTraits(isCurrent ? .isSelected : [])
+        .accessibilityAddTraits(isChosen ? .isSelected : [])
+    }
+
+    private func fill(chosen: Bool, highlighted: Bool) -> Color {
+        if chosen { return Palette.selectedEmphasized }
+        return highlighted ? Palette.hover : Color.clear
     }
 
     // MARK: - Keys
