@@ -84,10 +84,10 @@ struct WorkspaceCheckoutTests {
             local: ["main", "wip", "review"],
             remote: [],
             defaultBranch: "main",
-            inUse: ["review": "Quiet Harbour"]
+            inUse: ["review": .workspace("Quiet Harbour")]
         )
         #expect(branches.map(\.name) == ["review", "wip"])
-        #expect(branches.first { $0.name == "review" }?.inUseBy == "Quiet Harbour")
+        #expect(branches.first { $0.name == "review" }?.inUseBy == .workspace("Quiet Harbour"))
         #expect(branches.first { $0.name == "wip" }?.inUseBy == nil)
     }
 
@@ -110,7 +110,7 @@ struct WorkspaceCheckoutTests {
             local: ["main", "figma-mcp-check"],
             remote: ["origin/HEAD"],
             defaultBranch: "main",
-            inUse: ["figma-mcp-check": "Coral Bay", "main": "Coral Bay"],
+            inUse: ["figma-mcp-check": .workspace("Coral Bay"), "main": .workspace("Coral Bay")],
             pullRequestHeads: WorkspaceCheckoutPlan.heads(of: requests)
         )
         #expect(branches.isEmpty)

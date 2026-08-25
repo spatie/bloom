@@ -208,6 +208,32 @@ public struct WorkspaceManager: Sendable {
         let existingBranches = Set(try await Git.branches(of: repo.path))
         let branch = WorkspaceCheckoutPlan.localBranch(for: checkout, taken: existingBranches)
 
+        // **Refused here, before a worktree is cut, rather than diagnosed after git refuses.**
+        //
+        // Git allows one worktree per branch, and Bloom used to find that out from git: it cut a
+        // detached worktree, ran `gh pr checkout`, and got back "fatal:
+        // 'freekmurze/figma-mcp-check' is already used by worktree at
+        // '/Users/freek/conductor/workspaces/there-there/adelaide'" with "failed to run git: exit
+        // status 128" on the end, which reached a dialogue as it stood. The create sheet asks the
+        // same question before Create is pressed, so this is the second of two agreeing
+        // mechanisms rather than the only one: every other way in, the bridge and a `bloom://`
+        // link included, arrives here without having asked anything.
+        //
+        // One `git worktree list` on the path between pressing Create and the workspace existing.
+        // That path already spends a branch listing, a settings read and, for a pull request, a
+        // fetch over the network, so the cost is not the argument; cutting a worktree that has to
+        // be removed again is.
+        let holders = BranchHolder.byBranch(
+            worktrees: (try? await Git.worktrees(of: repo.path)) ?? [],
+            projectPath: repo.path,
+            workspaceNames: BranchHolder.names(
+                of: (try? await store.workspaces(repoID: repo.id)) ?? [], in: repo.id
+            )
+        )
+        if let holder = holders[branch] {
+            throw BranchInUse(branch: branch, holder: holder)
+        }
+
         let directoryName = branch.replacingOccurrences(of: "/", with: "-")
         let root = Self.workspacesRoot.appendingPathComponent(repo.name, isDirectory: true)
         let worktreePath = WorktreePath.free(

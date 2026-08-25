@@ -109,7 +109,7 @@ public enum WorkspaceSource: Sendable, Hashable, Identifiable {
         case .newBranch:
             return nil
         case .existingBranch(let branch):
-            if let holder = branch.inUseBy { return "In use by \(holder)" }
+            if let holder = branch.inUseBy { return holder.note }
             return branch.isLocal ? nil : "remote"
         case .pullRequest(.listed(let request)):
             let author = request.author.isEmpty ? nil : request.author
@@ -122,13 +122,17 @@ public enum WorkspaceSource: Sendable, Hashable, Identifiable {
         }
     }
 
-    /// The workspace already holding this branch, by name, when there is one.
+    /// What is already holding this branch, when something is.
     ///
     /// Selecting such a row does not create anything: git refuses one branch in two worktrees, so
-    /// the honest answer to "open this branch" is the workspace that already has it. These rows
-    /// used to be dropped from the list altogether, which answered the question by pretending the
-    /// branch did not exist.
-    public var heldBy: String? {
+    /// the honest answer to "open this branch" is whatever already has it. These rows used to be
+    /// dropped from the list altogether, which answered the question by pretending the branch did
+    /// not exist.
+    ///
+    /// Only one of the two answers is somewhere Bloom can take you. A workspace is selected; a
+    /// worktree belonging to Conductor or to nobody is named, with its path, so the owner can go
+    /// and close it himself. See `BranchHolder`.
+    public var heldBy: BranchHolder? {
         guard case .existingBranch(let branch) = self else { return nil }
         return branch.inUseBy
     }

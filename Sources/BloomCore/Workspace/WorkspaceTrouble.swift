@@ -24,9 +24,11 @@ import Foundation
 ///
 /// Every sentence names the thing that is wrong, says what is true about it, and ends with the one
 /// action that helps. None of them quotes a command. A project's path is named, because that is the
-/// owner's own folder and the whole remedy is about it; a worktree's path is not, because it is a
-/// directory inside Bloom's workspaces root that the owner did not choose and cannot usefully act
-/// on. The workspace's name is named instead.
+/// owner's own folder and the whole remedy is about it; a Bloom worktree's path is not, because it
+/// is a directory inside Bloom's workspaces root that the owner did not choose and cannot usefully
+/// act on. The workspace's name is named instead. A worktree that is **not** one of Bloom's is the
+/// exception on both counts: it is somebody else's application's folder, the app has no name for
+/// it, and its path is the only thing that says which window to go and close. See `BranchHolder`.
 public enum WorkspaceTrouble: Sendable, Equatable {
     /// The project's folder is not there at all.
     case projectGone(project: String, path: String)
@@ -36,6 +38,10 @@ public enum WorkspaceTrouble: Sendable, Equatable {
     case projectHasNoCommits(project: String)
     /// The branch the worktree would have been cut from is not in the project.
     case baseBranchGone(branch: String, project: String)
+    /// Creating cannot go on because something already has the branch checked out. See
+    /// `BranchHolder`: that something is not always one of Bloom's own workspaces, and the two
+    /// read differently because only one of them is somewhere Bloom can take you.
+    case createBranchInUse(branch: String, holder: BranchHolder)
     /// The workspace's worktree folder is not there at all.
     case worktreeGone(workspace: String)
     /// The workspace's worktree folder is there, and git does not know it any more.
@@ -127,6 +133,17 @@ public enum WorkspaceTrouble: Sendable, Equatable {
                 is nothing to cut this worktree from.
 
                 Choose another base branch, or put that one back.
+                """
+
+        case let .createBranchInUse(branch, holder):
+            return """
+                The branch '\(branch)' is already checked out in \(holder.described).
+
+                Git allows one worktree per branch, so a second workspace on it cannot be made. \
+                Nothing has been created and nothing has been changed.
+
+                \(holder.wayOut), or start a new branch from '\(branch)' on the Create new \
+                branch tab, which git does allow and which gets you the same code.
                 """
 
         case let .worktreeGone(workspace):
@@ -309,6 +326,14 @@ public enum WorkspaceTrouble: Sendable, Equatable {
     public static func creating(
         _ error: any Error, project: String, projectPath: String, baseBranch: String
     ) async -> WorkspaceTrouble {
+        // Asked of the error's type rather than of its words, which is the rule this whole file
+        // exists to keep. `WorkspaceManager.open` decided this before it ran anything and threw
+        // the branch and the holder as a value, so there is no stderr to read and no chance of
+        // "exit status 128" arriving in a dialogue by way of `unexplained`.
+        if let inUse = error as? BranchInUse {
+            return .createBranchInUse(branch: inUse.branch, holder: inUse.holder)
+        }
+
         switch await CheckoutStanding.of(projectPath, branch: baseBranch) {
         case .missing: return .projectGone(project: project, path: projectPath)
         case .notACheckout: return .projectNotACheckout(project: project, path: projectPath)

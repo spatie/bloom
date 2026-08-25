@@ -161,14 +161,14 @@ struct WorkspaceSourceTests {
     @Test("An in-use branch is listed, greyed by its note, and says which workspace has it")
     func marksAnInUseBranch() {
         let row = WorkspaceSource.existingBranch(
-            ExistingBranch(name: "review", isLocal: true, inUseBy: "Quiet Harbour")
+            ExistingBranch(name: "review", isLocal: true, inUseBy: .workspace("Quiet Harbour"))
         )
-        #expect(row.heldBy == "Quiet Harbour")
+        #expect(row.heldBy == .workspace("Quiet Harbour"))
         #expect(row.note == "In use by Quiet Harbour")
         // The note that would otherwise be there loses to it: what selecting the row does is the
         // one fact on it that changes.
         let remote = WorkspaceSource.existingBranch(
-            ExistingBranch(name: "review", isLocal: false, inUseBy: "Quiet Harbour")
+            ExistingBranch(name: "review", isLocal: false, inUseBy: .workspace("Quiet Harbour"))
         )
         #expect(remote.note == "In use by Quiet Harbour")
         #expect(
