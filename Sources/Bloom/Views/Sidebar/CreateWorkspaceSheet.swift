@@ -82,17 +82,9 @@ struct CreateWorkspaceSheet: View {
     @State private var isNamingAvailable = false
 
     /// Which bucket of `PromptAttachmentStore` this draft is filling, and the name of the staging
-    /// directory its files are copied into. A fresh one per draft, so the second workspace fired
-    /// off with "Create more" cannot pick up the first one's screenshots.
+    /// directory its files are copied into. A fresh one per draft, so a sheet opened again cannot
+    /// pick up the previous draft's screenshots.
     @State private var draftID = PromptAttachments.newShortID()
-
-    /// What was created a moment ago, shown in place of the branch hint so that firing off three
-    /// workspaces in a row is not three identical sheets with no sign anything happened.
-    @State private var lastCreated: String?
-
-    /// Kept between openings on purpose. Somebody who works in threes will work in threes again
-    /// tomorrow, and a toggle that reset every time would have to be found every time.
-    @AppStorage("create.more") private var createMore = false
 
     /// Which of the two things this sheet is being used for, and the last answer, kept.
     ///
@@ -218,9 +210,6 @@ struct CreateWorkspaceSheet: View {
         // the composer has to be typeable before it lands. The sheet opens on the branch route
         // either way; the picker fills in behind it.
         .task(id: repoID) { await loadCheckouts() }
-        // The confirmation stands until there is something new to say, which is the moment the
-        // next task starts being written. No timer, so it cannot vanish mid sentence.
-        .onChange(of: prompt) { _, _ in lastCreated = nil }
         // The draft's chips and the files behind them belong to a sheet that is going away.
         .onDisappear(perform: discardDraft)
     }
@@ -690,17 +679,6 @@ struct CreateWorkspaceSheet: View {
 
             Spacer(minLength: 0)
 
-            // More useful here than it is in Conductor, because running several agents at once is
-            // what this app is for: three workspaces on one repository is the core motion, and a
-            // sheet that closed between them made it three trips to the sidebar.
-            Toggle("Create more", isOn: $createMore)
-                .toggleStyle(.checkbox)
-                // Untinted it follows the system accent, which on a Mac set to anything but Blue
-                // is another app's colour in Bloom's sheet.
-                .tint(Palette.accentFill)
-                .font(Typo.caption)
-                .help("Keep this sheet open after creating, ready for the next one")
-
             Button("Cancel", role: .cancel) { dismiss() }
                 .keyboardShortcut(.cancelAction)
         }
@@ -737,11 +715,6 @@ struct CreateWorkspaceSheet: View {
                         .lineLimit(1)
                 }
             }
-        } else if let lastCreated {
-            Label("Started \(lastCreated)", systemImage: "checkmark.circle")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.accent)
-                .lineLimit(1)
         } else if willBeNamedByModel {
             // Deliberately nothing. See above.
             EmptyView()
@@ -1068,8 +1041,8 @@ struct CreateWorkspaceSheet: View {
     ///
     /// One function, one button, one guard, because there is now one way to finish this sheet.
     /// Everything below the first two lines is the same work whichever mode asked for it: the same
-    /// attachments, the same staging, the same "Create more", the same funnel. See
-    /// `AppModel.createWorkspace`, which is the one way a workspace is started whoever is asking.
+    /// attachments, the same staging, the same funnel. See `AppModel.createWorkspace`, which is
+    /// the one way a workspace is started whoever is asking.
     ///
     /// `task` is the sentence in chat mode and the name field in terminal mode, and both arrive at
     /// `startWorkspace` as `prompt` because that is what it derives a name and a branch from. The
@@ -1094,19 +1067,15 @@ struct CreateWorkspaceSheet: View {
         let staged = StagedAttachments(directory: directory, attachments: ready)
         // The chips go now; the files stay until the worktree has taken them.
         PromptAttachmentStore.shared.clear(sessionID: handedOver)
-        // Rotated here rather than in `resetDraft`, and on both paths. Dismissing the sheet
-        // discards whatever draft it is holding, and without this that would be the draft whose
-        // files are at this moment on their way into a worktree.
+        // Still rotated, even though creating now always dismisses. `dismiss` runs `onDisappear`,
+        // which discards whatever draft the sheet is holding, and without this that would be the
+        // draft whose files are at this moment on their way into a worktree.
         draftID = PromptAttachments.newShortID()
 
-        if createMore {
-            resetDraft()
-        } else {
-            dismiss()
-        }
+        dismiss()
 
         Task {
-            let workspace = await app.createWorkspace(
+            await app.createWorkspace(
                 in: repo,
                 prompt: text,
                 baseBranch: base,
@@ -1117,32 +1086,7 @@ struct CreateWorkspaceSheet: View {
             )
             // Whatever survived is in the worktree now, and whatever did not was never going to be.
             AttachmentStaging.discard(draftID: handedOver)
-            lastCreated = workspace?.name
         }
-    }
-
-    /// What "Create more" clears, and what it keeps.
-    ///
-    /// The task goes, because it has been sent and a second workspace on the same sentence is
-    /// never what anybody wanted. Everything else stays: the project, the base branch, what it
-    /// opens with and every choice in the footer are answers about this batch of work, and asking
-    /// for them again three times in a row is what would make the toggle not worth having.
-    private func resetDraft() {
-        // The checkout goes with the task. Everything else on the sheet is a setting for this
-        // batch of work; the pull request that was just opened is not, and a second workspace on
-        // the same pull request is never what anybody meant by "Create more".
-        checkout = nil
-        prompt = ""
-        // The name goes with the sentence, and for the same reason: it has been used, and a second
-        // workspace wearing the first one's name is never what "Create more" meant. The MODE does
-        // not go. Somebody firing off three shells in a row is exactly who the toggle is for, and
-        // a sheet that snapped back to chat between them would make the toggle cost more than it
-        // saved. It is not reset anywhere else either: it is `@AppStorage`, so it outlives the
-        // sheet on purpose.
-        terminalName = ""
-        caret = 0
-        contentHeight = ComposerTextEditor.lineHeight
-        focusTheBox()
     }
 
     private func discardDraft() {
