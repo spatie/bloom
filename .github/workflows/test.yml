@@ -147,7 +147,10 @@ jobs:
           # How many cores swift build is about to spread itself over. It sets
           # no --jobs, so this number is the parallelism, and it is the first
           # thing to look at when a build time moves for no reason anybody can
-          # see in the diff.
+          # see in the diff. macos-26 answered 3 in August 2026, which is worth
+          # knowing twice over: it is why compiling dominates this workflow, and
+          # it is a second reason to run this job beside the tests rather than
+          # before them, because two jobs is six cores and one job is three.
           echo "cores: $(sysctl -n hw.ncpu)"
 
           # `xcodebuild -version` writes two lines and is piped nowhere, deliberately.
