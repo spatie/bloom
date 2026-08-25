@@ -32,10 +32,11 @@ import SwiftUI
 /// lifts its ink rather than only changing what is behind it.
 ///
 /// **Three states, and none of them is a colour alone.** A resting cell is tertiary ink on the
-/// track, a hovered one is secondary ink over `Palette.hover`, and the chosen one is primary ink
-/// in medium weight on the fill. The weight is what carries the choice for a reader who cannot
+/// track, a hovered one is primary ink over `Palette.hover`, and the chosen one is primary ink in
+/// medium weight on the fill. The weight is what carries the choice for a reader who cannot
 /// separate the two greys, which is the rule `SeverityVocabularyTests` holds everywhere else in
-/// this app; equal cells are what let it change without moving anything.
+/// this app; equal cells are what let it change without moving anything. Why the hovered cell is
+/// not a rung of its own is on `ink(selected:hovered:)`, and it was a picture that settled it.
 ///
 /// Shared rather than local because a second panel wants it: `QuickPromptMarkPicker` draws the
 /// same two words by hand, and the inspector's own tab row is the third of them.
@@ -139,11 +140,19 @@ struct PanelTabs<Tab: Hashable>: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    /// Three rungs of the ink scale, one per state. Tertiary is the floor of what is meant to be
-    /// read and it only clears its 4.5 on the track, so the two lit states climb rather than
-    /// staying put and letting the fill do all the work. See the type's own note.
+    /// Resting ink, or lit ink. Two values rather than three, and the third was tried first.
+    ///
+    /// A hovered cell was `Palette.textSecondary`, on the reasoning that three states want three
+    /// rungs. Photographed, the hovered cell came out DIMMER than the resting one beside it, which
+    /// is the opposite of what a hover means. The scale is not the ladder it looks like:
+    /// `textSecondary` is `secondaryLabelColor`, half ink, which composites to `#808080` on white
+    /// and measures 3.95 to 1, while `Palette.textTertiary` is Bloom's own retuned rung at 4.52.
+    /// The system's second rung is below Bloom's third, and its own doc comment says as much.
+    ///
+    /// So a cell is either resting or lit, and the wash and the weight are what tell hovered from
+    /// chosen. Both are what the fill is for anyway; `Palette.hover` is four percent ink, which
+    /// carries almost nothing on its own.
     private func ink(selected: Bool, hovered: Bool) -> Color {
-        if selected { return Palette.textPrimary }
-        return hovered ? Palette.textSecondary : Palette.textTertiary
+        selected || hovered ? Palette.textPrimary : Palette.textTertiary
     }
 }
