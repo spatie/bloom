@@ -27,15 +27,47 @@ import SwiftUI
 /// gesture any app could make; this is Bloom's own picture, and it earns the extra complexity by
 /// being the thing the app does.
 ///
-/// Core Animation at `BrandWater`'s frame rate, for `BrandWater`'s reasons. The cap is the whole
-/// budget: uncapped, the render server honours this display's full ProMotion rate for as long as
-/// the window is open, which was measured on the About window at about forty percent of one core
-/// in WindowServer against seven capped. Nothing here moves fast enough to want more: the head of
-/// a branch travels between twenty seven and thirty nine points a second, so at twelve frames a
-/// second it steps at most three and a quarter points, which on a fifty eight point bloom whose
-/// colour is already gone by seven tenths of its radius is inside the softness of its own edge.
-/// Measured again after the speed went up, because that is exactly the change that would have
-/// taken it out of the noise, and it had not.
+/// Core Animation, and at twenty frames a second rather than `BrandWater`'s twelve, which is the
+/// one number on this view that is not the water's.
+///
+/// It was twelve, taken from `BrandWater.frameRate` by citation, and the reason did not come with
+/// the number. That cap is argued on a gradient breathing in place: the water's fastest pool
+/// changes its brightest pixel by about two levels of two hundred and fifty five a second, so at
+/// twelve frames a step is a sixth of a level and nothing a gradient can show. Nothing here
+/// breathes in place. Seven fifty eight point blooms travel along their curves at between twenty
+/// seven and forty two points a second, and a 1.3 point stroke draws itself out behind each of
+/// them at the same speed. A cap that is right for brightness changing is not therefore right
+/// for a thing moving, and this is where that went wrong.
+///
+/// Measured the way the original was, by redrawing the composition off screen and diffing
+/// consecutive frames. At twelve the water and the drifts along `main` change at most two levels
+/// per step and shift no pixel by more than eight, which is the original measurement confirmed
+/// rather than doubted. The branch heads change eighteen levels per step and shift more than
+/// eight thousand pixels by more than eight levels in that one step, because a bloom whose alpha
+/// ramps to nothing over twenty points of radius carries about two and a third levels for every
+/// point it moves, and at twelve frames it moves three and a half. A maximum blend of one second
+/// of that is a string of separate beads where sixty frames draws one streak. At twenty the step
+/// is twelve levels and three hundred and sixty pixels, at thirty nine levels and one pixel, at
+/// sixty six levels and none. Six is the floor rather than the trend: it is the head's own fade
+/// near the loop point, which no frame rate touches.
+///
+/// Twenty rather than thirty, and the threshold is film's. A pan is held to about a screen width
+/// in seven seconds at twenty four frames, which on a 520 point plinth is three points a frame
+/// before an edge starts to strobe. At twelve the fastest head moves three and a half points a
+/// frame, over the line; at twenty it moves two and a tenth, under it; thirty buys a further
+/// seven tenths of a point that nobody asked for. See `frameRate` for what each of them costs.
+///
+/// One rate for the whole view rather than twenty for the heads and twelve for the drifts, which
+/// looks like the thrifty version and is not. The render server recomposites the whole window
+/// surface on the fastest tick anything in it asks for, so a split rate saves the interpolation
+/// of two positions and none of the compositing. It is also why `BrandWater` keeping twelve is
+/// not a saving on this screen: it keeps its own number for the About window, where it is the
+/// only thing moving and the measurement it carries is the whole story.
+///
+/// And the bill is bounded by the screen it is drawn on. This figure is the greeting only. Press
+/// the button and the branches are gone and the band at the top of the checks step is
+/// `BrandWater` alone at twelve, so the extra frames are spent on the screen somebody is walking
+/// past rather than on a window that gets left open.
 struct BrandBranching: NSViewRepresentable {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -86,7 +118,7 @@ final class BrandBranchingView: NSView {
     ///
     /// They are assigned longest branch to longest period, which is the part that makes seven
     /// lights read as one family rather than as seven separate animations: a head covers between
-    /// twenty seven and thirty nine points a second whichever branch it is on, where the four
+    /// twenty seven and forty two points a second whichever branch it is on, where the four
     /// used to run from fourteen to twenty seven. That is the quicker Freek asked for, a little
     /// under twice the pace of the old average, and it is spent on the whole set rather than on
     /// the front of it.
@@ -139,8 +171,28 @@ final class BrandBranchingView: NSView {
     /// stripe being dragged.
     private static let lineLag: CFTimeInterval = 0.16
     private static let wakeLag: CFTimeInterval = 0.27
-    /// The same cap, the same numbers and the same reason as `BrandWater.frameRate`.
-    private static let frameRate = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)
+    /// Twenty, not `BrandWater.frameRate`'s twelve, and the type's own note is why.
+    ///
+    /// What the extra frames cost, sampled rather than reasoned about, because the last time
+    /// somebody reasoned about it this file inherited the wrong number. A harness holding this
+    /// plinth and nothing else, in a 520 by 424 window in a corner of the display, showing and
+    /// hiding itself on twenty second phases with WindowServer sampled every ten: shut, it sat at
+    /// 4.8 percent of one core; at twelve frames it cost 3.5 points over the shut phases either
+    /// side of it, at twenty 6.5, at thirty 10.8. So this change is worth about three points of
+    /// one core, and thirty would have been seven. Both are paid only while the greeting is on
+    /// screen. The phases alternate because WindowServer's own load on this machine wanders
+    /// between two and forty five percent with whatever else is drawing, so an absolute number is
+    /// worth nothing and only a sample next to its own baseline says anything.
+    ///
+    /// The window that this was originally measured on is still the one to worry about and it is
+    /// untouched: the About window has no branches, only `BrandWater` at twelve.
+    ///
+    /// Fifteen and twenty rather than a range around twenty because both ends have to divide the
+    /// refresh of the display this lands on. Fifteen and twenty go into sixty and into a hundred
+    /// and twenty; twenty four goes into a hundred and twenty and not into sixty, so on an
+    /// ordinary display it would be handed back as an uneven cadence, which is the judder these
+    /// frames are being spent to remove.
+    private static let frameRate = CAFrameRateRange(minimum: 15, maximum: 20, preferred: 20)
     /// How many points the head's travel is sampled into. Forty is under three points apart on
     /// the longest branch here, which is inside the softest edge in the composition.
     private static let steps = 40
