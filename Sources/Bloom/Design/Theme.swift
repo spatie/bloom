@@ -179,6 +179,15 @@ enum Palette {
     // colour alone does not: the focus ring follows the Full Keyboard Access setting, the caret
     // follows the text colour on high contrast, and the selection is the paler fill a text run
     // gets rather than the solid one a list row gets.
+    //
+    // All three are still semantic and none of them is a hex here, which is right for the same
+    // three reasons. What changed is what they are derived FROM. They are computed off
+    // `controlAccentColor`, and until `NSAccentColorName` went into the bundle that was the user's
+    // accent while every fill Bloom drew was Bloom's, so a focus ring round a field was the system
+    // blue an inch under a selected row that was Spatie Blue. Now the accent AppKit derives them
+    // from is `accentFill`, and the three follow it: measured `#006282` and `#37A3C7` for the ring
+    // at half alpha, and `PaletteInk.accentTextSelection` for the selection, which
+    // `PaletteContrastTests` holds a floor over because it is a fill with a paragraph on it.
 
     /// The focus ring around the control that has keyboard focus.
     static let focusRing = Color(nsColor: .keyboardFocusIndicatorColor)
@@ -205,6 +214,29 @@ enum Palette {
     ///
     /// This is for ink and for strokes. A filled control that has to carry white text uses
     /// `accentFill`, which is a different member of the ramp for exactly that reason.
+    ///
+    /// **The override used to reach only what Bloom draws itself, and that was the whole bug.**
+    /// Thirty-seven toggles, three steppers, every focus ring and every text selection are drawn by
+    /// AppKit off `controlAccentColor`, which no `.tint` can reach, so one Settings pane held a
+    /// switch in the user's blue, a focus ring in the user's blue and a selected sidebar row in
+    /// Bloom's. Two accents in one window, structurally rather than by slip. `NSAccentColorName` in
+    /// `Resources/Info.plist` names the `AccentColor` set in Assets.car, which carries `accentFill`,
+    /// and `controlAccentColor` then answers that for the whole process: measured `#197593` in both
+    /// appearances, with the ring, the text selection and the list selection all derived from it.
+    ///
+    /// **What it does not reach, and this was measured rather than repeated from the docs.** The
+    /// key wins only where the user has left the accent on Multicolour, which is the default and so
+    /// most machines. A probe bundle carrying this exact key and catalogue, handed a chosen accent,
+    /// answered `#F74F9E` for `controlAccentColor` and derived its ring and its selection from that:
+    /// the user's choice beats the app's every time. So a Mac set to Pink or to Graphite has the
+    /// two accents it had before, and this fixes the default case and nothing else. The other
+    /// coherent answer, giving the sidebar selection back to `controlAccentColor`, is the one to
+    /// reach for if the brand argument ever gives.
+    ///
+    /// Increase Contrast is the system's business either way now, because the colour it is lifting
+    /// is `controlAccentColor` and that is this. A colour set can carry a High Contrast variant of
+    /// its own the day `PaletteInk` grows a high-contrast tier; it has none, so it declares one
+    /// colour and the system does what it does to it.
     static let accent = dynamic(PaletteInk.accent)
 
     /// The same pair as an `NSColor`, for the layers that hold a `CGColor` and therefore have to be
@@ -217,6 +249,14 @@ enum Palette {
     /// on it measures 5.2 to 1, which is where macOS's own selection fill sits (4.9 to 1), so a
     /// selected row reads exactly as firmly as it did. Bloom itself cannot do this job: white on
     /// `#4FD8C4` is 1.6 to 1, an unreadable row.
+    ///
+    /// **This is also the colour AppKit is handed**, through `NSAccentColorName` and the
+    /// `AccentColor` set in Assets.car, and it is this member of the ramp rather than `accent` for
+    /// the reason above: `controlAccentColor` is a FILL everywhere the system reaches for it, the
+    /// track of a switch, the box of a ticked checkbox, the dot of a radio button, all of them with
+    /// white on top. `accent` in dark is `#4FD8C4` and would leave every tick in the app at 1.6 to
+    /// 1. One value in both appearances is what a colour set wants anyway, and this pair already is
+    /// one, which is why `Tools/build.sh` refuses a build where the two halves have come apart.
     static let accentFill = dynamic(PaletteInk.accentFill)
 
     /// An address in running text: underlined, and this colour.

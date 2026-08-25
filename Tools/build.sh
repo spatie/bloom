@@ -170,6 +170,41 @@ embed_sparkle() {
 
 embed_sparkle
 
+# The accent Bloom hands to AppKit, checked against the one Bloom draws with itself.
+#
+# Resources/Assets.xcassets/AccentColor.colorset is a colour set and nothing more, and a colour set
+# cannot reference a Swift constant. So the hex is stated twice, once in `PaletteInk.accentFill` and
+# once in the JSON, and this reads both and refuses a build where they have drifted. Without the
+# check the failure is silent and permanent: every AppKit control would go on drawing the colour the
+# ramp used to be, and the window would be back to two accents with nothing saying so.
+verify_accent_matches_palette() {
+  local colourset=Resources/Assets.xcassets/AccentColor.colorset/Contents.json
+  local ink=Sources/BloomCore/Presentation/PaletteInk.swift
+  [[ -f "$colourset" && -f "$ink" ]] || return 0
+
+  local declared asset
+  # Pair(light: 0x197593, dark: 0x197593). Both members, because a pair whose halves differ cannot
+  # be one colour set and this should say so rather than silently taking the light one.
+  declared="$(sed -n 's/.*accentFill = Pair(light: 0x\([0-9A-Fa-f]*\), dark: 0x\([0-9A-Fa-f]*\)).*/\1 \2/p' "$ink")"
+  if [[ "${declared%% *}" != "${declared##* }" ]]; then
+    echo "==> accent: PaletteInk.accentFill is a pair ($declared), which one colour set cannot be" >&2
+    return 1
+  fi
+
+  asset="$(/usr/bin/python3 -c '
+import json, sys
+c = json.load(open(sys.argv[1]))["colors"][0]["color"]["components"]
+print("".join(c[k][2:].upper() for k in ("red", "green", "blue")))
+' "$colourset")"
+
+  if [[ "$asset" != "$(echo "${declared%% *}" | tr "[:lower:]" "[:upper:]")" ]]; then
+    echo "==> accent: $colourset says #$asset, PaletteInk.accentFill says #${declared%% *}" >&2
+    return 1
+  fi
+}
+
+verify_accent_matches_palette
+
 # macOS 26 draws an app icon from a layered Icon Composer document rather than from a flat bitmap:
 # the glass, the shadow and the specular pass belong to the system and are applied live to the
 # layers. Resources/Bloom.icon is that document. actool compiles it into an Assets.car, which the
@@ -177,14 +212,25 @@ embed_sparkle
 # floor is macOS 26 and there is no system left that would draw a flat one. Tools/icon/make.py's
 # docstring carries the measurement that settled that.
 #
+# Resources/Assets.xcassets goes into the same catalogue and the same invocation, because a second
+# actool run compiling to the same directory writes a second Assets.car over the first and the app
+# loses whichever went in first. One run, two inputs, one file with both in it. What is in the
+# catalogue besides the icon is the AccentColor set NSAccentColorName names, which is what makes
+# every AppKit control in the window draw in Bloom's accent rather than the user's.
+#
 # Command line tools on their own carry no actool, so a machine with only those produces a bundle
-# with no icon at all. That is loud enough to notice and cheaper than failing the build.
-compile_layered_icon() {
+# with no icon at all, and no accent either: the app then falls back to the system accent, which is
+# what it drew before this existed. That is loud enough to notice and cheaper than failing the
+# build.
+compile_asset_catalogue() {
   local iconName=Bloom deployment
-  [[ -d "Resources/$iconName.icon" ]] || return 0
+  local -a inputs
+  [[ -d "Resources/$iconName.icon" ]] && inputs+=("$PWD/Resources/$iconName.icon")
+  [[ -d "Resources/Assets.xcassets" ]] && inputs+=("$PWD/Resources/Assets.xcassets")
+  (( ${#inputs} )) || return 0
 
   if ! xcrun --find actool >/dev/null 2>&1; then
-    echo "==> skipping layered icon: actool not found"
+    echo "==> skipping asset catalogue: actool not found"
     return 0
   fi
 
@@ -192,7 +238,7 @@ compile_layered_icon() {
 
   # Absolute, because actool hands a relative input path to ibtoold, which resolves it against a
   # working directory of its own and crashes rather than reporting a missing file.
-  xcrun actool "$PWD/Resources/$iconName.icon" \
+  xcrun actool "${inputs[@]}" \
     --compile "$APP/Contents/Resources" \
     --app-icon "$iconName" \
     --output-partial-info-plist "$BIN_DIR/$iconName.icon.plist" \
@@ -210,12 +256,12 @@ compile_layered_icon() {
   # Nothing above proves the catalogue arrived: actool reports a failure in the plist it prints and
   # is not reliably non-zero about it. The bundle either has the file or the build is wrong.
   if [[ ! -f "$APP/Contents/Resources/Assets.car" ]]; then
-    echo "==> layered icon: actool produced no Assets.car" >&2
+    echo "==> asset catalogue: actool produced no Assets.car" >&2
     return 1
   fi
 }
 
-compile_layered_icon
+compile_asset_catalogue
 
 # What the app looks up in its own bundle by name: the Spatie logos the About pane draws, the
 # menu bar mark, and the product marks the About window's makers section shows. The logos and the
