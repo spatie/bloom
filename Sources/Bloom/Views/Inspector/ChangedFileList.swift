@@ -30,31 +30,73 @@ struct ChangedFileList: View {
     /// Resolved when the selection moves rather than in `body`, which runs again on every hover.
     @State private var previewURL: URL?
     /// Bumped on every row activation, which is what puts the keyboard back on the list after the
-    /// reader has been in the composer or a terminal. See `QuickLookHost`.
+    /// reader has been in the composer or a terminal. See `ListKeyboardHost`.
     @State private var quickLookArm = 0
+    /// The row the keyboard is on, named by path.
+    ///
+    /// Not `model.selectedFilePath`, and it cannot be: in the tree shape a directory is a row too,
+    /// and a directory is not a file the centre column can open. So this is what the highlight
+    /// follows, and a cursor that lands on a file sets the model's selection as well, which is
+    /// what keeps the two shapes and the review pane saying the same thing.
+    @State private var cursor: String?
+    /// Every row on screen in the order it is drawn, and the names type-select matches against.
+    ///
+    /// Derived in `rebuild` for the reason every other derived list in this file is: a running
+    /// agent rewrites the changed files every few seconds and `body` runs far more often than
+    /// that.
+    @State private var rowPaths: [String] = []
+    @State private var rowTitles: [String] = []
+    /// The prefix somebody is typing, and the rest of the list's keyboard. See `ListKeyboard`.
+    @State private var keyboard = ListKeyboard()
+    /// Whether the arrow keys move this list, which is what decides between the emphasised
+    /// selection fill and the quiet one. See `RowBackground`.
+    @State private var hasKeyboard = false
 
     @AppStorage(ChangedFilePresentation.storageKey)
     private var isTree = ChangedFilePresentation.defaultsToTree
 
     var body: some View {
-        Group {
-            if model.changedFiles.isEmpty {
-                empty
-            } else if isTree {
-                tree
-            } else {
-                list
+        ScrollViewReader { proxy in
+            Group {
+                if model.changedFiles.isEmpty {
+                    empty
+                } else if isTree {
+                    tree
+                } else {
+                    list
+                }
+            }
+            // The row an arrow key moved to comes into view, which is the other half of the key.
+            // Only while this list holds the keyboard: a cursor that moved because the agent
+            // rewrote the file list must not drag the reader's scroll position with it.
+            .onChange(of: cursor) { _, path in
+                guard hasKeyboard, let path else { return }
+                proxy.scrollTo(path)
             }
         }
-        // Space bar Quick Look, the way Finder does it. Behind the rows, so it takes no clicks.
-        .background(QuickLookHost(url: previewURL, armToken: quickLookArm))
+        // Arrows, Home and End, type-select, Return, and the space bar Quick Look that used to be
+        // reachable only with the pointer. See `ListKeyboardHost`.
+        .listKeyboard(
+            hasKeyboard: $hasKeyboard,
+            previewing: previewURL,
+            armToken: quickLookArm,
+            onKey: handle
+        )
         .onChange(of: model.changedFiles, initial: true) { _, _ in
             rebuild()
             // A file the agent has just deleted stops being previewable without the selection
             // ever moving.
             refreshPreview()
         }
-        .onChange(of: model.selectedFilePath, initial: true) { _, _ in refreshPreview() }
+        // The keyboard follows a selection taken anywhere else: Command+Option+J, the review
+        // pane's own walk, a file chip in the transcript.
+        .onChange(of: model.selectedFilePath, initial: true) { _, path in
+            if let path, path != cursor { cursor = path }
+        }
+        .onChange(of: cursor) { _, _ in refreshPreview() }
+        .onChange(of: hasKeyboard) { _, focused in
+            if !focused { keyboard.forgetTyping() }
+        }
         .onChange(of: isTree) { _, _ in rebuild() }
         // Attached to the list the rows live in, so the dialog animates out of the file it is
         // about rather than out of the window.
@@ -175,14 +217,14 @@ struct ChangedFileList: View {
         } else {
             // The hover is the row's own, and the fill is painted by the wrapper rather than by
             // the row, for the two reasons `HoverRow` gives.
-            HoverRow(isSelected: false) {
+            HoverRow(isSelected: cursor == item.node.path, isFocused: hasKeyboard) {
                 ChangedFolderRow(
                     name: item.node.name,
                     path: item.node.path,
                     isExpanded: !collapsed.contains(item.node.path),
                     depth: item.depth,
                     fullPath: fullPath(item.node.path),
-                    action: { toggle(item.node.path) }
+                    action: { activate(folder: item.node.path) }
                 )
                 .equatable()
             }
@@ -191,12 +233,12 @@ struct ChangedFileList: View {
     }
 
     private func row(_ file: ChangedFile, depth: Int = 0) -> some View {
-        let isSelected = model.selectedFilePath == file.path
+        let isSelected = cursor == file.path
 
         // The fill is applied outside the row rather than inside it, so that the row's own body
         // can read the selection out of the environment and invert its status letter accordingly.
         // That is also why the hover cannot simply be state on the row: see `HoverRow`.
-        return HoverRow(isSelected: isSelected) {
+        return HoverRow(isSelected: isSelected, isFocused: hasKeyboard) {
             ChangedFileRow(
                 file: file,
                 isSelected: isSelected,
@@ -206,11 +248,7 @@ struct ChangedFileList: View {
                 // under the list; there is no diff under the list any more, and a click that
                 // deselected would now close nothing while making the row you just aimed at go
                 // quiet.
-                onSelect: {
-                    model.selectedFilePath = file.path
-                    FileReview.open(path: file.path, in: model)
-                    quickLookArm += 1
-                },
+                onSelect: { move(to: file.path) },
                 onRevert: { pendingRevert = file }
             )
             .equatable()
@@ -229,10 +267,20 @@ struct ChangedFileList: View {
                 collapsed: collapsed
             )
             groups = []
+            rowPaths = treeRows.map(\.node.path)
+            rowTitles = treeRows.map(\.node.name)
         } else {
             groups = ChangedFileGroup.build(from: model.changedFiles)
             treeRows = []
+            let files = groups.flatMap(\.files)
+            rowPaths = files.map(\.path)
+            rowTitles = files.map(\.filename)
         }
+
+        // A file the agent reverted, or a directory that closed under the keyboard, leaves the
+        // cursor naming a row that is not drawn any more, and every key after that would be
+        // measured from nothing.
+        if let cursor, !rowPaths.contains(cursor) { self.cursor = nil }
     }
 
     private func toggle(_ path: String) {
@@ -244,12 +292,102 @@ struct ChangedFileList: View {
         rebuild()
     }
 
+    // MARK: - The keyboard
+
+    /// The list's whole keyboard. Where a key lands is `ListKeyboard` and `TreeNavigation`, in the
+    /// core, because it is a rule and a rule taken inside a view is a rule nothing can test. What
+    /// is left here is applying the answer, which is the part that needs this window.
+    ///
+    /// False hands the key back to the responder chain. See `ListKeyOutcome` for why "nothing
+    /// moved" is not that.
+    private func handle(key: ListKey) -> Bool {
+        let index = cursor.flatMap { rowPaths.firstIndex(of: $0) }
+
+        // Only the tree shape has a left and a right. In the flat list both fall through to
+        // `ListKeyboard`, which ignores them, and the window keeps them.
+        if isTree, key == .left || key == .right {
+            switch TreeNavigation.step(key, at: index, in: treeShape) {
+            case .expand(let row), .collapse(let row):
+                activate(folder: treeRows[row].node.path)
+            case .move(let row):
+                move(to: rowPaths[row])
+            case .none:
+                break
+            }
+            return true
+        }
+
+        switch keyboard.outcome(for: key, titles: rowTitles, current: index) {
+        case .move(let row):
+            move(to: rowPaths[row])
+            return true
+        case .activate:
+            guard let index else { return false }
+            activate(row: index)
+            return true
+        case .handled:
+            return true
+        case .ignored:
+            return false
+        }
+    }
+
+    /// The tree as its keyboard sees it. A node with no file behind it is a directory, and the
+    /// `collapsed` set is the inverse of open, because a change of twenty files wants everything
+    /// open on first sight.
+    private var treeShape: [TreeRow] {
+        treeRows.map {
+            TreeRow(
+                depth: $0.depth,
+                isDirectory: $0.node.file == nil,
+                isExpanded: !collapsed.contains($0.node.path)
+            )
+        }
+    }
+
+    /// Moves the highlight, and opens the file under it.
+    ///
+    /// Arrowing onto a row opens it rather than only highlighting it, which is what a click on the
+    /// same row does and what this list's selection has always meant: the highlighted row is the
+    /// review that is open. Xcode's navigator behaves the same way. A directory row has nothing to
+    /// open and only takes the highlight.
+    private func move(to path: String) {
+        cursor = path
+
+        if let file = model.changedFiles.first(where: { $0.path == path }) {
+            model.selectedFilePath = file.path
+            FileReview.open(path: file.path, in: model)
+        }
+
+        // Opening a review moves the centre column, so the keyboard is put back here afterwards
+        // rather than left wherever that landed.
+        quickLookArm += 1
+    }
+
+    /// Return. A directory opens or closes, a file opens, and in the flat list every row is a file.
+    private func activate(row index: Int) {
+        if isTree, treeRows.indices.contains(index), treeRows[index].node.file == nil {
+            activate(folder: treeRows[index].node.path)
+            return
+        }
+        move(to: rowPaths[index])
+    }
+
+    private func activate(folder path: String) {
+        cursor = path
+        toggle(path)
+        quickLookArm += 1
+    }
+
     private func fullPath(_ relative: String) -> String {
         (model.workspace.path as NSString).appendingPathComponent(relative)
     }
 
+    /// Follows the cursor rather than the model's selection, so the space bar previews the row
+    /// the keyboard is actually on. A directory resolves to nothing, which disarms the preview
+    /// rather than opening a panel on a folder.
     private func refreshPreview() {
-        previewURL = model.selectedFilePath.flatMap { QuickLookTarget.url(for: fullPath($0)) }
+        previewURL = cursor.flatMap { QuickLookTarget.url(for: fullPath($0)) }
     }
 
     private func refresh() {
