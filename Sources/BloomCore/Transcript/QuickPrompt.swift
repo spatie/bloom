@@ -79,8 +79,9 @@ public struct QuickPrompt: Identifiable, Sendable, Hashable {
         return folded.prefix(Self.previewLength).trimmingCharacters(in: .whitespaces) + "\u{2026}"
     }
 
-    /// About as much as fits on the second line of a 300 point panel row.
-    static let previewLength = 64
+    /// About as much as fits on the second line of the panel's row. See
+    /// `QuickPromptMenu.width`.
+    static let previewLength = 72
 
     /// The name with the whitespace taken off both ends, or a name made from the text when the
     /// owner left the field empty. A row with no name at all is a row nobody can search for.
@@ -88,5 +89,14 @@ public struct QuickPrompt: Identifiable, Sendable, Hashable {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty else { return trimmed }
         return preview
+    }
+
+    /// Whether the row has anything to say on a second line.
+    ///
+    /// False for a prompt with no name, because `resolvedName` is already its first line and the
+    /// row drew the same sentence twice, once in the name's weight and once in the preview's. A
+    /// name somebody wrote is a different fact from the words, and only then are there two of them.
+    public var hasSeparatePreview: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
