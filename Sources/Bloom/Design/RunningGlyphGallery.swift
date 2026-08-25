@@ -60,36 +60,37 @@ struct RunningGlyphGallery: View {
             // A workspace whose agent was mid turn showed `circle.dotted`, the mark for a worktree
             // that matches its base branch, because `WorkspaceStatus.resolve` was handed
             // `isRunning: false` and fell through every test to `.clean`. The report called it "a
-            // hollow dashed ring", and the first hour of reading went into working out which of
-            // the column's two rings that was: `.clean`'s dotted circle, or `.settingUp`'s
-            // spinner. Both are here so nobody has to ask again, and so the distance between the
-            // dot and either ring can be seen rather than described. The state that produced it is
-            // `AgentTurns` in the core.
+            // hollow dashed ring" and an hour went into working out which mark that was, so the
+            // two are drawn side by side: what the mark meant to say, and what it said. The state
+            // that produced it is `AgentTurns` in the core.
+            //
+            // `.settingUp` is deliberately NOT here, and not because it was ruled out by reading.
+            // It is the column's other ring and the obvious third column for this row, and it is a
+            // `ProgressView`, which is a representable: drawn into this page it photographs as
+            // SwiftUI's yellow placeholder in `--snapshot`'s offscreen pass, which is the one pass
+            // an agent can run without putting a window in front of the owner. A page that comes
+            // out as a warning sign says less than a page without the column.
             VStack(alignment: .leading, spacing: 8) {
-                Text("The marks it was mistaken for")
+                Text("The mark it was mistaken for")
                     .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
                 HStack(alignment: .top, spacing: 24) {
                     named("Running") { WorkspaceRunningGlyph() }
                     named("No changes") { WorkspaceStatusGlyph(status: .clean) }
-                    named("Setting up") { WorkspaceStatusGlyph(status: .settingUp) }
                 }
             }
 
-            // The same three on the selection fill, because that is where the report saw them and
+            // The same pair on the selection fill, because that is where the report saw them and
             // because every meaning colour in the palette is unreadable there: on a selected row
             // the shape is the whole of what a mark says. See `WorkspaceStatusGlyph.isOnSelection`.
             VStack(alignment: .leading, spacing: 8) {
-                Text("The same three, selected")
+                Text("The same pair, selected")
                     .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
                 HStack(alignment: .top, spacing: 24) {
                     named("Running") { WorkspaceRunningGlyph(isOnSelection: true) }
                     named("No changes") {
                         WorkspaceStatusGlyph(status: .clean, isOnSelection: true)
-                    }
-                    named("Setting up") {
-                        WorkspaceStatusGlyph(status: .settingUp, isOnSelection: true)
                     }
                 }
                 .padding(8)
