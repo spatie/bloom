@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import WebKit
+import BloomCore
 
 /// A plain container so SwiftUI can attach and detach a long-lived view without that view ever
 /// being deallocated, and so the page follows the pane size on every layout pass.
@@ -60,6 +61,10 @@ final class BrowserPageWebView: WKWebView {
     /// split at the moment of the click.
     var paneMenu: (@MainActor () -> NSMenu)?
 
+    /// Where a find key press goes. Set by `BrowserSession`, which owns both this view and the
+    /// state the bar is drawn from.
+    var findCommand: (@MainActor (BrowserFindCommand) -> Void)?
+
     /// `NSMenuItem` does not own what answers it, so the menu the items came out of is kept until
     /// the next right click replaces it. Letting it go at the end of `willOpenMenu` leaves a menu
     /// of rows that draw and do nothing.
@@ -79,6 +84,76 @@ final class BrowserPageWebView: WKWebView {
         for item in hosted.items {
             hosted.removeItem(item)
             menu.addItem(item)
+        }
+    }
+
+    // MARK: - Find in page
+
+    /// The Edit menu's Find items, which arrive here down the responder chain when the page holds
+    /// the keyboard.
+    ///
+    /// **This is the route that costs nothing and survives.** The conventional Find submenu sends
+    /// `performFindPanelAction:` to the first responder, which is what `NSTextView` and SwiftTerm
+    /// both already answer, so a browser pane that answers it too is found by that menu the day it
+    /// is added without either half knowing about the other. `performKeyEquivalent` below is the
+    /// same thing for today, for as long as there is no such menu.
+    ///
+    /// Not an `override`: `performFindPanelAction` is declared on `NSTextView` rather than on
+    /// `NSResponder`, so there is nothing here to override and the selector is reached by the
+    /// responder chain's own dispatch.
+    @objc func performFindPanelAction(_ sender: Any?) {
+        guard let tag = (sender as? NSMenuItem)?.tag,
+              let action = NSTextFinder.Action(rawValue: tag),
+              let command = Self.command(for: action) else { return }
+        findCommand?(command)
+    }
+
+    /// `Cmd F`, `Cmd G` and `Shift Cmd G`, and only while this page holds the keyboard.
+    ///
+    /// **The focus test is the whole of what makes this safe to add.** A key equivalent claimed by
+    /// a view claims it for the window: a browser pane merely being on screen while the reader
+    /// types in the composer must not take `Cmd F` off the transcript, which is exactly the bug
+    /// the review records `Cmd W` having (it closes a chat session in some other pane from a
+    /// browser tab). So the event is only read when the first responder is this view or something
+    /// inside it, which for a page with focus is WebKit's own content view.
+    ///
+    /// Everything else falls straight through to `super`, and from there to the menu bar, which is
+    /// entitled to it.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard let command = findKey(event) else { return super.performKeyEquivalent(with: event) }
+        findCommand?(command)
+        return true
+    }
+
+    private func findKey(_ event: NSEvent) -> BrowserFindCommand? {
+        guard findCommand != nil, holdsKeyboard else { return nil }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // Option and Control are somebody else's business, and a pane that read past them would
+        // answer `Ctrl Cmd G` as Find Previous.
+        guard !flags.contains(.option), !flags.contains(.control) else { return nil }
+        return BrowserFindCommand.forKey(
+            event.charactersIgnoringModifiers ?? "",
+            hasCommand: flags.contains(.command),
+            hasShift: flags.contains(.shift)
+        )
+    }
+
+    /// Whether the keys are coming to this page. WebKit's first responder is a content view of its
+    /// own inside this one rather than this one, so the test is descent and not identity.
+    private var holdsKeyboard: Bool {
+        guard let responder = window?.firstResponder as? NSView else { return false }
+        return responder === self || responder.isDescendant(of: self)
+    }
+
+    /// Which of the standard find actions a browser pane has an answer for. Replace and its
+    /// friends are not among them: there is nothing here to write into.
+    private static func command(for action: NSTextFinder.Action) -> BrowserFindCommand? {
+        switch action {
+        case .showFindInterface: .show
+        case .nextMatch: .next
+        case .previousMatch: .previous
+        case .hideFindInterface: .hide
+        default: nil
         }
     }
 }

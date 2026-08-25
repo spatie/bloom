@@ -20,6 +20,10 @@ struct BrowserTabView: View {
     /// on submit.
     @State private var address = ""
     @FocusState private var isAddressFocused: Bool
+    /// The find banner's field, held here rather than in the banner because a `FocusState` belongs
+    /// to the view that stays on screen: the banner is added and removed, and a focus binding torn
+    /// down with it would never settle.
+    @FocusState private var isFindFocused: Bool
 
     /// True from the press until the picture is in the composer. It is normally a tenth of a
     /// second, and it is not always: `takeSnapshot` waits for the page to finish laying out, and
@@ -44,6 +48,15 @@ struct BrowserTabView: View {
         VStack(spacing: 0) {
             toolbar(session)
             Hairline()
+            if session.find.isShowing {
+                BrowserFindBar(
+                    find: session.find,
+                    focus: $isFindFocused,
+                    type: session.typeInFind,
+                    step: session.perform,
+                    done: { session.perform(.hide) }
+                )
+            }
             if !session.downloads.isEmpty {
                 BrowserDownloadsBar(
                     downloads: session.downloads, clear: session.clearDownloads
