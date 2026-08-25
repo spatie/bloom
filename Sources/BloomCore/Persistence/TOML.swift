@@ -429,7 +429,11 @@ public enum TOML {
             }
 
             // An array-of-tables index is addressed by its numeric component.
-            if let index = Int(path[1]), case .array(var elements)? = table[head], index < elements.count {
+            // `index >= 0` is not redundant. `Int("-1")` is -1, and -1 is less than any count,
+            // so a key like `a.-1.b` reached `elements[-1]` and trapped. The path comes out of a
+            // settings file, which is a file a person edits by hand.
+            if let index = Int(path[1]), index >= 0, case .array(var elements)? = table[head],
+               index < elements.count {
                 var element = elements[index].tableValue ?? [:]
                 insert(value, at: Array(path.dropFirst(2)), into: &element)
                 elements[index] = .table(element)
