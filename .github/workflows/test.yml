@@ -4,18 +4,23 @@ name: Test
 # so until this existed nothing compiled the app or ran a test in reaction to a
 # commit, and a branch could look fine right up to the moment somebody built it.
 #
-# Two things happen on every run, and they fail for different reasons.
+# Three jobs, all three side by side, because they fail for different reasons
+# and one push should tell you everything that is wrong with it rather than one
+# thing at a time.
 #
-#   swift build      compiles the app target, Sources/Bloom included.
-#                    Tools/test-core.sh mirrors only BloomCore into a throwaway
-#                    package with no app target, so a view that stops compiling
-#                    leaves the whole suite green. That has broken main four
-#                    times in a single day: widen an enum, leave a switch
-#                    non-exhaustive, tests pass, app does not build.
-#   ./Tools/test-core.sh   the BloomCore suite, around 1600 tests.
+#   lint     the workflows, the shell scripts and the house rules, on Linux.
+#   build    swift build, which compiles the app target, Sources/Bloom included.
+#            Tools/test-core.sh mirrors only BloomCore into a throwaway package
+#            with no app target, so a view that stops compiling leaves the whole
+#            suite green. That has broken main four times in a single day: widen
+#            an enum, leave a switch non-exhaustive, tests pass, app does not
+#            build. This job is what catches it.
+#   test     ./Tools/test-core.sh, the BloomCore suite, over three thousand
+#            tests in about half a minute.
 #
-# Both run even when the other has already failed, because one push should tell
-# you everything that is wrong with it rather than one thing at a time.
+# build and test were one job with one after the other in it, and were 187 and
+# 204 seconds of a 404 second run. They share no output, so they now share no
+# runner either.
 #
 # A bundle is only built when somebody asks for one by hand, from the Actions
 # tab. It used to be built on every push, which proved the app can be assembled
@@ -109,10 +114,21 @@ jobs:
       - name: Check the house rules
         run: ./Tools/house-rules.sh
 
-  test:
+  # Compiling Sources/Bloom, which is the question "does the app still build".
+  #
+  # This was one macOS job with the tests after it, and the two steps were 187
+  # and 204 seconds of a 404 second run. Neither needs anything the other
+  # produces: the build reads Sources/Bloom, and Tools/test-core.sh builds its
+  # own mirror from BloomCore alone. Run in series they added up, run beside
+  # each other the run is as long as the longer of the two. The bill barely
+  # moves, because the work is split rather than repeated: the same minutes are
+  # spent, on two runners instead of one, and only the few seconds of checkout
+  # and toolchain check are paid twice.
+  build:
     runs-on: macos-26
-    # A cold run is about six minutes. Anything past thirty is hung, and a hung
-    # job that is left alone bills for the full six hour default.
+    # A cold run is about three and a half minutes. Anything past thirty is
+    # hung, and a hung job that is left alone bills for the full six hour
+    # default.
     timeout-minutes: 30
 
     steps:
@@ -123,21 +139,19 @@ jobs:
       # and an older one would produce an app that builds with pieces missing.
       # It costs a couple of seconds and turns "the image changed its default
       # Xcode" from a wall of unrelated compiler errors into one sentence.
-      # Before the toolchain check, not after it. `RepositoryStarter` makes a first commit
-      # and a commit needs an author, so this is a prerequisite of the tests rather than a
-      # step that happens to come before them. Behind the version probe it was skipped when
-      # that probe crashed, and the run reported a test failure for a missing git identity
-      # caused by a SIGABRT in xcodebuild.
-      - name: Give the runner a git identity
-        run: |
-          set -euo pipefail
-          git config --global user.email "ci@bloom.local"
-          git config --global user.name "Bloom CI"
-
       - name: Check the toolchain
         run: |
           set -euo pipefail
           swift --version
+
+          # How many cores swift build is about to spread itself over. It sets
+          # no --jobs, so this number is the parallelism, and it is the first
+          # thing to look at when a build time moves for no reason anybody can
+          # see in the diff. macos-26 answered 3 in August 2026, which is worth
+          # knowing twice over: it is why compiling dominates this workflow, and
+          # it is a second reason to run this job beside the tests rather than
+          # before them, because two jobs is six cores and one job is three.
+          echo "cores: $(sysctl -n hw.ncpu)"
 
           # `xcodebuild -version` writes two lines and is piped nowhere, deliberately.
           #
@@ -164,10 +178,35 @@ jobs:
             exit 1
           fi
 
-      # Around thirty tests make a real commit with this machine's git, and
-      # RepositoryStarter refuses to commit without a name and an address. A
-      # fresh runner has neither, so one of them fails outright and the rest
-      # return early and assert nothing. This is what makes them run at all.
+      # There is no cache step here, and that is a measured decision rather
+      # than an omission.
+      #
+      # A cold `swift build` spends about forty three seconds before the
+      # compiler starts: compiling the manifest, fetching Sparkle, SwiftTerm and
+      # swift-argument-parser, working out which versions satisfy the ranges,
+      # three working copies, and downloading and unpacking Sparkle's
+      # XCFramework. All of it looks cacheable, and Package.resolved pins the
+      # three so a key on that file would hit on every run.
+      #
+      # It was tried, on runs 32820412787 and 32820771440. Caching
+      # .build/checkouts, .build/repositories, .build/artifacts and
+      # ~/Library/Caches/org.swift.swiftpm took those forty three seconds to
+      # thirty nine, on two runs whose compile phases came out within one per
+      # cent of each other, so the comparison is clean. Four seconds, for a
+      # hundred and fifty six megabyte cache entry moved twice a run. SwiftPM
+      # still spends six seconds recomputing which Sparkle version satisfies
+      # the range with the repository already on disk, and still spends twelve
+      # unpacking the XCFramework it fetched from its own cache.
+      #
+      # Nothing compiled is worth caching either, and for a different reason.
+      # A build directory tarred and restored to the same path stays fully
+      # incremental, so llbuild does not mind the inodes changing. But
+      # actions/checkout stamps every source file with today's mtime, which it
+      # does mind, so cached object files for our own code are rebuilt whatever
+      # is on disk. Making that work needs mtimes that follow the commit history
+      # rather than the checkout, which is a change with a failure mode worth
+      # watching and does not belong hidden in a cache step.
+
       # Debug, because nothing downstream consumes these objects. The question
       # this step answers is "does Sources/Bloom still compile", and a debug
       # build answers it faster. The manual build below makes its own release
@@ -186,12 +225,6 @@ jobs:
       # Bloom and BloomCore targets only.
       - name: Build the app target
         run: swift build -Xswiftc -warnings-as-errors
-
-      # Even if the build above failed: the core suite does not depend on the
-      # app target compiling, and a run that reports both is worth more.
-      - name: Run the core tests
-        if: ${{ !cancelled() }}
-        run: ./Tools/test-core.sh
 
       # Everything below only happens on a manual run.
       #
@@ -253,3 +286,59 @@ jobs:
             echo "real preferences, and it will not offer to update itself: Tools/build.sh"
             echo "marks a build with no version as local and the updater refuses those."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # The BloomCore suite, on its own runner beside the build.
+  #
+  # It caches nothing, and there is nothing here to cache. Tools/test-core.sh
+  # writes a package with no dependencies at all, so there is no resolve to
+  # skip, and the rest of its time goes on compiling BloomCore and fifty one
+  # thousand lines of test source, which a fresh checkout's mtimes force to be
+  # recompiled whatever is on disk.
+  test:
+    runs-on: macos-26
+    # A cold run is about three and a half minutes.
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Around thirty tests make a real commit with this machine's git, and
+      # RepositoryStarter refuses to commit without a name and an address. A
+      # fresh runner has neither, so one of them fails outright and the rest
+      # return early and assert nothing. This is what makes them run at all.
+      #
+      # Before the toolchain check, not after it. `RepositoryStarter` makes a first commit
+      # and a commit needs an author, so this is a prerequisite of the tests rather than a
+      # step that happens to come before them. Behind the version probe it was skipped when
+      # that probe crashed, and the run reported a test failure for a missing git identity
+      # caused by a SIGABRT in xcodebuild.
+      - name: Give the runner a git identity
+        run: |
+          set -euo pipefail
+          git config --global user.email "ci@bloom.local"
+          git config --global user.name "Bloom CI"
+
+      # The same check the build job makes, and made here too rather than
+      # depended on. Waiting for the build job to vouch for the toolchain would
+      # put the two back in series, which is the thing this split exists to
+      # undo, and an image that changed its Xcode should say so in one sentence
+      # here as well as there.
+      - name: Check the toolchain
+        run: |
+          set -euo pipefail
+          swift --version
+          echo "cores: $(sysctl -n hw.ncpu)"
+          version="$(xcodebuild -version)"
+          echo "$version"
+          major="$(printf '%s\n' "$version" | sed -n '1s/^Xcode \([0-9]*\).*/\1/p')"
+          if [ -z "$major" ]; then
+            echo "Could not read a major version out of: $version"
+            exit 1
+          fi
+          if [ "$major" -lt 26 ]; then
+            echo "Bloom needs Xcode 26 or newer, this runner has $major."
+            exit 1
+          fi
+
+      - name: Run the core tests
+        run: ./Tools/test-core.sh
