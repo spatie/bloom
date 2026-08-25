@@ -12,16 +12,55 @@ import BloomCore
 enum BrowserTab {
     /// Whether the in-app browser could show this at all.
     ///
-    /// A `WKWebView` speaks http and https. A `mailto:` is a perfectly good link for a plain
-    /// click and is not something to open a blank tab onto, so the menu item that would do that
-    /// is absent rather than present and useless. `BrowserAddress` is asked the rest, because
-    /// it is what will actually be handed the string a moment later, and two rules about what
-    /// counts as an address would eventually disagree.
+    /// The rule itself is `BrowserAddress.shows` in the core, because `TranscriptLinkMenu` asks it
+    /// too and two rules about what counts as an address would eventually disagree. Named here as
+    /// well so that the callers reading "can this be opened as a tab" keep the sentence they had.
     static func canOpen(_ url: URL) -> Bool {
-        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
-            return false
+        BrowserAddress.shows(url)
+    }
+
+    /// Which of `TranscriptLinkMenu`'s three placements a transcript is in.
+    ///
+    /// Here rather than in the transcript for the reason the rest of this type is: a row should not
+    /// have to know how the centre column is arranged. `pane` is nil for a transcript the window
+    /// cannot place, which is the archive sheet; it is checked against the layout of the tab in
+    /// front rather than trusted, because a tab that has been closed or rearranged since the
+    /// transcript was drawn leaves a pane id naming nothing, and `WorkspaceTabsStore.split` would
+    /// then do nothing at all rather than say so.
+    static func placement(of pane: String?, in model: WorkspaceModel?) -> TranscriptLinkPlacement {
+        guard let model else { return .detached }
+        guard let pane, let tab = WorkspaceTabsStore.shared.selectedTab(in: model),
+              WorkspaceTabsStore.shared.layout(of: tab).contains(pane) else { return .column }
+        return .pane
+    }
+
+    /// Splits the pane the transcript is in and opens the address in the half that opens.
+    ///
+    /// **A fresh browser rather than the workspace's existing one, which is the whole difference
+    /// from `open` above.** A `WKWebView` is one live view, so moving the tab `open` reuses into a
+    /// second pane would take the page away from wherever it already was;
+    /// `WorkspaceTabsStore.Arrangement.canHold` refuses that outright, and `PaneSplit` calls the
+    /// same answer `.freshBrowser` when a browser pane is split. It is also what the reader asked
+    /// for: a split is for reading the page beside the conversation that named it, not for moving
+    /// a tab they were already using.
+    ///
+    /// Through `NewPane.open`, which is the door `CenterPaneMenu` and `pane_split` both use, so a
+    /// browser opened from a link is the browser a split normally opens.
+    ///
+    /// There is nothing else for the menu to have gated on. A fresh tab is in no pane yet, so
+    /// `canHold` cannot refuse it, and `SplitLayout` sets no ceiling on how many panes a tab may
+    /// hold. The one way this could do nothing is a pane id naming nothing, which is what
+    /// `placement` above rules out before the items are offered and what the guard below repeats
+    /// for the moment between the menu opening and an item being chosen.
+    static func split(_ url: URL, in model: WorkspaceModel, pane: String, axis: SplitAxis) {
+        guard canOpen(url) else { return }
+        let tabs = WorkspaceTabsStore.shared
+        guard let tab = tabs.selectedTab(in: model), tabs.layout(of: tab).contains(pane) else {
+            return
         }
-        return BrowserAddress.url(from: url.absoluteString) != nil
+        NewPane.open(.browser, in: model, url: url.absoluteString) { content in
+            tabs.split(tab: tab, pane: pane, axis: axis, showing: content)
+        }
     }
 
     /// Opens an address in the workspace's browser tab, in front.

@@ -221,7 +221,9 @@ extension TranscriptLinkActions {
         copy.openFile = open
         // The identity moves with the closure, or a bubble that can open a file would compare
         // equal to the list's value that cannot, and the environment would never see the change.
-        if case let .workspace(id) = identity { copy.identity = .workspaceOpeningFiles(id) }
+        if case let .workspace(id, pane) = identity {
+            copy.identity = .workspaceOpeningFiles(id, pane: pane)
+        }
         return copy
     }
 }

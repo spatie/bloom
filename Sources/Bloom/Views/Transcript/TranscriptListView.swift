@@ -251,8 +251,15 @@ struct TranscriptListView: View {
     /// What a link in any row of this transcript does. Its own property rather than an expression
     /// in the chain below, which is long enough that one more inline call tips the type checker
     /// off the `ForEach` two hundred lines above it.
+    ///
+    /// The pane comes off `memory`, which already carries it and is already handed down for the
+    /// same reason: it is the one pane's worth of the column this list is allowed to know about.
+    /// Nil for a transcript nobody can scroll back to, which is the archive sheet, and a
+    /// transcript with no pane offers no split because there is nothing to divide.
     private var linkActions: TranscriptLinkActions {
-        TranscriptLink.actions(for: app.existingModel(for: transcript.workspace.id))
+        TranscriptLink.actions(
+            for: app.existingModel(for: transcript.workspace.id), pane: memory?.pane
+        )
     }
 
     /// Already rounded, by `TranscriptGeometry.cap`, and rounded before it reaches this view's
