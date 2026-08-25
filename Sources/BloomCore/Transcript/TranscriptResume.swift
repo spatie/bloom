@@ -82,19 +82,27 @@ public struct TranscriptPaneState: Equatable, Sendable {
     /// How many rows the session held when this was written. See `TranscriptResume.placement`.
     public var rowCount: Int
     public var measure: Measure?
+    /// The first row the list was drawing when the offset was taken, as an index into the session.
+    ///
+    /// The offset is a number of points into the content, and the content starts at this row, so
+    /// the two are one measurement and are useless apart: restoring the offset into a window that
+    /// starts somewhere else lands the reader somewhere else. See `TranscriptWindow`.
+    public var drawnStart: Int
 
     public init(
         expanded: Set<Int>,
         offset: Double,
         isAtLiveEnd: Bool,
         rowCount: Int,
-        measure: Measure?
+        measure: Measure?,
+        drawnStart: Int = 0
     ) {
         self.expanded = expanded
         self.offset = offset
         self.isAtLiveEnd = isAtLiveEnd
         self.rowCount = rowCount
         self.measure = measure
+        self.drawnStart = drawnStart
     }
 }
 
@@ -111,16 +119,37 @@ public enum TranscriptPlacement: Equatable, Sendable {
 
 /// The rule for what a pane may do with what it remembers.
 public enum TranscriptResume {
-    /// Whether the arrival frame may draw the whole session rather than `TranscriptTail`'s tail.
+    /// The first row of the session a pane draws, given what it wrote down when it last left one.
     ///
     /// **Asked before anything has been laid out**, because it decides what the FIRST pass of the
-    /// list's body draws, so it can read nothing that a measurement has to arrive for. The
-    /// existence of a memory for this pane and this session is the whole of it, and that is enough:
-    /// a pane that has drawn this session before is not arriving at it. The tail exists to keep a
-    /// 269ms layout off the frame that arrives at a session, and the price of it is the same layout
-    /// a hundred milliseconds later; paying that on every return is the trade going the wrong way.
-    public static func drawsInFull(_ remembered: TranscriptPaneState?) -> Bool {
+    /// list's body draws, so it can read nothing that a measurement has to arrive for.
+    ///
+    /// This used to answer a Bool, and the Bool was "draw the whole session". The argument for it
+    /// was sound and is kept: a pane that has drawn this session before is not arriving at it, so
+    /// the tail that keeps a 269ms layout off an arrival frame buys nothing on a return, and
+    /// paying a second layout to reveal the history behind it is the trade going the wrong way.
+    /// What was wrong was the other end of it. The whole session stays in the lazy stack for the
+    /// rest of the visit, and every resize, scroll and streamed token then pays for a stack with
+    /// four thousand children in it. See `TranscriptWindow`, which carries those measurements.
+    ///
+    /// So a return goes back to the window the reader was actually looking at, which is what makes
+    /// the remembered offset mean anything: the same rows above the viewport, in the same order,
+    /// so the same number of points down the content names the same place. A pane with nothing
+    /// written down is arriving, and arrives on the tail.
+    /// Whether this pane is coming back to a session rather than arriving at one.
+    ///
+    /// The existence of a memory for this pane and this session is the whole of it. A reader
+    /// coming back is already where they were, so nothing has to be revealed under them and the
+    /// window stays exactly as `window` restored it.
+    public static func isResuming(_ remembered: TranscriptPaneState?) -> Bool {
         remembered != nil
+    }
+
+    public static func window(
+        _ remembered: TranscriptPaneState?, tailStart: Int, rowCount: Int
+    ) -> Int {
+        guard let remembered else { return min(max(0, tailStart), max(0, rowCount)) }
+        return min(max(0, remembered.drawnStart), max(0, rowCount))
     }
 
     /// Where a pane opens a session, given what it wrote down when it last left one.

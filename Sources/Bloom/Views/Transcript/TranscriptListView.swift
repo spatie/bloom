@@ -31,8 +31,17 @@ struct TranscriptListView: View {
         // that is `@ObservationIgnored`, so asking costs nothing and subscribes to nothing.
         let remembered = memory?.remembered(session: transcript.session.id)
         _expanded = State(initialValue: remembered?.expanded ?? [])
-        _drawnInFull = State(
-            initialValue: TranscriptResume.drawsInFull(remembered) ? transcript.session.id : nil
+        let rows = transcript.rows
+        _drawn = State(initialValue: Drawn(
+            session: transcript.session.id,
+            start: TranscriptResume.window(
+                remembered,
+                tailStart: TranscriptTail.start(in: rows.lazy.map(\.kind)),
+                rowCount: rows.count
+            )
+        ))
+        _resumed = State(
+            initialValue: TranscriptResume.isResuming(remembered) ? transcript.session.id : nil
         )
     }
 
@@ -149,12 +158,35 @@ struct TranscriptListView: View {
     /// one size is a point into a document laid out at another. See `TranscriptPaneState.Measure`.
     @Environment(\.fontScale) private var fontScale
 
-    /// The session whose history has been put back, if any. See `visibleRows`.
+    /// How much of the session the lazy stack is being handed, and which session that is about.
     ///
-    /// A session id rather than a flag, because this view is the same view in the same place for
-    /// every workspace the window visits, and a flag left standing from the last one would draw
-    /// the next one's whole history onto the frame that is trying to arrive.
-    @State private var drawnInFull: SessionID?
+    /// A session id rather than a bare index, because this view is the same view in the same place
+    /// for every workspace the window visits, and a window left standing from the last one would
+    /// name a row in a conversation nobody is looking at.
+    private struct Drawn: Equatable {
+        var session: SessionID
+        /// The first row drawn, as an index into `transcript.rows`. See `TranscriptWindow`.
+        var start: Int
+    }
+
+    @State private var drawn: Drawn
+
+    /// The session this pane was restored into, if it was restored rather than arrived at.
+    ///
+    /// A reader coming back is already where they left off, so the window is whatever they were
+    /// reading in and nothing grows under them a moment later. See `TranscriptResume.isResuming`.
+    @State private var resumed: SessionID?
+
+    /// Whether the window is being grown upward right now, which is the one moment the list wants
+    /// the bottom anchor whatever the reader's position says.
+    ///
+    /// Growing adds rows ABOVE the viewport. Left to the default, a scroll view keeps its offset
+    /// when its content grows, and an offset measured from the top of a document that has just
+    /// become several hundred rows taller names somewhere else entirely: the reader is thrown
+    /// backwards through the conversation by exactly the amount that was added. Anchored to the
+    /// bottom for that one update, the distance to the end is what is kept, which is the distance
+    /// nothing above the viewport can change. See `growWindow`.
+    @State private var isGrowing = false
 
     /// Sentinel id, negative so it can never collide with a row sequence number.
     private static let streamingID = -2
@@ -231,26 +263,43 @@ struct TranscriptListView: View {
     /// over a slice that starts in the middle.
     private var visibleRows: ArraySlice<TranscriptRow> {
         let rows = transcript.rows
-        guard drawnInFull != transcript.session.id else { return rows[...] }
+        return rows[min(windowStart, rows.count)...]
+    }
 
-        // Lazily, so the kinds are read through the rows rather than copied out of them. This is
-        // asked on every pass, inside the arrival window the tail exists to protect, and the walk
-        // reads at most twice the tail's length of them however long the session is.
-        let start = TranscriptTail.start(in: rows.lazy.map(\.kind))
-        guard start > 0 else { return rows[...] }
-        // A session opens on the first thing the user has not read, and a scroll can only find a
-        // row the list is drawing. Anything unread above the tail and there is no tail: opening in
-        // the right place matters more than arriving quickly.
-        if let unread = transcript.firstUnreadSeq, unread < rows[start].seq { return rows[...] }
-        // Same rule for a search result, and it is the case that needs it most: the row somebody
-        // searched for is nearly always old, and a scroll can only find a row the list is drawing.
-        // Read rather than taken here, because a view body must not mutate; `position` takes it.
+    /// The first row of the session this pass hands to the stack.
+    ///
+    /// The window itself is state, because it only ever grows and a window recomputed from scratch
+    /// on every pass would shrink back the moment the thing that widened it went away, taking the
+    /// rows out from under the reader. What is computed here is the one thing that cannot be
+    /// state: a row somebody has asked for by name has to be in the list on the very pass that
+    /// asks for it, and `position` pins the answer the moment it has used it.
+    private var windowStart: Int {
+        let rows = transcript.rows
+        let tailStart = drawn.session == transcript.session.id
+            ? min(drawn.start, rows.count)
+            : TranscriptTail.start(in: rows.lazy.map(\.kind))
+        return TranscriptWindow.opening(
+            rowCount: rows.count, tailStart: tailStart, mustReach: mustReachIndex
+        )
+    }
+
+    /// The row the reader has asked for by name, if there is one: a search result, or the unread
+    /// mark a session opens on. A scroll can only find a row the list is drawing, so the window is
+    /// opened wide enough to hold it whatever the tail said.
+    ///
+    /// Both are read here rather than taken, because a view body must not mutate. `position` takes
+    /// the search target, and `markAllRead` clears the unread mark, and both then pin the window
+    /// so that the answer surviving is not a matter of what is still outstanding.
+    private var mustReachIndex: Int? {
+        let seqs = transcript.rows.lazy.map(\.seq)
         if let target = app.pendingTranscriptTarget,
-           target.workspaceID == transcript.workspace.id,
-           target.seq < rows[start].seq {
-            return rows[...]
+           target.workspaceID == transcript.workspace.id {
+            return TranscriptWindow.index(ofSeqAtOrAfter: target.seq, in: seqs)
         }
-        return rows[start...]
+        if let unread = transcript.firstUnreadSeq {
+            return TranscriptWindow.index(ofSeqAtOrAfter: unread, in: seqs)
+        }
+        return nil
     }
 
     /// What a link in any row of this transcript does. Its own property rather than an expression
@@ -480,7 +529,18 @@ struct TranscriptListView: View {
             // scrolled away, which is the rule the per-row scroll used to enforce by hand. Yanking
             // someone back down as they read something further up is the single most irritating
             // thing a live log can do.
-            .defaultScrollAnchor(geometry.isNearBottom ? .bottom : nil, for: .sizeChanges)
+            .defaultScrollAnchor(geometry.isNearBottom || isGrowing ? .bottom : nil, for: .sizeChanges)
+            // More history, when the reader gets near the top of what is drawn.
+            //
+            // A Bool rather than the offset, and that is the whole reason it can be a subscription
+            // of its own: a projection that answers the same value re-runs nothing, so a scroll
+            // through the middle of a conversation writes no state at all and only crossing into
+            // the top of it does. `TranscriptGeometry` makes the same bargain by quantising, one
+            // step coarser.
+            .onScrollGeometryChange(for: Bool.self, of: Self.isNearTop) { _, isNearTop in
+                guard isNearTop else { return }
+                growWindow()
+            }
             // Its own subscription, for the reason the raw offset below has one: what this
             // writes is an object rather than state, so nothing in this body is invalidated by it
             // and the rows that draw a bubble are. Folded into the projection above it would put
@@ -581,14 +641,23 @@ struct TranscriptListView: View {
                 // nothing. Without this the composer keeps whatever the last session told it.
                 onScrolledUpChange?(false)
                 // Arriving somewhere means arriving on its tail, unless this pane has drawn the
-                // session before, in which case there is nothing to arrive at: see
-                // `TranscriptResume.drawsInFull`. Said here as well as in `task`, because leaving
-                // a session before its history had landed and coming straight back would
-                // otherwise find its own id still recorded and put four thousand rows on the
-                // frame that is trying to arrive.
-                drawnInFull = TranscriptResume.drawsInFull(remembered) ? transcript.session.id : nil
+                // session before, in which case it goes back to the window the reader was reading
+                // in: see `TranscriptResume.window`. Said here as well as in the initialiser,
+                // because a pane pointed at a second session is the same view with the same state,
+                // and a window left standing from the last one names rows in the wrong
+                // conversation.
+                drawn = Drawn(
+                    session: transcript.session.id,
+                    start: TranscriptResume.window(
+                        remembered,
+                        tailStart: TranscriptTail.start(in: transcript.rows.lazy.map(\.kind)),
+                        rowCount: transcript.rows.count
+                    )
+                )
+                resumed = TranscriptResume.isResuming(remembered) ? transcript.session.id : nil
+                isGrowing = false
                 // And nothing in the session being arrived at counts as having arrived. Cleared
-                // here as well as set in `task` for the same reason `drawnInFull` is: leaving a
+                // here as well as set in `task` for the same reason the window is: leaving a
                 // session before it had settled and coming straight back must not find its own
                 // id still recorded and fade its whole tail up.
                 arrivalSession = nil
@@ -622,30 +691,37 @@ struct TranscriptListView: View {
                 // and the unread badge stuck until the next row happened to land.
                 position(proxy)
 
-                // A pane coming back to a session it has drawn before has the whole of it on the
-                // frame it arrived on and is already where the reader left it, so none of the
-                // reveal below applies: there is no tail to grow into the history, nothing moves
-                // under the viewport, and the two-call dance that exists because something does
-                // has nothing to correct. Measured on a release build at 1440 by 900 against a
-                // 3,848 row session: the reveal cost a 163ms to 169ms main thread block on every
-                // return, on top of the 104ms to 125ms the tail before it cost, and this is the
-                // whole of what removing it removes.
+                // A pane coming back to a session it has drawn before is already in the window
+                // the reader was reading in and already where they left off, so none of the reveal
+                // below applies: nothing has to grow under the viewport, and the two-call dance
+                // that exists because something does has nothing to correct. Measured on a release
+                // build at 1440 by 900 against a 3,848 row session: the reveal cost a 163ms to
+                // 169ms main thread block on every return, on top of the 104ms to 125ms the tail
+                // before it cost, and this is the whole of what removing it removes.
                 //
                 // It is skipped rather than deleted. On a FIRST open the sequence is still right
                 // and `TranscriptTail` still carries the argument for it.
-                guard drawnInFull != transcript.session.id else {
+                guard resumed != transcript.session.id else {
                     arrivalSession = transcript.session.id
                     // The same mark pair the deferred path carries below, so that a run of
                     // `TabProbe` before and after this change is comparing the same span: the
                     // moment the whole session is on the list, and the first frame that can show
                     // it. Here the first half is already true when this line is reached, which is
                     // the entire change.
-                    SwitchTrace.mark("transcript.full", workspace: transcript.workspace.id)
-                    SwitchTrace.markOnScreen("transcript.full", workspace: transcript.workspace.id)
+                    SwitchTrace.mark("transcript.window", workspace: transcript.workspace.id)
+                    SwitchTrace.markOnScreen("transcript.window", workspace: transcript.workspace.id)
                     return
                 }
 
-                // The rest of the session, once the frame carrying the tail has been drawn.
+                // A few hundred rows of history behind the tail, once the frame carrying the tail
+                // has been drawn.
+                //
+                // It used to be the WHOLE session here, and the tail's saving therefore lasted
+                // exactly one frame: everything after it, every resize and every streamed token,
+                // was paid over a lazy stack holding four thousand children. `TranscriptWindow`
+                // carries what that costs. What the reader actually needs a moment after arriving
+                // is enough history to scroll back through without waiting, and the rest arrives
+                // when they go looking for it.
                 //
                 // A wait rather than a yield, because a yield is the same run loop pass and would
                 // put the layout this exists to defer back on the frame it was taken off. Long
@@ -658,14 +734,17 @@ struct TranscriptListView: View {
                 // before this lands never pays for the history of a workspace nobody is on.
                 try? await Task.sleep(for: .milliseconds(100))
                 guard !Task.isCancelled else { return }
-                drawnInFull = transcript.session.id
+                let settled = TranscriptWindow.settling(
+                    from: drawn.start, rowCount: transcript.rows.count
+                )
+                drawn = Drawn(session: transcript.session.id, start: settled)
                 // **The number the whole of this is about.** The work stamp is the instant the
                 // history was asked for; the vsync stamp is the first frame that could show it,
                 // and the display link cannot run while the main thread is laying rows out. The
                 // gap between the two IS the layout `TranscriptTail` exists to keep off the
                 // arrival frame, and on a return to a chat tab it is paid all over again.
-                SwitchTrace.mark("transcript.full", workspace: transcript.workspace.id)
-                SwitchTrace.markOnScreen("transcript.full", workspace: transcript.workspace.id)
+                SwitchTrace.mark("transcript.window", workspace: transcript.workspace.id)
+                SwitchTrace.markOnScreen("transcript.window", workspace: transcript.workspace.id)
                 // Not an arrival. See `TranscriptLiveEndFollower.forget`.
                 follower.forget()
                 // And the live end again, in two calls, in two passes.
@@ -812,6 +891,15 @@ struct TranscriptListView: View {
         )
     }
 
+    /// Whether the reader is within a screenful of the top of what is drawn.
+    ///
+    /// A screenful rather than the edge itself, because a growth is a layout and the reader is
+    /// still moving: asked at the edge, the window would be handed its next rows on the frame
+    /// after the scroll had already stopped against the top of the ones it has.
+    private static func isNearTop(_ scroll: ScrollGeometry) -> Bool {
+        scroll.contentOffset.y < scroll.containerSize.height
+    }
+
     private static func measure(_ scroll: ScrollGeometry) -> TranscriptGeometry {
         TranscriptGeometry(
             paneHeight: TranscriptGeometry.height(scroll.containerSize.height),
@@ -944,6 +1032,14 @@ struct TranscriptListView: View {
         guard !transcript.rows.isEmpty, !didPosition else { return }
         didPosition = true
 
+        // The window this opening is resolved against, pinned before anything below can take the
+        // reason for it away. `windowStart` widens to hold a search result or an unread mark, and
+        // both of those are gone moments from now: the target is taken a few lines down and the
+        // session is marked read at the foot of this function. Left computed, the window would
+        // narrow again on the next pass and take the rows the reader was just sent to out from
+        // under them. See `mustReachIndex`.
+        drawn = Drawn(session: transcript.session.id, start: windowStart)
+
         // A pane coming back to a session it has already drawn is put back where the reader left
         // it, and none of the three openings below applies: they are all answers to "where should
         // somebody arriving at this conversation start reading", and this reader is not arriving.
@@ -1013,7 +1109,10 @@ struct TranscriptListView: View {
                 offset: contentOffset.value,
                 isAtLiveEnd: geometry.isNearBottom,
                 rowCount: transcript.rows.count,
-                measure: currentMeasure
+                measure: currentMeasure,
+                // The offset above is a number of points into content that starts at this row.
+                // Written down together because they are one measurement: see `TranscriptWindow`.
+                drawnStart: drawn.start
             ),
             session: transcript.session.id
         )
@@ -1040,6 +1139,32 @@ struct TranscriptListView: View {
             scrollPosition.scrollTo(y: y)
         case nil:
             break
+        }
+    }
+
+    // MARK: Growing the window
+
+    /// Puts another chunk of the conversation into the list, above what is drawn.
+    ///
+    /// The reader is by definition scrolled away from the live end when this runs, so nothing here
+    /// is allowed to move what they are looking at: `isGrowing` hands the scroll view the bottom
+    /// anchor for the one update that grows it, which keeps the distance to the end, which is the
+    /// distance the rows arriving above cannot change.
+    ///
+    /// It is cleared a beat later rather than immediately, because the anchor has to survive the
+    /// layout pass the growth causes and not merely the state write that asks for it. Clearing it
+    /// moves nothing: by then the content size is settled, and an anchor only does anything on a
+    /// change of size.
+    private func growWindow() {
+        guard drawn.session == transcript.session.id,
+              TranscriptWindow.canGrow(from: drawn.start),
+              !isGrowing
+        else { return }
+        isGrowing = true
+        drawn.start = TranscriptWindow.grown(from: drawn.start)
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(120))
+            isGrowing = false
         }
     }
 

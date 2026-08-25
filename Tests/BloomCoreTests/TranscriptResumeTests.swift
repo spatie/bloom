@@ -18,14 +18,16 @@ struct TranscriptResumeTests {
         offset: Double = 1_200,
         isAtLiveEnd: Bool = false,
         rowCount: Int = 400,
-        measure: TranscriptPaneState.Measure? = nil
+        measure: TranscriptPaneState.Measure? = nil,
+        drawnStart: Int = 0
     ) -> TranscriptPaneState {
         TranscriptPaneState(
             expanded: expanded,
             offset: offset,
             isAtLiveEnd: isAtLiveEnd,
             rowCount: rowCount,
-            measure: measure ?? self.measure()
+            measure: measure ?? self.measure(),
+            drawnStart: drawnStart
         )
     }
 
@@ -33,12 +35,25 @@ struct TranscriptResumeTests {
 
     @Test("a pane that has never held this session draws the tail")
     func nothingRememberedDrawsTheTail() {
-        #expect(TranscriptResume.drawsInFull(nil) == false)
+        #expect(TranscriptResume.window(nil, tailStart: 3_920, rowCount: 4_000) == 3_920)
     }
 
-    @Test("a pane coming back to a session it has drawn draws the whole of it")
-    func aReturnDrawsInFull() {
-        #expect(TranscriptResume.drawsInFull(state()))
+    @Test("a pane coming back to a session goes back to the window it was reading in")
+    func aReturnGoesBackToItsWindow() {
+        let remembered = state(drawnStart: 3_600)
+        #expect(TranscriptResume.window(remembered, tailStart: 3_920, rowCount: 4_000) == 3_600)
+    }
+
+    @Test("a pane with nothing written down is arriving, and one with a memory is coming back")
+    func resumingIsHavingBeenHereBefore() {
+        #expect(TranscriptResume.isResuming(nil) == false)
+        #expect(TranscriptResume.isResuming(state()))
+    }
+
+    @Test("a window from a session that has since been read again is clamped to it")
+    func aStaleWindowIsClamped() {
+        let remembered = state(drawnStart: 9_000)
+        #expect(TranscriptResume.window(remembered, tailStart: 20, rowCount: 100) == 100)
     }
 
     // MARK: Where it opens
