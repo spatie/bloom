@@ -12,6 +12,7 @@ struct TranscriptResumeTests {
     private func state(
         expanded: Set<Int> = [],
         offset: Double = 1_200,
+        anchorSeq: Int? = nil,
         isAtLiveEnd: Bool = false,
         rowCount: Int = 400,
         drawn: TranscriptWindow = TranscriptWindow(start: 0, end: 400)
@@ -19,6 +20,7 @@ struct TranscriptResumeTests {
         TranscriptPaneState(
             expanded: expanded,
             offset: offset,
+            anchorSeq: anchorSeq,
             isAtLiveEnd: isAtLiveEnd,
             rowCount: rowCount,
             drawn: drawn
@@ -61,6 +63,33 @@ struct TranscriptResumeTests {
     }
 
     // MARK: Where it opens
+
+    @Test("a reader is put back at the row they had at the top of the pane")
+    func theAnchorRowIsRestored() {
+        #expect(TranscriptResume.placement(for: state(anchorSeq: 120), rowCount: 400) == .row(120))
+    }
+
+    @Test("the row outranks the point, because the point is what answers without one")
+    func theRowOutranksThePoint() {
+        let placement = TranscriptResume.placement(
+            for: state(offset: 9_000, anchorSeq: 120), rowCount: 400
+        )
+        #expect(placement == .row(120))
+    }
+
+    @Test("a reader who left at the end is put back at the end whatever row was on top")
+    func liveEndOutranksTheRow() {
+        let placement = TranscriptResume.placement(
+            for: state(anchorSeq: 120, isAtLiveEnd: true), rowCount: 400
+        )
+        #expect(placement == .liveEnd)
+    }
+
+    @Test("a pane that could name no row falls back to the point it was at")
+    func noRowFallsBackToThePoint() {
+        let placement = TranscriptResume.placement(for: state(offset: 1_200), rowCount: 400)
+        #expect(placement == .offset(1_200))
+    }
 
     /// The three tests that used to sit at the foot of this suite are gone with the rule they
     /// held down: a restore is no longer refused because the pane is a different width or the text

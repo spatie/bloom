@@ -54,7 +54,21 @@ public struct TranscriptPaneState: Equatable, Sendable {
     /// The sequence numbers of the rows the reader had unfolded.
     public var expanded: Set<Int>
     /// Where the view was, in points from the top of the content.
+    ///
+    /// The fallback, not the answer. See `anchorSeq`.
     public var offset: Double
+
+    /// The row that was at the top of the viewport, by sequence number.
+    ///
+    /// **A row rather than a point, because a point is not a place here.** The content height of a
+    /// transcript is a fact about what the lazy stack has bothered to measure rather than about the
+    /// conversation: driven through the owner's own report, one chat visited three times reported
+    /// 35,246 points, then 17,235, then 24,407 for the same session. An offset written against one
+    /// of those and read against another names a different row.
+    ///
+    /// Nil when the pane had no row on screen to name, which is an empty conversation and the
+    /// frames before the first layout. The offset carries those.
+    public var anchorSeq: Int?
     /// Whether that offset was the live end.
     ///
     /// Kept as a flag rather than inferred from the offset, because a turn can run while the
@@ -73,12 +87,14 @@ public struct TranscriptPaneState: Equatable, Sendable {
     public init(
         expanded: Set<Int>,
         offset: Double,
+        anchorSeq: Int? = nil,
         isAtLiveEnd: Bool,
         rowCount: Int,
         drawn: TranscriptWindow = TranscriptWindow(start: 0, end: 0)
     ) {
         self.expanded = expanded
         self.offset = offset
+        self.anchorSeq = anchorSeq
         self.isAtLiveEnd = isAtLiveEnd
         self.rowCount = rowCount
         self.drawn = drawn
@@ -92,8 +108,10 @@ public enum TranscriptPlacement: Equatable, Sendable {
     case first
     /// The reader left at the live end, so that is where they are put back.
     case liveEnd
-    /// The reader left this many points down, and the document is the same document.
+    /// The reader left this many points down. The fallback, for a pane that could not name a row.
     case offset(Double)
+    /// The reader left this row at the top of the pane, so that is where it goes back.
+    case row(Int)
 }
 
 /// The rule for what a pane may do with what it remembers.
@@ -174,6 +192,9 @@ public enum TranscriptResume {
         // of a scroll target layout, and measured on this list that layout costs too much to keep:
         // p99 went from 21.8ms to 39.2ms scrolling a 225 row chat with nothing else changed. So
         // the row is what an AppKit list would buy, and until then this is the honest fallback.
+        // The row they were reading, which survives every re-measurement and every width. See
+        // `TranscriptPaneState.anchorSeq`.
+        if let seq = remembered.anchorSeq { return .row(seq) }
         // **Nought is a place: it is the top of the conversation.** This used to refuse it, on the
         // reasoning that a pane which has never been laid out reports nought and restoring that
         // would be a restore of nothing. The pane not being laid out is a fact about the PANE, and
