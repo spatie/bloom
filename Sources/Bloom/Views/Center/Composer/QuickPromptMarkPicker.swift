@@ -105,6 +105,9 @@ struct QuickPromptMarkPicker: View {
             grid(sections)
         }
         .frame(width: Self.width)
+        .onChange(of: kind) { _, tab in
+            settle(after: tab)
+        }
         .onChange(of: query) { _, _ in
             highlighted = QuickPromptMarkCatalog.settled(self.sections, after: highlighted)
         }
@@ -113,64 +116,35 @@ struct QuickPromptMarkPicker: View {
     /// Icons or emoji, as a pill on a sunken track.
     ///
     /// Not `.pickerStyle(.segmented)`, which is a form control and read as one: a bordered slab
-    /// across the top of a card that is otherwise a menu. It was two bare words before this, and
+    /// across the top of a card that is otherwise a menu. It was two bare words before that, and
     /// the owner read the strip they sat on as an unfinished grey band, because the card's own
     /// padding was all that separated them from the field under them.
     ///
-    /// **Local, and it should not stay that way.** `PanelTabs` in `Design/` is this control,
-    /// written for the create sheet's two tabs, and its own note names this picker as the second
-    /// caller. It was not on `main` when this was written. The colours and the two states here are
-    /// its, so adopting it is a deletion rather than a redesign.
+    /// **`PanelTabs` rather than a strip of this file's own**, which is what stood here for as long
+    /// as it took the branch carrying the shared control to land. The two were drawn from the same
+    /// values, so nothing about this card moved when the copy came out: the same sunken track, the
+    /// same hairline, the same `Palette.selected` pill, and the same lift from tertiary to primary
+    /// ink at the weight that carries the choice for a reader who cannot separate two greys. What
+    /// the copy did not have and now arrives with it is a hovered cell and a pill that travels to
+    /// the tab it was sent to.
     private var tabs: some View {
-        HStack(spacing: 0) {
-            ForEach(QuickPromptMarkKind.allCases) { tab in
-                tabCell(tab)
-            }
-        }
-        .padding(Metrics.spacingTight)
-        .background {
-            RoundedRectangle(cornerRadius: Metrics.corner)
-                .fill(Palette.surfaceSunken)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: Metrics.corner)
-                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("What to mark this prompt with")
-    }
-
-    private func tabCell(_ tab: QuickPromptMarkKind) -> some View {
-        let isSelected = kind == tab
-        return Button {
-            choose(tab: tab)
-        } label: {
-            Text(tab.title)
-                // The weight carries the choice as well as the fill does, which is what keeps the
-                // strip readable for somebody who cannot separate two greys.
-                .font(isSelected ? Typo.labelEmphasis : Typo.label)
-                .foregroundStyle(isSelected ? Palette.textPrimary : Palette.textTertiary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, Metrics.spacingSmall)
-                .background {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                            .fill(Palette.selected)
-                    }
-                }
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        PanelTabs(
+            "What to mark this prompt with",
+            tabs: QuickPromptMarkKind.allCases,
+            selection: $kind,
+            title: { $0.title }
+        )
     }
 
     /// Switching tabs clears the query with it. The field belongs to the tab under it, and a query
     /// carried across meant landing in Emojis with "hammer" still in the box and nothing to show
     /// for it.
-    private func choose(tab: QuickPromptMarkKind) {
-        guard kind != tab else { return }
-        kind = tab
+    ///
+    /// Hung off the change rather than off the strip, because `PanelTabs` writes the tab through a
+    /// binding and there is a second way to change it: Tab, from the search field. One place to put
+    /// what a tab change costs is what keeps the keyboard and the pointer landing in the same
+    /// state.
+    private func settle(after tab: QuickPromptMarkKind) {
         query = ""
         highlighted = QuickPromptMarkCatalog.sections(tab).first?.choices.first?.mark
     }
@@ -325,7 +299,7 @@ struct QuickPromptMarkPicker: View {
         case .tab:
             // The one other thing this card can do, and the field under the tabs is where a hand
             // already is. Tab moves nothing else here: the card holds one field and a grid.
-            choose(tab: kind == .icons ? .emoji : .icons)
+            kind = kind == .icons ? .emoji : .icons
             return true
         }
     }

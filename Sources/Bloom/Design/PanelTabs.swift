@@ -38,8 +38,13 @@ import SwiftUI
 /// this app; equal cells are what let it change without moving anything. Why the hovered cell is
 /// not a rung of its own is on `ink(selected:hovered:)`, and it was a picture that settled it.
 ///
-/// Shared rather than local because a second panel wants it: `QuickPromptMarkPicker` draws the
-/// same two words by hand, and the inspector's own tab row is the third of them.
+/// Shared rather than local because a second panel wants it, and that panel is here:
+/// `QuickPromptMarkPicker` draws Icons and Emojis through this, in a card three hundred points
+/// wide inside a popover, where the create sheet's panel is four hundred and sixty in a sheet. It
+/// needed no size of its own to get there. Every measurement above is a proportion or a token, the
+/// cells divide whatever width they are handed, and the two labels of either caller are short, so
+/// the only parameter the second caller added was its own words. The inspector's own tab row is
+/// the third of them.
 struct PanelTabs<Tab: Hashable>: View {
     /// What the strip as a whole is called, for VoiceOver. The cells carry their own words, so
     /// this is the question they are answers to rather than a repeat of them.
