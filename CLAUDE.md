@@ -87,6 +87,54 @@ matches a custom rule through SourceKit, there is no SourceKit on Linux, and the
 is not run by the thing that gates the merge is worse than no rule, so `.swiftlint.yml` has no
 such block and says why.
 
+## Why there is no Xcode project
+
+Because there is nothing left for one to do, and this was measured rather than assumed. The
+question keeps coming back, so the answer is written down here.
+
+**Xcode already has the targets and the schemes.** Open `Package.swift` in Xcode and it builds,
+runs, debugs, profiles and previews. `xcodebuild -list` in this directory, with no `.xcodeproj`
+anywhere, answers with four schemes: `Bloom`, `bloom-bridge`, `BloomCore` and `Bloom-Package`.
+Apple's own position is in the tooling: `swift package generate-xcodeproj` was removed years ago,
+and `swift build --build-system xcode` is labelled "discouraged" in its own help text.
+
+**The one thing a project file really does buy is the recommended-settings prompt, and here it
+would land on a build nobody ships.** That prompt is a `PBXProject` mechanism and nothing else:
+the strings live in `DevToolsCore.framework` next to `PBXProjectAttribute_LastUpgradeCheck`,
+`PBXProject setLastUpgradeCheck:` and `_runUpgradeChecksIfNecessary`, and what it compares is the
+`LastUpgradeCheck` stamp in `project.pbxproj` against the Xcode you opened it with. A package has
+no `project.pbxproj`, so there is nothing to stamp, which is why the prompt never appears. It is
+a real feature and it is genuinely unavailable here; the question is what it would modernise. It
+edits `XCBuildConfiguration`, which is a set of build settings that **`swift build` never reads**.
+`make build`, `Tools/build.sh`, `Tools/test-core.sh`, `.github/workflows/test.yml` and
+`release.yml` all go through SwiftPM, so a project accepting a recommended setting and the app
+everybody actually installs would be two different builds, free to disagree, with only the project
+file being told about it.
+
+**And a checked-in project file rots here faster than most.** This repository took 728 commits, 21
+merges and 964 new Swift files in its first eight days, with several agents in parallel worktrees
+merging into `main`. Xcode 26 does remove the oldest objection, because a
+`PBXFileSystemSynchronizedRootGroup` picks files up from a folder without listing them, so the
+"every new file has to be added by hand" complaint is out of date and should not be repeated. What
+does not go away is that the file would be a second description of a build that only one person
+opens, next to a `Package.swift` that everything else reads.
+
+**Generating it instead does not rescue the argument, it kills it.** XcodeGen or Tuist from a
+spec, or a `Tools/xcodeproj.sh` that writes one on demand, would avoid the merge conflicts, but the
+whole benefit above is a stamp Xcode writes back into `project.pbxproj` and compares next time.
+Regenerate the project and that stamp goes with it, so the modernisation prompt you wanted either
+never fires or fires every time. A generated project is the right answer to a different question.
+
+**What to do instead, when the toolchain moves.** The package equivalent of accepting recommended
+settings is `swift-tools-version` and the language mode at the head of `Package.swift`, which are
+`6.2` and `.swiftLanguageMode(.v6)` today, plus `.enableUpcomingFeature` for anything the next
+release wants opted into. CI already refuses to build on an Xcode older than 26 and compiles with
+`-warnings-as-errors`, so a toolchain that changes its mind about something says so on the next
+push rather than in a dialog nobody opened.
+
+`.gitignore` has ignored `*.xcodeproj` since before this was written. Leave it there. If you want
+Xcode, open `Package.swift`.
+
 ## Where a green answer comes from
 
 Run tests locally, and run the ones that cover what you touched:
