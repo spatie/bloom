@@ -35,7 +35,7 @@ struct DiffRefreshScheduleTests {
         #expect(due.contains(all[7]))
     }
 
-    @Test("a workspace nobody is watching is left alone until it is a minute old")
+    @Test("a workspace nobody is watching is left alone until the backstop age")
     func idleIsLeftAlone() {
         let all = ids(20)
         let now = Date()
@@ -50,8 +50,8 @@ struct DiffRefreshScheduleTests {
         #expect(due == [all[0]])
     }
 
-    /// The whole point. Twenty idle workspaces at a six second tick and a sixty second age is two
-    /// a tick, not twenty in one tick and none in the next nine.
+    /// The whole point. Twenty idle workspaces at a six second tick and the backstop age is a
+    /// handful a tick, not twenty in one tick and none for the rest of the round.
     @Test("the idle ones come round in a trickle rather than a burst")
     func trickle() {
         let all = ids(20)
@@ -60,23 +60,26 @@ struct DiffRefreshScheduleTests {
         let due = DiffRefreshSchedule.due(
             workspaces: all,
             busy: [],
-            lastRefreshed: justRefreshed(all, at: now.addingTimeInterval(-120)),
+            lastRefreshed: justRefreshed(
+                all, at: now.addingTimeInterval(-DiffRefreshSchedule.idleMaxAge * 2)
+            ),
             now: now
         )
 
-        #expect(due.count == 2)
+        // Twenty workspaces over a five minute round at a six second tick.
+        #expect(due.count == 1)
     }
 
     @Test("the oldest go first, so nothing at the back of a queue is starved")
     func oldestFirst() {
         let all = ids(20)
         let now = Date()
-        var last = justRefreshed(all, at: now.addingTimeInterval(-61))
-        last[all[11]] = now.addingTimeInterval(-600)
-        last[all[4]] = now.addingTimeInterval(-300)
+        var last = justRefreshed(all, at: now.addingTimeInterval(-DiffRefreshSchedule.idleMaxAge - 1))
+        last[all[11]] = now.addingTimeInterval(-3_600)
+        last[all[4]] = now.addingTimeInterval(-1_800)
 
         let due = DiffRefreshSchedule.due(
-            workspaces: all, busy: [], lastRefreshed: last, now: now
+            workspaces: all, busy: [], lastRefreshed: last, now: now, idleMaxAge: 60
         )
 
         #expect(due == [all[11], all[4]])
@@ -86,7 +89,7 @@ struct DiffRefreshScheduleTests {
     func deterministic() {
         let all = ids(20)
         let now = Date()
-        let last = justRefreshed(all, at: now.addingTimeInterval(-61))
+        let last = justRefreshed(all, at: now.addingTimeInterval(-DiffRefreshSchedule.idleMaxAge - 1))
 
         let first = DiffRefreshSchedule.due(
             workspaces: all, busy: [], lastRefreshed: last, now: now
@@ -121,11 +124,88 @@ struct DiffRefreshScheduleTests {
         let due = DiffRefreshSchedule.due(
             workspaces: all,
             busy: [],
-            lastRefreshed: justRefreshed(all, at: now.addingTimeInterval(-61)),
+            lastRefreshed: justRefreshed(
+                all, at: now.addingTimeInterval(-DiffRefreshSchedule.idleMaxAge - 1)
+            ),
             now: now
         )
 
         #expect(due.count == 1)
+    }
+
+    // MARK: The workspace on screen
+
+    @Test("the workspace on screen is not asked about on every tick any more")
+    func selectedIsNotEveryTick() {
+        let all = ids(5)
+        let now = Date()
+
+        let due = DiffRefreshSchedule.due(
+            workspaces: all,
+            busy: [],
+            selected: all[2],
+            lastRefreshed: justRefreshed(all, at: now.addingTimeInterval(-6)),
+            now: now
+        )
+
+        #expect(due.isEmpty)
+    }
+
+    @Test("the workspace on screen is asked about on its own shorter age")
+    func selectedHasItsOwnAge() {
+        let all = ids(5)
+        let now = Date()
+
+        let due = DiffRefreshSchedule.due(
+            workspaces: all,
+            busy: [],
+            selected: all[2],
+            lastRefreshed: justRefreshed(
+                all, at: now.addingTimeInterval(-DiffRefreshSchedule.selectedMaxAge - 1)
+            ),
+            now: now
+        )
+
+        #expect(due == [all[2]])
+    }
+
+    /// What the watcher is for: a worktree something has actually written to is asked about now,
+    /// whatever age it is, including the one on screen.
+    @Test("a worktree the file system says changed is due at once")
+    func changedIsDueAtOnce() {
+        let all = ids(5)
+        let now = Date()
+
+        let due = DiffRefreshSchedule.due(
+            workspaces: all,
+            busy: [all[2]],
+            selected: all[2],
+            lastRefreshed: justRefreshed(all, at: now),
+            now: now
+        )
+
+        #expect(due == [all[2]])
+    }
+
+    /// A sidebar of one selected workspace must not have it counted twice: once as the slice it is
+    /// excluded from and once on its own age.
+    @Test("the workspace on screen is never also part of the trickle")
+    func selectedIsNotInTheTrickle() {
+        let all = ids(20)
+        let now = Date()
+
+        let due = DiffRefreshSchedule.due(
+            workspaces: all,
+            busy: [],
+            selected: all[0],
+            lastRefreshed: justRefreshed(
+                all, at: now.addingTimeInterval(-DiffRefreshSchedule.idleMaxAge * 2)
+            ),
+            now: now
+        )
+
+        #expect(due.contains(all[0]))
+        #expect(due.count == 2)
     }
 
     @Test("nothing open asks git nothing")

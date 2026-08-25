@@ -257,6 +257,24 @@ final class AppModel {
     /// `DiffRefreshSchedule` to decide which of them this tick is for. Outside observation because
     /// nothing draws from it and it is written every six seconds.
     @ObservationIgnored private var lastDiffRefresh: [WorkspaceID: Date] = [:]
+
+    /// The worktrees the file system says have actually changed since they were last asked about.
+    ///
+    /// This is what turns the refresh loop from a poll into a backstop. Every `git` process the
+    /// loop used to run existed to find out whether anything had happened, and on an idle machine
+    /// the answer is always no; a worktree in here is one where the answer is provably yes. See
+    /// `WorktreeWatcher`, which carries the measurement, and `DiffRefreshSchedule`, whose backstop
+    /// age could be lengthened because of it.
+    ///
+    /// Outside observation for the same reason `lastDiffRefresh` is: nothing draws from it, and it
+    /// is written by a background queue's hop onto this actor whenever an agent touches a file.
+    @ObservationIgnored private var changedWorkspaceIDs: Set<WorkspaceID> = []
+
+    /// The one watcher, over every active worktree. Built lazily so that a model made by a test or
+    /// a probe with no workspaces at all never subscribes to anything.
+    @ObservationIgnored private lazy var worktreeWatcher = WorktreeWatcher { [weak self] paths in
+        Task { @MainActor in self?.noteWorktreesChanged(paths) }
+    }
     private var storeObservationTask: Task<Void, Never>?
     private var sessionObservationTask: Task<Void, Never>?
     private var quotaObservationTask: Task<Void, Never>?
@@ -415,6 +433,7 @@ final class AppModel {
     func shutdownEverything() async {
         refreshTask?.cancel()
         refreshTask = nil
+        worktreeWatcher.stop()
         storeObservationTask?.cancel()
         storeObservationTask = nil
         sessionObservationTask?.cancel()
@@ -483,6 +502,11 @@ final class AppModel {
                 let landed = Set(reconciled.map(\.id))
                 pendingWorkspaces.removeAll { landed.contains($0.id) }
             }
+            // And the file system watcher, from the same place and for the same reason: this is
+            // the one line the workspace list is published from, so a worktree created, archived
+            // or restored anywhere in the app is watched or forgotten without anybody remembering
+            // to say so. Watching a list it is already watching does nothing at all.
+            worktreeWatcher.watch(roots: workspaces.map(\.path))
             // The models hold a copy of their `Workspace`, and this is where those copies go
             // stale. Refreshing here keeps `model(for:)` out of every view body.
             for workspace in workspaces {
@@ -665,8 +689,15 @@ final class AppModel {
                 // agent editing the worktree is exactly when this loop is most likely to collide
                 // with a lock it has no business waiting for.
                 guard NSApp?.isActive ?? true else { continue }
-                await self.refreshDiffStats()
-                await self.refreshSelectedChangedFiles()
+                let refreshed = await self.refreshDiffStats()
+                // Only when the workspace on screen was one of them. This used to run on every
+                // tick, which is a second set of `git` processes every six seconds against a
+                // worktree nothing had written to, and the answer was the file list it already
+                // had. What decides is now the same decision as above: an agent writing, the file
+                // system reporting a change, or the backstop age coming round.
+                if let selected = self.selection.workspaceID, refreshed.contains(selected) {
+                    await self.refreshSelectedChangedFiles()
+                }
             }
         }
     }
@@ -691,17 +722,39 @@ final class AppModel {
         await model.refreshChanges(.quiet)
     }
 
-    func refreshDiffStats() async {
-        guard let manager else { return }
+    /// What the file system watcher saw, turned into workspaces the next tick has to ask git about.
+    ///
+    /// Paths rather than ids come back, because a watcher has no idea what a workspace is. A path
+    /// that matches nothing is dropped, which is what happens for the moment between a worktree
+    /// being removed and the watcher being pointed at the shorter list.
+    private func noteWorktreesChanged(_ paths: Set<String>) {
+        let changed = workspaces.filter { paths.contains($0.path) }.map(\.id)
+        guard !changed.isEmpty else { return }
+        changedWorkspaceIDs.formUnion(changed)
+    }
+
+    /// - Returns: the workspaces this pass actually asked git about.
+    @discardableResult
+    func refreshDiffStats() async -> Set<WorkspaceID> {
+        guard let manager else { return [] }
 
         // Not every workspace on every tick. `DiffRefreshSchedule` carries the measurement: one
         // pass over one worktree is seven git processes, and running twenty of them every six
         // seconds on an idle machine is what put Bloom under "Using Significant Energy".
+        //
+        // A worktree the file system says has changed is due now rather than whenever its turn in
+        // the backstop rotation comes round, which is what lets that rotation be slow. See
+        // `WorktreeWatcher`.
         var busy = runningWorkspaceIDs
-        if let selected = selection.workspaceID { busy.insert(selected) }
+        busy.formUnion(changedWorkspaceIDs)
         let due = Set(DiffRefreshSchedule.due(
             workspaces: workspaces.map(\.id),
             busy: busy,
+            // No longer folded into `busy`. The workspace on screen used to be refreshed on every
+            // tick, which is six or seven `git` processes every six seconds for as long as a
+            // window sits open on an idle worktree; it now has an age of its own, and the watcher
+            // is what makes a real change arrive before that age is reached.
+            selected: selection.workspaceID,
             lastRefreshed: lastDiffRefresh,
             now: Date()
         ))
@@ -711,8 +764,9 @@ final class AppModel {
         let present = Set(workspaces.map(\.id))
         lastDiffRefresh = lastDiffRefresh.filter { present.contains($0.key) }
 
+        var refreshed: Set<WorkspaceID> = []
         for workspace in workspaces where due.contains(workspace.id) {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return refreshed }
             // A worktree that has been removed outside Bloom would make git walk up to the parent
             // repository and answer about the wrong tree.
             guard FileManager.default.fileExists(atPath: workspace.path) else { continue }
@@ -722,12 +776,18 @@ final class AppModel {
             // After the pass rather than before it, so a workspace whose git call took four
             // seconds is not immediately due again on the next tick.
             lastDiffRefresh[workspace.id] = Date()
+            // And it has now been asked about, so the watcher's report is spent. Anything that
+            // happened WHILE the pass ran is a fresh event and lands back in here behind us, which
+            // is the right answer: the numbers this pass read are already a moment old.
+            changedWorkspaceIDs.remove(workspace.id)
+            refreshed.insert(workspace.id)
         }
         // Nothing is read back here. `Store.updateDiffStat` only writes when one of the three
         // numbers has actually moved, and a write that happens publishes itself, so the sidebar is
         // refreshed by the same feed as every other change to a row. On an idle machine this whole
         // pass now writes nothing, publishes nothing and costs the window nothing, where it used
         // to re-read every workspace every six seconds whether or not anything had changed.
+        return refreshed
     }
 
     /// Runs work with a deadline. One `git` blocked on an `index.lock`, which is routine while an
