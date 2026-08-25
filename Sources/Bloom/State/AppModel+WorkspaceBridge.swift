@@ -27,14 +27,13 @@ extension AppModel {
     /// Internal because `makeBridge(on:)` stayed in `AppModel.swift`, next to the `bridge` it
     /// is the one writer of. The toolbox is the half worth having here, with the three methods
     /// behind it.
+    ///
+    /// Built on top of `BridgeToolbox.standard` rather than by listing its handlers again. They
+    /// were written out here as well, and a copy of a list is a copy that drifts: a tool added to
+    /// the core toolbox and not to this one would pass every test in the suite, which serves
+    /// `.standard`, and never reach the running app.
     func bridgeToolbox() -> BridgeToolbox {
-        BridgeToolbox(handlers: [
-            WhoamiTool(),
-            ProjectListTool(),
-            ProjectAddTool(),
-            ProjectHideTool(),
-            ProjectUnhideTool(),
-            WorkspaceListTool(),
+        BridgeToolbox(handlers: BridgeToolbox.standard.handlers + [
             WorkspaceStartTool { [weak self] order, project, identity, origin in
                 guard let self else { throw AppNotReady.stillStartingUp }
                 return try await self.startWorkspaceForBridge(

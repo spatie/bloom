@@ -28,6 +28,13 @@ import Foundation
 /// remove a branch with it, and the whole reason Bloom asks before archiving by hand is that the
 /// answer is sometimes no. A tool that can lose work is a tool a person answers for.
 ///
+/// `quick_prompt_delete` and `quick_prompt_update` are the two on the bridge today that this
+/// applies to. Neither touches a repository, but both act on a few lines the owner wrote by hand,
+/// Bloom keeps no copy of what was there before, and both are reachable only from the owner's own
+/// client, where there is somebody sitting to answer. That is the whole of why they are allowed at
+/// all and the whole of why they ask. `quick_prompt_list` is on the list below; the other three
+/// are not.
+///
 /// `workspace_merge` is off the list too, and it draws the line one step further out. It destroys
 /// nothing: it sends a turn, and the agent that reads it runs the merge in front of the owner. But
 /// what that turn leads to is a call to a server other people share, and unlike a worktree there
@@ -60,6 +67,14 @@ public enum BridgeToolApproval {
         // typing the old one back. There is nothing here for a person to weigh that they cannot
         // see and reverse in a second.
         "pane_rename",
+        // The only one of the four quick prompt tools on this list, and the only one of them a
+        // parent can call unattended. It reads the owner's own library and changes nothing in it,
+        // so the ask would carry nothing for a person to weigh, and an unanswered ask on a read is
+        // the hang described above for no gain at all. `quick_prompt_create` is deliberately off
+        // the list, because a row lands in a panel nobody is looking at rather than in front of
+        // the reader the way a pane does; `quick_prompt_update` overwrites what the owner wrote
+        // and `quick_prompt_delete` removes it, with no undo on either.
+        "quick_prompt_list",
     ]
 
     /// Whether this ask is Bloom answering itself.

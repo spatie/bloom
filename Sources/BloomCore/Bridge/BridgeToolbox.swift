@@ -2,7 +2,7 @@ import Foundation
 
 /// Every tool the bridge serves, and the only place a new one is added.
 ///
-/// A list of handlers rather than a switch. There are twelve of them now, and a switch would put
+/// A list of handlers rather than a switch. There are sixteen of them now, and a switch would put
 /// each in three places: the listing, the dispatch and the role gate. Here a tool is one type, and
 /// it carries its own gate. See `docs/BRIDGE.md` for the whole surface and who may reach it.
 public struct BridgeToolbox: Sendable {
@@ -43,6 +43,13 @@ public struct BridgeToolbox: Sendable {
         ProjectHideTool(),
         ProjectUnhideTool(),
         WorkspaceListTool(),
+        // A quick prompt is a row in `quick_prompt` and nothing else, so all four reach the store
+        // directly and none of them needs a seam into the window: the panel finds out through the
+        // update hook, the way it would about a write made anywhere else. See `QuickPromptCall`.
+        QuickPromptListTool(),
+        QuickPromptCreateTool(),
+        QuickPromptUpdateTool(),
+        QuickPromptDeleteTool(),
     ])
 
     /// The tools a caller may see. Sorted by name so `tools/list` is stable between calls, which
