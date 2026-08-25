@@ -86,7 +86,7 @@ extension AppModel {
             placeholder: placeholder,
             hasPullRequest: hasPullRequest
         )
-        guard let result = outcome ?? nil, result.didRename else { return }
+        guard let result = outcome, result.didRename else { return }
 
         // The register is written here rather than left to the row, because more than one view
         // can be drawing this name when it lands and they have to scramble in step. `applyName`

@@ -1615,7 +1615,6 @@ final class WorkspaceModel {
     }
 }
 
-
 /// A thread-safe hand-off for streamed output.
 ///
 /// The producer is a subprocess reader on some background thread and the consumer is the main

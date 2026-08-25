@@ -1,20 +1,20 @@
 import Foundation
 
-/// What Bloom does about a folder it has been handed, decided before anything is done to it.
-///
-/// Everything in this file is pure. It takes facts that were gathered by looking at the disk and
-/// answers three questions: what should become of this folder, what would be committed if it
-/// became a repository, and is the GitHub name the user typed a name GitHub will accept. The
-/// answers are what the dialog shows, and they are what the tests pin, because the alternative is
-/// a dialog whose promises are only checked by running it against somebody's home directory.
-///
-/// **`FolderVerdict.of` is the one rule, and both doors ask it.** The owner's file panel and
-/// `project_add` over the bridge used to have a policy each, and they did not agree: the panel
-/// added anything git recognised, which meant it would register one of Bloom's own worktrees or
-/// a home directory somebody had run `git init` in, and the bridge refused both. Two lists of
-/// refusals maintained apart is the shape of that bug, so there is one list now. What genuinely
-/// differs is how a refusal reads, which is `sentence` for a person in front of a file panel and
-/// `agentSentence` for a caller that needs to be told whether retrying helps.
+// What Bloom does about a folder it has been handed, decided before anything is done to it.
+//
+// Everything in this file is pure. It takes facts that were gathered by looking at the disk and
+// answers three questions: what should become of this folder, what would be committed if it
+// became a repository, and is the GitHub name the user typed a name GitHub will accept. The
+// answers are what the dialog shows, and they are what the tests pin, because the alternative is
+// a dialog whose promises are only checked by running it against somebody's home directory.
+//
+// **`FolderVerdict.of` is the one rule, and both doors ask it.** The owner's file panel and
+// `project_add` over the bridge used to have a policy each, and they did not agree: the panel
+// added anything git recognised, which meant it would register one of Bloom's own worktrees or
+// a home directory somebody had run `git init` in, and the bridge refused both. Two lists of
+// refusals maintained apart is the shape of that bug, so there is one list now. What genuinely
+// differs is how a refusal reads, which is `sentence` for a person in front of a file panel and
+// `agentSentence` for a caller that needs to be told whether retrying helps.
 
 // MARK: - What the folder is
 

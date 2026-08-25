@@ -210,8 +210,7 @@ public enum SubagentOutput: Sendable {
     /// the kind is asked for rather than sniffed. Parsing one as the other is what made a
     /// background command's pane empty.
     public static func read(path: String?, kind: SubagentKind = .agent)
-        -> Result<SubagentTranscript, Failure>
-    {
+        -> Result<SubagentTranscript, Failure> {
         guard let path, !path.isEmpty else { return .failure(.noFile) }
         let url = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: url.path) else { return .failure(.missing) }

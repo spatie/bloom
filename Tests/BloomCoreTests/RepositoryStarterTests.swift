@@ -507,4 +507,3 @@ struct RepositoryStartAbandonmentTests {
             == RepositoryStartStep.allCases.count)
     }
 }
-

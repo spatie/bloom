@@ -86,7 +86,7 @@ struct RepoIcon: View {
         Image(nsImage: artwork.image)
             .resizable()
             .interpolation(.high)
-            .aspectRatio(contentMode: .fit)
+            .scaledToFit()
             .frame(width: size, height: size)
             .clipShape(shape)
             // Only around artwork that reaches the edges. It is what separates a pale icon from a

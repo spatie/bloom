@@ -41,6 +41,7 @@ Everything real is a script in `Tools/`; the `Makefile` is the index.
 
     make            list the targets        make lint       Tools/house-rules.sh
     make build      compile every target    make test       the BloomCore suite
+    make swiftlint  Tools/swiftlint.sh
     make app        assemble a debug .app   make run        release .app, launched
     make master     install ~/Applications/Bloom.app  (see the guard below)
     make dev        install ~/Applications/Bloom Dev.app
@@ -65,6 +66,26 @@ widened enum leaving a switch in a view non-exhaustive. Run `make build` before 
 anything that adds a case to an enum.
 
 Zero warnings, and `make lint` green, before anything is committed.
+
+**`make lint` and `make swiftlint` are two different linters and both have to pass.**
+`Tools/house-rules.sh` is the conventions no off the shelf tool knows: no em dashes, British
+spelling, typed ids, a view that does not run a subprocess, only the app target importing a UI
+framework. SwiftLint is the half every Swift codebase shares, and `.swiftlint.yml` is tuned rather
+than default, because the defaults reported 1,634 violations here. The head of that file carries
+the count each disabled rule produced and the reason it is off, so a rule is argued with rather
+than guessed at. Both run in the `lint` job of `.github/workflows/test.yml`, on the Linux runner.
+
+SwiftLint is not installed by anything here. `brew install swiftlint`, or take the binary from the
+releases page; `Tools/swiftlint.sh` says so and stops rather than installing it for you. CI pins
+its own copy. `./Tools/swiftlint.sh --fix` applies what SwiftLint can correct itself, and the
+diff has to be read: it once rewrote `let _ =` inside a `@ViewBuilder` into code that does not
+compile.
+
+**A rule of ours goes in `Tools/house-rules.sh`, never in a `custom_rules:` block.** SwiftLint
+matches a custom rule through SourceKit, there is no SourceKit on Linux, and the lint job prints
+"Skipping enabled rule 'custom_rules'" and goes green. A rule that passes on the author's Mac and
+is not run by the thing that gates the merge is worse than no rule, so `.swiftlint.yml` has no
+such block and says why.
 
 ## Where a green answer comes from
 

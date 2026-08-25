@@ -1,16 +1,16 @@
 import Foundation
 
-/// The two marks a person puts on a workspace by hand.
-///
-/// Everything else a sidebar row draws is reported rather than chosen: the status glyph is what
-/// `WorkspaceStatus` worked out, the diff counts are what `git` said, the unread weight is what a
-/// finishing turn wrote. These two are the opposite. Nothing sets them but the user, nothing
-/// clears them but the user or the one rule written out below, and they exist so a person can say
-/// something about a row that the machine has no way to know.
-///
-/// They live here, in the core, rather than in the menus that offer them, because both lists offer
-/// them and the answer must not depend on which list you right clicked in. `WorkspaceMenuItems`
-/// draws what these decide.
+// The two marks a person puts on a workspace by hand.
+//
+// Everything else a sidebar row draws is reported rather than chosen: the status glyph is what
+// `WorkspaceStatus` worked out, the diff counts are what `git` said, the unread weight is what a
+// finishing turn wrote. These two are the opposite. Nothing sets them but the user, nothing
+// clears them but the user or the one rule written out below, and they exist so a person can say
+// something about a row that the machine has no way to know.
+//
+// They live here, in the core, rather than in the menus that offer them, because both lists offer
+// them and the answer must not depend on which list you right clicked in. `WorkspaceMenuItems`
+// draws what these decide.
 
 // MARK: - The unread mark
 

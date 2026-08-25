@@ -49,13 +49,13 @@ extension WorkspaceManager {
 
         return BranchRenameFacts(
             recordedBranch: workspace.branch,
-            checkedOutBranch: await checkedOut ?? nil,
+            checkedOutBranch: await checkedOut,
             desiredBranch: desiredBranch,
             // A commit count git refused to give is not evidence that there are none. Treating a
             // failed read as "one commit" is the cautious direction: it refuses the rename rather
             // than performing one on a repository nobody could ask a question of.
             commitsAhead: await ahead ?? 1,
-            hasUpstream: (await upstream ?? nil) != nil,
+            hasUpstream: (await upstream) != nil,
             hasRemoteCounterpart: await remote,
             hasPullRequest: hasPullRequest,
             hasOperationInProgress: await inProgress,

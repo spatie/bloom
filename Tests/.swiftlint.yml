@@ -1,0 +1,24 @@
+# Merged over the `.swiftlint.yml` at the root, for files under this directory only. SwiftLint
+# reads the nearest configuration walking up from each file and layers it on the one above, so
+# everything the root says still applies here and this file only says what differs.
+#
+# Two rules differ, and both differ because the suite is not the app.
+disabled_rules:
+  # 11 violations, all of them here and none in `Sources`. Nine are
+  # `try! JSONSerialization.data(withJSONObject:)` over a dictionary literal written three lines
+  # above, and two are `try! #require(...)`. A fixture that cannot be built is a broken test
+  # rather than a condition to handle, and the alternatives are worse: `try?` with a fallback
+  # hides the breakage behind an assertion that fails somewhere else, and threading `throws` out
+  # of the fixture helpers reaches dozens of call sites to say nothing. The rule stays on for
+  # `Sources`, where it is at zero and where a `try!` really would be a crash in front of
+  # somebody.
+  - force_try
+
+  # 9 violations, and the correction it asks for does not compile inside `#expect`. Swift
+  # Testing's macro takes an expression apart to describe it in the failure message, and
+  # `#expect(!models.contains(where: \.hidden))` expands to `Testing.__checkFunctionCall(models,
+  # calling: { $0.contains(where: $1) }, ...)`, where the closure has lost the `rethrows`
+  # inference that made the original fine: "call can throw, but it is not marked with 'try'".
+  # `filter { }.isEmpty` survives the same expansion, so the rule's target is the only spelling
+  # that works here. It stays on for `Sources`, which is at zero and has no macro in the way.
+  - contains_over_filter_is_empty

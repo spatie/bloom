@@ -1915,7 +1915,6 @@ public actor Store {
         }
     }
 
-
     // MARK: - Agent quotas
 
     /// Every allowance any provider has reported and has not yet turned over.

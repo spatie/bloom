@@ -273,7 +273,6 @@ public struct CodexTranslation: Sendable {
         }
     }
 
-
     // MARK: - Envelopes
 
     /// The bytes a row is stored as.

@@ -16,7 +16,6 @@ import BloomCore
 
 extension AppModel {
 
-
     /// Every archived workspace with what it still holds, and whether its branch is still here.
     ///
     /// The branch question is asked once per project rather than once per workspace: `branchExists`

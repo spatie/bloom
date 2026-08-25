@@ -2,7 +2,6 @@ import AppKit
 import Observation
 import BloomCore
 
-
 struct BloomAlert: Identifiable {
     let id = UUID()
     var title: String
@@ -63,7 +62,6 @@ final class AppModel {
     /// from one clock reading. The menu is built at the moment it opens, so it takes that reading
     /// itself and this stays the durable half.
     private(set) var quotas: [AgentQuota] = []
-
 
     /// Selecting a workspace is the moment its live model should come into existence, rather than
     /// the moment some view body happens to ask for it. Doing it here keeps model creation out of
@@ -365,7 +363,6 @@ final class AppModel {
         // window is already on screen. See `AppModel+TranscriptSearch`.
         startTranscriptIndexBackfill()
     }
-
 
     /// The socket an agent's MCP shim forwards to, listening for as long as the app runs.
     ///
@@ -750,9 +747,7 @@ final class AppModel {
     /// of mid-update mutation this file avoids everywhere else.
     @ObservationIgnored private var cachedArchived: [Workspace]?
 
-
     // MARK: - Clearing out the archive
-
 
     func workspaces(in repo: Repo) -> [Workspace] {
         // `SidebarReorder.drawn` rather than a comparator written here: a restated rule dropped
@@ -1075,12 +1070,9 @@ final class AppModel {
 
     // MARK: - Workspaces
 
-
     // MARK: - Continuing after a merge
 
-
     // MARK: - Undoing an archive
-
 
     // MARK: - Reading an archived workspace, and bringing it back
 
@@ -1090,7 +1082,6 @@ final class AppModel {
     /// `AppModel+Archive.swift`, so this is the one property the split genuinely publishes. Two
     /// seams for an insert and a remove would be more code saying less than the property does.
     var restoring: Set<WorkspaceID> = []
-
 
     /// What the sidebar's drag ends in.
     ///

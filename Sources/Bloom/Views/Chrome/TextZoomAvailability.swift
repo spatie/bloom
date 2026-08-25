@@ -27,6 +27,9 @@ final class TextZoomAvailability {
 
     private init() {
         for name in [NSWindow.didUpdateNotification, UserDefaults.didChangeNotification] {
+            // Registered by the singleton's own initialiser and wanted for as long as the app
+            // runs, so the token would only ever be stored and never used.
+            // swiftlint:disable:next discarded_notification_center_observer
             NotificationCenter.default.addObserver(
                 forName: name, object: nil, queue: .main
             ) { _ in

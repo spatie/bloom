@@ -13,7 +13,6 @@ enum FeedbackPhase: Equatable {
     var isSending: Bool { self == .sending }
 }
 
-
 /// The heading and the sentence under it, which is the same shape on both sheets.
 struct FeedbackHeader: View {
     var title: String

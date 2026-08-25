@@ -53,8 +53,6 @@ struct PullRequestSummary: View {
 
     private var status: PullRequestStatus { pullRequest.status(local: localWork) }
 
-
-
     /// Whether this strip is asking for something or reporting something.
     ///
     /// Open is a request: there is a button in the band and a state you are waiting on. Merged and

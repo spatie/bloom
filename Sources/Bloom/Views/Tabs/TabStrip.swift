@@ -144,7 +144,6 @@ struct TabStrip<Leading: View, Tabs: View, Append: View, Trailing: View>: View {
     /// as `width`: a drag must not write state once a frame.
     @State private var overflow = TabStripOverflow()
 
-
     init(
         pane: TabPane = .content,
         selection: AnyHashable? = nil,

@@ -241,9 +241,6 @@ struct TerminalNoteTests {
         }
     }
 
-    /// **The regression this suite exists for.**
-    ///
-    /// The sheet used to say "Named after a sea", "named after a sea" and "named after the sea" in
     // MARK: - What a workspace ends up called
 
     /// The rule exists so the row drawn while the worktree is being cut and the row drawn
@@ -291,6 +288,9 @@ struct TerminalNoteTests {
         #expect(!WorkspaceStartPlan.name(supplied: nil, checkout: nil, prompt: "").isEmpty)
     }
 
+    /// **The regression this suite exists for.**
+    ///
+    /// The sheet used to say "Named after a sea", "named after a sea" and "named after the sea" in
     /// three places at once. The catalogue is still there and still claims, and the chart and the
     /// notice that fires on a first claim are how somebody is meant to find out about it. A create
     /// sheet that explains the mechanism up front spends that discovery to answer a question

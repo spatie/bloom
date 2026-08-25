@@ -379,7 +379,6 @@ struct ComposerTextEditor: NSViewRepresentable {
     }
 }
 
-
 /// The one edit the composer makes that nobody typed: a file arriving in the text after it has
 /// been copied into the worktree.
 ///

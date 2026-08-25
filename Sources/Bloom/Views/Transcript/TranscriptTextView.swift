@@ -203,8 +203,7 @@ struct TranscriptTextView: NSViewRepresentable {
     /// three) and which counts the extra line fragment a trailing newline leaves behind.
     private func widestLine(_ layout: NSLayoutManager, in container: NSTextContainer) -> CGFloat {
         var widest: CGFloat = 0
-        layout.enumerateLineFragments(forGlyphRange: layout.glyphRange(for: container)) {
-            _, usedRect, _, _, _ in
+        layout.enumerateLineFragments(forGlyphRange: layout.glyphRange(for: container)) { _, usedRect, _, _, _ in
             widest = max(widest, usedRect.maxX)
         }
         return widest
