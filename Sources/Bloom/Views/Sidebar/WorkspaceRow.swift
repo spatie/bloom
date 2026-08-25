@@ -61,6 +61,9 @@ struct WorkspaceRow: View {
     /// crossing the pane lights one row at a time.
     @State private var isHovered = false
     @State private var draft = ""
+    /// Whether this rename has already been finished, so the four ways of leaving the field cannot
+    /// write the name twice. Reset when the field opens. See `end(_:)`.
+    @State private var hasEnded = false
     @FocusState private var fieldFocused: Bool
 
     private var isRenaming: Bool { renaming == workspace.id }
@@ -82,10 +85,19 @@ struct WorkspaceRow: View {
                         // background in both appearances and owes nothing to what is behind it.
                         .foregroundStyle(Palette.textPrimary)
                         .focused($fieldFocused)
-                        .onSubmit { commit() }
-                        .onExitCommand { renaming = nil }
+                        .onSubmit { end(.submitted) }
+                        .onExitCommand { end(.escaped) }
+                        // Clicking away commits, which is what Finder, Xcode and Mail do and what
+                        // this field did not: it stayed open on the row holding uncommitted text
+                        // for as long as the window was left alone. Guarded on having had the
+                        // focus, so the false this starts at is not read as having lost it.
+                        .onChange(of: fieldFocused) { had, has in
+                            guard had, !has else { return }
+                            end(.focusLost)
+                        }
                         .task {
                             draft = workspace.name
+                            hasEnded = false
                             // A beat, so the field exists before focus moves to it.
                             try? await Task.sleep(for: .milliseconds(30))
                             fieldFocused = true
@@ -170,6 +182,14 @@ struct WorkspaceRow: View {
         // The list inverts the row's text for us, but a label that carries its own colour, such as
         // the green plus count, has to be told. This is the same signal the inspector's lists send.
         .environment(\.isOnEmphasizedSelection, isEmphasized)
+        // On the ROW rather than on the field, because this is the ending the field is not around
+        // to see: `SidebarView` closes it whenever the selection moves, and what was typed used to
+        // go with it. The row is still in the list when that happens, so this fires and the name is
+        // written. See `InPlaceRename`.
+        .onChange(of: isRenaming) { was, now in
+            guard was, !now else { return }
+            end(.dismissed)
+        }
     }
 
     // MARK: - Trailing
@@ -373,10 +393,22 @@ struct WorkspaceRow: View {
 
     // MARK: - Renaming
 
-    private func commit() {
-        let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        renaming = nil
-        guard !name.isEmpty, name != workspace.name else { return }
+    /// One door out of the field, for all four ways of leaving it.
+    ///
+    /// `hasEnded` is what stops the name being written twice. Ending the rename clears `renaming`,
+    /// which both removes the field (so the focus change fires) and flips `isRenaming` (so the
+    /// row's own watcher fires), and the write is asynchronous, so the second caller would still
+    /// see the old name and ask for the same rename again.
+    private func end(_ ending: InPlaceRename.Ending) {
+        guard !hasEnded else { return }
+        hasEnded = true
+        // Only if the field is still this row's. Starting a rename on another row is what ends
+        // this one, and clearing the shared id unconditionally would close the field that had just
+        // been opened over there.
+        if renaming == workspace.id { renaming = nil }
+        guard case .commit(let name) = InPlaceRename.outcome(
+            ending, draft: draft, current: workspace.name
+        ) else { return }
         Task { await app.rename(workspace, to: name) }
     }
 }

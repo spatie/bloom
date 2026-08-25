@@ -106,8 +106,14 @@ struct RepoHeaderRow: View {
                     .textFieldStyle(.plain)
                     .font(Typo.title)
                     .focused($repoFieldFocused)
-                    .onSubmit(commitRepoRename)
-                    .onExitCommand { isRenamingRepo = false }
+                    .onSubmit { endRepoRename(.submitted) }
+                    .onExitCommand { endRepoRename(.escaped) }
+                    // Clicking away commits, as it does in Finder. Guarded on having had the
+                    // focus, so the false the field starts at is not read as having lost it.
+                    .onChange(of: repoFieldFocused) { had, has in
+                        guard had, !has else { return }
+                        endRepoRename(.focusLost)
+                    }
             } else {
                 name
             }
@@ -399,10 +405,14 @@ struct RepoHeaderRow: View {
         }
     }
 
-    private func commitRepoRename() {
-        let name = repoDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// One door out of the field, for each of the ways of leaving it. Escape is the only one that
+    /// throws the draft away. See `InPlaceRename`.
+    private func endRepoRename(_ ending: InPlaceRename.Ending) {
+        guard isRenamingRepo else { return }
         isRenamingRepo = false
-        guard !name.isEmpty, name != repo.name else { return }
+        guard case .commit(let name) = InPlaceRename.outcome(
+            ending, draft: repoDraft, current: repo.name
+        ) else { return }
         Task { await app.rename(repo, to: name) }
     }
 }

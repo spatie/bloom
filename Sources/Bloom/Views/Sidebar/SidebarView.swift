@@ -316,6 +316,11 @@ struct SidebarView: View {
         }
         // Moving off a row has to close whatever field was open on it, or the rename would carry
         // on editing a workspace that is no longer on screen.
+        //
+        // Closing it no longer throws away what was typed. This line used to be the second half of
+        // an edit being eaten: the field went and the draft went with it, so selecting another
+        // workspace mid rename silently lost the name. The row watches `renaming` and commits when
+        // it is taken away, which is `InPlaceRename`'s `dismissed` ending. See `WorkspaceRow.end`.
         .onChange(of: app.selection, initial: true) { _, target in
             renaming = nil
             listSelection = target

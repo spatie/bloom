@@ -43,6 +43,9 @@ struct HomeListRow: View {
     var onCancelRename: () -> Void
 
     @State private var draft = ""
+    /// Whether this rename has already been finished, so the ways of leaving the field cannot ask
+    /// for the same rename twice. Reset when the field opens. See `end(_:)`.
+    @State private var hasEnded = false
     @FocusState private var fieldFocused: Bool
 
     private var workspace: Workspace { row.workspace }
@@ -74,10 +77,18 @@ struct HomeListRow: View {
                 TextField("Workspace name", text: $draft)
                     .textFieldStyle(.plain)
                     .focused($fieldFocused)
-                    .onSubmit { onCommitRename(draft) }
-                    .onExitCommand(perform: onCancelRename)
+                    .onSubmit { end(.submitted) }
+                    .onExitCommand { end(.escaped) }
+                    // Clicking away commits, as it does in Finder, rather than leaving the field
+                    // open on the row holding text nobody ever asked to keep. Guarded on having
+                    // had the focus, so the false the field starts at is not read as losing it.
+                    .onChange(of: fieldFocused) { had, has in
+                        guard had, !has else { return }
+                        end(.focusLost)
+                    }
                     .task {
                         draft = workspace.name
+                        hasEnded = false
                         // A beat, so the field exists before focus moves to it.
                         try? await Task.sleep(for: .milliseconds(30))
                         fieldFocused = true
@@ -291,6 +302,24 @@ struct HomeListRow: View {
             )
         )
         return parts.joined(separator: ", ")
+    }
+
+    // MARK: - Renaming
+
+    /// One door out of the field, for each of the ways of leaving it. Which of them writes the
+    /// name is `InPlaceRename` in the core, so this row, the sidebar's and the project header's
+    /// cannot answer the same gesture three different ways.
+    ///
+    /// `hasEnded` is what stops one rename being asked for twice: committing closes the field,
+    /// which is itself a focus change, and the write is asynchronous so the second caller would
+    /// still see the old name.
+    private func end(_ ending: InPlaceRename.Ending) {
+        guard !hasEnded else { return }
+        hasEnded = true
+        guard case .commit(let name) = InPlaceRename.outcome(
+            ending, draft: draft, current: workspace.name
+        ) else { return onCancelRename() }
+        onCommitRename(name)
     }
 }
 
