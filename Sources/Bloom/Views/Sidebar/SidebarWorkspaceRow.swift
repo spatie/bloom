@@ -25,6 +25,10 @@ struct SidebarWorkspaceRow: View {
 
     @Environment(AppModel.self) private var app
 
+    /// Where this row is on screen, for the card that opens beside it. Held rather than reported:
+    /// see `SidebarRowAnchor`.
+    @State private var anchor = SidebarRowAnchor()
+
     var body: some View {
         WorkspaceRow(
             workspace: workspace,
@@ -51,6 +55,31 @@ struct SidebarWorkspaceRow: View {
         // nesting left in it is unreadable without knowing which project each row belongs to, and
         // content that has to be asked for is content most people never hear.
         .accessibilityCustomContent(Text("Project"), Text(projectName), importance: .high)
+        // The card that opens beside the row, and the handle that says where the row is.
+        //
+        // Here rather than in `WorkspaceRow`, and this is the same line the type's own note draws:
+        // `WorkspaceRow` is the drawing and stays a pure function of what it is handed, while what
+        // the LIST is told about a row lives here. A card that opens over the whole window on a
+        // hover is squarely the second kind, and it needs the two things only this side has
+        // anyway, which are the model that knows whether an agent is running and the poll that
+        // knows what GitHub said.
+        //
+        // Its own `.onHover`, not the one inside `WorkspaceRow`. Two hover trackers on nested
+        // views both fire, and joining them would mean handing the drawing a callback it has no
+        // use for. Nothing is drawn from this one, so nothing redraws when it changes.
+        .background { SidebarRowAnchorReader(anchor: anchor) }
+        .onHoverChange { inside in
+            if inside {
+                WorkspaceHoverCardPresenter.shared.pointerEntered(
+                    workspace.id, card: hoverCard, anchor: { anchor.screenFrame }
+                )
+            } else {
+                WorkspaceHoverCardPresenter.shared.pointerExited(workspace.id)
+            }
+        }
+        // A row that leaves the pane while its card is up: archived from the menu bar, filtered
+        // out, or its project folded. The pointer never leaves, so no exit ever arrives.
+        .onDisappear { WorkspaceHoverCardPresenter.shared.pointerExited(workspace.id) }
         // Every item in it is `WorkspaceMenuItems`, which Home's rows draw from as well. It used
         // to be a copy of the same six buttons written out here, with a note on the other copy
         // saying what to extract when the two were merged; adding to both was what forced it.
@@ -79,6 +108,26 @@ struct SidebarWorkspaceRow: View {
     /// at stake. See `AppModel.archive(_:deleteBranch:alwaysConfirm:)`.
     private func confirmRowArchive(_ workspace: Workspace) {
         Task { await app.archive(workspace, alwaysConfirm: true) }
+    }
+
+    /// What the card says, built at the moment it opens rather than on every redraw.
+    ///
+    /// **Nothing in here fetches.** `isRunning` is the model's own answer about a turn already in
+    /// progress and the pull request is whatever `WorkspacePullRequests` last polled, which is the
+    /// same two facts the row's status mark is already drawn from. A hover that started a `gh`
+    /// call would put a subprocess behind moving the pointer down a list of thirty rows.
+    ///
+    /// It returns nil for a row being renamed. The field owns the row while it is open, and a
+    /// card over the window showing the name being replaced is a card about a fact that is in the
+    /// middle of changing.
+    private func hoverCard() -> WorkspaceHoverCard? {
+        guard renaming != workspace.id else { return nil }
+        return WorkspaceHoverCard.make(
+            workspace: workspace,
+            isRunning: app.isRunning(workspace),
+            isAwaitingPermission: app.isAwaitingPermission(workspace),
+            pullRequest: WorkspacePullRequests.shared.pullRequest(for: workspace.id)
+        )
     }
 }
 

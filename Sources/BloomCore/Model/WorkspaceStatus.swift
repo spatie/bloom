@@ -130,8 +130,21 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
         guard describesPullRequest, let pullRequest else { return label }
 
         var text = "\(label), pull request #\(pullRequest.number)"
-        let detail = pullRequest.checksSummary
-        if !detail.isEmpty, detail != label { text += ": \(detail)" }
+        if let detail = detail(pullRequest: pullRequest) { text += ": \(detail)" }
         return text
+    }
+
+    /// The numbers behind the state's name, or nil when the name is all there is to say.
+    ///
+    /// Split out of `summary` rather than copied from it, for `WorkspaceHoverCard`, which draws
+    /// the state and its detail as two pieces of text of different weights and so cannot use the
+    /// one sentence. The check that the detail is not simply the label again is the part worth
+    /// having in one place: gh reports "Checks failing" as its own rollup summary often enough
+    /// that a card built on a copy of this would have said it twice.
+    public func detail(pullRequest: PullRequest?) -> String? {
+        guard describesPullRequest, let pullRequest else { return nil }
+        let detail = pullRequest.checksSummary
+        guard !detail.isEmpty, detail != label else { return nil }
+        return detail
     }
 }

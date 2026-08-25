@@ -74,6 +74,7 @@ extension Snapshot {
         .paneTabs,
         .sidebarSelection,
         .quickPrompts,
+        .hoverCard,
     ]
 
     /// The page `--gallery` names, falling back to the first rather than failing: a capture run
