@@ -130,7 +130,7 @@ struct HomeView: View {
                             now: now,
                             isRenaming: renaming == row.id,
                             onCommitRename: { commitRename(row, to: $0) },
-                            onCancelRename: { renaming = nil }
+                            onCancelRename: { closeField(of: row) }
                         )
                         // Innermost, on the drawing alone. Everything below this line is what the
                         // list is told about the row, and a row that is fading in is still
@@ -359,10 +359,18 @@ struct HomeView: View {
         Task { await app.addProjectByAsking() }
     }
 
+    /// The name has already been through `InPlaceRename` in the row, which is what decided there
+    /// was anything to write at all: it is trimmed, not empty, and different from the one the
+    /// workspace has. All that is left here is closing the field and writing it.
     private func commitRename(_ row: HomeRow, to newName: String) {
-        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        renaming = nil
-        guard !name.isEmpty, name != row.workspace.name else { return }
-        Task { await app.rename(row.workspace, to: name) }
+        closeField(of: row)
+        Task { await app.rename(row.workspace, to: newName) }
+    }
+
+    /// Only if the open field is still this row's. A rename started on another row is what ends
+    /// this one, and clearing the shared id unconditionally would close the field that had just
+    /// been opened over there.
+    private func closeField(of row: HomeRow) {
+        if renaming == row.id { renaming = nil }
     }
 }
