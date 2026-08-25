@@ -1,5 +1,6 @@
 #!/bin/zsh
-# Runs SwiftLint over Sources and Tests, against the `.swiftlint.yml` at the root.
+# Runs SwiftLint over Sources and Tests, against the `.swiftlint.yml` at the root and the one
+# in `Tests/` layered on top of it for the files under there.
 #
 #   ./Tools/swiftlint.sh              lint everything, which is also `make swiftlint`
 #   ./Tools/swiftlint.sh --fix        apply the corrections SwiftLint can make itself
@@ -9,6 +10,10 @@
 # the conventions no off the shelf tool knows about: no em dashes, British spelling, typed ids, a
 # view that does not run a subprocess. SwiftLint holds the ones every Swift codebase shares. Both
 # run in the `lint` job of .github/workflows/test.yml, on the Linux runner, side by side.
+#
+# **No `--config`, deliberately.** Passing one switches SwiftLint's nested configuration off,
+# and `Tests/.swiftlint.yml` is where two rules that are wrong for a test suite and right for
+# `Sources` come off. Reach for `--config` and the suite is linted as if it were the app.
 #
 # --strict, always, and that is the whole point of the tuned configuration. SwiftLint's own exit
 # status only fails on an error-severity violation, and every rule in `.swiftlint.yml` is at the
