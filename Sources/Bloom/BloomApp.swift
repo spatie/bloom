@@ -48,6 +48,12 @@ struct BloomApp: App {
         // See `ScrollProbe`.
         if ScrollProbe.isRequested { ScrollProbe.schedule() }
 
+        // And the one that answers "the battery menu says Bloom is using significant energy":
+        // `Bloom --idle-probe <out.json> --idle-worktrees <list>` runs the diff stat pass the six
+        // second loop runs and reports what it cost in process time and in subprocesses. It is the
+        // only one of the family that measures the case where nothing is happening. See `IdleProbe`.
+        if IdleProbe.isRequested { IdleProbe.schedule() }
+
         // And two last ones. `Bloom --menu-probe <out.png>` opens one of the centre pane's split
         // submenus and photographs it, which nothing else can; `Bloom --menu-action <title>`
         // performs a real item of a real menu and reports the windows either side of it, which is

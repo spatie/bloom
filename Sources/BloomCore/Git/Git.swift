@@ -109,6 +109,7 @@ public enum Git {
         process.terminationHandler = { _ in exit.signal() }
 
         try process.run()
+        Shell.countSpawn()
 
         outReader.start()
         errReader.start()
@@ -295,9 +296,39 @@ public enum Git {
     /// simply not a candidate. Only a base that resolves nowhere at all throws, exactly as
     /// `mergeBase` already does, because an empty diff reading as "this workspace changed
     /// nothing" is the failure worth being loud about.
+    ///
+    /// The answer is remembered between calls, keyed on where those refs are rather than on a
+    /// clock, so the three or four processes below run only when one of them has actually moved.
+    /// `BaselineCache` carries the measurement that forced that and the argument for the key.
     public static func baseline(_ base: String, in worktree: String) async throws -> String {
         try validate(ref: base, label: "base branch")
 
+        let refs = await refPositions(base, in: worktree)
+        if let refs,
+           let remembered = await BaselineCache.shared.baseline(
+               worktree: worktree, base: base, fingerprint: refs
+           ) {
+            return remembered
+        }
+
+        let answer = try await resolveBaseline(base, in: worktree)
+        if let refs {
+            await BaselineCache.shared.remember(
+                worktree: worktree, base: base, fingerprint: refs, baseline: answer
+            )
+        }
+        return answer
+    }
+
+    /// Where the three refs are now, as one string. Nil when git could not be asked at all, which
+    /// makes every call a miss rather than letting a broken repository share an entry with another.
+    private static func refPositions(_ base: String, in worktree: String) async -> String? {
+        let arguments = BaselineFingerprint.arguments(base: base, remote: remote)
+        guard let result = try? await run(arguments, in: worktree), result.ok else { return nil }
+        return BaselineFingerprint.make(result.stdout)
+    }
+
+    private static func resolveBaseline(_ base: String, in worktree: String) async throws -> String {
         let local = try? await mergeBase(base, in: worktree)
 
         let tracking = "refs/remotes/\(remote)/\(base)"
