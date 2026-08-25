@@ -171,6 +171,27 @@ struct BloomCommands: Commands {
             // undivided run of eight items. Every Mac Edit menu keeps find in a group of its own.
             Divider()
 
+            // The find group every Mac Edit menu has, which this one did not: Cmd+F opened a
+            // screen, there was no Cmd+G anywhere in the app, and the terminal's own find bar had
+            // never been asked for. A submenu called Find, because that is where Mail, Safari,
+            // Preview and Xcode all keep these three.
+            Menu("Find") {
+                Button("Find…", action: find)
+                    .keyboardShortcut("f", modifiers: .command)
+                    // Never disabled. Whatever is in front either finds in place or falls through
+                    // to the search, and which of those it is cannot be read from here anyway:
+                    // this body is rebuilt when an `@Observable` moves, and first responder is not
+                    // one. See `FindCommand`, which is the rule, and `FindInPlace`, which asks the
+                    // responder chain at the moment the key is pressed.
+                    .disabled(model.repos.isEmpty && !FindInPlace.isAvailable)
+
+                Button("Find Next") { step(.nextMatch) }
+                    .keyboardShortcut("g", modifiers: .command)
+
+                Button("Find Previous") { step(.previousMatch) }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+            }
+
             // "Search", not "Find Workspace". This opens the sidebar's own Search, which reads
             // the full text of every transcript as well as workspace names, so the old title
             // named the smaller half of what it does and nobody would have guessed the rest was
@@ -178,10 +199,15 @@ struct BloomCommands: Commands {
             //
             // No ellipsis: it puts a screen up in the window rather than raising anything to fill
             // in, which is what the ellipsis promises.
+            //
+            // Shift+Cmd+F rather than Cmd+F. Cmd+F is the most reflexive keystroke on the platform
+            // and it belongs to the pane in front; this is the one that always means the screen,
+            // which is what somebody in a terminal needs it to mean. Cmd+F still lands here
+            // whenever nothing in front can find, so the key that used to open this still does.
             Button("Search") {
                 model.selection = .search
             }
-            .keyboardShortcut("f", modifiers: .command)
+            .keyboardShortcut("f", modifiers: [.command, .shift])
             // Keyed on projects rather than on live workspaces, because search now also finds
             // archived ones and a machine whose every workspace is archived still has something
             // to find. See `AppModel.search`.
@@ -380,7 +406,8 @@ struct BloomCommands: Commands {
             // the same gesture aimed at two different answers: one asks for something to be
             // fixed, the other asks for something to be built.
             //
-            // Option+Command+F rather than Command+F, which is Search and stays that way.
+            // Option+Command+F rather than Command+F, which belongs to finding in the pane in
+            // front. Feedback keeps this key: it is the one somebody already knows.
             // The sheets themselves are raised from `RootView`, through `FeedbackPresenter`, for
             // the reason the create sheet is: a menu item cannot present anything, and the draft
             // has to outlive the sheet it was typed into.
@@ -531,6 +558,30 @@ struct BloomCommands: Commands {
                 WorkspaceTabsStore.shared.select($0, in: workspace)
             }
         }
+    }
+
+    // MARK: - Finding
+
+    /// Cmd+F. The pane in front gets first refusal, and the workspace search is what is left when
+    /// nothing there can find. See `FindCommand`, which is the rule and holds the tests.
+    private func find() {
+        switch FindCommand.find(
+            canFindInPlace: FindInPlace.isAvailable, hasProjects: !model.repos.isEmpty
+        ) {
+        case .findInPlace:
+            FindInPlace.perform(.showFindInterface)
+        case .workspaceSearch:
+            model.selection = .search
+        case nil:
+            break
+        }
+    }
+
+    private func step(_ action: NSTextFinder.Action) {
+        guard FindCommand.step(canFindInPlace: FindInPlace.isAvailable) == .findInPlace else {
+            return
+        }
+        FindInPlace.perform(action)
     }
 
     private func addProjectFolder() {
