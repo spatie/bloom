@@ -51,24 +51,6 @@ public struct TranscriptPaneState: Equatable, Sendable {
         }
     }
 
-    /// The width the rows were laid out at and the scale they were drawn at, which are the two
-    /// things that decide how tall a row is and so what a point of offset means.
-    ///
-    /// Optional at both ends, and that is the rule rather than a convenience: a pane that has not
-    /// been laid out yet has no width to offer, and a measurement nobody has taken cannot
-    /// contradict one that was. The alternative was to treat "not measured" as "different" and
-    /// throw away every restored position on the frame the geometry had not landed on yet, which
-    /// is most of them.
-    public struct Measure: Equatable, Sendable {
-        public var width: Double
-        public var fontScale: Double
-
-        public init(width: Double, fontScale: Double) {
-            self.width = width
-            self.fontScale = fontScale
-        }
-    }
-
     /// The sequence numbers of the rows the reader had unfolded.
     public var expanded: Set<Int>
     /// Where the view was, in points from the top of the content.
@@ -81,20 +63,25 @@ public struct TranscriptPaneState: Equatable, Sendable {
     public var isAtLiveEnd: Bool
     /// How many rows the session held when this was written. See `TranscriptResume.placement`.
     public var rowCount: Int
-    public var measure: Measure?
+    /// The rows the list was drawing when the offset was taken.
+    ///
+    /// The offset is a number of points into the content, and the content is exactly these rows,
+    /// so the two are one measurement and are useless apart: restoring the offset into a window
+    /// that holds different rows lands the reader somewhere else. See `TranscriptWindow`.
+    public var drawn: TranscriptWindow
 
     public init(
         expanded: Set<Int>,
         offset: Double,
         isAtLiveEnd: Bool,
         rowCount: Int,
-        measure: Measure?
+        drawn: TranscriptWindow = TranscriptWindow(start: 0, end: 0)
     ) {
         self.expanded = expanded
         self.offset = offset
         self.isAtLiveEnd = isAtLiveEnd
         self.rowCount = rowCount
-        self.measure = measure
+        self.drawn = drawn
     }
 }
 
@@ -111,16 +98,43 @@ public enum TranscriptPlacement: Equatable, Sendable {
 
 /// The rule for what a pane may do with what it remembers.
 public enum TranscriptResume {
-    /// Whether the arrival frame may draw the whole session rather than `TranscriptTail`'s tail.
+    /// The first row of the session a pane draws, given what it wrote down when it last left one.
     ///
     /// **Asked before anything has been laid out**, because it decides what the FIRST pass of the
-    /// list's body draws, so it can read nothing that a measurement has to arrive for. The
-    /// existence of a memory for this pane and this session is the whole of it, and that is enough:
-    /// a pane that has drawn this session before is not arriving at it. The tail exists to keep a
-    /// 269ms layout off the frame that arrives at a session, and the price of it is the same layout
-    /// a hundred milliseconds later; paying that on every return is the trade going the wrong way.
-    public static func drawsInFull(_ remembered: TranscriptPaneState?) -> Bool {
+    /// list's body draws, so it can read nothing that a measurement has to arrive for.
+    ///
+    /// This used to answer a Bool, and the Bool was "draw the whole session". The argument for it
+    /// was sound and is kept: a pane that has drawn this session before is not arriving at it, so
+    /// the tail that keeps a 269ms layout off an arrival frame buys nothing on a return, and
+    /// paying a second layout to reveal the history behind it is the trade going the wrong way.
+    /// What was wrong was the other end of it. The whole session stays in the lazy stack for the
+    /// rest of the visit, and every resize, scroll and streamed token then pays for a stack with
+    /// four thousand children in it. See `TranscriptWindow`, which carries those measurements.
+    ///
+    /// So a return goes back to the window the reader was actually looking at, which is what makes
+    /// the remembered offset mean anything: the same rows above the viewport, in the same order,
+    /// so the same number of points down the content names the same place. A pane with nothing
+    /// written down is arriving, and arrives on the tail.
+    /// Whether this pane is coming back to a session rather than arriving at one.
+    ///
+    /// The existence of a memory for this pane and this session is the whole of it. A reader
+    /// coming back is already where they were, so nothing has to be revealed under them and the
+    /// window stays exactly as `window` restored it.
+    public static func isResuming(_ remembered: TranscriptPaneState?) -> Bool {
         remembered != nil
+    }
+
+    public static func window(
+        _ remembered: TranscriptPaneState?, tailStart: Int, rowCount: Int
+    ) -> TranscriptWindow {
+        // A remembered window with no rows in it is not a window anybody was reading in: it is
+        // what a pane wrote down before its session had loaded, and restoring it draws a blank
+        // transcript. Measured, and caught only because the probe reports how many rows are in the
+        // stack: a run that looked like the fastest resize yet was a pane with nothing in it.
+        guard let remembered, remembered.drawn.count > 0 else {
+            return TranscriptWindow.opening(rowCount: rowCount, tailStart: tailStart)
+        }
+        return remembered.drawn.clamped(rowCount: rowCount)
     }
 
     /// Where a pane opens a session, given what it wrote down when it last left one.
@@ -133,8 +147,7 @@ public enum TranscriptResume {
     /// the first unread row, which is what a session nobody has read wants.
     public static func placement(
         for remembered: TranscriptPaneState?,
-        rowCount: Int,
-        measure: TranscriptPaneState.Measure?
+        rowCount: Int
     ) -> TranscriptPlacement {
         guard let remembered, rowCount > 0 else { return .first }
         // A session with fewer rows than it had is not the session that offset was measured in.
@@ -146,10 +159,21 @@ public enum TranscriptResume {
         // width change moves nobody who was there, because the end is a place rather than a
         // measurement, so this is asked before the measure is looked at.
         if remembered.isAtLiveEnd { return .liveEnd }
-        // A point into a document laid out at another width, or at another text size, is a point
-        // into a different document. Rather than land the reader at a plausible looking wrong
-        // place, this opens the way a fresh visit does.
-        if let measure, let was = remembered.measure, was != measure { return .first }
+        // **A point measured at another width is used anyway, and that is a reversal.**
+        //
+        // It used to be refused, on the argument that a point into a document laid out at another
+        // width is a point into a different document and landing the reader at a plausible looking
+        // wrong place is worse than opening the way a fresh visit does. The first half of that is
+        // true and the second half turned out to be the bug the owner reported: opening the way a
+        // fresh visit does means opening at the first unread row, and after an agent has worked
+        // while somebody was on another workspace, that row is the middle of a long conversation.
+        // Roughly where they were beats a screen they have never seen.
+        //
+        // What would settle it properly is remembering the ROW rather than the point, which
+        // survives every width and every re-measurement. SwiftUI will say which row is at the top
+        // of a scroll target layout, and measured on this list that layout costs too much to keep:
+        // p99 went from 21.8ms to 39.2ms scrolling a 225 row chat with nothing else changed. So
+        // the row is what an AppKit list would buy, and until then this is the honest fallback.
         guard remembered.offset > 0 else { return .first }
         return .offset(remembered.offset)
     }

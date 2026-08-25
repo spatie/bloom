@@ -43,22 +43,43 @@ public enum DiffRefreshSchedule {
     public static let tick: TimeInterval = 6
 
     /// How stale a workspace nothing is writing to is allowed to get.
-    public static let idleMaxAge: TimeInterval = 60
+    ///
+    /// **Five minutes rather than one, because this is no longer how a change is noticed.**
+    /// `WorktreeWatcher` reports a worktree the moment anything inside it is written, and the
+    /// caller puts what it reports into `busy`, so a real edit is asked about on the next tick
+    /// whatever this says. What is left for the age to cover is the cases the file system cannot
+    /// tell us about: a volume FSEvents does not report on, and a stream that failed to start. A
+    /// backstop wants to be cheap, not prompt.
+    public static let idleMaxAge: TimeInterval = 300
+
+    /// How stale the workspace on screen is allowed to get.
+    ///
+    /// Shorter than the backstop above and no longer every tick. The workspace somebody is looking
+    /// at used to be refreshed on all of them, which is six or seven `git` processes every six
+    /// seconds for as long as a window sits open on it, and every one of those runs answered "no
+    /// change" on an idle worktree. The watcher answers that question for nothing, so what is left
+    /// here is how long a reader could be looking at a stale number if the watcher ever missed
+    /// one, and half a minute is short enough that nobody would notice it happening.
+    public static let selectedMaxAge: TimeInterval = 30
 
     /// - Parameters:
     ///   - workspaces: every workspace the loop could ask about, in sidebar order.
     ///   - busy: the ones that keep the old cadence. The caller puts the workspaces with a running
-    ///     agent and the selected one in here.
+    ///     agent, and the ones `WorktreeWatcher` says have changed, in here.
+    ///   - selected: the workspace on screen, which is asked about on its own shorter age rather
+    ///     than on every tick. Nil where nothing is selected.
     ///   - lastRefreshed: when each was last asked about, for this launch only. An absent entry
     ///     means never.
     /// - Returns: the workspaces to refresh on this tick, busy ones first.
     public static func due(
         workspaces: [WorkspaceID],
         busy: Set<WorkspaceID>,
+        selected: WorkspaceID? = nil,
         lastRefreshed: [WorkspaceID: Date],
         now: Date,
         tick: TimeInterval = tick,
-        idleMaxAge: TimeInterval = idleMaxAge
+        idleMaxAge: TimeInterval = idleMaxAge,
+        selectedMaxAge: TimeInterval = selectedMaxAge
     ) -> [WorkspaceID] {
         var due: [WorkspaceID] = []
         var stale: [(id: WorkspaceID, age: TimeInterval, place: Int)] = []
@@ -73,6 +94,13 @@ public enum DiffRefreshSchedule {
                 continue
             }
             let age = now.timeIntervalSince(last)
+            if id == selected {
+                // The one on screen is never part of the trickle: it is due on its own age or not
+                // at all, so a sidebar with twenty workspaces in it cannot push the workspace
+                // somebody is reading to the back of a rotation.
+                if age >= selectedMaxAge { due.append(id) }
+                continue
+            }
             guard age >= idleMaxAge else { continue }
             stale.append((id, age, place))
         }
@@ -82,7 +110,7 @@ public enum DiffRefreshSchedule {
         // Sized off every idle workspace rather than off the ones that have come due, so the slice
         // is a steady two or three rather than jumping about as a backlog drains. At least one,
         // because a sidebar of two workspaces would otherwise round down to none and never refresh.
-        let idleCount = workspaces.count { !busy.contains($0) }
+        let idleCount = workspaces.count { !busy.contains($0) && $0 != selected }
         let perTick = max(1, Int((Double(idleCount) * tick / idleMaxAge).rounded(.up)))
 
         // Oldest first, so nothing at the back of a backlog is starved by a shorter list in front

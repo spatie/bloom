@@ -369,6 +369,7 @@ enum FrameProbe {
             "gesture": .string(gesture),
             "pane": .string(requestedPane?.rawValue ?? "whatever was open"),
             "selection": .string(selection ?? "home"),
+            "drawnRows": .integer(TranscriptDrawn.rows),
             // What the window is ACTUALLY showing, rather than what was asked for. `AppModel`
             // reselects the last workspace on launch, so a run that meant to measure Home
             // silently measured a workspace as soon as any earlier run had opened one, and the

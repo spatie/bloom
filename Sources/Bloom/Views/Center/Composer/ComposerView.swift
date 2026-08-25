@@ -14,8 +14,12 @@ struct ComposerView: View {
     /// the session list is kept in step with edits made here.
     var model: WorkspaceModel?
     /// How tall the region the transcript and the composer share is, so a drag can be stopped
-    /// before the transcript is squeezed out of it. Zero reads as "not laid out yet, no cap".
-    var availableHeight: CGFloat = 0
+    /// before the transcript is squeezed out of it.
+    ///
+    /// An object rather than a number, and `ComposerRoom` carries the measurement for why: a
+    /// number is read by the view that passes it, so the pane publishing a new height rebuilt the
+    /// transcript beside this box on every frame that rewrapped a line of the draft.
+    var room: ComposerRoom = ComposerRoom()
 
     @Environment(AppModel.self) private var app
 
@@ -135,9 +139,10 @@ struct ComposerView: View {
     /// every render and not only while dragging, so shrinking the window shrinks the composer back
     /// rather than pushing the transcript off the top.
     private var maxEditorHeight: CGFloat {
-        guard availableHeight > 0 else { return .greatestFiniteMagnitude }
-        let room = availableHeight - chromeHeight - Self.minTranscriptHeight
-        return max(room, ComposerTextEditor.lineHeight)
+        let available = room.height
+        guard available > 0 else { return .greatestFiniteMagnitude }
+        let left = available - chromeHeight - Self.minTranscriptHeight
+        return max(left, ComposerTextEditor.lineHeight)
     }
 
     /// The drag begins from whatever is on screen, so switching out of automatic sizing never jumps.

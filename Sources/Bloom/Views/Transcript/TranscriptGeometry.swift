@@ -38,15 +38,6 @@ struct TranscriptGeometry: Equatable {
     /// for a line and a half of scrolling is an offer to go where the reader already is. See
     /// `ScrollEnd.offerAfterScreens`.
     var isFarFromEnd = false
-    /// How far below the viewport the end of the conversation is, already rounded, and read for
-    /// one thing only: how long the jump pill's scroll back to the live end should run for.
-    ///
-    /// Rounded hard, and it can afford to be. `TranscriptMotion.liveEndMove` moves its answer by
-    /// a tenth of a second across the whole of its range and stops moving it at all past
-    /// `glideRamp`, so a step of a quarter of a pane is finer than the answer, and a reader
-    /// dragging the scroller crosses a handful of steps rather than writing this state once a
-    /// frame. See `bubbleCap` for the same decision made for the same reason.
-    var reachToEnd: Double = 0
 
     /// The quantum the cap is rounded to. Eight points is invisible on a bubble that is several
     /// hundred wide, and small enough that a pane resized by hand still ends up with a bubble that
