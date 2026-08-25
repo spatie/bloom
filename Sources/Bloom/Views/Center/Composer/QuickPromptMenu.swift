@@ -34,6 +34,9 @@ struct QuickPromptMenu: View {
     /// that slot and Return inserts something other than what is drawn. `WorkspaceSourcePicker`
     /// carries the same note over the same failure.
     @State private var selected: QuickPrompt?
+    /// Hover for the row that writes a new prompt, which is not part of the ranked list and so has
+    /// no `QuickPromptRow` to keep it.
+    @State private var isNewHovered = false
     /// The form, when one is open. Two states of one panel rather than a second floating window.
     @State private var editor: Editor?
 
@@ -45,6 +48,19 @@ struct QuickPromptMenu: View {
 
     /// Wide enough for a name and a line of the prompt under it without either being cut.
     private static let width: CGFloat = 320
+
+    /// How far the scrolling list holds its rows off the panel's edge.
+    ///
+    /// A selection drawn flush to the edge runs its rounded corners into the panel's own rounding
+    /// and reads as a band painted across the popover rather than as a row picked out of a list.
+    /// Every menu on this Mac insets it. Four points was not enough to see.
+    private static let listInset: CGFloat = Metrics.spacingWide
+    /// A row's own padding inside that.
+    private static let rowInset: CGFloat = Metrics.spacing
+    /// Where a glyph starts, measured from the panel's edge. Everything that is not a row of the
+    /// list (the search field, the row that writes a new prompt) is indented to the same number,
+    /// so the marks down the left are one column rather than three that nearly agree.
+    private static var contentInset: CGFloat { listInset + rowInset }
     /// About eight rows, which is the cap a completion menu keeps in this app.
     private static let listHeight: CGFloat = 260
 
@@ -100,6 +116,7 @@ struct QuickPromptMenu: View {
             Image(systemName: "magnifyingglass")
                 .imageScale(.small)
                 .foregroundStyle(Palette.textTertiary)
+                .frame(width: Metrics.repoIcon)
 
             MenuSearchField(
                 text: $query,
@@ -108,7 +125,7 @@ struct QuickPromptMenu: View {
             )
             .frame(height: Metrics.rowHeight)
         }
-        .padding(.horizontal, Metrics.gutter)
+        .padding(.horizontal, Self.contentInset)
         .padding(.vertical, Metrics.spacingSmall)
         .onChange(of: query) { _, _ in
             // The highlight follows the list rather than staying where it was: a highlight left
@@ -134,7 +151,8 @@ struct QuickPromptMenu: View {
                         .id(prompt.id)
                     }
                 }
-                .padding(Metrics.spacingSmall)
+                .padding(.horizontal, Self.listInset)
+                .padding(.vertical, Metrics.spacingSmall)
             }
             .frame(maxHeight: Self.listHeight)
             .onChange(of: selected) { _, row in
@@ -164,8 +182,8 @@ struct QuickPromptMenu: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.vertical, Metrics.spacingWide)
+            .padding(.horizontal, Self.contentInset)
+            .padding(.vertical, Metrics.gutter)
         }
     }
 
@@ -178,9 +196,9 @@ struct QuickPromptMenu: View {
         } label: {
             HStack(spacing: Metrics.spacing) {
                 Image(systemName: "plus")
-                    .imageScale(.small)
-                    .foregroundStyle(Palette.textTertiary)
-                    .frame(width: Metrics.glyph)
+                    .imageScale(.medium)
+                    .foregroundStyle(Palette.textSecondary)
+                    .frame(width: Metrics.repoIcon, height: Metrics.repoIcon)
 
                 Text(newRowTitle)
                     .font(Typo.body)
@@ -189,11 +207,16 @@ struct QuickPromptMenu: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, Metrics.gutter)
+            .padding(.horizontal, Self.rowInset)
             .frame(height: Metrics.rowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // It highlights under the pointer because it is a row of this menu, not a footnote under
+        // one. Drawn flat, it was the one thing in the panel that did not answer to being hovered.
+        .rowBackground(isSelected: false, isHovered: isNewHovered, isFocused: true)
+        .onHover { isNewHovered = $0 }
+        .padding(.horizontal, Self.listInset)
         .padding(.vertical, Metrics.spacingSmall)
     }
 

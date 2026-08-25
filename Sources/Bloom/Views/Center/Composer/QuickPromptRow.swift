@@ -27,12 +27,16 @@ struct QuickPromptRow: View {
     var body: some View {
         Button(action: onPick) {
             HStack(spacing: Metrics.spacing) {
+                // Larger than the glyph column the one line lists use, and deliberately. This row
+                // is two lines tall, and `Metrics.glyph` beside it read as a speck someone had
+                // dropped rather than as the mark that tells five prompts apart at a glance, which
+                // is the whole job the icon was added for.
                 Image(systemName: QuickPrompt.resolvedSymbol(prompt.symbol))
-                    .imageScale(.small)
-                    .foregroundStyle(isEmphasized ? Palette.selectedEmphasizedText : Palette.textTertiary)
-                    .frame(width: Metrics.glyph)
+                    .imageScale(.large)
+                    .foregroundStyle(isEmphasized ? Palette.selectedEmphasizedText : Palette.textSecondary)
+                    .frame(width: Metrics.repoIcon, height: Metrics.repoIcon)
 
-                VStack(alignment: .leading, spacing: Metrics.spacingHair) {
+                VStack(alignment: .leading, spacing: Metrics.spacingTight) {
                     Text(prompt.resolvedName)
                         .font(Typo.body)
                         .foregroundStyle(isEmphasized ? Palette.selectedEmphasizedText : Palette.textPrimary)
@@ -58,7 +62,9 @@ struct QuickPromptRow: View {
                 }
             }
             .padding(.horizontal, Metrics.spacing)
-            .padding(.vertical, Metrics.spacingSmall)
+            // Four points was what a one line row takes, and this one is two lines: the name sat
+            // hard against the top of the selection with its ascenders touching the fill.
+            .padding(.vertical, Metrics.spacingWide)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -85,11 +91,16 @@ struct QuickPromptRow: View {
         Button(action: onEdit) {
             Image(systemName: "pencil")
                 .imageScale(.small)
-                .foregroundStyle(isEmphasized ? Palette.selectedEmphasizedText : Palette.textSecondary)
-                .padding(Metrics.spacingTight)
+                .foregroundStyle(
+                    isEmphasized
+                        ? Palette.selectedEmphasizedText.opacity(0.85)
+                        : Palette.textTertiary
+                )
+                .frame(width: Metrics.rowHeight - Metrics.spacingWide,
+                       height: Metrics.rowHeight - Metrics.spacingWide)
                 .background {
                     RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                        .fill(isEmphasized ? Palette.selectedEmphasizedText.opacity(0.22) : Palette.hover)
+                        .fill(isEmphasized ? Palette.selectedEmphasizedText.opacity(0.18) : Palette.hover)
                 }
                 .contentShape(Rectangle())
         }
