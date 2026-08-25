@@ -129,6 +129,41 @@ struct PaletteContrastTests {
         }
     }
 
+    /// The tab strip's own two colours, which is the one control in the window whose fill and ink
+    /// were chosen together rather than inherited from a list row.
+    ///
+    /// `PanelTabs` replaced a segmented picker whose selected cell drew in the system accent, and
+    /// the replacement had to answer a question the picker never asked: what ink goes on
+    /// `Palette.selected`. The obvious answer is the one the resting cells already carry, and it
+    /// is wrong. `textTertiary` measures 3.76 to 1 on that fill in light and 3.64 in dark, under
+    /// the 4.5 floor, which is why a chosen cell lifts to `Palette.textPrimary` instead of only
+    /// changing what is behind it. That failure is asserted rather than described, so retuning
+    /// either pair until it stops being true is something this suite says out loud.
+    @Test("a chosen cell is findable, and cannot keep a resting cell's ink")
+    func thePanelTabsHoldTheirOwnFloors() {
+        for (appearance, isDark) in Self.appearances {
+            let fill = PaletteInk.selected.member(dark: isDark)
+            let track = PaletteInk.surfaceSunken.member(dark: isDark)
+            let onTrack = Contrast.ratio(fill, track)
+            #expect(
+                onTrack >= 1.2,
+                "the chosen cell on its track, \(appearance): \(onTrack.rounded(to: 2)) to 1"
+            )
+
+            let resting = Contrast.ratio(PaletteInk.textTertiary.member(dark: isDark), track)
+            #expect(
+                resting >= Contrast.textFloor,
+                "a resting cell's ink on its track, \(appearance): \(resting.rounded(to: 2)) to 1"
+            )
+
+            let borrowed = Contrast.ratio(PaletteInk.textTertiary.member(dark: isDark), fill)
+            #expect(
+                borrowed < Contrast.textFloor,
+                "a resting cell's ink now clears the chosen fill in \(appearance) at \(borrowed.rounded(to: 2)) to 1, so the lift to the primary label can go"
+            )
+        }
+    }
+
     /// A boundary is not read, so it holds the non-text floor rather than the text one. `border`
     /// is the case the window used to have none of: `separatorColor` composites to a 25 unit step
     /// on white, which the eye reads as nothing.

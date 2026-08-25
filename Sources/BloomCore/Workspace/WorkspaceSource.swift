@@ -302,10 +302,17 @@ public enum WorkspaceSourceTab: String, Sendable, Hashable, CaseIterable, Identi
     /// difference. Both say where a commit ends up and what merging does with it, because that is
     /// the whole distinction: on a new branch the merge is yours to do later, and on an existing
     /// one the merge already belongs to that branch and your commits ride it.
+    ///
+    /// **Both fit on one line at the width the panel opens at, and the first one did not.** It was
+    /// "Commits land on a new branch. Merging it brings them into the branch you pick here.", which
+    /// measured at 436 points, the panel's 460 less its gutters, wraps after "pick" and leaves
+    /// "here." alone on a second line. That cost a word of nothing to read and made the panel a
+    /// line taller on one tab than the other, so switching tabs moved the search field under the
+    /// pointer. One clause instead of two sentences says the same thing inside the width.
     public var explanation: String {
         switch self {
         case .newBranch:
-            "Commits land on a new branch. Merging it brings them into the branch you pick here."
+            "Commits land on a new branch, and merge into the branch you pick here."
         case .existingBranch:
             "Commits land on the branch you pick here, and merge when it does."
         }
