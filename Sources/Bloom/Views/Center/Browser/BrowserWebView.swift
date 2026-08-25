@@ -90,16 +90,24 @@ struct BrowserWebView: NSViewRepresentable {
     /// The pane's own menu, to go under the page's. Set on every update rather than once, because
     /// the tab can be dragged into another pane and the menu belongs to the pane, not the tab.
     var paneMenu: (@MainActor () -> NSMenu)?
+    /// What the page can ask the window for, handed down for the same reason and on the same
+    /// schedule as the menu above. See `BrowserPaneHost`.
+    var host = BrowserPaneHost()
 
     func makeNSView(context: Context) -> BrowserHostView {
-        let host = BrowserHostView()
-        host.attach(session.pageView)
-        session.webView.paneMenu = paneMenu
-        return host
+        let view = BrowserHostView()
+        view.attach(session.pageView)
+        wire()
+        return view
     }
 
     func updateNSView(_ nsView: BrowserHostView, context: Context) {
         nsView.attach(session.pageView)
+        wire()
+    }
+
+    private func wire() {
         session.webView.paneMenu = paneMenu
+        session.host = host
     }
 }
