@@ -253,6 +253,10 @@ final class AppModel {
     }
 
     private var refreshTask: Task<Void, Never>?
+    /// When each workspace's diff stat was last asked about, for this launch only. Read by
+    /// `DiffRefreshSchedule` to decide which of them this tick is for. Outside observation because
+    /// nothing draws from it and it is written every six seconds.
+    @ObservationIgnored private var lastDiffRefresh: [WorkspaceID: Date] = [:]
     private var storeObservationTask: Task<Void, Never>?
     private var sessionObservationTask: Task<Void, Never>?
     private var quotaObservationTask: Task<Void, Never>?
@@ -689,7 +693,25 @@ final class AppModel {
 
     func refreshDiffStats() async {
         guard let manager else { return }
-        for workspace in workspaces {
+
+        // Not every workspace on every tick. `DiffRefreshSchedule` carries the measurement: one
+        // pass over one worktree is seven git processes, and running twenty of them every six
+        // seconds on an idle machine is what put Bloom under "Using Significant Energy".
+        var busy = runningWorkspaceIDs
+        if let selected = selection.workspaceID { busy.insert(selected) }
+        let due = Set(DiffRefreshSchedule.due(
+            workspaces: workspaces.map(\.id),
+            busy: busy,
+            lastRefreshed: lastDiffRefresh,
+            now: Date()
+        ))
+
+        // Keyed on what is here now, so a workspace archived while the app was running stops being
+        // remembered rather than pinning a path that no longer exists.
+        let present = Set(workspaces.map(\.id))
+        lastDiffRefresh = lastDiffRefresh.filter { present.contains($0.key) }
+
+        for workspace in workspaces where due.contains(workspace.id) {
             guard !Task.isCancelled else { return }
             // A worktree that has been removed outside Bloom would make git walk up to the parent
             // repository and answer about the wrong tree.
@@ -697,6 +719,9 @@ final class AppModel {
             await Self.withTimeLimit(.seconds(5)) {
                 await manager.refreshDiffStat(workspace: workspace)
             }
+            // After the pass rather than before it, so a workspace whose git call took four
+            // seconds is not immediately due again on the next tick.
+            lastDiffRefresh[workspace.id] = Date()
         }
         // Nothing is read back here. `Store.updateDiffStat` only writes when one of the three
         // numbers has actually moved, and a write that happens publishes itself, so the sidebar is

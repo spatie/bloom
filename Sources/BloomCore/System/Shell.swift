@@ -61,6 +61,30 @@ public enum Shell {
         ]
     }()
 
+    /// How many subprocesses this process has started since launch.
+    ///
+    /// Here rather than in a probe because the number cannot be taken from outside. Polling `ps`
+    /// at 20Hz for a minute against the running app saw nine children where the diff stat loop
+    /// alone starts several a second: a `git rev-parse` lives for about ten milliseconds, so a
+    /// sampler misses almost all of them and reports a number that looks reassuring and is wrong.
+    /// A counter incremented where the process is actually started cannot miss one.
+    ///
+    /// Relaxed ordering, because a count is read after the work it counts has finished and nothing
+    /// is synchronised against it.
+    private static let spawns = Atomic<Int>(0)
+
+    /// Called by every site that starts a process. `Git.runRaw` has its own `Process` for the
+    /// byte-preserving parsers, so it calls this too, and a new spawn site that forgets to is a
+    /// probe that quietly under-reports.
+    static func countSpawn() {
+        spawns.add(1, ordering: .relaxed)
+    }
+
+    /// The running total, for the probes. See `IdleProbe`.
+    public static var spawnCount: Int {
+        spawns.load(ordering: .relaxed)
+    }
+
     public static func environment(extra: [String: String] = [:]) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
         let existing = env["PATH"]?.components(separatedBy: ":") ?? []
@@ -176,6 +200,7 @@ public enum Shell {
         process.terminationHandler = { _ in exit.signal() }
 
         try process.run()
+        Shell.countSpawn()
 
         outReader.start()
         errReader.start()
