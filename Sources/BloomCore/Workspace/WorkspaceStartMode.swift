@@ -59,12 +59,11 @@ public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable {
 
     /// Where the last choice is kept.
     ///
-    /// Global, not per project, and beside `create.more` on purpose. Which of the two you reach
-    /// for is a fact about how you work rather than about a repository: somebody who lives in a
-    /// shell lives in one in every checkout, and somebody who drives agents does that everywhere
-    /// too. Keyed per project it would also be wrong most often exactly when it is least expected,
-    /// on the first creation in a new project, which is the moment a person is least inclined to
-    /// go looking for a control.
+    /// Global, not per project, on purpose. Which of the two you reach for is a fact about how you
+    /// work rather than about a repository: somebody who lives in a shell lives in one in every
+    /// checkout, and somebody who drives agents does that everywhere too. Keyed per project it
+    /// would also be wrong most often exactly when it is least expected, on the first creation in
+    /// a new project, which is the moment a person is least inclined to go looking for a control.
     ///
     /// It is the answer to this direction's own strongest objection. Choosing first costs a click
     /// before the first word, and nineteen creations out of twenty are chats, so a control that
