@@ -27,7 +27,7 @@ import SwiftUI
 /// gesture any app could make; this is Bloom's own picture, and it earns the extra complexity by
 /// being the thing the app does.
 ///
-/// Core Animation, and at twenty frames a second rather than `BrandWater`'s twelve, which is the
+/// Core Animation, and at sixty frames a second rather than `BrandWater`'s twelve, which is the
 /// one number on this view that is not the water's.
 ///
 /// It was twelve, taken from `BrandWater.frameRate` by citation, and the reason did not come with
@@ -51,13 +51,16 @@ import SwiftUI
 /// sixty six levels and none. Six is the floor rather than the trend: it is the head's own fade
 /// near the loop point, which no frame rate touches.
 ///
-/// Twenty rather than thirty, and the threshold is film's. A pan is held to about a screen width
-/// in seven seconds at twenty four frames, which on a 520 point plinth is three points a frame
-/// before an edge starts to strobe. At twelve the fastest head moves three and a half points a
-/// frame, over the line; at twenty it moves two and a tenth, under it; thirty buys a further
-/// seven tenths of a point that nobody asked for. See `frameRate` for what each of them costs.
+/// Sixty, and that is a choice rather than a threshold. Film's is the threshold: a pan is held to
+/// about a screen width in seven seconds at twenty four frames, which on a 520 point plinth is
+/// three points a frame before an edge starts to strobe. At twelve the fastest head moves three
+/// and a half points a frame, over the line; at twenty it moves two and a tenth, already under
+/// it. So twenty is where the judder argument runs out, and everything above it is bought for
+/// the look of the thing: at sixty the head moves seven tenths of a point and nothing on the
+/// plinth steps at all. Freek asked for sixty knowing there would be a bill, and `frameRate` is
+/// that bill, measured at every rung rather than extrapolated from the rung below.
 ///
-/// One rate for the whole view rather than twenty for the heads and twelve for the drifts, which
+/// One rate for the whole view rather than sixty for the heads and twelve for the drifts, which
 /// looks like the thrifty version and is not. The render server recomposites the whole window
 /// surface on the fastest tick anything in it asks for, so a split rate saves the interpolation
 /// of two positions and none of the compositing. It is also why `BrandWater` keeping twelve is
@@ -171,28 +174,41 @@ final class BrandBranchingView: NSView {
     /// stripe being dragged.
     private static let lineLag: CFTimeInterval = 0.16
     private static let wakeLag: CFTimeInterval = 0.27
-    /// Twenty, not `BrandWater.frameRate`'s twelve, and the type's own note is why.
+    /// Sixty, not `BrandWater.frameRate`'s twelve and not the twenty this view was raised to
+    /// first, and the type's own note is why it is not the water's number. What follows is the
+    /// whole ladder, because what a rung costs is the only thing that argues for standing on it.
     ///
-    /// What the extra frames cost, sampled rather than reasoned about, because the last time
-    /// somebody reasoned about it this file inherited the wrong number. A harness holding this
-    /// plinth and nothing else, in a 520 by 424 window in a corner of the display, showing and
-    /// hiding itself on twenty second phases with WindowServer sampled every ten: shut, it sat at
-    /// 4.8 percent of one core; at twelve frames it cost 3.5 points over the shut phases either
-    /// side of it, at twenty 6.5, at thirty 10.8. So this change is worth about three points of
-    /// one core, and thirty would have been seven. Both are paid only while the greeting is on
-    /// screen. The phases alternate because WindowServer's own load on this machine wanders
-    /// between two and forty five percent with whatever else is drawing, so an absolute number is
-    /// worth nothing and only a sample next to its own baseline says anything.
+    /// Sampled rather than reasoned about, because the last time somebody reasoned about it this
+    /// file inherited the wrong number, and sampled at sixty rather than extrapolated from thirty,
+    /// which would have been the same mistake in a politer form: a straight line through the first
+    /// three rungs predicts about nineteen points and the measurement is twenty one, so the cost
+    /// bends upwards at the top of the ladder rather than following the bottom of it. A harness
+    /// holding this plinth and nothing else, in a 520 by 424 window in a corner of the display,
+    /// showing and hiding itself on twenty second phases, with WindowServer's own CPU time taken
+    /// across each phase and divided by its wall clock: shut it sat at 4.7 percent of one core,
+    /// and against the shut phases either side of it twelve cost 4.7 points, twenty 7.7, thirty
+    /// 9.9 and sixty 21.1. The rungs up to thirty are about three points each and the last
+    /// doubling costs more than everything under it, so sixty is about a fifth of one core, three
+    /// times what twenty was and four and a half times twelve. An earlier run of the same harness
+    /// had 4.8 shut and 3.5, 6.5 and 10.8 for the first three rungs, which is this ladder within
+    /// the noise, and the two agreeing on those is what makes the sixty worth quoting.
+    ///
+    /// A fifth of a core is a real bill and it is paid only while the greeting is up. Press the
+    /// button and it is gone, and nobody is meant to sit on this screen; if that ever stops being
+    /// true, this is the number to come back to. The phases alternate because WindowServer's own
+    /// load on this machine wanders between two and forty five percent with whatever else is
+    /// drawing, so an absolute number is worth nothing and only a sample next to its own baseline
+    /// says anything.
     ///
     /// The window that this was originally measured on is still the one to worry about and it is
     /// untouched: the About window has no branches, only `BrandWater` at twelve.
     ///
-    /// Fifteen and twenty rather than a range around twenty because both ends have to divide the
-    /// refresh of the display this lands on. Fifteen and twenty go into sixty and into a hundred
-    /// and twenty; twenty four goes into a hundred and twenty and not into sixty, so on an
-    /// ordinary display it would be handed back as an uneven cadence, which is the judder these
-    /// frames are being spent to remove.
-    private static let frameRate = CAFrameRateRange(minimum: 15, maximum: 20, preferred: 20)
+    /// Thirty and sixty rather than a range around sixty because both ends have to divide the
+    /// refresh of the display this lands on. Both go into sixty and into a hundred and twenty;
+    /// twenty four goes into a hundred and twenty and not into sixty, so on an ordinary display it
+    /// would be handed back as an uneven cadence, which is the judder these frames are being spent
+    /// to remove.
+    private static let frameRate = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
     /// How many points the head's travel is sampled into. Forty is under three points apart on
     /// the longest branch here, which is inside the softest edge in the composition.
     private static let steps = 40

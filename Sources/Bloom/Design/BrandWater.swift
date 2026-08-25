@@ -217,9 +217,9 @@ final class BrandWaterView: NSView {
     /// wrong to: its branch heads are fifty eight point blooms crossing the plinth at up to forty
     /// two points a second, and at twelve frames each step moves them three and a half points and
     /// eighteen levels, which is a hundred times what the sentence above is defending. It runs at
-    /// twenty now, with its own measurement. The travel this file has is the sways, a few points
-    /// a second across a field with no edge anywhere in it, which measures at two levels a step
-    /// and is why the cap is still right for the water.
+    /// sixty now, with its own measurement of what every rung of that ladder costs. The travel
+    /// this file has is the sways, a few points a second across a field with no edge anywhere in
+    /// it, which measures at two levels a step and is why the cap is still right for the water.
     private static let frameRate = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)
 
     private func sway(_ light: CALayer, by offset: CGVector, over seconds: CFTimeInterval) {
