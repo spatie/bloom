@@ -31,10 +31,13 @@ struct PendingTurnRowView: View {
     /// a divider somebody had left in. At the foot of the run it reads as what it is, which is a
     /// note about everything above it.
     var hold: DeliveryHold?
-    var maxWidth: CGFloat
     /// Asks to delete this one. It asks rather than deletes: the confirmation and the promise
     /// about where the sentence ends up are `PendingMessageDiscard`'s, through `TranscriptModel`.
     var onDelete: @MainActor () -> Void
+    /// The width this bubble may fill. Read from the list's object rather than handed in, for the
+    /// reason `TranscriptBubbleWidth` sets out: a number passed in is a number the list has to
+    /// read, and a list that reads it is a list that is rebuilt whenever the pane changes width.
+    @Environment(\.transcriptBubbleWidth) private var bubbleWidth
     /// Draws the row as though the pointer were on it, for `--snapshot`. An offscreen render has
     /// no pointer, and the state worth photographing here is the one under it.
     var pointerInside = false
@@ -79,7 +82,7 @@ struct PendingTurnRowView: View {
     }
 
     private var bubble: some View {
-        CappedWidth(width: maxWidth) {
+        CappedWidth(width: bubbleWidth?.cap ?? 560) {
             Text(displayText)
                 .font(Typo.body)
                 .lineSpacing(TranscriptLayout.proseLeading)

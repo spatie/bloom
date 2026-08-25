@@ -46,6 +46,11 @@ struct TranscriptListView: View {
     /// written to, the pane's own memory, which lasts as long as the launch and no longer.
     @State private var expanded: Set<Int> = []
     @State private var geometry = TranscriptGeometry()
+    /// The width a bubble may fill, which used to be a field of `geometry` above. It is an object
+    /// held here and read only by the views that draw a bubble, so a pane changing width no longer
+    /// re-runs this body and rebuilds every row the lazy stack has realised. See
+    /// `TranscriptBubbleWidth`, which carries the measurement that moved it.
+    @State private var bubbleWidth = TranscriptBubbleWidth()
     @State private var didPosition = false
 
     /// The chip or the row the pointer is resting on, shared with every row in the list.
@@ -262,11 +267,6 @@ struct TranscriptListView: View {
         )
     }
 
-    /// Already rounded, by `TranscriptGeometry.cap`, and rounded before it reaches this view's
-    /// state rather than after. A cap that changed on every pixel of a drag failed the row
-    /// equality check on every realised row, once a frame.
-    private var maxBubbleWidth: CGFloat { geometry.bubbleCap }
-
     var body: some View {
         // The first pass of this body after a tab switch, which is where the rebuilt list starts.
         // Stamped once per timeline, so the passes that follow it cost nothing to ignore.
@@ -275,6 +275,22 @@ struct TranscriptListView: View {
         // Read once for the pass rather than once per footer: resolving it walks the row list,
         // and every realised footer would otherwise pay for its own walk. See `TranscriptModel`.
         let stoppedTurnSeq = transcript.stoppedTurnSeq
+        // The five below are read here for a different reason, and it is the more expensive one.
+        // Each is a property of an `@Observable`, and observation is recorded where a property is
+        // READ: read inside the `ForEach`'s closure, every row registers its own edge on it, and
+        // SwiftUI tears that edge down and puts it back every time the child is rebuilt. Measured
+        // on a release build resizing a window over a 1,104 row conversation, six percent of the
+        // whole gesture was inside `ObservationCenter.invalidate` doing exactly that. Read once
+        // here, they are plain values by the time a row is built, and the list holds one edge on
+        // each instead of one per realised row.
+        //
+        // `projectName` is also worth a line of its own: it reaches `AppModel.repo(for:)`, which
+        // is a linear scan, and it was on the scroll path once per realised row per pass.
+        let workspace = transcript.workspace
+        let projectName = transcript.projectName
+        let rows = transcript.rows
+        let permissionMode = transcript.session.permissionMode
+        let recoveredRuns = transcript.recoveredRuns
         // Only so the delete confirmation below has a binding to the model's own state. The
         // question cannot live in this view: see `TranscriptModel.discarding`.
         @Bindable var transcript = transcript
@@ -298,7 +314,7 @@ struct TranscriptListView: View {
                         // The one row in this list sized as a share of the pane rather than of its
                         // own contents. Already rounded, by `TranscriptGeometry.height`, and
                         // rounded before it reaches this view's state for the reason the bubble cap
-                        // is: see `maxBubbleWidth`.
+                        // is quantised: see `TranscriptGeometry`.
                         paneHeight: geometry.paneHeight,
                         onVisibilityChange: { showsSetup = $0 },
                         onShowLogEnd: { wasAsked in
@@ -321,16 +337,16 @@ struct TranscriptListView: View {
                             // reads as belonging to the turn above rather than to the one below.
                             // See `TranscriptLayout.turnGap`.
                             TurnFooterView(
-                                rows: transcript.rows,
+                                rows: rows,
                                 row: row,
-                                worktree: transcript.workspace.path,
-                                permissionMode: transcript.session.permissionMode,
+                                worktree: workspace.path,
+                                permissionMode: permissionMode,
                                 // Only the turn the stop was about, which is at most one of them.
                                 // See `TranscriptModel.stoppedTurnSeq`.
                                 wasStopped: row.seq == stoppedTurnSeq,
                                 // What is left of a wait this turn spent on somebody else's
                                 // outage, or nothing, which is almost always.
-                                recovered: transcript.recoveredRuns[row.seq]
+                                recovered: recoveredRuns[row.seq]
                             )
                             .arrivingRow(isArriving(row))
                             .padding(.horizontal, TranscriptLayout.inset)
@@ -339,11 +355,10 @@ struct TranscriptListView: View {
                         } else {
                             TranscriptRowView(
                                 row: row,
-                                workspace: transcript.workspace,
+                                workspace: workspace,
                                 isExpanded: expanded.contains(row.seq),
                                 isNested: row.parentToolUseID != nil,
-                                maxBubbleWidth: maxBubbleWidth,
-                                projectName: transcript.projectName,
+                                projectName: projectName,
                                 onToggle: { toggle(row.seq) },
                                 onAnswer: { requestID, decision in
                                     Task { await transcript.answer(requestID: requestID, decision: decision) }
@@ -372,8 +387,7 @@ struct TranscriptListView: View {
                             UserTurnRowView(
                                 text: review.message,
                                 reviewChips: review.chips,
-                                workspace: transcript.workspace,
-                                maxWidth: maxBubbleWidth
+                                workspace: workspace
                             )
                             // The owner's own bubble settles in like every other row that turns
                             // up. It is the one thing on this screen the reader made happen, and
@@ -392,8 +406,7 @@ struct TranscriptListView: View {
                             UserTurnRowView(
                                 text: turn.body,
                                 attachments: turn.paths,
-                                workspace: transcript.workspace,
-                                maxWidth: maxBubbleWidth
+                                workspace: workspace
                             )
                             .arrivingRow(true)
                             .padding(.horizontal, TranscriptLayout.inset)
@@ -417,7 +430,6 @@ struct TranscriptListView: View {
                             hold: delivery.id == transcript.waitingDeliveries.last?.id
                                 ? transcript.deliveryHold
                                 : nil,
-                            maxWidth: maxBubbleWidth,
                             onDelete: { transcript.askToDiscard(delivery) }
                         )
                         .padding(.horizontal, TranscriptLayout.inset)
@@ -469,6 +481,13 @@ struct TranscriptListView: View {
             // someone back down as they read something further up is the single most irritating
             // thing a live log can do.
             .defaultScrollAnchor(geometry.isNearBottom ? .bottom : nil, for: .sizeChanges)
+            // Its own subscription, for the reason the raw offset below has one: what this
+            // writes is an object rather than state, so nothing in this body is invalidated by it
+            // and the rows that draw a bubble are. Folded into the projection above it would put
+            // the cap back into `@State` and undo the whole of `TranscriptBubbleWidth`.
+            .onScrollGeometryChange(for: CGFloat.self, of: Self.bubbleCapOf) { _, new in
+                bubbleWidth.cap = new
+            }
             .onScrollGeometryChange(for: TranscriptGeometry.self, of: Self.measure) { _, new in
                 geometry = new
                 // The state, every time, rather than only on a transition of it.
@@ -698,6 +717,11 @@ struct TranscriptListView: View {
             // rather than passed as a closure through five layers of view. A closure would be a
             // new closure on every pass over the list and would invalidate every row that read it.
             .environment(\.transcriptHoverHost, hoverHost)
+            // And the cap a bubble is drawn at, for the same reason and by the same mechanism:
+            // handing down the OBJECT is a read of a reference that never changes, so this body
+            // takes no dependency on the width at all, and only the views that read `cap` are
+            // invalidated when the pane is made narrower. See `TranscriptBubbleWidth`.
+            .environment(\.transcriptBubbleWidth, bubbleWidth)
             // What a link in any row of this transcript does when it is pressed or chosen from a
             // menu. Said once for the whole list rather than per row, and comparable: this is a
             // computed property, so it really is a fresh struct on every pass, and until
@@ -770,18 +794,26 @@ struct TranscriptListView: View {
     /// gets wrong, and both of them float the jump pill over a conversation whose last line is
     /// already on screen: content that fits in the pane, and a pane with no height to fit it in.
     ///
-    /// The bubble cap is worked out here, inside the projection, rather than in the body from a
-    /// stored width. `onScrollGeometryChange` only calls its handler when the projected value
-    /// changes, so rounding on this side of the line means a drag stops writing state, and stops
-    /// re-running the list body, for the eleven points of travel between one cap and the next.
+    /// The bubble cap is no longer one of these. It is `bubbleCapOf` below, on a subscription of
+    /// its own, because it is the one value here that moves on every eight points of a resize and
+    /// the only one a handful of rows read: see `TranscriptBubbleWidth`.
+    /// The width a bubble may fill, rounded on this side of the line.
+    ///
+    /// `onScrollGeometryChange` only calls its handler when the projected value changes, so the
+    /// rounding is what makes a drag write the object once every eight points rather than once a
+    /// frame. That was the whole reason the cap was quantised when it lived in `measure` above,
+    /// and it is still the reason here; what changed is who pays when it does move.
+    private static func bubbleCapOf(_ scroll: ScrollGeometry) -> CGFloat {
+        TranscriptGeometry.cap(
+            width: scroll.containerSize.width,
+            share: bubbleShare,
+            gutter: Metrics.gutter,
+            floor: bubbleFloor
+        )
+    }
+
     private static func measure(_ scroll: ScrollGeometry) -> TranscriptGeometry {
         TranscriptGeometry(
-            bubbleCap: TranscriptGeometry.cap(
-                width: scroll.containerSize.width,
-                share: bubbleShare,
-                gutter: Metrics.gutter,
-                floor: bubbleFloor
-            ),
             paneHeight: TranscriptGeometry.height(scroll.containerSize.height),
             isNearBottom: ScrollEnd.isAtEnd(
                 contentHeight: scroll.contentSize.height,
@@ -954,13 +986,17 @@ struct TranscriptListView: View {
 
     /// What this pane is now, or nothing if it has not been laid out yet.
     ///
-    /// `bubbleCap` rather than the container width, because that is the number this view actually
-    /// holds and it is a step function of the width: see `TranscriptGeometry`, which explains why
-    /// the raw width is deliberately not kept. `paneHeight` is nought until the first layout, and
-    /// that is what tells an unmeasured pane apart from a narrow one.
+    /// The bubble cap rather than the container width, because that is the number this view
+    /// actually holds and it is a step function of the width: see `TranscriptGeometry`, which
+    /// explains why the raw width is deliberately not kept. `paneHeight` is nought until the first
+    /// layout, and that is what tells an unmeasured pane apart from a narrow one.
+    ///
+    /// Read off the object rather than out of `geometry` since the cap moved there. Both callers
+    /// are outside `body`, so this reads `cap` without subscribing this view to it, which is the
+    /// whole point of the object.
     private var currentMeasure: TranscriptPaneState.Measure? {
         guard geometry.paneHeight > 0 else { return nil }
-        return TranscriptPaneState.Measure(width: geometry.bubbleCap, fontScale: fontScale)
+        return TranscriptPaneState.Measure(width: bubbleWidth.cap, fontScale: fontScale)
     }
 
     /// Writes down where the reader is, for the pane to find when it is built again.
