@@ -62,10 +62,8 @@ struct QuickPromptGallery: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.pane) {
-            panel("A: accent fill, what ships today", selected: 0)
-            panel("B: the quiet grey AppKit uses when a list has no keyboard", selected: 0,
-                  emphasized: false)
-            panel("At rest, nothing highlighted", selected: nil)
+            panel("The first row, highlighted on opening", selected: 0)
+            panel("Further down the list", selected: 3)
             panel("Nothing written yet", selected: nil, empty: true)
         }
         .padding(Metrics.pane)
@@ -176,7 +174,7 @@ extension Gallery {
     static let quickPrompts = Gallery(
         name: "quick-prompts",
         title: "Quick prompts",
-        size: CGSize(width: 460, height: 1180),
+        size: CGSize(width: 460, height: 1080),
         needsFocus: false,
         view: { app in AnyView(QuickPromptGallery(app: app)) }
     )
