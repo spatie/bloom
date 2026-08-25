@@ -29,10 +29,13 @@ struct SlashCommandChip: View {
 
     @Environment(\.openInRepoID) private var repoID
 
-    /// The same slot and the same delay as `AttachmentChip`, so a row holding one of each does not
-    /// have two rhythms in it.
+    /// The same slot as `AttachmentChip`, so a row holding one of each does not have two rhythms
+    /// in it.
     private static let slot: CGFloat = 14
-    private static let hoverDelay = Duration.milliseconds(350)
+    /// And the same wait, which is `Motion.hoverCardDelay` rather than a number copied from that
+    /// chip. It was copied, and then the shared constant moved and this one did not, which is the
+    /// drift a promise in a comment cannot stop and a reference to the constant can.
+    private static var hoverDelay: Duration { Motion.hoverCardDelay }
     /// Wide enough that a plugin's longest name is not truncated at all, which matters more here
     /// than it does on a filename: a middle truncated `superpowers:requesting-code-review` has
     /// lost the half that says which review it is.
