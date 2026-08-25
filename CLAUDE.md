@@ -81,6 +81,12 @@ its own copy. `./Tools/swiftlint.sh --fix` applies what SwiftLint can correct it
 diff has to be read: it once rewrote `let _ =` inside a `@ViewBuilder` into code that does not
 compile.
 
+**A rule of ours goes in `Tools/house-rules.sh`, never in a `custom_rules:` block.** SwiftLint
+matches a custom rule through SourceKit, there is no SourceKit on Linux, and the lint job prints
+"Skipping enabled rule 'custom_rules'" and goes green. A rule that passes on the author's Mac and
+is not run by the thing that gates the merge is worse than no rule, so `.swiftlint.yml` has no
+such block and says why.
+
 ## Where a green answer comes from
 
 Run tests locally, and run the ones that cover what you touched:

@@ -3,7 +3,7 @@
 #
 #   ./Tools/house-rules.sh
 #
-# Eight rules, and every one of them is here because it has already been broken:
+# Nine rules, and every one of them is here because it has already been broken:
 #
 #   1. No em dashes and no en dashes. Anywhere. They arrive by the hundred from
 #      anything that writes prose for you, and once one is in a file the next
@@ -26,22 +26,26 @@
 #   8. A View does not run a subprocess. A decision taken inside a View is a
 #      decision nothing can test, and CLAUDE.md said so for weeks while nothing
 #      checked it; see the rule itself for the helper types that are the way out.
+#   9. A catch says something. This one is here before it has been broken, which
+#      makes it the exception, and it is here because SwiftLint cannot hold it:
+#      its `custom_rules` need SourceKit, there is none on Linux, and the lint
+#      job skips them and stays green. See the rule itself.
 #
 # Exit status is 1 if anything was found, and every finding is printed with the
 # file and line so it can be opened. The word lists are deliberately narrow:
 # a rule that cries wolf gets switched off, so anything with a legitimate use in
 # this codebase either stays out of the list or is named in an exception below.
 #
-# **Every search here passes `--untracked`, and that is load bearing.** Six of
-# these eight rules did not, and a plain `git grep` sees only what is tracked, so
-# a brand new file was invisible to all six until somebody staged it. One decoy
-# file inside `Sources/BloomCore` carrying a violation of each raised one finding
-# untracked and six the moment it was added, on identical bytes. That is worst
-# exactly where it matters: rules 4, 5 and 6 say in their own comments that the
-# compiler holds everything EXCEPT a new file inside the core, and a new file is
-# untracked until it is staged, so `make lint` passed on precisely the thing the
-# rule exists to catch. `--untracked` does not include ignored files, so `.build`
-# and the rest of .gitignore stay out.
+# **Every search here passes `--untracked`, and that is load bearing.** Six of the
+# eight rules that existed then did not, and a plain `git grep` sees only what is
+# tracked, so a brand new file was invisible to all six until somebody staged it.
+# One decoy file inside `Sources/BloomCore` carrying a violation of each raised
+# one finding untracked and six the moment it was added, on identical bytes. That
+# is worst exactly where it matters: rules 4, 5 and 6 say in their own comments
+# that the compiler holds everything EXCEPT a new file inside the core, and a new
+# file is untracked until it is staged, so `make lint` passed on precisely the
+# thing the rule exists to catch. `--untracked` does not include ignored files,
+# so `.build` and the rest of .gitignore stay out.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -372,6 +376,42 @@ while IFS= read -r hit; do
   fi
 done <<EOF
 $(git grep --untracked -n -I -E 'await (Git|Shell)\.' -- 'Sources/Bloom/Views/*' || true)
+EOF
+
+echo "==> a catch says something"
+# `catch { }` compiles, runs, and is the only way an error in Swift can vanish
+# without anybody being told. There are none in the tree today, which is why this
+# is the one rule here written before the mistake rather than after it: a rule
+# that starts at zero costs nothing to add and everything to add later.
+#
+# It is here rather than in `.swiftlint.yml` because SwiftLint cannot enforce it.
+# `no_empty_block` is the nearest stock rule and it counts every empty `{ }`
+# closure a SwiftUI action passes as the same thing, so it reports 103 findings
+# here and not one of them is a swallowed error. A `custom_rules` regex says
+# exactly this and is skipped on Linux, where the lint job runs, because matching
+# one needs SourceKit: "Skipping enabled rule 'custom_rules' because it requires
+# SourceKit and SourceKit access is prohibited", and then the job goes green. A
+# rule that passes on the author's Mac and is not run by the thing that gates the
+# merge is worse than no rule.
+#
+# Two spellings, because both are how it actually gets typed: the whole thing on
+# one line, and the brace on its own line under it. A catch with a comment in it
+# is not empty and is the way to say the error is deliberately ignored.
+empty_catch_awk='
+  previous ~ /catch[^{]*\{[[:space:]]*$/ && $0 ~ /^[[:space:]]*\}[[:space:]]*$/ {
+    printf "%s:%d:%s\n", FILENAME, NR - 1, previous
+  }
+  /catch[^{]*\{[[:space:]]*\}/ { printf "%s:%d:%s\n", FILENAME, NR, $0 }
+  { previous = $0 }
+'
+while IFS= read -r file; do
+  [ -n "$file" ] || continue
+  if hits="$(awk "$empty_catch_awk" "$file")" && [ -n "$hits" ]; then
+    echo "$hits" | show
+    report "$file has a catch that does nothing. An error that is deliberately ignored says so in a comment inside the block; one that is not is a failure nobody will ever hear about."
+  fi
+done <<EOF
+$(git grep --untracked -l -I -E 'catch[^{]*\{' -- 'Sources/*' 'Tests/*' || true)
 EOF
 
 echo "==> British spelling"

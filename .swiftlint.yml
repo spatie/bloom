@@ -34,6 +34,16 @@
 #   type without the compiler objecting, so read what it says about a double optional rather than
 #   applying it. Both sites carry a `swiftlint:disable:next` saying so.
 #
+# **There is no `custom_rules:` block here and there must not be one.** A custom rule is a regex
+# and SwiftLint matches it through SourceKit, so that a hit inside a string or a comment can be
+# excluded. There is no SourceKit on Linux, so the Linux build says "Skipping enabled rule
+# 'custom_rules' because it requires SourceKit and SourceKit access is prohibited" and carries on
+# green, which is worse than having no rule at all: it passes on this Mac, and the run that gates
+# a merge never looks. `statement_position` is skipped for the same reason and is the only stock
+# rule that is, which is a gap worth knowing about rather than a hole worth filling. A rule of our
+# own belongs in `Tools/house-rules.sh`, which is `git grep` and runs everywhere. The empty catch
+# rule is there.
+#
 # One warning from experience. `swiftlint --fix` is not safe to run unread here. It rewrote
 # `let _ = SwitchTrace.mark(...)` to `_ = SwitchTrace.mark(...)` in three view bodies, which is
 # the documented SwiftUI idiom for a side effect inside a `@ViewBuilder`, and the app stopped
@@ -136,16 +146,3 @@ identifier_name:
   # `x86_64` is Apple's spelling of an architecture, and `as_` and `where_` are Swift keywords
   # that have to be spelled around. Backticks were the alternative and read worse.
   allowed_symbols: ["_"]
-
-custom_rules:
-  # There is no SwiftLint rule for this and there are no violations of it today, which is exactly
-  # when a rule is cheap to add. `no_empty_block` is the near miss: it counts a catch as a
-  # statement block along with every empty `{ }` closure a SwiftUI action passes, so it reports
-  # 103 things here and none of them is a swallowed error.
-  empty_catch:
-    name: "Empty catch"
-    regex: 'catch[^{]*\{[[:space:]]*\}'
-    message: "A catch that does nothing is an error nobody will ever see. Say why, in the block."
-    match_kinds:
-      - keyword
-      - identifier
