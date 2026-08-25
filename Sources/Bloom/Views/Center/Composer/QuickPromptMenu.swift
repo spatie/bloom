@@ -42,6 +42,11 @@ struct QuickPromptMenu: View {
     @State private var contentHeight: CGFloat = 0
     /// The form, when one is open. Two states of one panel rather than a second floating window.
     @State private var editor: Editor?
+    /// The prompt Delete was pressed on, while the question about it is up.
+    ///
+    /// One piece of state for both routes into it, the pencil's form and the row's own context
+    /// menu, because they ask the same question. See `QuickPromptDeletion`.
+    @State private var deleting: QuickPrompt?
 
     /// Which form is up, and what it is about.
     private enum Editor: Equatable {
@@ -84,6 +89,17 @@ struct QuickPromptMenu: View {
         }
         .frame(width: Self.width)
         .task { await catalog.load(from: app.store) }
+        // A quick prompt is a paragraph the owner wrote and there is no undo for it. Delete used to
+        // take the row on the click, from a list opened to pick something out of.
+        .confirmation($deleting) {
+            QuickPromptDeletion.confirmation(for: $0)
+        } onConfirm: { prompt in
+            delete(prompt)
+            // The form was about the prompt that has just gone, so it goes with it. Cancelling
+            // leaves it standing, which is the half that matters: nothing typed is lost by
+            // pressing Delete and changing your mind.
+            if case .existing(let editing) = editor, editing.id == prompt.id { editor = nil }
+        }
     }
 
     // MARK: - The list
@@ -162,7 +178,7 @@ struct QuickPromptMenu: View {
                             onPick: { pick(prompt) },
                             onHover: { selected = prompt },
                             onEdit: { editor = .existing(prompt) },
-                            onDelete: { delete(prompt) }
+                            onDelete: { deleting = prompt }
                         )
                         // Identity is the thing the row names, never its position. See `selected`.
                         .id(prompt.id)
@@ -277,8 +293,7 @@ struct QuickPromptMenu: View {
             onSave: { name, symbol, text in save(editing, name: name, symbol: symbol, text: text) },
             onDelete: {
                 guard let editing else { return }
-                delete(editing)
-                self.editor = nil
+                deleting = editing
             }
         )
     }

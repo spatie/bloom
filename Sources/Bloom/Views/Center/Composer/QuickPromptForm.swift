@@ -5,8 +5,7 @@ import BloomCore
 ///
 /// One form for both jobs, because they are the same three fields. Editing adds Delete, on the left
 /// of the row Save is on, which is where a destructive button goes in a Mac form and the only place
-/// this one lives. Deleting something you wrote is worth one deliberate trip rather than one stray
-/// click in a list you opened to pick from.
+/// this one lives. It asks before it deletes: see `QuickPromptDeletion`.
 ///
 /// It is drawn inside the panel the list was in rather than in a sheet of its own: the list and the
 /// form are two states of one popover, so choosing a prompt and editing one never involve two
@@ -18,6 +17,13 @@ import BloomCore
 /// and the name filling the rest of the row, is the shape of the same row in There There, and it
 /// puts the choice behind one press instead of in front of everybody who only wanted to rename
 /// something.
+///
+/// **The picker opens into a gap rather than over the form**, which is what the second round of
+/// this panel got wrong. It used to be an overlay positioned off a measured well, with the panel
+/// padded at the foot by whatever the card overhung by; that arithmetic was right and the result
+/// was still a card sitting on top of the Text field and the Save button. A row in the stack costs
+/// the panel exactly the same height and covers nothing, and it takes the measured well frame, the
+/// measured content height and the reserve sum with it.
 struct QuickPromptForm: View {
     /// The prompt being changed, or nil when this is a new one.
     var editing: QuickPrompt?
@@ -27,12 +33,13 @@ struct QuickPromptForm: View {
     /// Whether the form opens with the picker already up.
     ///
     /// False everywhere but `QuickPromptGallery`, which renders this form offscreen and cannot
-    /// press a button to open anything. The panel shipped four times with something wrong with it
+    /// press a button to open anything. The panel shipped five times with something wrong with it
     /// that one look would have caught, so the state that has to be looked at has to be reachable
     /// without a click.
     var startsPickingMark = false
     var onCancel: @MainActor () -> Void
     var onSave: @MainActor (_ name: String, _ symbol: String, _ text: String) -> Void
+    /// Asks for the prompt to go. The panel owns the question, because the list can ask it too.
     var onDelete: @MainActor () -> Void
 
     @State private var name = ""
@@ -44,13 +51,6 @@ struct QuickPromptForm: View {
     @State private var isPrepared = false
     /// Whether the icon picker is up.
     @State private var isPickingMark = false
-    /// Where the well is, in the form's own coordinates, so the picker can be hung off it rather
-    /// than off the row around it. Measured rather than worked out from the spacing scale, because
-    /// a form whose label heights are guessed at is a picker that drifts a point or two off its
-    /// well the first time a rung of `Typo` moves.
-    @State private var wellFrame: CGRect = .zero
-    /// How tall the form is with nothing hanging off it. See `pickerReserve`.
-    @State private var contentHeight: CGFloat = 0
 
     @FocusState private var isNameFocused: Bool
 
@@ -62,27 +62,30 @@ struct QuickPromptForm: View {
     private static let wellSize: CGFloat = 22
     /// The mark inside it, set well under the well so the plate reads as a plate.
     private static let wellPoints: CGFloat = 15
-    /// The name the well's position is measured in. `nonisolated` because `onGeometryChange` reads
-    /// it from a closure that is not on the main actor, and a `String` on a `MainActor` type is
-    /// isolated to it unless it says otherwise.
-    private nonisolated static let formSpace = "quickPromptForm"
 
     var body: some View {
-        // `Metrics.pane` and `gutter` rather than the tighter rungs the rest of this panel uses.
-        // A list is scanned and wants to be dense; a form is filled in, and at the panel's spacing
-        // the three labels sat on top of their controls and the whole card read as cramped.
-        VStack(alignment: .leading, spacing: Metrics.gutter) {
+        // `Metrics.pane` between the groups, which is the widest rung there is, and the owner asked
+        // for it twice. The form was on `gutter` and read as cramped: it is filled in rather than
+        // scanned, and a panel four groups tall at twelve points apart is a wall of controls. The
+        // labels inside a group stay tight, so the wide gap is what says where one group ends.
+        VStack(alignment: .leading, spacing: Metrics.pane) {
             heading
 
-            field("Name and icon") {
-                HStack(spacing: Metrics.spacing) {
-                    well
+            VStack(alignment: .leading, spacing: Metrics.spacingWide) {
+                field("Name and icon") {
+                    HStack(spacing: Metrics.spacing) {
+                        well
 
-                    TextField("Run the tests", text: $name)
-                        .textFieldStyle(.roundedBorder)
-                        .font(Typo.body)
-                        .focused($isNameFocused)
-                        .accessibilityLabel("Quick prompt name")
+                        TextField("Run the tests", text: $name)
+                            .textFieldStyle(.roundedBorder)
+                            .font(Typo.body)
+                            .focused($isNameFocused)
+                            .accessibilityLabel("Quick prompt name")
+                    }
+                }
+
+                if isPickingMark {
+                    picker
                 }
             }
 
@@ -105,17 +108,19 @@ struct QuickPromptForm: View {
             }
 
             buttons
-                .padding(.top, Metrics.spacingSmall)
         }
-        .coordinateSpace(.named(Self.formSpace))
-        // Measured before the room for the picker is added, so the one cannot feed the other.
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
-        .padding(.bottom, pickerReserve)
         .padding(Metrics.pane)
-        // Over the whole panel rather than over the fields, so a click on the padding closes the
-        // picker too. A popover would have had that for nothing; this card is inside the panel, so
-        // it has to be given.
-        .overlay(alignment: .topLeading) { picker }
+        // Behind the form rather than over it, which is the whole of why this is a `background`.
+        // An overlay took the clicks meant for the fields under it; a background takes only the
+        // ones nothing else wanted, which is exactly the click on the panel's own padding that
+        // ought to put the picker away.
+        .background {
+            if isPickingMark {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { closePicker() }
+            }
+        }
         .onAppear(perform: prepare)
         // Escape leaves the form and goes back to the list, rather than closing the whole panel and
         // losing what was typed with it. While the picker is up it has Escape first, and gives it
@@ -124,7 +129,10 @@ struct QuickPromptForm: View {
     }
 
     private var heading: some View {
-        VStack(alignment: .leading, spacing: Metrics.spacingHair) {
+        // `spacingSmall`, not `spacingHair`. At one point the subtitle sat on the ascenders of the
+        // title above it and the two read as one wrapped line, which is what the owner meant by the
+        // heading sitting almost on its subtitle.
+        VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
             Text(editing == nil ? "New quick prompt" : "Edit quick prompt")
                 .font(Typo.bodyEmphasis)
                 .foregroundStyle(Palette.textPrimary)
@@ -164,49 +172,19 @@ struct QuickPromptForm: View {
         .buttonStyle(.plain)
         .help("Choose an icon or an emoji")
         .accessibilityLabel("Quick prompt icon")
-        .onGeometryChange(for: CGRect.self) {
-            $0.frame(in: .named(Self.formSpace))
-        } action: { wellFrame = $0 }
     }
 
-    /// The picker, hung under the well, over a layer that swallows the click that dismisses it.
-    @ViewBuilder
+    /// The picker, under the well and narrower than the form, so it reads as a card hung off the
+    /// square that opened it rather than as a second panel the width of the first.
     private var picker: some View {
-        if isPickingMark {
-            ZStack(alignment: .topLeading) {
-                // Not `Color.clear` on its own, which takes no clicks at all.
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { closePicker() }
-
-                QuickPromptMarkPicker(
-                    selection: symbol,
-                    onChoose: { mark in
-                        symbol = mark.stored
-                        closePicker()
-                    },
-                    onClose: closePicker
-                )
-                // The form's own padding, because this layer is outside it and the well was
-                // measured inside it.
-                .offset(
-                    x: wellFrame.minX + Metrics.pane,
-                    y: wellFrame.maxY + Metrics.pane + Metrics.spacingSmall
-                )
-            }
-        }
-    }
-
-    /// How much taller the panel has to be while the picker is up.
-    ///
-    /// **The card cannot hang past the panel's edge, because it is inside it.** A `.popover` of its
-    /// own would float free, and would also take the whole panel with it on the first click: see
-    /// `QuickPromptMarkPicker`. So the form grows by exactly what is missing and by nothing when
-    /// nothing is, which is most of the time only the last thirty or so points.
-    private var pickerReserve: CGFloat {
-        guard isPickingMark, contentHeight > 0 else { return 0 }
-        let need = wellFrame.maxY + Metrics.spacingSmall + QuickPromptMarkPicker.height
-        return max(0, need - contentHeight)
+        QuickPromptMarkPicker(
+            selection: symbol,
+            onChoose: { mark in
+                symbol = mark.stored
+                closePicker()
+            },
+            onClose: closePicker
+        )
     }
 
     private var buttons: some View {

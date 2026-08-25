@@ -15,8 +15,13 @@ import BloomCore
 /// Two columns: the list on the left, the form on the right. The form is here because the icon
 /// picker replaced an inline grid, and the two things worth looking at are whether an emoji sits
 /// in the same column as a symbol without reading a size larger, and whether the picker hangs off
-/// the well squarely. Neither is visible from the tests, and both are what the last four rounds of
+/// the well squarely. Neither is visible from the tests, and both are what the last five rounds of
 /// this panel got wrong.
+///
+/// The fifth round added the rest of what a reviewer has to see at once: the form with nothing
+/// hanging off it, the picker on each of its two tabs, a name too long for the row, and the
+/// question Delete asks. Every one of those was reported from a screenshot rather than caught
+/// here, which is what a page missing a state costs.
 struct QuickPromptGallery: View {
     var app: AppModel
 
@@ -81,17 +86,27 @@ struct QuickPromptGallery: View {
             VStack(alignment: .leading, spacing: Metrics.pane) {
                 panel("The first row, highlighted on opening", selected: 0)
                 panel("Nothing written yet", selected: nil, empty: true)
-                form("Name and icon, a symbol chosen", prompt: prompts[0])
                 Spacer(minLength: 0)
             }
 
             VStack(alignment: .leading, spacing: Metrics.pane) {
-                form("An emoji chosen", prompt: prompts[4])
-                // Both tabs, and the tab each opens on is read off the mark the prompt already
-                // carries, so these two are also the test of that.
-                form("The picker, open on the well", prompt: prompts[0], picking: true)
-                form("The same picker on a prompt marked with an emoji",
-                     prompt: prompts[4], picking: true)
+                form("At rest, a symbol chosen", prompt: prompts[0])
+                form("A name longer than the row it is typed in", prompt: prompts[5])
+                captioned("What Delete asks first") { deleteQuestion }
+                Spacer(minLength: 0)
+            }
+
+            VStack(alignment: .leading, spacing: Metrics.pane) {
+                // The tab each opens on is read off the mark the prompt already carries, so these
+                // two are the test of that as well as of the card.
+                //
+                // The first is marked with a symbol from the fifth band, which is the case that
+                // used to fail silently: the picker opened at the top of the first band with the
+                // mark it was meant to be showing several hundred points below the fold, because
+                // a lazy grid had not built the row a `ScrollViewReader` was asked to scroll to.
+                form("The picker, open on Icons and scrolled to the mark",
+                     prompt: prompts[6], picking: true)
+                form("The picker, open on Emojis", prompt: prompts[4], picking: true)
                 Spacer(minLength: 0)
             }
         }
@@ -99,6 +114,20 @@ struct QuickPromptGallery: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Palette.surface)
         .environment(app)
+    }
+
+    /// The question Delete asks, drawn through the app's own dialog rather than described.
+    ///
+    /// `PendingDeleteSnapshotGallery` does the same with its own question and for the same reason:
+    /// a sentence about a prompt with no name of its own, or one whose name runs past the width of
+    /// the dialog, is a sentence that has to be seen wrapped rather than counted.
+    private var deleteQuestion: some View {
+        ConfirmationSheet(
+            confirmation: QuickPromptDeletion.confirmation(for: prompts[5]),
+            onConfirm: {},
+            onCancel: {}
+        )
+        .fixedSize()
     }
 
     /// The form, in its own plate, at the width the panel opens at.
@@ -227,7 +256,7 @@ extension Gallery {
     static let quickPrompts = Gallery(
         name: "quick-prompts",
         title: "Quick prompts",
-        size: CGSize(width: 880, height: 1400),
+        size: CGSize(width: 1320, height: 1440),
         needsFocus: false,
         view: { app in AnyView(QuickPromptGallery(app: app)) }
     )

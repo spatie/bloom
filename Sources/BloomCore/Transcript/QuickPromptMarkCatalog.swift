@@ -31,6 +31,39 @@ public struct QuickPromptMarkSection: Sendable, Hashable, Identifiable {
         self.name = name
         self.choices = choices
     }
+
+    /// The band's choices cut into rows of `columns`, the last one short.
+    ///
+    /// **Here rather than in a `LazyVGrid`, and the grid is what this replaced.** A lazy grid only
+    /// builds the rows that intersect what is on screen, and a row nothing has built carries no
+    /// identity a `ScrollViewReader` can find: `proxy.scrollTo` on it does nothing at all, silently.
+    /// That was measured on the picker rather than argued about. A prompt marked with the last
+    /// symbol in the last band opened the picker at the top of the first band, with the mark it was
+    /// meant to be showing seven hundred points below the fold, and the doc comment saying it opens
+    /// "on it rather than at the top" had been wrong since the day it was written. Rows built here
+    /// are all built, so the target of a scroll always exists.
+    ///
+    /// A hundred and fifty cells is not a list laziness was invented for. The same argument
+    /// `QuickPromptMenu.rows` writes down about its own prompts holds here twice over.
+    public func rows(across columns: Int) -> [QuickPromptMarkRow] {
+        guard columns > 0 else { return [] }
+        return stride(from: 0, to: choices.count, by: columns).map {
+            QuickPromptMarkRow(choices: Array(choices[$0..<min($0 + columns, choices.count)]))
+        }
+    }
+}
+
+/// One line of a band's grid.
+public struct QuickPromptMarkRow: Sendable, Hashable, Identifiable {
+    public let choices: [QuickPromptMarkChoice]
+
+    /// The first mark on the row, which is unique across the catalogue because a mark is offered
+    /// once. `QuickPromptMarkCatalogTests` walks the whole of it to hold that.
+    public var id: String { choices.first?.id ?? "" }
+
+    public init(choices: [QuickPromptMarkChoice]) {
+        self.choices = choices
+    }
 }
 
 /// The picker's two tabs.
