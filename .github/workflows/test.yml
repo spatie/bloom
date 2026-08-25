@@ -178,32 +178,34 @@ jobs:
             exit 1
           fi
 
-      # The forty three seconds before the compiler starts.
+      # There is no cache step here, and that is a measured decision rather
+      # than an omission.
       #
-      # A cold `swift build` spent that long doing nothing that is Bloom's:
-      # compiling the manifest, fetching Sparkle, SwiftTerm and
-      # swift-argument-parser, working out which versions satisfy the ranges
-      # (ten seconds on Sparkle alone, whose tag list is long), checking out
-      # three working copies and downloading Sparkle's XCFramework zip. Every
-      # run did it again, and every run got the same answer, because
-      # Package.resolved pins all three.
+      # A cold `swift build` spends about forty three seconds before the
+      # compiler starts: compiling the manifest, fetching Sparkle, SwiftTerm and
+      # swift-argument-parser, working out which versions satisfy the ranges,
+      # three working copies, and downloading and unpacking Sparkle's
+      # XCFramework. All of it looks cacheable, and Package.resolved pins the
+      # three so a key on that file would hit on every run.
       #
-      # So the key is Package.resolved and nothing else. These are downloads
-      # rather than build products, so no toolchain belongs in the key, and the
-      # file only changes on a deliberate bump, which is the one run that should
-      # pay for a fresh resolve. Nothing compiled is cached here: a fresh
-      # checkout gives every source file today's mtime, which llbuild reads as
-      # a change, so cached object files for our own code would be rebuilt
-      # anyway, and the cache would cost more to move than it saved.
-      - name: Cache the resolved packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            .build/checkouts
-            .build/repositories
-            .build/artifacts
-            ~/Library/Caches/org.swift.swiftpm
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+      # It was tried, on runs 32820412787 and 32820771440. Caching
+      # .build/checkouts, .build/repositories, .build/artifacts and
+      # ~/Library/Caches/org.swift.swiftpm took those forty three seconds to
+      # thirty nine, on two runs whose compile phases came out within one per
+      # cent of each other, so the comparison is clean. Four seconds, for a
+      # hundred and fifty six megabyte cache entry moved twice a run. SwiftPM
+      # still spends six seconds recomputing which Sparkle version satisfies
+      # the range with the repository already on disk, and still spends twelve
+      # unpacking the XCFramework it fetched from its own cache.
+      #
+      # Nothing compiled is worth caching either, and for a different reason.
+      # A build directory tarred and restored to the same path stays fully
+      # incremental, so llbuild does not mind the inodes changing. But
+      # actions/checkout stamps every source file with today's mtime, which it
+      # does mind, so cached object files for our own code are rebuilt whatever
+      # is on disk. Making that work needs mtimes that follow the commit history
+      # rather than the checkout, which is a change with a failure mode worth
+      # watching and does not belong hidden in a cache step.
 
       # Debug, because nothing downstream consumes these objects. The question
       # this step answers is "does Sources/Bloom still compile", and a debug
