@@ -28,37 +28,20 @@ import BloomCore
 /// A sweep is one trip from the bottom of the transcript to the top and back. `--scroll-step` is
 /// how far the origin moves per frame: 24 points at 120Hz is about 2,900 points a second, which is
 /// a brisk flick rather than a drag, and is the speed at which a row that lays out slowly shows.
+///
+/// Everything that is not the scroll itself is `ProbeHarness`: the flags, the window, the failure,
+/// the frame timings, the report.
 @MainActor
 enum ScrollProbe {
-    static var isRequested: Bool {
-        CommandLine.arguments.contains("--scroll-probe")
-    }
+    private static let harness = ProbeHarness(subject: "scroll")
+
+    static var isRequested: Bool { harness.isRequested }
 
     // MARK: - Arguments
 
-    private static func value(for flag: String) -> String? {
-        let arguments = CommandLine.arguments
-        guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else {
-            return nil
-        }
-        return arguments[index + 1]
-    }
-
-    private static var outputPath: String {
-        value(for: "--scroll-probe") ?? (NSTemporaryDirectory() + "bloom-scroll-probe.json")
-    }
-
-    private static var workspace: String? { value(for: "--scroll-workspace") }
-    private static var sweeps: Int { Int(value(for: "--scroll-sweeps") ?? "") ?? 4 }
-    private static var step: CGFloat { CGFloat(Double(value(for: "--scroll-step") ?? "") ?? 24) }
-
-    private static var windowSize: CGSize? {
-        guard let raw = value(for: "--window-size") else { return nil }
-        let parts = raw.split(separator: "x")
-        guard parts.count == 2, let width = Double(parts[0]), let height = Double(parts[1])
-        else { return nil }
-        return CGSize(width: width, height: height)
-    }
+    private static var workspace: String? { ProbeHarness.value(for: "--scroll-workspace") }
+    private static var sweeps: Int { ProbeHarness.count("--scroll-sweeps", or: 4) }
+    private static var step: CGFloat { ProbeHarness.points("--scroll-step", or: 24) }
 
     // MARK: - Entry
 
@@ -67,18 +50,8 @@ enum ScrollProbe {
     }
 
     private static func run() async {
-        // Not brought to the front, for the reason at the head of `FrameProbe`.
-        try? await Task.sleep(for: .seconds(3))
-
-        guard let window = await firstWindow(), let contentView = window.contentView else {
-            return fail("no window to probe")
-        }
-
-        if let size = windowSize {
-            window.setContentSize(size)
-            window.layoutIfNeeded()
-            try? await Task.sleep(for: .seconds(1))
-        }
+        // Not brought to the front, for the reason at the head of `ProbeHarness.window`.
+        let (window, contentView) = await harness.window()
 
         if let workspace {
             OpenWorkspaceNotification.post(WorkspaceID(workspace))
@@ -87,7 +60,7 @@ enum ScrollProbe {
         }
 
         guard let scroll = transcriptScrollView(in: contentView) else {
-            return fail("no transcript NSScrollView found")
+            harness.fail("no transcript NSScrollView found")
         }
 
         // Sampled before the sweep and again in the report, because these two disagreeing is
@@ -97,7 +70,7 @@ enum ScrollProbe {
         let heightBefore = scroll.documentView?.frame.height ?? 0
         let travel = scrollableHeight(scroll)
         guard travel > 1 else {
-            return fail("the transcript is shorter than its viewport, so there is nothing to scroll")
+            harness.fail("the transcript is shorter than its viewport, so there is nothing to scroll")
         }
 
         // The offset, sampled once a frame. A run whose min and max agree scrolled nothing, which
@@ -112,12 +85,7 @@ enum ScrollProbe {
         await sweep(scroll, travel: travel, sweeps: 1)
         try? await Task.sleep(for: .seconds(1))
 
-        // A marker on disk rather than a line on stderr, so a shell watching for it can start
-        // `sample` against this pid at the moment the measured sweep begins instead of profiling
-        // twenty seconds of a window loading a transcript. Copied from `FrameProbe`, which needed
-        // it for the same reason.
-        try? Data("\(ProcessInfo.processInfo.processIdentifier)".utf8)
-            .write(to: URL(fileURLWithPath: outputPath + ".started"))
+        harness.markStarted()
 
         recorder.start()
         let wallBefore = CACurrentMediaTime()
@@ -125,22 +93,11 @@ enum ScrollProbe {
         let wall = CACurrentMediaTime() - wallBefore
         recorder.stop()
 
-        write(report(
-            recorder: recorder, travel: travel, wall: wall, scroll: scroll, heightBefore: heightBefore
+        harness.write(report(
+            recorder: recorder, travel: travel, wall: wall, window: window, scroll: scroll,
+            heightBefore: heightBefore
         ))
         exit(0)
-    }
-
-    private static func firstWindow() async -> NSWindow? {
-        for _ in 0..<60 {
-            let window = NSApp.windows.first {
-                $0.isVisible && $0.contentView != nil && $0.parent == nil
-                    && $0.styleMask.contains(.titled)
-            }
-            if let window { return window }
-            try? await Task.sleep(for: .milliseconds(250))
-        }
-        return nil
     }
 
     // MARK: - Finding the transcript
@@ -204,56 +161,28 @@ enum ScrollProbe {
     // MARK: - Reporting
 
     private static func report(
-        recorder: FrameRecorder, travel: CGFloat, wall: Double, scroll: NSScrollView,
-        heightBefore: CGFloat
-    ) -> [String: Any] {
-        let ms = recorder.intervals.map { $0 * 1000 }.sorted()
-        func percentile(_ p: Double) -> Double {
-            guard !ms.isEmpty else { return 0 }
-            let index = Int((Double(ms.count - 1) * p).rounded())
-            return ms[min(max(index, 0), ms.count - 1)]
-        }
+        recorder: FrameRecorder, travel: CGFloat, wall: Double, window: NSWindow,
+        scroll: NSScrollView, heightBefore: CGFloat
+    ) -> JSONValue {
         let offsets = recorder.widths
-        // A frame that took longer than two vsyncs at 120Hz. Not a fixed 16.7, because this Mac
-        // may be running at 120Hz, and calling every 10ms frame a stutter on a 60Hz panel would
-        // report a problem that nobody can see.
-        let refresh = ms.isEmpty ? 8.3 : percentile(0.5)
-        let dropped = ms.filter { $0 > refresh * 1.8 }.count
-
-        return [
-            "frames": ms.count,
-            "wallSeconds": wall,
-            "travelPoints": travel,
-            "documentHeightBefore": heightBefore,
-            "documentHeightAfter": scroll.documentView?.frame.height ?? 0,
-            "viewportHeight": scroll.contentView.bounds.height,
-            "offsetMin": offsets.min() ?? 0,
-            "offsetMax": offsets.max() ?? 0,
+        let own: [String: JSONValue] = [
+            "wallSeconds": .number(wall),
+            "travelPoints": .number(Double(travel)),
+            "documentHeightBefore": .number(Double(heightBefore)),
+            "documentHeightAfter": .number(Double(scroll.documentView?.frame.height ?? 0)),
+            "viewportHeight": .number(Double(scroll.contentView.bounds.height)),
+            "offsetMin": .number(Double(offsets.min() ?? 0)),
+            "offsetMax": .number(Double(offsets.max() ?? 0)),
             // The check that a run actually moved. See the note on the recorder above.
-            "didScroll": (offsets.max() ?? 0) - (offsets.min() ?? 0) > 1,
-            "medianMs": percentile(0.5),
-            "medianFps": percentile(0.5) > 0 ? 1000 / percentile(0.5) : 0,
-            "p95Ms": percentile(0.95),
-            "p99Ms": percentile(0.99),
-            "worstMs": ms.last ?? 0,
-            "droppedFrames": dropped,
-            "droppedShare": ms.isEmpty ? 0 : Double(dropped) / Double(ms.count),
-            "step": step,
-            "sweeps": sweeps,
+            "didScroll": .bool((offsets.max() ?? 0) - (offsets.min() ?? 0) > 1),
+            "step": .number(Double(step)),
+            "sweeps": .integer(sweeps),
         ]
-    }
-
-    private static func write(_ report: [String: Any]) {
-        guard let data = try? JSONSerialization.data(
-            withJSONObject: report, options: [.prettyPrinted, .sortedKeys]
-        ) else { return fail("could not serialise the report") }
-        try? data.write(to: URL(fileURLWithPath: outputPath))
-    }
-
-    /// Typed as returning nothing rather than `Never`, so `return fail(...)` reads the same in
-    /// a guard as it does in the other three probes. It exits either way.
-    private static func fail(_ message: String) {
-        FileHandle.standardError.write(Data("scroll probe: \(message)\n".utf8))
-        exit(1)
+        // The probe's own keys win over both, so a report that has an opinion keeps it.
+        return .object(
+            own
+                .merging(ProbeHarness.frameTimings(recorder.intervals.map { $0 * 1000 })) { mine, _ in mine }
+                .merging(harness.conditions(window: window)) { mine, _ in mine }
+        )
     }
 }

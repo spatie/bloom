@@ -1,7 +1,6 @@
 import AppKit
 import SwiftUI
 import QuartzCore
-import Synchronization
 import BloomCore
 
 /// Measures how many frames the window actually produces while the sidebar divider is dragged.
@@ -28,33 +27,24 @@ import BloomCore
 ///
 ///     Bloom --frame-probe /tmp/probe.json [--probe-driver mouse|programmatic]
 ///           [--probe-select <workspaceID>] [--window-size 1440x900] [--probe-sweeps 6]
+///
+/// Everything that is not the drag itself is `ProbeHarness`: the flags, the window, the failure,
+/// the report.
 @MainActor
 enum FrameProbe {
-    static var isRequested: Bool {
-        CommandLine.arguments.contains("--frame-probe")
-    }
+    private static let harness = ProbeHarness(subject: "frame")
+
+    static var isRequested: Bool { harness.isRequested }
 
     // MARK: - Arguments
 
-    private static func value(for flag: String) -> String? {
-        let arguments = CommandLine.arguments
-        guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else {
-            return nil
-        }
-        return arguments[index + 1]
-    }
-
-    private static var outputPath: String {
-        value(for: "--frame-probe") ?? (NSTemporaryDirectory() + "bloom-frame-probe.json")
-    }
-
-    private static var driver: String { value(for: "--probe-driver") ?? "mouse" }
+    private static var driver: String { ProbeHarness.text("--probe-driver", or: "mouse") }
 
     /// Window state a run wants to start in, so the inspector can be taken out of the picture and
     /// the centre column measured on its own. Read by `AppModel`, which owns the switch.
-    static var wantsInspector: Bool { !CommandLine.arguments.contains("--probe-no-inspector") }
-    private static var sweeps: Int { Int(value(for: "--probe-sweeps") ?? "") ?? 6 }
-    private static var selection: String? { value(for: "--probe-select") }
+    static var wantsInspector: Bool { !ProbeHarness.isPresent("--probe-no-inspector") }
+    private static var sweeps: Int { ProbeHarness.count("--probe-sweeps", or: 6) }
+    private static var selection: String? { ProbeHarness.value(for: "--probe-select") }
 
     /// What the run drags. The sidebar divider, which is what this probe was written for, or the
     /// window's own bottom right corner, which is the gesture the owner called janky.
@@ -62,25 +52,17 @@ enum FrameProbe {
     /// A separate flag rather than a fourth driver, because the two gestures cross with the same
     /// three drivers: a window can be resized by a synthetic hand, at a hand's pace from code, or
     /// as fast as the run loop will take it.
-    private static var gesture: String { value(for: "--probe-gesture") ?? "sidebar" }
+    private static var gesture: String { ProbeHarness.text("--probe-gesture", or: "sidebar") }
 
     /// A pane to open on the selected workspace before anything is measured, so a run can name
     /// what is on screen instead of inheriting whatever the last one left there.
     private static var requestedPane: PaneKind? {
-        value(for: "--probe-pane").flatMap(PaneKind.init(rawValue:))
+        ProbeHarness.value(for: "--probe-pane").flatMap(PaneKind.init(rawValue:))
     }
 
     /// Where a browser pane opened by `--probe-pane browser` should go. A file URL by preference:
     /// a run that has to reach the network measures the network.
-    private static var paneURL: String { value(for: "--probe-url") ?? "" }
-
-    private static var windowSize: CGSize? {
-        guard let raw = value(for: "--window-size") else { return nil }
-        let parts = raw.split(separator: "x")
-        guard parts.count == 2, let width = Double(parts[0]), let height = Double(parts[1])
-        else { return nil }
-        return CGSize(width: width, height: height)
-    }
+    private static var paneURL: String { ProbeHarness.text("--probe-url", or: "") }
 
     // MARK: - Entry
 
@@ -90,27 +72,9 @@ enum FrameProbe {
 
     private static func run() async {
         // The app is deliberately not brought to the front. A probe run happens while the owner is
-        // using their own copy, and an activation would steal their keyboard.
-        try? await Task.sleep(for: .seconds(3))
-
-        var window: NSWindow?
-        for _ in 0..<60 {
-            window = NSApp.windows.first {
-                $0.isVisible && $0.contentView != nil && $0.parent == nil
-                    && $0.styleMask.contains(.titled)
-            }
-            if window != nil { break }
-            try? await Task.sleep(for: .milliseconds(250))
-        }
-        guard let window, let contentView = window.contentView else {
-            return fail("no window to probe")
-        }
-
-        if let size = windowSize {
-            window.setContentSize(size)
-            window.layoutIfNeeded()
-            try? await Task.sleep(for: .seconds(1))
-        }
+        // using their own copy, and an activation would steal their keyboard. See `ProbeHarness`,
+        // which waits out the launch and applies `--window-size`.
+        let (window, contentView) = await harness.window()
 
         if let selection {
             OpenWorkspaceNotification.post(WorkspaceID(selection))
@@ -127,10 +91,10 @@ enum FrameProbe {
         var split: NSSplitView?
         if gesture != "window" {
             guard let found = sidebarSplitView(in: contentView) else {
-                return fail("no sidebar NSSplitView found")
+                harness.fail("no sidebar NSSplitView found")
             }
             guard found.arrangedSubviews.count >= 2 else {
-                return fail("sidebar split view has \(found.arrangedSubviews.count) panes")
+                harness.fail("sidebar split view has \(found.arrangedSubviews.count) panes")
             }
             split = found
         }
@@ -148,24 +112,20 @@ enum FrameProbe {
         await drag(split: split, window: window, sweeps: 1, recorder: nil)
         try? await Task.sleep(for: .seconds(1))
 
-        // A marker on disk rather than a line on stderr, so a shell watching for it can start
-        // `sample` against this pid at the moment the measured drag begins instead of profiling
-        // ten seconds of a window doing nothing.
-        try? Data("\(ProcessInfo.processInfo.processIdentifier)".utf8)
-            .write(to: URL(fileURLWithPath: outputPath + ".started"))
+        harness.markStarted()
 
         PaneLayoutTiming.reset()
         PaneLayoutTiming.isEnabled = true
         recorder.start()
-        let cpuBefore = mainThreadCPUSeconds()
+        let cpuBefore = ProbeHarness.mainThreadCPUSeconds()
         let wallBefore = CACurrentMediaTime()
         await drag(split: split, window: window, sweeps: sweeps, recorder: recorder)
-        mainThreadCPU = mainThreadCPUSeconds() - cpuBefore
+        mainThreadCPU = ProbeHarness.mainThreadCPUSeconds() - cpuBefore
         wallClock = CACurrentMediaTime() - wallBefore
         recorder.stop()
         PaneLayoutTiming.isEnabled = false
 
-        write(report(recorder: recorder, window: window, split: split))
+        harness.write(report(recorder: recorder, window: window, split: split))
         exit(0)
     }
 
@@ -258,23 +218,18 @@ enum FrameProbe {
         window.makeKeyAndOrderFront(nil)
         try? await Task.sleep(for: .milliseconds(400))
 
-        let done = Mutex(false)
         let pid = ProcessInfo.processInfo.processIdentifier
         let sequence = sweepOffsets(sweeps: sweeps)
-        Thread.detachNewThread {
-            post(.leftMouseDown, at: flipped, pid: pid)
+        await harness.onEventThread(polling: .milliseconds(4)) {
+            ProbeHarness.post(.leftMouseDown, at: flipped, pid: pid)
             Thread.sleep(forTimeInterval: 0.05)
             for offset in sequence {
-                post(.leftMouseDragged, at: CGPoint(x: flipped.x + offset, y: flipped.y), pid: pid)
+                ProbeHarness.post(
+                    .leftMouseDragged, at: CGPoint(x: flipped.x + offset, y: flipped.y), pid: pid
+                )
                 Thread.sleep(forTimeInterval: 1.0 / 120.0)
             }
-            post(.leftMouseUp, at: flipped, pid: pid)
-            done.withLock { $0 = true }
-        }
-
-        while !done.withLock({ $0 }) {
-            await Task.yield()
-            try? await Task.sleep(for: .milliseconds(4))
+            ProbeHarness.post(.leftMouseUp, at: flipped, pid: pid)
         }
         try? await Task.sleep(for: .milliseconds(300))
     }
@@ -321,37 +276,20 @@ enum FrameProbe {
         window.makeKeyAndOrderFront(nil)
         try? await Task.sleep(for: .milliseconds(400))
 
-        // Posted from a thread of its own at a steady 120Hz, which is what a trackpad on this
-        // machine delivers. Pacing from the main thread would mean the drag slowed down exactly
-        // when the main thread got busy, which is the thing being measured.
-        let done = Mutex(false)
+        // Posted at a steady 120Hz, which is what a trackpad on this machine delivers. See
+        // `ProbeHarness.onEventThread` for why the posting is not done from here.
         let pid = ProcessInfo.processInfo.processIdentifier
-        Thread.detachNewThread {
-            post(.leftMouseDown, at: flipped, pid: pid)
+        await harness.onEventThread(polling: .milliseconds(4)) {
+            ProbeHarness.post(.leftMouseDown, at: flipped, pid: pid)
             Thread.sleep(forTimeInterval: 0.05)
             for offset in sequence {
                 let point = CGPoint(x: flipped.x + offset, y: flipped.y)
-                post(.leftMouseDragged, at: point, pid: pid)
+                ProbeHarness.post(.leftMouseDragged, at: point, pid: pid)
                 Thread.sleep(forTimeInterval: 1.0 / 120.0)
             }
-            post(.leftMouseUp, at: CGPoint(x: flipped.x, y: flipped.y), pid: pid)
-            done.withLock { $0 = true }
-        }
-
-        // Waited on by yielding the main thread rather than blocking it: the tracking loop that
-        // consumes these events IS the main thread.
-        while !done.withLock({ $0 }) {
-            await Task.yield()
-            try? await Task.sleep(for: .milliseconds(4))
+            ProbeHarness.post(.leftMouseUp, at: CGPoint(x: flipped.x, y: flipped.y), pid: pid)
         }
         try? await Task.sleep(for: .milliseconds(300))
-    }
-
-    private nonisolated static func post(_ type: CGEventType, at point: CGPoint, pid: pid_t) {
-        guard let event = CGEvent(
-            mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left
-        ) else { return }
-        event.postToPid(pid)
     }
 
     /// Two modes, because they answer two different questions and neither answers both.
@@ -408,61 +346,64 @@ enum FrameProbe {
 
     // MARK: - Reporting
 
+    /// The one report in the family that counts frames against a fixed deadline.
+    ///
+    /// `framesOver16ms` and `framesOver33ms` are 60Hz and 30Hz, and they stay literals here where
+    /// `ScrollProbe` and `ResizeProbe` measure against their own median. This probe's question is
+    /// whether a drag holds a frame budget; theirs is whether a run stuttered against whatever
+    /// this panel is doing. See `ProbeHarness.frameTimings`.
     private static func report(
         recorder: FrameRecorder, window: NSWindow, split: NSSplitView?
-    ) -> [String: Any] {
+    ) -> JSONValue {
         let intervals = recorder.intervals.map { $0 * 1000 }
         let sorted = intervals.sorted()
-        func percentile(_ p: Double) -> Double {
-            guard !sorted.isEmpty else { return 0 }
-            let index = min(sorted.count - 1, max(0, Int((Double(sorted.count - 1) * p).rounded())))
-            return sorted[index]
+        func percentile(_ fraction: Double) -> Double {
+            ProbeStats.percentile(fraction, of: sorted)
         }
         let total = intervals.reduce(0, +)
         let mean = intervals.isEmpty ? 0 : total / Double(intervals.count)
-        let refresh = Double(window.screen?.maximumFramesPerSecond ?? 60)
+        let steps = sweepOffsets(sweeps: sweeps).count
 
-        return [
-            "driver": driver,
-            "gesture": gesture,
-            "pane": requestedPane?.rawValue ?? "whatever was open",
-            "selection": selection ?? "home",
+        let own: [String: JSONValue] = [
+            "driver": .string(driver),
+            "gesture": .string(gesture),
+            "pane": .string(requestedPane?.rawValue ?? "whatever was open"),
+            "selection": .string(selection ?? "home"),
             // What the window is ACTUALLY showing, rather than what was asked for. `AppModel`
             // reselects the last workspace on launch, so a run that meant to measure Home
             // silently measured a workspace as soon as any earlier run had opened one, and the
             // two configurations converged on the same number for a reason that had nothing to do
             // with either of them.
-            "inspector": wantsInspector,
-            "restoredWorkspace":
-                UserDefaults.standard.string(forKey: "sidebar.lastWorkspaceID") ?? "none",
-            "configuration": buildConfiguration,
-            "displayHz": refresh,
-            "frames": intervals.count,
-            "durationMs": total,
-            "meanMs": mean,
-            "meanFps": mean > 0 ? 1000 / mean : 0,
-            "medianMs": percentile(0.5),
-            "medianFps": percentile(0.5) > 0 ? 1000 / percentile(0.5) : 0,
-            "p95Ms": percentile(0.95),
-            "p99Ms": percentile(0.99),
-            "maxMs": sorted.last ?? 0,
-            "framesOver16ms": intervals.filter { $0 > 16.7 }.count,
-            "framesOver33ms": intervals.filter { $0 > 33.4 }.count,
-            "sidebarWidth": split?.arrangedSubviews[0].frame.width ?? 0,
+            "inspector": .bool(wantsInspector),
+            "restoredWorkspace": .string(
+                UserDefaults.standard.string(forKey: "sidebar.lastWorkspaceID") ?? "none"
+            ),
+            "frames": .integer(intervals.count),
+            "durationMs": .number(total),
+            "meanMs": .number(mean),
+            "meanFps": .number(mean > 0 ? 1000 / mean : 0),
+            "medianMs": .number(percentile(0.5)),
+            "medianFps": .number(percentile(0.5) > 0 ? 1000 / percentile(0.5) : 0),
+            "p95Ms": .number(percentile(0.95)),
+            "p99Ms": .number(percentile(0.99)),
+            "maxMs": .number(sorted.last ?? 0),
+            "framesOver16ms": .integer(intervals.filter { $0 > 16.7 }.count),
+            "framesOver33ms": .integer(intervals.filter { $0 > 33.4 }.count),
+            "sidebarWidth": .number(Double(split?.arrangedSubviews[0].frame.width ?? 0)),
             // Proof the drag landed. A run whose min and max are the same measured nothing.
-            "widthMin": recorder.widths.min() ?? 0,
-            "widthMax": recorder.widths.max() ?? 0,
-            "widthSteps": Set(recorder.widths).count,
-            "windowSize": ["w": window.frame.width, "h": window.frame.height],
-            "dragSteps": sweepOffsets(sweeps: sweeps).count,
-            "mainThreadCpuMs": mainThreadCPU * 1000,
-            "wallMs": wallClock * 1000,
-            "mainThreadBusyFraction": wallClock > 0 ? mainThreadCPU / wallClock : 0,
-            "cpuMsPerStep": mainThreadCPU * 1000 / Double(max(1, sweepOffsets(sweeps: sweeps).count)),
-            "loadAverage": systemLoadAverage(),
-            "paneLayout": PaneLayoutTiming.summary(),
-            "histogramMs": intervals,
+            "widthMin": .number(Double(recorder.widths.min() ?? 0)),
+            "widthMax": .number(Double(recorder.widths.max() ?? 0)),
+            "widthSteps": .integer(Set(recorder.widths).count),
+            "dragSteps": .integer(steps),
+            "mainThreadCpuMs": .number(mainThreadCPU * 1000),
+            "wallMs": .number(wallClock * 1000),
+            "mainThreadBusyFraction": .number(wallClock > 0 ? mainThreadCPU / wallClock : 0),
+            "cpuMsPerStep": .number(mainThreadCPU * 1000 / Double(max(1, steps))),
+            "paneLayout": .map(PaneLayoutTiming.summary()),
+            "histogramMs": .numbers(intervals),
         ]
+        // The probe's own keys win, so a report that has an opinion about the window keeps it.
+        return .object(own.merging(harness.conditions(window: window)) { mine, _ in mine })
     }
 
     /// How much CPU the main thread actually burned, and over how long.
@@ -473,36 +414,4 @@ enum FrameProbe {
     /// the frame interval is the number that says what the drag feels like.
     private static var mainThreadCPU: Double = 0
     private static var wallClock: Double = 0
-
-    private static func mainThreadCPUSeconds() -> Double {
-        Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)) / 1_000_000_000
-    }
-
-    private static var buildConfiguration: String {
-        #if DEBUG
-        "debug"
-        #else
-        "release"
-        #endif
-    }
-
-    /// Recorded with every run, so a number taken while three other builds were running can be
-    /// recognised as one rather than believed.
-    private static func systemLoadAverage() -> Double {
-        var loads = [Double](repeating: 0, count: 3)
-        guard getloadavg(&loads, 3) > 0 else { return 0 }
-        return loads[0]
-    }
-
-    private static func write(_ report: [String: Any]) {
-        let data = (try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted]))
-            ?? Data()
-        try? data.write(to: URL(fileURLWithPath: outputPath))
-        FileHandle.standardError.write(Data("frame probe wrote \(outputPath)\n".utf8))
-    }
-
-    private static func fail(_ message: String) {
-        FileHandle.standardError.write(Data("frame probe: \(message)\n".utf8))
-        exit(1)
-    }
 }
