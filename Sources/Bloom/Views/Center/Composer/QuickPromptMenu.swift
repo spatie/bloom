@@ -37,6 +37,9 @@ struct QuickPromptMenu: View {
     /// Hover for the row that writes a new prompt, which is not part of the ranked list and so has
     /// no `QuickPromptRow` to keep it.
     @State private var isNewHovered = false
+    /// How tall the rows actually are, so the scroll view can be given a height rather than left
+    /// to take whatever it is offered. See `rows(_:)`.
+    @State private var contentHeight: CGFloat = 0
     /// The form, when one is open. Two states of one panel rather than a second floating window.
     @State private var editor: Editor?
 
@@ -137,10 +140,21 @@ struct QuickPromptMenu: View {
         }
     }
 
+    /// The list, given an explicit height rather than a maximum one.
+    ///
+    /// **A `ScrollView` takes the height it is offered, not the height of what is in it.** Inside a
+    /// popover that meant two different wrong answers on the same panel: on the first open, before
+    /// the popover had settled on a size, the rows were laid out over the search field above them;
+    /// on the second, one prompt sat at the top of three hundred points of empty panel.
+    ///
+    /// So the rows are measured and the scroll view is told what to be, clamped so a long list
+    /// still scrolls instead of growing past the window. `LazyVStack` reports the height of what it
+    /// has realised, which is why this is a plain `VStack`: the list is a handful of prompts
+    /// somebody wrote by hand, and laziness here bought nothing and cost the measurement.
     private func rows(_ matches: QuickPromptMatches) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(matches.prompts) { prompt in
                         QuickPromptRow(
                             prompt: prompt,
@@ -156,8 +170,9 @@ struct QuickPromptMenu: View {
                 }
                 .padding(.horizontal, Self.listInset)
                 .padding(.vertical, Metrics.spacingSmall)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
             }
-            .frame(maxHeight: Self.listHeight)
+            .frame(height: height(for: matches.prompts.count))
             .onChange(of: selected) { _, row in
                 guard let row else { return }
                 proxy.scrollTo(row.id)
@@ -221,6 +236,22 @@ struct QuickPromptMenu: View {
         .onHover { isNewHovered = $0 }
         .padding(.horizontal, Self.listInset)
         .padding(.vertical, Metrics.spacingSmall)
+    }
+
+    /// What the scroll view is told to be.
+    ///
+    /// The measurement wins once there is one, and until then a guess from the row count stands in.
+    /// Without the guess the first frame is one row tall, because `onGeometryChange` cannot report
+    /// a height until after a layout has happened, and the panel visibly grew on opening. The guess
+    /// only has to be close enough that nobody sees the correction.
+    private func height(for count: Int) -> CGFloat {
+        let measured = contentHeight > 0 ? contentHeight : Self.estimatedHeight(rows: count)
+        return min(max(measured, Metrics.rowHeight), Self.listHeight)
+    }
+
+    /// A two line row and the list's own padding, which is what a prompt with a name draws.
+    private static func estimatedHeight(rows: Int) -> CGFloat {
+        CGFloat(rows) * (Metrics.rowHeight + Metrics.gutter) + Metrics.spacingWide
     }
 
     private var newRowTitle: String {

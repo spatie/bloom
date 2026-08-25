@@ -62,8 +62,8 @@ struct QuickPromptGallery: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.pane) {
-            panel("At rest", selected: nil)
-            panel("Highlighted, with the pencil in place", selected: 3)
+            panel("The first row, highlighted on opening", selected: 0)
+            panel("Further down the list", selected: 3)
             panel("Nothing written yet", selected: nil, empty: true)
         }
         .padding(Metrics.pane)
@@ -72,7 +72,12 @@ struct QuickPromptGallery: View {
         .environment(app)
     }
 
-    private func panel(_ caption: String, selected: Int?, empty: Bool = false) -> some View {
+    /// `emphasized: false` draws the same row through the same code with the window read as
+    /// inactive, which is exactly how `RowBackground` decides between the accent fill and the quiet
+    /// grey. Nothing about the row is reimplemented here to get the comparison.
+    private func panel(
+        _ caption: String, selected: Int?, empty: Bool = false, emphasized: Bool = true
+    ) -> some View {
         VStack(alignment: .leading, spacing: Metrics.spacingWide) {
             Text(caption)
                 .font(Typo.caption)
@@ -107,6 +112,7 @@ struct QuickPromptGallery: View {
                     }
                     .padding(.horizontal, listInset)
                     .padding(.vertical, Metrics.spacingSmall)
+                    .environment(\.controlActiveState, emphasized ? .key : .inactive)
                 }
 
                 Hairline()
@@ -168,7 +174,7 @@ extension Gallery {
     static let quickPrompts = Gallery(
         name: "quick-prompts",
         title: "Quick prompts",
-        size: CGSize(width: 460, height: 980),
+        size: CGSize(width: 460, height: 1080),
         needsFocus: false,
         view: { app in AnyView(QuickPromptGallery(app: app)) }
     )

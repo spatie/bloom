@@ -77,9 +77,17 @@ struct QuickPromptRow: View {
         .buttonStyle(.plain)
         .accessibilityLabel(prompt.resolvedName)
         .accessibilityValue(prompt.preview)
-        // Focused, for the reason spelled out on `SlashCommandRow`: this list really is driven by
-        // the arrow keys, which is the one case AppKit paints in the accent.
-        .rowBackground(isSelected: isSelected, isHovered: isHovered, isFocused: true)
+        // **The quiet fill, not the accent one**, and this is the one place in the composer's menus
+        // that differs. `RowBackground` paints the accent when a list has the keyboard, and here it
+        // has not: the keyboard is in the search field above, and the list is driven by arrows the
+        // field hands down. More to the point, the top row is highlighted the instant the panel
+        // opens, before anybody has done anything, and at full accent that reads as a row already
+        // chosen rather than as the place Return will go. With one prompt in the list the fill
+        // covered most of the panel.
+        //
+        // It is the treatment Spotlight, Raycast and Alfred all use for a resting first hit. Xcode's
+        // Open Quickly is the one that fills it solid, and it is the outlier.
+        .rowBackground(isSelected: isSelected, isHovered: isHovered, isFocused: false)
         .onHover { hovering in
             isHovered = hovering
             if hovering { onHover() }
@@ -105,10 +113,9 @@ struct QuickPromptRow: View {
                 )
                 .frame(width: Metrics.rowHeight - Metrics.spacingWide,
                        height: Metrics.rowHeight - Metrics.spacingWide)
-                .background {
-                    RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                        .fill(isEmphasized ? Palette.selectedEmphasizedText.opacity(0.18) : Palette.hover)
-                }
+                // No plate. A filled square inside the selection made the row read as a card with
+                // an action on it, and a menu on this Mac does not contain buttons. The glyph
+                // alone, appearing only on the row you are on, is as far as this should go.
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
