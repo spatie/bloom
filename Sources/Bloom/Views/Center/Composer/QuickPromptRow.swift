@@ -60,9 +60,13 @@ struct QuickPromptRow: View {
 
                 Spacer(minLength: Metrics.spacingSmall)
 
-                if isHovered || isSelected {
-                    pencil
-                }
+                // The space is always taken, and only the pencil comes and goes. Shown and hidden
+                // by presence, a name long enough to need the room lost forty points of it the
+                // moment the row was arrowed onto: the text reflowed into an ellipsis under the
+                // highlight and back out again as it left, on every press of Down.
+                pencil
+                    .opacity(isHovered || isSelected ? 1 : 0)
+                    .allowsHitTesting(isHovered || isSelected)
             }
             .padding(.horizontal, Metrics.spacing)
             // Four points was what a one line row takes, and this one is two lines: the name sat

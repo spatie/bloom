@@ -40,13 +40,30 @@ struct QuickPromptGallery: View {
                 text: "Walk me through the diff, file by file, and say why each change is there.",
                 sortOrder: 2
             ),
+            // Longer than the panel by a wide margin, which is the case that has to truncate
+            // gracefully rather than push the pencil off the edge or wrap into a third line.
+            QuickPrompt(
+                name: "Open a pull request against the release branch and write the description "
+                    + "from the commits rather than from the diff",
+                symbol: "arrow.triangle.pull",
+                text: "Push the branch and open a pull request. Three sentences, no headings.",
+                sortOrder: 3
+            ),
+            // One word with nowhere to break. Truncation has to cut it rather than let it push
+            // everything else out of the row.
+            QuickPrompt(
+                name: "Regenerate\u{200B}TheSnapshotFixturesForEveryGalleryPageInOneGo",
+                symbol: "camera",
+                text: "Run every gallery capture and replace the fixtures under Tests.",
+                sortOrder: 4
+            ),
         ]
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.pane) {
             panel("At rest", selected: nil)
-            panel("Second row highlighted", selected: 1)
+            panel("Highlighted, with the pencil in place", selected: 3)
             panel("Nothing written yet", selected: nil, empty: true)
         }
         .padding(Metrics.pane)
@@ -151,7 +168,7 @@ extension Gallery {
     static let quickPrompts = Gallery(
         name: "quick-prompts",
         title: "Quick prompts",
-        size: CGSize(width: 460, height: 780),
+        size: CGSize(width: 460, height: 980),
         needsFocus: false,
         view: { app in AnyView(QuickPromptGallery(app: app)) }
     )
