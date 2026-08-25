@@ -680,6 +680,22 @@ struct TranscriptListView: View {
                 // offset the view is already at moves nothing. See `onStart`.
                 follower.onStart = { [box = _scrollPosition] y in box.wrappedValue.scrollTo(y: y) }
                 await transcript.load()
+                // The window, now that there are rows to work it out from.
+                //
+                // The initialiser and the session's `onChange` both ran before this: the first
+                // when the pane was built, which for a session this launch has never opened is
+                // before a single row exists, and the second while `transcript.rows` still held
+                // the conversation being left. Neither could name a tail, and a window of "from
+                // row zero" is the whole session. This is the first moment the answer can be
+                // right, and it is still before anything has been drawn from it.
+                drawn = Drawn(
+                    session: transcript.session.id,
+                    start: TranscriptResume.window(
+                        memory?.remembered(session: transcript.session.id),
+                        tailStart: TranscriptTail.start(in: transcript.rows.lazy.map(\.kind)),
+                        rowCount: transcript.rows.count
+                    )
+                )
                 // Whatever the session arrived with, taken in without a fade. This runs whether
                 // or not the row count changed, which matters: two sessions can hold the same
                 // number of rows, and then nothing else would have told the tracker it is
