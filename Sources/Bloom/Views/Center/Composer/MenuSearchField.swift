@@ -17,6 +17,14 @@ struct MenuSearchField: NSViewRepresentable {
     /// what leaves Tab moving the focus and Return doing whatever a field does with it when the
     /// list has nothing highlighted to press.
     var onKey: @MainActor (ComposerKey) -> Bool
+    /// The left and right arrows, for a list laid out as a grid, given the step they mean.
+    ///
+    /// Its own way in rather than two more cases on `ComposerKey`, which is the enum of keys **the
+    /// composer** has to answer for itself: every one of its seven handlers would have had to
+    /// answer a question only the icon picker asks, and one of them answering it wrongly would
+    /// have taken the caret out of a field somebody was typing in. Absent by default, so a field
+    /// that says nothing keeps the arrows the field editor's.
+    var onHorizontal: (@MainActor (Int) -> Bool)?
 
     func makeNSView(context: Context) -> NSTextField {
         let field = NSTextField()
@@ -35,6 +43,7 @@ struct MenuSearchField: NSViewRepresentable {
 
     func updateNSView(_ field: NSTextField, context: Context) {
         context.coordinator.onKey = onKey
+        context.coordinator.onHorizontal = onHorizontal
         context.coordinator.text = $text
         // Only when it differs. Writing the value back on every pass would move the insertion
         // point to the end of the field mid word.
@@ -46,21 +55,27 @@ struct MenuSearchField: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, onKey: onKey)
+        Coordinator(text: $text, onKey: onKey, onHorizontal: onHorizontal)
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var text: Binding<String>
         var onKey: @MainActor (ComposerKey) -> Bool
+        var onHorizontal: (@MainActor (Int) -> Bool)?
         /// Whether the keyboard has been claimed once already. The panel opens because somebody
         /// clicked the control it hangs off and the next thing they do is type, so it is claimed;
         /// claiming it again on a later pass would drag the caret back out of wherever they had
         /// put it.
         private var didFocus = false
 
-        init(text: Binding<String>, onKey: @escaping @MainActor (ComposerKey) -> Bool) {
+        init(
+            text: Binding<String>,
+            onKey: @escaping @MainActor (ComposerKey) -> Bool,
+            onHorizontal: (@MainActor (Int) -> Bool)?
+        ) {
             self.text = text
             self.onKey = onKey
+            self.onHorizontal = onHorizontal
         }
 
         /// On the next pass of the run loop, because a view being made or updated is not yet in
@@ -82,6 +97,13 @@ struct MenuSearchField: NSViewRepresentable {
         func control(
             _ control: NSControl, textView: NSTextView, doCommandBy selector: Selector
         ) -> Bool {
+            if let onHorizontal {
+                switch selector {
+                case #selector(NSResponder.moveLeft(_:)): if onHorizontal(-1) { return true }
+                case #selector(NSResponder.moveRight(_:)): if onHorizontal(1) { return true }
+                default: break
+                }
+            }
             let key: ComposerKey? = switch selector {
             case #selector(NSResponder.moveUp(_:)): .up
             case #selector(NSResponder.moveDown(_:)): .down
