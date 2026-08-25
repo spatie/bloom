@@ -10,7 +10,12 @@ let package = Package(
         .library(name: "BloomCore", targets: ["BloomCore"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.2.0"),
+        // The terminal panes. The upper bound is not tidiness: SwiftTerm tags 1.20.0 as a
+        // pre-release ("one last before 2.0"), and SwiftPM cannot see that flag because the tag
+        // carries no semver pre-release identifier, so a bare `from:` would resolve to it. 1.19.0
+        // is what upstream marks as the release, and what upstream says comes next is 2.0 with
+        // breaking changes, which this range would have to be opened by hand for anyway.
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm", "1.19.0" ..< "1.20.0"),
         // The updater. Sparkle ships as a binary XCFramework, so `swift build` links the app
         // against it but copies nothing: `Tools/build.sh` embeds `Sparkle.framework` into
         // `Contents/Frameworks` and adds the rpath that finds it there. See `Tools/build.sh`.
