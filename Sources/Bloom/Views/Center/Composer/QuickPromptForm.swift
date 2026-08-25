@@ -62,8 +62,10 @@ struct QuickPromptForm: View {
     private static let wellSize: CGFloat = 22
     /// The mark inside it, set well under the well so the plate reads as a plate.
     private static let wellPoints: CGFloat = 15
-    /// The name the well's position is measured in.
-    private static let formSpace = "quickPromptForm"
+    /// The name the well's position is measured in. `nonisolated` because `onGeometryChange` reads
+    /// it from a closure that is not on the main actor, and a `String` on a `MainActor` type is
+    /// isolated to it unless it says otherwise.
+    private nonisolated static let formSpace = "quickPromptForm"
 
     var body: some View {
         // `Metrics.pane` and `gutter` rather than the tighter rungs the rest of this panel uses.
