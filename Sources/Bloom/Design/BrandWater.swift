@@ -211,6 +211,15 @@ final class BrandWaterView: NSView {
     /// About window open against seven with it closed, drawing pictures indistinguishable from
     /// each other, for as long as the window stayed open. Capped, the same sampling puts the
     /// open window within ten points of one core of the closed baseline.
+    ///
+    /// **It is an argument about brightness changing, not about anything moving, and it does not
+    /// carry to a layer that travels.** `BrandBranching` took this number by citation and was
+    /// wrong to: its branch heads are fifty eight point blooms crossing the plinth at up to forty
+    /// two points a second, and at twelve frames each step moves them three and a half points and
+    /// eighteen levels, which is a hundred times what the sentence above is defending. It runs at
+    /// twenty now, with its own measurement. The travel this file has is the sways, a few points
+    /// a second across a field with no edge anywhere in it, which measures at two levels a step
+    /// and is why the cap is still right for the water.
     private static let frameRate = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)
 
     private func sway(_ light: CALayer, by offset: CGVector, over seconds: CFTimeInterval) {
