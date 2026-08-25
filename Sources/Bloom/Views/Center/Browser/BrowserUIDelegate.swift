@@ -2,14 +2,16 @@ import AppKit
 import WebKit
 import BloomCore
 
-/// The things a page asks the application for, rather than the network: a window of its own, and
-/// a file off this Mac.
+/// The things a page asks the application for, rather than the network: a window of its own, a
+/// question put to the reader, and a file off this Mac.
 ///
 /// **A browser pane had no `WKUIDelegate` at all**, and WebKit's answer to a missing one is to do
 /// nothing without saying so. Every `target="_blank"` link and every `window.open` returned null
-/// and left the reader looking at a page where a click had visibly failed; every
-/// `<input type="file">` opened no panel. For a pane whose whole job is the dev server running in
-/// the worktree next door, those are the everyday cases rather than the exotic ones.
+/// and left the reader looking at a page where a click had visibly failed; `alert` drew nothing,
+/// `confirm` was always false and `prompt` was always null, so a page that waited for the reader
+/// to agree to something waited for ever; every `<input type="file">` opened no panel. For a pane
+/// whose whole job is the dev server running in the worktree next door, those are the everyday
+/// cases rather than the exotic ones.
 ///
 /// Kept off `BrowserSession` for the reason `NavigationObserver` is: `uiDelegate` is the sort of
 /// reference that outlives what it points at, and a separate object makes the weak link back
@@ -62,6 +64,62 @@ final class BrowserUIObserver: NSObject, WKUIDelegate {
     ) -> WKWebView? {
         owner?.openWindow(navigationAction.request.url)
         return nil
+    }
+
+    // MARK: - The page's own questions
+
+    /// `alert`.
+    ///
+    /// **The `async` spelling of all three, and that is the safety property rather than a
+    /// nicety.** WebKit hands each of these a completion handler that gives the page's JavaScript
+    /// its answer back: never calling it hangs the page for ever, and calling it twice raises.
+    /// Written this way the compiler resumes the caller exactly once whatever path the method
+    /// returns by, including the one where the pane is closed while the sheet is up, which
+    /// `BrowserDialogPresenter.dismiss` turns into an ordinary cancel.
+    ///
+    /// Nothing is returned to the page by `alert`, so the answer is dropped. It is still awaited,
+    /// because the page is entitled to be blocked until the reader has read it: that is what
+    /// `alert` means, and a page that carried on regardless would put its next dialog up over this
+    /// one.
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo
+    ) async {
+        _ = await owner?.ask(.alert, message: message, from: Self.name(of: frame.securityOrigin))
+    }
+
+    /// `confirm`. False for a cancel, and false for a page that has been silenced or has no window
+    /// to ask in, which is the answer a page must already be ready for.
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo
+    ) async -> Bool {
+        let answer = await owner?.ask(
+            .confirm, message: message, from: Self.name(of: frame.securityOrigin)
+        )
+        return answer?.isConfirmed ?? false
+    }
+
+    /// `prompt`. Nil for a cancel, which is what a browser returns and what a page tests for.
+    ///
+    /// An empty string is a different answer from nil and is preserved: a reader who clears the
+    /// field and presses OK has said "nothing", and a page that treats that as a cancel is a page
+    /// making its own mistake.
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptTextInputPanelWithPrompt prompt: String,
+        defaultText: String?,
+        initiatedByFrame frame: WKFrameInfo
+    ) async -> String? {
+        let answer = await owner?.ask(
+            .prompt,
+            message: prompt,
+            defaultText: defaultText ?? "",
+            from: Self.name(of: frame.securityOrigin)
+        )
+        return answer?.text
     }
 
     // MARK: - A file off this Mac
