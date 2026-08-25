@@ -97,6 +97,11 @@ enum SwitchProbe {
             }
         }
 
+        // Whether a reader who was NOT at the live end is put back where they were, which is the
+        // half of `TranscriptResume` the runs above cannot reach: a probe that only ever sits at
+        // the end measures the flag, never the anchor.
+        let kept = await keepsItsPlace(contentView: contentView, ticker: ticker)
+
         // The case that breaks first: away before the asynchronous work has landed. Nothing from
         // the workspace being left may appear in the one being arrived at.
         let rapid = await rapidSwitches(contentView: contentView, ticker: ticker)
@@ -111,6 +116,7 @@ enum SwitchProbe {
             "settleMs": .integer(settle),
             "runs": .array(runs),
             "rapid": .object(rapid),
+            "keepsItsPlace": .object(kept),
         ]
         harness.write(.object(own.merging(harness.conditions(window: window)) { mine, _ in mine }))
         exit(0)
@@ -162,6 +168,47 @@ enum SwitchProbe {
             "panePasses": .map(PaneLayoutTiming.timeline()),
             "worstFrameMs": .number(ticker.intervalsMs.max() ?? 0),
         ]
+    }
+
+    /// Leaves a reader part way up a conversation, goes somewhere else, and comes back.
+    ///
+    /// The offsets either side are the whole report. They are not required to be equal to the
+    /// point: the rows above the viewport are re-measured on the way back, so an anchor that lands
+    /// the same ROW at the top can legitimately land a few points from where it was. What would
+    /// fail is landing at the live end (the flag was written when it should not have been), at the
+    /// top (nothing was restored), or at the first unread row, which is what a refused restore
+    /// used to do and is halfway up a long conversation.
+    private static func keepsItsPlace(
+        contentView: NSView, ticker: Ticker
+    ) async -> [String: JSONValue] {
+        guard let app = ProbeHarness.appModel, order.count >= 2 else { return [:] }
+        let subject = order[0]
+
+        app.selection = .workspace(subject)
+        try? await Task.sleep(for: .milliseconds(settle))
+        guard let scroll = ProbeHarness.transcriptScrollView(in: contentView) else { return [:] }
+
+        // A long way up, so the answer cannot be confused with a reader who never left the end.
+        let travel = ProbeHarness.scrollableHeight(of: scroll)
+        let target = max(0, travel - 2_000)
+        scroll.contentView.setBoundsOrigin(CGPoint(x: 0, y: target))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        // Long enough for the scroll to settle and for the pane to write down where it is: the
+        // record is made when a scroll ENDS, which is a phase change rather than a frame.
+        try? await Task.sleep(for: .seconds(2))
+        let left = ProbeHarness.scrollPlace(scroll)
+
+        await switchTo(order[order.count - 1], contentView: contentView, ticker: ticker)
+        await switchTo(subject, contentView: contentView, ticker: ticker)
+
+        let returned = ProbeHarness.scrollPlace(
+            ProbeHarness.transcriptScrollView(in: contentView)
+        )
+        var report: [String: JSONValue] = ["left": .object(left), "returned": .object(returned)]
+        if case .number(let before)? = left["offset"], case .number(let after)? = returned["offset"] {
+            report["movedPoints"] = .number(abs(after - before))
+        }
+        return report
     }
 
     /// Switches back and forth without waiting, then reports what is on screen at the end.
