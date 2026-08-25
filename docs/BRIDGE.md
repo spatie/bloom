@@ -91,9 +91,9 @@ uses, so Bloom and Bloom Dev can never land on one. The landmine there is `socka
 
 ## 3. The tools
 
-Sixteen, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role gate. A
-list of handlers rather than a switch, because a switch would put every tool in three places: the
-listing, the dispatch and the gate.
+Twenty-three, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
+gate. A list of handlers rather than a switch, because a switch would put every tool in three
+places: the listing, the dispatch and the gate.
 
 | Tool | What it does | parent | child | owner |
 | --- | --- | :---: | :---: | :---: |
@@ -109,6 +109,13 @@ listing, the dispatch and the gate.
 | `pane_split` | Put one beside what is on screen rather than behind it | ✓ | | |
 | `pane_close` | Take one back off the screen | ✓ | | |
 | `pane_rename` | Give a tab a name the reader can find it by | ✓ | | |
+| `pane_list` | What the workspace has open: each pane's kind, its name, whether it is in the tab in front, and for a browser its number and its address | ✓ | | |
+| `browser_read` | One browser's toolbar: address, page title, load state, whether Back and Forward would do anything | ✓ | | |
+| `browser_reload` | Fetch that page again | ✓ | | |
+| `browser_go` | Point a pane that is already open at another http or https address | ✓ | | |
+| `browser_scroll` | Move the page up, down, to the top or to the bottom, and say where it ended up | ✓ | | |
+| `browser_screenshot` | A picture of the pane as it is on screen, as an image | ✓ | | |
+| `browser_text` | The visible text of the page, wrapped as untrusted content | ✓ | | |
 | `quick_prompt_list` | The owner's own quick prompts, whole, with the ids the other three take | ✓ | | ✓ |
 | `quick_prompt_create` | Write a new quick prompt into that library | ✓ | | ✓ |
 | `quick_prompt_update` | Change one, field by field, leaving the fields it does not name alone | | | ✓ |
@@ -128,18 +135,24 @@ transport failure the CLI may retry or surface as a broken server; an errored re
 model reads and can act on. "You are not allowed to do that" is something to tell the model, not
 something to tell the transport.
 
-### The six that need the app, and the ten that do not
+### The thirteen that need the app, and the ten that do not
 
 `BridgeToolbox.standard` holds the ten that reach nothing but the store, and it is what a
 `BridgeServer` built without the app serves, which is every test that did not ask for more.
-`AppModel.bridgeToolbox()` adds the other six to it, because starting a workspace has to reach the
-main-actor graph that runs one, asking for a merge has to reach the same path the Merge button
+`AppModel.bridgeToolbox()` adds the other thirteen to it, because starting a workspace has to reach
+the main-actor graph that runs one, asking for a merge has to reach the same path the Merge button
 takes, and a pane is a thing the window owns. Each of those crosses the line as an injected closure
 (`WorkspaceStarting`, `WorkspaceMergeRequesting`, `PaneOpening`, `PaneSplitting`, `PaneClosing`,
-`PaneRenaming`), so a pane an agent asks for is the pane the menu makes, unchanged and not copied.
-It adds them **to** `.standard` rather than listing its handlers again, because a copy of that list
-is a copy that drifts: a tool added to the core toolbox and not to the app's would pass every test
-in the suite and never reach the running app.
+`PaneRenaming`, `PaneListing`, `BrowserPaneCommanding`), so a pane an agent asks for is the pane the
+menu makes, unchanged and not copied. It adds them **to** `.standard` rather than listing its
+handlers again, because a copy of that list is a copy that drifts: a tool added to the core toolbox
+and not to the app's would pass every test in the suite and never reach the running app.
+
+**The last two of those are what a browser tool sees the window through.** `PaneListing` takes a
+workspace and gives back a `PaneCensus`, and that shape is the point: there is no argument on it
+that could ask the window to do anything, so the tool that reports cannot act. `BrowserPaneCommanding`
+carries one `BrowserPaneCommand` and is what the other six share, so the pane a call means is
+resolved once, by `BrowserPaneChoice.choose` in the core, rather than six times in the window.
 
 **The four quick prompt tools are the case that shows where the line really is.** They write, and
 they need no seam at all, because a quick prompt is a row in `quick_prompt` and `Store` is an actor
@@ -219,6 +232,59 @@ the form enforces by disabling Save. A call that names no field at all is refuse
 answered with "nothing changed", because the next call a model makes after those two answers is a
 different call.
 
+### The browser pane, and what it does and does not hand over
+
+**Stated as a capability rather than as a list of tools: an agent working in a workspace can now
+see what the owner has open in that workspace, read one of its browser panes as words or as a
+picture, and move that pane about, in the workspace it is standing in and nowhere else. It cannot
+run script in the page, click anything, fill anything in, or read anything the person cannot see on
+the screen.**
+
+That is the whole of it, and each half is deliberate.
+
+**It cannot run script.** `evaluateJavaScript` would turn six narrow tools into a general
+automation surface, and it is not here. The pane is the owner's own browser with his own session in
+it, so a script in that page reads what he can read and acts as he acts: it can walk an
+administration area, post a form, or lift a token out of `localStorage`. And the caller may be an
+agent that has just read a web page, an issue or a dependency's README, which is to say an agent
+holding text somebody else wrote. Keeping such a tool off the self-approval list would not rescue
+it either, because a permission prompt showing a paragraph of JavaScript is a prompt nobody can
+evaluate: two lines of it look reasonable to anybody. The honest substitute is the narrow verb, so
+what Bloom offers is reading the visible text, taking a picture, scrolling, reloading and going to
+an address, each of them a thing Bloom does rather than a thing the caller describes. What that
+costs is real: no clicking, no forms, no waiting for a selector. An agent that needs those has a
+browser of its own to drive, and the difference is that nobody is logged in there as him. If it is
+ever wanted, the shape is a per-project setting, off by default, never self-approved, with the
+script shown in the prompt, and it is a change to make with the owner asked first.
+
+**The scripts Bloom does run are written out in `BrowserPageScript`, in full, at compile time.**
+Two of them: `document.body.innerText` for the text, and a scroll. There is no case in that enum
+that carries a string, and `BrowserSession.evaluate` takes a `BrowserPageScript` rather than a
+`String`, so the signature is the guarantee rather than a convention somebody has to keep. The one
+thing a caller influences is a distance, and it reaches the source as an `Int` that has already
+been parsed out of JSON and range checked.
+
+**What comes back off a page is marked as untrusted where it arrives.** A page can say anything,
+including "ignore your instructions", and a model reading a wall of prose cannot tell which words
+came from the owner. `browser_text` answers inside `BridgeUntrustedText`, which names the address,
+says the lines are data, and quotes any line of the page that would have read as the closing
+marker. That is not a defence and is not described as one: nothing stops a model that decides to
+obey the page. It removes the excuse. The picture `browser_screenshot` returns carries the same
+sentence beside it, and a browser tab's name and address are page-written too, so `pane_list` and
+`browser_read` carry the note as well.
+
+**Nothing here can reach another workspace's window.** There is no workspace argument on any of
+them, exactly as with the four older pane tools, so an agent cannot read a page in a window
+somebody is working in on the other side of the sidebar.
+
+**And nothing here opens a page.** A caller names a browser by the number `pane_list` gives it,
+counting along the strip, and the tools act only on a pane that already has a live web view.
+`CenterTabStore.liveBrowser` is what they ask, never `browser(for:)`, so a listing cannot cause a
+page to be fetched: a tab restored from the last launch that nobody has looked at is reported with
+the address it remembers and refused for anything needing a live page. `browser_go` takes the two
+schemes `pane_open` takes and refuses the rest, through the same reading, so neither door will
+render `file:///` in the owner's window on a model's say-so.
+
 ### How many a caller may start
 
 `WorkspaceStartAllowance` holds all three answers in one switch, and they are one rule with one
@@ -259,7 +325,7 @@ So `BridgeToolApproval` names the tools Bloom answers for itself:
 
 | Self-approved | Not |
 | --- | --- |
-| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `quick_prompt_list` | everything else |
+| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `pane_list`, `browser_read`, `quick_prompt_list` | everything else |
 
 It is a list rather than "anything with our prefix", so a tool added later is opted in by somebody
 thinking about it rather than by inheriting a decision made before it existed.
@@ -276,6 +342,19 @@ The four pane tools are on the list because each adds or changes something the r
 undo, in the workspace whose agent is asking and nowhere else. `pane_close` refuses the two cases
 that would cost anything: it will not empty the centre column, and it cannot close the review or
 the notes, which hold the reader's own work.
+
+**The seven browser tools split, and the line between them is the chrome.** `pane_list` and
+`browser_read` report the strip and the address bar: what is open, what it is called, where each
+browser is pointed, whether it is loading. Every fact of that is on the screen in front of the owner
+already, none of it is the contents of a page, and they have to be callable unattended because they
+are the first call of any turn that then does something useful. The other five are off the list, in
+two groups. `browser_reload`, `browser_go` and `browser_scroll` change what the person is looking
+at: a reload can lose what they had half typed into a form, a navigation is a request made from
+their browser with whatever they are logged into, and a scroll moves the page under somebody who is
+reading it. `browser_screenshot` and `browser_text` carry the page itself into a model's context,
+which is to say off this machine, and a page he is signed into is his own data. Bloom cannot tell a
+dev server's front page from an administration screen, so it does not try: it asks, and the person
+who can tell answers.
 
 The project tools are not on it, and that is deliberate rather than an omission: the list is for
 tools an agent must be able to call while nobody is watching, and those are called by the owner's

@@ -45,10 +45,24 @@ public struct BridgeTool: Sendable, Hashable {
 public struct BridgeToolResult: Sendable, Hashable {
     public let text: String
     public let isError: Bool
+    /// A picture, for the one tool that has one. Nil for every other result, which is why it is
+    /// defaulted rather than threaded through eighteen call sites that have nothing to say about
+    /// it.
+    public let image: BridgeToolImage?
 
-    public init(text: String, isError: Bool = false) {
+    public init(text: String, isError: Bool = false, image: BridgeToolImage? = nil) {
         self.text = text
         self.isError = isError
+        self.image = image
+    }
+
+    /// An image, and the sentence that says what it is of.
+    ///
+    /// The text is not decoration. A model handed a bare image has to work out from the
+    /// conversation what it is looking at, and the one fact it cannot see in the picture is which
+    /// pane and which address it came from.
+    public static func picture(_ image: BridgeToolImage, saying text: String) -> BridgeToolResult {
+        BridgeToolResult(text: text, isError: false, image: image)
     }
 
     public static func failure(_ text: String) -> BridgeToolResult {
@@ -70,10 +84,53 @@ public struct BridgeToolResult: Sendable, Hashable {
         return BridgeToolResult(text: String(decoding: data, as: UTF8.self))
     }
 
+    /// The MCP shape: a list of content blocks, text first.
+    ///
+    /// An image travels as its own block rather than as a data URI inside the text, because that
+    /// is what the protocol says and because the two CLIs render a block and would render a
+    /// hundred kilobytes of base64 in a sentence as a hundred kilobytes of base64 in a sentence.
     public var content: JSONValue {
-        .object([
-            "content": .array([.object(["type": .string("text"), "text": .string(text)])]),
+        var blocks: [JSONValue] = [.object(["type": .string("text"), "text": .string(text)])]
+        if let image { blocks.append(image.content) }
+        return .object([
+            "content": .array(blocks),
             "isError": .bool(isError),
+        ])
+    }
+}
+
+/// A picture a tool answers with.
+///
+/// It exists for `browser_screenshot` and is written to be the only way an image reaches the wire,
+/// so the size ceiling below is enforced in one place rather than remembered in each.
+public struct BridgeToolImage: Sendable, Hashable {
+    public let data: Data
+    public let mimeType: String
+
+    /// What one result may carry.
+    ///
+    /// The socket does not care: `UnixSocketConnection` writes a line of any length and
+    /// `LineBuffer` reads one. The model does. Base64 is a third larger than the bytes, every one
+    /// of those bytes is a token the owner pays for, and a picture of a web page that will not fit
+    /// in this is a picture of a page nobody wanted at that size. `BrowserSnapshot.agentWidth` is
+    /// the other half of that argument, and is what keeps a real capture an order of magnitude
+    /// under it.
+    public static let maximumBytes = 4 * 1_024 * 1_024
+
+    public init(png: Data) {
+        data = png
+        mimeType = "image/png"
+    }
+
+    /// Whether this is small enough to send, asked by the tool rather than by the initialiser, so
+    /// that the refusal is a sentence a model reads rather than a nil somebody has to explain.
+    public var isTooLarge: Bool { data.count > Self.maximumBytes }
+
+    var content: JSONValue {
+        .object([
+            "type": .string("image"),
+            "data": .string(data.base64EncodedString()),
+            "mimeType": .string(mimeType),
         ])
     }
 }

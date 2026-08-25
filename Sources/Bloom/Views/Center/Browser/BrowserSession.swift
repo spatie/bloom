@@ -182,11 +182,15 @@ final class BrowserSession {
     ///
     /// PNG rather than the `NSImage` WebKit hands back, because the attachment path takes bytes
     /// and a format, and because PNG is what a screenshot on this machine already is.
-    func snapshot() async throws -> Data {
+    /// `width`, in points, is for the one caller that is not a person: `browser_screenshot` asks
+    /// for `BrowserSnapshot.agentWidth` rather than the pane's own, because that picture is paid
+    /// for by the token instead of being looked at. Nil is the pane's width and is what the camera
+    /// button passes, so what the reader gets is unchanged.
+    func snapshot(width: Double? = nil) async throws -> Data {
         let configuration = WKSnapshotConfiguration()
         // Points, not pixels, so the picture comes out at the retina size the pane is drawn at
         // rather than at half of it. Nil would give the same, but only while the default holds.
-        configuration.snapshotWidth = NSNumber(value: Double(webView.bounds.width))
+        configuration.snapshotWidth = NSNumber(value: width ?? Double(webView.bounds.width))
 
         let image = try await webView.takeSnapshot(configuration: configuration)
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
@@ -195,6 +199,65 @@ final class BrowserSession {
             throw BrowserSnapshotFailure()
         }
         return png
+    }
+
+    /// The rendered text of the page, for `browser_text`.
+    ///
+    /// Trimmed of the blank lines a laid-out page produces at either end, and nothing else: what
+    /// comes back is what the reader can see, and editing it further would be Bloom deciding which
+    /// of somebody else's words matter. The envelope it travels in is `BridgeUntrustedText`, and
+    /// the cap is `BrowserPageText`.
+    func text() async throws -> String {
+        let value = try await evaluate(.visibleText) { $0 as? String }
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Moves the page, and answers with where it ended up: how far down, how tall the page is, and
+    /// how much of it the pane is showing.
+    ///
+    /// The three come back out of the page, so they are read as integers and nothing else. A
+    /// number that has been through `Int` carries nothing a page wrote, which is what makes them
+    /// safe to put in a sentence a model reads. See `BrowserScroll.report`.
+    func scroll(_ scroll: BrowserScroll) async throws -> (offset: Int, height: Int, viewport: Int) {
+        try await evaluate(.scroll(scroll)) { value in
+            guard let numbers = value as? [Double], numbers.count == 3 else { return nil }
+            return (Int(numbers[0]), Int(numbers[1]), Int(numbers[2]))
+        }
+    }
+
+    /// Runs one of Bloom's own scripts in the page.
+    ///
+    /// **The parameter is a `BrowserPageScript` and never a `String`, and that signature is the
+    /// safety property rather than a nicety.** There is no method on this type that evaluates text
+    /// a caller supplied, so there is no expression anywhere in the app that can put a bridge
+    /// caller's characters into this page. The head of `BrowserPageScript` says what the scripts
+    /// are, and the head of `BrowserPaneCommand` argues why Bloom offers no tool that would want
+    /// an arbitrary one.
+    ///
+    /// The completion-handler form rather than the `async` overload, which looks tidier and is a
+    /// trap: WebKit's async spelling returns a non-optional `Any`, so a script evaluating to
+    /// `undefined` crashes in the thunk before the value reaches the caller. A page that has just
+    /// navigated is exactly when that happens.
+    ///
+    /// `read` runs inside the completion handler rather than after it, and that is not a style
+    /// choice either: `Any` is not `Sendable`, so resuming a continuation with the raw value is a
+    /// data race the compiler refuses. Turning it into a `String` or three `Int`s where it arrives
+    /// means the only thing crossing back is a value that was safe to cross.
+    private func evaluate<Value: Sendable>(
+        _ script: BrowserPageScript,
+        reading read: @escaping @Sendable (Any?) -> Value?
+    ) async throws -> Value {
+        try await withCheckedThrowingContinuation { continuation in
+            webView.evaluateJavaScript(script.source) { value, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let read = read(value) {
+                    continuation.resume(returning: read)
+                } else {
+                    continuation.resume(throwing: BrowserScriptFailure())
+                }
+            }
+        }
     }
 
     func stop() {
@@ -346,4 +409,16 @@ private final class NavigationObserver: NSObject, WKNavigationDelegate {
 /// `takeSnapshot` does not report itself.
 struct BrowserSnapshotFailure: LocalizedError {
     var errorDescription: String? { "Bloom could not turn this page into an image." }
+}
+
+/// One of Bloom's own scripts answered with something that is not what it returns.
+///
+/// The scripts are fixed and each has one shape, so this is a page that has gone away underneath
+/// the call: a navigation committing between the evaluation and the answer leaves `undefined`
+/// where a string or three numbers were. Its own error rather than a nil, because the tool has to
+/// say something a model can act on, and "try again once it has loaded" is that sentence.
+struct BrowserScriptFailure: LocalizedError {
+    var errorDescription: String? {
+        "That page did not answer. It may have navigated while Bloom was reading it."
+    }
 }
