@@ -105,10 +105,9 @@ struct QuickPromptRow: View {
                 )
                 .frame(width: Metrics.rowHeight - Metrics.spacingWide,
                        height: Metrics.rowHeight - Metrics.spacingWide)
-                .background {
-                    RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                        .fill(isEmphasized ? Palette.selectedEmphasizedText.opacity(0.18) : Palette.hover)
-                }
+                // No plate. A filled square inside the selection made the row read as a card with
+                // an action on it, and a menu on this Mac does not contain buttons. The glyph
+                // alone, appearing only on the row you are on, is as far as this should go.
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
