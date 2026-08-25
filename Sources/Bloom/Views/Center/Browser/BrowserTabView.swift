@@ -44,6 +44,11 @@ struct BrowserTabView: View {
         VStack(spacing: 0) {
             toolbar(session)
             Hairline()
+            if !session.downloads.isEmpty {
+                BrowserDownloadsBar(
+                    downloads: session.downloads, clear: session.clearDownloads
+                )
+            }
             BrowserWebView(session: session, paneMenu: pageMenu, host: host)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
