@@ -601,12 +601,11 @@ final class TranscriptModel {
 
     /// The one place a turn starts, reached only from `drain`.
     private func deliver(_ delivery: Delivery) async {
-        guard let store else { return }
-        // A `return` used to stand here, and the sentence went nowhere: `drain` has already
+        // A bare `return` used to stand here, and the sentence went nowhere: `drain` has already
         // retired this delivery from the queue and drawn it as sent, so a quiet return leaves a
-        // bubble claiming to have been said to an agent that was never built. It needs the
-        // database open, so it is close to impossible, and a message of the owner's disappearing
-        // without a word is not a thing to leave resting on that.
+        // bubble claiming to have been said to an agent that was never built. It takes a database
+        // that never opened, so it is close to impossible, and a message of the owner's
+        // disappearing without a word is not a thing to leave resting on that.
         guard let runner = ensureRunner() else {
             await abandon(delivery, saying: "Bloom could not open an agent for this chat.")
             return
@@ -653,20 +652,24 @@ final class TranscriptModel {
     /// lost its place in the order. An unsent prompt is often minutes of thought and this app
     /// holds the only copy of it; it stays where it can be read, cancelled and sent again.
     private func abandon(_ delivery: Delivery, saying complaint: String) async {
-        guard let store else { return }
-
         // Nothing was said after all, so the bubble that said it was going stops claiming so.
         sending = nil
-        try? await store.restoreDelivery(id: delivery.id)
-        await refreshQueue()
 
         Log.composer.error(
             "the agent would not start, so the prompt stayed in the queue: \(complaint, privacy: .public)"
         )
 
-        let row = AgentError.notStarted(message: complaint)
-        _ = try? await store.appendNext(sessionID: session.id, kind: .error, payload: row.raw)
-        await appendLatestMessages()
+        // Everything durable needs the database, and one of the two ways in here is the database
+        // never having opened. The alert below is outside this on purpose: it is the half that
+        // still works when there is nowhere to write, and the half nobody can be left without.
+        if let store {
+            try? await store.restoreDelivery(id: delivery.id)
+            await refreshQueue()
+
+            let row = AgentError.notStarted(message: complaint)
+            _ = try? await store.appendNext(sessionID: session.id, kind: .error, payload: row.raw)
+            await appendLatestMessages()
+        }
 
         app.alert = BloomAlert(title: "Could not start the agent", message: complaint)
     }
