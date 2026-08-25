@@ -46,6 +46,20 @@ struct UserTurnRowView: View {
     /// inside a bubble that would clip it. See `TranscriptHoverOverlay`.
     @Environment(\.transcriptHoverHost) private var hoverHost
 
+    /// The pill inside the sentence the pointer is currently on, reported by `LinkTextView` the
+    /// moment it arrives. Nil for every bubble nobody is pointing at, which is what keeps the
+    /// probe below and the timer beside it off every other row in the transcript.
+    @State private var hovered: FileChipHover?
+    /// Where the sentence is in the window, read only while a pill in it is under the pointer. See
+    /// `chipProbe`.
+    @State private var textFrame: CGRect = .zero
+    @State private var hoverTask: Task<Void, Never>?
+    /// The card this bubble put up, if it is still up. Recorded rather than recomputed, exactly as
+    /// `ToolRowHeader` records its own: what has to be taken down is what was PUT up, and the
+    /// pointer crossing from one chip to the next raises the second before the first is told it
+    /// was left.
+    @State private var published: TranscriptHoverCard?
+
     /// How much of the pane a user turn always leaves empty on its left, so it reads as one side of
     /// a conversation even when it is short.
     ///
@@ -111,6 +125,25 @@ struct UserTurnRowView: View {
         }
         .padding(.horizontal, TranscriptLayout.inset)
         .padding(.vertical, TranscriptLayout.inset)
+        .onChange(of: hovered) { _, chip in
+            hoverTask?.cancel()
+            guard let chip else {
+                withdraw()
+                return
+            }
+            let wanted = card(for: chip.path)
+            hoverTask = Task {
+                try? await Task.sleep(for: Motion.hoverCardDelay)
+                // Zero only if the probe has not been laid out yet, which would put the card in
+                // the pane's top left corner. Saying nothing beats saying it in the wrong place.
+                guard !Task.isCancelled, textFrame != .zero else { return }
+                publish(wanted, at: chip.frame.offsetBy(dx: textFrame.minX, dy: textFrame.minY))
+            }
+        }
+        .onDisappear {
+            hoverTask?.cancel()
+            withdraw()
+        }
     }
 
     /// The words and then the files, which is the order they were written in and the order the
@@ -147,8 +180,9 @@ struct UserTurnRowView: View {
                     // muted slate that sits clearly on Spatie Blue and leaves white text alone.
                     // AppKit cannot read the `colorScheme` this bubble sets, so it is named.
                     selectionColor: Palette.bubbleTextSelection,
-                    actions: linkActions.opening(file: open)
+                    actions: linkActions.opening(file: open, hovering: { hovered = $0 })
                 )
+                .background { chipProbe }
             }
 
             if !reviewChips.isEmpty {
@@ -193,32 +227,89 @@ struct UserTurnRowView: View {
         FileReview.open(path: path, in: model)
     }
 
+    /// Where the sentence sits in the window, measured only while a pill in it is under the
+    /// pointer.
+    ///
+    /// The pill reports its own frame in the text view's coordinates, because AppKit measures from
+    /// the bottom of a window and SwiftUI from the top, and the one number that reconciles them is
+    /// where SwiftUI thinks this view is. Reading it behind every bubble would be a read per
+    /// bubble per layout pass, on the list that re-lays out on every frame of a sidebar drag;
+    /// behind the hovered one it is nothing at all for the rest. It is up well before it is
+    /// needed: `Motion.hoverCardDelay` is a third of a second and this is a layout pass.
+    @ViewBuilder
+    private var chipProbe: some View {
+        if hoverHost != nil, hovered != nil {
+            Color.clear
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                    textFrame = $0
+                }
+        }
+    }
+
+    /// What the card is asked for. `FileChipTarget` is the rule, in the core, and it is the same
+    /// call a tool row's chip makes: a path inside the worktree is shown relative to it, and one
+    /// outside keeps the absolute path it arrived with and is resolved against nothing.
+    ///
+    /// A file that has since been deleted still gets a card, and the card says so: `AttachmentPreview`
+    /// draws "it is gone" for a path with nothing behind it. That is deliberately the same answer a
+    /// tool row gives, and it is the honest one here, because a sent turn is a record of what was
+    /// asked rather than a picker. See `AttachmentChip.verifiesOnDisk`.
+    private func card(for path: String) -> TranscriptHoverCard {
+        let target = FileChipTarget.resolve(path, in: workspace.path)
+        return .file(attachment: .sent(path: target.path), worktree: target.worktree)
+    }
+
     /// The same card the composer showed while the file was being attached, drawn over the
     /// transcript instead of over the box. A bubble cannot hold it: it is a plate a few hundred
     /// points wide inside a lazy stack inside a scroll view, and it would be clipped at the first
     /// edge it met.
+    ///
+    /// This is the trailer's chips, which are laid out by SwiftUI and measure themselves, so they
+    /// arrive with a window frame already in hand and need none of the timing above.
     private func preview(_ path: String, _ frame: CGRect?) {
-        let file = TranscriptHoverCard.file(
-            attachment: .sent(path: path), worktree: workspace.path
-        )
         guard let frame else {
-            if hoverHost?.request?.card == file { hoverHost?.request = nil }
+            withdraw()
             return
         }
-        hoverHost?.request = TranscriptHoverRequest(card: file, frame: frame)
+        publish(card(for: path), at: frame)
+    }
+
+    private func publish(_ card: TranscriptHoverCard, at frame: CGRect) {
+        published = card
+        hoverHost?.request = TranscriptHoverRequest(card: card, frame: frame)
+    }
+
+    /// Takes this bubble's card down, and only its own.
+    ///
+    /// The comparison is what makes the hide immediate AND safe. The pointer crossing from one
+    /// chip to the next raises the new card before the old chip has been told it was left, so a
+    /// bare `request = nil` would sometimes clear the card that had just gone up.
+    private func withdraw() {
+        defer { published = nil }
+        guard let published, hoverHost?.request?.card == published else { return }
+        hoverHost?.request = nil
     }
 }
 
 extension TranscriptLinkActions {
-    /// The list's shared actions with a door for file chips added.
+    /// The list's shared actions with a door for file chips added, and a way for one of them to
+    /// say the pointer is on it.
     ///
     /// A copy per bubble rather than a fourth closure on the list's one value, because opening a
     /// file needs the workspace and the list is handed a session. It costs one struct on the rows
     /// that draw a bubble, which is a handful in a transcript of hundreds.
+    ///
+    /// Both closures at once because both need the same thing the list cannot give: the workspace,
+    /// for the door and for the worktree the card resolves against. A value that has one always
+    /// has the other, which is why `identity` gains no third case for the pair.
     @MainActor
-    func opening(file open: @escaping @MainActor @Sendable (String) -> Void) -> TranscriptLinkActions {
+    func opening(
+        file open: @escaping @MainActor @Sendable (String) -> Void,
+        hovering hover: @escaping @MainActor @Sendable (FileChipHover?) -> Void
+    ) -> TranscriptLinkActions {
         var copy = self
         copy.openFile = open
+        copy.hoverFile = hover
         // The identity moves with the closure, or a bubble that can open a file would compare
         // equal to the list's value that cannot, and the environment would never see the change.
         if case let .workspace(id, pane) = identity {

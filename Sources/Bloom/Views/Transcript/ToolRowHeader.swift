@@ -42,8 +42,10 @@ struct ToolRowHeader: View {
 
     /// How long the pointer has to rest on a row before its card opens. The same wait
     /// `AttachmentChip` makes for the file card, so the two cards in this pane answer at the same
-    /// speed rather than at two speeds a reader would have to learn.
-    private static let hoverDelay = Duration.milliseconds(350)
+    /// speed rather than at two speeds a reader would have to learn. It is `Motion.hoverCardDelay`
+    /// rather than a number of its own, because the sidebar's card and the composer's ask the
+    /// identical question and four answers to it would be four windows.
+    private static var hoverDelay: Duration { Motion.hoverCardDelay }
 
     /// A chip that repeats the detail replaces it: `Read [notes.txt]` rather than
     /// `Read notes.txt [notes.txt]`.
@@ -297,14 +299,17 @@ struct ToolRowHeader: View {
     /// combined label exactly the way the monospace chips beside it already do, which is the
     /// behaviour this change should not have altered.
     private func fileChip(_ path: String) -> some View {
-        let inside = FilePathGuess.relative(path, to: workspace.path)
-        let attachment = PromptAttachment.sent(path: inside ?? path)
-        let worktree = inside == nil ? "" : workspace.path
+        // The rule is `FileChipTarget` in the core, shared with the pills a sent turn draws inside
+        // its own sentence: two copies of it would be two answers to "can this chip be opened",
+        // four lines apart in the same transcript.
+        let target = FileChipTarget.resolve(path, in: workspace.path)
+        let attachment = PromptAttachment.sent(path: target.path)
+        let worktree = target.worktree
         // Spelled out rather than mapped over the optional, so the closure's actor is written down
         // rather than inferred through two layers of optional.
         let onOpen: (@MainActor () -> Void)?
-        if let inside {
-            onOpen = { open(inside) }
+        if let opens = target.opens {
+            onOpen = { open(opens) }
         } else {
             onOpen = nil
         }

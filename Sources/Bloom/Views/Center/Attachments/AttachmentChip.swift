@@ -91,8 +91,10 @@ struct AttachmentChip: View {
     /// is truncated in the middle, and short enough that four chips fit across a narrow column.
     private static let maxNameWidth: CGFloat = 150
     /// How long the pointer has to rest before the card opens. Short enough to feel like hovering,
-    /// long enough that crossing the row on the way to the send button shows nothing.
-    private static let hoverDelay = Duration.milliseconds(350)
+    /// long enough that crossing the row on the way to the send button shows nothing. Shared with
+    /// the sidebar's card, the composer's and the transcript's, so the whole window answers a
+    /// resting pointer at one speed.
+    private static var hoverDelay: Duration { Motion.hoverCardDelay }
 
     var body: some View {
         HStack(spacing: Metrics.spacingSmall) {
