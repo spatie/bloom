@@ -68,6 +68,13 @@ final class BrowserSession {
     @ObservationIgnored private var dialogs = BrowserDialogs()
     @ObservationIgnored private let dialogPresenter = BrowserDialogPresenter()
 
+    /// How many files a page may hand over, which is `BrowserDownloads` in the core.
+    @ObservationIgnored private var downloadLimit = BrowserDownloads()
+
+    /// What this page has handed over, newest last, for the strip under the toolbar. It is also
+    /// what holds each download's delegate alive, since `WKDownload.delegate` is weak.
+    private(set) var downloads: [BrowserDownloadItem] = []
+
     /// KVO on everything the toolbar reads, because the navigation delegate does not see every
     /// navigation.
     ///
@@ -326,6 +333,36 @@ final class BrowserSession {
         dialogs.pageCommitted()
     }
 
+    // MARK: - Downloads
+
+    /// A response became a file rather than a page. Where it goes is `BrowserDownloadItem`; how
+    /// many a page may send is `BrowserDownloads` in the core.
+    func begin(_ download: WKDownload) {
+        switch downloadLimit.request(from: pageName) {
+        case .save:
+            let item = BrowserDownloadItem(download)
+            downloads.append(item)
+            download.delegate = item
+        case .refuse:
+            download.cancel { _ in }
+        case .refuseAndSay(let notice):
+            download.cancel { _ in }
+            host.report(notice)
+        }
+    }
+
+    /// Forgets the downloads the strip is drawn from. The files stay where they are: this is
+    /// closing the strip, not undoing anything.
+    func clearDownloads() {
+        downloads.removeAll { $0.state != .running }
+    }
+
+    /// The page as `BrowserPageOrigin` names it, for the sentence a refusal carries.
+    private var pageName: String? {
+        guard let url = webView.url ?? currentURL, let host = url.host() else { return nil }
+        return BrowserPageOrigin.name(scheme: url.scheme ?? "", host: host, port: url.port ?? 0)
+    }
+
     func stop() {
         observations = []
         // Before the web view is let go, so a page waiting on an answer gets one. Never calling
@@ -480,6 +517,48 @@ private final class NavigationObserver: NSObject, WKNavigationDelegate {
         withError error: any Error
     ) {
         owner?.refresh()
+    }
+
+    // MARK: - Turning a navigation into a file
+
+    /// A link carrying the `download` attribute, which is a click that says "save this" rather
+    /// than "show me this".
+    ///
+    /// **This method not existing is half of why downloads never started.** WebKit's default
+    /// policy is `.allow`, and allowing a navigation that was meant to be a download leaves the
+    /// page where it was with nothing said. Everything else is allowed exactly as before, so no
+    /// navigation that used to happen stops happening.
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction
+    ) async -> WKNavigationActionPolicy {
+        navigationAction.shouldPerformDownload ? .download : .allow
+    }
+
+    /// A response a web view cannot draw, which is the other half: a zip, a tarball, a PDF served
+    /// as an attachment. Without this the response is allowed, WebKit finds it cannot render it,
+    /// and the navigation quietly stops.
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse
+    ) async -> WKNavigationResponsePolicy {
+        navigationResponse.canShowMIMEType ? .allow : .download
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        navigationAction: WKNavigationAction,
+        didBecome download: WKDownload
+    ) {
+        owner?.begin(download)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        navigationResponse: WKNavigationResponse,
+        didBecome download: WKDownload
+    ) {
+        owner?.begin(download)
     }
 }
 
