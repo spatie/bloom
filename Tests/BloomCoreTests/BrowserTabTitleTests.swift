@@ -133,6 +133,24 @@ struct BrowserTabTitleTests {
         #expect(next == page("http://localhost:3000/", "Settings"))
     }
 
+    /// The bug this covers: an Inertia site navigated with `history.pushState`, the tab strip
+    /// followed it because the title is on KVO, and the address field sat on `/login` because the
+    /// url was not. `BrowserSession` watches both now, so both halves arrive here, and what has to
+    /// hold is that the address moves while the name the site has already given the tab stays up
+    /// for the moment before the new one arrives.
+    @Test("A client side navigation moves the address and keeps the name up")
+    func followsAPushState() {
+        let next = BrowserTabTitle.advance(
+            from: page("https://there-there-6.test/login", "Log in"),
+            to: page("https://there-there-6.test/tickets/429")
+        )
+        #expect(next == page("https://there-there-6.test/tickets/429", "Log in"))
+
+        // And the title the site sets a beat later, with no navigation beside it, replaces it.
+        let named = BrowserTabTitle.advance(from: next, to: page("", "#429 Large CSV support"))
+        #expect(named == page("https://there-there-6.test/tickets/429", "#429 Large CSV support"))
+    }
+
     @Test("A page with no address at all keeps the one the tab has")
     func keepsTheAddressWhenNoneIsGiven() {
         let next = BrowserTabTitle.advance(from: page("https://spatie.be/", "Spatie"), to: page(""))
