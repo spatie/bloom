@@ -350,6 +350,19 @@ final class CenterTabStore {
         return session
     }
 
+    /// The live web view for a browser tab, or nothing if one has never been made.
+    ///
+    /// **The difference from `browser(for:)` is the whole reason it exists.** That one creates the
+    /// session, which loads the page, which is right when a pane is about to be drawn and wrong
+    /// for anything that is only asking. `pane_list` runs on an agent's word, over every tab of a
+    /// workspace including the ones restored from the last launch that nobody has opened yet, and
+    /// asking through the creating accessor would have had a tool call quietly fetch half a dozen
+    /// pages nobody had looked at. A tab that has not been drawn still knows its address, which is
+    /// what the census reports for it.
+    func liveBrowser(for tab: CenterTab) -> BrowserSession? {
+        browsers[tab.id]
+    }
+
     /// A centre tab is not one of the bottom panel's rows: it has no `terminal_tabs` record and no
     /// place in that panel's list, so there is nothing to delete and only shells to stop. Every
     /// pane goes, which for a tab the user never split is the one shell it opened with.

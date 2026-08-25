@@ -33,7 +33,15 @@ extension AppModel {
     /// the core toolbox and not to this one would pass every test in the suite, which serves
     /// `.standard`, and never reach the running app.
     func bridgeToolbox() -> BridgeToolbox {
-        BridgeToolbox(handlers: BridgeToolbox.standard.handlers + [
+        // One closure for the six browser tools rather than six that would have to agree. What
+        // crosses the line is "do this to that pane", and `driveBrowserForBridge` resolves which
+        // pane the same way every time. See `BrowserPaneCommanding`.
+        let browser: BrowserPaneCommanding = { [weak self] command, workspaceID in
+            guard let self else { return .refused("Bloom is still starting up.") }
+            return await self.driveBrowserForBridge(command, in: workspaceID)
+        }
+
+        return BridgeToolbox(handlers: BridgeToolbox.standard.handlers + [
             WorkspaceStartTool { [weak self] order, project, identity, origin in
                 guard let self else { throw AppNotReady.stillStartingUp }
                 return try await self.startWorkspaceForBridge(
@@ -56,6 +64,16 @@ extension AppModel {
                 guard let self else { return .refused("Bloom is still starting up.") }
                 return await self.renamePaneForBridge(title, kind: kind, in: workspaceID)
             },
+            PaneListTool { [weak self] workspaceID in
+                guard let self else { return nil }
+                return await self.paneCensusForBridge(workspaceID)
+            },
+            BrowserReadTool(browser),
+            BrowserReloadTool(browser),
+            BrowserGoTool(browser),
+            BrowserScrollTool(browser),
+            BrowserScreenshotTool(browser),
+            BrowserTextTool(browser),
             WorkspaceMergeTool { [weak self] workspace, pullRequest, method in
                 guard let self else {
                     return .refused("Bloom is still starting up. Try again in a moment.")
@@ -141,12 +159,15 @@ extension AppModel {
     /// have been archived out from under it, so "gone" is a real answer rather than a guard for
     /// tidiness. The sentence is a constant beside it so the two tools cannot describe the same
     /// absence differently.
-    private func paneTarget(_ workspaceID: WorkspaceID) -> WorkspaceModel? {
+    /// Internal rather than private because `AppModel+BrowserBridge` asks the same question of
+    /// the same workspace, and a second resolver there would be a second sentence for the same
+    /// absence.
+    func paneTarget(_ workspaceID: WorkspaceID) -> WorkspaceModel? {
         guard let workspace = workspaces.first(where: { $0.id == workspaceID }) else { return nil }
         return model(for: workspace)
     }
 
-    private static let noWorkspaceForPane =
+    static let noWorkspaceForPane =
         "That workspace is not open in Bloom any more, so there is nowhere to put a pane."
 
     /// `pane_open`, through the same door the tab strip's `+` menu uses.

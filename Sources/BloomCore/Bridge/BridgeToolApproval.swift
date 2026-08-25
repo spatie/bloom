@@ -35,6 +35,34 @@ import Foundation
 /// all and the whole of why they ask. `quick_prompt_list` is on the list below; the other three
 /// are not.
 ///
+/// ## The browser pane, which is where the line got its sharpest test
+///
+/// Seven tools reach a browser pane the owner has open, and two of them are on the list. The
+/// question is not how destructive each one is, it is what a page in that pane actually is: his
+/// own application, logged in as him, with a live session. Anything that reads it out or acts
+/// inside it is doing so as him.
+///
+/// So the line is drawn at the chrome. `pane_list` and `browser_read` report the strip and the
+/// address bar: which tabs are open, what they are called, where each browser is pointed, whether
+/// it is loading, whether Back would do anything. Every fact of that is on the screen in front of
+/// him already, none of it is the contents of a page, and an agent that cannot see what is open
+/// cannot offer to help with it. They also have to be callable while nobody is watching, because
+/// the whole point of them is to be the first call of a turn that then does something useful.
+///
+/// The other five are off the list, in two groups. `browser_reload`, `browser_go` and
+/// `browser_scroll` change what the person is looking at: a reload can lose what they had typed
+/// into a form, a navigation is a request made from their browser with whatever they are logged
+/// into, and a scroll moves the page under somebody who is reading it. `browser_screenshot` and
+/// `browser_text` carry the page itself into a model's context, which is to say off this machine,
+/// and a page he is signed into is his data. Bloom cannot tell a dev server's front page from an
+/// administration screen, so it does not try: it asks, and the person who can tell answers.
+///
+/// **There is no tool here that runs script in the page, and that is a decision rather than an
+/// omission.** The argument is at the head of `BrowserPaneCommand`, and the part that belongs on
+/// this list is that self-approval could not have rescued it: a permission prompt showing a
+/// paragraph of JavaScript is a prompt nobody can evaluate, so keeping it off the list would have
+/// been a safeguard in name only.
+///
 /// `workspace_merge` is off the list too, and it draws the line one step further out. It destroys
 /// nothing: it sends a turn, and the agent that reads it runs the merge in front of the owner. But
 /// what that turn leads to is a call to a server other people share, and unlike a worktree there
@@ -75,6 +103,12 @@ public enum BridgeToolApproval {
         // the reader the way a pane does; `quick_prompt_update` overwrites what the owner wrote
         // and `quick_prompt_delete` removes it, with no undo on either.
         "quick_prompt_list",
+        // The two that report the window's own furniture rather than anything on a page. See the
+        // section above: everything they say is already on the screen in front of the reader, and
+        // an agent that cannot see which panes are open has nothing to name in the five tools
+        // that act on one.
+        "pane_list",
+        "browser_read",
     ]
 
     /// Whether this ask is Bloom answering itself.

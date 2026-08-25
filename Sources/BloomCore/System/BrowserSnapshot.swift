@@ -20,6 +20,16 @@ public enum BrowserSnapshot {
     /// tells two workspaces' dev servers apart and the deepest path segment rarely is.
     static let maxLabelLength = 40
 
+    /// How wide a picture taken for an agent is rendered, in points.
+    ///
+    /// The camera button captures at the pane's own width, so the reader gets back exactly what
+    /// they were looking at. A capture that goes to a model is paid for by the token instead, and
+    /// a model reading a page does not need a retina copy of it: 900 points across is wide enough
+    /// for body text to stay legible and keeps a full pane comfortably under
+    /// `BridgeToolImage.maximumBytes`, where the pane's own retina width can be four times the
+    /// bytes for nothing anybody reads.
+    public static let agentWidth: Double = 900
+
     /// The file a page captured now is written as.
     public static func filename(
         for address: String,
