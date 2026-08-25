@@ -55,31 +55,22 @@ import BloomCore
 /// `--idle-worktrees` is a file with one worktree path per line, which is how a run needs no
 /// database and cannot touch the owner's. `ls -d ~/bloom/workspaces/*/*/ > /tmp/trees.txt` is the
 /// list this was written against.
+///
+/// It is the one probe in the family with no window in it, so `ProbeHarness` gives it the flags,
+/// the settle, the failure and the report and nothing else.
 @MainActor
 enum IdleProbe {
-    static var isRequested: Bool {
-        CommandLine.arguments.contains("--idle-probe")
-    }
+    private static let harness = ProbeHarness(subject: "idle")
+
+    static var isRequested: Bool { harness.isRequested }
 
     // MARK: - Arguments
 
-    private static func value(for flag: String) -> String? {
-        let arguments = CommandLine.arguments
-        guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else {
-            return nil
-        }
-        return arguments[index + 1]
-    }
-
-    private static var outputPath: String {
-        value(for: "--idle-probe") ?? (NSTemporaryDirectory() + "bloom-idle-probe.json")
-    }
-
-    private static var base: String { value(for: "--idle-base") ?? "main" }
-    private static var passes: Int { Int(value(for: "--idle-passes") ?? "") ?? 5 }
+    private static var base: String { ProbeHarness.text("--idle-base", or: "main") }
+    private static var passes: Int { ProbeHarness.count("--idle-passes", or: 5) }
 
     private static var worktrees: [String] {
-        guard let path = value(for: "--idle-worktrees"),
+        guard let path = ProbeHarness.value(for: "--idle-worktrees"),
               let text = try? String(contentsOfFile: path, encoding: .utf8)
         else { return [] }
         return text
@@ -96,11 +87,13 @@ enum IdleProbe {
     }
 
     private static func run() async {
-        // Not brought to the front, for the reason at the head of `FrameProbe`.
-        try? await Task.sleep(for: .seconds(3))
+        // Not brought to the front, for the reason at the head of `ProbeHarness.window`. This one
+        // waits without a window to wait for: what it measures is the work, and a launch's own
+        // git reads landing inside the first pass would be counted as the loop's.
+        await harness.settle()
 
         let trees = worktrees
-        guard !trees.isEmpty else { return fail("no worktrees to probe") }
+        guard !trees.isEmpty else { harness.fail("no worktrees to probe") }
 
         // A warm pass that is thrown away. The first one pays for `Shell.which` walking PATH, for
         // git's own caches and for every baseline being worked out for the first time, and
@@ -108,31 +101,58 @@ enum IdleProbe {
         // running all day.
         _ = await pass(trees)
 
-        var reports: [[String: Any]] = []
+        var runs: [Pass] = []
         for _ in 0..<passes {
-            reports.append(await pass(trees))
+            runs.append(await pass(trees))
         }
 
-        write([
-            "worktrees": trees.count,
-            "base": base,
-            "passes": reports,
-            "median": [
-                "wallMs": median(reports.map { $0["wallMs"] as? Double ?? 0 }),
-                "cpuMs": median(reports.map { $0["cpuMs"] as? Double ?? 0 }),
-                "spawns": median(reports.map { Double($0["spawns"] as? Int ?? 0) }),
-                "spawnsPerWorktree": median(
-                    reports.map { Double($0["spawns"] as? Int ?? 0) / Double(trees.count) }
+        let own: [String: JSONValue] = [
+            "worktrees": .integer(trees.count),
+            "base": .string(base),
+            "passes": .array(runs.map(\.json)),
+            "median": .object([
+                "wallMs": .number(median(runs.map(\.wallMs))),
+                "cpuMs": .number(median(runs.map { $0.cpu.total * 1000 })),
+                "spawns": .number(median(runs.map { Double($0.spawns) })),
+                "spawnsPerWorktree": .number(
+                    median(runs.map { Double($0.spawns) / Double(trees.count) })
                 ),
-            ],
-        ])
+            ]),
+        ]
+        // Echoed as well as written, because a run of this one is short and is driven from a shell
+        // that never opens the file.
+        harness.write(
+            .object(own.merging(harness.conditions(window: nil)) { mine, _ in mine }), echo: true
+        )
         exit(0)
+    }
+
+    /// What one pass cost.
+    ///
+    /// A type rather than the `[String: Any]` this used to be. The medians above read every one of
+    /// these numbers back out again, and they used to do it with a string key, a dynamic cast and
+    /// a `?? 0`, so a key renamed on one line and not on the other would have reported nought for
+    /// the whole run without a word to anybody.
+    private struct Pass {
+        var wallMs: Double
+        var cpu: ProcessCPU.Sample
+        var spawns: Int
+
+        var json: JSONValue {
+            .object([
+                "wallMs": .number(wallMs),
+                "cpuMs": .number(cpu.total * 1000),
+                "selfCpuMs": .number(cpu.own * 1000),
+                "childCpuMs": .number(cpu.children * 1000),
+                "spawns": .integer(spawns),
+            ])
+        }
     }
 
     /// One sweep of `Git.diffStat` over every worktree, exactly as `AppModel.refreshDiffStats`
     /// runs it: one at a time, because that is what the loop does and a concurrent sweep would
     /// measure how many cores this Mac has rather than what the loop costs.
-    private static func pass(_ trees: [String]) async -> [String: Any] {
+    private static func pass(_ trees: [String]) async -> Pass {
         let spawnsBefore = Shell.spawnCount
         let cpuBefore = ProcessCPU.read()
         let wallBefore = CACurrentMediaTime()
@@ -141,37 +161,18 @@ enum IdleProbe {
             _ = try? await Git.diffStat(worktree: tree, base: base)
         }
 
-        let wall = (CACurrentMediaTime() - wallBefore) * 1000
-        let cpu = ProcessCPU.read() - cpuBefore
-        return [
-            "wallMs": wall,
-            "cpuMs": cpu.total * 1000,
-            "selfCpuMs": cpu.own * 1000,
-            "childCpuMs": cpu.children * 1000,
-            "spawns": Shell.spawnCount - spawnsBefore,
-        ]
+        return Pass(
+            wallMs: (CACurrentMediaTime() - wallBefore) * 1000,
+            cpu: ProcessCPU.read() - cpuBefore,
+            spawns: Shell.spawnCount - spawnsBefore
+        )
     }
 
+    /// The same middle value the rest of the family reports, taken the same way. It used to be
+    /// `sorted[count / 2]` here and a rank in the other two, which agreed and said so nowhere;
+    /// `ProbeStatsTests` is where that is now written down.
     private static func median(_ values: [Double]) -> Double {
-        guard !values.isEmpty else { return 0 }
-        let sorted = values.sorted()
-        return sorted[sorted.count / 2]
-    }
-
-    // MARK: - Reporting
-
-    private static func fail(_ reason: String) {
-        write(["error": reason])
-        exit(1)
-    }
-
-    private static func write(_ report: [String: Any]) {
-        guard let data = try? JSONSerialization.data(
-            withJSONObject: report, options: [.prettyPrinted, .sortedKeys]
-        ) else { return }
-        try? data.write(to: URL(fileURLWithPath: outputPath))
-        FileHandle.standardError.write(data)
-        FileHandle.standardError.write(Data("\n".utf8))
+        ProbeStats.percentile(0.5, of: values.sorted())
     }
 }
 

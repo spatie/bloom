@@ -27,48 +27,31 @@ import BloomCore
 /// - `chat` is the workspace's first conversation, `chat:<sessionID>` a named one.
 /// - `review`, `terminal`, `browser` and `notes` are that kind of tool tab, opened if the
 ///   workspace has not got one, so an order can name a tab the workspace has never had.
+///
+/// Everything that is not the tab pick itself is `ProbeHarness`: the flags, the window, the model,
+/// the failure, the report.
 @MainActor
 enum TabProbe {
-    static var isRequested: Bool {
-        CommandLine.arguments.contains("--tab-probe")
-    }
+    private static let harness = ProbeHarness(subject: "tab")
+
+    static var isRequested: Bool { harness.isRequested }
 
     // MARK: - Arguments
 
-    private static func value(for flag: String) -> String? {
-        let arguments = CommandLine.arguments
-        guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else {
-            return nil
-        }
-        return arguments[index + 1]
-    }
-
-    private static var outputPath: String {
-        value(for: "--tab-probe") ?? (NSTemporaryDirectory() + "bloom-tab-probe.json")
-    }
-
     private static var workspaceID: WorkspaceID? {
-        value(for: "--tab-workspace").map(WorkspaceID.init)
+        ProbeHarness.value(for: "--tab-workspace").map(WorkspaceID.init)
     }
 
     private static var order: [String] {
-        (value(for: "--tab-order") ?? "chat").split(separator: ",").map(String.init)
+        ProbeHarness.text("--tab-order", or: "chat").split(separator: ",").map(String.init)
     }
 
-    private static var cycles: Int { Int(value(for: "--tab-cycles") ?? "") ?? 3 }
+    private static var cycles: Int { ProbeHarness.count("--tab-cycles", or: 3) }
 
     /// How long a tab switch is given to finish before the next one starts. Shorter than
     /// `SwitchProbe`'s, because nothing here reaches `gh` or the network: what a tab switch starts
     /// is a transcript read at worst, and the deferred history a hundred milliseconds behind it.
-    private static var settle: Int { Int(value(for: "--tab-settle") ?? "") ?? 2500 }
-
-    private static var windowSize: CGSize? {
-        guard let raw = value(for: "--window-size") else { return nil }
-        let parts = raw.split(separator: "x")
-        guard parts.count == 2, let width = Double(parts[0]), let height = Double(parts[1])
-        else { return nil }
-        return CGSize(width: width, height: height)
-    }
+    private static var settle: Int { ProbeHarness.count("--tab-settle", or: 2500) }
 
     // MARK: - Entry
 
@@ -76,36 +59,23 @@ enum TabProbe {
         Task { @MainActor in await run() }
     }
 
+    /// The state, handed over by the delegate on launch. See `ProbeHarness.attach`, which holds it.
+    static func attach(_ model: AppModel) {
+        guard isRequested else { return }
+        ProbeHarness.attach(model)
+    }
+
     private static func run() async {
-        // Deliberately never brought to the front, for the reason `FrameProbe` gives: a run
-        // happens while the owner is using his own copy of the app.
-        if let driver = value(for: "--tab-driver"), driver != "programmatic" {
-            fail("the only driver is `programmatic`. See the head of TabProbe.swift")
+        // Deliberately never brought to the front, for the reason `ProbeHarness.window` gives: a
+        // run happens while the owner is using his own copy of the app.
+        if let driver = ProbeHarness.value(for: "--tab-driver"), driver != "programmatic" {
+            harness.fail("the only driver is `programmatic`. See the head of TabProbe.swift")
         }
 
-        try? await Task.sleep(for: .seconds(3))
+        let (window, contentView) = await harness.window()
 
-        var window: NSWindow?
-        for _ in 0..<60 {
-            window = NSApp.windows.first {
-                $0.isVisible && $0.contentView != nil && $0.parent == nil
-                    && $0.styleMask.contains(.titled)
-            }
-            if window != nil { break }
-            try? await Task.sleep(for: .milliseconds(250))
-        }
-        guard let window, let contentView = window.contentView else {
-            fail("no window to probe")
-        }
-
-        if let size = windowSize {
-            window.setContentSize(size)
-            window.layoutIfNeeded()
-            try? await Task.sleep(for: .seconds(1))
-        }
-
-        guard let app = model() else { fail("no app model") }
-        guard let workspaceID else { fail("--tab-workspace named no workspace") }
+        guard let app = ProbeHarness.appModel else { harness.fail("no app model") }
+        guard let workspaceID else { harness.fail("--tab-workspace named no workspace") }
         app.selection = .workspace(workspaceID)
 
         // The workspace's own arrival, which this probe is not measuring: its sessions, its
@@ -114,12 +84,12 @@ enum TabProbe {
         try? await Task.sleep(for: .seconds(8))
 
         guard let workspace = app.existingModel(for: workspaceID) else {
-            fail("workspace \(workspaceID.rawValue) is not open")
+            harness.fail("workspace \(workspaceID.rawValue) is not open")
         }
 
         let tabs = order.map { token -> (token: String, tab: PaneContent) in
             guard let tab = resolve(token, in: workspace) else {
-                fail("--tab-order named `\(token)`, which is not a tab this workspace can have")
+                harness.fail("--tab-order named `\(token)`, which is not a tab this workspace can have")
             }
             return (token, tab)
         }
@@ -131,25 +101,24 @@ enum TabProbe {
         ticker.start()
         SwitchTrace.isEnabled = true
 
-        var runs: [[String: Any]] = []
+        var runs: [JSONValue] = []
 
         // The first pass over the order is kept and labelled rather than thrown away, for the
         // reason `SwitchProbe` keeps its own: a first visit to a tab and a return to it are two
         // different switches, and the complaint being measured is about the second one.
         for entry in tabs {
-            runs.append(
-                await select(entry.tab, token: entry.token, of: workspace, ticker: ticker)
-                    .merging(["pass": "cold"]) { current, _ in current }
-            )
+            let run = await select(entry.tab, token: entry.token, of: workspace, ticker: ticker)
+            runs.append(.object(run.merging(["pass": .string("cold")]) { current, _ in current }))
             try? await Task.sleep(for: .milliseconds(600))
         }
 
         for cycle in 0..<cycles {
             for entry in tabs {
-                runs.append(
-                    await select(entry.tab, token: entry.token, of: workspace, ticker: ticker)
-                        .merging(["cycle": cycle, "pass": "warm"]) { current, _ in current }
-                )
+                let run = await select(entry.tab, token: entry.token, of: workspace, ticker: ticker)
+                let labels: [String: JSONValue] = [
+                    "cycle": .integer(cycle), "pass": .string("warm"),
+                ]
+                runs.append(.object(run.merging(labels) { current, _ in current }))
                 try? await Task.sleep(for: .milliseconds(600))
             }
         }
@@ -157,26 +126,24 @@ enum TabProbe {
         SwitchTrace.isEnabled = false
         ticker.stop()
 
-        write([
-            "driver": "programmatic",
-            "configuration": buildConfiguration,
-            "workspace": workspaceID.rawValue,
-            "workspaceName": workspace.workspace.name,
-            "order": order,
-            "cycles": cycles,
-            "settleMs": settle,
-            "windowSize": ["w": window.frame.width, "h": window.frame.height],
-            "loadAverage": systemLoadAverage(),
-            "sessionRows": workspace.activeTranscript?.rows.count ?? 0,
-            "runs": runs,
-        ])
+        let own: [String: JSONValue] = [
+            "driver": .string("programmatic"),
+            "workspace": .string(workspaceID.rawValue),
+            "workspaceName": .string(workspace.workspace.name),
+            "order": .strings(order),
+            "cycles": .integer(cycles),
+            "settleMs": .integer(settle),
+            "sessionRows": .integer(workspace.activeTranscript?.rows.count ?? 0),
+            "runs": .array(runs),
+        ]
+        harness.write(.object(own.merging(harness.conditions(window: window)) { mine, _ in mine }))
         exit(0)
     }
 
     /// One tab switch, from the selection to everything the timeline caught.
     private static func select(
         _ tab: PaneContent, token: String, of workspace: WorkspaceModel, ticker: Ticker
-    ) async -> [String: Any] {
+    ) async -> [String: JSONValue] {
         ticker.beginRun()
         PaneLayoutTiming.reset()
         PaneLayoutTiming.isEnabled = true
@@ -193,14 +160,14 @@ enum TabProbe {
         PaneLayoutTiming.isEnabled = false
 
         return [
-            "token": token,
-            "tab": tab.id,
+            "token": .string(token),
+            "tab": .string(tab.id),
             "marks": SwitchTrace.timeline(),
-            "frameCount": ticker.intervalsMs.count,
-            "blocks": ticker.blocksMs,
-            "paneLayout": PaneLayoutTiming.summary(),
-            "panePasses": PaneLayoutTiming.timeline(),
-            "worstFrameMs": ticker.intervalsMs.max() ?? 0,
+            "frameCount": .integer(ticker.intervalsMs.count),
+            "blocks": .numbers(ticker.blocksMs),
+            "paneLayout": .map(PaneLayoutTiming.summary()),
+            "panePasses": .map(PaneLayoutTiming.timeline()),
+            "worstFrameMs": .number(ticker.intervalsMs.max() ?? 0),
         ]
     }
 
@@ -221,54 +188,5 @@ enum TabProbe {
             return .tool(existing.id)
         }
         return .tool(store.add(kind: kind, workspaceID: id).id)
-    }
-
-    // MARK: - Reaching the model
-
-    /// The app's state, handed over by the delegate on launch. Weak, for the reason `SwitchProbe`
-    /// gives: a probe has no business keeping the app alive.
-    private weak static var app: AppModel?
-
-    static func attach(_ model: AppModel) {
-        guard isRequested else { return }
-        app = model
-    }
-
-    private static func model() -> AppModel? { app }
-
-    // MARK: - Reporting
-
-    private static var buildConfiguration: String {
-        #if DEBUG
-        "debug"
-        #else
-        "release"
-        #endif
-    }
-
-    private static func systemLoadAverage() -> Double {
-        var loads = [Double](repeating: 0, count: 3)
-        guard getloadavg(&loads, 3) > 0 else { return 0 }
-        return loads[0]
-    }
-
-    private static func write(_ report: [String: Any]) {
-        // Asked before the encode, for the reason written down in `SwitchProbe.write`: a typed id
-        // in a `[String: Any]` arrives as `__SwiftValue` and `JSONSerialization` raises rather
-        // than throwing, which is not something `try?` catches, so it killed a run on its last
-        // line.
-        guard JSONSerialization.isValidJSONObject(report) else {
-            fail("the report holds a value JSON cannot carry, probably an id that needed .rawValue")
-        }
-        let data = (try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted]))
-            ?? Data()
-        try? data.write(to: URL(fileURLWithPath: outputPath))
-        FileHandle.standardError.write(Data("tab probe wrote \(outputPath)\n".utf8))
-    }
-
-    /// `Never`, so the callers above can end the run with it from inside a `guard`.
-    private static func fail(_ message: String) -> Never {
-        FileHandle.standardError.write(Data("tab probe: \(message)\n".utf8))
-        exit(1)
     }
 }

@@ -17,8 +17,8 @@ import BloomCore
 /// So the whole of what this adds is the arrangement. It splits the conversation's tab so the chat
 /// and a browser share the centre column, leaves the inspector showing the worktree's changed
 /// files, and only then drags the window's own edge. Everything else is `FrameProbe`'s, down to
-/// the display link and the two drivers, because "how long did a frame take" is the same question
-/// however the window was made to move.
+/// the display link and the frame timings, because "how long did a frame take" is the same
+/// question however the window was made to move.
 ///
 /// **Programmatic, and deliberately without a mouse driver.** `FrameProbe` has one and needs it:
 /// AppKit's live resize path sets `inLiveResize`, throttles and coalesces, and a faithful answer
@@ -39,51 +39,36 @@ import BloomCore
 /// every probe here has learned the hard way: a run that measured a window with one pane in it,
 /// or with no changed files to list, is a run whose number means something else. `panes`,
 /// `inspector` and `changedFiles` are the three that have to be believed before the timings are.
+///
+/// Everything that is not the arrangement and the drag is `ProbeHarness`: the flags, the window,
+/// the model, the failure, the frame timings, the report.
 @MainActor
 enum ResizeProbe {
-    static var isRequested: Bool {
-        CommandLine.arguments.contains("--resize-probe")
-    }
+    private static let harness = ProbeHarness(subject: "resize")
+
+    static var isRequested: Bool { harness.isRequested }
 
     // MARK: - Arguments
 
-    private static func value(for flag: String) -> String? {
-        let arguments = CommandLine.arguments
-        guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else {
-            return nil
-        }
-        return arguments[index + 1]
-    }
-
-    private static var outputPath: String {
-        value(for: "--resize-probe") ?? (NSTemporaryDirectory() + "bloom-resize-probe.json")
-    }
-
     private static var workspaceID: WorkspaceID? {
-        value(for: "--resize-workspace").map(WorkspaceID.init)
+        ProbeHarness.value(for: "--resize-workspace").map(WorkspaceID.init)
     }
 
-    private static var sweeps: Int { Int(value(for: "--resize-sweeps") ?? "") ?? 4 }
-    private static var travel: CGFloat { CGFloat(Double(value(for: "--resize-travel") ?? "") ?? 240) }
-    private static var step: CGFloat { CGFloat(Double(value(for: "--resize-step") ?? "") ?? 4) }
+    private static var sweeps: Int { ProbeHarness.count("--resize-sweeps", or: 4) }
+    private static var travel: CGFloat { ProbeHarness.points("--resize-travel", or: 240) }
+    private static var step: CGFloat { ProbeHarness.points("--resize-step", or: 4) }
 
     /// Where the browser pane goes. A file URL by preference, and empty by default: a run that has
     /// to reach the network is a run that measures the network.
-    private static var pageURL: String { value(for: "--resize-url") ?? "" }
+    private static var pageURL: String { ProbeHarness.text("--resize-url", or: "") }
 
     /// What is in the centre column. `chat+browser` is the complaint; `chat` is the control that
     /// says how much of the cost the second pane is, which is the number the question "should a
     /// hidden pane be kept alive across a tab switch" turns on. A pane kept alive is a pane laid
     /// out on every frame of every resize, and the only way to price that is to measure a window
     /// with one more pane in it than it needs.
-    private static var arrangement: String { value(for: "--resize-arrangement") ?? "chat+browser" }
-
-    private static var windowSize: CGSize? {
-        guard let raw = value(for: "--window-size") else { return nil }
-        let parts = raw.split(separator: "x")
-        guard parts.count == 2, let width = Double(parts[0]), let height = Double(parts[1])
-        else { return nil }
-        return CGSize(width: width, height: height)
+    private static var arrangement: String {
+        ProbeHarness.text("--resize-arrangement", or: "chat+browser")
     }
 
     // MARK: - Entry
@@ -93,21 +78,11 @@ enum ResizeProbe {
     }
 
     private static func run() async {
-        // Never brought to the front, for the reason at the head of `FrameProbe`.
-        try? await Task.sleep(for: .seconds(3))
+        // Never brought to the front, for the reason at the head of `ProbeHarness.window`.
+        let (window, contentView) = await harness.window()
 
-        guard let window = await firstWindow(), let contentView = window.contentView else {
-            fail("no window to probe")
-        }
-
-        if let size = windowSize {
-            window.setContentSize(size)
-            window.layoutIfNeeded()
-            try? await Task.sleep(for: .seconds(1))
-        }
-
-        guard let app = model() else { fail("no app model") }
-        guard let workspaceID else { fail("--resize-workspace named no workspace") }
+        guard let app = ProbeHarness.appModel else { harness.fail("no app model") }
+        guard let workspaceID else { harness.fail("--resize-workspace named no workspace") }
         app.selection = .workspace(workspaceID)
         app.isInspectorVisible = true
 
@@ -116,7 +91,7 @@ enum ResizeProbe {
         try? await Task.sleep(for: .seconds(8))
 
         guard let workspace = app.existingModel(for: workspaceID) else {
-            fail("workspace \(workspaceID.rawValue) is not open")
+            harness.fail("workspace \(workspaceID.rawValue) is not open")
         }
 
         await arrange(workspace)
@@ -135,39 +110,23 @@ enum ResizeProbe {
         await drag(window, sweeps: 1)
         try? await Task.sleep(for: .seconds(1))
 
-        // A marker on disk rather than a line on stderr, so a shell watching for it can start
-        // `sample` at the moment the measured drag begins rather than profiling twenty seconds of
-        // a window loading a conversation. Copied from `FrameProbe` for the same reason.
-        try? Data("\(ProcessInfo.processInfo.processIdentifier)".utf8)
-            .write(to: URL(fileURLWithPath: outputPath + ".started"))
+        harness.markStarted()
 
         PaneLayoutTiming.reset()
         PaneLayoutTiming.isEnabled = true
         recorder.start()
-        let cpuBefore = mainThreadCPUSeconds()
+        let cpuBefore = ProbeHarness.mainThreadCPUSeconds()
         let wallBefore = CACurrentMediaTime()
         await drag(window, sweeps: sweeps)
-        let cpu = mainThreadCPUSeconds() - cpuBefore
+        let cpu = ProbeHarness.mainThreadCPUSeconds() - cpuBefore
         let wall = CACurrentMediaTime() - wallBefore
         recorder.stop()
         PaneLayoutTiming.isEnabled = false
 
-        write(report(
+        harness.write(report(
             recorder: recorder, window: window, workspace: workspace, cpu: cpu, wall: wall
         ))
         exit(0)
-    }
-
-    private static func firstWindow() async -> NSWindow? {
-        for _ in 0..<60 {
-            let window = NSApp.windows.first {
-                $0.isVisible && $0.contentView != nil && $0.parent == nil
-                    && $0.styleMask.contains(.titled)
-            }
-            if let window { return window }
-            try? await Task.sleep(for: .milliseconds(250))
-        }
-        return nil
     }
 
     // MARK: - The arrangement
@@ -186,7 +145,7 @@ enum ResizeProbe {
     private static func arrange(_ workspace: WorkspaceModel) async {
         let tabs = WorkspaceTabsStore.shared
         guard let chat = tabs.entries(in: workspace).first(where: { $0.isChat }) else {
-            fail("the workspace has no conversation to put beside a browser")
+            harness.fail("the workspace has no conversation to put beside a browser")
         }
         tabs.select(chat, in: workspace)
 
@@ -248,103 +207,44 @@ enum ResizeProbe {
     private static func report(
         recorder: FrameRecorder, window: NSWindow, workspace: WorkspaceModel,
         cpu: Double, wall: Double
-    ) -> [String: Any] {
-        let ms = recorder.intervals.map { $0 * 1000 }.sorted()
-        func percentile(_ p: Double) -> Double {
-            guard !ms.isEmpty else { return 0 }
-            let index = Int((Double(ms.count - 1) * p).rounded())
-            return ms[min(max(index, 0), ms.count - 1)]
-        }
-        // A frame that took longer than two vsyncs, measured against this run's own median rather
-        // than against a fixed 16.7. See `ScrollProbe`, which explains why a 120Hz panel and a
-        // 60Hz one cannot share a threshold.
-        let refresh = ms.isEmpty ? 8.3 : percentile(0.5)
-        let dropped = ms.filter { $0 > refresh * 1.8 }.count
+    ) -> JSONValue {
         let widths = recorder.widths
         let tabs = WorkspaceTabsStore.shared
         let panes = tabs.selectedTab(in: workspace).map { tabs.layout(of: $0).paneCount } ?? 0
+        let steps = offsets(sweeps: sweeps).count
 
-        return [
-            "driver": "programmatic",
-            "arrangement": arrangement,
-            "configuration": buildConfiguration,
-            "workspace": workspace.workspace.id.rawValue,
-            "workspaceName": workspace.workspace.name,
-            "sessionRows": workspace.activeTranscript?.rows.count ?? 0,
+        let own: [String: JSONValue] = [
+            "driver": .string("programmatic"),
+            "arrangement": .string(arrangement),
+            "workspace": .string(workspace.workspace.id.rawValue),
+            "workspaceName": .string(workspace.workspace.name),
+            "sessionRows": .integer(workspace.activeTranscript?.rows.count ?? 0),
             // The three claims the timings below are worthless without. See the head of this file.
-            "panes": panes,
-            "inspector": AppModel.probeInstance?.isInspectorVisible ?? false,
-            "changedFiles": workspace.changedFiles.count,
-            "frames": ms.count,
-            "medianMs": percentile(0.5),
-            "medianFps": percentile(0.5) > 0 ? 1000 / percentile(0.5) : 0,
-            "p95Ms": percentile(0.95),
-            "p99Ms": percentile(0.99),
-            "worstMs": ms.last ?? 0,
-            "droppedFrames": dropped,
-            "droppedShare": ms.isEmpty ? 0 : Double(dropped) / Double(ms.count),
+            "panes": .integer(panes),
+            "inspector": .bool(AppModel.probeInstance?.isInspectorVisible ?? false),
+            "changedFiles": .integer(workspace.changedFiles.count),
             // Proof the drag landed. A run whose min and max agree resized nothing.
-            "widthMin": widths.min() ?? 0,
-            "widthMax": widths.max() ?? 0,
-            "widthSteps": Set(widths).count,
-            "didResize": (widths.max() ?? 0) - (widths.min() ?? 0) > 1,
-            "windowSize": ["w": window.frame.width, "h": window.frame.height],
-            "steps": offsets(sweeps: sweeps).count,
-            "travel": travel,
-            "step": step,
-            "sweeps": sweeps,
+            "widthMin": .number(Double(widths.min() ?? 0)),
+            "widthMax": .number(Double(widths.max() ?? 0)),
+            "widthSteps": .integer(Set(widths).count),
+            "didResize": .bool((widths.max() ?? 0) - (widths.min() ?? 0) > 1),
+            "steps": .integer(steps),
+            "travel": .number(Double(travel)),
+            "step": .number(Double(step)),
+            "sweeps": .integer(sweeps),
             // What two builds are compared with, for `FrameProbe`'s reason: a wall clock frame
             // interval measures this machine as well as this app, and CPU per step does not.
-            "mainThreadCpuMs": cpu * 1000,
-            "wallMs": wall * 1000,
-            "mainThreadBusyFraction": wall > 0 ? cpu / wall : 0,
-            "cpuMsPerStep": cpu * 1000 / Double(max(1, offsets(sweeps: sweeps).count)),
-            "loadAverage": systemLoadAverage(),
-            "paneLayout": PaneLayoutTiming.summary(),
+            "mainThreadCpuMs": .number(cpu * 1000),
+            "wallMs": .number(wall * 1000),
+            "mainThreadBusyFraction": .number(wall > 0 ? cpu / wall : 0),
+            "cpuMsPerStep": .number(cpu * 1000 / Double(max(1, steps))),
+            "paneLayout": .map(PaneLayoutTiming.summary()),
         ]
-    }
-
-    private static func mainThreadCPUSeconds() -> Double {
-        Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)) / 1_000_000_000
-    }
-
-    private static var buildConfiguration: String {
-        #if DEBUG
-        "debug"
-        #else
-        "release"
-        #endif
-    }
-
-    private static func systemLoadAverage() -> Double {
-        var loads = [Double](repeating: 0, count: 3)
-        guard getloadavg(&loads, 3) > 0 else { return 0 }
-        return loads[0]
-    }
-
-    // MARK: - Reaching the model
-
-    /// The app's state, handed over by the delegate on launch. Weak, for the reason `SwitchProbe`
-    /// gives: a probe has no business keeping the app alive.
-    private static func model() -> AppModel? { AppModel.probeInstance }
-
-    private static func write(_ report: [String: Any]) {
-        // Asked before the encode, for the reason `SwitchProbe.write` records: a typed id in a
-        // `[String: Any]` arrives as `__SwiftValue`, and `JSONSerialization` raises rather than
-        // throwing, which `try?` does not catch and which killed a run on its last line.
-        guard JSONSerialization.isValidJSONObject(report) else {
-            fail("the report holds a value JSON cannot carry, probably an id that needed .rawValue")
-        }
-        let data = (try? JSONSerialization.data(
-            withJSONObject: report, options: [.prettyPrinted, .sortedKeys]
-        )) ?? Data()
-        try? data.write(to: URL(fileURLWithPath: outputPath))
-        FileHandle.standardError.write(Data("resize probe wrote \(outputPath)\n".utf8))
-    }
-
-    /// `Never`, so the callers above can end a run with it from inside a `guard`.
-    private static func fail(_ message: String) -> Never {
-        FileHandle.standardError.write(Data("resize probe: \(message)\n".utf8))
-        exit(1)
+        // The probe's own keys win over both, so a report that has an opinion keeps it.
+        return .object(
+            own
+                .merging(ProbeHarness.frameTimings(recorder.intervals.map { $0 * 1000 })) { mine, _ in mine }
+                .merging(harness.conditions(window: window)) { mine, _ in mine }
+        )
     }
 }
