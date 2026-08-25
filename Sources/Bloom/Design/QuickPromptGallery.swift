@@ -86,17 +86,27 @@ struct QuickPromptGallery: View {
             VStack(alignment: .leading, spacing: Metrics.pane) {
                 panel("The first row, highlighted on opening", selected: 0)
                 panel("Nothing written yet", selected: nil, empty: true)
-                form("At rest, a symbol chosen", prompt: prompts[0])
                 Spacer(minLength: 0)
             }
 
             VStack(alignment: .leading, spacing: Metrics.pane) {
+                form("At rest, a symbol chosen", prompt: prompts[0])
                 form("A name longer than the row it is typed in", prompt: prompts[5])
-                // Both tabs, and the tab each opens on is read off the mark the prompt already
-                // carries, so these two are also the test of that.
-                form("The picker, open on Icons", prompt: prompts[0], picking: true)
-                form("The picker, open on Emojis", prompt: prompts[4], picking: true)
                 captioned("What Delete asks first") { deleteQuestion }
+                Spacer(minLength: 0)
+            }
+
+            VStack(alignment: .leading, spacing: Metrics.pane) {
+                // The tab each opens on is read off the mark the prompt already carries, so these
+                // two are the test of that as well as of the card.
+                //
+                // The first is marked with a symbol from the fifth band, which is the case that
+                // used to fail silently: the picker opened at the top of the first band with the
+                // mark it was meant to be showing several hundred points below the fold, because
+                // a lazy grid had not built the row a `ScrollViewReader` was asked to scroll to.
+                form("The picker, open on Icons and scrolled to the mark",
+                     prompt: prompts[6], picking: true)
+                form("The picker, open on Emojis", prompt: prompts[4], picking: true)
                 Spacer(minLength: 0)
             }
         }
@@ -246,7 +256,7 @@ extension Gallery {
     static let quickPrompts = Gallery(
         name: "quick-prompts",
         title: "Quick prompts",
-        size: CGSize(width: 880, height: 1400),
+        size: CGSize(width: 1320, height: 1440),
         needsFocus: false,
         view: { app in AnyView(QuickPromptGallery(app: app)) }
     )
