@@ -17,7 +17,16 @@ import BloomCore
 /// for it.
 struct PendingDeleteSnapshotGallery: View {
     /// The width the transcript caps a bubble at in a comfortable window.
+    /// The cap the bubbles below are drawn at, handed down the way the transcript hands it down:
+    /// a `PendingTurnRowView` reads the object rather than taking a number, so a gallery has to
+    /// put one in the environment. See `TranscriptBubbleWidth`.
     private static let bubble: CGFloat = 520
+
+    @State private var bubbleWidth: TranscriptBubbleWidth = {
+        let width = TranscriptBubbleWidth()
+        width.cap = bubble
+        return width
+    }()
 
     private static func delivery(_ body: String) -> Delivery {
         Delivery(targetSessionID: SessionID("s1"), body: body)
@@ -32,7 +41,6 @@ struct PendingDeleteSnapshotGallery: View {
                 PendingTurnRowView(
                     delivery: Self.delivery(Self.typed),
                     hold: .question,
-                    maxWidth: Self.bubble,
                     onDelete: {}
                 )
             }
@@ -41,7 +49,6 @@ struct PendingDeleteSnapshotGallery: View {
                 PendingTurnRowView(
                     delivery: Self.delivery(Self.typed),
                     hold: .question,
-                    maxWidth: Self.bubble,
                     onDelete: {},
                     pointerInside: true
                 )
@@ -55,21 +62,18 @@ struct PendingDeleteSnapshotGallery: View {
                     PendingTurnRowView(
                         delivery: Self.delivery("Also check the migration."),
                         hold: nil,
-                        maxWidth: Self.bubble,
-                        onDelete: {}
+                            onDelete: {}
                     )
                     PendingTurnRowView(
                         delivery: Self.delivery(Self.typed),
                         hold: nil,
-                        maxWidth: Self.bubble,
-                        onDelete: {},
+                            onDelete: {},
                         pointerInside: true
                     )
                     PendingTurnRowView(
                         delivery: Self.delivery("And run the tests when you are done."),
                         hold: .turn,
-                        maxWidth: Self.bubble,
-                        onDelete: {}
+                            onDelete: {}
                     )
                 }
             }
@@ -91,6 +95,7 @@ struct PendingDeleteSnapshotGallery: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .environment(\.transcriptBubbleWidth, bubbleWidth)
     }
 
     private func sheet(for recovery: PendingMessageDiscard.Recovery) -> some View {

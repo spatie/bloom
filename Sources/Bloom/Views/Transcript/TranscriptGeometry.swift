@@ -7,16 +7,19 @@ import Foundation
 /// content size and where it sits between them, and asking it directly is both cheaper and immune
 /// to the "the probe stopped being built" edge cases a preference-based measurement has.
 ///
-/// **It holds the bubble cap rather than the width it was worked out from, and that is a
-/// performance decision rather than a tidiness one.** This value is `@State` in `TranscriptListView`,
-/// so every change to it re-runs that view's body and with it the `ForEach` over every row the
-/// lazy stack has realised. A raw container width changes on every pixel of a sidebar drag, which
-/// is once a frame, for a number whose only use is capping the width of a speech bubble. Rounded
-/// to `step`, it changes about once every eleven points instead, and the drag stops rebuilding the
-/// list to move a bubble's edge by one point.
+/// **Everything in it is quantised, and that is a performance decision rather than a tidiness
+/// one.** This value is `@State` in `TranscriptListView`, so every change to it re-runs that
+/// view's body and with it the `ForEach` over every row the lazy stack has realised. A raw
+/// container width changes on every pixel of a drag, which is once a frame, and a raw offset
+/// changes on every frame of a scroll.
+///
+/// The bubble cap used to be one of these fields and no longer is. Quantising it took a drag from
+/// invalidating the list once a frame to once every eight points, which was the right fix for the
+/// gesture it was measured against and still an order of magnitude too much for a window resize:
+/// see `TranscriptBubbleWidth`, which holds it now, and which carries that measurement. `cap` is
+/// still here, because rounding it is still what keeps the writes down; what moved is who pays for
+/// one.
 struct TranscriptGeometry: Equatable {
-    /// The widest a user bubble may be, already rounded. Not the container width: see above.
-    var bubbleCap: CGFloat = 240
     /// How tall the pane is, rounded down to `heightStep`, for the one thing in the transcript
     /// that is sized as a share of it: the running setup tail. See `SetupTailWindow`.
     ///
