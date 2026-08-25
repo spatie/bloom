@@ -49,10 +49,32 @@ final class BrowserSession {
     private(set) var page = BrowserTabTitle.BrowserPage()
 
     @ObservationIgnored private let navigation = NavigationObserver()
-    /// KVO on `title`, because there is no delegate callback for it: `didFinish` fires before the
-    /// title of a page that sets it from script, and a page that changes its own title while you
-    /// are reading it fires nothing at all.
-    @ObservationIgnored private var titleObservation: NSKeyValueObservation?
+
+    /// KVO on everything the toolbar reads, because the navigation delegate does not see every
+    /// navigation.
+    ///
+    /// It started as KVO on `title` alone, since there is no delegate callback for a title:
+    /// `didFinish` fires before the title of a page that sets it from script, and a page that
+    /// renames itself while you are reading it fires nothing at all.
+    ///
+    /// **The address needed exactly the same treatment and did not have it, which is the bug.** A
+    /// single page app navigates with `history.pushState`, which is a SAME DOCUMENT navigation:
+    /// WebKit updates `url` and the back list, and neither `didCommit` nor `didFinish` fires,
+    /// because no document was loaded. There is no public delegate callback for one either, and
+    /// this was checked rather than assumed: `WKNavigationDelegate` has nothing with "same
+    /// document" in its name. So the field sat on `/login` while the reader walked four pages into
+    /// an Inertia site, and the tab strip beside it kept up perfectly, because the title was on
+    /// KVO and the address was not.
+    ///
+    /// `canGoBack` and `canGoForward` were stale in the same way and for the same reason: a
+    /// `pushState` pushes a back entry without loading anything, so Back was dead on a page you
+    /// really could go back from. `isLoading` is watched with them because the header documents it
+    /// as KVO compliant alongside the other three and one line is cheaper than the argument about
+    /// which callbacks cover it.
+    ///
+    /// The delegate stays. It is what reports a failure, and having both is two mechanisms
+    /// agreeing rather than a duplicate: `refresh` reads the web view and writes what changed.
+    @ObservationIgnored private var observations: [NSKeyValueObservation] = []
 
     init(url: String) {
         Self.preferInspectorDocked()
@@ -67,13 +89,30 @@ final class BrowserSession {
         webView.underPageBackgroundColor = NSColor(Palette.surface)
         navigation.owner = self
         webView.navigationDelegate = navigation
-        titleObservation = webView.observe(\.title, options: [.initial, .new]) { [weak self] view, _ in
-            // On the main thread, measured rather than assumed: WebKit posts every one of these
-            // from there, which is also the only thread its properties may be read on.
-            MainActor.assumeIsolated {
-                self?.adopt(BrowserTabTitle.BrowserPage(title: view.title ?? ""))
-            }
-        }
+        observations = [
+            webView.observe(\.title, options: [.initial, .new]) { [weak self] view, _ in
+                // On the main thread, measured rather than assumed: WebKit posts every one of
+                // these from there, which is also the only thread its properties may be read on.
+                MainActor.assumeIsolated {
+                    self?.adopt(BrowserTabTitle.BrowserPage(title: view.title ?? ""))
+                }
+            },
+            // No `.initial` on these four, unlike the title: the three lines below set the same
+            // facts from the address this tab is opening on, and an initial notification would
+            // land before them and read an empty web view.
+            webView.observe(\.url) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            },
+            webView.observe(\.canGoBack) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            },
+            webView.observe(\.canGoForward) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            },
+            webView.observe(\.isLoading) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            },
+        ]
         // Shown in the address field from the first frame, before anything has been fetched.
         currentURL = BrowserAddress.url(from: url)
         page = BrowserTabTitle.BrowserPage(address: displayAddress)
@@ -90,6 +129,31 @@ final class BrowserSession {
 
     func goBack() { webView.goBack() }
     func goForward() { webView.goForward() }
+
+    /// The pages behind this one, nearest first, as the menu under the Back arrow draws them.
+    ///
+    /// Read off `WKBackForwardList` on demand rather than mirrored into a property: the list is
+    /// not observable, so a stored copy would need a writer on every navigation and would be one
+    /// more thing to get out of step with the web view. Every navigation already moves `page` or
+    /// `isLoading`, both of which are observed, so the toolbar is rebuilt and asks again.
+    var backHistory: [BrowserToolbar.HistoryEntry] {
+        BrowserToolbar.backMenu(webView.backForwardList.backList.map(Self.page))
+    }
+
+    var forwardHistory: [BrowserToolbar.HistoryEntry] {
+        BrowserToolbar.forwardMenu(webView.backForwardList.forwardList.map(Self.page))
+    }
+
+    /// Somewhere further back or further forward than one step. The distance is
+    /// `BrowserToolbar.HistoryEntry.id`, which is WebKit's own index into this list.
+    func go(back distance: Int) {
+        guard let item = webView.backForwardList.item(at: distance) else { return }
+        webView.go(to: item)
+    }
+
+    private static func page(_ item: WKBackForwardListItem) -> BrowserTabTitle.BrowserPage {
+        BrowserTabTitle.BrowserPage(address: item.url.absoluteString, title: item.title ?? "")
+    }
 
     func reload() {
         // A dev server that was not up when the tab opened has no page to reload, so an empty
@@ -134,7 +198,7 @@ final class BrowserSession {
     }
 
     func stop() {
-        titleObservation = nil
+        observations = []
         webView.stopLoading()
         webView.navigationDelegate = nil
         // The page view rather than the web view, so an attached inspector comes out of the window
@@ -165,11 +229,21 @@ final class BrowserSession {
         self.page = next
     }
 
+    /// Reads the whole of the web view's state and writes back only what moved.
+    ///
+    /// **Only what moved, because `@Observable` does not compare.** Setting a property to the value
+    /// it already holds still tells every view reading it to redraw, and one navigation now calls
+    /// this five times: the delegate on start, commit and finish, and KVO on each of the four
+    /// properties it watches. Writing all four every time made a single page load a dozen redraws
+    /// of the centre column for three actual changes. `adopt` has always compared, for the same
+    /// reason and one level down.
     fileprivate func refresh() {
-        canGoBack = webView.canGoBack
-        canGoForward = webView.canGoForward
-        isLoading = webView.isLoading
-        if let url = webView.url { currentURL = url }
+        if canGoBack != webView.canGoBack { canGoBack = webView.canGoBack }
+        if canGoForward != webView.canGoForward { canGoForward = webView.canGoForward }
+        if isLoading != webView.isLoading { isLoading = webView.isLoading }
+        // Nil is a web view that has not loaded anything rather than a page at no address, so the
+        // tab keeps the address it was opened on. See `reload`, which is the other half of that.
+        if let url = webView.url, url != currentURL { currentURL = url }
         adopt(BrowserTabTitle.BrowserPage(address: displayAddress))
     }
 

@@ -157,6 +157,22 @@ enum Palette {
     /// a quarter, which is why a placeholder written as `textTertiary` reads as disabled.
     static let textPlaceholder = Color(nsColor: .placeholderTextColor)
 
+    /// A control that is there and cannot be pressed.
+    ///
+    /// Semantic, and it is the exception `textTertiary` above argues for rather than a fourth rung
+    /// of Bloom's own. That note says the system's third rung is what the system means for a
+    /// disabled control and that Bloom's tertiary is deliberately not it, which leaves nothing in
+    /// this file for a control that really is disabled. Written as `textTertiary`, the browser
+    /// toolbar's Back arrow was a shade off the Forward arrow beside it and read as pressable at
+    /// every size the pane is drawn at, which is measured off `BrowserToolbarGallery` rather than
+    /// argued: the first row of that page has both arrows dead and looked exactly like the second,
+    /// which has neither.
+    ///
+    /// `disabledControlTextColor` rather than `tertiaryLabelColor`, though they are close, because
+    /// this is a control and not a label, and it is the one AppKit moves when the user turns on
+    /// Increase Contrast.
+    static let textDisabled = Color(nsColor: .disabledControlTextColor)
+
     // MARK: Text editing
     //
     // The three colours AppKit uses inside a text view. Each of them tracks something the accent

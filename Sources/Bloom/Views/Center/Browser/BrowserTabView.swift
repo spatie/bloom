@@ -32,10 +32,6 @@ struct BrowserTabView: View {
     /// See `ControlActiveState.showsFocusRing`: a ring belongs in the key window only.
     @Environment(\.controlActiveState) private var activeState
 
-    /// Drawn inside the field's own edge rather than outside it, so the toolbar does not have to
-    /// give the ring clearance. See `HomeBar.focusRingWidth`.
-    private static let focusRingWidth: CGFloat = 2
-
     private var tabs: CenterTabStore { .shared }
     private var session: BrowserSession { tabs.browser(for: tab) }
 
@@ -82,59 +78,35 @@ struct BrowserTabView: View {
         }
     }
 
+    /// What the bar offers, given what the page can do. Every one of those answers is
+    /// `BrowserToolbar` in the core, so this view holds no rule of its own: it wires the buttons
+    /// to the session and draws what it is told. See `BrowserToolbarView`.
     private func toolbar(_ session: BrowserSession) -> some View {
-        HStack(spacing: Metrics.spacing) {
-            control("chevron.backward", title: "Back", enabled: session.canGoBack, action: session.goBack)
-            control(
-                "chevron.forward", title: "Forward",
-                enabled: session.canGoForward, action: session.goForward
-            )
-            control(
-                session.isLoading ? "xmark" : "arrow.clockwise",
-                title: session.isLoading ? "Stop" : "Reload",
-                enabled: true
-            ) {
+        BrowserToolbarView(
+            toolbar: BrowserToolbar(
+                page: session.page,
+                canGoBack: session.canGoBack,
+                canGoForward: session.canGoForward,
+                isLoading: session.isLoading,
+                isCapturing: isCapturing
+            ),
+            address: $address,
+            addressFocus: $isAddressFocused,
+            isRingVisible: isRingVisible,
+            backHistory: session.backHistory,
+            forwardHistory: session.forwardHistory,
+            goBack: session.goBack,
+            goForward: session.goForward,
+            goToHistory: { session.go(back: $0) },
+            reloadOrStop: {
                 if session.isLoading { session.webView.stopLoading() } else { session.reload() }
+            },
+            capture: capture,
+            submit: {
+                session.load(address)
+                isAddressFocused = false
             }
-
-            // Left of the address rather than right of it, with the other three: they are all
-            // things you do to the page, and the address field is where the page is. Its own group
-            // on the right would have read as belonging to the field.
-            control(
-                "camera",
-                title: "Send a Screenshot to the Agent",
-                enabled: !isCapturing,
-                action: capture
-            )
-
-            TextField("Address", text: $address)
-                .textFieldStyle(.plain)
-                .font(Typo.label)
-                .focused($isAddressFocused)
-                .autocorrectionDisabled()
-                .padding(.horizontal, Metrics.spacingWide)
-                .padding(.vertical, Metrics.spacingSmall)
-                .background(Palette.surfaceRaised, in: .rect(cornerRadius: Metrics.cornerSmall))
-                // A hand-built field gets no focus ring from AppKit, and an address bar that looks
-                // identical whether or not it has the keyboard is the single most reliable way to
-                // make a Mac window feel like a web page. The same overlay `HomeBar`'s search field
-                // uses, in the same colour macOS draws a real one in, so it follows Full Keyboard
-                // Access and Increase Contrast with it.
-                .overlay {
-                    RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                        .strokeBorder(
-                            isRingVisible ? Palette.focusRing : Palette.border,
-                            lineWidth: isRingVisible ? Self.focusRingWidth : Metrics.hairline
-                        )
-                }
-                .onSubmit {
-                    session.load(address)
-                    isAddressFocused = false
-                }
-        }
-        .padding(.horizontal, Metrics.inset)
-        .frame(height: Metrics.barHeight)
-        .background(Palette.surfaceSunken)
+        )
     }
 
     // MARK: - Screenshot
@@ -201,7 +173,9 @@ struct BrowserTabView: View {
         let menu = paneMenu?() ?? NSMenu()
         guard !isCapturing else { return menu }
 
-        let title = "Send a Screenshot to the Agent"
+        // The same words as the toolbar's own camera, taken from the one place that says them, so
+        // the glyph and the menu item cannot drift into naming the same thing two ways.
+        let title = BrowserToolbar().screenshot.name
         let target = SnapshotMenuTarget(perform: capture)
         let item = NSMenuItem(
             title: title, action: #selector(SnapshotMenuTarget.fire), keyEquivalent: ""
@@ -214,24 +188,6 @@ struct BrowserTabView: View {
         return menu
     }
 
-    private func control(
-        _ symbol: String,
-        title: String,
-        enabled: Bool,
-        action: @escaping @MainActor () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: symbol)
-                .labelStyle(.iconOnly)
-                .font(Typo.label)
-                .foregroundStyle(enabled ? Palette.textSecondary : Palette.textTertiary)
-                .frame(width: Metrics.rowHeight, height: Metrics.glyph)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.borderless)
-        .disabled(!enabled)
-        .help(title)
-    }
 }
 
 /// What answers the page menu's screenshot item. A closure cannot be an `NSMenuItem` action, and
