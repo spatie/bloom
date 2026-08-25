@@ -37,6 +37,16 @@ struct SystemAccentGallery: View {
             VStack(alignment: .leading, spacing: Metrics.pane) {
                 captioned("What AppKit draws off the accent, and no .tint can reach") {
                     SystemAccentControls()
+                        // Every accented control drops to a neutral grey when its window is not
+                        // key, which is exactly what this page is captured in: `needsFocus` is
+                        // false, so the window is ordered front without the app being activated
+                        // and the first capture came back with an "on" switch identical to the
+                        // "off" one. `controlActiveState` is the environment value SwiftUI's own
+                        // controls read to decide that, so the page states the answer rather than
+                        // taking the keys off whoever is at the machine to earn it. The window is
+                        // still inactive; only these controls are told to draw as though it were
+                        // not.
+                        .environment(\.controlActiveState, .key)
                 }
                 Spacer(minLength: 0)
             }
