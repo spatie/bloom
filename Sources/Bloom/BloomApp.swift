@@ -55,6 +55,12 @@ struct BloomApp: App {
         // complaint is about. See `ResizeProbe`.
         if ResizeProbe.isRequested { ResizeProbe.schedule() }
 
+        // And the one that measures the app being USED rather than a gesture somebody made to it:
+        // `Bloom --stream-probe <out.json>` types into the composer and then streams a turn into
+        // the transcript, and reports what each keystroke and each delta cost the window. See
+        // `StreamProbe`.
+        if StreamProbe.isRequested { StreamProbe.schedule() }
+
         // And the one that answers "the battery menu says Bloom is using significant energy":
         // `Bloom --idle-probe <out.json> --idle-worktrees <list>` runs the diff stat pass the six
         // second loop runs and reports what it cost in process time and in subprocesses. It is the

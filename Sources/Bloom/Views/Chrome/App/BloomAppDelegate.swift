@@ -37,6 +37,7 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         // The tab probe needs it for the same reason, and reaches one workspace's model through
         // it: what it drives is `WorkspaceTabsStore.select`, which takes one.
         TabProbe.attach(model)
+        StreamProbe.attach(model)
         servicesProvider.attach(model)
         // And a Shortcut needs it for the same reason the Services menu does: an intent runs in
         // this process and has to execute the same code a click in the create sheet does, rather

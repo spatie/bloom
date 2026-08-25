@@ -43,7 +43,11 @@ struct ReviewPaneView: View {
     }
 
     /// How tall the whole pane is, which caps how far the composer's divider can be dragged.
-    @State private var paneHeight: CGFloat = 0
+    ///
+    /// In the composer's own object rather than in this view's state, and quantised on the way in,
+    /// for the reason `ComposerRoom` sets out: as state it re-ran this body, and with it the diff
+    /// beside the box, every time the draft rewrapped a line.
+    @State private var room = ComposerRoom()
 
     /// The conversation's text size and face, applied to the composer here exactly as
     /// `ChatPaneView` applies them to its whole subtree. Without this the same composer would
@@ -63,12 +67,14 @@ struct ReviewPaneView: View {
             // comments on this screen and then leaving it to send them. A second composer view
             // was considered and rejected: one draft, one send path, nothing to keep in step.
             if let transcript = composerTranscript {
-                ComposerView(transcript: transcript, model: model, availableHeight: paneHeight)
+                ComposerView(transcript: transcript, model: model, room: room)
                     .environment(\.fontScale, textSize.scale)
                     .environment(\.chatFont, chatFont)
             }
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { paneHeight = $0 }
+        .onGeometryChange(for: CGFloat.self) { PaneMeasure.room($0.size.height) } action: {
+            room.height = $0
+        }
         .background(Palette.surface)
         // A pane can be pointed at a session this launch has never opened, so the transcript is
         // built here rather than assumed, exactly as `CenterPaneView.prepare` does for a chat.

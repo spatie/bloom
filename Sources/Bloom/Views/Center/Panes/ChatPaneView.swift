@@ -29,11 +29,14 @@ struct ChatPaneView: View {
     /// the divider between the two can be dragged.
     ///
     /// Rounded, and that is a performance decision rather than a tidiness one. Raw, it changed on
-    /// every pixel of a window or sidebar drag, which is once a frame, and every one of those
-    /// changes re-ran this body: the whole transcript subtree and the composer under it, rebuilt to
-    /// move a clamp by one point. See `PaneMeasure`, and `TranscriptGeometry` for the same decision
-    /// taken for the same reason one view down.
-    @State private var conversationHeight: CGFloat = 0
+    /// every pixel of a window or sidebar drag, which is once a frame. See `PaneMeasure`, and
+    /// `TranscriptGeometry` for the same decision taken for the same reason one view down.
+    ///
+    /// An object rather than `@State`, which is the other half of the same fix: rounding cut how
+    /// OFTEN this body was re-run, and holding the number where only the composer reads it cuts
+    /// what a re-run costs to nothing at all. The transcript is rebuilt by neither now. See
+    /// `ComposerRoom`.
+    @State private var room = ComposerRoom()
 
     /// The conversation's text size, applied here because this pane is exactly what the setting is
     /// scoped to: what was said and what you are about to say. The sidebar, the inspector and the
@@ -71,17 +74,13 @@ struct ChatPaneView: View {
                 }
             }
 
-            ComposerView(
-                transcript: transcript,
-                model: model,
-                availableHeight: conversationHeight
-            )
+            ComposerView(transcript: transcript, model: model, room: room)
         }
         // Rounded inside the probe rather than after it, because `onGeometryChange` only calls
         // the action when the value it is given has changed. Rounding here is what stops the
         // action running at all for the frames that do not cross a step.
         .onGeometryChange(for: CGFloat.self) { PaneMeasure.room($0.size.height) } action: {
-            conversationHeight = $0
+            room.height = $0
         }
         .background(Palette.windowBackground)
         .environment(\.fontScale, textSize.scale)

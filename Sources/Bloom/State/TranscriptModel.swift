@@ -845,6 +845,19 @@ final class TranscriptModel {
 
     // MARK: - Event handling
 
+    /// The event pump's door, opened for one caller: `StreamProbe`.
+    ///
+    /// **A probe hook in a production type, deliberately, and this is the argument for it.** What
+    /// the probe has to measure is what Bloom does with a delta, and the only faithful way to
+    /// measure that is to hand this the events a runner hands it. The alternative was a probe that
+    /// wrote `streamingText` directly, which measures a property being assigned rather than a turn
+    /// arriving, and would go on measuring it after the pump around it had changed. Nothing else
+    /// may call this: a runner reaches `handle` through its own pump, and anything else pushing
+    /// events into a transcript would be a second writer on state that has exactly one.
+    func acceptForProbe(_ event: AgentEvent) async {
+        await handle(event)
+    }
+
     private func handle(_ event: AgentEvent) async {
         switch event {
         case .initialized:
