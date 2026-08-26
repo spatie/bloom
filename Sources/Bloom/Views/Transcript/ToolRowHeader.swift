@@ -16,6 +16,11 @@ struct ToolRowHeader: View {
     var durationMS: Int?
     var isExpanded: Bool
     var isHovered: Bool
+    /// Whether there is anything behind the chevron. False for the rows that cannot open: a merge
+    /// event has no log, and `WorkspaceEventsView` already refuses to wrap those in an
+    /// `ExpandableRowHeader`. Drawn unconditionally, the chevron appeared on hover over a row that
+    /// does not answer it, which is the case that row's own doc calls worse than no chevron.
+    var showsDisclosure = true
 
     /// The model is looked up rather than passed down, exactly as `UserTurnRowView` does it: the
     /// transcript is handed a session, not a workspace model, and this only ever reads. Nothing in
@@ -213,7 +218,9 @@ struct ToolRowHeader: View {
                     .fixedSize()
             }
 
-            TranscriptDisclosure(isExpanded: isExpanded, isVisible: isHovered)
+            if showsDisclosure {
+                TranscriptDisclosure(isExpanded: isExpanded, isVisible: isHovered)
+            }
         }
         .transcriptRowFrame()
         .background { frameProbe }

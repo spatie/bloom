@@ -16,6 +16,12 @@ struct ExpandableRowHeader<Content: View>: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // The state in a value and the action in a hint, which is the split VoiceOver makes. A
+        // hint is read after a pause and can be switched off entirely in VoiceOver Utility, so
+        // announcing "expanded" only there meant a reader with hints off was told what pressing
+        // would do and never what the row currently was. `RepoHeaderRow.disclosure` already does
+        // both.
+        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
         .accessibilityHint(isExpanded ? "Collapses this row" : "Expands this row")
     }
 }

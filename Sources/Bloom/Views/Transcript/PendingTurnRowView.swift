@@ -85,7 +85,7 @@ struct PendingTurnRowView: View {
     }
 
     private var bubble: some View {
-        CappedWidth(width: bubbleWidth?.cap ?? 560) {
+        CappedWidth(width: bubbleWidth?.cap ?? UserTurnRowView.uncappedFallback) {
             Text(displayText)
                 .font(Typo.body)
                 .lineSpacing(TranscriptLayout.proseLeading)
