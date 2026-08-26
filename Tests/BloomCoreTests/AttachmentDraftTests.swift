@@ -153,6 +153,90 @@ struct AttachmentDraftTests {
         #expect(AttachmentDraft.parse(draft).keeping { _ in false } == "what is this")
     }
 
+    @Test("Taking one chip off leaves the others where they were")
+    func removesOneOccurrence() {
+        let draft = "compare `\(Self.copy)` with `\(Self.spaced)` please"
+        let parsed = AttachmentDraft.parse(draft)
+
+        #expect(parsed.removing(attachment: 0) == "compare with `\(Self.spaced)` please")
+        #expect(parsed.removing(attachment: 1) == "compare `\(Self.copy)` with please")
+    }
+
+    /// The same file twice is two chips, and the X on one of them is about that one.
+    @Test("The same file named twice is taken off one chip at a time")
+    func removesTheChipThatWasClicked() {
+        let draft = "`\(Self.copy)` and again `\(Self.copy)`"
+        let parsed = AttachmentDraft.parse(draft)
+
+        #expect(parsed.removing(attachment: 0) == "and again `\(Self.copy)`")
+        #expect(parsed.removing(attachment: 1) == "`\(Self.copy)` and again")
+    }
+
+    @Test("A file at the start of the draft takes the space that follows it")
+    func removesAtStart() {
+        let draft = "`\(Self.copy)` what is this"
+        #expect(AttachmentDraft.parse(draft).removal(ofAttachment: 0)?.location == 0)
+        #expect(AttachmentDraft.parse(draft).removing(attachment: 0) == "what is this")
+    }
+
+    @Test("A file that is the whole draft leaves nothing behind")
+    func removesTheOnlyWord() {
+        #expect(AttachmentDraft.parse("`\(Self.copy)`").removing(attachment: 0).isEmpty)
+        #expect(AttachmentDraft.parse("`\(Self.copy)` ").removing(attachment: 0).isEmpty)
+    }
+
+    /// The range is what the editor deletes, so it has to be the token plus at most one space and
+    /// never a character of the sentence around it.
+    @Test("The range covers the file and one space, and nothing else")
+    func removalRange() throws {
+        let draft = "have a look at `\(Self.copy)` and fix the spacing"
+        let range = AttachmentDraft.parse(draft).removal(ofAttachment: 0)
+        let cut = (draft as NSString).substring(with: try #require(range))
+
+        #expect(cut == " `\(Self.copy)`")
+        #expect(AttachmentDraft.parse(draft).removing(attachment: 0)
+            == "have a look at and fix the spacing")
+    }
+
+    @Test("A draft with no such file is left exactly as it was")
+    func removesNothing() {
+        let draft = "run `git status` first"
+        #expect(AttachmentDraft.parse(draft).removal(ofAttachment: 0) == nil)
+        #expect(AttachmentDraft.parse(draft).removing(attachment: 0) == draft)
+        #expect(AttachmentDraft.parse("`\(Self.copy)`").removal(ofAttachment: 1) == nil)
+    }
+
+    /// How a chip in the composer says which file it is: by where it starts, because a path typed
+    /// inside backticks is a file here and still plain text over there.
+    @Test("A file is found by where it starts in the draft")
+    func findsByOffset() {
+        let draft = "a `\(Self.copy)` b `\(Self.spaced)`"
+        let parsed = AttachmentDraft.parse(draft)
+
+        #expect(parsed.attachment(startingAt: 2) == 0)
+        #expect(parsed.attachment(startingAt: 2 + (Self.copy as NSString).length + 5) == 1)
+        // Anywhere that is not the first character of a token names nothing.
+        #expect(parsed.attachment(startingAt: 0) == nil)
+        #expect(parsed.attachment(startingAt: 3) == nil)
+        #expect(parsed.attachment(startingAt: (draft as NSString).length) == nil)
+    }
+
+    /// Every removal is a removal of one, so doing it once per file has to land on the same
+    /// sentence `keeping` gives for all of them at once.
+    @Test("Taking every chip off one at a time agrees with taking them all at once")
+    func agreesWithKeeping() {
+        for row in Self.drafts {
+            var text = row.draft
+            while true {
+                let parsed = AttachmentDraft.parse(text, paths: row.known)
+                guard !parsed.paths.isEmpty else { break }
+                text = parsed.removing(attachment: 0)
+            }
+            let all = AttachmentDraft.parse(row.draft, paths: row.known).keeping { _ in false }
+            #expect(text == all, "one at a time disagreed for: \(row.draft)")
+        }
+    }
+
     @Test("What the sentence says without its files")
     func withoutAttachments() {
         #expect(

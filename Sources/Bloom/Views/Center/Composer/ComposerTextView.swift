@@ -27,8 +27,8 @@ final class ComposerTextView: NSTextView {
     /// draws the file above the box.
     var hoverAttachment: (@MainActor (String?) -> Void)?
 
-    /// Where the pointer is now, and the wait before it counts as settled.
-    fileprivate var hoveredPath: String?
+    /// Which chip the pointer is on now, and the wait before it counts as settled.
+    fileprivate var hoveredChip: HoveredChip?
     fileprivate var hoverTask: Task<Void, Never>?
     fileprivate var hoverArea: NSTrackingArea?
 
@@ -260,7 +260,7 @@ extension ComposerTextView {
 
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
-        hover(over: attachmentPath(at: convert(event.locationInWindow, from: nil)))
+        hover(over: chip(at: convert(event.locationInWindow, from: nil)))
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -268,13 +268,13 @@ extension ComposerTextView {
         hover(over: nil)
     }
 
-    /// The file under a point, or nil for anywhere that is not a chip.
+    /// The chip under a point, or nil for anywhere that is not one.
     ///
     /// The glyph's own rectangle is checked rather than the insertion point the same coordinates
     /// would give: an insertion index is the nearest gap between characters and exists everywhere
     /// in the box, including the empty space to the right of the last word, which would raise a
     /// card for a file the pointer is nowhere near.
-    private func attachmentPath(at point: CGPoint) -> String? {
+    private func chip(at point: CGPoint) -> HoveredChip? {
         guard let layout = layoutManager, let container = textContainer else { return nil }
         let origin = textContainerOrigin
         let inContainer = CGPoint(x: point.x - origin.x, y: point.y - origin.y)
@@ -292,24 +292,93 @@ extension ComposerTextView {
 
         let index = layout.characterIndexForGlyph(at: glyph)
         guard index < (string as NSString).length else { return nil }
-        return textStorage?.attribute(
+        guard let path = textStorage?.attribute(
             ComposerChipText.pathKey, at: index, effectiveRange: nil
-        ) as? String
+        ) as? String else { return nil }
+        return HoveredChip(path: path, index: index)
     }
 
-    private func hover(over path: String?) {
-        guard path != hoveredPath else { return }
-        hoveredPath = path
+    private func hover(over chip: HoveredChip?) {
+        guard chip != hoveredChip else { return }
+        let was = hoveredChip
+        hoveredChip = chip
         hoverTask?.cancel()
 
-        guard let path else {
+        // The close control lives in the chip's own icon slot, so crossing into or out of one is
+        // a redraw. The whole box rather than the two glyph rects: it is twelve lines at most, and
+        // this runs when the pointer crosses a chip's edge rather than while it moves along one.
+        if was?.index != chip?.index { needsDisplay = true }
+
+        guard let chip else {
             hoverAttachment?(nil)
             return
         }
         hoverTask = Task { [weak self] in
             try? await Task.sleep(for: Self.hoverDelay)
-            guard !Task.isCancelled, let self, self.hoveredPath == path else { return }
-            self.hoverAttachment?(path)
+            guard !Task.isCancelled, let self, self.hoveredChip == chip else { return }
+            self.hoverAttachment?(chip.path)
         }
+    }
+}
+
+/// A chip and where it is, which is what the pointer is on rather than just which file it names:
+/// the same screenshot can be in the sentence twice, and the close control belongs to the one
+/// under the pointer.
+struct HoveredChip: Equatable {
+    var path: String
+    /// The character the chip is, in the text view's own storage.
+    var index: Int
+}
+
+// MARK: - Taking one off
+
+extension ComposerTextView {
+    /// Whether the chip at this character is the one under the pointer, which is what puts the
+    /// close control in its icon slot. Asked by the cell as it draws.
+    func isChipHovered(at characterIndex: Int) -> Bool {
+        hoveredChip?.index == characterIndex
+    }
+
+    /// Takes one file out of the draft, as an edit rather than as a new draft.
+    ///
+    /// Through the text system for the reason `ComposerEditorHandle.insert` goes through it: this
+    /// is the undo of an attachment, and Command+Z has to put the file back in the sentence where
+    /// it was, in order with the words typed either side of it. Rewriting the binding would leave
+    /// the text right and the undo stack describing a draft that no longer exists.
+    ///
+    /// **The copy under `.bloom/attachments` deliberately stays.** It is deleted when the turn
+    /// goes, by `PromptAttachmentStore.settle`, which discards every copy the sentence no longer
+    /// names. Deleting it here would mean an X and then a Command+Z left a chip in the sentence
+    /// pointing at a file that is not there any more, and it would make this button a delete from
+    /// somebody's disk rather than an edit to their draft. It is exactly what backspacing the chip
+    /// away already does, which is the other half of why: two ways to take a file off must not
+    /// have two different answers about the file.
+    func removeAttachment(at characterIndex: Int) {
+        guard let storage = textStorage else { return }
+        let held = attributedString()
+        let chips = ComposerChipText.attachments(in: held)
+        let draft = ComposerChipText.draft(of: held)
+        let parsed = AttachmentDraft.parse(draft, paths: chips.map(\.path))
+        // By where the chip is in the draft rather than by which chip it is in the storage. See
+        // `AttachmentDraft.attachment(startingAt:)` for the draft the two disagree about.
+        guard let occurrence = parsed.attachment(
+            startingAt: ComposerChipText.draftOffset(forStorage: characterIndex, in: held)
+        ), let cut = parsed.removal(ofAttachment: occurrence) else { return }
+        let start = ComposerChipText.storageOffset(forDraft: cut.location, in: held)
+        let end = ComposerChipText.storageOffset(forDraft: cut.upperBound, in: held)
+        let range = NSRange(location: start, length: max(end - start, 0))
+
+        breakUndoCoalescing()
+        guard shouldChangeText(in: range, replacementString: "") else { return }
+        storage.beginEditing()
+        storage.replaceCharacters(in: range, with: "")
+        storage.endEditing()
+        didChangeText()
+        breakUndoCoalescing()
+        undoManager?.setActionName("Remove Attachment")
+        setSelectedRange(NSRange(location: range.location, length: 0))
+        // The chip the card was about has gone, so the card goes with it rather than hanging over
+        // the box until the pointer next moves.
+        hover(over: nil)
     }
 }

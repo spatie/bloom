@@ -264,6 +264,72 @@ public struct AttachmentDraft: Equatable, Sendable {
         return result
     }
 
+    /// The file whose token starts at this offset in the draft, as its place in reading order.
+    ///
+    /// The way a chip in a text view names itself to the rules here, and it goes by position
+    /// rather than by counting: a path somebody typed inside backticks is a file to `parse` and
+    /// still plain text in the storage, because nothing rewrites the storage while the draft it
+    /// stands for is unchanged. The two lists then differ, and a chip's ordinal in one of them is
+    /// the wrong file in the other.
+    public func attachment(startingAt offset: Int) -> Int? {
+        var seen = 0
+        var location = 0
+        for segment in segments {
+            let length = (segment.text as NSString).length
+            if case .attachment = segment {
+                if location == offset { return seen }
+                seen += 1
+            }
+            location += length
+        }
+        return nil
+    }
+
+    /// Where one file sits in the draft, together with the single space that was written beside
+    /// it. Nil when the draft names no such file.
+    ///
+    /// `occurrence` counts files in reading order rather than naming a path, because the same
+    /// screenshot can be in the sentence twice and taking one chip off must take that chip off.
+    ///
+    /// A range rather than the resulting draft, because the caller that matters applies it as an
+    /// edit to the text view so that the text system's own undo covers it. `removing(attachment:)`
+    /// is the same answer for anyone holding only the string.
+    ///
+    /// The space rule is `keeping`'s, asked of one file instead of all of them: one space goes,
+    /// the one before it where there is one, otherwise the one after, so the words either side
+    /// close up without being joined.
+    public func removal(ofAttachment occurrence: Int) -> NSRange? {
+        let string = text as NSString
+        var seen = 0
+        var location = 0
+
+        for segment in segments {
+            let length = (segment.text as NSString).length
+            guard case .attachment = segment, seen == occurrence else {
+                if case .attachment = segment { seen += 1 }
+                location += length
+                continue
+            }
+            var range = NSRange(location: location, length: length)
+            if range.location > 0,
+               string.substring(with: NSRange(location: range.location - 1, length: 1)) == " " {
+                range.location -= 1
+                range.length += 1
+            } else if range.upperBound < string.length,
+                      string.substring(with: NSRange(location: range.upperBound, length: 1)) == " " {
+                range.length += 1
+            }
+            return range
+        }
+        return nil
+    }
+
+    /// The draft with one file taken out of it, closed up behind.
+    public func removing(attachment occurrence: Int) -> String {
+        guard let range = removal(ofAttachment: occurrence) else { return text }
+        return (text as NSString).replacingCharacters(in: range, with: "")
+    }
+
     /// The draft with every file taken out of it: what the sentence says on its own.
     ///
     /// Used where the words are read by something other than the agent. A workspace is named after

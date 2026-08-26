@@ -386,8 +386,12 @@ final class AttachmentChipCell: NSTextAttachmentCell {
 
     override func cellBaselineOffset() -> NSPoint { baselineOffset }
 
+    /// The fallback TextKit does not take: it draws an attachment through the overload below,
+    /// which is the only one that says which character it is drawing. `NSNotFound` rather than
+    /// zero, so a chip reached this way cannot be mistaken for the one the pointer is on when
+    /// that one happens to be the first character of the draft.
     override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {
-        draw(withFrame: cellFrame, in: controlView, characterIndex: 0)
+        draw(withFrame: cellFrame, in: controlView, characterIndex: NSNotFound)
     }
 
     override func draw(
@@ -402,7 +406,6 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         plate.lineWidth = 1
         plate.stroke()
 
-        let icon = FileTypeIcon.icon(for: filename)
         let side = iconSize
         let iconRect = NSRect(
             x: frame.minX + Self.padding,
@@ -410,7 +413,15 @@ final class AttachmentChipCell: NSTextAttachmentCell {
             width: side,
             height: side
         )
-        icon.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        // The file's own icon, unless the pointer is on the chip, in which case the slot is the
+        // close control instead. A symbol that would not load falls back to the icon rather than
+        // to an empty slot.
+        let mark = (isRemovable(from: controlView, at: characterIndex) ? close : nil)
+            ?? FileTypeIcon.icon(for: filename)
+        mark.draw(
+            in: iconRect, from: .zero, operation: .sourceOver, fraction: 1,
+            respectFlipped: true, hints: nil
+        )
 
         let name = NSAttributedString(string: filename, attributes: nameAttributes)
         let height = name.size().height
@@ -421,6 +432,48 @@ final class AttachmentChipCell: NSTextAttachmentCell {
             height: height
         )
         name.draw(with: nameRect, options: [.usesLineFragmentOrigin])
+    }
+
+    // MARK: - Taking it off
+
+    /// Whether this chip is showing its close control, which is the pointer resting on it inside a
+    /// composer. A chip in a sent turn is drawn by another view entirely and has nothing to
+    /// remove: the prompt the agent read named that file, so the transcript cannot un-name it.
+    private func isRemovable(from controlView: NSView?, at characterIndex: Int) -> Bool {
+        guard let composer = controlView as? ComposerTextView else { return false }
+        return composer.isChipHovered(at: characterIndex)
+    }
+
+    /// The close control, which takes the icon's place rather than a slot of its own.
+    ///
+    /// The width is measured once at init and TextKit has already laid the line out around it, so
+    /// a control beside the name would have to come out of the name. Swapping the icon costs the
+    /// name nothing, keeps the chip exactly the width it had so the line does not reflow under the
+    /// pointer, and is what `AttachmentChip` and `SlashCommandChip` already do above the box.
+    ///
+    /// `.secondaryLabelColor` because it is only ever drawn on the composer's own ground; the
+    /// bubble's ink is not reached through here, because a sent turn is never removable.
+    ///
+    /// Built per draw rather than held: one chip shows it, only while the pointer is on it, and
+    /// SF Symbols does its own caching underneath.
+    private var close: NSImage? {
+        let size = NSImage.SymbolConfiguration(pointSize: iconSize, weight: .regular)
+        let ink = NSImage.SymbolConfiguration(paletteColors: [.secondaryLabelColor])
+        return NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Remove")?
+            .withSymbolConfiguration(size.applying(ink))
+    }
+
+    /// Where a click takes the file off rather than opening it: the icon's slot and the padding
+    /// around it, up to halfway across the gap before the name. Wider than the glyph on purpose,
+    /// which is fourteen points in a twenty point pill, and stopping short of the name because
+    /// reading the name is what tells you which file you are about to remove.
+    private func closeRect(in frame: NSRect) -> NSRect {
+        NSRect(
+            x: frame.minX,
+            y: frame.minY,
+            width: Self.padding + iconSize + Self.gap / 2,
+            height: frame.height
+        )
     }
 
     /// The chip answers a click itself, so opening a file is a click on the file rather than a
@@ -437,6 +490,14 @@ final class AttachmentChipCell: NSTextAttachmentCell {
     ) -> Bool {
         guard event.clickCount >= 1, let composer = controlView as? ComposerTextView else {
             return false
+        }
+        // Only where the control is actually showing. Without that, the click that makes an
+        // inactive window key would remove a file whose X the reader never saw: the tracking area
+        // is `.activeInKeyWindow`, so nothing has hovered yet.
+        if isRemovable(from: controlView, at: charIndex),
+           closeRect(in: cellFrame).contains(composer.convert(event.locationInWindow, from: nil)) {
+            composer.removeAttachment(at: charIndex)
+            return true
         }
         composer.openAttachment?(path)
         return true
