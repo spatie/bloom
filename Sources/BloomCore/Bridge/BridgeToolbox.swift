@@ -2,7 +2,7 @@ import Foundation
 
 /// Every tool the bridge serves, and the only place a new one is added.
 ///
-/// A list of handlers rather than a switch. There are twenty-three of them now, and a switch
+/// A list of handlers rather than a switch. There are twenty-five of them now, and a switch
 /// would put each in three places: the listing, the dispatch and the role gate. Here a tool is one
 /// type, and it carries its own gate. See `docs/BRIDGE.md` for the whole surface and who may reach
 /// it.
@@ -31,14 +31,15 @@ public struct BridgeToolbox: Sendable {
     /// where that was answered, and its head says which tools Bloom answers for and why the rest
     /// are not on the list. See `LiveBridgeTests`.
     ///
-    /// `workspace_start`, `workspace_merge` and the eleven pane tools are the exceptions and are
-    /// added by `AppModel.bridgeToolbox()`, because starting a workspace has to reach the
+    /// `workspace_start`, `workspace_merge` and the thirteen pane and tab tools are the exceptions
+    /// and are added by `AppModel.bridgeToolbox()`, because starting a workspace has to reach the
     /// main-actor graph that runs one, asking one to merge has to reach the same path the Merge
     /// button takes, and a pane is a thing the window owns; see `WorkspaceStarting`,
     /// `WorkspaceMergeRequesting`, `PaneOpening`, `PaneSplitting`, `PaneClosing`, `PaneRenaming`,
-    /// `PaneListing` and `BrowserPaneCommanding`. The last two are the ones that read: a
-    /// `WKWebView` is as much a part of the UI graph as a tab strip is, so seeing a pane crosses
-    /// the same line as opening one.
+    /// `PaneListing`, `BrowserPaneCommanding`, `WorkspaceTabListing` and `WorkspaceTabSelecting`.
+    /// Four of those are the ones that read: a `WKWebView` is as much a part of the UI graph as a
+    /// tab strip is, so seeing a pane crosses the same line as opening one, and which tab a
+    /// workspace is in is held nowhere but in memory on the main actor.
     public static let standard = BridgeToolbox(handlers: [
         WhoamiTool(),
         ProjectListTool(),

@@ -45,11 +45,13 @@ extension AppModel {
     /// Every browser pane of a workspace, in the order the reader would count them: along the
     /// strip, and within a split tab in the order its panes are laid out.
     ///
-    /// **One definition of that order, asked twice**, because the number in a census and the pane a
-    /// later call acts on have to mean the same thing. Two walks written separately are two walks
-    /// that can come to disagree about a split tab, and disagreeing here means reading one page and
-    /// reporting another.
-    private func browserTabs(in model: WorkspaceModel) -> [CenterTab] {
+    /// **One definition of that order, asked everywhere**, because the number in a census and the
+    /// pane a later call acts on have to mean the same thing. Two walks written separately are two
+    /// walks that can come to disagree about a split tab, and disagreeing here means reading one
+    /// page and reporting another. Internal rather than private because `AppModel+TabBridge` hands
+    /// out the same numbers in `workspace_tabs`, so a caller can read the strip once and reach for
+    /// `browser_read` off the back of it.
+    func browserTabs(in model: WorkspaceModel) -> [CenterTab] {
         let tabs = WorkspaceTabsStore.shared
         let centre = CenterTabStore.shared
         var found: [CenterTab] = []
@@ -109,7 +111,9 @@ extension AppModel {
     /// browser tab it had last night, and none of them has a web view until somebody clicks it, so
     /// "the tab is at this address and has not been drawn yet" is the ordinary answer rather than
     /// the exceptional one.
-    private func report(_ tab: CenterTab, number: Int, name: String) -> BrowserPaneReport {
+    /// Internal for the reason `browserTabs(in:)` is: `workspace_tabs` reports a browser tab too,
+    /// and a second reading of the same toolbar would be a second answer about one address bar.
+    func report(_ tab: CenterTab, number: Int, name: String) -> BrowserPaneReport {
         guard let session = CenterTabStore.shared.liveBrowser(for: tab) else {
             return BrowserPaneReport(
                 number: number,

@@ -120,6 +120,18 @@ final class TerminalSessionStore {
         TerminalSplitStore.shared.discard(ownerID: ownerID)
     }
 
+    /// Whether a shell has been forked for one pane in this run of Bloom.
+    ///
+    /// **The difference from `terminal(for:...)` is the whole reason it exists**, and it is the
+    /// same difference `CenterTabStore.liveBrowser` draws next to `browser(for:)`. That one forks
+    /// a shell, which is right when a pane is about to be drawn and wrong for anything that is
+    /// only asking. `workspace_tabs` runs on an agent's word over every terminal tab a workspace
+    /// has, restored ones included, and asking through the forking accessor would have had a
+    /// listing start half a dozen shells in a worktree nobody had opened.
+    func hasShell(paneID: String) -> Bool {
+        terminals[paneID] != nil
+    }
+
     /// The live shell for a tab, forked on first use and reused forever after.
     func terminal(
         for tab: TerminalTab,
