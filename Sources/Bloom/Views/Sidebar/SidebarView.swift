@@ -99,6 +99,14 @@ struct SidebarView: View {
             // Xcode.
             Section {
                 navRow(.home, title: "Home", icon: "house")
+                // The one row that came back, and it needed an argument. Search and Archive were
+                // taken out because both were the list of workspaces Home already draws. This is
+                // not that list under a filter: it is a conversation, it holds state a chip on
+                // Home cannot hold, and it is the only thing in the window scoped to no workspace.
+                //
+                // Under Home rather than over it, because Home is where you land and this is where
+                // you go. See `SidebarSelection.ask`.
+                navRow(.ask, title: AskConversation.title, icon: "bubble.left.and.text.bubble.right")
             }
 
             // A plain row rather than a `Section` header, because the things it heads are

@@ -865,7 +865,7 @@ final class TranscriptModel {
         // which is the same door the owner's terminal comes in through and the reason every owner
         // tool works here without one of them being written twice.
         let bridge = workspace.map { app.bridge?.register(session: session, workspace: $0) }
-            ?? app.bridge?.registerAsk(session: session)
+            ?? app.bridge?.register(askSession: session)
         let runner = self.runner ?? Self.makeRunner(
             session: session,
             workspacePath: cwd,

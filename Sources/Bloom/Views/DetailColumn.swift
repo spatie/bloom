@@ -17,6 +17,8 @@ struct DetailColumn: View {
             switch app.selection {
             case .home:
                 HomeView()
+            case .ask:
+                AskView()
             case .workspace(let id):
                 workspace(id)
             case .subagent(let workspaceID, let subagentID):

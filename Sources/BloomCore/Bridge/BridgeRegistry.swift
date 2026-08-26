@@ -27,6 +27,14 @@ public final class BridgeRegistry: Sendable {
         /// config sweep asks `tokens` what is still live. An owner token in there would look like
         /// a session whose config file is missing, every launch, for ever.
         var ownerToken: String?
+        /// The chats running on that owner token rather than on one minted for them.
+        ///
+        /// Ask Bloom, and nothing else today. It needs to be here for one reason: the config sweep
+        /// deletes the file for any session not in `liveSessions`, and a chat with no minted token
+        /// is in neither map. Without this, the first time any other chat started, the sweep would
+        /// have deleted the config file naming the owner token out from under a conversation that
+        /// was running on it.
+        var ownerSessions: Set<SessionID> = []
     }
 
     private let state = Mutex(State())
@@ -79,6 +87,13 @@ public final class BridgeRegistry: Sendable {
         }
     }
 
+    /// Records that a chat is speaking on the owner's token, so the config sweep leaves its file
+    /// alone. It grants nothing: `admit(ownerToken:)` is what lets that token through the
+    /// handshake, and this chat is on it whether or not anything is written here.
+    public func attachOwner(sessionID: SessionID) {
+        state.withLock { $0.ownerSessions.insert(sessionID) }
+    }
+
     public func identity(forToken token: String) -> BridgeIdentity? {
         state.withLock { $0.identities[token] }
     }
@@ -89,6 +104,10 @@ public final class BridgeRegistry: Sendable {
     public func retire(sessionID: SessionID) {
         state.withLock { state in
             if let token = state.tokens.removeValue(forKey: sessionID) { state.identities[token] = nil }
+            // The owner's token is deliberately NOT dropped with it. It belongs to the owner
+            // rather than to this chat, and the terminal on the other side of the machine is
+            // still holding it.
+            state.ownerSessions.remove(sessionID)
         }
     }
 
@@ -96,7 +115,7 @@ public final class BridgeRegistry: Sendable {
     /// file for a session not in here can no longer be used by anything: its token was either
     /// retired or minted by a launch that has ended.
     public var liveSessions: Set<SessionID> {
-        state.withLock { Set($0.tokens.keys) }
+        state.withLock { Set($0.tokens.keys).union($0.ownerSessions) }
     }
 
     public var count: Int {

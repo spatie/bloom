@@ -91,7 +91,38 @@ extension AppModel {
                 }
                 return await self.requestMergeForBridge(workspace, pullRequest, method: method)
             },
+            // Here rather than in `.standard` because the selection is the window's own and lives
+            // nowhere else. The name and the sentence were resolved in the core before this is
+            // reached, so all the app does is move the selection.
+            RevealTool { [weak self] reveal in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return self.revealForBridge(reveal)
+            },
         ])
+    }
+
+    /// Point the window at something, because the owner's own chat asked to be shown it.
+    ///
+    /// The whole of the app side, and it is one assignment on purpose. Everything that could be
+    /// got wrong (which workspace a name means, whether the arguments contradict each other, what
+    /// to say afterwards) was decided in `RevealChoice` before this is reached, where a test can
+    /// read it. What is left is the one thing the core cannot do.
+    ///
+    /// It refuses a workspace that has gone between the resolve and here, rather than selecting an
+    /// id nothing answers to: `selection` would take it, and the window would land on an empty
+    /// detail column with a sidebar agreeing with nothing.
+    func revealForBridge(_ reveal: Reveal) -> RevealOutcome {
+        switch reveal.target {
+        case .workspace(let id):
+            guard workspaces.contains(where: { $0.id == id }) else {
+                return .refused("That workspace is not in Bloom any more.")
+            }
+            selection = .workspace(id)
+        case .home(let filter):
+            homeFilter = filter
+            selection = .home
+        }
+        return .revealed(reveal.sentence)
     }
 
     /// Ask a workspace's agent to merge, because something on the bridge asked for it.

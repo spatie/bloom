@@ -209,6 +209,22 @@ final class AppModel {
     /// outside this file both destroy a model whose workspace has genuinely gone.
     @ObservationIgnored var workspaceModels: [WorkspaceID: WorkspaceModel] = [:]
 
+    /// The conversation that belongs to Bloom rather than to a workspace. See `AskModel`.
+    ///
+    /// Built on first use and kept for the life of the window, for the same reason the dictionary
+    /// above is: it holds a running agent and a loaded transcript, and going back to Home and
+    /// returning must not lose either. Outside observation for the same reason too, so that a view
+    /// body asking for it is not a write that invalidates the body it is in. What the window
+    /// watches is the state inside the model.
+    @ObservationIgnored private var storedAsk: AskModel?
+
+    var ask: AskModel {
+        if let storedAsk { return storedAsk }
+        let model = AskModel(app: self)
+        storedAsk = model
+        return model
+    }
+
     /// Workspaces whose row has already left the sidebar while their archive is still running.
     ///
     /// The archive hides the row before any filesystem work starts, on purpose, and the store is
