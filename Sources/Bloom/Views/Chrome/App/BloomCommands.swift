@@ -25,6 +25,10 @@ struct BloomCommands: Commands {
     /// The focused window's Save, when it has one. See `FocusedMenuValues`.
     @FocusedValue(\.saveAction) private var saveAction: SaveAction?
 
+    /// Landing the branch, published by the pull request band because that is where the
+    /// confirmation lives. Nil whenever that band is not on screen, which greys the item.
+    @FocusedValue(\.mergeAction) private var mergeAction: MergeAction?
+
     init(model: AppModel) {
         self.model = model
     }
@@ -407,6 +411,15 @@ struct BloomCommands: Commands {
             }
 
             Divider()
+
+            // The title is the band's when the band is on screen, and the table's fallback when
+            // it is not, which is what lets a greyed row still say what the item is. It goes
+            // through the band's own `propose`, so the sign in gate and the confirmation are the
+            // ones the button raises rather than a second copy of them. See `MergeAction`.
+            Button(mergeAction?.title ?? MenuBarCatalogue[.merge].title) {
+                mergeAction?.perform()
+            }
+            .disabled(mergeAction?.isEnabled != true)
 
             MenuCommand(.archive) {
                 guard let workspace = workspace(for: .archive) else { return }

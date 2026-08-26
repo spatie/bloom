@@ -49,6 +49,7 @@ contribute for free.
 | New Browser Tab | `⇧⌘B` | a workspace is selected |
 | Show Changes | `⇧⌘D` | a workspace is selected |
 | Show Notes | `⇧⌘N` | a workspace is selected |
+| Rename Tab | | the tab in front has a name to change |
 | Close Tab | `⌘W` | main window is key and a tab is closable |
 | Add Project Folder… | `⇧⌘O` | always |
 | Save | `⌘S` | a window has published a `SaveAction` |
@@ -67,9 +68,11 @@ contribute for free.
 
 | Item | Key | Enabled when |
 | --- | --- | --- |
-| Split Right | `⌘\` | the focused pane can be split |
-| Split Down | `⇧⌘\` | the focused pane can be split |
+| Split Right > Chat / Terminal / Browser | `⌘\` on the kind this pane is | a workspace is selected |
+| Split Down > Chat / Terminal / Browser | `⇧⌘\` on the kind this pane is | a workspace is selected |
 | Close Pane | `⌃⌘W` | a workspace is selected |
+| Zoom Pane | `⇧⌘↩` | a split shell is in front |
+| Focus Pane > Left / Right / Up / Down | | a split shell is in front |
 | Previous Tab / Next Tab | `⇧⌘[` `⇧⌘]` | the strip has more than one tab |
 | Go to Tab > (each tab) | `⌘1`…`⌘9` | the strip is not empty |
 | Next / Previous Changed File | `⌥⌘J` `⌥⌘K` | a review is open and something changed |
@@ -86,10 +89,15 @@ contribute for free.
 | Item | Key | Enabled when |
 | --- | --- | --- |
 | Rename | | a workspace is the subject |
+| Pin / Unpin | | a live workspace is the subject |
+| Mark as Unread / Mark as Read | | a live workspace is the subject |
+| Colour > None and ten colours | | a live workspace is the subject |
+| Merge / Squash and merge / Rebase and merge | | the pull request band is on screen and GitHub will take a merge |
 | Archive Workspace | `⌘⌫` | a live workspace is the subject |
 | Restore Workspace | | an archived workspace is the subject |
 | Open in Editor | `⇧⌘E` | a live workspace is the subject |
 | Reveal in Finder | `⇧⌘R` | a live workspace is the subject |
+| Copy Name | | live or archived |
 | Copy Branch Name | `⇧⌘C` | live or archived |
 | Run Setup / Run Setup Again | | the project has a setup script |
 | Run > (each run script) | | the project has run scripts |
@@ -100,6 +108,13 @@ contribute for free.
 Entirely SwiftUI's and AppKit's: Minimise `⌘M`, Zoom, Fill and Arrange, Bloom, Discovered Seas,
 Bring All to Front, then the window list. `⇧⌘W` closes the window, forced onto the item by
 `WindowCloseShortcut` because `⌘W` belongs to the tab.
+
+**Nothing was added to it, and that is the answer rather than an omission.** Each `Window` scene
+contributes its own item, which both opens the window when it is closed and raises it when it is
+not, so Bloom and Discovered Seas are already there and a command of our own would print either
+name twice. The project settings windows are a `WindowGroup(id:for:)`, which contributes no item
+of its own and is opened from File instead, where a project is already dealt with. What is left is
+the standard set, and it is complete.
 
 ### Help
 
@@ -113,15 +128,21 @@ The columns are: is it in the menu bar, does it carry a key, is that key discove
 
 | Action | In the menu bar | Key |
 | --- | --- | --- |
-| Split Right > Chat / Terminal / Browser | **no** | none |
-| Split Down > Chat / Terminal / Browser | **no** | none |
+| Split Right > Chat / Terminal / Browser | yes | `⌘\` on the kind this pane is |
+| Split Down > Chat / Terminal / Browser | yes | `⇧⌘\` on the kind this pane is |
 | Close Pane | yes | `⌃⌘W` |
 
-**This is the headline gap.** The View menu's Split Right and Split Down always DUPLICATE: a chat
-twice, a fresh shell, the same page again. The split people actually want, a browser or a terminal
-beside the conversation, exists only in this two-level context menu with no key on it and no menu
-bar item anywhere. `CenterPaneMenu`'s own doc says a second copy of a transcript is almost never
-the point.
+**This was the headline gap and it is closed.** The View menu's Split Right and Split Down used to
+DUPLICATE: a chat twice, a fresh shell, the same page again. The split people actually want, a
+browser or a terminal beside the conversation, existed only in this two-level context menu with no
+key on it and no menu bar item anywhere. `CenterPaneMenu`'s own doc says a second copy of a
+transcript is almost never the point.
+
+The keystroke changed meaning with it, and that is worth knowing: `⌘\` now means "another one of
+these, beside this one" rather than "this one again". On a shell it does what it always did. On a
+browser it opens the address field rather than the page you were on, and on a conversation it
+starts a new one rather than showing the same transcript in both halves. The context menu still
+carries no key equivalents, for the reason written at the head of `CenterPaneMenu`.
 
 ### A terminal pane's menu (`TerminalPaneMenu`, AppKit, right click in a shell)
 
@@ -225,6 +246,8 @@ A browser with no Back in any menu is the second most obvious gap after the spli
 | Comment on This Line | diff line menu | **no** | none |
 | Send This Failure to the Agent | check row menu | **no** | none |
 | Open on GitHub, Copy link (pull request) | summary menu | **no** | none |
+| Merge, Squash and merge, Rebase and merge | the band's split button | yes | none |
+| Choose the merge method | the split button's chevron | **no**, deliberately | none |
 | Create pull request, Continue, Archive, Fix merge conflicts | buttons | Archive only | `⌘⌫` |
 | Save an edited file | hidden button | greyed, always | `⌘S` |
 
@@ -313,8 +336,9 @@ decision about muscle memory rather than about menus.
 **This branch.** The split, which was the finding that started this: the View menu's two items take
 the same three kinds the context menus have, and `⌘\` and `⇧⌘\` move onto the row meaning "the same
 again". Then the actions that belong to the window and to a workspace: the Workspace menu becomes
-everything a workspace row's menu offers, the tab actions are completed, the terminal pane's own
-actions are published, and the standard menus are checked for shape.
+everything a workspace row's menu offers, plus the merge, which had no item in any menu at all; the
+tab actions are completed, the terminal pane's own actions are published, and the standard menus
+are checked for shape.
 
 **Left for a second pass**, in the order they are worth doing:
 
@@ -323,8 +347,9 @@ actions are published, and the standard menus are checked for shape.
    the session, and `BrowserToolbar.Control.name` already holds the wording. `⌘[`, `⌘]` and `⌘R`
    are free.
 2. **The inspector.** The tab picker, the diff scope, the file bar's three toggles, Revert file,
-   Copy path, and the pull request items. Two of these need `⌘E` and `⌘S` moved off their hidden
-   buttons onto `@FocusedValue`s, which is what `FocusedMenuValues` already asks for.
+   Copy path, and the remaining pull request items. Two of these need `⌘E` and `⌘S` moved off their
+   hidden buttons onto `@FocusedValue`s, which is what `FocusedMenuValues` already asks for and
+   what the merge item on this branch is the worked example of.
 3. **A Project menu, or a project group in File.** Rename, Reveal in Finder, Hide, Remove. Four
    items that exist only on a right click.
 4. **The composer and the transcript.** Attach a file, insert a quick prompt, fast mode, and the
@@ -337,9 +362,15 @@ actions are published, and the standard menus are checked for shape.
   behind it. Dragging a tab onto a pane edge is Open in Split Right, which does belong in a menu.
 - **The composer's Return and Shift Return.** They are text editing, not commands, and a menu item
   for "type a newline" is noise.
-- **Rows of a list.** The tabs are in Go to Tab because nine keys hang off them. The workspaces are
-  in the sidebar and reachable with `⌥⌘↑↓`; a Workspaces submenu listing every workspace on the
-  machine would be a second sidebar that goes stale.
+- **Rows of a list.** An item that acts on the row the pointer is over has no subject at the top of
+  the screen: Reveal in Finder on a changed file, Copy path on a folder, Open Terminal Tab Here on
+  a tree row. The tabs are in Go to Tab because nine keys hang off them and the selected tab is a
+  real subject. The workspaces are in the sidebar and reachable with `⌥⌘↑↓`; a Workspaces submenu
+  listing every workspace on the machine would be a second sidebar that goes stale.
+- **Choosing the merge method.** It is a per-project mode, set from the split button's chevron and
+  remembered. A submenu of the three in the menu bar would be a second place to set it, and a row
+  in it would have to both change the mode and merge, which is the one thing that button's own menu
+  refuses to do. The menu bar's item says which merge is in force and performs that one.
 - **Anything inside Settings or the project settings window.** Removing a run script is a button in
   the editor that owns it. A menu bar item for it would have to name which script.
 - **Discovered Seas.** A `Window` scene contributes its own Window menu item, and a command of our
