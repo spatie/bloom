@@ -32,6 +32,12 @@ final class BrowserSession {
     private(set) var canGoBack = false
     private(set) var canGoForward = false
     private(set) var isLoading = false
+    /// How far the fetch in flight has got, rounded to hundredths.
+    ///
+    /// Rounded because WebKit reports this continuously and every write redraws the pane. A
+    /// hundredth is under four points of the field the fill is drawn in, so nothing is lost and
+    /// the number of redraws a load can cost is capped at a hundred.
+    private(set) var loadProgress: Double = 0
     /// Where the page actually is, which is not what the user has typed into the address field.
     private(set) var currentURL: URL?
     /// Where the page is and what it says it is called, as one value.
@@ -83,23 +89,19 @@ final class BrowserSession {
     /// navigation.
     ///
     /// It started as KVO on `title` alone, since there is no delegate callback for a title:
-    /// `didFinish` fires before the title of a page that sets it from script, and a page that
-    /// renames itself while you are reading it fires nothing at all.
+    /// `didFinish` fires before the title of a page that sets it from script.
     ///
-    /// **The address needed exactly the same treatment and did not have it, which is the bug.** A
-    /// single page app navigates with `history.pushState`, which is a SAME DOCUMENT navigation:
-    /// WebKit updates `url` and the back list, and neither `didCommit` nor `didFinish` fires,
-    /// because no document was loaded. There is no public delegate callback for one either, and
-    /// this was checked rather than assumed: `WKNavigationDelegate` has nothing with "same
-    /// document" in its name. So the field sat on `/login` while the reader walked four pages into
-    /// an Inertia site, and the tab strip beside it kept up perfectly, because the title was on
-    /// KVO and the address was not.
+    /// **The address needed exactly the same treatment and did not have it, which was the bug.** A
+    /// single page app navigates with `history.pushState`, which is a same document navigation:
+    /// WebKit updates `url` and the back list, neither `didCommit` nor `didFinish` fires, and
+    /// there is no public delegate callback for one. So the field sat on `/login` while the reader
+    /// walked four pages into an Inertia site.
     ///
     /// `canGoBack` and `canGoForward` were stale in the same way and for the same reason: a
     /// `pushState` pushes a back entry without loading anything, so Back was dead on a page you
     /// really could go back from. `isLoading` is watched with them because the header documents it
-    /// as KVO compliant alongside the other three and one line is cheaper than the argument about
-    /// which callbacks cover it.
+    /// as KVO compliant with the rest, and `estimatedProgress` is watched for the fill behind the
+    /// address.
     ///
     /// The delegate stays. It is what reports a failure, and having both is two mechanisms
     /// agreeing rather than a duplicate: `refresh` reads the web view and writes what changed.
@@ -131,9 +133,9 @@ final class BrowserSession {
                     self?.adopt(BrowserTabTitle.BrowserPage(title: view.title ?? ""))
                 }
             },
-            // No `.initial` on these four, unlike the title: the three lines below set the same
-            // facts from the address this tab is opening on, and an initial notification would
-            // land before them and read an empty web view.
+            // No `.initial` on these, unlike the title: the three lines at the end of this
+            // initialiser set the same facts from the address the tab is opening on, and an
+            // initial notification would land before them and read an empty web view.
             webView.observe(\.url) { [weak self] _, _ in
                 MainActor.assumeIsolated { self?.refresh() }
             },
@@ -144,6 +146,9 @@ final class BrowserSession {
                 MainActor.assumeIsolated { self?.refresh() }
             },
             webView.observe(\.isLoading) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            },
+            webView.observe(\.estimatedProgress) { [weak self] _, _ in
                 MainActor.assumeIsolated { self?.refresh() }
             },
         ]
@@ -464,16 +469,17 @@ final class BrowserSession {
 
     /// Reads the whole of the web view's state and writes back only what moved.
     ///
-    /// **Only what moved, because `@Observable` does not compare.** Setting a property to the value
-    /// it already holds still tells every view reading it to redraw, and one navigation now calls
-    /// this five times: the delegate on start, commit and finish, and KVO on each of the four
-    /// properties it watches. Writing all four every time made a single page load a dozen redraws
-    /// of the centre column for three actual changes. `adopt` has always compared, for the same
-    /// reason and one level down.
+    /// **Only what moved, because `@Observable` does not compare.** Setting a property to the
+    /// value it already holds still tells every view reading it to redraw, and one navigation
+    /// calls this a dozen times over: the delegate on start, commit and finish, and KVO on each of
+    /// the five properties it watches. Writing every field each time made a single page load a
+    /// dozen redraws of the centre column for three actual changes.
     fileprivate func refresh() {
         if canGoBack != webView.canGoBack { canGoBack = webView.canGoBack }
         if canGoForward != webView.canGoForward { canGoForward = webView.canGoForward }
         if isLoading != webView.isLoading { isLoading = webView.isLoading }
+        let progress = (webView.estimatedProgress * 100).rounded() / 100
+        if loadProgress != progress { loadProgress = progress }
         // Nil is a web view that has not loaded anything rather than a page at no address, so the
         // tab keeps the address it was opened on. See `reload`, which is the other half of that.
         if let url = webView.url, url != currentURL { currentURL = url }

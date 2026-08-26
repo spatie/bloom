@@ -102,7 +102,7 @@ struct HomeBar: View {
             }
         }
         .padding(.horizontal, Metrics.spacing)
-        .frame(width: Self.fieldWidth, height: Self.fieldHeight)
+        .frame(width: Self.fieldWidth, height: Metrics.controlHeight)
         .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
         // A hand-built field gets no focus ring from AppKit, and a text field that looks
         // identical whether or not it has the keyboard is the single most reliable way to make a
@@ -126,9 +126,6 @@ struct HomeBar: View {
     /// stroke reads as the same signal at this size.
     private static let focusRingWidth: CGFloat = 2
 
-    /// A small control's height, so the field sits inside the strip with the same clearance the
-    /// menu and the toggle beside it have rather than filling it edge to edge.
-    private static let fieldHeight: CGFloat = 22
     /// Enough for a branch name typed in full and no more. It was 360, which is not a control any
     /// more, it is a column.
     private static let fieldWidth: CGFloat = 220
