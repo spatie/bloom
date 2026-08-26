@@ -136,7 +136,13 @@ extension AppModel {
             case .terminal:
                 return .terminal(
                     WorkspaceTabTerminal(
-                        directory: model.workspace.path,
+                        // The folder the tab was opened on, which for all but one route to a
+                        // shell is the worktree root, and by the same rule the fork reads. An
+                        // agent asking where a pane is standing used to be told the root whatever
+                        // the pane said in the strip.
+                        directory: FolderTerminal.launchDirectory(
+                            requested: tab.directory, root: model.workspace.path
+                        ),
                         // Every pane of the tab, because a split terminal is one tab with two
                         // shells and either of them being alive makes the tab a live one.
                         isLive: TerminalSplitStore.shared.panes(of: tab.id).contains {
