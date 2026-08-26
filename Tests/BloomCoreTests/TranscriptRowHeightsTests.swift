@@ -283,6 +283,57 @@ struct TranscriptRowHeightsTests {
         #expect(heights.assumed(for: key("row.1")) == 100)
     }
 
+    /// **A row that is going to draw nothing is answered, not estimated.** Most of a session is
+    /// stream events with no view in them, and the mean is the worst answer for one: too tall by
+    /// the whole mean, three or four times between every pair of tool calls, and then corrected the
+    /// moment it is drawn. See `TranscriptRowInk`.
+    @Test("a row that draws nothing is worth nothing before it is drawn")
+    func assumesNothingForABlankRow() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(100, for: key("row.1"))
+        #expect(heights.assumed(for: key("blank"), drawsNothing: true) == 0)
+        #expect(heights.assumed(for: key("blank")) == 100)
+    }
+
+    /// The claim is about a row nobody has drawn. A measurement outranks it, because being wrong
+    /// about this has to cost one correction rather than a row stuck at nothing.
+    @Test("a measurement outranks the claim that a row draws nothing")
+    func measurementBeatsTheClaim() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(42, for: key("row.1"))
+        #expect(heights.assumed(for: key("row.1"), drawsNothing: true) == 42)
+    }
+
+    /// **The rows that drew nothing are not in the mean.** A session where most rows draw nothing
+    /// made the mean several times too small for the rows it is actually asked about, which is the
+    /// other half of a screen of wrong heights.
+    @Test("rows that drew nothing do not drag the estimate down")
+    func noughtsAreNotInTheMean() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(100, for: key("row.1"))
+        heights.note(200, for: key("row.2"))
+        for row in 0..<50 { heights.note(0, for: key("blank.\(row)")) }
+        #expect(heights.estimate == 150)
+        // The noughts are still remembered, and still nought.
+        #expect(heights.height(for: key("blank.7")) == 0)
+        #expect(heights.count == 52)
+    }
+
+    /// A row that drew something and then drew nothing leaves the mean as if it had never been in
+    /// it, which is what a fold closing or a tail emptying does.
+    @Test("a row that becomes nothing leaves the mean")
+    func aRowThatEmptiesLeavesTheMean() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(100, for: key("row.1"))
+        heights.note(300, for: key("row.2"))
+        heights.note(0, for: key("row.2"))
+        #expect(heights.estimate == 100)
+    }
+
     /// The running total has to survive an overwrite, which is what every drawn row does to what
     /// was measured for it off screen.
     @Test("a row measured again does not count twice")

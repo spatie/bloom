@@ -32,6 +32,15 @@ struct TranscriptTableEntry: Identifiable {
     /// their own state and redraw inside the cell they are in; handing them a new root view on
     /// every pass threw that state away and rebuilt the tail several times a second.
     let contentKey: TranscriptContentKey
+    /// Whether this entry is expected to draw nothing at all, which most of a session is. An
+    /// unmeasured row that says so is told nought rather than the running mean: see
+    /// `TranscriptRowInk`, which decides it, and `TranscriptRowHeights.assumed`, which uses it.
+    ///
+    /// False for the four entries that are not stored rows. Each of them draws nothing much of the
+    /// time, and each is on screen at the live end where it is measured immediately anyway, so a
+    /// claim about them would buy nothing and could be wrong about the streaming tail, which is the
+    /// one entry that changes height without anything saying so.
+    var drawsNothing = false
     /// Built on demand: when the row is measured, and when it is drawn. Nothing is built for a row
     /// that is neither, which is what keeps the pass that assembles these cheap.
     let content: @MainActor () -> AnyView
@@ -516,7 +525,7 @@ struct TranscriptTable: NSViewRepresentable {
         /// grows.
         private func height(of entry: TranscriptTableEntry) -> CGFloat {
             guard heights.isReady else { return Self.hair }
-            return CGFloat(heights.assumed(for: entry.contentKey))
+            return CGFloat(heights.assumed(for: entry.contentKey, drawsNothing: entry.drawsNothing))
         }
 
         /// A fresh `NSHostingView` per measurement, at the exact width the cell is laid out at.
@@ -560,6 +569,16 @@ struct TranscriptTable: NSViewRepresentable {
             guard !isHeld else { return }
             guard let row = index[entryID], entries.indices.contains(row) else { return }
             guard heights.note(height, for: entries[row].contentKey) else { return }
+            // **News to the cache is not always news to the table.** A row the table is already
+            // drawing at this height needs no `noteHeightOfRows`, and the whole of a correction's
+            // cost is that call: it moves the document's total and makes AppKit lay out every row
+            // below the one that changed, which near the top of a long conversation is all of
+            // them. Measured on a 2,981 row session, an upward sweep made 285 of those calls and
+            // resized the document on 214 frames of 312. Most of them were rows that draw nothing
+            // arriving at the nought they were already being drawn at.
+            let told = tableView?.rect(ofRow: row).height
+            let drawn = max(Double(Self.hair), TranscriptRowHeights.rounded(Double(height)))
+            if let told, TranscriptRowHeights.isSameHeight(Double(told), drawn) { return }
             owedHeights.insert(entryID)
             guard owedWork == nil else { return }
             owedWork = Task { @MainActor [weak self] in
@@ -611,9 +630,9 @@ struct TranscriptTable: NSViewRepresentable {
             // this one, which is the streaming tail on every frame of a turn.
             for id in owed where !owedHeights.contains(id) {
                 guard let row = rowOf(id),
-                      let measured = heights.height(for: entries[row].contentKey) else { continue }
+                      heights.height(for: entries[row].contentKey) != nil else { continue }
                 let told = tableView.rect(ofRow: row).height
-                let drawn = max(Double(Self.hair), measured)
+                let drawn = owedHeight(of: entries[row])
                 guard !TranscriptRowHeights.isSameHeight(Double(told), drawn) else { continue }
                 wrong += 1
                 #if DEBUG
@@ -639,13 +658,9 @@ struct TranscriptTable: NSViewRepresentable {
             var estimated = 0
             var wrong = 0
             for row in visibleRows where entries.indices.contains(row) {
-                let key = entries[row].contentKey
-                guard let measured = heights.height(for: key) else {
-                    estimated += 1
-                    continue
-                }
+                if isGuessed(entries[row]) { estimated += 1 }
                 let told = Double(tableView.rect(ofRow: row).height)
-                if !TranscriptRowHeights.isSameHeight(told, max(Double(Self.hair), measured)) {
+                if !TranscriptRowHeights.isSameHeight(told, owedHeight(of: entries[row])) {
                     wrong += 1
                 }
             }
@@ -655,14 +670,33 @@ struct TranscriptTable: NSViewRepresentable {
             // there is worth naming and a guess mid flick is not.
             if settled, estimated > 0 {
                 let named = visibleRows
-                    .filter { entries.indices.contains($0) }
-                    .filter { heights.height(for: entries[$0].contentKey) == nil }
+                    .filter { entries.indices.contains($0) && isGuessed(entries[$0]) }
                     .map { entries[$0].id.description }
                 FileHandle.standardError.write(Data(
                     "transcript: \(estimated) guessed rows on screen: \(named)\n".utf8
                 ))
             }
             #endif
+        }
+
+        /// Whether this row is on screen at a number somebody guessed.
+        ///
+        /// **A row claimed to draw nothing is answered rather than guessed**, so it is not counted
+        /// here: `TranscriptRowInk` decided it from the row itself, and nought is the whole of what
+        /// such a row can be. Counting those would have this report a screenful of alarms for the
+        /// change that removed the alarms.
+        private func isGuessed(_ entry: TranscriptTableEntry) -> Bool {
+            heights.height(for: entry.contentKey) == nil && !entry.drawsNothing
+        }
+
+        /// The height this row ought to be drawn at: what was measured, what it is claimed to be,
+        /// or the mean. The same number `height(of:)` gives the table, so the two cannot disagree
+        /// about what counts as a row drawn wrong.
+        private func owedHeight(of entry: TranscriptTableEntry) -> Double {
+            max(
+                Double(Self.hair),
+                heights.assumed(for: entry.contentKey, drawsNothing: entry.drawsNothing)
+            )
         }
 
         /// Every height change in this file goes through here.

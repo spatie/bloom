@@ -363,10 +363,13 @@ struct TranscriptListView: View {
             // Free, and no for the two kinds that make up most of a long session, so it is asked
             // here rather than inside the closure that runs per cell.
             let settles = TranscriptMotion.fadesOnArrival(row.kind)
+            // What this row is worth before anybody draws it. Sixty per cent of a session draws
+            // nothing, and the mean is a bad answer for every one of them: see `TranscriptRowInk`.
+            let blank = TranscriptRowInk.drawsNothing(kind: row.kind, payload: row.payload)
 
             if row.kind == .result {
                 out.append(TranscriptTableEntry(
-                    id: .row(row.seq), contentKey: key,
+                    id: .row(row.seq), contentKey: key, drawsNothing: blank,
                     content: {
                         AnyView(
                             // No top padding: the rule inside the footer carries its own air. The
@@ -389,7 +392,7 @@ struct TranscriptListView: View {
                 ))
             } else {
                 out.append(TranscriptTableEntry(
-                    id: .row(row.seq), contentKey: key,
+                    id: .row(row.seq), contentKey: key, drawsNothing: blank,
                     content: {
                         AnyView(
                             TranscriptRowView(

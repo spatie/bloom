@@ -36,6 +36,13 @@ import Foundation
 /// keeps this honest is that no placement is ever resolved against an estimate: the caller
 /// measures the screen it is about to show, exactly, before it shows it.
 ///
+/// **A row that is going to draw nothing is not estimated at all, it is answered.** Most of a
+/// session is stream events with no view in them, and a mean is the worst possible answer for one:
+/// too tall by the whole mean, three or four times between every pair of tool calls. Worse, each
+/// of them is then corrected the moment it is drawn, and correcting a row near the top of a long
+/// list moves every row below it. `TranscriptRowInk` is how a caller knows before anything is
+/// drawn; `assumed(for:drawsNothing:)` is where the answer goes in.
+///
 /// ## It outlives the conversation it was filled for
 ///
 /// A pane is pointed at one conversation after another, and the heights of the one being left are
@@ -140,6 +147,9 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     private var stale: Set<TranscriptContentKey> = []
     /// The sum of `heights`, kept in step on every write so the mean below costs nothing to ask.
     private var total: Double = 0
+    /// How many of `heights` are more than nothing, which is what `estimate` divides by. See it
+    /// for why a mean over the rows that drew nothing was the wrong number.
+    private var inked = 0
 
     public init() {}
 
@@ -166,6 +176,7 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         heights.removeAll()
         stale.removeAll()
         total = 0
+        inked = 0
         return true
     }
 
@@ -205,24 +216,32 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         heights[contentKey]
     }
 
-    /// What an unmeasured row is worth: the mean of everything measured here, or
-    /// `assumedRowHeight` before there is one.
+    /// What an unmeasured row that draws SOMETHING is worth: the mean of the rows measured here
+    /// that drew something, or `assumedRowHeight` before there is one.
     ///
     /// A mean rather than a median, because it is kept as a running total and a median would mean
     /// holding the numbers sorted for an answer that is corrected the moment the row is drawn.
-    /// Rows that draw nothing are in it and should be: a conversation with a run of empty rows in
-    /// it really is shorter per row than one without.
+    ///
+    /// **The rows that drew nothing are deliberately not in it, and they used to be.** Most of a
+    /// session is stream events that draw no view at all, so a mean over every measurement is a
+    /// mean over thousands of noughts: it came out several times too small for the rows it is
+    /// actually asked about. Those rows are answered by `assumed(for:drawsNothing:)` without
+    /// consulting this at all, so including them made the one number this still answers worse for
+    /// no one's benefit.
     public var estimate: Double {
-        heights.isEmpty ? Self.assumedRowHeight : total / Double(heights.count)
+        inked == 0 ? Self.assumedRowHeight : total / Double(inked)
     }
 
-    /// **The number to tell a table**: what is known, or what is assumed.
+    /// **The number to tell a table**: what is known, what is known to be nothing, or what is
+    /// assumed.
     ///
     /// Never nil and never a measurement, so answering it for every row of a session costs a
     /// dictionary lookup each. See the header for why a table is answered rather than made to
-    /// wait.
-    public func assumed(for contentKey: TranscriptContentKey) -> Double {
-        heights[contentKey] ?? estimate
+    /// wait, and `TranscriptRowInk` for how a caller knows a row will draw nothing before anything
+    /// has drawn it.
+    public func assumed(for contentKey: TranscriptContentKey, drawsNothing: Bool = false) -> Double {
+        if let known = heights[contentKey] { return known }
+        return drawsNothing ? 0 : estimate
     }
 
     /// Remembers a height, and says whether it is news.
@@ -248,7 +267,10 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         guard !Self.isSameHeight(heights[contentKey] ?? -1, rounded) else { return false }
         // See `mostRows`. Asked before the insert, so the cache never holds more than it says.
         if heights.count >= Self.mostRows, heights[contentKey] == nil { forget() }
-        total += rounded - (heights[contentKey] ?? 0)
+        let previous = heights[contentKey] ?? 0
+        total += rounded - previous
+        if previous > 0 { inked -= 1 }
+        if rounded > 0 { inked += 1 }
         heights[contentKey] = rounded
         return true
     }
@@ -268,5 +290,6 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         heights.removeAll()
         stale.removeAll()
         total = 0
+        inked = 0
     }
 }
