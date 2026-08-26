@@ -38,9 +38,9 @@ import Foundation
 /// document.
 public struct TranscriptPaneState: Equatable, Sendable {
     /// One pane's memory of one conversation. Both halves are needed: a split tab can hold the
-    /// same session in two panes, each scrolled somewhere else, and an unsplit tab's pane is
-    /// called the same thing in every workspace (see `CenterPanesView.soloPane`), so the session
-    /// is what tells two of those apart.
+    /// same session in two panes, each scrolled somewhere else, so the pane alone does not say
+    /// which half. The pane string is the tab's own id, which for an unsplit chat tab is already
+    /// the session's uuid; nothing is ever keyed on a shared name.
     public struct Key: Hashable, Sendable {
         public var pane: String
         public var session: SessionID

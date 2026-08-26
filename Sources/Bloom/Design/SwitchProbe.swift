@@ -41,6 +41,9 @@ enum SwitchProbe {
     /// switch kicks off has to be allowed to land inside the timeline, or the report is a
     /// measurement of the settle rather than of the switch.
     private static var settle: Int { ProbeHarness.count("--switch-settle", or: 4000) }
+    /// How many wheel steps back the reader is scrolled before being switched away from. Four
+    /// hundred reaches the top of any conversation in the fixture; forty stops part way up.
+    private static var scrollSteps: Int { ProbeHarness.count("--switch-scroll", or: 400) }
 
     // MARK: - Entry
 
@@ -158,6 +161,7 @@ enum SwitchProbe {
             "name": .string(name),
             // Where the switch left the reader, which is the whole of what "it did not keep my
             // place" means. See `ProbeHarness.scrollPlace`.
+            "drawnRows": .integer(TranscriptDrawn.rows),
             "place": .object(ProbeHarness.scrollPlace(
                 ProbeHarness.transcriptScrollView(in: contentView)
             )),
@@ -185,17 +189,25 @@ enum SwitchProbe {
         let bottom = order[order.count - 1]
         var report: [String: JSONValue] = [:]
 
-        // One to the top. A wheel scroll rather than a jump, in one large step per frame, because
-        // what is being set up is a reader's position and a reader gets there by scrolling.
+        // One scrolled back, a wheel step per frame, because what is being set up is a reader's
+        // position and a reader gets there by scrolling.
+        //
+        // `--switch-scroll` is how far, and it is a flag because the two ends of the range are two
+        // different questions. All the way to the top is where a place has to be exact; a stop
+        // part way up is where a place has to EXIST, and it is the case the owner reported second:
+        // a reader who is neither at the end nor at the beginning was being put back at the end.
         app.selection = .workspace(top)
         try? await Task.sleep(for: .milliseconds(settle))
         if let scroll = ProbeHarness.transcriptScrollView(in: contentView) {
-            for _ in 0..<400 {
+            for _ in 0..<scrollSteps {
                 ProbeHarness.wheel(scroll, by: 300)
                 try? await Task.sleep(for: .milliseconds(8))
             }
             try? await Task.sleep(for: .seconds(2))
             report["topLeft"] = .object(ProbeHarness.scrollPlace(scroll))
+            // And what the pane wrote down about it, which is the only way to tell a place that
+            // was recorded wrongly from a place that was recorded and then restored wrongly.
+            report["topRemembered"] = .object(remembered(for: top, in: app))
         }
 
         // The other stays where a conversation opens, which is its live end.
@@ -220,7 +232,54 @@ enum SwitchProbe {
             ]))
         }
         report["visits"] = .array(visits)
+
+        // **Can the reader get to the end at all?** The reported bug is a conversation that stops
+        // part way down and cannot be scrolled past, because the window the list is drawing ends
+        // there and nothing had told it to grow. Wheeling down as far as it will go and asking
+        // what is left is the whole test.
+        app.selection = .workspace(top)
+        try? await Task.sleep(for: .milliseconds(settle))
+        if let scroll = ProbeHarness.transcriptScrollView(in: contentView) {
+            for _ in 0..<200 {
+                ProbeHarness.wheel(scroll, by: -300)
+                try? await Task.sleep(for: .milliseconds(8))
+            }
+            try? await Task.sleep(for: .seconds(2))
+            var reached = ProbeHarness.scrollPlace(scroll)
+            reached["drawnRows"] = .integer(TranscriptDrawn.rows)
+            if let model = app.existingModel(for: top),
+               let session = model.activeSession,
+               let transcript = model.existingTranscript(for: session.id) {
+                reached["sessionRows"] = .integer(transcript.rows.count)
+            }
+            report["reachesTheEnd"] = .object(reached)
+        }
         return report
+    }
+
+    /// What a pane has written down about the conversation it is showing.
+    ///
+    /// **The pane is the tab's own id, not "solo".** This asked for `CenterPanesView.soloPane`
+    /// first, on the strength of two doc comments that said an unsplit tab's pane answers to that
+    /// name everywhere, and it came back nil every time: nothing writes that key. `soloPane` is a
+    /// `ForEach` identity and nothing else, and the string a pane is actually given is
+    /// `PaneContent.id`, which for a chat is the session's uuid. A probe that reads the wrong key
+    /// reports "nothing was remembered" for an app that remembered perfectly well, which is a
+    /// worse failure than not looking at all.
+    private static func remembered(for id: WorkspaceID, in app: AppModel) -> [String: JSONValue] {
+        guard let model = app.existingModel(for: id),
+              let session = model.activeSession,
+              let state = model.panePosition(pane: PaneContent.chat(session.id).id, session: session.id)
+        else { return ["found": .bool(false)] }
+        return [
+            "found": .bool(true),
+            "anchorSeq": state.anchorSeq.map { .integer($0) } ?? .null,
+            "offset": .number(state.offset),
+            "isAtLiveEnd": .bool(state.isAtLiveEnd),
+            "rowCount": .integer(state.rowCount),
+            "drawnStart": .integer(state.drawn.start),
+            "drawnEnd": .integer(state.drawn.end),
+        ]
     }
 
     /// Switches back and forth without waiting, then reports what is on screen at the end.
