@@ -91,7 +91,15 @@ struct TranscriptListView: View {
     @State private var hoverHost = TranscriptHoverHost()
     @State private var didPosition = false
     @State private var showsSetup = false
-    @State private var isGrowing = false
+    /// Whether the window has grown in the last moment, which is the throttle on `growWindow`.
+    ///
+    /// **In a box, because nothing in the body reads it and as `@State` it cost a full pass to
+    /// clear.** Growing the window writes `drawn`, which is a pass this list owes: four hundred
+    /// rows really did arrive. Clearing this flag a fifth of a second later owed nothing at all,
+    /// and it rebuilt every entry in the window to change a boolean no view draws from. On the
+    /// owner's 2,981 row session an upward scroll grows about eight times, so that was eight
+    /// rebuilds of up to 2,981 entries each, for nothing. See `GeometryBox`.
+    @State private var isGrowing = GeometryBox(false)
     @State private var resumed: SessionID?
     @State private var opening: Opening?
     @State private var writingTo: WriteTarget?
@@ -632,7 +640,7 @@ struct TranscriptListView: View {
             )
             writingTo = memory.map { WriteTarget(memory: $0, session: transcript.session.id) }
             resumed = TranscriptResume.isResuming(remembered) ? transcript.session.id : nil
-            isGrowing = false
+            isGrowing.value = false
             topSeq.value = 0
             // Nothing in the session being arrived at counts as having arrived. Cleared here as
             // well as set in `task`, because leaving a session before it had settled and coming
@@ -1069,19 +1077,21 @@ struct TranscriptListView: View {
         // The live end is checked as well, because a session whose window is shorter than the pane
         // is at its top and its bottom at once, and growing it would add rows above a reader who
         // is reading the newest one. And `isGrowing`, because this is asked on every frame of a
-        // scroll that is near the top, and without it the window takes a chunk per frame.
+        // scroll that is near the top, and without it the window takes a chunk per frame. That
+        // flag is a box rather than `@State` for the reason written where it is declared: clearing
+        // it used to cost a rebuild of every entry in the window.
         guard arrivalSession == transcript.session.id,
               !geometry.isNearBottom,
               drawn.session == transcript.session.id,
               drawn.window.canGrowUp,
-              !isGrowing
+              !isGrowing.value
         else { return }
-        isGrowing = true
+        isGrowing.value = true
         drawn.window = drawn.window.grownUp()
         TranscriptDrawn.note(drawn.window.count)
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(120))
-            isGrowing = false
+            isGrowing.value = false
         }
     }
 

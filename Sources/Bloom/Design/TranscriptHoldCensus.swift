@@ -1,5 +1,6 @@
 import BloomCore
 import Foundation
+import QuartzCore
 
 /// What a transcript's holds did, for a probe to read. See `TranscriptHoldView`.
 ///
@@ -67,12 +68,48 @@ enum TranscriptHoldCensus {
     ///
     /// Counted per pass rather than per entry, which is the lesson at the head of `ProbeHarness`:
     /// an increment and an add, whatever the window holds.
+    ///
+    /// **These two were predicted to be the stutter, and they are not. Written down because the
+    /// prediction was made in public and failed in public.** The reasoning was that an upward
+    /// scroll grows the window about eight times, that each grow costs a pass over every entry in
+    /// it, and that a pass of that size costs about fifty milliseconds: sixteen passes, 29,000
+    /// entries, 800ms of a three second sweep, 27 per cent of its frames. The run returned 13
+    /// passes and 13,410 entries, so the mechanism was real. It also returned a ceiling of 0.8ms
+    /// on every SwiftUI layout of the centre pane across a 22 second sweep, 3,512 of them totalling
+    /// 481ms, which is two per cent of the wall clock. The fifty milliseconds was invented and
+    /// never measured, and 27 per cent predicted against 27 per cent observed would have convinced
+    /// both readers of it if the count had not been falsifiable alongside.
+    ///
+    /// The cost is in the AppKit half, which nothing here timed. See `cellSeconds`.
     private(set) static var entryPasses = 0
     private(set) static var entriesBuilt = 0
-    /// Cells the table asked for, which is one SwiftUI graph each. A row that draws nothing is a
-    /// hundredth of a point tall, so a screenful of them is hundreds of rows rather than thirty,
-    /// and this is the only number that would say so.
+    /// **The AppKit half, which nothing measured until the SwiftUI half was proved innocent.**
+    ///
+    /// `PaneLayoutTiming` times the pane's own SwiftUI pass and says it never exceeds a
+    /// millisecond. What it cannot see is everything the table does around it: asking the delegate
+    /// for heights, building a row's `NSHostingView`, and relaying out when a height is corrected.
+    /// A row scrolled into view costs a whole SwiftUI graph, and none of that happens inside the
+    /// pane's layout.
+    ///
+    /// `cellsAsked` is every call of `viewFor`; `cellsBuilt` is the ones that actually replaced the
+    /// root view, because a recycled cell holding the content it already holds returns early. The
+    /// seconds are around that replacement.
+    private(set) static var cellsAsked = 0
     private(set) static var cellsBuilt = 0
+    private(set) static var cellSeconds = 0.0
+    private(set) static var cellWorstMs = 0.0
+    /// Every time the table asked the delegate how tall a row is.
+    ///
+    /// **The one number that says whether a correction is O(the rows below it).** If AppKit re-asks
+    /// for every row of the table each time `noteHeightOfRows` names one, then 505 corrections over
+    /// a 2,981 row conversation is a million and a half delegate calls, each a hashed dictionary
+    /// lookup. If it asks only for what it was told about, this stays in the tens of thousands.
+    /// Two answers three orders of magnitude apart, from one increment.
+    private(set) static var heightAsks = 0
+    /// The time inside `noteHeightOfRows` itself, which is AppKit's relayout of the rows below a
+    /// correction.
+    private(set) static var noteSeconds = 0.0
+    private(set) static var noteWorstMs = 0.0
 
     static func held(_ what: TranscriptPaneHold.PaneHeld, underAHand hand: Bool, liveResize: Bool) {
         switch what {
@@ -105,17 +142,39 @@ enum TranscriptHoldCensus {
         }
     }
 
-    /// One `noteHeightOfRows`, and how many rows it named.
-    static func noted(rows: Int) {
-        noteCalls += 1
-        notedRows += rows
-    }
-
     /// One write of the scroll offset that actually moved it.
     static func placed() { placeWrites += 1 }
 
-    /// One cell handed to the table. See `cellsBuilt`.
-    static func builtCell() { cellsBuilt += 1 }
+    /// One cell handed to the table, and whether its root view had to be replaced. See `cellsBuilt`.
+    static func askedCell(rebuilt: Bool, seconds: Double) {
+        cellsAsked += 1
+        guard rebuilt else { return }
+        cellsBuilt += 1
+        cellSeconds += seconds
+        cellWorstMs = max(cellWorstMs, seconds * 1000)
+    }
+
+    /// One height answered. See `heightAsks`: an increment and nothing else, on a path AppKit can
+    /// call a million times.
+    static func askedHeight() { heightAsks += 1 }
+
+    /// One `noteHeightOfRows`, and what it took. See `noteSeconds`.
+    static func noted(rows: Int, seconds: Double) {
+        noteCalls += 1
+        notedRows += rows
+        noteSeconds += seconds
+        noteWorstMs = max(noteWorstMs, seconds * 1000)
+    }
+
+    /// The clock, but only while a probe is measuring. Two reads of it per cell is nothing; the
+    /// point of the gate is that a shipping build takes neither.
+    static func clock() -> Double {
+        PaneLayoutTiming.isEnabled ? CACurrentMediaTime() : 0
+    }
+
+    static func since(_ started: Double) -> Double {
+        started > 0 ? CACurrentMediaTime() - started : 0
+    }
 
     /// One pass over the list's entries. See `entryPasses`.
     static func builtEntries(_ count: Int) {
@@ -148,7 +207,13 @@ enum TranscriptHoldCensus {
         noteCalls = 0
         notedRows = 0
         placeWrites = 0
+        cellsAsked = 0
         cellsBuilt = 0
+        cellSeconds = 0
+        cellWorstMs = 0
+        heightAsks = 0
+        noteSeconds = 0
+        noteWorstMs = 0
         entryPasses = 0
         entriesBuilt = 0
     }
@@ -173,7 +238,13 @@ enum TranscriptHoldCensus {
             "noteCalls": Double(noteCalls),
             "notedRows": Double(notedRows),
             "placeWrites": Double(placeWrites),
+            "cellsAsked": Double(cellsAsked),
             "cellsBuilt": Double(cellsBuilt),
+            "cellSeconds": cellSeconds,
+            "cellWorstMs": cellWorstMs,
+            "heightAsks": Double(heightAsks),
+            "noteSeconds": noteSeconds,
+            "noteWorstMs": noteWorstMs,
             "entryPasses": Double(entryPasses),
             "entriesBuilt": Double(entriesBuilt),
         ]

@@ -488,6 +488,9 @@ struct TranscriptTable: NSViewRepresentable {
         private static let hair: CGFloat = 0.01
 
         func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+            // An increment, on a path AppKit may call for every row of the table. See
+            // `TranscriptHoldCensus.heightAsks`, which is here to find out whether it does.
+            TranscriptHoldCensus.askedHeight()
             guard entries.indices.contains(row) else { return Self.hair }
             return max(Self.hair, height(of: entries[row]))
         }
@@ -502,17 +505,20 @@ struct TranscriptTable: NSViewRepresentable {
             let identifier = NSUserInterfaceItemIdentifier("bloom.transcript.cell")
             let cell = tableView.makeView(withIdentifier: identifier, owner: self)
                 as? TranscriptTableCell ?? TranscriptTableCell(identifier: identifier)
-            // **Every row in the visible rect gets one of these, and a screenful is not a fixed
-            // number of rows.** Most of a session draws nothing and is a hundredth of a point
-            // tall, so a viewport can span hundreds of them, each costing a SwiftUI graph. Counted
-            // rather than assumed: `measurements` only ever covered the hosting views built OFF
-            // screen, so nothing in the report has ever said what a frame of scrolling really
-            // builds. See `TranscriptHoldCensus`.
-            TranscriptHoldCensus.builtCell()
             cell.onHeightChange = { [weak self] id, height in
                 self?.noted(height: height, for: id)
             }
-            cell.apply(entry: entry, environment: rowEnvironment)
+            // **Every row in the visible rect gets one of these, and this is where a row's SwiftUI
+            // graph is actually built.** It is outside the pane's own layout pass, so
+            // `PaneLayoutTiming` never saw it: that reported a ceiling of 0.8ms while a quarter of
+            // the frames were being dropped. Timed rather than assumed, and only the calls that
+            // really replace the root view, because a recycled cell holding what it already holds
+            // returns early. See `TranscriptHoldCensus.cellSeconds`.
+            let started = TranscriptHoldCensus.clock()
+            let rebuilt = cell.apply(entry: entry, environment: rowEnvironment)
+            TranscriptHoldCensus.askedCell(
+                rebuilt: rebuilt, seconds: TranscriptHoldCensus.since(started)
+            )
             return cell
         }
 
@@ -735,15 +741,20 @@ struct TranscriptTable: NSViewRepresentable {
                     (cell as? TranscriptTableCell)?.clips(whileGrowingFor: seconds)
                 }
             }
-            TranscriptHoldCensus.noted(rows: rows.count)
+            let started = TranscriptHoldCensus.clock()
             NSAnimationContext.beginGrouping()
             NSAnimationContext.current.duration = seconds
             if seconds > 0 {
                 NSAnimationContext.current.timingFunction =
                     CAMediaTimingFunction(name: .easeOut)
             }
+            // What AppKit does here is the other unmeasured half: a height changing near the top
+            // of a long list moves every row below it. See `TranscriptHoldCensus.noteSeconds`.
             tableView.noteHeightOfRows(withIndexesChanged: rows)
             NSAnimationContext.endGrouping()
+            TranscriptHoldCensus.noted(
+                rows: rows.count, seconds: TranscriptHoldCensus.since(started)
+            )
         }
 
         /// A fold is about to open or close, so the height change it causes is the one this file
@@ -1391,12 +1402,15 @@ final class TranscriptTableCell: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not in a nib") }
 
-    func apply(entry: TranscriptTableEntry, environment: TranscriptRowEnvironment) {
+    /// Returns whether the root view had to be replaced, which is the expensive half and the only
+    /// half worth timing. See `TranscriptHoldCensus.cellSeconds`.
+    @discardableResult
+    func apply(entry: TranscriptTableEntry, environment: TranscriptRowEnvironment) -> Bool {
         // The recycling. A cell that already holds this content is left exactly as it is, which
         // is what a table buys over a stack that rebuilds every realised row on every pass. The
         // three entries that re-render themselves are NOT excepted, and used to be: handing the
         // streaming tail a new root view on every pass rebuilt it several times a second.
-        guard appliedKey != entry.contentKey else { return }
+        guard appliedKey != entry.contentKey else { return false }
         appliedKey = entry.contentKey
         let id = entry.id
         host.rootView = AnyView(
@@ -1411,6 +1425,7 @@ final class TranscriptTableCell: NSView {
             .id(id)
             .transcriptRowEnvironment(environment)
         )
+        return true
     }
 
     /// Clips this cell for as long as its row is travelling to a new height.
