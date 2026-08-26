@@ -93,9 +93,9 @@ struct ScriptEditor: View {
         .frame(maxWidth: .infinity)
         .frame(height: Self.gripHeight)
         .contentShape(Rectangle())
-        .onHover { inside in
-            if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
-        }
+        // The grip goes away with the form it is in, and a form dismissed under the pointer used
+        // to leave the resize arrow behind it: see `ResizeCursor`.
+        .resizeCursor(.resizeUpDown)
         .gesture(
             DragGesture(minimumDistance: 1)
                 .onChanged { value in
