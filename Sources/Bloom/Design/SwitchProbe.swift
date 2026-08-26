@@ -259,13 +259,17 @@ enum SwitchProbe {
 
     /// What a pane has written down about the conversation it is showing.
     ///
-    /// Reached through the workspace's own model, which is where `TranscriptPaneMemory` puts it.
-    /// The pane name is the unsplit one, because that is what every one of these runs is looking
-    /// at; a split tab would answer for one of its halves and this probe never splits.
+    /// **The pane is the tab's own id, not "solo".** This asked for `CenterPanesView.soloPane`
+    /// first, on the strength of two doc comments that said an unsplit tab's pane answers to that
+    /// name everywhere, and it came back nil every time: nothing writes that key. `soloPane` is a
+    /// `ForEach` identity and nothing else, and the string a pane is actually given is
+    /// `PaneContent.id`, which for a chat is the session's uuid. A probe that reads the wrong key
+    /// reports "nothing was remembered" for an app that remembered perfectly well, which is a
+    /// worse failure than not looking at all.
     private static func remembered(for id: WorkspaceID, in app: AppModel) -> [String: JSONValue] {
         guard let model = app.existingModel(for: id),
               let session = model.activeSession,
-              let state = model.panePosition(pane: CenterPanesView.soloPane, session: session.id)
+              let state = model.panePosition(pane: PaneContent.chat(session.id).id, session: session.id)
         else { return ["found": .bool(false)] }
         return [
             "found": .bool(true),

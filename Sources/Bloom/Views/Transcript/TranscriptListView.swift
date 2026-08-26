@@ -188,6 +188,28 @@ struct TranscriptListView: View {
 
     @State private var drawn: Drawn
 
+    /// Where `remember` writes, captured beside the state it is writing rather than read from the
+    /// body when the write happens.
+    ///
+    /// **This view is not torn down when the reader changes workspace.** The centre column hands
+    /// the same view a different model and a different session (see `CenterPanesView`), so by the
+    /// time anything notices the change, `memory` and `transcript` are already the conversation
+    /// being ARRIVED at, while `drawn`, `contentOffset`, `geometry` and the visible rows still
+    /// describe the one being left. `remember` read one half from each, so a scroll that settled
+    /// in that window wrote the old conversation's place under the new conversation's key, and the
+    /// reader came back to a position that was never theirs. That is the "it does weird things"
+    /// half of the report.
+    ///
+    /// Held as state, so it moves when the drawn window moves and never when the body happens to
+    /// be re-run with somebody else's model.
+    @State private var writingTo: WriteTarget?
+
+    /// The pane and session one write belongs to.
+    private struct WriteTarget {
+        var memory: TranscriptPaneMemory
+        var session: SessionID
+    }
+
     /// The session this pane was restored into, if it was restored rather than arrived at.
     ///
     /// A reader coming back is already where they left off, so the window is whatever they were
@@ -683,14 +705,21 @@ struct TranscriptListView: View {
                 goToLiveEnd()
             }
             .onChange(of: transcript.session.id) { _, _ in
-                // Nothing is written down for the session being left here, and that is deliberate
-                // rather than an omission. Everything `remember` reads describes the pane as it
-                // was laid out a moment ago, and by the time this runs `transcript` is already the
-                // NEW model: the row count would be the wrong session's. What the old session has
-                // is whatever its last settled scroll wrote, which is a position in a document
-                // that has only grown since, and that is exactly what `TranscriptResume` is built
-                // to read back.
+                // **The session being left is written down here, and it used to be nowhere.**
                 //
+                // The comment that stood here said it was deliberate: everything `remember` reads
+                // describes the pane as it was laid out a moment ago, and by this line `transcript`
+                // is already the conversation being arrived at, so the row count would be the wrong
+                // session's. Both halves of that were true and the conclusion was wrong. What was
+                // left instead was a pane that only ever recorded a place when a scroll happened to
+                // settle, so a reader who arrived, read what was on screen and moved to another
+                // workspace had nothing written down at all, and came back to whatever a first
+                // visit does: their first unread row, or the live end.
+                //
+                // It is safe now because the write no longer reads the body. `writingTo` carries
+                // the pane and the session the drawn state belongs to, so this call records the
+                // conversation being left, under its own key, from its own measurements.
+                remember()
                 // Nothing owed to a conversation the pane has left.
                 scroller.stop()
                 follower.stop()
@@ -724,6 +753,7 @@ struct TranscriptListView: View {
                         rowCount: transcript.rows.count
                     )
                 )
+                writingTo = memory.map { WriteTarget(memory: $0, session: transcript.session.id) }
                 resumed = TranscriptResume.isResuming(remembered) ? transcript.session.id : nil
                 isGrowing = false
                 visibleRowSeqs.forget()
@@ -768,6 +798,7 @@ struct TranscriptListView: View {
                     )
                 )
                 TranscriptDrawn.note(drawn.window.count)
+                writingTo = memory.map { WriteTarget(memory: $0, session: transcript.session.id) }
                 // Whatever the session arrived with, taken in without a fade. This runs whether
                 // or not the row count changed, which matters: two sessions can hold the same
                 // number of rows, and then nothing else would have told the tracker it is
@@ -1205,8 +1236,8 @@ struct TranscriptListView: View {
         // over a session that has since loaded. The height is what says a layout has happened, and
         // it is checked HERE rather than where the memory is read, because nought is a real place
         // to a reader who is at the top of a conversation. See `TranscriptResume.placement`.
-        guard let memory, drawn.window.count > 0, geometry.paneHeight > 0 else { return }
-        memory.remember(
+        guard let target = writingTo, drawn.window.count > 0, geometry.paneHeight > 0 else { return }
+        target.memory.remember(
             TranscriptPaneState(
                 expanded: expanded,
                 offset: contentOffset.value,
@@ -1219,7 +1250,7 @@ struct TranscriptListView: View {
                 // Written down together because they are one measurement: see `TranscriptWindow`.
                 drawn: drawn.window
             ),
-            session: transcript.session.id
+            session: target.session
         )
     }
 
