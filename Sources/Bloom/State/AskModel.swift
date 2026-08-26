@@ -95,6 +95,21 @@ final class AskModel {
         await open()
     }
 
+    /// Signals the agent, without waiting. `AppModel.shutdownEverything` calls this on every model
+    /// first so the SIGTERM escalations all run at once rather than one after another.
+    ///
+    /// **This chat has to be in that sweep.** macOS reparents a child process to launchd rather
+    /// than killing it, so a conversation left out of the teardown would leave a `claude` running
+    /// against Bloom's own Application Support directory for the rest of the day, with nothing on
+    /// screen to say so.
+    func stopEverything() {
+        transcript?.terminateNow()
+    }
+
+    func shutdown() async {
+        await transcript?.shutdown()
+    }
+
     /// Whether the agent in this chat is mid turn, for the sidebar row's own mark.
     ///
     /// Read off the live transcript rather than out of `Store.sessionActivity`, and that is the
