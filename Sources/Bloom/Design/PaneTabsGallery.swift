@@ -93,18 +93,24 @@ struct PaneTabsGallery: View {
                 ),
             ])
 
-            // The one thing on this page that is a question rather than a record. `.glass` is a
-            // system style, so what it draws for a `.button` toggle's ON state is Apple's decision
-            // and not ours, and the whole reason the control used to be `.accessoryBar` was to keep
-            // that state off the saturated accent. Both states, side by side, is the answer.
+            // Two rows that have to come out identical, which is the whole reason they are both
+            // here. The control is a `Button` and has no on state to draw, the way the sidebar's
+            // own toolbar item has none: see `InspectorToggle`. A filled plate in the second row
+            // is the bug this page exists to catch.
             row(
-                "The inspector toggle, hidden and shown",
-                tabs: [fixture("Chat", PaneGlyph.chat, active: true), fixture("Terminal", PaneGlyph.terminal)],
+                "The inspector toggle, inspector hidden",
+                tabs: [
+                    fixture("Chat", PaneGlyph.chat, active: true),
+                    fixture("Terminal", PaneGlyph.terminal),
+                ],
                 inspectorVisible: false
             )
             row(
-                "The same strip with the inspector open",
-                tabs: [fixture("Chat", PaneGlyph.chat, active: true), fixture("Terminal", PaneGlyph.terminal)],
+                "The same strip, inspector shown. Identical, and that is the point",
+                tabs: [
+                    fixture("Chat", PaneGlyph.chat, active: true),
+                    fixture("Terminal", PaneGlyph.terminal),
+                ],
                 inspectorVisible: true
             )
 
@@ -158,8 +164,8 @@ struct PaneTabsGallery: View {
 /// and the other four reading as though nothing in them were selected.
 private struct StripRow: View {
     var tabs: [Fixture]
-    /// Whether the strip ends in the inspector's toggle, and which way it is thrown. Nil for the
-    /// rows that are about the tabs.
+    /// Whether the strip ends in the inspector's control, and which way the inspector is. Nil for
+    /// the rows that are about the tabs. Both values must draw the same button.
     var inspectorVisible: Bool?
 
     @Namespace private var selection

@@ -360,8 +360,8 @@ struct SessionTabsView: View {
     /// about which of them it would move. On the boundary it opens, the target is the thing it is
     /// pointing at.
     ///
-    /// What it looks like is `InspectorToggle`, which is a view of its own so that both of its
-    /// states can be photographed.
+    /// What it looks like is `InspectorToggle`, which is a view of its own so that the gallery can
+    /// draw it with the inspector both ways and show they come out the same.
     private var inspectorToggle: some View {
         @Bindable var app = app
 
