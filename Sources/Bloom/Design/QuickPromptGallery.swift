@@ -22,6 +22,13 @@ import BloomCore
 /// hanging off it, the picker on each of its two tabs, a name too long for the row, and the
 /// question Delete asks. Every one of those was reported from a screenshot rather than caught
 /// here, which is what a page missing a state costs.
+///
+/// The fourth column is the two switches, which are the reason a row can now do something other
+/// than write into the box. Three of the four things a prompt can do are drawn: what the two
+/// switches read like at rest is the column beside it, and the sentence under them is the whole of
+/// how clear this is, so it is here rather than described. The list on the left carries prompts
+/// with the switches on, because the marks on those rows are the only warning somebody arrowing
+/// down the list gets.
 struct QuickPromptGallery: View {
     var app: AppModel
 
@@ -36,10 +43,13 @@ struct QuickPromptGallery: View {
                 text: "Explain the changes made in this PR as HTML. Open it as a new tab in this workspace.",
                 sortOrder: 0
             ),
+            // Sends without stopping in the box, and a name long enough that the mark saying so
+            // has to hold its column against the truncation.
             QuickPrompt(
                 name: "Run the tests and fix whatever comes back failing",
                 symbol: "checkmark.seal",
                 text: "Run make test. If anything fails, fix it and run the failing test again on its own.",
+                sendsImmediately: true,
                 sortOrder: 1
             ),
             // The mark that has to hold its own beside the tinted ones on either side of it.
@@ -49,16 +59,24 @@ struct QuickPromptGallery: View {
                 text: "Run the failing test twenty times and say what makes it fail.",
                 sortOrder: 2
             ),
+            // A chat and no send, on the row that has no name of its own: one mark on a one line
+            // row, and the chat this opens is called `Chat` rather than the first half of the
+            // sentence. See `QuickPrompt.chatTitle`.
             QuickPrompt(
                 name: "",
                 symbol: "text.alignleft",
                 text: "Walk me through the diff, file by file, and say why each change is there.",
+                opensNewChat: true,
                 sortOrder: 3
             ),
+            // Both switches, which is the one press that opens a chat and runs. Two marks on one
+            // row, in the order the sentence says them.
             QuickPrompt(
                 name: "Ship it",
                 symbol: "\u{1F680}",
                 text: "Push the branch, open the pull request, and wait for the checks.",
+                sendsImmediately: true,
+                opensNewChat: true,
                 sortOrder: 4
             ),
             // Longer than the panel by a wide margin, which is the case that has to truncate
@@ -109,6 +127,12 @@ struct QuickPromptGallery: View {
                 form("The picker, open on Emojis", prompt: prompts[4], picking: true)
                 Spacer(minLength: 0)
             }
+
+            VStack(alignment: .leading, spacing: Metrics.pane) {
+                form("Both switches on: one press opens a chat and runs", prompt: prompts[4])
+                form("A chat, and the words left waiting in it", prompt: prompts[3])
+                Spacer(minLength: 0)
+            }
         }
         .padding(Metrics.pane)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -138,7 +162,7 @@ struct QuickPromptGallery: View {
             QuickPromptForm(
                 editing: prompt,
                 startsPickingMark: picking,
-                onCancel: {}, onSave: { _, _, _ in }, onDelete: {}
+                onCancel: {}, onSave: { _ in }, onDelete: {}
             )
             .frame(width: 380)
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metrics.corner + 2))
@@ -256,7 +280,7 @@ extension Gallery {
     static let quickPrompts = Gallery(
         name: "quick-prompts",
         title: "Quick prompts",
-        size: CGSize(width: 1320, height: 1440),
+        size: CGSize(width: 1720, height: 1600),
         needsFocus: false,
         view: { app in AnyView(QuickPromptGallery(app: app)) }
     )

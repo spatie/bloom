@@ -756,6 +756,36 @@ public actor Store {
                 created_at REAL NOT NULL
             );
             """),
+
+            // The two switches on a quick prompt: whether choosing it sends the words rather than
+            // leaving them in the composer, and whether it opens a new chat for them.
+            //
+            // Zero rather than NULL, and no backfill. Every prompt in the table was written when
+            // insert-and-stop was the only thing a quick prompt could do, and off is exactly that
+            // behaviour, so the default is not a guess about what the owner wanted, it is what the
+            // row has always done. See `QuickPromptDelivery`.
+            //
+            // Real code rather than SQL for the reason the two steps above give: `ADD COLUMN` has
+            // no `IF NOT EXISTS`, and the store's own tests rewind `user_version` to reproduce an
+            // old schema, so a step that could not be replayed would throw and take the whole
+            // migration transaction with it.
+            { db in
+                let existing = Set(
+                    try db.query("PRAGMA table_info(quick_prompt);").compactMap { $0.string("name") }
+                )
+                if !existing.contains("sends_immediately") {
+                    try db.execute("""
+                        ALTER TABLE quick_prompt
+                        ADD COLUMN sends_immediately INTEGER NOT NULL DEFAULT 0;
+                        """)
+                }
+                if !existing.contains("opens_new_chat") {
+                    try db.execute("""
+                        ALTER TABLE quick_prompt
+                        ADD COLUMN opens_new_chat INTEGER NOT NULL DEFAULT 0;
+                        """)
+                }
+            },
         ]
 
         let current = Int(db.userVersion)
@@ -2294,8 +2324,16 @@ public actor Store {
         guard var row = try quickPrompt(id: quickPromptID) else { return nil }
         change(&row)
         try db.run(
-            "UPDATE quick_prompt SET name = ?, symbol = ?, text = ? WHERE id = ?",
-            [.text(row.name), .text(row.symbol), .text(row.text), .text(quickPromptID)]
+            """
+            UPDATE quick_prompt
+            SET name = ?, symbol = ?, text = ?, sends_immediately = ?, opens_new_chat = ?
+            WHERE id = ?
+            """,
+            [
+                .text(row.name), .text(row.symbol), .text(row.text),
+                .int(row.sendsImmediately ? 1 : 0), .int(row.opensNewChat ? 1 : 0),
+                .text(quickPromptID),
+            ]
         )
         row.id = quickPromptID
         return row
@@ -2337,11 +2375,14 @@ public actor Store {
     private func insertQuickPromptRow(_ prompt: QuickPrompt) throws {
         try db.run(
             """
-            INSERT INTO quick_prompt (id, name, symbol, text, sort_order, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO quick_prompt (
+                id, name, symbol, text, sends_immediately, opens_new_chat, sort_order, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 .text(prompt.id), .text(prompt.name), .text(prompt.symbol), .text(prompt.text),
+                .int(prompt.sendsImmediately ? 1 : 0), .int(prompt.opensNewChat ? 1 : 0),
                 .int(Int64(prompt.sortOrder)),
                 .double(prompt.createdAt.timeIntervalSince1970),
             ]
@@ -2705,6 +2746,11 @@ public actor Store {
             name: row.string("name") ?? "",
             symbol: row.string("symbol") ?? QuickPrompt.defaultSymbol,
             text: row.string("text") ?? "",
+            // A row read before the migration ran, or through a query that did not name the
+            // column, has no value here at all, and no value means the prompt behaves the way it
+            // always has. See `QuickPromptDelivery`.
+            sendsImmediately: row.int("sends_immediately") == 1,
+            opensNewChat: row.int("opens_new_chat") == 1,
             sortOrder: Int(row.int("sort_order") ?? 0),
             createdAt: row.date("created_at") ?? Date()
         )

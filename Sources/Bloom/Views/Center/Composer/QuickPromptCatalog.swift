@@ -11,7 +11,7 @@ import BloomCore
 ///
 /// Every edit is made against the store first and then applied here, so the list on screen is
 /// whatever the row says rather than what the form hoped it would say. The writes are narrow:
-/// `Store.update(quickPromptID:)` names the three columns a form can change and leaves the order
+/// `Store.update(quickPromptID:)` names the five columns a form can change and leaves the order
 /// and the creation date alone.
 @MainActor
 @Observable
@@ -85,11 +85,15 @@ final class QuickPromptCatalog {
     }
 
     @discardableResult
-    func add(
-        name: String, symbol: String, text: String, in store: Store?
-    ) async -> QuickPrompt? {
+    func add(_ fields: QuickPrompt.Fields, in store: Store?) async -> QuickPrompt? {
         guard let store else { return nil }
-        let prompt = QuickPrompt(name: name, symbol: symbol, text: text)
+        let prompt = QuickPrompt(
+            name: fields.name,
+            symbol: fields.symbol,
+            text: fields.text,
+            sendsImmediately: fields.sendsImmediately,
+            opensNewChat: fields.opensNewChat
+        )
         guard let written = try? await store.insert(prompt) else { return nil }
         prompts.append(written)
         return written
@@ -97,14 +101,10 @@ final class QuickPromptCatalog {
 
     @discardableResult
     func save(
-        id: QuickPromptID, name: String, symbol: String, text: String, in store: Store?
+        id: QuickPromptID, _ fields: QuickPrompt.Fields, in store: Store?
     ) async -> QuickPrompt? {
         guard let store else { return nil }
-        let changed = try? await store.update(quickPromptID: id) { prompt in
-            prompt.name = name
-            prompt.symbol = symbol
-            prompt.text = text
-        }
+        let changed = try? await store.update(quickPromptID: id) { $0.fields = fields }
         guard let changed else { return nil }
         if let index = prompts.firstIndex(where: { $0.id == id }) {
             prompts[index] = changed

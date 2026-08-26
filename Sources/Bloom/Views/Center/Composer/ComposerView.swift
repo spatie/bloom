@@ -107,7 +107,7 @@ struct ComposerView: View {
                 canSend: canSend,
                 project: transcript.workspace.path,
                 onAttach: actions.attach,
-                onQuickPrompt: actions.insert,
+                onQuickPrompt: { fire($0, insert: actions.insert) },
                 onSend: send,
                 onStop: transcript.stop
             )
@@ -378,6 +378,62 @@ struct ComposerView: View {
             }.value
             await transcript.submit(composed)
             await model?.removeReviewComments(ids: comments.map(\.id))
+        }
+    }
+
+    // MARK: - Quick prompts
+
+    /// What choosing a quick prompt does here.
+    ///
+    /// The four routes are `QuickPromptDelivery`'s and not this view's, which is the whole reason
+    /// that type exists: the rule has cases worth holding still, and a decision taken in a view is
+    /// one nothing can test. What is left here is the doing, and both halves of it are the paths
+    /// that already exist. Sending is `send()`, the same function Return and the Send button call,
+    /// so a prompt fired while a turn is running queues behind it exactly as a typed message does.
+    /// A new chat is `WorkspaceModel.createSession`, which is what the `+` in the strip presses.
+    ///
+    /// `canOpenNewChat` is a real question rather than a constant: this composer is dropped in
+    /// wherever a transcript exists, and without the workspace model there is no strip to open a
+    /// second chat on. A prompt that asked for one then writes into this box instead.
+    private func fire(_ prompt: QuickPrompt, insert: @MainActor (QuickPrompt) -> Void) {
+        switch QuickPromptDelivery.decided(
+            for: prompt, canSend: true, canOpenNewChat: model != nil
+        ) {
+        case .compose:
+            insert(prompt)
+        case .send:
+            // Written into the draft first and then sent, rather than submitted straight from the
+            // prompt: what goes is the box, so half a sentence already typed goes with it instead
+            // of being left behind under a turn that answered something else. The form's own line
+            // says so before the switch is turned on.
+            insert(prompt)
+            send()
+        case .composeInNewChat:
+            openChat(for: prompt, sending: false)
+        case .sendInNewChat:
+            openChat(for: prompt, sending: true)
+        }
+    }
+
+    /// Opens a chat for a quick prompt and puts the words in it, sent or waiting.
+    ///
+    /// The draft goes to the store before it goes to the transcript, and that order is the bug
+    /// this avoids: the new chat's `TranscriptModel` is already loading by the time
+    /// `createSession` returns, and the last thing that load does is read the draft out of the
+    /// store. Written the other way round, the load lands afterwards and puts the empty box back.
+    /// Both are written, so a load that had already finished is not left holding nothing, and the
+    /// two agree because the store now says the same words.
+    private func openChat(for prompt: QuickPrompt, sending: Bool) {
+        guard let model else { return }
+        let text = prompt.text
+        Task { @MainActor in
+            guard let session = await model.createSession(title: prompt.chatTitle) else { return }
+            guard sending else {
+                try? await app.store?.saveDraft(sessionID: session.id, body: text)
+                model.transcript(for: session).draft = text
+                return
+            }
+            await model.transcript(for: session).submit(text)
         }
     }
 

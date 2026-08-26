@@ -11,7 +11,10 @@ import BloomCore
 struct ComposerPromptActions {
     /// The paperclip: opens the file panel, and writes what is chosen into the draft at the caret.
     var attach: @MainActor () -> Void
-    /// A quick prompt chosen from the panel: its words go into the draft at the caret, and nothing
-    /// is sent. See `QuickPromptInsertion`.
+    /// A quick prompt written into the draft at the caret, and nothing else: this is the writing
+    /// half only. What a chosen prompt actually does is `QuickPromptDelivery`, decided by whoever
+    /// owns the draft, because sending it and opening a chat for it are both things this surface
+    /// has no way to do. `ComposerView.fire` is that decision made; the create sheet has neither
+    /// of the other two routes and so only ever calls this.
     var insert: @MainActor (QuickPrompt) -> Void
 }

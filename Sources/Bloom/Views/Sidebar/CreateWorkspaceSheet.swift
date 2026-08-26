@@ -568,6 +568,10 @@ struct CreateWorkspaceSheet: View {
                 // exist yet and a style the project defines is already in the repository.
                 project: repo?.path,
                 onAttach: actions.attach,
+                // Written into the box, whatever the prompt's own two switches say. There is no
+                // conversation here to send into and no strip to open a chat on, and the sheet is
+                // not going to cut a worktree because a row was arrowed onto. `QuickPromptDelivery`
+                // is the same fallback said once, for a surface that can do neither.
                 onQuickPrompt: actions.insert,
                 onSend: create
             )
