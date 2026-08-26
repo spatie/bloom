@@ -48,24 +48,12 @@ struct TranscriptView: View {
     var body: some View {
         Group {
             if let transcript {
-                // **Spike.** The same pane, drawn twice over: `NSTableView` by default on this
-                // branch, and the lazy stack it is being weighed against behind
-                // `--transcript-lazy`. See `TranscriptVariant`.
-                if TranscriptVariant.usesTable {
-                    TranscriptTableListView(
-                        transcript: transcript,
-                        isRunningSetup: isRunningSetup,
-                        memory: memory,
-                        onScrolledUpChange: onScrolledUpChange
-                    )
-                } else {
-                    TranscriptListView(
-                        transcript: transcript,
-                        isRunningSetup: isRunningSetup,
-                        memory: memory,
-                        onScrolledUpChange: onScrolledUpChange
-                    )
-                }
+                TranscriptListView(
+                    transcript: transcript,
+                    isRunningSetup: isRunningSetup,
+                    memory: memory,
+                    onScrolledUpChange: onScrolledUpChange
+                )
             } else {
                 EmptyTranscriptView()
             }

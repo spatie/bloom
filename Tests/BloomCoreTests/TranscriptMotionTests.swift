@@ -76,23 +76,6 @@ struct TranscriptMotionTests {
         #expect(atRamp == .glide(seconds: TranscriptMotion.glideCeiling))
     }
 
-    /// The end of the content moves down while the glide is in the air, so the glide lands short
-    /// of it, and short of the end is the state in which the transcript stops following the tail.
-    @Test("a glide taken during a turn says the live end again when it lands")
-    func reassertsWhileStreaming() {
-        let move = TranscriptMotion.liveEndMove(distance: 3000, reduceMotion: false)
-        #expect(TranscriptMotion.reassertsLiveEnd(after: move, isStreaming: true))
-        #expect(!TranscriptMotion.reassertsLiveEnd(after: move, isStreaming: false))
-    }
-
-    /// Nothing was in the air, so there is nothing to catch up with, and a second scroll a beat
-    /// after an instant one is a jolt with no cause the reader can see.
-    @Test("a jump never has anything to say twice")
-    func jumpNeverReasserts() {
-        #expect(!TranscriptMotion.reassertsLiveEnd(after: .jump, isStreaming: true))
-        #expect(!TranscriptMotion.reassertsLiveEnd(after: .jump, isStreaming: false))
-    }
-
     private func seconds(_ move: TranscriptMotion.LiveEndMove) -> Double {
         switch move {
         case .jump: 0

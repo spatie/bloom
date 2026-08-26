@@ -29,10 +29,18 @@ import SwiftUI
 /// That call was already there for the streaming case. It is now what every completed travel ends
 /// with, and a travel that was stopped does not reach it.
 ///
-/// It fails safe. The scroll view is found through `enclosingScrollView` from a zero sized view
-/// planted inside the content, and if SwiftUI ever stops backing its `ScrollView` with an
-/// `NSScrollView` the answer is nil, `glide` returns false, and the caller jumps instead. A press
-/// that arrives instantly is the behaviour this branch replaced and is not a failure.
+/// It fails safe. The scroll view is handed over by `TranscriptTable`, which owns it, and if there
+/// is none the answer is nil, `glide` returns false, and the caller jumps instead. A press that
+/// arrives instantly is the behaviour this replaced and is not a failure.
+///
+/// **It used to be found rather than handed over**, by planting a zero sized `NSViewRepresentable`
+/// inside the scroll content and walking up through `enclosingScrollView`, because that was the
+/// only way to reach the `NSScrollView` SwiftUI puts behind a `ScrollView`. That view had to be
+/// updated on every layout pass, since the reference went stale whenever SwiftUI rebuilt the
+/// hosting scroll view under a pane that is reused for every workspace the window visits, and it
+/// answered nil on its first update because a representable's view is created before it is put in
+/// the hierarchy. None of that survives the move to a table: the table makes its own scroll view
+/// and says which one it is.
 @MainActor
 @Observable
 final class TranscriptLiveEndScroller {
@@ -109,38 +117,5 @@ final class TranscriptLiveEndScroller {
             stop()
             landed?()
         }
-    }
-}
-
-/// Plants a zero sized view inside the transcript's scroll content so the scroll view behind it
-/// can be reached. Inside the content on purpose: `enclosingScrollView` walks up from the view it
-/// is asked of, and a background on the `ScrollView` itself is a sibling of the scroll view rather
-/// than a descendant of it, so it would answer nil, or find the composer's.
-struct TranscriptScrollBridge: NSViewRepresentable {
-    let scroller: TranscriptLiveEndScroller
-    /// The other thing that moves this scroll view: what keeps up with a running turn. Fed from
-    /// here rather than from a bridge of its own, so there is one view planted in the content and
-    /// one answer about which scroll view the transcript is in.
-    let follower: TranscriptLiveEndFollower
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        view.isHidden = true
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        // Every layout pass rather than once on attach. The pane is reused for every workspace the
-        // window visits and SwiftUI is free to rebuild the hosting scroll view underneath it, so a
-        // reference taken once goes stale in exactly the case that matters.
-        //
-        // It is also the only chance either of these gets. Measured against a bare hosted
-        // `ScrollView`, `enclosingScrollView` is nil on the first update, because the
-        // representable's view is created before it is put in the hierarchy: the scroll view is
-        // there from the second update on. Anything that took the reference once, on attach, would
-        // hold nil for ever and every travel below would silently fall back to a jump.
-        let found = nsView.enclosingScrollView
-        if scroller.scrollView !== found { scroller.scrollView = found }
-        if follower.scrollView !== found { follower.scrollView = found }
     }
 }
