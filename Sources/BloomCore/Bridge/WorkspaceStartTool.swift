@@ -21,15 +21,28 @@ public struct AgentWorkspaceOrder: Sendable, Hashable {
     /// only to the tool would make the two doors behave differently for no reason visible from
     /// either. The accidental duplicate, a retried call, is already handled by `spawnID`.
     public let name: String?
-    public let baseBranch: String?
+    /// Which of the create sheet's two routes this call asked for: a fresh branch cut from
+    /// something, or an existing branch carried on. Defaulted to a new branch from the project's
+    /// default, which is what every call made before there was a choice gets. See
+    /// `AgentStartSource`.
+    public let source: AgentStartSource
     /// Nil inherits whatever the calling session is using, which is almost always what is wanted:
     /// an agent asking for help wants help from the thing it already trusts.
     public let agent: AgentKind?
 
-    public init(prompt: String, name: String? = nil, baseBranch: String? = nil, agent: AgentKind? = nil) {
+    /// What the worktree is cut from, or nil for the project's default. Nil for a checkout too,
+    /// which brings its own base.
+    public var baseBranch: String? { source.baseBranch }
+
+    public init(
+        prompt: String,
+        name: String? = nil,
+        source: AgentStartSource = .newBranch(from: nil),
+        agent: AgentKind? = nil
+    ) {
         self.prompt = prompt
         self.name = name
-        self.baseBranch = baseBranch
+        self.source = source
         self.agent = agent
     }
 }
@@ -87,13 +100,13 @@ extension AgentWorkspaceOrder {
     }
 
     private func spawnID(scope: String) -> String {
-        let material = [
+        let material = ([
             scope,
             prompt,
             name ?? "",
-            baseBranch ?? "",
+        ] + source.digestMaterial + [
             agent?.rawValue ?? "",
-        ].joined(separator: "\u{0}")
+        ]).joined(separator: "\u{0}")
 
         let digest = SHA256.hash(data: Data(material.utf8))
 
@@ -183,6 +196,22 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             Use it when a task splits into parts that do not need to see each other's edits, and \
             you want them worked on at the same time rather than one after another.
 
+            There are two ways to start it, the two Bloom's own create sheet offers, and picking \
+            the wrong one is the mistake worth avoiding here.
+
+            '\(WorkspaceSourceTab.newBranch.title)' is the default and needs nothing said. \
+            \(WorkspaceSourceTab.newBranch.explanation) Name the branch to cut from with \
+            'base_branch', or leave it out for the project's default branch.
+
+            '\(WorkspaceSourceTab.existingBranch.title)' is 'existing_branch'. \
+            \(WorkspaceSourceTab.existingBranch.explanation) Use it to carry on, review or fix \
+            work that is already on a branch: cutting a new branch off that branch instead gives \
+            you a workspace whose diff is empty, because it starts out identical to the branch \
+            you named. The branch has to exist already, and git allows one worktree per branch, \
+            so a branch another workspace is sitting on is refused rather than opened twice.
+
+            Name one or the other, never both.
+
             It returns as soon as the workspace exists, not when its work is done. The new agent \
             starts on its own and keeps running while you carry on. There is no way to wait for \
             it from here, so do not ask for one and then sit idle: say what you started and get on \
@@ -220,7 +249,18 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                 "base_branch": .object([
                     "type": .string("string"),
                     "description": .string(
-                        "Branch to cut from. Leave it out for the project's default branch."
+                        "Cut a new branch from this one. Your commits land on the new branch and "
+                            + "merge back into this one. Leave it out for the project's default "
+                            + "branch. Do not name it together with existing_branch."
+                    ),
+                ]),
+                "existing_branch": .object([
+                    "type": .string("string"),
+                    "description": .string(
+                        "Work on this branch itself, instead of cutting a new one. Your commits "
+                            + "land on it. It has to exist already, locally or on the remote, and "
+                            + "it must not be open in another workspace. Do not name it together "
+                            + "with base_branch."
                     ),
                 ]),
                 "agent": .object([
@@ -249,14 +289,8 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             return .failure("workspace_start needs a prompt saying what the new workspace should do.")
         }
 
-        let order = AgentWorkspaceOrder(
-            prompt: prompt,
-            name: filled(request.param("name")),
-            baseBranch: filled(request.param("base_branch")),
-            agent: agent(in: request)
-        )
-
-        if let requested = request.stringParam("agent"), order.agent == nil {
+        let agent = agent(in: request)
+        if let requested = request.stringParam("agent"), agent == nil {
             return .failure(
                 "Bloom cannot run '\(requested)'. It runs "
                     + AgentKind.runnable.map(\.rawValue).joined(separator: " and ")
@@ -266,15 +300,46 @@ public struct WorkspaceStartTool: BridgeToolHandling {
 
         // The project is resolved here rather than only on the happy path, because it is what
         // makes a failed start explicable: `WorkspaceStartTrouble` needs the repository's name,
-        // its path and the branch a call that named none would have been cut from.
+        // its path and the branch a call that named none would have been cut from. It is also what
+        // the branch below is looked for in, and what the spawn key of a caller with no workspace
+        // is scoped by, so it is settled before either.
         let project: Repo
-        let origin: WorkspaceOrigin
-        switch await resolve(request, order: order, as: identity, store: store) {
+        let parent: WorkspaceID?
+        switch await resolve(request, as: identity, store: store) {
         case .refused(let sentence): return .failure(sentence)
-        case let .resolved(repo, resolvedOrigin):
+        case let .resolved(repo, caller):
             project = repo
-            origin = resolvedOrigin
+            parent = caller
         }
+
+        // Which of the sheet's two routes this is, with the branch found in the project rather
+        // than taken on trust. A name that is not there, or one something else is already sitting
+        // on, is answered in a sentence here: the alternative is a start that fails inside git,
+        // or worse, a workspace on a branch nobody asked for. See `AgentStartSource`.
+        let source: AgentStartSource
+        switch AgentStartRequest.read(
+            baseBranch: filled(request.param("base_branch")),
+            existingBranch: filled(request.param("existing_branch"))
+        ) {
+        case .refused(let sentence):
+            return .failure(sentence)
+        case .newBranch(let ref):
+            source = .newBranch(from: ref)
+        case .existingBranch(let named):
+            let branches = await AgentStartBranch.listing(of: project, store: store)
+            switch AgentStartBranch.find(named, among: branches, project: project.name) {
+            case .refused(let sentence): return .failure(sentence)
+            case .found(let branch): source = .existingBranch(branch)
+            }
+        }
+
+        let order = AgentWorkspaceOrder(
+            prompt: prompt,
+            name: filled(request.param("name")),
+            source: source,
+            agent: agent
+        )
+        let origin = origin(of: order, project: project, parent: parent)
 
         if let spawnID = origin.spawnToolUseID {
             do {
@@ -326,27 +391,36 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                 error,
                 project: project.name,
                 projectPath: project.path,
-                baseBranch: order.baseBranch ?? project.defaultBranch,
-                wasRequested: order.baseBranch != nil
+                // Whichever branch this call actually named, which for a checkout is the branch it
+                // asked to carry on. Diagnosing against the default there would answer a call
+                // about one branch with a sentence about another.
+                baseBranch: order.source.namedBranch ?? project.defaultBranch,
+                wasRequested: order.source.namedBranch != nil
             )
             return .failure(trouble.sentence)
         }
     }
 
-    /// Which project this workspace goes in and who is recorded as having asked for it, or the
+    /// Which project this workspace goes in and which workspace, if any, is asking, or the
     /// sentence saying why neither can be answered.
     ///
     /// One function for both roles, because the two answers have to stay opposite: a caller with a
     /// workspace may not name a project and a caller without one must. Split across two call sites
     /// that would eventually become one that does neither.
+    ///
+    /// It answers with the caller rather than with a `WorkspaceOrigin`, because the origin carries
+    /// the spawn key and the spawn key is a digest of the whole order, branch included, which is
+    /// not settled until the branch has been found in this project. `origin(of:project:parent:)`
+    /// puts the two together once both are known.
     enum Resolution {
-        case resolved(Repo, WorkspaceOrigin)
+        /// The project, and the workspace that asked. Nil is the owner's own client, which is
+        /// sitting in none.
+        case resolved(Repo, WorkspaceID?)
         case refused(String)
     }
 
     func resolve(
         _ request: MCPRequest,
-        order: AgentWorkspaceOrder,
         as identity: BridgeIdentity,
         store: Store
     ) async -> Resolution {
@@ -376,9 +450,7 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                 // The rate is not checked here. A retry of a call that already cut a worktree is
                 // not another start, and `call` answers that before it counts anything, or a
                 // duplicate would come back looking like a limit.
-                return .resolved(project, .ownerClient(
-                    spawnToolUseID: order.spawnID(ownerProject: project.id)
-                ))
+                return .resolved(project, nil)
             }
 
             // A caller that is a workspace. Its project is decided for it, so naming one is a
@@ -408,14 +480,28 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                 )
             }
 
-            // A retry of the same call is the same call. See `AgentWorkspaceOrder.spawnID`.
-            return .resolved(project, .agent(
-                parentWorkspaceID: workspaceID,
-                spawnToolUseID: order.spawnID(parentWorkspaceID: workspaceID)
-            ))
+            return .resolved(project, workspaceID)
         } catch {
             return .refused("Bloom could not read its projects: \(error.readableMessage)")
         }
+    }
+
+    /// Who is recorded as having asked for this workspace, and the key that makes a retry of the
+    /// call the same call rather than a second worktree.
+    ///
+    /// One function for both callers, because the difference between them is one thing: what the
+    /// digest is scoped by. A parent scopes it by itself, and the owner's client, which is not a
+    /// workspace, scopes it by the project it named out loud. See `AgentWorkspaceOrder.spawnID`.
+    private func origin(
+        of order: AgentWorkspaceOrder, project: Repo, parent: WorkspaceID?
+    ) -> WorkspaceOrigin {
+        guard let parent else {
+            return .ownerClient(spawnToolUseID: order.spawnID(ownerProject: project.id))
+        }
+        return .agent(
+            parentWorkspaceID: parent,
+            spawnToolUseID: order.spawnID(parentWorkspaceID: parent)
+        )
     }
 
     /// Whether this caller has already had as many as its origin allows, and the sentence saying

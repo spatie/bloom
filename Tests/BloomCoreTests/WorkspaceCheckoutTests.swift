@@ -91,6 +91,21 @@ struct WorkspaceCheckoutTests {
         #expect(branches.first { $0.name == "wip" }?.inUseBy == nil)
     }
 
+    /// What a caller naming a branch by name is looked up in. The picker drops the default branch
+    /// because it is normally the one the project's own checkout is on, and normally is not always:
+    /// a project left on a feature branch has its default free, and a list that hid it would refuse
+    /// a checkout git would have allowed. Nothing is hidden here, and `inUse` answers instead.
+    @Test("Every branch, for a caller that names one, keeps the default branch in the list")
+    func keepsEverythingWhenNothingIsBeingOffered() {
+        let branches = WorkspaceCheckoutPlan.everyBranch(
+            local: ["main", "wip"],
+            remote: ["origin/main", "origin/theirs", "origin/HEAD"],
+            inUse: ["main": .projectCheckout(path: "/dev/flare")]
+        )
+        #expect(branches.map(\.name) == ["main", "theirs", "wip"])
+        #expect(branches.first { $0.name == "main" }?.inUseBy == .projectCheckout(path: "/dev/flare"))
+    }
+
     @Test("A head with a pull request open on it is offered as the pull request and not twice")
     func skipsBranchesWithAnOpenPullRequest() {
         let requests = [listing(number: 4, head: "figma-mcp-check")]
