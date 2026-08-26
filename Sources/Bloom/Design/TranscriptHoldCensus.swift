@@ -60,6 +60,15 @@ enum TranscriptHoldCensus {
     private(set) static var noteCalls = 0
     private(set) static var notedRows = 0
     private(set) static var placeWrites = 0
+    /// **How often the list built its entries, and how many it built.** One pass builds an entry
+    /// for every row in the window: a content key hashed from a dozen fields, two closures
+    /// allocated, and a payload sniffed. So this is the work that is proportional to the ROW COUNT
+    /// rather than to what is on screen, and the number that says whether a scroll is paying it.
+    ///
+    /// Counted per pass rather than per entry, which is the lesson at the head of `ProbeHarness`:
+    /// an increment and an add, whatever the window holds.
+    private(set) static var entryPasses = 0
+    private(set) static var entriesBuilt = 0
     /// Cells the table asked for, which is one SwiftUI graph each. A row that draws nothing is a
     /// hundredth of a point tall, so a screenful of them is hundreds of rows rather than thirty,
     /// and this is the only number that would say so.
@@ -108,6 +117,12 @@ enum TranscriptHoldCensus {
     /// One cell handed to the table. See `cellsBuilt`.
     static func builtCell() { cellsBuilt += 1 }
 
+    /// One pass over the list's entries. See `entryPasses`.
+    static func builtEntries(_ count: Int) {
+        entryPasses += 1
+        entriesBuilt += count
+    }
+
     /// One batch of corrections, and the ones that did not take.
     static func corrected(rows: Int, uncorrected: Int) {
         correctedRows += rows
@@ -134,6 +149,8 @@ enum TranscriptHoldCensus {
         notedRows = 0
         placeWrites = 0
         cellsBuilt = 0
+        entryPasses = 0
+        entriesBuilt = 0
     }
 
     static func summary() -> [String: Double] {
@@ -157,6 +174,8 @@ enum TranscriptHoldCensus {
             "notedRows": Double(notedRows),
             "placeWrites": Double(placeWrites),
             "cellsBuilt": Double(cellsBuilt),
+            "entryPasses": Double(entryPasses),
+            "entriesBuilt": Double(entriesBuilt),
         ]
     }
 }

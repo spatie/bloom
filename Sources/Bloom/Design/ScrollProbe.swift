@@ -124,6 +124,15 @@ enum ScrollProbe {
 
         harness.markStarted()
 
+        // **Where a frame's time went, not just how long it took.** The complaint is stuttering
+        // rather than a low frame rate, so the question is which pass is eating a frame, and the
+        // centre column's layout is the candidate: a body pass over this list rebuilds an entry
+        // for every row in the window. `SwitchProbe` and `TabProbe` have read this for months and
+        // the scroll probe never turned it on, which is why an upward sweep could say 62ms at the
+        // ninety fifth percentile and not say what took it.
+        PaneLayoutTiming.reset()
+        PaneLayoutTiming.isEnabled = true
+
         recorder.start()
         documentHeights.removeAll()
         frames.removeAll()
@@ -131,6 +140,7 @@ enum ScrollProbe {
         await sweep(scroll, travel: travel, sweeps: sweeps)
         let wall = CACurrentMediaTime() - wallBefore
         recorder.stop()
+        PaneLayoutTiming.isEnabled = false
 
         harness.write(report(
             recorder: recorder, travel: travel, wall: wall, window: window, scroll: scroll,
@@ -337,6 +347,10 @@ enum ScrollProbe {
             "step": .number(Double(step)),
             "sweeps": .integer(sweeps),
             "transcriptHold": .map(TranscriptHoldCensus.summary()),
+            // `detail` is the centre column, which is the one holding the transcript. Each entry
+            // is `[startedMs, tookMs]`, so a pass can be laid against the frame it landed in.
+            "paneLayout": .map(PaneLayoutTiming.summary()),
+            "panePasses": .map(PaneLayoutTiming.timeline()),
         ].merging(documentMovement()) { mine, _ in mine }
             .merging(climb()) { mine, _ in mine }
         // The probe's own keys win over both, so a report that has an opinion keeps it.

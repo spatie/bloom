@@ -524,6 +524,10 @@ struct TranscriptListView: View {
                 }
             ))
         }
+        // One increment and one add for the whole pass. See `TranscriptHoldCensus.entryPasses`:
+        // this is the count that says whether a scroll is paying for the window rather than for
+        // the screen.
+        TranscriptHoldCensus.builtEntries(out.count)
         return out
     }
 
