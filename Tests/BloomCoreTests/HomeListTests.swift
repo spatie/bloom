@@ -354,18 +354,21 @@ struct HomeListTests {
         #expect(listing.groups.first?.rows.count == 2)
     }
 
-    @Test("archived workspaces are listed by default and the Live scope is what leaves them out")
-    func archivedIsListedByDefaultAndCountedWhileHidden() {
+    /// **The default is `live` and this is the test that pins it.** Home opened on `all`, which on
+    /// the machine it was redesigned against was twenty rows of which seventeen were archived: a
+    /// page about the past, in which the three workspaces that could still be acted on were
+    /// outnumbered six to one. The archive is not hidden by it, which is the second half of what
+    /// is checked here: the Archived chip carries its own count, and the tail below the list draws
+    /// the most recent of it.
+    @Test("Home lists live work by default, and says how much archived work it is not listing")
+    func liveIsTheDefaultAndArchivedIsStillCounted() {
         let now = date(2025, 8, 19, 12, 0, 0)
         let archived = [
             workspace("gone", at: date(2025, 8, 18, 9, 0, 0), state: .archived),
             workspace("older", at: date(2025, 8, 10, 9, 0, 0), state: .archived),
         ]
 
-        // The default. Home is the flat list of every workspace on the machine, and it is the
-        // only screen that lists an archived one at all, so leaving them out until somebody
-        // found a switch meant the one place they exist was the one place they could not be seen.
-        let shown = HomeList.build(
+        let resting = HomeList.build(
             repos: [repo("repo")],
             workspaces: [workspace("live", at: now)],
             archived: archived,
@@ -374,30 +377,131 @@ struct HomeListTests {
             calendar: Self.calendar
         )
 
-        #expect(shown.shown == 3)
-        #expect(shown.considered == 3)
-        #expect(shown.archived == 2)
-        #expect(shown.shownArchived == 2)
-        #expect(shown.groups.flatMap(\.rows).map(\.id.rawValue) == ["live", "gone", "older"])
+        #expect(resting.shown == 1)
+        // Every workspace on the machine is considered whichever chip is lit: the chips have to
+        // count what clicking them would show, so the pass cannot stop at the selected one.
+        #expect(resting.considered == 3)
+        #expect(resting.archived == 2)
+        #expect(resting.shownArchived == 0)
+        #expect(resting.counts.archived == 2)
+        #expect(resting.counts.live == 1)
 
-        let hidden = HomeList.build(
+        // And All is still the whole machine in one date-ordered list, which is what it was.
+        let everything = HomeList.build(
             repos: [repo("repo")],
             workspaces: [workspace("live", at: now)],
             archived: archived,
-            filter: HomeFilter(scope: .live),
+            filter: HomeFilter(scope: .all),
             now: now,
             calendar: Self.calendar
         )
 
-        #expect(hidden.shown == 1)
-        // Every workspace on the machine is considered now, whichever chip is lit: the chips have
-        // to count what clicking them would show, so the pass cannot stop at the selected one.
-        #expect(hidden.considered == 3)
-        #expect(hidden.archived == 2)
-        #expect(hidden.shownArchived == 0)
-        // And the Archived chip still says two while the Live chip is the one lit.
-        #expect(hidden.counts.archived == 2)
-        #expect(hidden.counts.live == 1)
+        #expect(everything.shown == 3)
+        #expect(everything.shownArchived == 2)
+        #expect(everything.groups.flatMap(\.rows).map(\.id.rawValue) == ["live", "gone", "older"])
+    }
+
+    // MARK: - The tail
+
+    /// Three rows in a 1440 by 900 window is a screen with half its ground empty, so the resting
+    /// page follows the live list with the most recent finished work rather than nothing at all.
+    @Test("a live list is followed by a capped tail of the recent archive")
+    func theTailFollowsTheLiveList() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        let archived = (1...9).map { hours in
+            workspace(
+                "gone-\(hours)",
+                at: now.addingTimeInterval(TimeInterval(-3_600 * hours)),
+                state: .archived
+            )
+        }
+
+        let listing = HomeList.build(
+            repos: [repo("repo")],
+            workspaces: [workspace("live", at: now)],
+            archived: archived,
+            filter: HomeFilter(),
+            now: now,
+            calendar: Self.calendar
+        )
+
+        #expect(listing.tail.count == HomeList.tailLimit)
+        #expect(listing.tailTotal == 9)
+        // Newest first, like the list above it, and never mixed into it.
+        #expect(
+            listing.tail.map(\.id.rawValue)
+                == ["gone-1", "gone-2", "gone-3", "gone-4", "gone-5", "gone-6"]
+        )
+        let everyTailRowIsArchived = listing.tail.allSatisfy { $0.isArchived }
+        #expect(everyTailRowIsArchived)
+        #expect(listing.groups.flatMap(\.rows).map(\.id.rawValue) == ["live"])
+        // The tail is context around an answer, so it is not counted as part of one.
+        #expect(listing.shown == 1)
+        #expect(listing.shownArchived == 0)
+    }
+
+    /// On a machine where nothing is live the pane raises `HomeEmptyState.emptyScope(.live)`,
+    /// which says every workspace here has been archived and carries the button that shows them.
+    /// Six rows of archive under that sentence would be the sentence contradicting itself.
+    @Test("nothing live means no tail either")
+    func anEmptyLiveListHasNoTail() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        let listing = HomeList.build(
+            repos: [repo("repo")],
+            workspaces: [],
+            archived: [workspace("gone", at: now, state: .archived)],
+            filter: HomeFilter(),
+            now: now,
+            calendar: Self.calendar
+        )
+
+        #expect(listing.isEmpty)
+        #expect(listing.tail.isEmpty)
+    }
+
+    /// Under every other chip, and in a search, the archive is what was asked for rather than
+    /// context around the answer, so drawing a second helping of it below would be the same rows
+    /// twice.
+    @Test("only the Live chip grows a tail")
+    func onlyLiveGrowsATail() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        func tail(_ filter: HomeFilter) -> [HomeRow] {
+            HomeList.build(
+                repos: [repo("repo")],
+                workspaces: [workspace("live", at: now)],
+                archived: [workspace("gone", at: now, state: .archived)],
+                filter: filter,
+                now: now,
+                calendar: Self.calendar
+            ).tail
+        }
+
+        #expect(!tail(HomeFilter()).isEmpty)
+        #expect(tail(HomeFilter(scope: .all)).isEmpty)
+        #expect(tail(HomeFilter(scope: .archived)).isEmpty)
+        #expect(tail(HomeFilter(scope: .needsYou)).isEmpty)
+        #expect(tail(HomeFilter(query: "live", scope: .all)).isEmpty)
+    }
+
+    /// The project menu narrows the tail with everything else, or the page would answer a question
+    /// about one project with rows from another.
+    @Test("the project filter reaches the tail")
+    func theProjectFilterReachesTheTail() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        let listing = HomeList.build(
+            repos: [repo("a"), repo("b")],
+            workspaces: [workspace("live", repoID: RepoID("a"), at: now)],
+            archived: [
+                workspace("mine", repoID: RepoID("a"), at: now, state: .archived),
+                workspace("theirs", repoID: RepoID("b"), at: now, state: .archived),
+            ],
+            filter: HomeFilter(projects: [RepoID("a")]),
+            now: now,
+            calendar: Self.calendar
+        )
+
+        #expect(listing.tail.map(\.id.rawValue) == ["mine"])
+        #expect(listing.tailTotal == 1)
     }
 
     @Test("an archived row sorts by recency like any other, not to the bottom")
@@ -407,7 +511,7 @@ struct HomeListTests {
             repos: [repo("repo")],
             workspaces: [workspace("old", at: date(2025, 8, 1, 9, 0, 0))],
             archived: [workspace("recent", at: now, state: .archived)],
-            filter: HomeFilter(),
+            filter: HomeFilter(scope: .all),
             now: now,
             calendar: Self.calendar
         )
@@ -430,7 +534,7 @@ struct HomeListTests {
                 repos: repos,
                 workspaces: workspaces,
                 archived: [],
-                filter: HomeFilter(query: query),
+                filter: HomeFilter(query: query, scope: .all),
                 now: now,
                 calendar: Self.calendar
             ).groups.flatMap(\.rows).map(\.id.rawValue)
@@ -544,7 +648,7 @@ struct HomeListTests {
                     workspace("Sidebar rewrite", repoID: RepoID("a"), branch: "agent/glass", at: now),
                 ],
                 archived: [],
-                filter: HomeFilter(query: query),
+                filter: HomeFilter(query: query, scope: .all),
                 now: now,
                 calendar: Self.calendar
             ).groups.flatMap(\.rows)
@@ -574,7 +678,7 @@ struct HomeListTests {
                 workspace("sidebar last month", at: date(2025, 6, 1, 9, 0, 0)),
             ],
             archived: [],
-            filter: HomeFilter(query: "sidebar"),
+            filter: HomeFilter(query: "sidebar", scope: .all),
             now: now,
             calendar: Self.calendar
         )
@@ -600,7 +704,7 @@ struct HomeListTests {
                 transcriptResult("quiet", matches: 6),
                 transcriptResult("sidebar rewrite", matches: 4),
             ],
-            filter: HomeFilter(query: "sidebar"),
+            filter: HomeFilter(query: "sidebar", scope: .all),
             now: now,
             calendar: Self.calendar
         )
@@ -629,7 +733,7 @@ struct HomeListTests {
             ],
             archived: [],
             transcripts: [transcriptResult("one", matches: 3), transcriptResult("two", matches: 9)],
-            filter: HomeFilter(query: "sidebar", projects: [RepoID("a")]),
+            filter: HomeFilter(query: "sidebar", projects: [RepoID("a")], scope: .all),
             now: now,
             calendar: Self.calendar
         )
@@ -648,7 +752,7 @@ struct HomeListTests {
             workspaces: [workspace("here", at: now)],
             archived: [],
             transcripts: [transcriptResult("deleted", matches: 4)],
-            filter: HomeFilter(query: "sidebar"),
+            filter: HomeFilter(query: "sidebar", scope: .all),
             now: now,
             calendar: Self.calendar
         )
@@ -736,7 +840,7 @@ struct HomeListTests {
             workspaces: [workspace("quiet", at: now)],
             archived: [],
             transcripts: [transcriptResult("quiet", matches: 4)],
-            filter: HomeFilter(query: "sidebar"),
+            filter: HomeFilter(query: "sidebar", scope: .all),
             now: now,
             calendar: Self.calendar
         )

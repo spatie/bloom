@@ -1,28 +1,32 @@
 import SwiftUI
 import BloomCore
 
-/// The one strip of chrome Home has: which chip is lit, which projects are listed, and what the
-/// answer adds up to.
+/// The one strip of chrome above Home's list: which chip is lit, and which projects are listed.
 ///
-/// **What came off it, and why the strip is glass now.** It used to hold a hand built search field
-/// with a hand drawn focus ring, a project menu, a "Hide archived" toggle and the readout. The
-/// field is gone: the window has a real `NSSearchToolbarItem` in its toolbar, which is where
-/// Finder and Mail publish search, and which draws its own glass and its own focus ring rather
-/// than an approximation of both. The toggle is gone too, into `HomeScope.live`, because a
-/// narrowing switch beside a set of narrowing chips is two mechanisms for one question.
+/// **What came off it.** It used to hold a hand built search field with a hand drawn focus ring, a
+/// project menu, a "Hide archived" toggle and a readout of what the list added up to. The field is
+/// gone: the window has a real `NSSearchToolbarItem` in its toolbar, which is where Finder and Mail
+/// publish search. The toggle is gone into `HomeScope.live`, because a narrowing switch beside a
+/// set of narrowing chips is two mechanisms for one question. And the readout is gone down to
+/// `HomeStatusBar` at the foot of the pane: a count belongs beside the thing it counts, and this
+/// bar was carrying five chips, a picker and a sentence at one weight, so nothing on it led.
 ///
-/// What is left floats. A bar of controls over a list that scrolls under it is exactly what a
-/// material is for, so this is `.regular` glass in a `GlassEffectContainer` with the chips, which
-/// means a chip lighting up is one shape morphing rather than two surfaces disagreeing about the
-/// ground they stand on. The rows underneath are not glass and must not be: a row is content, and
-/// forty glass rows is noise.
+/// **It was glass and it is not any more.** It was a `GlassEffectContainer` with `.regular` on the
+/// strip and a tinted chip for the selected one, floating over the list on its own rounded plate.
+/// The owner's words were "Bloom doesn't need that glassy stuff behind it", and he is right about
+/// this app in particular: Bloom's ground is a stated ramp rather than a material, the whole
+/// argument for which is on `Palette`, and a strip that samples what is under it is the one
+/// surface in the window whose colour nobody chose.
+///
+/// So it is a band of `Palette.sidebar` with a rule under it, which is what the palette already
+/// names for "the sidebar column, the title bar, and every strip of small controls". Because the
+/// title bar is that same colour, the band reads as attached to it rather than as a plate floating
+/// over the rows, which is where Finder puts a scope bar and where Safari puts its favourites.
 ///
 /// It does not scroll. The list under it is hundreds of rows on a real install, and a strip that
 /// leaves the screen takes the state of the filters with it, which is how a user ends up staring
 /// at eleven rows wondering where the rest went.
 struct HomeBar: View {
-    /// What the list adds up to, worked out by `HomeView`. Empty means there is nothing to say.
-    var summary: String
     var repos: [Repo]
     var counts: HomeScopeCounts
     var isSearching: Bool
@@ -33,10 +37,7 @@ struct HomeBar: View {
     @State private var hovered: HomeScope?
 
     var body: some View {
-        // One sampling pass for the strip and every chip on it rather than one each, which is what
-        // the container is for. `spacing: 0` so two chips that come close do not merge into one
-        // blob, which is the other thing it does.
-        GlassEffectContainer(spacing: 0) {
+        VStack(spacing: 0) {
             HStack(spacing: Metrics.spacingSmall) {
                 ForEach(HomeScope.offered(searching: isSearching), id: \.self) { scope in
                     chip(scope)
@@ -45,47 +46,25 @@ struct HomeBar: View {
                 Spacer(minLength: Metrics.gutter)
 
                 projectMenu
-
-                // Trailing, and the whole reason the count is still on screen at all: it describes
-                // the list rather than the database whenever the two differ, so it has to sit with
-                // the controls that made them differ.
-                //
-                // First to be given up when the pane is narrow. The controls are how the user gets
-                // out of a narrowed list; the readout only explains it.
-                if !summary.isEmpty {
-                    Text(summary)
-                        .font(Typo.caption)
-                        .foregroundStyle(Palette.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .layoutPriority(-1)
-                        .accessibilityLabel("Showing \(summary)")
-                }
             }
-            .padding(.horizontal, Metrics.spacingWide)
-            .frame(height: Self.height)
-            .glassEffect(
-                .regular, in: RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
-            )
-        }
-        .padding(.horizontal, HomeMetrics.gutter)
-        .padding(.top, Metrics.inset)
-    }
+            .padding(.horizontal, HomeMetrics.gutter)
+            .frame(height: Metrics.barHeight)
 
-    /// A chip and its clearance above and below. Not `Metrics.barHeight`: this strip floats over
-    /// the list rather than being a band ruled off from it, so it is sized by what it holds.
-    private static let height: CGFloat = Metrics.controlHeight + Metrics.spacing * 2
+            Hairline()
+        }
+        .background(Palette.sidebar)
+    }
 
     // MARK: - Scopes
 
     /// One scope, with the number that says what clicking it would show.
     ///
-    /// The count is the half that earns the chip its place on the strip. "Needs you 3" answers the
-    /// question the window was opened with at a glance, without drawing a second list of the same
-    /// rows above the first one.
+    /// **A chip at nought draws no number.** The strip read "Needs you 0, Running 0" at rest, which
+    /// is the state most of the time, so the noughts were what the eye learned to skip and the two
+    /// numbers that matter got skipped with them. See `HomeScopeCounts.badge`.
     private func chip(_ scope: HomeScope) -> some View {
         let isOn = filter.scope == scope
-        let count = counts.count(of: scope, searching: isSearching)
+        let badge = counts.badge(of: scope, searching: isSearching)
         let label = scope.label(searching: isSearching)
 
         return Button {
@@ -95,28 +74,31 @@ struct HomeBar: View {
                 Text(label)
                     .font(Typo.caption)
 
-                Text(count, format: .number)
-                    .font(Typo.micro)
-                    .monospacedDigit()
-                    .foregroundStyle(isOn ? Palette.textInverted.opacity(0.8) : countTint(scope))
+                if let badge {
+                    Text(badge, format: .number)
+                        .font(Typo.micro)
+                        .monospacedDigit()
+                        .foregroundStyle(isOn ? Palette.textInverted.opacity(0.8) : countTint(scope))
+                }
             }
             .foregroundStyle(isOn ? Palette.textInverted : Palette.textSecondary)
             .padding(.horizontal, Metrics.spacing)
             .frame(height: Metrics.controlHeight)
-            .background(hovered == scope && !isOn ? Palette.hover : .clear, in: Capsule())
+            .background(fill(isOn: isOn, isHovered: hovered == scope), in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        // A tinted glass chip is one control, rather than a coloured control standing next to a
-        // glass one. `.identity` for the unlit ones rather than dropping the modifier: the shape
-        // stays in the container either way, so a chip lighting up morphs instead of appearing,
-        // and the strip is already glass, so a second material inside it would be a surface on a
-        // surface.
-        .glassEffect(isOn ? .regular.tint(Palette.accentFill) : .identity, in: Capsule())
         .onHoverChange { hovered = $0 ? scope : (hovered == scope ? nil : hovered) }
-        .accessibilityLabel("\(label), \(count)")
+        .accessibilityLabel(badge.map { "\(label), \($0)" } ?? label)
         .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
         .help(help(for: scope))
+    }
+
+    /// The selected chip is filled with Bloom's own accent rather than tinted glass, which is the
+    /// same fill an emphasized selection uses everywhere else in the window.
+    private func fill(isOn: Bool, isHovered: Bool) -> Color {
+        if isOn { return Palette.accentFill }
+        return isHovered ? Palette.hover : .clear
     }
 
     /// The one chip whose number is worth noticing before it is read. Everything else on the strip
@@ -145,11 +127,12 @@ struct HomeBar: View {
     /// checkmarks are AppKit's rather than a column of drawn ticks that has to be kept in step
     /// with the selection by hand.
     ///
+    /// **It stays up here rather than going down to the status bar with the counts.** It changes
+    /// what the list shows, and a status bar is a place for reading rather than pressing: Finder's
+    /// says how many items there are and offers nothing to click.
+    ///
     /// `.menuStyle(.button)` because a borderless `Menu` on macOS throws a custom label away and
     /// draws only the chevron, which is what the sidebar's account row used to look like.
-    ///
-    /// No glass on it. It is system drawn already, and a material on top of a control that has its
-    /// own treatment freezes it at this year's version of that treatment.
     private var projectMenu: some View {
         Menu {
             Toggle("All projects", isOn: allProjects)

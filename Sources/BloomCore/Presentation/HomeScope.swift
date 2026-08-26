@@ -34,12 +34,37 @@ public enum HomeScope: String, Hashable, Sendable, CaseIterable, Codable {
 
     /// The chips on offer, in the order they are drawn.
     ///
-    /// `live` sits between `running` and `archived` because the three are one gradient of how
-    /// finished the work is, and because `archived` next to it says what `live` excludes.
+    /// **Browsing, `live` leads, because it is what Home opens on.** A strip whose first chip is
+    /// one nobody wants selected reads as a strip you have to correct. After it come the two
+    /// subsets of it, `needsYou` and `running`, which are the two questions asked ABOUT live work
+    /// rather than instead of it; then `archived`, which is the other half of the machine; then
+    /// `all`, which is the widest net and the way out of every narrowing to its left.
+    ///
+    /// Searching, `all` leads, because there is no default worth having: what was typed is the
+    /// narrowing, and the chips only split the answer by kind.
     public static func offered(searching: Bool) -> [HomeScope] {
         searching
             ? [.all, .workspaces, .transcripts, .archived]
-            : [.all, .needsYou, .running, .live, .archived]
+            : [.live, .needsYou, .running, .archived, .all]
+    }
+
+    /// What the strip is set to when nothing has been asked of it.
+    ///
+    /// **Browsing, that is `live` rather than `all`, and it is the biggest decision on this
+    /// screen.** Home is what somebody sees on launch, so it has to answer "what was I doing, and
+    /// what needs me" before anything else. On the machine this was redesigned against, `all` was
+    /// twenty rows of which seventeen were archived: a page about the past, in which the three
+    /// workspaces that could still be acted on were outnumbered six to one and drawn almost the
+    /// same.
+    ///
+    /// Nothing is hidden by it. `archived` is a chip on the same strip carrying its own count, and
+    /// `HomeList` follows a live list with a capped tail of the most recent archived work, which
+    /// is more than the "Hide archived" switch this scope replaced ever said.
+    ///
+    /// Searching, it is `all`: a search is a question about the whole machine, archived work
+    /// included, and narrowing one by default would be answering a question that was not asked.
+    public static func resting(searching: Bool) -> HomeScope {
+        searching ? .all : .live
     }
 
     public func label(searching: Bool) -> String {
@@ -56,13 +81,17 @@ public enum HomeScope: String, Hashable, Sendable, CaseIterable, Codable {
 
     /// The scope to hold after the field has been typed into or emptied.
     ///
-    /// A chip that is not on offer in the set now being drawn falls back to `all` rather than
-    /// staying selected and invisible, which is how a list ends up showing nothing with no
-    /// control on screen explaining why. `archived` survives the crossing in both directions,
-    /// deliberately: somebody who narrowed to finished work and then typed a name is still asking
-    /// about finished work.
+    /// A chip that is not on offer in the set now being drawn falls back to the resting scope
+    /// rather than staying selected and invisible, which is how a list ends up showing nothing
+    /// with no control on screen explaining why. `archived` survives the crossing in both
+    /// directions, deliberately: somebody who narrowed to finished work and then typed a name is
+    /// still asking about finished work.
+    ///
+    /// `live` crossing into a search becomes `all`, which is right rather than merely tidy: a
+    /// search of live work alone would silently refuse to find the archived workspace somebody is
+    /// searching for the name of.
     public static func settle(_ scope: HomeScope, searching: Bool) -> HomeScope {
-        offered(searching: searching).contains(scope) ? scope : .all
+        offered(searching: searching).contains(scope) ? scope : resting(searching: searching)
     }
 
     /// Whether workspace rows are drawn at all under this scope.
@@ -156,6 +185,21 @@ public struct HomeScopeCounts: Sendable, Equatable {
     public var transcriptWorkspaces = 0
 
     public init() {}
+
+    /// The number a chip draws, or nothing at all.
+    ///
+    /// **A nought is not a number worth printing.** The resting strip on a quiet machine read
+    /// "Needs you 0, Running 0", which is two facts stated in the least useful way there is: they
+    /// are the state most of the time, so the noughts are what the eye learns to skip, and the
+    /// numbers beside them get skipped with them. Bare, the chip says the same thing by saying
+    /// nothing, and a number arriving on it is itself the signal.
+    ///
+    /// The chip stays on the strip either way. Dropping it would reflow the row every time an
+    /// agent started or stopped, which is movement under the pointer for no gain.
+    public func badge(of scope: HomeScope, searching: Bool) -> Int? {
+        let value = count(of: scope, searching: searching)
+        return value == 0 ? nil : value
+    }
 
     /// What one chip says. `all` is the sum of the two kinds in a search and the whole list
     /// outside one.

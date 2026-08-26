@@ -56,6 +56,22 @@ public struct HomeGroup: Identifiable, Hashable, Sendable {
 /// number, and they are worked out in this one pass rather than in five more.
 public struct HomeListing: Sendable {
     public var groups: [HomeGroup]
+    /// The most recent finished work, drawn under the live list and capped.
+    ///
+    /// **Why the resting page carries any archived rows at all, having just defaulted them off.**
+    /// `HomeScope.live` is the right subject for Home and it is not the whole of what a person
+    /// wants on landing: the thing they finished an hour ago is the second question, and a screen
+    /// that answers only the first is a screen with three rows and half a window of ground under
+    /// them. So the archive is present as a tail rather than as the page: `HomeList.tailLimit`
+    /// rows under a heading of their own that says how many of how many, ending in a way through
+    /// to the rest. Three rows that matter above six that do not, instead of three above
+    /// seventeen.
+    ///
+    /// Empty in every other scope, and empty in a search, because in both of those the archive is
+    /// what was asked for rather than context around the answer.
+    public var tail: [HomeRow] = []
+    /// How much finished work the tail is a sample of, which is what its heading counts against.
+    public var tailTotal = 0
     /// The transcripts that matched, one entry per workspace. Empty outside a search, because the
     /// index is only asked when there is something to ask it.
     public var transcripts: [TranscriptWorkspaceMatches]
@@ -74,6 +90,8 @@ public struct HomeListing: Sendable {
 
     public init(
         groups: [HomeGroup],
+        tail: [HomeRow] = [],
+        tailTotal: Int = 0,
         transcripts: [TranscriptWorkspaceMatches] = [],
         counts: HomeScopeCounts = HomeScopeCounts(),
         isSearching: Bool = false,
@@ -83,6 +101,8 @@ public struct HomeListing: Sendable {
         shownArchived: Int
     ) {
         self.groups = groups
+        self.tail = tail
+        self.tailTotal = tailTotal
         self.transcripts = transcripts
         self.counts = counts
         self.isSearching = isSearching
@@ -114,16 +134,18 @@ public struct HomeFilter: Equatable, Sendable {
     /// the same state, which is what stops the menu from reaching a configuration that shows
     /// nothing and offers no way back.
     public var projects: Set<RepoID> = []
-    /// Which chip is lit. `all` includes archived work, so nothing on this Mac is hidden behind a
-    /// control somebody has to remember to check.
+    /// Which chip is lit, starting at `HomeScope.resting`, which is `live`. The argument for that
+    /// default, and for why it hides nothing, is on that function.
     ///
     /// This replaced a "Hide archived" switch, and `HomeScope.live` is what that switch did. A
     /// scope rather than a switch of its own, because the switch was a second narrowing mechanism
     /// beside the field with its own state, its own empty state and its own clause in the summary
     /// line, all to answer a question the chips answer with a number attached.
-    public var scope: HomeScope = .all
+    public var scope: HomeScope = .live
 
-    public init(query: String = "", projects: Set<RepoID> = [], scope: HomeScope = .all) {
+    public init(
+        query: String = "", projects: Set<RepoID> = [], scope: HomeScope = .live
+    ) {
         self.query = query
         self.projects = projects
         self.scope = scope
@@ -250,6 +272,8 @@ public enum HomeList {
 
         return HomeListing(
             groups: groups,
+            tail: tail(after: ordered, from: matched, scope: filter.scope, isSearching: isSearching),
+            tailTotal: counts.archived,
             transcripts: shownTranscripts,
             counts: counts,
             isSearching: isSearching,
@@ -258,6 +282,31 @@ public enum HomeList {
             archived: archived.count,
             shownArchived: ordered.count { $0.isArchived }
         )
+    }
+
+    /// How many finished rows follow the live list. Six: enough to fill the ground under three
+    /// live workspaces on a 1440 by 900 window, few enough that the eye reads it as a sample
+    /// rather than as the list starting again.
+    public static let tailLimit = 6
+
+    /// The recent archive drawn under a live list, newest first.
+    ///
+    /// Only under `live`, and only when the live list has something in it. On a machine where
+    /// nothing is live the pane raises `HomeEmptyState.emptyScope(.live)`, which says every
+    /// workspace here has been archived and carries the button that shows them; six rows of
+    /// archive under that sentence would be the sentence contradicting itself.
+    private static func tail(
+        after ordered: [HomeRow],
+        from matched: [HomeRow],
+        scope: HomeScope,
+        isSearching: Bool
+    ) -> [HomeRow] {
+        guard !isSearching, scope == .live, !ordered.isEmpty else { return [] }
+        return matched
+            .filter(\.isArchived)
+            .sorted { $0.workspace.lastActivityAt > $1.workspace.lastActivityAt }
+            .prefix(tailLimit)
+            .map { $0 }
     }
 
     /// The transcript results the project menu leaves standing.
@@ -388,9 +437,15 @@ public enum HomeList {
         return day.formatted(style)
     }
 
-    /// The line above the list, which describes the list rather than the database.
+    /// The line along the foot of the list, which describes the list rather than the database.
     ///
-    /// A line reading "312 workspaces" above eleven rows is how a forgotten filter becomes a bug
+    /// **It was at the trailing end of the strip at the top, and the owner's word for it was
+    /// "strange".** That bar was carrying five chips, a project picker and a sentence at one
+    /// weight, so nothing on it led; and a count printed above the thing it counts is a count in
+    /// the wrong place. It is a status bar now, at the foot of the pane, which is where Finder
+    /// puts "23 items, 140 GB available" and Mail puts its message count. See `HomeStatusBar`.
+    ///
+    /// A line reading "312 workspaces" under eleven rows is how a forgotten filter becomes a bug
     /// report about missing work, so a narrowed list says so in the same breath as the total it
     /// was narrowed from.
     ///
@@ -398,16 +453,16 @@ public enum HomeList {
     /// comment on its first clause records that the expression had already produced a wrong
     /// answer once**: "0 workspaces" about a machine holding three, printed directly above a
     /// panel saying all three existed. That is the whole argument for this being here. A sentence
-    /// assembled in a body is a sentence nothing can be asked about, and this one has five
-    /// branches and four counts.
+    /// assembled in a body is a sentence nothing can be asked about, and this one has branches
+    /// enough to prove it.
     ///
-    /// Empty when there is nothing to describe. The strip is not drawn then, and on a machine
-    /// with no project there is nothing to count.
+    /// **It follows the chip, which it did not before.** While it sat an inch from the chips it
+    /// deliberately ignored them, because each of them carries its own number in plain sight.
+    /// Down at the foot of the list it is beside the rows instead, so it has to be about the
+    /// rows: narrowed to Archived it counts archived work, not the machine.
     ///
-    /// **It says less than it used to, and that is the point.** It used to carry the archived
-    /// count and the running count as trailing clauses, because nothing else on the strip did.
-    /// Both of those are chips now, with their own numbers, six inches to the left of this
-    /// sentence, so repeating them here was the same fact printed twice on one line.
+    /// Empty when there is nothing to describe. On a machine with no project there is nothing to
+    /// count and no bar is drawn.
     public static func summary(
         listing: HomeListing,
         filter: HomeFilter,
@@ -416,34 +471,54 @@ public enum HomeList {
         guard listing.considered > 0 || listing.archived > 0 else { return "" }
 
         // Searching, the only fact worth carrying is how many answers came back, because the
-        // chips beside it have already split them by kind.
+        // chips above have already split them by kind.
         if listing.isSearching {
             let found = listing.counts.count(of: filter.scope, searching: true)
-            return "\(ArchiveDeletion.count(found, "result")) for \u{201C}\(filter.query.trimmingCharacters(in: .whitespaces))\u{201D}"
+            let query = filter.query.trimmingCharacters(in: .whitespaces)
+            return "\(ArchiveDeletion.count(found, "result")) for \u{201C}\(query)\u{201D}"
         }
 
-        if filter.isNarrowed {
-            return "Showing \(listing.shown) of \(ArchiveDeletion.count(listing.considered, "workspace"))"
+        if !filter.projects.isEmpty {
+            let total = ArchiveDeletion.count(listing.considered, "workspace")
+            return "Showing \(listing.shown) of \(total)"
         }
 
-        // What the machine holds, in the two halves the chips do not repeat: how it is spread
-        // over projects, and how much of it is finished. "48 workspaces" reads very differently
-        // once you know 30 of them are over.
-        var text = projects > 1
-            ? ArchiveDeletion.count(projects, "project")
-            : ArchiveDeletion.count(listing.considered, "workspace")
-
-        if projects > 1 {
-            text += " \u{00B7} \(listing.counts.live) live"
-        } else if listing.counts.archived > 0 {
-            text += ", \(listing.counts.live) live"
+        let counts = listing.counts
+        switch filter.scope {
+        case .needsYou:
+            return counts.needsYou == 0
+                ? "Nothing waiting on you"
+                : "\(counts.needsYou) waiting on you"
+        case .running:
+            return counts.running == 0 ? "Nothing running" : "\(counts.running) running"
+        case .archived:
+            return counts.archived == 0
+                ? "Nothing archived"
+                : "\(counts.archived) archived\(inProjects(projects))"
+        case .live:
+            // The archived half is the pointer to the chip that shows it, and the one clause that
+            // keeps the default scope honest: a page about live work says out loud how much
+            // finished work it is not showing.
+            let head = counts.live == 0
+                ? "Nothing live"
+                : "\(counts.live) live\(inProjects(projects))"
+            return counts.archived == 0 ? head : "\(head) \u{00B7} \(counts.archived) archived"
+        default:
+            // What the machine holds, split the way the chips do not repeat: how it is spread over
+            // projects, and how much of it is finished. "48 workspaces" reads very differently once
+            // you know 30 of them are over.
+            var text = ArchiveDeletion.count(listing.considered, "workspace") + inProjects(projects)
+            if counts.archived > 0 {
+                text += " \u{00B7} \(counts.live) live, \(counts.archived) archived"
+            }
+            return text
         }
+    }
 
-        if listing.counts.archived > 0 {
-            text += ", \(listing.counts.archived) archived"
-        }
-
-        return text
+    /// The clause naming how many projects a count is spread over, and nothing at all on a machine
+    /// with one. "3 live in 1 project" is a fact about a machine that has no other kind.
+    private static func inProjects(_ projects: Int) -> String {
+        projects > 1 ? " in \(ArchiveDeletion.count(projects, "project"))" : ""
     }
 }
 

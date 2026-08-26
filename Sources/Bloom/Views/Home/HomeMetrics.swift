@@ -6,6 +6,15 @@ import SwiftUI
 /// describe one pane's internal rhythm, and the relationship between them was arrived at by
 /// measuring a window capture rather than by reasoning from the spacing scale.
 enum HomeMetrics {
+    /// A row in Home's list, which is two lines rather than the sidebar's one.
+    ///
+    /// Not `Metrics.rowHeight`, which is the 28 points AppKit gives a source list row: that is the
+    /// pitch for a line of text and a glyph, and this row carries a name over a project and a
+    /// branch. Forty-two is those two lines at their own leading plus the clearance above and below
+    /// that the sidebar's row has, measured rather than derived, and it is the number to re-measure
+    /// if either line changes rung.
+    static let rowHeight: CGFloat = 42
+
     /// What a row asks `List` to keep clear of the pane's edges.
     ///
     /// Not what it gets. `.listStyle(.inset)` adds an inset of its own on top of `listRowInsets`
