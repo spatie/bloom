@@ -164,6 +164,14 @@ struct InspectorToolbar: View {
         }
     }
 
+    /// **The number is the diff's, and it does not follow the filter field under this row.**
+    ///
+    /// This is the tab's name rather than the list's heading, and a name that changed as somebody
+    /// typed would move the segment out from under a click already on its way to it, which is the
+    /// same reason `InspectorTab.available` puts the conditional tab last. It also answers a
+    /// different question: how much the agent changed is worth knowing while you are hunting for
+    /// one file inside it, and the field holding a word is what says the list below is showing
+    /// fewer.
     private func title(for tab: InspectorTab) -> String {
         guard tab == .changes, !model.changedFiles.isEmpty else { return tab.rawValue }
         return "\(tab.rawValue) (\(model.changedFiles.count))"
