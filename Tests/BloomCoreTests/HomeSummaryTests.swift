@@ -1,17 +1,17 @@
 import Testing
 @testable import BloomCore
 
-/// The line at the end of Home's strip, which used to be four pieces of view state picking between
-/// sentences inside a body.
+/// The line along the foot of Home's list, which used to be four pieces of view state picking
+/// between sentences inside a body.
 ///
 /// The comment on its first clause recorded that the expression had already produced a wrong
 /// answer once: "0 workspaces" about a machine holding three, printed directly above a panel
 /// saying all three existed.
 ///
-/// It says less than it did, and that is the change to check for rather than a regression. The
-/// archived count and the running count are chips on the same strip now, each carrying its own
-/// number, so a clause repeating either of them here would be the same fact printed twice on one
-/// line.
+/// It has moved twice over. It came out of the body into here, and then out of the trailing end of
+/// the chip strip into a status bar at the foot of the pane, where Finder puts "23 items". The
+/// move is why it now follows the chip: standing an inch from five numbered chips it could afford
+/// to ignore them, and standing beside the rows it has to be about the rows.
 @Suite("What Home says about its list")
 struct HomeSummaryTests {
     private func listing(
@@ -19,6 +19,8 @@ struct HomeSummaryTests {
         considered: Int,
         live: Int = 0,
         archived: Int = 0,
+        needsYou: Int = 0,
+        running: Int = 0,
         workspaces: Int = 0,
         transcripts: Int = 0,
         isSearching: Bool = false
@@ -26,6 +28,8 @@ struct HomeSummaryTests {
         var counts = HomeScopeCounts()
         counts.live = live
         counts.archived = archived
+        counts.needsYou = needsYou
+        counts.running = running
         counts.workspaces = workspaces
         counts.transcripts = transcripts
         return HomeListing(
@@ -51,41 +55,57 @@ struct HomeSummaryTests {
         #expect(text == "Showing 11 of 312 workspaces")
     }
 
-    @Test("an unnarrowed list leads with projects only when there is more than one")
+    /// "3 live in 1 project" is a fact about a machine that has no other kind, so the clause is
+    /// dropped rather than printed with a one in it.
+    @Test("the project clause appears only when there is more than one project")
     func projectsAreNamedWhenThereAreSeveral() {
         #expect(
             HomeList.summary(
                 listing: listing(shown: 8, considered: 8, live: 8),
                 filter: HomeFilter(),
                 projects: 1
-            ) == "8 workspaces"
+            ) == "8 live"
         )
         #expect(
             HomeList.summary(
                 listing: listing(shown: 8, considered: 8, live: 8),
                 filter: HomeFilter(),
                 projects: 3
-            ) == "3 projects \u{00B7} 8 live"
+            ) == "8 live in 3 projects"
+        )
+    }
+
+    /// The resting page is about live work, so the resting line is too, and the archived clause is
+    /// the pointer to the chip that shows the rest. It is also what keeps the default honest: a
+    /// page that leads with live work says out loud how much finished work it is not showing.
+    @Test("resting on Live, the line counts live work and names the archive")
+    func theRestingLineIsAboutLiveWork() {
+        #expect(
+            HomeList.summary(
+                listing: listing(shown: 3, considered: 20, live: 3, archived: 17),
+                filter: HomeFilter(),
+                projects: 4
+            ) == "3 live in 4 projects \u{00B7} 17 archived"
         )
     }
 
     /// "48 workspaces" reads very differently once you know 30 of them are over, and the split is
-    /// the one thing on the strip the chips do not already say in the same breath.
-    @Test("finished work is split out of the total")
+    /// the one thing the chips do not already say in the same breath.
+    @Test("finished work is split out of the total under All")
     func archivedIsSplitOut() {
         #expect(
             HomeList.summary(
                 listing: listing(shown: 48, considered: 48, live: 18, archived: 30),
-                filter: HomeFilter(),
+                filter: HomeFilter(scope: .all),
                 projects: 1
-            ) == "48 workspaces, 18 live, 30 archived"
+            ) == "48 workspaces \u{00B7} 18 live, 30 archived"
         )
         #expect(
             HomeList.summary(
                 listing: listing(shown: 47, considered: 47, live: 35, archived: 12),
-                filter: HomeFilter(),
+                filter: HomeFilter(scope: .all),
                 projects: 6
-            ) == "6 projects \u{00B7} 35 live, 12 archived"
+            ) == "47 workspaces in 6 projects \u{00B7} 35 live, 12 archived"
         )
     }
 
@@ -93,12 +113,61 @@ struct HomeSummaryTests {
     /// a clause about an absence.
     @Test("a machine with nothing archived does not mention it")
     func nothingArchivedIsNotMentioned() {
-        let text = HomeList.summary(
-            listing: listing(shown: 5, considered: 5, live: 5),
-            filter: HomeFilter(),
-            projects: 1
+        #expect(
+            HomeList.summary(
+                listing: listing(shown: 5, considered: 5, live: 5),
+                filter: HomeFilter(scope: .all),
+                projects: 1
+            ) == "5 workspaces"
         )
-        #expect(text == "5 workspaces")
+        #expect(
+            HomeList.summary(
+                listing: listing(shown: 5, considered: 5, live: 5),
+                filter: HomeFilter(),
+                projects: 1
+            ) == "5 live"
+        )
+    }
+
+    /// A count printed under the rows has to be a count OF the rows. Narrowed to Archived, the
+    /// line that says how many workspaces the machine holds is answering a question nobody asked.
+    @Test("the line follows the chip")
+    func theLineFollowsTheChip() {
+        let machine = listing(
+            shown: 17, considered: 20, live: 3, archived: 17, needsYou: 2, running: 1
+        )
+        #expect(
+            HomeList.summary(listing: machine, filter: HomeFilter(scope: .archived), projects: 4)
+                == "17 archived in 4 projects"
+        )
+        #expect(
+            HomeList.summary(listing: machine, filter: HomeFilter(scope: .needsYou), projects: 4)
+                == "2 waiting on you"
+        )
+        #expect(
+            HomeList.summary(listing: machine, filter: HomeFilter(scope: .running), projects: 4)
+                == "1 running"
+        )
+    }
+
+    /// A chip with nothing in it raises an empty state above this line, and "0 waiting on you"
+    /// under it would be arithmetic where the pane is already using words.
+    @Test("an empty scope says so in words rather than with a nought")
+    func anEmptyScopeSaysSoInWords() {
+        let quiet = listing(shown: 0, considered: 20, live: 3, archived: 17)
+        #expect(
+            HomeList.summary(listing: quiet, filter: HomeFilter(scope: .needsYou), projects: 4)
+                == "Nothing waiting on you"
+        )
+        #expect(
+            HomeList.summary(listing: quiet, filter: HomeFilter(scope: .running), projects: 4)
+                == "Nothing running"
+        )
+        let allArchived = listing(shown: 0, considered: 17, live: 0, archived: 17)
+        #expect(
+            HomeList.summary(listing: allArchived, filter: HomeFilter(), projects: 4)
+                == "Nothing live \u{00B7} 17 archived"
+        )
     }
 
     /// Searching, the chips have already split the answer by kind, so the only fact left worth
@@ -109,7 +178,7 @@ struct HomeSummaryTests {
             shown: 4, considered: 47, workspaces: 4, transcripts: 37, isSearching: true
         )
         #expect(
-            HomeList.summary(listing: found, filter: HomeFilter(query: "sidebar"), projects: 6)
+            HomeList.summary(listing: found, filter: HomeFilter(query: "sidebar", scope: .all), projects: 6)
                 == "41 results for \u{201C}sidebar\u{201D}"
         )
         // The count follows the chip, because the chip is what decided what is in the pane.
@@ -128,7 +197,7 @@ struct HomeSummaryTests {
     func theQuotesAreTypographic() {
         let text = HomeList.summary(
             listing: listing(shown: 1, considered: 4, workspaces: 1, isSearching: true),
-            filter: HomeFilter(query: "  blue  "),
+            filter: HomeFilter(query: "  blue  ", scope: .all),
             projects: 1
         )
         #expect(text.contains("\u{201C}blue\u{201D}"))

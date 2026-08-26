@@ -38,7 +38,7 @@ struct HomeScopeTests {
 
     /// Browsing narrows the rows by what is happening in them; searching narrows the answer by
     /// what kind of thing matched. Two questions, two sets.
-    @Test("the two sets share exactly one chip, and it is the resting one")
+    @Test("the two sets share exactly one chip, and it is the widest one")
     func theSetsShareOnlyAll() {
         let browsing = Set(HomeScope.offered(searching: false))
         let searching = Set(HomeScope.offered(searching: true))
@@ -62,11 +62,37 @@ struct HomeScopeTests {
 
     /// A chip that is not on offer in the set being drawn would leave a list showing nothing with
     /// no control on screen explaining why.
-    @Test("a chip that is not on offer falls back to All")
+    @Test("a chip that is not on offer falls back to the resting one")
     func aScopeThatIsNotOfferedSettles() {
         #expect(HomeScope.settle(.running, searching: true) == .all)
-        #expect(HomeScope.settle(.transcripts, searching: false) == .all)
+        #expect(HomeScope.settle(.transcripts, searching: false) == .live)
         #expect(HomeScope.settle(.all, searching: true) == .all)
+    }
+
+    /// Home opens on live work, because it is what somebody sees on launch and the question they
+    /// arrive with is what needs them, not what is finished. A search opens on everything, because
+    /// a search narrowed by default answers a question nobody asked.
+    @Test("Home rests on Live, and a search rests on Everything")
+    func theRestingScopeIsLive() {
+        #expect(HomeScope.resting(searching: false) == .live)
+        #expect(HomeScope.resting(searching: true) == .all)
+        #expect(HomeFilter().scope == .live)
+    }
+
+    /// The default leads, because a strip whose first chip is one nobody wants selected reads as a
+    /// strip you have to correct. Its two subsets follow it, then the other half of the machine,
+    /// then the widest net.
+    @Test("Live leads the browsing chips and All closes them")
+    func liveLeadsTheStrip() {
+        #expect(HomeScope.offered(searching: false) == [.live, .needsYou, .running, .archived, .all])
+        #expect(HomeScope.offered(searching: true).first == .all)
+    }
+
+    /// A search of live work alone would refuse to find the archived workspace somebody is
+    /// searching for the name of.
+    @Test("Live widens to everything when a search starts")
+    func liveWidensIntoASearch() {
+        #expect(HomeScope.settle(.live, searching: true) == .all)
     }
 
     /// Somebody who narrowed to finished work and then typed a name is still asking about finished
@@ -150,6 +176,24 @@ struct HomeScopeTests {
             #expect(listing.counts.needsYou == 1)
             #expect(listing.counts.count(of: .all, searching: false) == 4)
         }
+    }
+
+    /// The resting strip read "Needs you 0, Running 0", which is two facts stated in the least
+    /// useful way there is: the noughts are the state most of the time, so they are what the eye
+    /// learns to skip, and the numbers beside them get skipped with them.
+    @Test("a chip at nought draws no number")
+    func aNoughtDrawsNoNumber() {
+        var counts = HomeScopeCounts()
+        counts.live = 3
+        counts.archived = 17
+        #expect(counts.badge(of: .live, searching: false) == 3)
+        #expect(counts.badge(of: .archived, searching: false) == 17)
+        #expect(counts.badge(of: .all, searching: false) == 20)
+        #expect(counts.badge(of: .needsYou, searching: false) == nil)
+        #expect(counts.badge(of: .running, searching: false) == nil)
+        // The chip is still offered, because a strip that reflowed every time an agent started
+        // would be movement under the pointer for no gain.
+        #expect(HomeScope.offered(searching: false).contains(.running))
     }
 
     /// The project menu narrows what the chips count, because it narrows what clicking one would
