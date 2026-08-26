@@ -22,6 +22,19 @@ import BloomCore
 ///     icon to go: `WindowTitle` carries the reasoning. Taking the URL back to get a menu is a
 ///     trade this window has already refused.
 ///
+///   - **`navigationTitle(_ title: Binding<String>)` is not the door into it, and this was
+///     measured rather than read.** The overload is declared for macOS 13 and its own
+///     documentation says the binding "allows editing the navigation title when the title is
+///     displayed in the toolbar", which reads exactly like the public half of the session above.
+///     It is not. Built offscreen twice, once with the binding and once with the plain `String`,
+///     and the whole title bar compared: the `NSToolbarTitleView`, the
+///     `NSToolbarPrimaryTitleContainerView`, the `_NSToolbarTitleField` and the
+///     `NSWindowTitleController` behind them come out with identical ivars and identical gesture
+///     recognisers, `_handleToolbarTitleViewLeftPress:` and the two sidecar ones, which are
+///     AppKit's own and are there either way. The field is `editable=false` in both. The binding
+///     changes nothing about the title bar on macOS; it is an iOS feature with a shared
+///     declaration. Do not chase it again.
+///
 /// So the machinery cannot be borrowed, and this is the smallest thing that behaves like it.
 ///
 /// ## The double click is on the text, never on the bar
@@ -35,6 +48,36 @@ import BloomCore
 /// `NSWindow.titleVisibility`, which governs the title AppKit draws; `RootView` says
 /// `.toolbar(removing: .title)`, which governs the title item SwiftUI contributes from
 /// `navigationTitle`. The first shipped without the second and the window wore its name twice.
+///
+/// ## The glass capsule is the toolbar's own, and there is nothing here to draw it
+///
+/// The owner asked for the name to sit in a glass component, matching `InspectorToggle` a few
+/// points to its left, and an earlier report said a bare `Text` in a toolbar item picked up no
+/// capsule at all. That report was wrong, and the way it was wrong is why the bar looked broken.
+/// On macOS 26 every toolbar item is given a shared background: AppKit wraps it in an
+/// `NSToolbarPlatterView` holding an `NSGlassEffectView`, which is the same plate
+/// `.buttonStyle(.glass)` puts under the inspector's control, so the two already match and a
+/// `.glassEffect` of ours would be a second treatment over the first.
+///
+/// What there was instead was a capsule nobody could see, because the search field's capsule
+/// began eight points after it and the two read as one long run of glass. Rendered offscreen at
+/// 1440 points: the name's plate ran 152 to 408 and the field's 416 to 741. The fix was the space
+/// between them, not the plate, and it is `BloomWindowToolbar`'s `ToolbarSpacer`.
+///
+/// One thing follows from the plate being AppKit's, and it is worth knowing before anybody puts a
+/// neighbour next to this one. **Two adjacent items are sometimes drawn in a single plate**, so
+/// with the sidebar folded away the `+` and the name can come out as one capsule holding both.
+/// Whether they do was not stable across the runs here and is AppKit's to decide; a fixed
+/// `ToolbarSpacer` between them does not divide it, and a flexible one would push the name into
+/// the middle of the bar. It is left alone. The switch worth knowing about is
+/// `.sharedBackgroundVisibility` on the item, which turns a plate off rather than dividing one.
+///
+/// ## Renaming in place, measured
+///
+/// The label and the field are drawn in the same toolbar item, so the plate they sit in has one
+/// origin and the name cannot jump as it becomes editable. Offscreen, at rest and mid rename, the
+/// plate is at x=152.5 both times; it is four points wider while editing, which is the field's own
+/// inset and falls off the trailing end where there is nothing to displace.
 struct WindowTitleControl: View {
     /// Handed in rather than read from the environment, as `BloomWindowToolbar` takes it, because
     /// a `contextMenu`'s content is built in a detached context that observable values in the

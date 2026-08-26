@@ -45,7 +45,9 @@ public enum MergeMethodChoice {
     }
 
     public static func load(repoID: RepoID, from store: Store) async -> GitHub.MergeMethod {
-        resolve((try? await store.setting(key(repoID: repoID))) ?? nil)
+        // No `?? nil`: `try?` over an expression that is already optional flattens, so the
+        // coalescing was redundant and SwiftLint failed the lint job on `main` for it.
+        resolve(try? await store.setting(key(repoID: repoID)))
     }
 
     /// The chosen method, written whole even when it is the fallback, so that a project where
