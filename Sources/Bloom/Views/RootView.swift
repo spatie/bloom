@@ -42,303 +42,319 @@ struct RootView: View {
     var body: some View {
         @Bindable var app = app
 
-        return NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView()
-            // The sidebar's ground is set here rather than inside `SidebarView`, because what has
-            // to be replaced is the `List`'s own scroll background, and that is a property of the
-            // column rather than of anything the sidebar draws. See `sidebarMaterial` for why a
-            // named colour beats the system's vibrant one in a window with a themed ramp.
-            .scrollContentBackground(.hidden)
-            .sidebarMaterial()
-            // The rule down the sidebar's trailing edge.
+        return windowWiring(
+            NavigationSplitView(columnVisibility: $columnVisibility) {
+                SidebarView()
+                // The sidebar's ground is set here rather than inside `SidebarView`, because what has
+                // to be replaced is the `List`'s own scroll background, and that is a property of the
+                // column rather than of anything the sidebar draws. See `sidebarMaterial` for why a
+                // named colour beats the system's vibrant one in a window with a themed ramp.
+                .scrollContentBackground(.hidden)
+                .sidebarMaterial()
+                // The rule down the sidebar's trailing edge.
+                //
+                // `NavigationSplitView` draws none: measured across the boundary, the sidebar's last
+                // pixel is followed directly by the centre column's first, in both appearances. That
+                // is survivable while both columns are the system's own white, and it is not once
+                // they are two steps of a ramp, because then the two panes simply run into each other.
+                .overlay(alignment: .trailing) { Hairline(axis: .vertical) }
+                .navigationSplitViewColumnWidth(
+                    min: 200, ideal: Metrics.sidebarWidth, max: BloomApp.sidebarMaximumWidth
+                )
+            } detail: {
+                // An `NSSplitViewController`, not `.inspector()` and not `HSplitView`.
+                //
+                // `.inspector` cannot be used in this window. Presented, it throws "more Update
+                // Constraints in Window passes than there are views in the window" out of the display
+                // cycle, from a loop that runs through SwiftUI's own `SplitViewChildController`
+                // reacting to its hosting view's min and max size. Verified again on this branch:
+                // swapping the split below for `.inspector()` kills the window during a resize.
+                //
+                // `HSplitView` was the next attempt and it did not crash, but its divider is drawn
+                // down the whole bounds of the split view while the SwiftUI content inside each pane
+                // respects the safe area, so under a unified toolbar a hard rule crossed the title.
+                // An `NSSplitViewController` is a view controller container rather than a view, so its
+                // panes and its divider share one safe area and the rule starts under the toolbar.
+                DetailSplitView(
+                    app: app,
+                    isInspectorPresented: isInspectorPresented,
+                    animated: !reduceMotion
+                )
+                    // The toolbar's `+` is there only while the sidebar is not, so the column that
+                    // owns starting work owns it alone whenever it is on screen. The flag is this
+                    // binding rather than anything read off the window, because this is what actually
+                    // decides whether the first column is drawn: the menu item below writes it, and
+                    // AppKit's own sidebar toggle writes it back through the binding. That second
+                    // half is the one worth measuring, and it was: driving that button through the
+                    // running app's accessibility tree, which is the channel a real click ends up in,
+                    // folds the pane away and the `+` arrives, and driving it again takes both back.
+                    // See `BloomWindowToolbar.isSidebarCollapsed`.
+                    .toolbar {
+                        BloomWindowToolbar(
+                            app: app, isSidebarCollapsed: columnVisibility == .detailOnly
+                        )
+                    }
+                    // Said here as well as under `navigationTitle` below, and deliberately.
+                    //
+                    // The title is declared on the split view and the toolbar is declared on this
+                    // column, so the two are not the same view, and which of them resolves the default
+                    // title item is not a thing reading the interface settles. The window came up
+                    // wearing its name twice once already. Both, until a picture says which one did it.
+                    .toolbar(removing: .title)
+                    // The window's search field, on the trailing edge of the toolbar, which is where
+                    // Finder and Mail publish search on this platform.
+                    //
+                    // Which edge it lands on is not this modifier's to say. `SearchFieldPlacement` on
+                    // macOS offers `automatic`, `toolbar`, `toolbarPrincipal` and `sidebar`, and none
+                    // of them names an edge: the item is appended after the toolbar's own items and
+                    // goes wherever the packing leaves it. What puts it at the end is the
+                    // `ToolbarSpacer` in `BloomWindowToolbar`, and without that it sits against the
+                    // window's name a third of the way across.
+                    //
+                    // `.searchable` rather than the hand built field this replaced, and that is the
+                    // whole reason it moved. An `NSSearchToolbarItem` is compact at rest, expands over
+                    // the toolbar when it is focused, draws the system's glass and the system's focus
+                    // ring, and answers Escape, none of which a `TextField` in a `RoundedRectangle`
+                    // with a hand drawn stroke ever quite did.
+                    //
+                    // `HomeBar` used to argue against exactly this, on the grounds that a field in the
+                    // toolbar would look like it searched the transcript and the inspector too. That
+                    // was right while the field was a filter for one list. It searches every workspace
+                    // on the Mac and the full text of every transcript now, so the objection became
+                    // the case for it: this belongs to the window rather than to a column. Finding a
+                    // word in what you are reading is still Cmd+F and still the pane's own, which is
+                    // Xcode's split. See `FindCommand`.
+                    .searchable(
+                        text: $app.homeFilter.query,
+                        placement: .toolbar,
+                        prompt: Text("Search")
+                    )
+                    .searchFocused($isSearchFocused)
+                    // Published to the model, because the pane that needs the answer cannot see a
+                    // `@FocusState` declared up here and Home's list was taking the keyboard off this
+                    // field mid word. See `HomeListKeyboard` for the sequence that did it.
+                    .onChange(of: isSearchFocused) { _, focused in
+                        app.isSearchFieldFocused = focused
+                    }
+            }
+            // As well as heading the toolbar (see BloomApp), the title names the window in the
+            // Window menu and in Mission Control, so it is worth setting.
             //
-            // `NavigationSplitView` draws none: measured across the boundary, the sidebar's last
-            // pixel is followed directly by the centre column's first, in both appearances. That
-            // is survivable while both columns are the system's own white, and it is not once
-            // they are two steps of a ramp, because then the two panes simply run into each other.
-            .overlay(alignment: .trailing) { Hairline(axis: .vertical) }
-            .navigationSplitViewColumnWidth(
-                min: 200, ideal: Metrics.sidebarWidth, max: BloomApp.sidebarMaximumWidth
-            )
-        } detail: {
-            // An `NSSplitViewController`, not `.inspector()` and not `HSplitView`.
+            // It takes an automatic rename straight, with no reveal. A window title is also its entry
+            // in the Window menu and its label in Mission Control, and neither of those can be
+            // animated: what they would show is one arbitrary frame of a scramble, which is a window
+            // called `xqbn hgue` in a menu the user is reading to find it by name.
+            // `menuWorkspace` rather than `selectedWorkspace`, so an archived workspace being read
+            // names the window as well. It is still not what the inspector keys on, below: naming a
+            // window costs nothing, and showing a diff for a worktree that is gone does not.
+            .navigationTitle(app.menuWorkspace?.name ?? "Bloom")
+
+            // And then removed from the toolbar again, because `WindowTitleControl` draws the name
+            // itself and the window came up wearing it twice.
             //
-            // `.inspector` cannot be used in this window. Presented, it throws "more Update
-            // Constraints in Window passes than there are views in the window" out of the display
-            // cycle, from a loop that runs through SwiftUI's own `SplitViewChildController`
-            // reacting to its hosting view's min and max size. Verified again on this branch:
-            // swapping the split below for `.inspector()` kills the window during a resize.
+            // The two titles are not one title drawn twice, they are two different mechanisms, which
+            // is why hiding one did not hide the other. `NSWindow.titleVisibility`, which `WindowChrome`
+            // sets, governs the title AppKit draws. The line above contributes a title item of
+            // SwiftUI's own to the window toolbar, and SwiftUI owns that one: it re-resolves it with
+            // the toolbar, so nothing set on the window from the side can take it away.
+            // `ToolbarDefaultItemKind.title` is the switch for it, and it is the only one.
             //
-            // `HSplitView` was the next attempt and it did not crash, but its divider is drawn
-            // down the whole bounds of the split view while the SwiftUI content inside each pane
-            // respects the safe area, so under a unified toolbar a hard rule crossed the title.
-            // An `NSSplitViewController` is a view controller container rather than a view, so its
-            // panes and its divider share one safe area and the rule starts under the toolbar.
-            DetailSplitView(
-                app: app,
-                isInspectorPresented: isInspectorPresented,
-                animated: !reduceMotion
-            )
-                // The toolbar's `+` is there only while the sidebar is not, so the column that
-                // owns starting work owns it alone whenever it is on screen. The flag is this
-                // binding rather than anything read off the window, because this is what actually
-                // decides whether the first column is drawn: the menu item below writes it, and
-                // AppKit's own sidebar toggle writes it back through the binding. That second
-                // half is the one worth measuring, and it was: driving that button through the
-                // running app's accessibility tree, which is the channel a real click ends up in,
-                // folds the pane away and the `+` arrives, and driving it again takes both back.
-                // See `BloomWindowToolbar.isSidebarCollapsed`.
-                .toolbar {
-                    BloomWindowToolbar(
-                        app: app, isSidebarCollapsed: columnVisibility == .detailOnly
+            // The title itself stays. It is what the Window menu, Mission Control and the Dock read,
+            // and the comment above is the reason it is set at all.
+            .toolbar(removing: .title)
+
+            // Marks this scene as the main window, so the menu items that act on a workspace grey out
+            // while Settings or a project settings window is key. See `MainWindowFocus`.
+            .focusedSceneValue(\.isMainWindowFocused, true)
+
+            // Bottom trailing, out of the way of the sidebar and of the composer's send button.
+            .overlay(alignment: .bottomTrailing) {
+                if let notice = app.notice {
+                    NoticeBanner(notice: notice) { app.notice = nil }
+                        .transition(.opacity)
+                }
+            }
+            .animation(reduceMotion ? nil : Motion.pane, value: app.notice)
+
+            .task { await app.bootstrap() }
+            // The install ping. Started from here because this is the first moment there is a window
+            // and a model, and it keeps a loop of its own from then on rather than living inside this
+            // task: Bloom goes on running with its window closed, and a view's task does not. It waits
+            // a minute before it does anything at all, so nothing about it is part of a launch. See
+            // `InstallPingService`.
+            .task { InstallPingService.shared.start(app: app) }
+            // Debug builds only, and only when asked for on the command line: raises one of the two
+            // Help menu sheets so a capture run can look at it. See `FeedbackPresenter`.
+            .task { FeedbackPresenter.shared.presentIfRequested() }
+            .sheet(isPresented: $isCreateSheetPresented) {
+                CreateWorkspaceSheet(
+                    initialRepo: createTargetRepo, startsOnPullRequest: createStartsOnPullRequest
+                )
+            }
+            // Starting a project that is not a repository yet, and then going straight on to its
+            // first workspace.
+            //
+            // **The hand-off is the one behavioural change.** Adding a folder ends with a project in
+            // the sidebar because the person already had one and may well have work in it. Creating a
+            // project ends in the create sheet, because a repository with one empty commit in it is
+            // not something anybody wanted for its own sake: they had an idea, and the next thing is
+            // an agent working on it.
+            .sheet(isPresented: $isNewProjectPresented, onDismiss: startWorkInNewProject) {
+                NewProjectSheet { path in
+                    guard let path else {
+                        isNewProjectPresented = false
+                        return
+                    }
+                    // Registered before the sheet comes down rather than after, so the project is in
+                    // hand by the time `onDismiss` looks for it. It is one store write.
+                    Task {
+                        projectToStartWorkIn = await app.addCreatedProject(at: path)
+                        isNewProjectPresented = false
+                    }
+                }
+            }
+            // Send Feedback and Submit a Prompt, raised from the Help menu. Here rather than at the
+            // menu item, because a `Commands` body is not a view and cannot present anything, and
+            // because what was typed into either of them belongs to the app rather than to the sheet:
+            // see `FeedbackPresenter` for why a draft that dies with its sheet is the wrong shape.
+            .sheet(item: $feedback.sheet) { sheet in
+                switch sheet {
+                case .report: FeedbackSheet()
+                case .prompt: PromptSubmissionSheet()
+                case .reportSent:
+                    FeedbackSentCard(
+                        title: Feedback.Copy.reportSent,
+                        detail: Feedback.Copy.reportSentDetail,
+                        onDismiss: feedback.close
+                    )
+                case .promptSent:
+                    FeedbackSentCard(
+                        title: Feedback.Copy.promptSent,
+                        detail: Feedback.Copy.promptSentDetail,
+                        onDismiss: feedback.close
                     )
                 }
-                // Said here as well as under `navigationTitle` below, and deliberately.
-                //
-                // The title is declared on the split view and the toolbar is declared on this
-                // column, so the two are not the same view, and which of them resolves the default
-                // title item is not a thing reading the interface settles. The window came up
-                // wearing its name twice once already. Both, until a picture says which one did it.
-                .toolbar(removing: .title)
-                // The window's search field, on the trailing edge of the toolbar, which is where
-                // Finder and Mail publish search on this platform.
-                //
-                // Which edge it lands on is not this modifier's to say. `SearchFieldPlacement` on
-                // macOS offers `automatic`, `toolbar`, `toolbarPrincipal` and `sidebar`, and none
-                // of them names an edge: the item is appended after the toolbar's own items and
-                // goes wherever the packing leaves it. What puts it at the end is the
-                // `ToolbarSpacer` in `BloomWindowToolbar`, and without that it sits against the
-                // window's name a third of the way across.
-                //
-                // `.searchable` rather than the hand built field this replaced, and that is the
-                // whole reason it moved. An `NSSearchToolbarItem` is compact at rest, expands over
-                // the toolbar when it is focused, draws the system's glass and the system's focus
-                // ring, and answers Escape, none of which a `TextField` in a `RoundedRectangle`
-                // with a hand drawn stroke ever quite did.
-                //
-                // `HomeBar` used to argue against exactly this, on the grounds that a field in the
-                // toolbar would look like it searched the transcript and the inspector too. That
-                // was right while the field was a filter for one list. It searches every workspace
-                // on the Mac and the full text of every transcript now, so the objection became
-                // the case for it: this belongs to the window rather than to a column. Finding a
-                // word in what you are reading is still Cmd+F and still the pane's own, which is
-                // Xcode's split. See `FindCommand`.
-                .searchable(
-                    text: $app.homeFilter.query,
-                    placement: .toolbar,
-                    prompt: Text("Search")
-                )
-                .searchFocused($isSearchFocused)
-                // Published to the model, because the pane that needs the answer cannot see a
-                // `@FocusState` declared up here and Home's list was taking the keyboard off this
-                // field mid word. See `HomeListKeyboard` for the sequence that did it.
-                .onChange(of: isSearchFocused) { _, focused in
-                    app.isSearchFieldFocused = focused
-                }
-        }
-        // As well as heading the toolbar (see BloomApp), the title names the window in the
-        // Window menu and in Mission Control, so it is worth setting.
-        //
-        // It takes an automatic rename straight, with no reveal. A window title is also its entry
-        // in the Window menu and its label in Mission Control, and neither of those can be
-        // animated: what they would show is one arbitrary frame of a scramble, which is a window
-        // called `xqbn hgue` in a menu the user is reading to find it by name.
-        // `menuWorkspace` rather than `selectedWorkspace`, so an archived workspace being read
-        // names the window as well. It is still not what the inspector keys on, below: naming a
-        // window costs nothing, and showing a diff for a worktree that is gone does not.
-        .navigationTitle(app.menuWorkspace?.name ?? "Bloom")
-
-        // And then removed from the toolbar again, because `WindowTitleControl` draws the name
-        // itself and the window came up wearing it twice.
-        //
-        // The two titles are not one title drawn twice, they are two different mechanisms, which
-        // is why hiding one did not hide the other. `NSWindow.titleVisibility`, which `WindowChrome`
-        // sets, governs the title AppKit draws. The line above contributes a title item of
-        // SwiftUI's own to the window toolbar, and SwiftUI owns that one: it re-resolves it with
-        // the toolbar, so nothing set on the window from the side can take it away.
-        // `ToolbarDefaultItemKind.title` is the switch for it, and it is the only one.
-        //
-        // The title itself stays. It is what the Window menu, Mission Control and the Dock read,
-        // and the comment above is the reason it is set at all.
-        .toolbar(removing: .title)
-
-        // Marks this scene as the main window, so the menu items that act on a workspace grey out
-        // while Settings or a project settings window is key. See `MainWindowFocus`.
-        .focusedSceneValue(\.isMainWindowFocused, true)
-
-        // Bottom trailing, out of the way of the sidebar and of the composer's send button.
-        .overlay(alignment: .bottomTrailing) {
-            if let notice = app.notice {
-                NoticeBanner(notice: notice) { app.notice = nil }
-                    .transition(.opacity)
             }
-        }
-        .animation(reduceMotion ? nil : Motion.pane, value: app.notice)
-
-        .task { await app.bootstrap() }
-        // The install ping. Started from here because this is the first moment there is a window
-        // and a model, and it keeps a loop of its own from then on rather than living inside this
-        // task: Bloom goes on running with its window closed, and a view's task does not. It waits
-        // a minute before it does anything at all, so nothing about it is part of a launch. See
-        // `InstallPingService`.
-        .task { InstallPingService.shared.start(app: app) }
-        // Debug builds only, and only when asked for on the command line: raises one of the two
-        // Help menu sheets so a capture run can look at it. See `FeedbackPresenter`.
-        .task { FeedbackPresenter.shared.presentIfRequested() }
-        .sheet(isPresented: $isCreateSheetPresented) {
-            CreateWorkspaceSheet(
-                initialRepo: createTargetRepo, startsOnPullRequest: createStartsOnPullRequest
-            )
-        }
-        // Starting a project that is not a repository yet, and then going straight on to its
-        // first workspace.
-        //
-        // **The hand-off is the one behavioural change.** Adding a folder ends with a project in
-        // the sidebar because the person already had one and may well have work in it. Creating a
-        // project ends in the create sheet, because a repository with one empty commit in it is
-        // not something anybody wanted for its own sake: they had an idea, and the next thing is
-        // an agent working on it.
-        .sheet(isPresented: $isNewProjectPresented, onDismiss: startWorkInNewProject) {
-            NewProjectSheet { path in
-                guard let path else {
-                    isNewProjectPresented = false
-                    return
-                }
-                // Registered before the sheet comes down rather than after, so the project is in
-                // hand by the time `onDismiss` looks for it. It is one store write.
-                Task {
-                    projectToStartWorkIn = await app.addCreatedProject(at: path)
-                    isNewProjectPresented = false
+            // The offer to turn a folder into a repository. Presented here rather than at each of the
+            // controls that can raise it, because there are five of them across two windows and they
+            // all reach it through `AppModel.addRepository`.
+            .sheet(item: $projectSetup.request.on(.main)) { request in
+                ProjectSetupSheet(request: request) { path in
+                    Task { await app.finishProjectSetup(path) }
                 }
             }
-        }
-        // Send Feedback and Submit a Prompt, raised from the Help menu. Here rather than at the
-        // menu item, because a `Commands` body is not a view and cannot present anything, and
-        // because what was typed into either of them belongs to the app rather than to the sheet:
-        // see `FeedbackPresenter` for why a draft that dies with its sheet is the wrong shape.
-        .sheet(item: $feedback.sheet) { sheet in
-            switch sheet {
-            case .report: FeedbackSheet()
-            case .prompt: PromptSubmissionSheet()
-            case .reportSent:
-                FeedbackSentCard(
-                    title: Feedback.Copy.reportSent,
-                    detail: Feedback.Copy.reportSentDetail,
-                    onDismiss: feedback.close
-                )
-            case .promptSent:
-                FeedbackSentCard(
-                    title: Feedback.Copy.promptSent,
-                    detail: Feedback.Copy.promptSentDetail,
-                    onDismiss: feedback.close
-                )
+            // This one stays on the window rather than moving to the row that asked for it. It is not
+            // presented by a click: `AppModel.archive` runs a git safety check first and only refuses
+            // afterwards, and it refuses identically whether the request came from a sidebar context
+            // menu, the Workspace menu or a keyboard shortcut. There is no single control it could
+            // animate out of, and anchoring it to the sidebar row would lose the refusals that arrive
+            // for the selected workspace from the menu bar.
+            //
+            // The title is fixed rather than "Archive <name>?". Workspace names here are whole
+            // sentences ("Show me the technolgies-used-in-this-project"), and a title built from one
+            // wraps to two lines of bold text that the eye reads as the warning. The name belongs in
+            // the message, where a long one costs nothing.
+            .confirmationDialog(
+                "Archive this workspace?",
+                isPresented: $app.pendingArchive.isPresent(),
+                titleVisibility: .visible,
+                presenting: app.pendingArchive
+            ) { request in
+                // The request comes from `presenting:` and is handed straight to the model. Reading
+                // `app.pendingArchive` back inside the action is what made Archive do nothing at all:
+                // dismissing the dialog clears it before the action's task ever reaches the main
+                // actor. See `AppModel.confirmArchive`.
+                // The role follows the severity rather than the action, because the action is the
+                // same either way. A worktree carrying nothing but a `.env` and a folder of generated
+                // types gets a plain button: see `ArchiveRequest.Severity`.
+                Button(
+                    request.confirmLabel, role: request.isDestructive ? .destructive : nil
+                ) { confirmArchive(request) }
+                // No `.keyboardShortcut(.defaultAction)` on the cancel button, and that is not an
+                // oversight. It used to be there, to keep Return off the destructive answer, and it
+                // did that by REPLACING the cancel button's own key binding. A `.cancel` role button
+                // is what Escape is wired to, so moving Return onto it took Escape off it, and no
+                // destructive confirmation in the app could be waved away with the key every Mac user
+                // reaches for. Verified on this build: with the modifier gone Escape dismisses, and
+                // Return does nothing at all, because a confirmation dialog has no default button
+                // unless one is named. Both halves of the rule hold, and the safe answer keeps the
+                // key it is supposed to have.
+                Button(request.cancelLabel, role: .cancel, action: app.cancelPendingArchive)
+            } message: { request in
+                // Naming what disappears, rather than asking "are you sure?". Written by
+                // `ArchiveRequest` in the core, where it can be tested.
+                Text(request.message)
             }
-        }
-        // The offer to turn a folder into a repository. Presented here rather than at each of the
-        // controls that can raise it, because there are five of them across two windows and they
-        // all reach it through `AppModel.addRepository`.
-        .sheet(item: $projectSetup.request.on(.main)) { request in
-            ProjectSetupSheet(request: request) { path in
-                Task { await app.finishProjectSetup(path) }
+            // The question asked before a session that is still working is closed. On the window for
+            // the reason the archive confirmation above is: it is raised from the tab strip's close
+            // button and from Cmd+W in the menu bar, and there is no one control both of those could
+            // animate out of. See `CloseSessionAlert`.
+            .confirmationDialog(
+                closeSession.request?.title ?? "",
+                isPresented: $closeSession.request.isPresent(),
+                titleVisibility: .visible,
+                presenting: closeSession.request
+            ) { request in
+                // The wording answers the question that was asked, which is not always the same
+                // question: a conversation can be mid turn, or the only one its workspace has, or
+                // both. See `SessionClosure`.
+                Button(request.cost.confirmTitle, role: .destructive) { closeSession.confirm() }
+                // Escape keeps the conversation. See the archive confirmation above for why no cancel
+                // button in this app carries `.keyboardShortcut(.defaultAction)`.
+                Button(request.cost.cancelTitle, role: .cancel) { closeSession.cancel() }
+            } message: { request in
+                Text(request.message)
             }
-        }
-        // This one stays on the window rather than moving to the row that asked for it. It is not
-        // presented by a click: `AppModel.archive` runs a git safety check first and only refuses
-        // afterwards, and it refuses identically whether the request came from a sidebar context
-        // menu, the Workspace menu or a keyboard shortcut. There is no single control it could
-        // animate out of, and anchoring it to the sidebar row would lose the refusals that arrive
-        // for the selected workspace from the menu bar.
-        //
-        // The title is fixed rather than "Archive <name>?". Workspace names here are whole
-        // sentences ("Show me the technolgies-used-in-this-project"), and a title built from one
-        // wraps to two lines of bold text that the eye reads as the warning. The name belongs in
-        // the message, where a long one costs nothing.
-        .confirmationDialog(
-            "Archive this workspace?",
-            isPresented: $app.pendingArchive.isPresent(),
-            titleVisibility: .visible,
-            presenting: app.pendingArchive
-        ) { request in
-            // The request comes from `presenting:` and is handed straight to the model. Reading
-            // `app.pendingArchive` back inside the action is what made Archive do nothing at all:
-            // dismissing the dialog clears it before the action's task ever reaches the main
-            // actor. See `AppModel.confirmArchive`.
-            // The role follows the severity rather than the action, because the action is the
-            // same either way. A worktree carrying nothing but a `.env` and a folder of generated
-            // types gets a plain button: see `ArchiveRequest.Severity`.
-            Button(
-                request.confirmLabel, role: request.isDestructive ? .destructive : nil
-            ) { confirmArchive(request) }
-            // No `.keyboardShortcut(.defaultAction)` on the cancel button, and that is not an
-            // oversight. It used to be there, to keep Return off the destructive answer, and it
-            // did that by REPLACING the cancel button's own key binding. A `.cancel` role button
-            // is what Escape is wired to, so moving Return onto it took Escape off it, and no
-            // destructive confirmation in the app could be waved away with the key every Mac user
-            // reaches for. Verified on this build: with the modifier gone Escape dismisses, and
-            // Return does nothing at all, because a confirmation dialog has no default button
-            // unless one is named. Both halves of the rule hold, and the safe answer keeps the
-            // key it is supposed to have.
-            Button(request.cancelLabel, role: .cancel, action: app.cancelPendingArchive)
-        } message: { request in
-            // Naming what disappears, rather than asking "are you sure?". Written by
-            // `ArchiveRequest` in the core, where it can be tested.
-            Text(request.message)
-        }
-        // The question asked before a session that is still working is closed. On the window for
-        // the reason the archive confirmation above is: it is raised from the tab strip's close
-        // button and from Cmd+W in the menu bar, and there is no one control both of those could
-        // animate out of. See `CloseSessionAlert`.
-        .confirmationDialog(
-            closeSession.request?.title ?? "",
-            isPresented: $closeSession.request.isPresent(),
-            titleVisibility: .visible,
-            presenting: closeSession.request
-        ) { request in
-            // The wording answers the question that was asked, which is not always the same
-            // question: a conversation can be mid turn, or the only one its workspace has, or
-            // both. See `SessionClosure`.
-            Button(request.cost.confirmTitle, role: .destructive) { closeSession.confirm() }
-            // Escape keeps the conversation. See the archive confirmation above for why no cancel
-            // button in this app carries `.keyboardShortcut(.defaultAction)`.
-            Button(request.cost.cancelTitle, role: .cancel) { closeSession.cancel() }
-        } message: { request in
-            Text(request.message)
-        }
-        // The question asked before a setup script runs. On the window because the three controls
-        // that raise it are two menus and a transcript row, and a `Commands` body is not a view
-        // and can present nothing. See `SetupRunAlert`.
-        .confirmation($setupRun.request) { request in
-            Confirmation(
-                title: request.question.title,
-                message: request.question.message,
-                confirmLabel: request.question.confirmLabel,
-                cancelLabel: request.question.cancelLabel
-            )
-        } onConfirm: { request in
-            request.model.runSetupAgain()
-        }
-        // A single OK that does nothing but dismiss is the system default, so the actions builder
-        // is deliberately empty rather than spelling one out.
-        .alert(
-            app.alert?.title ?? "",
-            isPresented: $app.alert.isPresent(),
-            presenting: app.alert
-        ) { _ in
-        } message: { alert in
-            Text(alert.message)
-        }
-        .onReceive(OpenWorkspaceNotification.publisher()) { id in
-            // Through `open(workspaceID:)` rather than straight into the selection, so an id that
-            // has since been archived opens its transcript instead of landing on Home with no
-            // explanation. See `AppModel.open(workspaceID:)`.
-            Task { await app.open(workspaceID: id) }
-        }
-        // Shift+Cmd+F, and Cmd+F where nothing in front can find. A `Commands` body is not a view
-        // and cannot reach a `@FocusState`, so the menu item posts and this listens.
-        //
-        // The centre pane goes to Home with it. The field is in the toolbar, so it is on screen
-        // while a workspace is open, and a search whose answer is drawn in a pane nobody is
-        // looking at would be a field that does nothing.
+            // The question asked before a setup script runs. On the window because the three controls
+            // that raise it are two menus and a transcript row, and a `Commands` body is not a view
+            // and can present nothing. See `SetupRunAlert`.
+            .confirmation($setupRun.request) { request in
+                Confirmation(
+                    title: request.question.title,
+                    message: request.question.message,
+                    confirmLabel: request.question.confirmLabel,
+                    cancelLabel: request.question.cancelLabel
+                )
+            } onConfirm: { request in
+                request.model.runSetupAgain()
+            }
+            // A single OK that does nothing but dismiss is the system default, so the actions builder
+            // is deliberately empty rather than spelling one out.
+            .alert(
+                app.alert?.title ?? "",
+                isPresented: $app.alert.isPresent(),
+                presenting: app.alert
+            ) { _ in
+            } message: { alert in
+                Text(alert.message)
+            }
+            .onReceive(OpenWorkspaceNotification.publisher()) { id in
+                // Through `open(workspaceID:)` rather than straight into the selection, so an id that
+                // has since been archived opens its transcript instead of landing on Home with no
+                // explanation. See `AppModel.open(workspaceID:)`.
+                Task { await app.open(workspaceID: id) }
+            }
+            // Shift+Cmd+F, and Cmd+F where nothing in front can find. A `Commands` body is not a view
+            // and cannot reach a `@FocusState`, so the menu item posts and this listens.
+            //
+            // The centre pane goes to Home with it. The field is in the toolbar, so it is on screen
+            // while a workspace is open, and a search whose answer is drawn in a pane nobody is
+            // looking at would be a field that does nothing.
+        )
+    }
+
+    /// The window's notification wiring, in a method rather than in `body`.
+    ///
+    /// Not tidiness. `body` was one chain of forty-odd modifiers, and the new-project sheet took
+    /// it past the type checker's budget: the build fails with "unable to type-check this
+    /// expression in reasonable time", which names no cause and points at whichever line the
+    /// solver happened to give up on. A method has a signature of its own to solve against, so
+    /// the two halves are solved separately.
+    ///
+    /// A method and not a `ViewModifier`, because half of these handlers write this view's own
+    /// `@State` and `@FocusState`, and a modifier is a separate type that can see neither.
+    private func windowWiring(_ content: some View) -> some View {
+        content
         .onReceive(NotificationCenter.default.publisher(for: .bloomFocusSearch)) { _ in
             app.selection = .home
             isSearchFocused = true
