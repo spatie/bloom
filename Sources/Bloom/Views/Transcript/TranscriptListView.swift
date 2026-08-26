@@ -1246,7 +1246,28 @@ struct TranscriptListView: View {
                 opening = .liveEnd
             }
         }
+        // Said now, and said once more on the next update.
+        //
+        // **Both of the ways this view can be told where to go need a second turn, for two
+        // different reasons, and this is the one place that knows it.** The live end is a value on
+        // `ScrollPosition`, and a position that already stands at `.bottom` is not CHANGED by
+        // being told `.bottom` again, so SwiftUI has nothing to apply: the file's own reveal
+        // solved that by naming a point first and the edge in the next update, and a restore has
+        // exactly the same problem. A row is the opposite: it is a call rather than a value, and
+        // it acts on the list as it is laid out at that instant, which on the pass that restores a
+        // window is a list that does not hold the row yet.
+        //
+        // Measured, both of them, with `--switch-probe --switch-scroll 25`: a conversation left at
+        // its live end came back at its first row, and one left at row 1,478 of 1,582 came back at
+        // the top of its window. Neither is a memory that was not written; both are an instruction
+        // that landed on nothing.
+        if case .liveEnd = opening { scrollPosition.scrollTo(y: .greatestFiniteMagnitude) }
         open(opening, with: proxy)
+        let settled = opening
+        Task { @MainActor in
+            await Task.yield()
+            open(settled, with: proxy)
+        }
         Task { await transcript.markAllRead() }
     }
 
@@ -1292,26 +1313,7 @@ struct TranscriptListView: View {
         switch opening {
         case .row(let seq, let anchor):
             proxy.scrollTo(seq, anchor: anchor)
-            // And again on the next turn, because the first one can be shouting at a list that
-            // does not hold the row yet.
-            //
-            // **This is the bug the owner reported as "it is always at the bottom now", and it was
-            // neither always nor the bottom.** `ScrollViewProxy.scrollTo` acts on the list as it is
-            // laid out at the moment it is called, and the call sites here run inside the same turn
-            // that sets the window the row lives in: the body has not re-run, the `ForEach` is
-            // still the one from the conversation being left, and the id names nothing. What that
-            // looks like is a pane sitting wherever the arrival put it, which for a restored window
-            // is its first row. Measured with `--switch-probe --switch-scroll 25`: left at 11,993
-            // points and back at 32.
-            //
-            // The edge and the point do not need this. Both are values on `ScrollPosition`, which
-            // SwiftUI applies on the next layout pass whenever that happens to be; only the row is
-            // a call. Saying it twice costs one resolved scroll on a list that already holds the
-            // row, which is what the second call finds in every other case.
-            Task { @MainActor in
-                await Task.yield()
-                proxy.scrollTo(seq, anchor: anchor)
-            }
+            // The second attempt is `position`'s now, so that the live end gets one too.
         case .liveEnd:
             scrollPosition.scrollTo(edge: .bottom)
         case .offset(let y):
