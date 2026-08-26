@@ -34,21 +34,35 @@ import Foundation
 final class TranscriptVisibleRows {
     private var seqs: Set<Int> = []
 
+    /// The last answer this could give while it had one.
+    ///
+    /// **Because the set empties at exactly the wrong moment.** A row leaves this set when it
+    /// scrolls out of the viewport and also when the lazy stack throws it away, and a pane being
+    /// taken off screen throws all of them away at once. The place is read while that is happening,
+    /// so a set alone answers nil for the one question it exists to answer. Keeping the last real
+    /// answer costs one integer and is right whenever the set is empty for a reason that is not
+    /// "the reader is looking at nothing".
+    private var lastTop: Int?
+
     func note(_ seq: Int, isVisible: Bool) {
         if isVisible {
             seqs.insert(seq)
         } else {
             seqs.remove(seq)
         }
+        if let top = seqs.min() { lastTop = top }
     }
 
     /// The topmost row on screen, which is where the reader is.
     ///
     /// The minimum rather than the first the set happened to see: a set has no order, and rows
     /// arrive in it in whatever order they crossed the edge.
-    var topmost: Int? { seqs.min() }
+    var topmost: Int? { seqs.min() ?? lastTop }
 
     /// Forgotten when the pane is pointed at another conversation, because a row that is visible
     /// in one session is not a row in another.
-    func forget() { seqs.removeAll() }
+    func forget() {
+        seqs.removeAll()
+        lastTop = nil
+    }
 }

@@ -453,6 +453,14 @@ struct TranscriptListView: View {
                             .onScrollVisibilityChange(threshold: 0.01) { isVisible in
                                 visibleRowSeqs.note(row.seq, isVisible: isVisible)
                             }
+                            // **And when the stack throws the row away, which is not the same
+                            // event.** A row scrolled far enough from the viewport is destroyed
+                            // rather than reported invisible, so without this the set keeps every
+                            // row it ever saw and its minimum is the oldest of them: a reader who
+                            // scrolled back down was written down as being at the top of the
+                            // conversation, and came back there. Measured: left at row 1,399 of
+                            // 1,582, returned at the first row of the window.
+                            .onDisappear { visibleRowSeqs.note(row.seq, isVisible: false) }
                         } else {
                             TranscriptRowView(
                                 row: row,
@@ -480,6 +488,14 @@ struct TranscriptListView: View {
                             .onScrollVisibilityChange(threshold: 0.01) { isVisible in
                                 visibleRowSeqs.note(row.seq, isVisible: isVisible)
                             }
+                            // **And when the stack throws the row away, which is not the same
+                            // event.** A row scrolled far enough from the viewport is destroyed
+                            // rather than reported invisible, so without this the set keeps every
+                            // row it ever saw and its minimum is the oldest of them: a reader who
+                            // scrolled back down was written down as being at the top of the
+                            // conversation, and came back there. Measured: left at row 1,399 of
+                            // 1,582, returned at the first row of the window.
+                            .onDisappear { visibleRowSeqs.note(row.seq, isVisible: false) }
                         }
                     }
 
