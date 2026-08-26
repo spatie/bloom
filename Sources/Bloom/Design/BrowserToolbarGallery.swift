@@ -12,6 +12,14 @@ import BloomCore
 /// split out: a pane needs a live `BrowserSession` behind it, and an offscreen render paints
 /// SwiftUI's yellow placeholder over the `WKWebView` under it in any case.
 ///
+/// **This page is an honest picture of the glass, and `--snapshot` would not be.** The bar's
+/// arrow capsule and address pill are `glassEffect`, and a material has to be composited by the
+/// window server to exist: `ImageRenderer` draws into a bitmap with no window behind it, so what
+/// it photographs is the opaque fallback rather than the thing. `--snapshot-gallery` does not use
+/// it. It builds a real `NSWindow`, orders it front and asks `screencapture -l<window>` for that
+/// window by number, so the two shapes are sampling their own bar the way they do in the pane.
+/// Nothing here samples outside the window, which is why capturing one window is enough.
+///
 /// `Bloom --snapshot-gallery <dir> --gallery browser-toolbar`.
 struct BrowserToolbarGallery: View {
     /// The width a browser pane sits at in one half of a split centre column, which is the

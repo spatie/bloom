@@ -21,7 +21,10 @@ import Foundation
 /// inside a split inside a tab, so none of them can be reached from here. `NSToolbarDisplayMode`
 /// has no `unified` case in the macOS 26 SDK either, whatever memory says.
 ///
-/// So the bar is drawn, out of `Palette` and `Capsule`. What that costs is written on the view.
+/// So the bar is drawn, out of glass and `Capsule`. Glass was refused here once because it
+/// "samples an arbitrary web page", which was never true: the pane stacks this bar above the web
+/// view rather than over it, so nothing in the bar ever samples the page. What the shapes sample,
+/// and what that costs the ink on them, is written on the view.
 public struct BrowserToolbar: Equatable, Sendable {
     /// One button in the bar: what it draws, what it is called, and whether it can be pressed.
     public struct Control: Equatable, Sendable {
