@@ -128,9 +128,13 @@ final class CenterTabStore {
     /// A title given here is a named tab, which matters for exactly one kind: a browser's name is
     /// otherwise the page's, so `pane_open` asking for a browser called "Docs" would have watched
     /// the first page it loaded rename it. See `CenterTab.isNamed` and `BrowserTabTitle`.
+    ///
+    /// `directory` is a terminal's, and only a folder row in the inspector passes one. See
+    /// `FolderTerminal`.
     @discardableResult
     func add(
-        kind: CenterTab.Kind, workspaceID: WorkspaceID, url: String = "", title: String? = nil
+        kind: CenterTab.Kind, workspaceID: WorkspaceID, url: String = "", title: String? = nil,
+        directory: String = ""
     ) -> CenterTab {
         var tabs = tabs(for: workspaceID)
         let tab = CenterTab(
@@ -138,7 +142,8 @@ final class CenterTabStore {
             kind: kind,
             title: title ?? Self.nextTitle(for: kind, in: tabs),
             url: url,
-            isNamed: title != nil
+            isNamed: title != nil,
+            directory: directory
         )
         tabs.append(tab)
         apply(tabs, to: workspaceID)

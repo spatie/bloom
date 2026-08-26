@@ -133,11 +133,16 @@ final class TerminalSessionStore {
     }
 
     /// The live shell for a tab, forked on first use and reused forever after.
+    ///
+    /// `directory` is what the tab asked for, empty for the worktree root, and it is checked here
+    /// rather than trusted: a tab opened on a folder outlives that folder. See
+    /// `FolderTerminal.launchDirectory`.
     func terminal(
         for tab: TerminalTab,
         workspace: Workspace,
         repo: Repo?,
-        port: Int
+        port: Int,
+        directory: String = ""
     ) -> BloomTerminalView {
         if let existing = terminals[tab.id.rawValue] { return existing }
 
@@ -161,13 +166,14 @@ final class TerminalSessionStore {
         // `tab.id.rawValue` is the pane id here: a split hands each pane a `TerminalTab` carrying its own id,
         // and an unsplit tab is its own single pane.
         paneOwner[tab.id.rawValue] = workspace.id
+        let start = FolderTerminal.launchDirectory(requested: directory, root: workspace.path)
         if let persistence, let command = persistence.command,
            let session = persistence.decision(workspaceID: workspace.id, paneID: tab.id.rawValue).session {
             view.start(TerminalLaunch.tmux(
-                command: command, session: session, directory: workspace.path, extra: extra
+                command: command, session: session, directory: start, extra: extra
             ))
         } else {
-            view.start(TerminalLaunch.loginShell(directory: workspace.path, extra: extra))
+            view.start(TerminalLaunch.loginShell(directory: start, extra: extra))
         }
 
         terminals[tab.id.rawValue] = view

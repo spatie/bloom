@@ -31,6 +31,8 @@ struct ChangedFolderRow: View, Equatable {
     /// The folder's location in the worktree, for the menu items that hand it to another app.
     var fullPath: String
     var action: () -> Void
+    /// Opens a shell in this folder. See `FolderTerminal`.
+    var onOpenTerminal: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -69,6 +71,13 @@ struct ChangedFolderRow: View, Equatable {
         .contextMenu {
             Button("Reveal in Finder") { Reveal.inFinder(fullPath) }
             OpenInItems(target: .folder(fullPath))
+            // With the two above rather than beside Copy path, and worded exactly as the worktree
+            // tree words it: the two trees share a pane and must not name one action two ways.
+            // Absent when the folder is not on disk, which here is a directory git reports out of
+            // a diff after the agent deleted it.
+            if FolderTerminal.canOpen(folder: fullPath) {
+                Button(FolderTerminal.menuTitle, action: onOpenTerminal)
+            }
             Button("Copy path", action: copyPath)
         }
         .help(path)

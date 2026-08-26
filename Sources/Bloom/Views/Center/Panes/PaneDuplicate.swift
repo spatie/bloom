@@ -33,8 +33,15 @@ enum PaneDuplicate {
         case .sameContent:
             place(content)
 
+        // In the folder the shell being duplicated is standing in, for the same reason the browser
+        // below opens on the page it is showing. The worktree root when it was opened at the root,
+        // and the root again when the folder has gone since.
         case .freshTerminal:
-            NewPane.open(.terminal, in: model, place: place)
+            let folder = FolderTerminalTab.target(folder: tab?.directory ?? "", in: model)
+            NewPane.open(
+                .terminal, in: model, title: folder?.title,
+                directory: folder?.directory ?? "", place: place
+            )
 
         // On the page it is already showing, rather than on the empty address a split browser
         // normally opens with. This is the one route that means "the same again", and the same

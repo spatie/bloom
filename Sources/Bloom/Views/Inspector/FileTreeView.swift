@@ -118,7 +118,8 @@ struct FileTreeView: View {
                 isExpanded: expanded.contains(path),
                 isChanged: changedPaths.contains(path),
                 fullPath: fullPath(path),
-                action: { activate(item.node) }
+                action: { activate(item.node) },
+                onOpenTerminal: { FolderTerminalTab.open(folder: fullPath(path), in: model) }
             )
             .equatable()
         }

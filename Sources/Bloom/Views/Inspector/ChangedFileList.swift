@@ -226,7 +226,10 @@ struct ChangedFileList: View {
                     isExpanded: !collapsed.contains(item.node.path),
                     depth: item.depth,
                     fullPath: fullPath(item.node.path),
-                    action: { activate(folder: item.node.path) }
+                    action: { activate(folder: item.node.path) },
+                    onOpenTerminal: {
+                        FolderTerminalTab.open(folder: fullPath(item.node.path), in: model)
+                    }
                 )
                 .equatable()
             }

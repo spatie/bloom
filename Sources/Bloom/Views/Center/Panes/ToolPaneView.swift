@@ -48,6 +48,7 @@ struct ToolPaneView: View {
                             workspace: model.workspace,
                             repo: model.repo,
                             port: model.port,
+                            directory: tab.directory,
                             onCloseTab: { Task { await CenterTabStore.shared.close(tab) } },
                             splitColumn: splitColumn
                         )
