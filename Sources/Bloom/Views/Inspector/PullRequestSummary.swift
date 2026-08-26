@@ -212,9 +212,8 @@ struct PullRequestSummary: View {
     /// The primary slot belongs to whatever the state is actually asking for. With local work in
     /// the worktree that is not Merge: merging now would land the pull request WITHOUT what the
     /// reader is looking at and delete the branch it was on. So the primary swaps to Commit and
-    /// push, and merging stays exactly one press away in the quiet split button beside it, which
-    /// carries the same method and opens the same confirmation. Nothing is taken away; what
-    /// changes is which of the two the strip is pointing at.
+    /// push, and the strip offers that and nothing else, because a merge control standing beside
+    /// a commit button is an offer to do the thing the state has just said not to do.
     ///
     /// **The primary control is last in every one of these, and that is the whole rule.** It used
     /// to be first, with the merge method chevron or Archive after it, so the button the strip
@@ -225,13 +224,14 @@ struct PullRequestSummary: View {
     /// only thing that gives way, and the primary's trailing edge is the pane's own inset in
     /// every state the strip can be in.
     ///
-    /// Everything that is not the primary sits immediately before it, at the tight spacing, so
-    /// the pair still reads as one cluster rather than as two controls that happen to be near
-    /// each other. The merge method chevron used to be the awkward one here: it stood BEFORE
-    /// Merge, on the leading side, because a 19 point chevron at the trailing edge is exactly the
-    /// misalignment the rule above was written to fix. It is inside the button now, on the
-    /// trailing side where a split button carries it, and the button's own trailing edge is still
-    /// the pane's inset. See `mergeControl`.
+    /// Where something DOES stand beside the primary, which is Continue beside Archive on a
+    /// merged pull request, it sits immediately before it at the tight spacing, so the pair reads
+    /// as one cluster rather than as two controls that happen to be near each other. An open pull
+    /// request has no such pair any more. The merge method chevron used to be the awkward one
+    /// here: it stood BEFORE Merge, on the leading side, because a 19 point chevron at the
+    /// trailing edge is exactly the misalignment the rule above was written to fix. It is inside
+    /// the button now, on the trailing side where a split button carries it, and it is drawn
+    /// nowhere else. See `mergeControl`.
     private var trailing: some View {
         // Disabled here, for the cluster, rather than on each button in it. Everything in this
         // slot ends in a turn that writes to the worktree or the branch, so it is one question,
@@ -250,15 +250,10 @@ struct PullRequestSummary: View {
                 .controlSize(.small)
                 .accessibilityLabel("Working")
         } else if pullRequest.isOpen {
-            HStack(spacing: Metrics.spacingTight) {
-                // Only when merging is not what the state is asking for, because then the split
-                // button IS the primary and there is nothing to stand beside it. This is what the
-                // old chevron did in those states: it was the only way to merge a branch whose
-                // primary said Commit and push, and losing it would have taken a route away.
-                if status.remedy != .merge { mergeControl(isPrimary: false) }
-                primaryButton
-            }
-            .fixedSize()
+            // One control, and only the one the state is asking for. Nothing stands beside it:
+            // the merge method chevron is inside the merge button now, and it is drawn nowhere a
+            // merge is not what the button does.
+            primaryButton.fixedSize()
         } else if pullRequest.isMerged {
             HStack(spacing: Metrics.spacingTight) {
                 continueButton
@@ -284,7 +279,7 @@ struct PullRequestSummary: View {
     @ViewBuilder
     private var primaryButton: some View {
         switch status.remedy {
-        case .merge: mergeControl(isPrimary: true)
+        case .merge: mergeControl
         case .fixConflicts: fixConflictsButton
         case .commitAndPush, .push: pushButton
         }
@@ -481,15 +476,21 @@ struct PullRequestSummary: View {
     /// Merge, and the chevron that chooses which merge, as one control.
     ///
     /// This replaces a pair: a prominent `Merge` button that always proposed a squash, and a small
-    /// borderless chevron beside it whose three items each merged by their own method. Nothing has
-    /// been dropped. All three methods are still there, still in GitHub's own wording, still one
-    /// press from a merge; what changed is that picking one now sets the mode and the button says
-    /// which, so the press that lands somebody's branch is always the press on the thing labelled
-    /// with what it will do.
+    /// borderless chevron beside it whose three items each merged by their own method. All three
+    /// methods are still there, still in GitHub's own wording, still one press from a merge; what
+    /// changed is that picking one now sets the mode and the button says which, so the press that
+    /// lands somebody's branch is always the press on the thing labelled with what it will do.
     ///
-    /// Prominent when merging is what the state is asking for, quiet when it is not. The quiet
-    /// form is the old chevron's other job: with local work in the worktree the primary swaps to
-    /// Commit and push, and merging has to stay reachable rather than disappear.
+    /// **Drawn only where the primary action is a merge, which is the one thing the old chevron
+    /// did that has not been kept.** That chevron was also the way to merge a branch whose primary
+    /// said Commit and push or Fix merge conflicts, and a quiet form of this control was standing
+    /// there for exactly that reason until the owner saw it: a merge menu beside a commit button
+    /// is a control the band did not ask for. So in those two states the band is what it was
+    /// before any of this. Merging waits for the state that is blocking it to clear, which is a
+    /// push or a resolved conflict away and is what the primary button is there to do. Nothing
+    /// else in this app offers a merge from a menu, so those two states now have no merge press at
+    /// all; asking this workspace's agent in the composer still lands one, which is all this
+    /// button does anyway.
     ///
     /// **The tint measurement that used to live here has moved to `MergeSplitButton`,** because
     /// it is the reason that control is drawn the way it is. The short version is unchanged: the
@@ -501,11 +502,10 @@ struct PullRequestSummary: View {
     ///
     /// Every path through it opens the confirmation. Nothing here performs a merge, and since
     /// merging moved onto the agent nothing anywhere in this target does either.
-    private func mergeControl(isPrimary: Bool) -> some View {
+    private var mergeControl: some View {
         MergeSplitButton(
             method: mergeMethod,
             fill: status.tone.fill,
-            isPrimary: isPrimary,
             // Only what GitHub says about the pull request. A running agent is the cluster's
             // answer rather than this control's: see `trailing`.
             canMerge: status.canMerge,
