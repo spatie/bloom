@@ -893,16 +893,20 @@ extension View {
     /// reading as a row of buttons; drawn behind, the selected tab's own opaque fill breaks it, and
     /// that break is what joins the tab to the content below.
     ///
-    /// `pulsing` puts the busy signal on that rule, and it goes in this background rather than in
+    /// `busy` puts the activity signal on that rule, and it goes in this background rather than in
     /// an overlay for exactly the reason the rule does: the lit rule has to be broken by the
     /// selected tab on the same pixels the rule is broken on, or the tab reads as sitting on top of
-    /// a line rather than as part of it. See `RulePulse`.
-    func tabStripMaterial(pulsing: Bool = false) -> some View {
+    /// a line rather than as part of it. See `ActivityRule`.
+    ///
+    /// `busy` and no longer `pulsing`, because the signal no longer pulses: it is a crest running
+    /// the rule, and a parameter named after a figure that has been replaced is the next reader's
+    /// wrong turn. The same rename took `RuleSweep` to `RulePulse` when the light stopped sweeping.
+    func tabStripMaterial(busy: Bool = false) -> some View {
         background {
             ZStack(alignment: .bottom) {
                 Palette.sidebar
                 Hairline()
-                if pulsing { RulePulse() }
+                if busy { ActivityRule() }
             }
         }
     }

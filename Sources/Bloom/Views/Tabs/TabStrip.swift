@@ -223,7 +223,7 @@ struct TabStrip<Leading: View, Tabs: View, Append: View, Trailing: View>: View {
         // column's strip is the only one drawn on that rule: the bottom panel's is a `.sunken`
         // strip halfway down the window, and a second line brightening there would be a second
         // heartbeat in a window that is meant to have one.
-        .tabStripMaterial(pulsing: pane == .content)
+        .tabStripMaterial(busy: pane == .content)
     }
 }
 
