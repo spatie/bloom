@@ -48,7 +48,7 @@ struct TabItemIconView: View {
                     Image(nsImage: image)
                         .resizable()
                         .interpolation(.high)
-                        .aspectRatio(contentMode: .fit)
+                        .scaledToFit()
                 } else {
                     Image(systemName: PaneGlyph.browser)
                         .imageScale(.small)
