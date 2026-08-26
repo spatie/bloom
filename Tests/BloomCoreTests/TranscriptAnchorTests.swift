@@ -132,11 +132,12 @@ struct TranscriptAnchorTests {
     @Test("nearly at the end is not at the end")
     func nearlyIsNotAtIt() {
         #expect(TranscriptAnchor.isAtEnd(offset: 19_200, contentHeight: 20_000, viewportHeight: 800))
-        #expect(!TranscriptAnchor.isAtEnd(offset: 19_100, contentHeight: 20_000, viewportHeight: 800))
-        // And the same position is "following along" to the pill, which is the whole point of the
-        // two questions being different.
+        #expect(!TranscriptAnchor.isAtEnd(offset: 19_110, contentHeight: 20_000, viewportHeight: 800))
+        // And the same position is "following along" to an arriving row, which is the whole point
+        // of the two questions being different. Ninety points short, so it is inside ScrollEnd's
+        // 96 and well outside the one point of slack above.
         #expect(
-            ScrollEnd.isAtEnd(contentHeight: 20_000, viewportHeight: 800, offset: 19_100)
+            ScrollEnd.isAtEnd(contentHeight: 20_000, viewportHeight: 800, offset: 19_110)
         )
     }
 

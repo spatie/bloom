@@ -29,7 +29,10 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
         heights.note(120, for: "row.7")
-        #expect(heights.reset(width: 600, scale: 1))
+        // Called before the expectation rather than inside it: `reset` is mutating, and `#expect`
+        // rewrites its argument into a closure that takes the value immutably.
+        let invalidated = heights.reset(width: 600, scale: 1)
+        #expect(invalidated)
         #expect(heights.height(for: "row.7") == nil)
         #expect(heights.count == 0)
     }
@@ -39,7 +42,8 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
         heights.note(120, for: "row.7")
-        #expect(heights.reset(width: 800, scale: 1.3))
+        let invalidated = heights.reset(width: 800, scale: 1.3)
+        #expect(invalidated)
         #expect(heights.height(for: "row.7") == nil)
     }
 
@@ -65,15 +69,18 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 831.5, scale: 1)
         heights.note(120, for: "row.7")
-        #expect(!heights.reset(width: 831.75, scale: 1))
+        let invalidated = heights.reset(width: 831.75, scale: 1)
+        #expect(!invalidated)
         #expect(heights.height(for: "row.7") == 120)
     }
 
     @Test("a pass that changes nothing says so")
     func noChangeIsNotAnInvalidation() {
         var heights = TranscriptRowHeights()
-        #expect(heights.reset(width: 800, scale: 1))
-        #expect(!heights.reset(width: 800, scale: 1))
+        let firstPass = heights.reset(width: 800, scale: 1)
+        #expect(firstPass)
+        let secondPass = heights.reset(width: 800, scale: 1)
+        #expect(!secondPass)
     }
 
     // MARK: - The width that has not arrived yet
@@ -84,15 +91,18 @@ struct TranscriptRowHeightsTests {
     @Test("a width nothing can be drawn at is not a width")
     func refusesAnUnlaidPane() {
         var heights = TranscriptRowHeights()
-        #expect(!heights.reset(width: 0, scale: 1))
-        #expect(!heights.reset(width: 1, scale: 1))
+        let atNought = heights.reset(width: 0, scale: 1)
+        #expect(!atNought)
+        let atOne = heights.reset(width: 1, scale: 1)
+        #expect(!atOne)
         #expect(!heights.isReady)
     }
 
     @Test("nothing is remembered before a width has arrived")
     func refusesHeightsWithoutAWidth() {
         var heights = TranscriptRowHeights()
-        #expect(!heights.note(120, for: "row.7"))
+        let changed = heights.note(120, for: "row.7")
+        #expect(!changed)
         #expect(heights.height(for: "row.7") == nil)
     }
 
@@ -115,7 +125,8 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
         heights.note(120, for: "row.7")
-        #expect(heights.note(340, for: "row.7"))
+        let changed = heights.note(340, for: "row.7")
+        #expect(changed)
         #expect(heights.height(for: "row.7") == 340)
     }
 
@@ -125,10 +136,13 @@ struct TranscriptRowHeightsTests {
     func ignoresAnUnchangedHeight() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        #expect(heights.note(120, for: "row.7"))
-        #expect(!heights.note(120, for: "row.7"))
+        let changed = heights.note(120, for: "row.7")
+        #expect(changed)
+        let changedAgain = heights.note(120, for: "row.7")
+        #expect(!changedAgain)
         // Rounds up to the same 120, so a fraction of a point of drift says nothing either.
-        #expect(!heights.note(119.6, for: "row.7"))
+        let changedByAFraction = heights.note(119.6, for: "row.7")
+        #expect(!changedByAFraction)
     }
 
     /// This was the several hundred points of blank between the rows of a real conversation: an
@@ -137,7 +151,8 @@ struct TranscriptRowHeightsTests {
     func nothingIsAnAnswer() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        #expect(heights.note(0, for: "row.7"))
+        let changed = heights.note(0, for: "row.7")
+        #expect(changed)
         #expect(heights.height(for: "row.7") == 0)
     }
 
@@ -158,6 +173,7 @@ struct TranscriptRowHeightsTests {
         heights.forget()
         #expect(heights.height(for: "row.7") == nil)
         #expect(heights.isReady)
-        #expect(!heights.reset(width: 800, scale: 1))
+        let invalidated = heights.reset(width: 800, scale: 1)
+        #expect(!invalidated)
     }
 }

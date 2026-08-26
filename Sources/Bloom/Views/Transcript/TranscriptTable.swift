@@ -740,7 +740,7 @@ struct TranscriptTable: NSViewRepresentable {
             let clip = scrollView.contentView
             let target = TranscriptAnchor.clamped(
                 y,
-                contentHeight: scrollView.documentView?.bounds.height ?? 0,
+                contentHeight: Double(scrollView.documentView?.bounds.height ?? 0),
                 viewportHeight: clip.bounds.height
             )
             guard abs(clip.bounds.origin.y - target) > 0.01 else { return }
