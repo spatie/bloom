@@ -163,6 +163,98 @@ struct TranscriptRowHeightsTests {
         #expect(TranscriptRowHeights.rounded(-3) == 0)
     }
 
+    // MARK: - A resize, which keeps the numbers and marks them owed
+
+    /// Emptying the cache is a fresh `NSHostingView` per row before the table can be told
+    /// anything, which is four seconds on an 1,855 row session. A resize keeps the old numbers as
+    /// estimates instead and marks each one as owed a measurement.
+    @Test("a resize keeps every height and marks it owed")
+    func rewidthEstimates() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(120, for: "row.7")
+        let moved = heights.rewidth(to: 600)
+        #expect(moved)
+        #expect(heights.height(for: "row.7") == 120)
+        #expect(heights.isStale("row.7"))
+        #expect(heights.measure?.width == 600)
+        #expect(heights.staleCount == 1)
+    }
+
+    @Test("a row measured again at the new width stops being owed one")
+    func measuringClearsTheDebt() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(120, for: "row.7")
+        heights.rewidth(to: 600)
+        heights.note(180, for: "row.7")
+        #expect(!heights.isStale("row.7"))
+        #expect(heights.staleCount == 0)
+    }
+
+    /// Most rows in a transcript are tool headers and footers whose height does not depend on the
+    /// width, so the commonest answer at a new width is the old number. It still has to count as
+    /// having been measured, or it is remeasured on every resize for ever.
+    @Test("a row that turns out the same height is still no longer owed one")
+    func anUnchangedHeightStillSettlesTheDebt() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(120, for: "row.7")
+        heights.rewidth(to: 600)
+        let changed = heights.note(120, for: "row.7")
+        #expect(!changed)
+        #expect(!heights.isStale("row.7"))
+    }
+
+    @Test("a resize to the same width changes nothing")
+    func rewidthToTheSameWidth() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(120, for: "row.7")
+        #expect(!heights.rewidth(to: 800.25))
+        #expect(!heights.isStale("row.7"))
+    }
+
+    /// A pane that has never been laid out has nothing to estimate from, so this is `reset`'s
+    /// question rather than one this can answer.
+    @Test("a resize before a width has arrived is refused")
+    func rewidthNeedsAWidth() {
+        var heights = TranscriptRowHeights()
+        #expect(!heights.rewidth(to: 800))
+        #expect(!heights.isReady)
+        heights.reset(width: 800, scale: 1)
+        #expect(!heights.rewidth(to: 1))
+        #expect(heights.measure?.width == 800)
+    }
+
+    @Test("a text size change empties what a resize would have kept")
+    func resetClearsTheDebt() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(120, for: "row.7")
+        heights.rewidth(to: 600)
+        heights.reset(width: 600, scale: 1.3)
+        #expect(heights.staleCount == 0)
+        #expect(heights.height(for: "row.7") == nil)
+    }
+
+    @Test("forgetting settles every debt a resize left")
+    func forgettingClearsTheDebt() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(120, for: "row.7")
+        heights.rewidth(to: 600)
+        heights.forget()
+        #expect(heights.staleCount == 0)
+        #expect(!heights.isStale("row.7"))
+    }
+
+    @Test("half a point is the same width, and one answer says so")
+    func oneRuleAboutTheSameWidth() {
+        #expect(TranscriptRowHeights.isSameWidth(831.5, 831.75))
+        #expect(!TranscriptRowHeights.isSameWidth(831.5, 833))
+    }
+
     // MARK: - Forgetting
 
     @Test("forgetting empties the cache and keeps the width")

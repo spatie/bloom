@@ -141,7 +141,13 @@ struct CenterPaneDivider: View {
             .onChanged { value in
                 if dragOrigin == nil, carrying == nil {
                     carrying = pane(at: local(value.startLocation))
-                    if carrying == nil { dragOrigin = ratio }
+                    if carrying == nil {
+                        dragOrigin = ratio
+                        // A transcript in either half holds still until this ends. AppKit calls no
+                        // live resize for a SwiftUI drag, so saying so is the only way it knows.
+                        // See `TranscriptHoldView`.
+                        NotificationCenter.default.post(name: .bloomPaneResizeBegan, object: nil)
+                    }
                 }
                 if let carrying {
                     return onMoveChanged(carrying, value.location)
@@ -154,6 +160,9 @@ struct CenterPaneDivider: View {
             }
             .onEnded { value in
                 if let carrying { onMoveEnded(carrying, value.location) }
+                if dragOrigin != nil {
+                    NotificationCenter.default.post(name: .bloomPaneResizeEnded, object: nil)
+                }
                 carrying = nil
                 dragOrigin = nil
             }
