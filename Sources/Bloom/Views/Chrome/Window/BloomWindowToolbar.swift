@@ -89,6 +89,23 @@ struct BloomWindowToolbar: ToolbarContent {
             WindowTitleControl(app: app)
         }
 
+        // The elastic middle of the bar, and the whole reason the search field sits at the
+        // window's trailing edge rather than beside the name.
+        //
+        // `.searchable` contributes an `NSSearchToolbarItem` after everything written here, and an
+        // `NSToolbar` packs its items from the leading edge with no gap unless something between
+        // them can stretch. What usually stretches is AppKit's own title item, and `RootView`
+        // takes that away with `.toolbar(removing: .title)` because the name is drawn here
+        // instead, so removing the second title also removed the toolbar's only piece of slack.
+        //
+        // Measured in an offscreen window 1440 points wide, with the same 380 point accessory:
+        // without this the field's capsule starts at x=416, eight points from the title's own and
+        // a third of the way across the bar, which is what the owner was looking at; with it, at
+        // x=727, hard against the pull request band. The band is beyond the toolbar rather than
+        // in it, so the two do not compete for the edge: the field takes the toolbar's trailing
+        // end, the band takes the window's. See `TitleBarStrip`.
+        ToolbarSpacer(.flexible, placement: .navigation)
+
         // The worktree's menu is not here any more. It was a trailing toolbar item, pinned to the
         // window's own edge, which put it directly above the inspector's pull request strip: two
         // stacked rows in the top right corner, both describing the same workspace. The strip has

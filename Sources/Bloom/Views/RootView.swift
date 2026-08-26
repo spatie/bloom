@@ -97,6 +97,13 @@ struct RootView: View {
                 // The window's search field, on the trailing edge of the toolbar, which is where
                 // Finder and Mail publish search on this platform.
                 //
+                // Which edge it lands on is not this modifier's to say. `SearchFieldPlacement` on
+                // macOS offers `automatic`, `toolbar`, `toolbarPrincipal` and `sidebar`, and none
+                // of them names an edge: the item is appended after the toolbar's own items and
+                // goes wherever the packing leaves it. What puts it at the end is the
+                // `ToolbarSpacer` in `BloomWindowToolbar`, and without that it sits against the
+                // window's name a third of the way across.
+                //
                 // `.searchable` rather than the hand built field this replaced, and that is the
                 // whole reason it moved. An `NSSearchToolbarItem` is compact at rest, expands over
                 // the toolbar when it is focused, draws the system's glass and the system's focus
