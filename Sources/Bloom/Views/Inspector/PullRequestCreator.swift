@@ -145,11 +145,15 @@ struct PullRequestCreator: View {
                 // Nothing extra is polled for it and nothing is later than it was: the list is
                 // re-read when a turn ends and every six seconds while Bloom is frontmost, which
                 // is what used to take the button from grey to live.
+                // The `.fixedSize()` is on the candidates rather than over the row. Outside, it
+                // proposed an unspecified width, a `ViewThatFits` reads that as room for its
+                // first candidate, and "Create pull request" therefore kept its title at every
+                // pane width and the icon-only form was unreachable. See
+                // `PullRequestSummary.continueButton`.
                 ViewThatFits(in: .horizontal) {
-                    createButton.labelStyle(.titleOnly)
-                    createButton.labelStyle(.iconOnly)
+                    createButton.labelStyle(.titleOnly).fixedSize()
+                    createButton.labelStyle(.iconOnly).fixedSize()
                 }
-                .fixedSize()
             }
         }
         // Reading the name is half of what a truncated branch name is wanted for. The other half

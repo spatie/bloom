@@ -56,11 +56,17 @@ struct MergeSplitButton: View {
     var body: some View {
         // Two forms, as every other control in this strip has, and for the same reason: the
         // headline is the part that must not be what truncates.
+        //
+        // Nothing sizes this row from outside. A `.fixedSize()` sat here and proposed an
+        // unspecified width, which a `ViewThatFits` reads as room for its first candidate, so
+        // "Squash and merge" kept its title at every width the pane could be and the icon-only
+        // form below it was never once drawn. The candidates carry their own, on `control`, which
+        // is what makes each of them report the width its label really wants. See
+        // `PullRequestSummary.continueButton`, where the same slip was on four more.
         ViewThatFits(in: .horizontal) {
             styled.labelStyle(.titleAndIcon)
             styled.labelStyle(.iconOnly)
         }
-        .fixedSize()
         // **The label and the tick are one value, and this is what makes that true.** A `Menu`'s
         // content is not evaluated when the view is rebuilt; it is evaluated when the menu opens,
         // out of the closure SwiftUI stored, and the tick is drawn from the selection that closure
@@ -116,6 +122,8 @@ struct MergeSplitButton: View {
         // Disabled controls do not explain themselves, and "why is this greyed out" is the whole
         // question a blocked pull request raises.
         .help(help ?? "\(method.buttonLabel), or choose another method from the chevron")
+        // Inside both candidates, which is where a `ViewThatFits` needs it: it is what stops the
+        // label truncating to fit instead of the row dropping to the shorter form. See `body`.
         .fixedSize()
     }
 
