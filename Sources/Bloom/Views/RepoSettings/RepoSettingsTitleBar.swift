@@ -2,15 +2,14 @@ import AppKit
 import SwiftUI
 import BloomCore
 
-/// Gives the project settings window an ordinary Mac title bar, above its tab bar.
+/// Gives the project settings window an ordinary Mac title bar, above the row that chooses a pane.
 ///
-/// A `TabView` at the root of a window hands its tab bar to the title bar, and SwiftUI hides the
-/// window's title when it does. The title is not lost, only undrawn: `navigationTitle` still sets
-/// `NSWindow.title`, and the window carries the right string the whole time. So the tab bar and a
-/// title are not in competition for one row, and the belief that a window has to choose between
-/// them is wrong. Making the title visible again and asking for the toolbar style a preferences
-/// window uses gives the title a row of its own with the tab bar centred underneath, which is the
-/// shape of the app's own Settings window and the reason a `TabView` was chosen here.
+/// The title and that row are not in competition for one place, which is the belief this modifier
+/// exists to correct. A title lives on its own line and `.preference` puts the toolbar under it,
+/// so the window can have both and the app's own Settings window is the proof. The title itself
+/// is never lost, only undrawn: `navigationTitle` sets `NSWindow.title` whatever else is on the
+/// window, so making it visible again is all this has to do about it. The toolbar under it, and
+/// the style that puts it there, are `RepoSettingsToolbar`.
 ///
 /// The folder comes along as the window's `representedURL`, so the title bar behaves like every
 /// document window on the Mac: the proxy icon beside the title drags into a terminal or an editor,
@@ -20,17 +19,17 @@ import BloomCore
 /// It also refuses the system's window tabbing, which is the one thing on this window that nobody
 /// asked for. macOS groups windows of the same class into one tabbed window by default, so opening
 /// settings for a second project merged it into the first as a tab, and a `+` beside it offered a
-/// third. This window is one project's, and it already has a tab bar of its own directly above:
-/// two rows of tabs, one meaning "which part of this project" and the other "which project", read
-/// as one row meaning neither. There is nothing to gain here from the system's row either, since
-/// the app's own tab bar is what a settings window is for. `.disallowed` is per window rather than
-/// `NSWindow.allowsAutomaticWindowTabbing = false`, which would be the app speaking for windows
-/// this file knows nothing about.
+/// third. This window is one project's, and it already has a row of its own directly above saying
+/// which part of it is showing: two rows, one meaning "which part of this project" and the other
+/// "which project", read as one row meaning neither. There is nothing to gain here from the
+/// system's row either, since the window's own three panes are what a settings window is for.
+/// `.disallowed` is per window rather than `NSWindow.allowsAutomaticWindowTabbing = false`, which
+/// would be the app speaking for windows this file knows nothing about.
 ///
-/// AppKit rather than SwiftUI because SwiftUI models none of the three things this needs.
-/// `windowToolbarStyle` has no case for the preferences style, nothing in SwiftUI un-hides a title
-/// the framework decided to hide, and there is no scene modifier for tabbing at all.
-/// `WindowChrome` reaches for the main window's title bar the same way and for the same reason.
+/// AppKit rather than SwiftUI because SwiftUI models neither of the two things this needs. Nothing
+/// in SwiftUI un-hides a title the framework decided to hide, and there is no scene modifier for
+/// tabbing at all. `WindowChrome` reaches for the main window's title bar the same way and for the
+/// same reason.
 struct RepoSettingsTitleBar: ViewModifier {
     let repo: Repo
 
@@ -50,7 +49,6 @@ struct RepoSettingsTitleBar: ViewModifier {
         // The title itself stays `navigationTitle`'s to set, so there is one place that decides
         // what this window is called.
         window.titleVisibility = .visible
-        window.toolbarStyle = .preference
         window.representedURL = URL(filePath: repo.path)
         window.tabbingMode = .disallowed
         // Refusing tabbing decides what may happen to this window next, not what has already
