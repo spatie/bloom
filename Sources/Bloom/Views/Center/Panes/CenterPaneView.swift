@@ -45,8 +45,68 @@ struct CenterPaneView: View {
         tab.map { tabs.content(of: pane, in: $0) }
     }
 
+    /// What a pane with nothing to draw is waiting for.
+    ///
+    /// Two of them, and they are two different moments of the same switch. Which one the user
+    /// actually meets depends on whether this launch has been here before, which is why neither
+    /// could be left out.
+    private enum Wait: Equatable, Sendable {
+        /// The store has not yet said which conversations this workspace has. The first visit of a
+        /// launch only, since `WorkspaceModel.hasReadSessions` stays true afterwards.
+        case sessions(WorkspaceID)
+        /// The conversation is known and its rows are not on screen yet: either this launch has
+        /// never built its transcript, or the transcript exists and is still reading.
+        case conversation(SessionID)
+
+        /// In the register the file loader already uses: what is being read.
+        var label: String {
+            switch self {
+            case .sessions: "Opening the workspace"
+            case .conversation: "Reading the conversation"
+            }
+        }
+    }
+
+    /// Nil whenever the pane has something to draw, which is the ordinary case and the one this
+    /// must be cheap in.
+    ///
+    /// `existingTranscript` is a plain dictionary lookup, and `isLoaded` is the one observed
+    /// property read here, so a pane that is drawing a conversation depends on nothing that moves
+    /// until that conversation is read.
+    private var waiting: Wait? {
+        switch showing {
+        case .chat(let sessionID):
+            if let transcript = model.existingTranscript(for: sessionID) {
+                return transcript.isLoaded ? nil : .conversation(sessionID)
+            }
+            if model.sessions.contains(where: { $0.id == sessionID }) {
+                return .conversation(sessionID)
+            }
+            // A pane restored from a saved arrangement can name a session before the store has
+            // said whether it still exists. Unknown and not-asked-yet are different answers, and
+            // only the second of them is a wait.
+            return model.hasReadSessions ? nil : .sessions(model.workspace.id)
+        case .tool:
+            // A terminal says so for itself while its shell starts, and a browser draws the page's
+            // own progress. Neither is this pane's wait to announce.
+            return nil
+        case nil:
+            // A workspace still running its setup script has a sentence of its own that says more
+            // than a spinner would, so it is not a wait either.
+            guard !model.isRunningSetup, !model.hasReadSessions else { return nil }
+            return .sessions(model.workspace.id)
+        }
+    }
+
     var body: some View {
         content
+            // Over the content rather than in place of it, so the pane that is being built keeps
+            // its background, its size and its place in the hierarchy while the wait is drawn.
+            // Nothing to hit: it is a readout, and the pane underneath still takes clicks.
+            .overlay {
+                SlowLoadingView(subject: waiting, label: waiting?.label)
+                    .allowsHitTesting(false)
+            }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size.value = $0 }
             // Simultaneous rather than a plain tap: the transcript, the composer and the terminal
             // all want their own clicks, and this only needs to know that one happened.
@@ -94,7 +154,15 @@ struct CenterPaneView: View {
             if let transcript = model.existingTranscript(for: sessionID) {
                 ChatPaneView(transcript: transcript, model: model, pane: pane)
             } else if model.sessions.contains(where: { $0.id == sessionID }) {
-                LoadingView()
+                // Nothing, rather than the `LoadingView` that used to be here. This branch is the
+                // gap between a session being known and its transcript being built, which is one
+                // turn of the run loop on almost every switch: a spinner drawn for it flickered.
+                // The wait is `waiting` above, and it is only drawn if it lasts.
+                waitingSurface
+            } else if !model.hasReadSessions {
+                // Same rule as the `nil` case below: a session this pane was restored pointing at
+                // is not missing until the store has been asked.
+                waitingSurface
             } else {
                 emptyState
             }
@@ -114,6 +182,14 @@ struct CenterPaneView: View {
         case nil:
             if model.isRunningSetup {
                 setupState
+            } else if !model.hasReadSessions {
+                // **Not `noConversationState`, and this is the bug that made a switch feel wrong
+                // rather than merely slow.** On the first visit of a launch the sessions have not
+                // been read yet, so `sessions.isEmpty` was true and the pane confidently said
+                // "This workspace has no conversation" about a workspace full of them, for as
+                // long as the store took to answer. An empty list is not an answer until somebody
+                // has asked. See `WorkspaceModel.hasReadSessions`.
+                waitingSurface
             } else if model.sessions.isEmpty {
                 noConversationState
             } else {
@@ -233,6 +309,17 @@ struct CenterPaneView: View {
     }
 
     // MARK: - Empty states
+
+    /// What a pane that has nothing to draw yet shows: the colour it is about to be, and no words.
+    ///
+    /// `Palette.windowBackground` because that is what `ChatPaneView` paints itself, so the
+    /// conversation arriving changes what is in the pane and not the colour behind it. A sentence
+    /// here would be a sentence that is wrong a beat later, which is what `noConversationState`
+    /// was doing on the first visit of every launch.
+    private var waitingSurface: some View {
+        Palette.windowBackground
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
 
     /// A fresh workspace runs its setup script before anything else, and that can take minutes on a
     /// large repository. Saying so beats an empty rectangle that looks like a failure.
