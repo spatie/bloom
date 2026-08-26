@@ -4,28 +4,21 @@ import BloomCore
 
 /// Code gets a dedicated surface so syntax state can flow across lines without flattening the transcript.
 public struct CodeBlockView: View {
-    /// Beyond this the fence is folded, because a `Text` per line is not a pager.
+    /// Beyond this the fence is folded, because a fence nobody asked to see all of is not worth
+    /// lexing and laying out all of on the way past it.
     private static let lineCap = 2_000
 
     private let code: String
     private let language: Language
-    private let showsLineNumbers: Bool
     @State private var showsAllLines = false
 
-    /// The gutter follows the conversation's text size, otherwise a raised size runs the numbers
-    /// into the code beside them. This was a `@ScaledMetric`, which on macOS never moves: there is
-    /// no Dynamic Type for it to track.
-    @Environment(\.fontScale) private var fontScale
     /// Whether the answer this fence belongs to is still arriving, which decides which cache the
     /// preparation goes through. See `CodeBlockPreparationCache`.
     @Environment(\.markdownIsStreaming) private var isStreaming
 
-    private var lineNumberWidth: CGFloat { MarkdownMetrics.lineNumberWidth * fontScale }
-
-    public init(code: String, language: Language, showsLineNumbers: Bool = false) {
+    public init(code: String, language: Language) {
         self.code = code
         self.language = language
-        self.showsLineNumbers = showsLineNumbers
     }
 
     public var body: some View {
@@ -50,28 +43,11 @@ public struct CodeBlockView: View {
             Hairline()
 
             ScrollView(.horizontal) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(0..<visibleCount, id: \.self) { offset in
-                        HStack(alignment: .firstTextBaseline, spacing: MarkdownMetrics.blockGap) {
-                            if showsLineNumbers {
-                                Text(String(offset + 1))
-                                    .font(Typo.codeSmall)
-                                    .foregroundStyle(Palette.textTertiary)
-                                    .monospacedDigit()
-                                    .frame(minWidth: lineNumberWidth, alignment: .trailing)
-                            }
-                            Text(SyntaxCache.attributed(
-                                line: prepared.lines[offset],
-                                language: language,
-                                carry: prepared.carries[offset]
-                            ))
-                                .font(Typo.code)
-                                .foregroundStyle(Palette.textPrimary)
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-                .padding(MarkdownMetrics.blockGap)
+                Text(highlighted(prepared, upTo: visibleCount))
+                    .font(Typo.code)
+                    .foregroundStyle(Palette.textPrimary)
+                    .textSelection(.enabled)
+                    .padding(MarkdownMetrics.blockGap)
             }
 
             if prepared.lines.count > Self.lineCap, !showsAllLines {
@@ -91,6 +67,38 @@ public struct CodeBlockView: View {
             RoundedRectangle(cornerRadius: Metrics.corner)
                 .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
         }
+    }
+
+    /// The visible lines as one `AttributedString`, highlighting and all.
+    ///
+    /// **One `Text` rather than a `Text` per line, so a selection runs across the whole fence.**
+    /// Sibling `Text`s are separate selection scopes, so dragging down a forty line block selected
+    /// the single line the drag began on, and Copy, which takes the whole fence, was the only way
+    /// to get anything out of one. Lifting three lines out of forty is not what Copy does, and in
+    /// a transcript full of code it is most of what anybody wants. `WorkspaceEventsView.marked`
+    /// reached the same conclusion about a setup log and wrote the rule down.
+    ///
+    /// Joining costs the colours nothing. `SyntaxCache.attributed` hands back a line whose colours
+    /// are already attribute runs on the string, concatenation carries a run's attributes with it,
+    /// and the lexer state that a fence opening a comment on line three needs still arrives per
+    /// line through `prepared.carries`. It saves the view hierarchy two thousand views at the cap,
+    /// which the transcript's scrolling pays for on every display cycle.
+    ///
+    /// The line number gutter came off with the `ForEach`. It was a parameter defaulting to false
+    /// that no caller ever set, so the column had never been drawn; a column beside one `Text` is
+    /// a different problem from a column beside one `Text` per line, and it wants a per line height
+    /// the way `SetupLineHeight` gives the setup log one. Worth writing when something asks for it.
+    private func highlighted(_ prepared: CodeBlockPreparation, upTo count: Int) -> AttributedString {
+        var output = AttributedString()
+        for offset in 0..<count {
+            if offset > 0 { output += AttributedString("\n") }
+            output += SyntaxCache.attributed(
+                line: prepared.lines[offset],
+                language: language,
+                carry: prepared.carries[offset]
+            )
+        }
+        return output
     }
 
     private static func displayName(for language: Language) -> String {
