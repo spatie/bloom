@@ -31,6 +31,7 @@ struct CenterPaneMenu: View {
         if isSplit {
             Divider()
             Button("Close Pane", systemImage: PaneSymbol.closePane, action: close)
+                .labelStyle(.titleAndIcon)
         }
     }
 
@@ -42,6 +43,7 @@ struct CenterPaneMenu: View {
         Menu(title, systemImage: symbol) {
             PaneKindItems { split(axis, $0) }
         }
+        .labelStyle(.titleAndIcon)
     }
 }
 
@@ -56,9 +58,15 @@ struct CenterPaneMenu: View {
 struct PaneKindItems: View {
     var pick: @MainActor (PaneKind) -> Void
 
+    /// **`.labelStyle(.titleAndIcon)` is what draws the glyphs.** Every item here has carried a
+    /// `systemImage` since it was written, and none of them appeared: a SwiftUI menu item on macOS
+    /// renders title-only unless it is asked otherwise, so the marks were being built and thrown
+    /// away. Naming the style is the whole fix, and it is why "Split Right" itself had no glyph
+    /// either while its submenu chevron did.
     var body: some View {
         ForEach(PaneKind.allCases) { kind in
             Button(kind.title, systemImage: kind.symbol) { pick(kind) }
         }
+        .labelStyle(.titleAndIcon)
     }
 }

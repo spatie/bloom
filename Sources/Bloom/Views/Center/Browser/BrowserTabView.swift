@@ -72,7 +72,16 @@ struct BrowserTabView: View {
                 // one does too. Over the web view rather than instead of it, so the view keeps its
                 // identity and the first page does not arrive into a pane that has just been
                 // rebuilt.
-                if session.currentURL == nil {
+                if let failure = session.failure {
+                    EmptyStateView(
+                        glyph: "exclamationmark.triangle",
+                        title: failure.title,
+                        message: failure.message,
+                        actionTitle: "Try again",
+                        action: { session.reload() }
+                    )
+                    .background(Palette.surface)
+                } else if session.currentURL == nil {
                     EmptyStateView(
                         glyph: "globe",
                         title: "No page yet",

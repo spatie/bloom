@@ -196,7 +196,14 @@ public struct HomeScopeCounts: Sendable, Equatable {
     ///
     /// The chip stays on the strip either way. Dropping it would reflow the row every time an
     /// agent started or stopped, which is movement under the pointer for no gain.
+    /// **Only the two chips whose number is a size, and not the three whose number is a state.**
+    /// Live, Needs you and Running each carried one too, and five numbers across one strip is a row
+    /// of figures to read rather than a set of filters to press. The two that keep theirs are the
+    /// ones where the number is the point: All says how much there is, and Archived says how much
+    /// of it is behind you. Live is answered by the list underneath it, and the whole argument
+    /// below about a nought being worth nothing applies twice over to a three.
     public func badge(of scope: HomeScope, searching: Bool) -> Int? {
+        guard scope == .all || scope == .archived else { return nil }
         let value = count(of: scope, searching: searching)
         return value == 0 ? nil : value
     }
