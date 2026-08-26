@@ -299,6 +299,23 @@ struct BrowserPaneToolTests {
 
     // MARK: - The census
 
+    /// Both censuses turned a tool tab's kind into these words by hand, in the app target where
+    /// nothing could hold them to each other. One conversion, and this is what holds it.
+    @Test("a tool tab's kind becomes the census word for it")
+    func aToolTabsKindBecomesTheCensusWord() {
+        let expected: [CenterTabKind: PaneCensusKind] = [
+            .terminal: .terminal,
+            .browser: .browser,
+            .review: .review,
+            .notes: .notes,
+        ]
+        for kind in CenterTabKind.allCases {
+            #expect(PaneCensusKind(kind) == expected[kind], "\(kind)")
+        }
+        // A chat is the one census kind no tool tab can be: it is a session row, not a tab blob.
+        #expect(!CenterTabKind.allCases.contains(where: { PaneCensusKind($0) == .chat }))
+    }
+
     @Test("the census names every kind of pane, and numbers only the browsers")
     func theCensusNamesEveryKind() {
         let census = PaneCensus(entries: [

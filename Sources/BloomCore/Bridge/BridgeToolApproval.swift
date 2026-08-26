@@ -109,6 +109,17 @@ public enum BridgeToolApproval {
         // that act on one.
         "pane_list",
         "browser_read",
+        // The strip, read as a strip, which is the same furniture `pane_list` reports in another
+        // shape and is on the list for the same reason: it is on the screen in front of the reader
+        // already, none of it is the contents of a page, a diff or a note, and it is the first
+        // call of any turn that then does something useful.
+        "workspace_tabs",
+        // Clicking a tab, which is `pane_open` with less in it: that one makes a tab AND brings it
+        // to the front and is on this list, so a rule that asked before an agent could bring an
+        // existing tab forward would cost a hung turn and protect nothing. What it changes is
+        // which tab the reader is looking at, in the workspace whose agent is asking, and one
+        // click puts it back. It cannot create a tab, which is what keeps it this small.
+        "workspace_tab_select",
     ]
 
     /// Whether this ask is Bloom answering itself.

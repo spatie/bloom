@@ -68,6 +68,17 @@ extension AppModel {
                 guard let self else { return nil }
                 return await self.paneCensusForBridge(workspaceID)
             },
+            // Two closures rather than one, because the shape is the argument: the listing takes a
+            // workspace and gives back a census, so nothing on that path can ask the window to do
+            // something, and the selecting one carries the single verb. See `WorkspaceTabListing`.
+            WorkspaceTabsTool { [weak self] workspaceID in
+                guard let self else { return nil }
+                return await self.workspaceTabsForBridge(workspaceID)
+            },
+            WorkspaceTabSelectTool { [weak self] choice, workspaceID in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return await self.selectWorkspaceTabForBridge(choice, in: workspaceID)
+            },
             BrowserReadTool(browser),
             BrowserReloadTool(browser),
             BrowserGoTool(browser),

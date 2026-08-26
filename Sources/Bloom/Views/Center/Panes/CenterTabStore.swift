@@ -65,16 +65,30 @@ final class CenterTabStore {
         tabs(for: workspaceID).first { $0.kind == .notes }
     }
 
-    /// What the strip calls a tab.
+    /// What the strip calls a tab, whichever kind it is.
     ///
-    /// Two kinds are named after what they are showing rather than after themselves, and for the
-    /// same reason: a strip of three of them all called "Review" or all called "Browser" tells the
-    /// reader nothing about which is which.
-    ///
-    /// A review is named after the file under the cursor, so that a file nobody changed is not
-    /// filed under "All changes", and the answer moves as the reader walks the list. A browser is
-    /// named after the page, the way Safari's tabs are; the chain, and everything it has to
-    /// survive, is `BrowserTabTitle`.
+    /// One function because it was three, and two of them disagreed: the Go to Tab menu, and
+    /// `workspace_tabs` over the bridge. The bridge is the one that made it a bug rather than an
+    /// inconsistency, because `workspace_tab_select` takes back the title it handed out, so a tab
+    /// reported as "Chat" that the person is looking at under "Untitled" is a name neither of them
+    /// can use.
+    func title(of content: PaneContent, in model: WorkspaceModel) -> String {
+        switch content {
+        case .chat(let sessionID):
+            let title = model.sessions.first { $0.id == sessionID }?.title ?? ""
+            return title.isEmpty ? PaneNaming.untitledChat : title
+        case .tool(let id):
+            guard let tab = tabs(for: model.workspace.id).first(where: { $0.id == id }) else {
+                return PaneNaming.missingTab
+            }
+            return displayTitle(of: tab, in: model)
+        }
+    }
+
+    /// What the strip calls a tool tab, which for two kinds is what they are showing rather than
+    /// what they are: a strip of three tabs all called "Review" tells the reader nothing about
+    /// which is which. A review takes the name of the file under the cursor, a browser the name of
+    /// the page, and the chain behind the latter is `BrowserTabTitle`.
     func displayTitle(of tab: CenterTab, in model: WorkspaceModel) -> String {
         switch tab.kind {
         case .browser:

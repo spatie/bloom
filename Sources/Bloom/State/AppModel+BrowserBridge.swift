@@ -26,8 +26,7 @@ extension AppModel {
         let tabs = WorkspaceTabsStore.shared
         let entries = tabs.entries(in: model)
         let selected = tabs.selectedTab(in: model, entries: entries)
-        var numbers: [String: Int] = [:]
-        for (index, tab) in browserTabs(in: model).enumerated() { numbers[tab.id] = index + 1 }
+        let numbers = browserNumbers(in: model)
 
         var panes: [PaneCensusEntry] = []
         for entry in entries {
@@ -45,11 +44,11 @@ extension AppModel {
     /// Every browser pane of a workspace, in the order the reader would count them: along the
     /// strip, and within a split tab in the order its panes are laid out.
     ///
-    /// **One definition of that order, asked twice**, because the number in a census and the pane a
-    /// later call acts on have to mean the same thing. Two walks written separately are two walks
-    /// that can come to disagree about a split tab, and disagreeing here means reading one page and
+    /// **One definition of that order, asked everywhere**, because the number in a census and the
+    /// pane a later call acts on have to mean the same thing. Two walks written separately can
+    /// come to disagree about a split tab, and disagreeing here means reading one page and
     /// reporting another.
-    private func browserTabs(in model: WorkspaceModel) -> [CenterTab] {
+    func browserTabs(in model: WorkspaceModel) -> [CenterTab] {
         let tabs = WorkspaceTabsStore.shared
         let centre = CenterTabStore.shared
         var found: [CenterTab] = []
@@ -62,6 +61,15 @@ extension AppModel {
             }
         }
         return found
+    }
+
+    /// The same order as a lookup, which is what both censuses actually want. It was the walk
+    /// above plus an `enumerated()` map, written out in each of the two files that argue the walk
+    /// must only be written once.
+    func browserNumbers(in model: WorkspaceModel) -> [String: Int] {
+        var numbers: [String: Int] = [:]
+        for (index, tab) in browserTabs(in: model).enumerated() { numbers[tab.id] = index + 1 }
+        return numbers
     }
 
     /// One pane, as the census reports it, or nothing for a pane pointing at something that has
@@ -83,22 +91,18 @@ extension AppModel {
             guard let tab = centre.tabs(for: model.workspace.id).first(where: { $0.id == id })
             else { return nil }
             let name = centre.displayTitle(of: tab, in: model)
-            switch tab.kind {
-            case .terminal:
-                return PaneCensusEntry(kind: .terminal, name: name, isShowing: showing)
-            case .review:
-                return PaneCensusEntry(kind: .review, name: name, isShowing: showing)
-            case .notes:
-                return PaneCensusEntry(kind: .notes, name: name, isShowing: showing)
-            case .browser:
-                guard let number = numbers[tab.id] else { return nil }
+            guard tab.kind == .browser else {
                 return PaneCensusEntry(
-                    kind: .browser,
-                    name: name,
-                    isShowing: showing,
-                    browser: report(tab, number: number, name: name)
+                    kind: PaneCensusKind(tab.kind), name: name, isShowing: showing
                 )
             }
+            guard let number = numbers[tab.id] else { return nil }
+            return PaneCensusEntry(
+                kind: .browser,
+                name: name,
+                isShowing: showing,
+                browser: report(tab, number: number, name: name)
+            )
         }
     }
 
@@ -107,9 +111,8 @@ extension AppModel {
     ///
     /// The second half is not a fallback for tidiness. A workspace reopened this morning has every
     /// browser tab it had last night, and none of them has a web view until somebody clicks it, so
-    /// "the tab is at this address and has not been drawn yet" is the ordinary answer rather than
-    /// the exceptional one.
-    private func report(_ tab: CenterTab, number: Int, name: String) -> BrowserPaneReport {
+    /// "the tab is at this address and has not been drawn yet" is the ordinary answer.
+    func report(_ tab: CenterTab, number: Int, name: String) -> BrowserPaneReport {
         guard let session = CenterTabStore.shared.liveBrowser(for: tab) else {
             return BrowserPaneReport(
                 number: number,

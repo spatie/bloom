@@ -91,7 +91,7 @@ uses, so Bloom and Bloom Dev can never land on one. The landmine there is `socka
 
 ## 3. The tools
 
-Twenty-three, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
+Twenty-five, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
 gate. A list of handlers rather than a switch, because a switch would put every tool in three
 places: the listing, the dispatch and the gate.
 
@@ -110,6 +110,8 @@ places: the listing, the dispatch and the gate.
 | `pane_close` | Take one back off the screen | ✓ | | |
 | `pane_rename` | Give a tab a name the reader can find it by | ✓ | | |
 | `pane_list` | What the workspace has open: each pane's kind, its name, whether it is in the tab in front, and for a browser its number and its address | ✓ | | |
+| `workspace_tabs` | The same window read as a strip: every tab in order, what it is called, which one is in front, and one true thing about what is in it | ✓ | | |
+| `workspace_tab_select` | Make one of those tabs the one in front, by its number or by its name. It cannot make one | ✓ | | |
 | `browser_read` | One browser's toolbar: address, page title, load state, whether Back and Forward would do anything | ✓ | | |
 | `browser_reload` | Fetch that page again | ✓ | | |
 | `browser_go` | Point a pane that is already open at another http or https address | ✓ | | |
@@ -135,18 +137,29 @@ transport failure the CLI may retry or surface as a broken server; an errored re
 model reads and can act on. "You are not allowed to do that" is something to tell the model, not
 something to tell the transport.
 
-### The thirteen that need the app, and the ten that do not
+### The fifteen that need the app, and the ten that do not
 
 `BridgeToolbox.standard` holds the ten that reach nothing but the store, and it is what a
 `BridgeServer` built without the app serves, which is every test that did not ask for more.
-`AppModel.bridgeToolbox()` adds the other thirteen to it, because starting a workspace has to reach
+`AppModel.bridgeToolbox()` adds the other fifteen to it, because starting a workspace has to reach
 the main-actor graph that runs one, asking for a merge has to reach the same path the Merge button
 takes, and a pane is a thing the window owns. Each of those crosses the line as an injected closure
 (`WorkspaceStarting`, `WorkspaceMergeRequesting`, `PaneOpening`, `PaneSplitting`, `PaneClosing`,
-`PaneRenaming`, `PaneListing`, `BrowserPaneCommanding`), so a pane an agent asks for is the pane the
+`PaneRenaming`, `PaneListing`, `BrowserPaneCommanding`, `WorkspaceTabListing`,
+`WorkspaceTabSelecting`), so a pane an agent asks for is the pane the
 menu makes, unchanged and not copied. It adds them **to** `.standard` rather than listing its
 handlers again, because a copy of that list is a copy that drifts: a tool added to the core toolbox
 and not to the app's would pass every test in the suite and never reach the running app.
+
+**The two tab tools are on that side for a reason worth stating plainly, because it is not the
+same reason the browser tools are there.** A browser is a `WKWebView`, which is obviously the
+window's. A tab looks like data and is not: the tool tabs are a JSON blob in user defaults that
+only `CenterTabStore` reads, the split arrangements are more of the same under `WorkspaceTabsStore`,
+and **which tab a workspace is in is in memory on the main actor and is written nowhere at all**.
+There is no table to read, so there was never a version of these two that lived in
+`BridgeToolbox.standard`. What that forces is the pair of closures above, and the same rule the
+rest of the family follows: no workspace argument, so the caller reads and moves the strip of the
+workspace it is standing in and no other.
 
 **The last two of those are what a browser tool sees the window through.** `PaneListing` takes a
 workspace and gives back a `PaneCensus`, and that shape is the point: there is no argument on it
@@ -175,6 +188,10 @@ directly, and a second `SQLiteDatabase` on the file is the cross-connection sequ
 Nothing here reads or writes a file, runs a command, or touches a repository's contents. The
 worktree path is handed over precisely so the agent uses **its own** tools on an ordinary git
 checkout, which `workspace_list`'s description says out loud.
+
+Nothing here opens or closes a tab except the tools whose whole subject that is. `workspace_tab_select`
+brings an existing tab forward and will not make one on the way, which is what keeps "go back to the
+terminal" from forking a second terminal.
 
 Nothing archives. `workspace_archive` is not one of the sixteen: it removes a worktree and can
 remove a branch with it, and the whole reason Bloom asks before archiving by hand is that the
@@ -285,6 +302,65 @@ the address it remembers and refused for anything needing a live page. `browser_
 schemes `pane_open` takes and refuses the rest, through the same reading, so neither door will
 render `file:///` in the owner's window on a model's say-so.
 
+### The strip, and what a tab tells a caller
+
+`pane_list` and `workspace_tabs` report one window and are not two versions of one tool. The first
+flattens a workspace into panes, which is the shape the browser tools need, because the question
+they ask first is "which of the reader's browsers do you mean" and a browser is a pane wherever it
+is sitting. The second is the strip itself, because that is the shape a person speaks in: "go back
+to the chat about the parser", "bring the notes forward". A flat list of panes has nothing in it
+that is a tab, since a split contributes two rows and neither of them is the thing the reader would
+click.
+
+A tab is one entry of that strip, and it is one of five things: a chat, a terminal, a browser, the
+review or the notes. The first three a workspace can have several of; the last two it has exactly
+one of each. A tab can also have been split, in which case it owns a small tree of panes and the
+other things living in them have dropped out of the strip. That last part is the one piece of
+window furniture a caller mostly does not need, so it is reported and kept small: a split tab lists
+what it has absorbed, kind and name, and nothing else. Ratios, axes, which half has the keyboard
+and the pane ids themselves are all left out, because there is no tool that takes any of them.
+
+What each kind says is what Bloom is already holding:
+
+| Kind | What the tab reports |
+| --- | --- |
+| `chat` | Which CLI drives it, the `sessions` row's own state, whether a turn is running, how many messages |
+| `terminal` | The directory its shell was started in, and whether a shell has been started at all |
+| `browser` | The toolbar: where it is pointed, what the page calls itself, whether it is loading, and the number the `browser_` tools take |
+| `review` | The file it is on, or that it is on the whole change |
+| `notes` | How long the note is, and never a word of it |
+
+**The cases were chosen against a rule rather than by taste: nothing in a listing may cost a
+subprocess or a request.** The two temptations were a terminal's live working directory and what is
+running in it, and both mean asking tmux, inside a call an agent makes at the top of every turn. So
+the tab says where its shell started and says out loud that it does not know the rest, which is a
+true small answer instead of a plausible large one. For the same reason nothing here creates:
+`CenterTabStore.liveBrowser` is asked rather than `browser(for:)` and `TerminalSessionStore.hasShell`
+rather than `terminal(for:)`, so a listing cannot fetch a page or fork a shell in a worktree nobody
+had opened.
+
+**A tab is named by a number or by its name, and never by its id.** The number is its place in the
+strip counting from 1, which is `BrowserPaneReport.number`'s argument applied again: a uuid is a
+handle a model cannot read, cannot repeat to a person and can carry in from somewhere stale. The
+title is accepted as well, which the browser tools deliberately do not do, and the difference is
+that a browser's name is the page's own `<title>` while a tab is the one thing in this window a
+person names out loud. A title that two tabs share is refused with their numbers rather than
+resolved to the first, because guessing there means selecting a tab the caller did not name.
+
+That title is whatever the strip draws, down to the fallback: a chat nobody has titled reads
+`Untitled` in the strip, in the Go to Tab menu and over the bridge, because `workspace_tab_select`
+takes back the name `workspace_tabs` handed out. One function answers it for all three,
+`CenterTabStore.title`, and it was three functions with two different fallbacks.
+
+**`workspace_tab_select` cannot create a tab, and that is the refusal it was written around.** The
+tempting shape is "select it, and open it if it is not there", which reads as helpful and is how an
+agent asked to go back to a terminal ends up forking a second one beside the one it meant. A name
+nothing answers to is a refusal carrying the strip, ten tabs and a count of the rest, so the next
+call can pick off it without a workspace of thirty tabs spending the whole refusal listing them, and
+`pane_open` stays the only door a tab comes through. Selecting a chat also makes it the workspace's
+active conversation, which is not an extra effect: it is what clicking that tab does, through the
+same `WorkspaceTabsStore.select` the click goes through.
+
 ### Which branch a workspace starts on
 
 `workspace_start` offers the choice the create sheet offers, and it is the sheet's own choice
@@ -362,7 +438,7 @@ So `BridgeToolApproval` names the tools Bloom answers for itself:
 
 | Self-approved | Not |
 | --- | --- |
-| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `pane_list`, `browser_read`, `quick_prompt_list` | everything else |
+| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `pane_list`, `workspace_tabs`, `workspace_tab_select`, `browser_read`, `quick_prompt_list` | everything else |
 
 It is a list rather than "anything with our prefix", so a tool added later is opted in by somebody
 thinking about it rather than by inheriting a decision made before it existed.
@@ -379,6 +455,15 @@ The four pane tools are on the list because each adds or changes something the r
 undo, in the workspace whose agent is asking and nowhere else. `pane_close` refuses the two cases
 that would cost anything: it will not empty the centre column, and it cannot close the review or
 the notes, which hold the reader's own work.
+
+The two tab tools follow them. `workspace_tabs` reports the same furniture `pane_list` reports in
+another shape, all of it on the screen in front of the reader and none of it the contents of a
+page, a diff or a note. `workspace_tab_select` is `pane_open` with less in it: that one both makes
+a tab and brings it to the front and is already on this list, so asking before an agent may bring
+forward a tab that already exists would cost a hung turn and protect nothing. What it changes is
+which tab the reader is looking at, and one click puts it back. The cost that is real is
+interruption, and it is answered in the tool's description rather than by a prompt: a person may be
+typing in the tab in front, so the tool says to ask before pulling them out of it.
 
 **The seven browser tools split, and the line between them is the chrome.** `pane_list` and
 `browser_read` report the strip and the address bar: what is open, what it is called, where each
