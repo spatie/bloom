@@ -846,17 +846,23 @@ public actor AgentRunner {
             return
         }
 
-        if status != 0, !sawResult {
-            let tail = stderrTail.joined(separator: "\n")
-            let message = "The agent exited with status \(status)."
-            let payload = (try? JSONEncoder().encode(
-                ProcessFailure(status: Int(status), stderr: tail, command: launchedCommand)
-            )) ?? Data(#"{"type":"error"}"#.utf8)
+        // The state is read before anything is applied to it, because it is the question being
+        // asked: was a turn open at the moment this process went away. See `UnfinishedRun`, which
+        // is the bug the owner reported as "sometimes the AI just stops dead in the water".
+        if let unfinished = UnfinishedRun.of(
+            status: status,
+            sawResult: sawResult,
+            state: session.state,
+            stderr: stderrTail.joined(separator: "\n"),
+            command: launchedCommand
+        ) {
+            Self.log.error("""
+                the agent for \(self.session.id.rawValue, privacy: .public) ended on status \
+                \(status, privacy: .public) with the session \
+                \(self.session.state.rawValue, privacy: .public)
+                """)
 
-            await ingest(.error(AgentError(
-                message: tail.isEmpty ? message : "\(message)\n\(tail)",
-                raw: payload
-            )))
+            await ingest(.error(AgentError(message: unfinished.message, raw: unfinished.payload)))
 
             session.apply(.processFailed)
             await save(session)
@@ -972,17 +978,6 @@ public actor AgentRunner {
         init(text: String) {
             message = Body(content: [Block(text: text)])
         }
-    }
-
-    /// Stored as the `.error` row when the process dies without ever emitting a `result`.
-    private struct ProcessFailure: Encodable {
-        let type = "error"
-        let subtype = "process_exit"
-        let status: Int
-        let stderr: String
-        /// The resolved path of what was launched, so a row can name the binary that died rather
-        /// than the name it was asked for.
-        let command: String
     }
 
 }

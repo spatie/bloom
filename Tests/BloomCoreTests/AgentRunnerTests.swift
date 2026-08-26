@@ -760,6 +760,76 @@ struct AgentRunnerProcessTests {
         #expect(payload["stderr"]?.stringValue == "error: not logged in")
     }
 
+    /// **The turn that stopped dead.** A `claude` that exits cleanly in the middle of a turn used
+    /// to take the quiet branch of `finish`: the session row went to `idle` and nothing at all
+    /// reached the event sink, so the transcript ended on whatever row had arrived last and the
+    /// composer kept its working state for the rest of the launch. Four of the owner's chats did
+    /// exactly this within thirty five seconds of each other. The row and the event are what make
+    /// the stall something the transcript states. See `UnfinishedRun`.
+    @Test("a clean exit in the middle of a turn ends it rather than leaving it running")
+    func cleanExitMidTurnEndsTheTurn() async throws {
+        let store = try makeTestStore("agent")
+        let session = try await makeSession(store)
+        let recorder = ProcessRecorder(status: 0)
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session, store: store, makeProcess: recorder.factory
+        )
+
+        // The event matters as much as the row: the row is what the transcript keeps, and the
+        // event is what unlocks the composer and stops the status bar counting this turn.
+        let stream = runner.events
+        let sawError = Task<Bool, Never> {
+            for await event in stream {
+                if case .error = event { return true }
+            }
+            return false
+        }
+
+        try await runner.send("run phpstan")
+        let process = try #require(recorder.last)
+        process.emit(#"{"type":"system","subtype":"init","session_id":"s","cwd":"/tmp/w"}"#)
+        // Nothing else. This is the whole of the bug: the child goes away with a clean status and
+        // never says the turn is over.
+        process.endOutput()
+
+        await waitUntil("the session stopped claiming a turn was running") {
+            (try? await store.session(id: session.id)?.state) == .failed
+        }
+
+        let errors = try await store.messages(sessionID: session.id).filter { $0.kind == .error }
+        #expect(errors.count == 1)
+        let exit = AgentExit.decode(errors[0].payload)
+        #expect(exit.cause == .endedMidTurn)
+
+        #expect(await sawError.value)
+        #expect(await runner.isRunning == false)
+    }
+
+    /// The other half of the same rule, and the reason it is a rule rather than "always draw a
+    /// row": a process that exits after finishing its turn is an ordinary ending and has nothing
+    /// to report.
+    @Test("a clean exit after a result reports nothing")
+    func cleanExitAfterResultIsQuiet() async throws {
+        let store = try makeTestStore("agent")
+        let session = try await makeSession(store)
+        let recorder = ProcessRecorder(status: 0)
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session, store: store, makeProcess: recorder.factory
+        )
+
+        try await runner.send("hello")
+        let process = try #require(recorder.last)
+        process.emit(#"""
+        {"type":"result","subtype":"success","is_error":false,"duration_ms":10,"session_id":"s"}
+        """#)
+        process.endOutput()
+
+        await waitUntil("the turn landed idle") { (try? await store.session(id: session.id)?.state) == .idle }
+
+        let errors = try await store.messages(sessionID: session.id).filter { $0.kind == .error }
+        #expect(errors.isEmpty)
+    }
+
     @Test("cancelling terminates the process and marks the session cancelled")
     func cancels() async throws {
         let store = try makeTestStore("agent")

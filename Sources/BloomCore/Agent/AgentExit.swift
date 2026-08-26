@@ -17,6 +17,11 @@ public enum AgentExitCause: Sendable, Hashable {
     case reported(String)
     /// It printed nothing at all.
     case silent
+    /// The process went away in the middle of a turn, on a clean status and with nothing on
+    /// stderr. Its own case rather than `.silent` because "Agent exited (0)" reads as nothing
+    /// having gone wrong, and a turn that stopped dead is the one ending a person most needs
+    /// named. See `UnfinishedRun`.
+    case endedMidTurn
     /// Bloom could not write the row. The agent is not what failed.
     case storage(String)
     /// The turn never reached a process. Nothing was launched and nothing was said to the agent,
@@ -61,6 +66,9 @@ public struct AgentExit: Sendable, Hashable {
     public var title: String {
         if case .storage = cause { return "Not saved" }
         if case .notStarted = cause { return "Not sent" }
+        // Deliberately not "Agent exited (0)". The status is true and it is also the least useful
+        // thing that could be said about a turn nothing will ever close.
+        if case .endedMidTurn = cause { return "Turn never finished" }
         return status.map { "Agent exited (\($0))" } ?? "Agent error"
     }
 
@@ -75,6 +83,9 @@ public struct AgentExit: Sendable, Hashable {
             Self.oneLine(text)
         case .silent:
             "It stopped without printing anything."
+        case .endedMidTurn:
+            "The agent's process ended in the middle of this turn, without an error and without "
+                + "finishing."
         case .storage(let message):
             Self.oneLine(message)
         case .notStarted(let message):
@@ -109,6 +120,13 @@ public struct AgentExit: Sendable, Hashable {
             Nothing in this conversation was lost, and everything the agent had already changed is \
             still in the worktree. Send the turn again, and if it stops here a second time, run \
             the CLI once in a terminal to see what it says.
+            """ + ranCommand
+        case .endedMidTurn:
+            """
+            Nothing in this conversation was lost, and everything the agent had already changed is \
+            still in the worktree. Send the turn again. It is worth checking the limits panel \
+            first: the CLI has been seen to end a turn this way with the weekly allowance nearly \
+            spent.
             """ + ranCommand
         case .storage:
             """
@@ -169,6 +187,13 @@ public struct AgentExit: Sendable, Hashable {
             let message = json?["message"]?.stringValue ?? ""
             let cause: AgentExitCause = message.isEmpty ? .silent : .notStarted(message)
             return AgentExit(status: status, cause: cause, detail: message)
+        }
+
+        // A turn nothing closed, written by `UnfinishedRun` when the process went away with a
+        // clean status and nothing to say. It carries no stderr by construction, so classifying
+        // it by its output would land on `.silent` and draw "Agent exited (0)".
+        if json?["subtype"]?.stringValue == UnfinishedRun.abandonedSubtype {
+            return AgentExit(status: status, cause: .endedMidTurn, detail: stderr, command: command)
         }
 
         return AgentExit(
