@@ -25,20 +25,21 @@ struct BloomCommands: Commands {
     /// The focused window's Save, when it has one. See `FocusedMenuValues`.
     @FocusedValue(\.saveAction) private var saveAction: SaveAction?
 
-    /// Opens the project settings window, which is a scene rather than a sheet.
-    @Environment(\.openWindow) private var openWindow
-
-    /// The project of the selected workspace, or the only sensible fallback: the first one.
-    private var projectSettingsRepo: Repo? {
-        model.selectedWorkspace.flatMap(model.repo(for:)) ?? model.repos.first
-    }
-
     /// Landing the branch, published by the pull request band because that is where the
     /// confirmation lives. Nil whenever that band is not on screen, which greys the item.
     @FocusedValue(\.mergeAction) private var mergeAction: MergeAction?
 
+    /// Opens the project settings window, which is a scene rather than a sheet.
+    @Environment(\.openWindow) private var openWindow
+
     init(model: AppModel) {
         self.model = model
+    }
+
+    /// Which project the settings item opens: the selected workspace's, or the only sensible
+    /// fallback, which is the first one.
+    private var projectSettingsRepo: Repo? {
+        model.selectedWorkspace.flatMap(model.repo(for:)) ?? model.repos.first
     }
 
     var body: some Commands {
