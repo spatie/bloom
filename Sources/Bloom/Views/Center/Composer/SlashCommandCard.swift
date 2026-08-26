@@ -43,8 +43,8 @@ struct SlashCommandCard: View {
     /// is the half a reader looks at first. So the prose is cut to fit instead.
     var availableHeight: CGFloat
 
-    /// The same box `AttachmentCard` takes.
-    private static let maxWidth: CGFloat = 520
+    /// The same box `AttachmentCard` takes, from the one place it is written.
+    private static var maxWidth: CGFloat { HoverCardWidth.ceiling }
     /// Fewer lines than the file preview reads, and the reason is the header this card has and
     /// that one does not. A hover card grows upwards from the composer, so every line of it comes
     /// out of the conversation the reader is answering: at the file preview's twenty four the name

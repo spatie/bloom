@@ -1,11 +1,17 @@
 import SwiftUI
 import BloomCore
 
-/// The card that opens beside a workspace row while the pointer rests on it.
+/// The card that opens beside a workspace row while the pointer rests on it, and under the pull
+/// request band in the title bar.
 ///
 /// What it says is `WorkspaceHoverCard`'s, in the core, where the suite holds it. This is the
 /// drawing and nothing else, which is why it takes one value rather than a workspace and a pull
 /// request: a card assembled here would be a card assembled in a target the tests cannot import.
+///
+/// **One view for both, and that is what the value being in the core buys.** The band's card is a
+/// second maker rather than a second view (`WorkspaceHoverCard.pullRequestBand`), so the two
+/// surfaces cannot drift into two card designs, and the width below arrived for the band and the
+/// row got it for nothing.
 ///
 /// **It takes no clicks, and that is the design rather than a limitation of it.** The panel it is
 /// drawn in ignores the mouse entirely (see `WorkspaceHoverCardPresenter`), so nothing here is a
@@ -22,12 +28,6 @@ import BloomCore
 struct WorkspaceHoverCardView: View {
     var card: WorkspaceHoverCard
 
-    /// Wider than the 260 point sidebar, deliberately. The whole point of the card is having room
-    /// the row does not, and a card the width of the pane it opens out of reads as the pane
-    /// repeated rather than as the pane explained. Wide enough for a two line workspace name at
-    /// reading size, which is what most of them come to.
-    static let width: CGFloat = 320
-
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.spacingWide) {
             branchLine
@@ -35,10 +35,28 @@ struct WorkspaceHoverCardView: View {
             footer
         }
         .padding(Metrics.gutter)
-        .frame(width: Self.width, alignment: .leading)
-        // Sized by its content, so a one line name draws a shorter card than a three line one.
-        // The panel asks the hosting view for this height. See the presenter.
-        .fixedSize(horizontal: false, vertical: true)
+        // The card is as wide as what is on it, between `HoverCardWidth`'s floor and its ceiling.
+        //
+        // It was a flat 320, and a workspace on `freekmurze/review-support-question` drew that
+        // line as `…eekmurze/review-support-question`: the card cutting off the one thing it was
+        // opened to show whole. The bounds and the reason for each are in `HoverCardWidth`.
+        //
+        // **What may set the width is the lines that cannot wrap**, which is the branch with its
+        // counts, the state with its detail, and the number with the age. The name is prose and
+        // has three lines to spend, so it is capped at the floor's own measure by `title` below
+        // rather than being allowed to pull the card out to a banner. That is the difference
+        // between a card that got wider because a branch is long and a card that got wider because
+        // somebody pasted a sentence into a workspace name, and only the first is worth the width.
+        .frame(
+            minWidth: HoverCardWidth.minimum,
+            maxWidth: HoverCardWidth.ceiling,
+            alignment: .leading
+        )
+        // Both axes now. Horizontally it is what makes the frame above resolve to the content's
+        // own width clamped into that range, rather than to whatever the panel proposes.
+        // Vertically it is what it always was: a one line name draws a shorter card than a three
+        // line one. The panel asks the hosting view for both. See the presenter.
+        .fixedSize()
         .background(cardBackground)
         // The card is drawn in a window of its own, which cannot be reached by the pointer or by
         // VoiceOver. Everything on it is on the row as well, in the row's own accessibility value
@@ -102,7 +120,18 @@ struct WorkspaceHoverCardView: View {
                 // place to read a paragraph.
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                // `idealWidth` is what stops a long name widening the card, and it only ever
+                // applies while the card is being measured: the card's own frame proposes a
+                // definite width, and against a definite proposal this frame is `maxWidth` alone
+                // and the name fills the card as it always did. Asked with no proposal, which is
+                // the one pass that decides how wide the card comes out, it answers with the
+                // floor's own measure instead of with the whole name on one line. A name is prose
+                // and wraps; the branch above it cannot.
+                .frame(
+                    idealWidth: HoverCardWidth.minimum - Metrics.gutter * 2,
+                    maxWidth: .infinity,
+                    alignment: .leading
+                )
 
             WorkspaceStatusGlyph(status: card.status)
                 // The glyph sizes itself to the sidebar's icon column and is drawn at the cap

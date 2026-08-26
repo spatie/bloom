@@ -9,8 +9,15 @@ import BloomCore
 /// by side answers every question except where the panel lands, and where the panel lands is
 /// `HoverCardPlacement`, which the suite holds.
 ///
-/// Each pane is the card at its real 320 point width, over the sidebar's own ground, so a card
-/// and the pane it opens out of can be judged against each other.
+/// Each pane is the card at the width it comes out at, over the sidebar's own ground, so a card
+/// and the pane it opens out of can be judged against each other. The width is the second thing
+/// this page is for: it is the content's now, between `HoverCardWidth.minimum` and
+/// `.ceiling`, so the row of panes should be ragged and the long branch in row two should be the
+/// widest thing here without reaching the ceiling.
+///
+/// The last row is the same view filled in for the pull request band in the title bar rather than
+/// for a sidebar row. See `WorkspaceHoverCard.pullRequestBand`: same four slots, different
+/// subject.
 ///
 ///     Bloom --snapshot-gallery <dir> --gallery hover-card
 struct WorkspaceHoverCardGallery: View {
@@ -164,6 +171,42 @@ struct WorkspaceHoverCardGallery: View {
                     )
                 ))
             }
+
+            // The band's card. The branch here is the one the owner photographed truncated, so
+            // this row is where to check that it is not truncated any more.
+            HStack(alignment: .top, spacing: Metrics.pane) {
+                pane("Band: no pull request yet", bandCard(
+                    workspace(
+                        name: "Answer a review support question",
+                        branch: "freekmurze/review-support-question",
+                        additions: 118,
+                        deletions: 6,
+                        daysAgo: 0.2
+                    )
+                ))
+                pane("Band: checks failing", bandCard(
+                    workspace(
+                        name: "Fix the flaky diff parser test",
+                        branch: "agent/2026-08/fix-the-flaky-diff-parser-test",
+                        additions: 42,
+                        deletions: 9,
+                        daysAgo: 1
+                    ),
+                    pullRequest: pullRequest(
+                        checks: .failing, summary: "1 of 12 required checks failed"
+                    )
+                ))
+                pane("Band: merged", bandCard(
+                    workspace(
+                        name: "Draw a file path in a sent turn as a file",
+                        branch: "chat/file-pill-and-merge-scroll",
+                        daysAgo: 30
+                    ),
+                    pullRequest: pullRequest(
+                        number: 23, state: "MERGED", checks: .passing, summary: "12 checks passed"
+                    )
+                ))
+            }
         }
         .padding(Metrics.pane)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -189,6 +232,19 @@ struct WorkspaceHoverCardGallery: View {
         )
     }
 
+    /// The same card said about the pull request band. Built through the band's own maker rather
+    /// than by hand, so this page cannot show a card the window does not draw.
+    private func bandCard(
+        _ workspace: Workspace,
+        pullRequest: PullRequest? = nil
+    ) -> WorkspaceHoverCard {
+        WorkspaceHoverCard.pullRequestBand(
+            workspace: workspace,
+            pullRequest: pullRequest,
+            now: Self.now
+        )
+    }
+
     private func pane(_ title: String, _ card: WorkspaceHoverCard) -> some View {
         VStack(alignment: .leading, spacing: Metrics.spacingWide) {
             Text(title)
@@ -196,21 +252,24 @@ struct WorkspaceHoverCardGallery: View {
                 .foregroundStyle(Palette.textSecondary)
 
             // Drawn exactly as the panel draws it, rim and material and all, and with no shadow,
-            // because the shadow is the panel's rather than the card's.
+            // because the shadow is the panel's rather than the card's. No frame around it: the
+            // card sizes itself now, so a pane that pinned it to a width would be the one place
+            // in this app where it did not. Which pane is widest is the thing to look at.
             WorkspaceHoverCardView(card: card)
         }
-        .frame(width: WorkspaceHoverCardView.width, alignment: .leading)
     }
 }
 
 extension Gallery {
     /// The registry entry for this page. See `Gallery`.
     ///
-    /// Nine cards in three rows, at the card's real width.
+    /// Twelve cards in four rows, each at the width its own content comes out at. The page is
+    /// wider and taller than it was because the cards are: the ceiling is 520 and the tallest row
+    /// now has a three line name in it.
     static let hoverCard = Gallery(
         name: "hover-card",
         title: "Workspace hover card",
-        size: CGSize(width: 1_120, height: 620),
+        size: CGSize(width: 1_440, height: 860),
         needsFocus: false,
         view: { _ in AnyView(WorkspaceHoverCardGallery()) }
     )

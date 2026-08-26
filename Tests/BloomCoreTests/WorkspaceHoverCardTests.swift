@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import BloomCore
 
-/// What the card beside a hovered sidebar row says, and where it is put.
+/// What the card beside a hovered sidebar row says, how wide it comes out, and where it is put.
 ///
 /// Every date here is built rather than read off the clock, for the reason `HomeListTests` writes
 /// down: a suite that says "six days ago" as an offset from `Date()` passes all afternoon and
@@ -244,6 +244,55 @@ struct WorkspaceHoverCardTests {
         #expect(card.age == rung.phrase)
     }
 
+    // MARK: - How wide it comes out
+
+    /// The card the width of its content, which is the whole change: a branch called
+    /// `freekmurze/review-support-question` used to be drawn `…eekmurze/review-support-question`
+    /// inside a card that was 320 points whatever was on it.
+    @Test("Content between the two bounds is drawn at its own width")
+    func widthFollowsTheContent() {
+        #expect(HoverCardWidth.fits(content: 412) == 412)
+    }
+
+    /// The floor, which is what the fixed width became. A workspace called `x` on a branch called
+    /// `x` is a card, not a small square.
+    @Test("Content narrower than the floor is drawn at the floor")
+    func widthNeverGoesBelowTheFloor() {
+        #expect(HoverCardWidth.fits(content: 120) == HoverCardWidth.minimum)
+        #expect(HoverCardWidth.fits(content: 0) == HoverCardWidth.minimum)
+    }
+
+    /// And the ceiling, past which truncating is the right answer. A card as wide as the longest
+    /// branch anybody can type is worse than a truncated one.
+    @Test("Content wider than the ceiling is drawn at the ceiling")
+    func widthNeverGoesAboveTheCeiling() {
+        #expect(HoverCardWidth.fits(content: 900) == HoverCardWidth.ceiling)
+    }
+
+    /// A text layout answers in fractions and a panel on a half point draws its rim across two
+    /// rows of pixels. Rounded up rather than down, so the rounding never costs a character.
+    @Test("A fractional width is rounded up to a whole point")
+    func widthIsWhole() {
+        #expect(HoverCardWidth.fits(content: 412.25) == 413)
+    }
+
+    /// `NSHostingView.fittingSize` answers zero for a view that has not laid out, and has been
+    /// seen to answer worse than that. Neither is a width, and a panel given one would be a
+    /// shadow with nothing in it.
+    @Test("A width that is not a number lands on the floor")
+    func widthOfNothingAtAll() {
+        #expect(HoverCardWidth.fits(content: .nan) == HoverCardWidth.minimum)
+        #expect(HoverCardWidth.fits(content: .infinity) == HoverCardWidth.minimum)
+    }
+
+    /// The floor has to leave the ceiling somewhere to go, and the ceiling has to be a card rather
+    /// than a pane. Written as a test because both are read by four cards in two targets.
+    @Test("The bounds are the right way round and neither is a pane")
+    func boundsAreSane() {
+        #expect(HoverCardWidth.minimum < HoverCardWidth.ceiling)
+        #expect(HoverCardWidth.minimum > 260)
+    }
+
     // MARK: - Where it goes
 
     /// The ordinary case: a window in the middle of a large screen, sidebar row on the left.
@@ -334,5 +383,84 @@ struct WorkspaceHoverCardTests {
         )
 
         #expect(frame.maxY == screen.maxY - HoverCardPlacement.screenMargin)
+    }
+
+    // MARK: - Where it goes under the title bar band
+
+    /// The ordinary case: a window somewhere in a large screen, band at the trailing end of its
+    /// title bar. Under the band, trailing edges flush, because the band's trailing edge is the
+    /// window's and that is the line the eye is following down.
+    @Test("The band's card hangs under it with their trailing edges aligned")
+    func placedUnderTheBand() {
+        let screen = CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
+        let band = CGRect(x: 1_500, y: 948, width: 380, height: 52)
+
+        let frame = HoverCardPlacement.frame(
+            anchor: band, size: CGSize(width: 400, height: 160), visible: screen, side: .below
+        )
+
+        #expect(frame.maxX == band.maxX)
+        #expect(frame.maxY == band.minY - HoverCardPlacement.gap)
+    }
+
+    /// The case the band is always in on a maximised window: its trailing edge IS the screen's, so
+    /// a card flush with it would have its rim on the last column of pixels.
+    @Test("A band against the right edge of the screen keeps the card's margin")
+    func bandAgainstTheScreenEdge() {
+        let screen = CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
+        let band = CGRect(x: 1_540, y: 1_020, width: 380, height: 52)
+
+        let frame = HoverCardPlacement.frame(
+            anchor: band, size: CGSize(width: 400, height: 160), visible: screen, side: .below
+        )
+
+        #expect(frame.maxX == screen.maxX - HoverCardPlacement.screenMargin)
+        #expect(frame.minX >= screen.minX + HoverCardPlacement.screenMargin)
+    }
+
+    /// A window dragged most of the way off the bottom of the screen, which is the only way a band
+    /// at the top of a window ends up near the bottom of a display.
+    @Test("With no room under the band the card flips above it")
+    func flipsAboveWhenThereIsNoRoomBelow() {
+        let screen = CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
+        let band = CGRect(x: 1_500, y: 100, width: 380, height: 52)
+
+        let frame = HoverCardPlacement.frame(
+            anchor: band, size: CGSize(width: 400, height: 260), visible: screen, side: .below
+        )
+
+        #expect(frame.minY == band.maxY + HoverCardPlacement.gap)
+    }
+
+    /// A display with room for the card neither above the band nor below it. Flipping would trade
+    /// one overhang for another and put the card over the title bar besides, so it stays where it
+    /// was and the clamp decides. The top edge survives, as it does for a row.
+    @Test("With room on neither side of the band the card is clamped rather than flipped")
+    func clampedWhenNeitherAboveNorBelowFits() {
+        let screen = CGRect(x: 0, y: 0, width: 1_920, height: 300)
+        let band = CGRect(x: 1_500, y: 200, width: 380, height: 52)
+
+        let frame = HoverCardPlacement.frame(
+            anchor: band, size: CGSize(width: 400, height: 260), visible: screen, side: .below
+        )
+
+        #expect(frame.minY == screen.minY + HoverCardPlacement.screenMargin)
+        #expect(frame.maxY <= screen.maxY - HoverCardPlacement.screenMargin)
+    }
+
+    /// The sidebar's own placement is unchanged by the band's arriving, which is the whole point
+    /// of the side being an argument with a default rather than a second function.
+    @Test("A row still gets the same rectangle it did before there was a side to pass")
+    func trailingIsStillTheDefault() {
+        let screen = CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
+        let row = CGRect(x: 200, y: 800, width: 240, height: 32)
+        let size = CGSize(width: 300, height: 140)
+
+        #expect(
+            HoverCardPlacement.frame(anchor: row, size: size, visible: screen)
+                == HoverCardPlacement.frame(
+                    anchor: row, size: size, visible: screen, side: .trailing
+                )
+        )
     }
 }

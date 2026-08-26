@@ -1,6 +1,7 @@
 import CoreGraphics
 
-/// Where the card that opens beside a sidebar row is put, in screen coordinates.
+/// Where a hover card is put, in screen coordinates: beside a sidebar row, or under the pull
+/// request band in the title bar.
 ///
 /// It is a floating panel rather than something drawn inside the window, because the card has to
 /// stand to the RIGHT of a 260 point sidebar and the sidebar is an `NSSplitView` subview, which
@@ -14,6 +15,25 @@ import CoreGraphics
 /// the pointer: a card that follows the pointer inside a 32 point row wobbles as the hand
 /// settles, and the thing being described is the row.
 public enum HoverCardPlacement {
+    /// Which way the card hangs off the thing it describes.
+    ///
+    /// Two, because the two things that open one sit in different places. A sidebar row is a
+    /// horizontal band in the leftmost column and the space beside it is where the eye already
+    /// travels. The pull request band is at the trailing end of the title bar with the top of the
+    /// screen above it and nothing at all to its right, so a card beside it would be a card off
+    /// the edge of the window.
+    public enum Side: Sendable, Hashable {
+        /// Beside the anchor, top edges aligned. The sidebar row's.
+        case trailing
+        /// Under the anchor, trailing edges aligned. The title bar band's.
+        ///
+        /// Trailing aligned rather than leading, because the band ends at the window's right edge
+        /// and that edge is what the reader's eye is following down. Hung off the band's leading
+        /// edge instead, the card would stand under the window's title rather than under the
+        /// thing it is about.
+        case below
+    }
+
     /// The gap between the row and the card.
     ///
     /// Enough that the card reads as a separate surface floating over the centre pane rather than
@@ -44,27 +64,52 @@ public enum HoverCardPlacement {
     ///    of a full sidebar would otherwise run off the bottom, which is where the age and the
     ///    pull request number are.
     ///
+    /// `.below` takes the same three decisions with the axes swapped: under the band rather than
+    /// beside the row, flipped ABOVE it when the screen has no room underneath, and clamped. The
+    /// flip almost never fires, because the band is at the top of a window and what is under it is
+    /// the window. It fires for a window dragged far enough down the display that its title bar is
+    /// near the bottom of it, and that is exactly the case a hand-checked rectangle never gets
+    /// looked at in.
+    ///
     /// Nothing here consults the window. The card may overlap the transcript, and should: it is a
     /// card that opens over what you are reading and closes again, exactly as a menu does.
     public static func frame(
         anchor: CGRect,
         size: CGSize,
-        visible: CGRect
+        visible: CGRect,
+        side: Side = .trailing
     ) -> CGRect {
-        var origin = CGPoint(
-            x: anchor.maxX + gap,
-            // `maxY` on both sides: the card's top edge on the row's top edge.
-            y: anchor.maxY - size.height
-        )
+        var origin = switch side {
+        case .trailing:
+            CGPoint(
+                x: anchor.maxX + gap,
+                // `maxY` on both sides: the card's top edge on the row's top edge.
+                y: anchor.maxY - size.height
+            )
+        case .below:
+            CGPoint(
+                // `maxX` on both sides: the card's trailing edge on the band's trailing edge.
+                x: anchor.maxX - size.width,
+                y: anchor.minY - gap - size.height
+            )
+        }
 
         // The flip. Measured against the whole card, so a card that would be cut off by one point
         // moves rather than being clipped by one point.
-        if origin.x + size.width > visible.maxX - screenMargin {
+        if side == .trailing, origin.x + size.width > visible.maxX - screenMargin {
             let flipped = anchor.minX - gap - size.width
             // Only when the other side genuinely has room. On a screen too narrow for the card
             // beside the window at all, flipping trades one overhang for another, and the clamp
             // below is a better answer than a card that has jumped to the wrong side as well.
             if flipped >= visible.minX + screenMargin { origin.x = flipped }
+        }
+
+        if side == .below, origin.y < visible.minY + screenMargin {
+            let flipped = anchor.maxY + gap
+            // Same condition as the horizontal flip, and it fails on the same kind of screen: a
+            // display too short for the card either way keeps the card where it was and lets the
+            // clamp decide, rather than moving it over the title bar first.
+            if flipped + size.height <= visible.maxY - screenMargin { origin.y = flipped }
         }
 
         origin.x = min(origin.x, visible.maxX - screenMargin - size.width)

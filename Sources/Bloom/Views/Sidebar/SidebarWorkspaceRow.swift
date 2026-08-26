@@ -26,8 +26,8 @@ struct SidebarWorkspaceRow: View {
     @Environment(AppModel.self) private var app
 
     /// Where this row is on screen, for the card that opens beside it. Held rather than reported:
-    /// see `SidebarRowAnchor`.
-    @State private var anchor = SidebarRowAnchor()
+    /// see `HoverCardAnchor`.
+    @State private var anchor = HoverCardAnchor()
 
     var body: some View {
         WorkspaceRow(
@@ -67,19 +67,23 @@ struct SidebarWorkspaceRow: View {
         // Its own `.onHover`, not the one inside `WorkspaceRow`. Two hover trackers on nested
         // views both fire, and joining them would mean handing the drawing a callback it has no
         // use for. Nothing is drawn from this one, so nothing redraws when it changes.
-        .background { SidebarRowAnchorReader(anchor: anchor) }
+        .background { HoverCardAnchorReader(anchor: anchor) }
         .onHoverChange { inside in
             if inside {
                 WorkspaceHoverCardPresenter.shared.pointerEntered(
-                    workspace.id, card: hoverCard, anchor: { anchor.screenFrame }
+                    .workspaceRow(workspace.id),
+                    card: hoverCard,
+                    anchor: { anchor.screenFrame }
                 )
             } else {
-                WorkspaceHoverCardPresenter.shared.pointerExited(workspace.id)
+                WorkspaceHoverCardPresenter.shared.pointerExited(.workspaceRow(workspace.id))
             }
         }
         // A row that leaves the pane while its card is up: archived from the menu bar, filtered
         // out, or its project folded. The pointer never leaves, so no exit ever arrives.
-        .onDisappear { WorkspaceHoverCardPresenter.shared.pointerExited(workspace.id) }
+        .onDisappear {
+            WorkspaceHoverCardPresenter.shared.pointerExited(.workspaceRow(workspace.id))
+        }
         // Every item in it is `WorkspaceMenuItems`, which Home's rows draw from as well. It used
         // to be a copy of the same six buttons written out here, with a note on the other copy
         // saying what to extract when the two were merged; adding to both was what forced it.
