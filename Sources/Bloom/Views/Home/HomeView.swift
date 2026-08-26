@@ -435,12 +435,17 @@ struct HomeView: View {
     private func action(for state: HomeEmptyState) -> some View {
         switch state {
         case .noProjects:
-            Button(state.actionTitle, systemImage: "folder", action: addProject)
+            // The only state with two ways out, because it is the only one where the reader might
+            // have nothing on disk yet. The prominent half is the half that needs no folder.
+            Button(state.actionTitle, systemImage: "plus", action: newProject)
                 .buttonStyle(.borderedProminent)
                 // Tinted explicitly, like every other prominent button in the app: untinted it
                 // follows the system accent, which on a Mac set to Graphite is grey glass. See
                 // `EmptyStateView`, which says the same over the same button.
                 .tint(Palette.accentFill)
+            if let second = state.secondaryActionTitle {
+                Button(second, systemImage: "folder", action: addProject)
+            }
         case .noWorkspaces:
             Button(state.actionTitle, systemImage: "plus") { requestWorkspace(in: nil) }
                 .buttonStyle(.borderedProminent)
@@ -567,6 +572,11 @@ struct HomeView: View {
 
     private func addProject() {
         Task { await app.addProjectByAsking() }
+    }
+
+    /// Handed to `RootView`, which owns the only new-project sheet in the app.
+    private func newProject() {
+        NotificationCenter.default.post(name: .bloomNewProject, object: nil)
     }
 
     /// The name has already been through `InPlaceRename` in the row, which is what decided there

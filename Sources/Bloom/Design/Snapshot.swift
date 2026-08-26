@@ -492,6 +492,15 @@ enum Snapshot {
                 try? await Task.sleep(for: .seconds(2))
             }
 
+            // `--new-project` opens the New Project sheet, for the same reason `--create-sheet`
+            // opens the other one: it is a sheet, and a sheet has no way in that a capture run can
+            // press. Pass it LAST, as above.
+            let wantsNewProject = arguments.contains("--new-project")
+            if wantsNewProject {
+                NotificationCenter.default.post(name: .bloomNewProject, object: nil)
+                try? await Task.sleep(for: .seconds(2))
+            }
+
             // `--project-setup <folder>` hands a folder to the same code path the file panel
             // does, so the offer to turn it into a repository can be looked at. It has to be
             // driven from here because the only other way in is an `NSOpenPanel`, and a modal
@@ -584,7 +593,7 @@ enum Snapshot {
             // A sheet is its own window, hanging off the one it was presented from, and it is
             // never in `capturableWindows()`: it carries no title bar. Asked for by name here
             // rather than searched for, so nothing else on screen can be picked by mistake.
-            if wantsCreateSheet || wantsProjectSetup || wantsFeedbackSheet {
+            if wantsCreateSheet || wantsNewProject || wantsProjectSetup || wantsFeedbackSheet {
                 for _ in 0..<20 where candidate?.attachedSheet == nil {
                     try? await Task.sleep(for: .milliseconds(250))
                 }

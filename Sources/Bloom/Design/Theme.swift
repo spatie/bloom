@@ -926,6 +926,45 @@ struct Hairline: View {
     }
 }
 
+/// Something the user has to read before pressing, or after it went wrong.
+///
+/// Here rather than beside the sheet that first drew it: `ProjectSetupSheet` and
+/// `NewProjectSheet` are the two halves of one question, so a warning worded and tinted two ways
+/// would be the same fault the two dialogs were split to avoid.
+struct Callout: View {
+    enum Tone {
+        case warning
+        case negative
+
+        var color: Color {
+            switch self {
+            case .warning: Palette.warning
+            case .negative: Palette.negative
+            }
+        }
+    }
+
+    let text: String
+    let symbol: String
+    let tone: Tone
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Metrics.spacingWide) {
+            Image(systemName: symbol)
+                .font(Typo.caption)
+                .foregroundStyle(tone.color)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Metrics.inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tone.color.opacity(0.10), in: RoundedRectangle(cornerRadius: Metrics.corner))
+    }
+}
+
 /// The small rounded label used for tool names, file chips, counts and states.
 struct Chip: View {
     var text: String

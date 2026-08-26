@@ -1,7 +1,7 @@
 # Menus and keys
 
 Every action Bloom can perform, where it is reachable from, and which key it carries. Read off the
-source on 2026-08-26 rather than remembered.
+source on 2026-08-27 rather than remembered.
 
 ## The rule this document exists to hold
 
@@ -51,6 +51,7 @@ contribute for free.
 | Show Notes | `⇧⌘N` | a workspace is selected |
 | Rename Tab | | the tab in front has a name to change |
 | Close Tab | `⌘W` | main window is key and a tab is closable |
+| New Project… | `⌥⌘N` | always |
 | Add Project Folder… | `⇧⌘O` | always |
 | Save | `⌘S` | a window has published a `SaveAction` |
 
@@ -287,6 +288,8 @@ in its own doc comment.
 
 | Action | Where it lives | In the menu bar | Key |
 | --- | --- | --- | --- |
+| New project (sidebar heading menu, both empty states) | `+` menu, buttons | yes | `⌥⌘N` |
+| Add a project folder (sidebar heading menu, both empty states) | `+` menu, buttons | yes | `⇧⌘O` |
 | Home scopes: All, Needs you, Running, Live, Archived | chip strip | **no** | none |
 | Home project filter | menu | **no** | none |
 | Sidebar filter: which workspaces, hidden projects (`SidebarFilterMenuItems`) | status bar menu | **no** | none |

@@ -772,38 +772,3 @@ private struct LabeledLine: View {
         }
     }
 }
-
-/// Something the user has to read before pressing, or after it went wrong.
-private struct Callout: View {
-    enum Tone {
-        case warning
-        case negative
-
-        var color: Color {
-            switch self {
-            case .warning: Palette.warning
-            case .negative: Palette.negative
-            }
-        }
-    }
-
-    let text: String
-    let symbol: String
-    let tone: Tone
-
-    var body: some View {
-        HStack(alignment: .top, spacing: Metrics.spacingWide) {
-            Image(systemName: symbol)
-                .font(Typo.caption)
-                .foregroundStyle(tone.color)
-                .accessibilityHidden(true)
-            Text(text)
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(Metrics.inset)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tone.color.opacity(0.10), in: RoundedRectangle(cornerRadius: Metrics.corner))
-    }
-}

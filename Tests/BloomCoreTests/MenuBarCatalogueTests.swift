@@ -65,6 +65,24 @@ struct MenuBarCatalogueTests {
         }
     }
 
+    /// Two doors into the project list, and the words are the point of the pair: New makes a
+    /// folder and a repository for somebody with an idea, Add takes a repository that already
+    /// exists. Both are in File, both carry a key, and the sidebar's own menu draws these same
+    /// titles rather than a second spelling of them.
+    @Test("the two ways to get a project are both published, and named differently")
+    func bothProjectDoorsAreInTheBar() {
+        let new = MenuBarCatalogue[.newProject]
+        let add = MenuBarCatalogue[.addProjectFolder]
+        #expect(new.menu == .file)
+        #expect(add.menu == .file)
+        #expect(new.title != add.title)
+        #expect(new.key != nil)
+        #expect(add.key != nil)
+        // Neither depends on a project existing, since one of them is how the first one arrives.
+        #expect(new.availability == .always)
+        #expect(add.availability == .always)
+    }
+
     /// The two splits are the only items whose key lives on a submenu row, because they are the
     /// only submenus with a "same again" row for it to sit on. Anything else marked this way would
     /// be a key drawn beside an item AppKit never fires.
