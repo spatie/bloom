@@ -70,7 +70,7 @@ public enum RevealChoice {
         project: JSONValue?,
         scope: JSONValue?,
         search: JSONValue?
-    ) -> Result<RevealOrder, String> {
+    ) -> Result<RevealOrder, PaneRefusal> {
         let workspaceName = text(workspace)
         let projectName = text(project)
         let query = text(search) ?? ""
@@ -78,20 +78,20 @@ public enum RevealChoice {
         var narrowing: HomeScope = .all
         if let raw = text(scope) {
             guard let known = HomeScope(rawValue: raw), Self.offered.contains(known) else {
-                return .failure(
+                return .failure(PaneRefusal(
                     "'\(raw)' is not one of Home's scopes. They are: "
                         + Self.offered.map(\.rawValue).joined(separator: ", ") + "."
-                )
+                ))
             }
             narrowing = known
         }
 
         if workspaceName != nil, projectName != nil || narrowing != .all || !query.isEmpty {
-            return .failure(
+            return .failure(PaneRefusal(
                 "reveal points at one workspace, or at Home narrowed by project, scope and "
                     + "search. Asking for both at once leaves it ambiguous which you meant, so "
                     + "pass 'workspace' on its own, or leave it out and pass the rest."
-            )
+            ))
         }
 
         return .success(RevealOrder(
@@ -109,7 +109,7 @@ public enum RevealChoice {
         _ order: RevealOrder,
         workspaces: [Workspace],
         projects: [Repo]
-    ) -> Result<Reveal, String> {
+    ) -> Result<Reveal, PaneRefusal> {
         if let name = order.workspace {
             return workspaceTarget(name, among: workspaces, projects: projects)
         }
@@ -132,7 +132,7 @@ public enum RevealChoice {
         _ name: String,
         among workspaces: [Workspace],
         projects: [Repo]
-    ) -> Result<Reveal, String> {
+    ) -> Result<Reveal, PaneRefusal> {
         if let exact = workspaces.first(where: { $0.id.rawValue == name }) {
             return .success(Reveal(
                 target: .workspace(exact.id), sentence: sentence(for: exact, projects: projects)
@@ -148,26 +148,26 @@ public enum RevealChoice {
                 sentence: sentence(for: matches[0], projects: projects)
             ))
         case 0:
-            return .failure(
+            return .failure(PaneRefusal(
                 "There is no workspace called '\(name)'. There is: "
                     + list(workspaces.map(\.name)) + "."
-            )
+            ))
         default:
-            return .failure(
+            return .failure(PaneRefusal(
                 "\(matches.count) workspaces are called '\(name)', in "
                     + list(matches.map { projectName($0, projects: projects) })
                     + ". Pass the workspace's id instead, which workspace_list prints."
-            )
+            ))
         }
     }
 
-    private static func match(_ name: String, among projects: [Repo]) -> Result<Repo, String> {
+    private static func match(_ name: String, among projects: [Repo]) -> Result<Repo, PaneRefusal> {
         let needle = name.lowercased()
         if let exact = projects.first(where: { $0.name.lowercased() == needle }) { return .success(exact) }
         if let byPath = projects.first(where: { $0.path.lowercased() == needle }) { return .success(byPath) }
-        return .failure(
+        return .failure(PaneRefusal(
             "There is no project called '\(name)'. There is: " + list(projects.map(\.name)) + "."
-        )
+        ))
     }
 
     private static func sentence(for workspace: Workspace, projects: [Repo]) -> String {

@@ -116,7 +116,7 @@ public struct RevealTool: BridgeToolHandling {
             scope: request.param("scope"),
             search: request.param("search")
         ) {
-        case .failure(let refusal): return .failure(refusal)
+        case .failure(let refusal): return .failure(refusal.sentence)
         case .success(let parsed): order = parsed
         }
 
@@ -128,7 +128,7 @@ public struct RevealTool: BridgeToolHandling {
 
         let resolved: Reveal
         switch RevealChoice.resolve(order, workspaces: workspaces, projects: projects) {
-        case .failure(let refusal): return .failure(refusal)
+        case .failure(let refusal): return .failure(refusal.sentence)
         case .success(let found): resolved = found
         }
 

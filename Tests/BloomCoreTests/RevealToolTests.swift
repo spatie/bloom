@@ -38,7 +38,7 @@ struct RevealToolTests {
             guard case .failure(let refusal) = outcome else {
                 Issue.record("expected a refusal for \(extra.0)"); return
             }
-            #expect(refusal.contains("ambiguous"))
+            #expect(refusal.sentence.contains("ambiguous"))
         }
     }
 
@@ -49,8 +49,8 @@ struct RevealToolTests {
         ) else {
             Issue.record("expected a refusal"); return
         }
-        #expect(refusal.contains("finished"))
-        #expect(refusal.contains("needsYou"))
+        #expect(refusal.sentence.contains("finished"))
+        #expect(refusal.sentence.contains("needsYou"))
     }
 
     /// Home's two search-only chips narrow a search by what kind of thing matched, so a reveal
@@ -88,8 +88,8 @@ struct RevealToolTests {
         ) else {
             Issue.record("expected a refusal"); return
         }
-        #expect(refusal.contains("Ship it"))
-        #expect(refusal.contains("Fix the flake"))
+        #expect(refusal.sentence.contains("Ship it"))
+        #expect(refusal.sentence.contains("Fix the flake"))
     }
 
     @Test("two workspaces with one name is refused, and asks for the id")
@@ -103,8 +103,8 @@ struct RevealToolTests {
         ) else {
             Issue.record("expected a refusal"); return
         }
-        #expect(refusal.contains("2 workspaces"))
-        #expect(refusal.contains("id"))
+        #expect(refusal.sentence.contains("2 workspaces"))
+        #expect(refusal.sentence.contains("id"))
     }
 
     @Test("a refusal stops listing before it becomes a directory")
@@ -151,8 +151,8 @@ struct RevealToolTests {
         ) else {
             Issue.record("expected a refusal"); return
         }
-        #expect(refusal.contains("flare"))
-        #expect(refusal.contains("mailcoach"))
+        #expect(refusal.sentence.contains("flare"))
+        #expect(refusal.sentence.contains("mailcoach"))
     }
 
     // MARK: - The tool
