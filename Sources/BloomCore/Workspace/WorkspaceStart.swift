@@ -102,17 +102,25 @@ public struct StartedWorkspace: Sendable {
     /// different things to tell a caller, and a false meaning either of them is how a workspace
     /// with no dependencies installed gets reported as fine.
     public var setupSucceeded: Bool?
+    /// Whether the project had to come back into the sidebar to hold this workspace.
+    ///
+    /// True only when it was hidden and this workspace is the reason it is not any more, so a
+    /// caller with a window can say so out loud rather than leaving a preference the owner set to
+    /// change behind their back. See `ProjectVisibility.comesBack`.
+    public var projectCameBack: Bool
 
     public init(
         workspace: Workspace,
         session: Session? = nil,
         placeholder: String? = nil,
-        setupSucceeded: Bool? = nil
+        setupSucceeded: Bool? = nil,
+        projectCameBack: Bool = false
     ) {
         self.workspace = workspace
         self.session = session
         self.placeholder = placeholder
         self.setupSucceeded = setupSucceeded
+        self.projectCameBack = projectCameBack
     }
 }
 
@@ -169,6 +177,14 @@ extension WorkspaceManager {
             checkout: request.checkout
         )
 
+        // Here rather than inside `createWorkspace`, for the reason that method's own comment
+        // gives: it is the lower half, the worktree and the row and nothing else, and which list
+        // the window draws the row in is orchestration. This is the one route every caller takes,
+        // the sheet, a `bloom://` link, the Services menu, a Shortcut and the bridge alike, so
+        // both ways a worktree can be made, cut and checkout, are covered by the one call. See
+        // `bringProjectBack`.
+        let projectCameBack = await bringProjectBack(request.repo.id)
+
         var session: Session?
         if request.opensSession {
             let controls = request.controls
@@ -211,7 +227,8 @@ extension WorkspaceManager {
             workspace: workspace,
             session: session,
             placeholder: placeholder,
-            setupSucceeded: setupSucceeded
+            setupSucceeded: setupSucceeded,
+            projectCameBack: projectCameBack
         )
     }
 }

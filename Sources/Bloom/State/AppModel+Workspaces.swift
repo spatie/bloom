@@ -252,6 +252,21 @@ extension AppModel {
             self.notice = BloomNotice(message: notice)
         }
 
+        // Said out loud, because this is a preference the owner set that Bloom has just undone,
+        // and the workspace that undid it can have been asked for by an agent on the bridge with
+        // nobody watching. A banner is exactly what `BloomNotice` is for: something the app did
+        // that the user did not ask for and should still know about.
+        //
+        // After the sea rather than before it, so it wins when a first voyage and a project
+        // coming back land together. One of the two is a project changing state under the reader
+        // and the other is decoration.
+        if started.projectCameBack {
+            self.notice = BloomNotice(
+                message: "\(repo.name) is back in Bloom's sidebar. It was hidden, and this "
+                    + "workspace has just been added to it."
+            )
+        }
+
         // The files come across whichever mode asked for the workspace.
         //
         // This used to be inside the `.chat` branch below, so a workspace opened as a terminal
