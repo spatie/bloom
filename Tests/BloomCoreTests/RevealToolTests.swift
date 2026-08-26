@@ -21,14 +21,32 @@ struct RevealToolTests {
         #expect(reveal.sentence == "Bloom is on Home, showing All.")
     }
 
-    /// The rule, pinned on its own so it cannot be changed by accident. Home rests on `.live`,
-    /// which hides archived work, and the headline use of this verb is showing somebody the
-    /// finished workspaces there is deliberately no tool to archive. A reveal that hid them would
-    /// lie about what it revealed.
-    @Test("a bare reveal is not what Home rests on")
-    func unnamedScopeIsNotHomeDefault() {
+    /// The rule, pinned on its own so it cannot be changed by accident. **A reveal that hides rows
+    /// is a reveal that lies about what it revealed**, and the headline use of this verb is showing
+    /// somebody the finished workspaces there is deliberately no tool to archive.
+    ///
+    /// This used to be pinned as a contrast, because Home rested on `.live` and this deliberately
+    /// did not. Home rests on `.all` too now and the two agree, so what is held here is the
+    /// property rather than the difference: a bare reveal leaves nothing out. The constant is still
+    /// written down in `RevealChoice` rather than read off `HomeFilter`, which is the half of the
+    /// old test that still matters. If Home ever narrows what it rests on again, this must not
+    /// narrow with it.
+    @Test("a bare reveal leaves nothing out, archived work included")
+    func unnamedScopeHidesNothing() {
         #expect(RevealChoice.scopeWhenUnnamed == .all)
-        #expect(RevealChoice.scopeWhenUnnamed != HomeFilter().scope)
+
+        let repo = Repo(name: "bloom", path: "/tmp/bloom")
+        let live = HomeRow(workspace: Workspace(
+            repoID: repo.id, name: "Fix the flake", branch: "b1", path: "/p1", baseBranch: "main"
+        ))
+        let finished = HomeRow(workspace: Workspace(
+            repoID: repo.id, name: "Warm the cache", branch: "b2", path: "/p2",
+            baseBranch: "main", state: .archived
+        ))
+
+        let scope = RevealChoice.scopeWhenUnnamed
+        #expect(scope.includes(live, activity: HomeActivity()))
+        #expect(scope.includes(finished, activity: HomeActivity()))
     }
 
     @Test("blank strings are the same as nothing at all")

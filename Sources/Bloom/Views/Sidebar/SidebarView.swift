@@ -556,7 +556,7 @@ struct SidebarView: View {
     /// "working" and "waiting on you" in one shape throughout.
     private var askRow: some View {
         HStack(spacing: 0) {
-            SidebarNavRow(title: AskConversation.title, icon: "bubble.left.and.bubble.right")
+            SidebarNavRow(title: AskConversation.title, icon: PaneGlyph.chat)
             Spacer(minLength: Metrics.spacingSmall)
             if let status = app.askStatus {
                 WorkspaceStatusGlyph(status: status, isOnSelection: isEmphasized(.ask))

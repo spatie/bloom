@@ -115,9 +115,17 @@ public enum AskConversation {
     }
 
     /// What the empty pane says before anything has been asked.
-    public static let emptyHeading = "One conversation, above every project"
+    ///
+    /// **It used to lead with what this chat cannot do.** "This chat has no worktree. ... It
+    /// cannot change a file." Both sentences are true and neither belongs on the first screen: a
+    /// worktree is Bloom's word for a thing the reader has not met yet, and an empty pane that
+    /// opens by listing its own limits reads as an apology for existing. The limits are real and
+    /// they are said where they change a decision, which is the permission menu's footnote.
+    ///
+    /// So this says what to ask it for, in the order somebody would want it: start something, find
+    /// out where everything stands, then go to the thing you found.
+    public static let emptyHeading = "Ask Bloom anything about your work"
     public static let emptyDetail =
-        "This chat has no worktree. It can list what you have running, tell you which workspaces "
-        + "have failing checks, register a repository, and start a workspace in one of them. "
-        + "It cannot change a file."
+        "Start a new project or a workspace, ask what is running and what needs you, "
+        + "find the workspace with the failing checks, and open it."
 }

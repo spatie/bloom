@@ -88,7 +88,7 @@ struct AskView: View {
     /// surprising half: it looks exactly like every other conversation in Bloom and it cannot
     /// change a file.
     private static let opening = TranscriptEmptyState(
-        glyph: "bubble.left.and.text.bubble",
+        glyph: PaneGlyph.chat,
         title: AskConversation.emptyHeading,
         message: AskConversation.emptyDetail
     )

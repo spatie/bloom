@@ -43,8 +43,8 @@ public enum RevealOutcome: Sendable, Equatable {
 public struct RevealOrder: Sendable, Equatable {
     public var workspace: String?
     public var project: String?
-    /// `RevealChoice.scopeWhenUnnamed`, and read its note: it is not `HomeFilter`'s own default,
-    /// on purpose.
+    /// `RevealChoice.scopeWhenUnnamed`, and read its note: it is written down there rather than
+    /// taken from `HomeFilter`, on purpose.
     public var scope: HomeScope
     public var search: String
 
@@ -112,16 +112,17 @@ public enum RevealChoice {
     /// a chip that shows nothing.
     static let offered: [HomeScope] = [.all, .needsYou, .running, .live, .archived]
 
-    /// What a caller that named no scope gets, and it is deliberately **not** `HomeFilter`'s own
-    /// default.
+    /// What a caller that named no scope gets, decided here rather than taken from `HomeFilter`.
     ///
-    /// Home rests on `.live`, which is right for a person browsing: it is the old "hide archived"
-    /// switch, and somebody opening Home is looking for work in progress. It is wrong for this
-    /// tool, for one reason that outweighs the consistency. **A reveal that hides rows is a reveal
-    /// that lies about what it revealed**, and the headline use of this verb is the request there
-    /// is deliberately no archive tool for: asked to clean up the finished ones, an agent ends by
-    /// showing the candidates, and under `.live` the finished ones are exactly what Home would
-    /// leave out.
+    /// **A reveal that hides rows is a reveal that lies about what it revealed**, and the headline
+    /// use of this verb is the request there is deliberately no archive tool for: asked to clean up
+    /// the finished ones, an agent ends by showing the candidates, so a scope that left archived
+    /// work out would leave the candidates out.
+    ///
+    /// Home rests on `.all` as well today, and the two agreeing is a coincidence rather than a
+    /// link. It rested on `.live` when this was written, which is what forced the constant to be
+    /// its own decision, and if Home ever narrows what it rests on again this must not narrow with
+    /// it.
     ///
     /// One rule rather than two, and that is the second half of the argument. A default that
     /// varied by which other arguments were passed (everything when a project was named, live when
@@ -130,8 +131,6 @@ public enum RevealChoice {
     ///
     /// What makes it safe is that `homeSentence` names the scope every time, including this one,
     /// so an agent can tell the owner what he is looking at rather than leaving him to notice.
-    /// **`.all` is a change now**, where it used to be Home's resting value, and a sentence that
-    /// stayed silent about it would be the quiet part of this decision.
     public static let scopeWhenUnnamed = HomeScope.all
 
     /// Turns names into a target, against the rows as they are right now.
@@ -205,9 +204,8 @@ public enum RevealChoice {
     }
 
     /// The scope is named every time, and that is load bearing rather than wordy. See
-    /// `scopeWhenUnnamed`: what a bare call selects is not what Home rests on, so a sentence that
-    /// mentioned the scope only when it was unusual would be silent about the one thing the caller
-    /// did not choose.
+    /// `scopeWhenUnnamed`: a bare call picks a scope the caller did not, so a sentence that
+    /// mentioned it only when it was unusual would be silent about exactly the case nobody chose.
     private static func homeSentence(_ filter: HomeFilter, project: Repo?) -> String {
         var clauses = ["showing \(filter.scope.label(searching: false))"]
         if let project { clauses.append("in \(project.name)") }

@@ -62,28 +62,32 @@ struct HomeSummaryTests {
         #expect(
             HomeList.summary(
                 listing: listing(shown: 8, considered: 8, live: 8),
-                filter: HomeFilter(),
+                filter: HomeFilter(scope: .live),
                 projects: 1
             ) == "8 live"
         )
         #expect(
             HomeList.summary(
                 listing: listing(shown: 8, considered: 8, live: 8),
-                filter: HomeFilter(),
+                filter: HomeFilter(scope: .live),
                 projects: 3
             ) == "8 live in 3 projects"
         )
     }
 
-    /// The resting page is about live work, so the resting line is too, and the archived clause is
-    /// the pointer to the chip that shows the rest. It is also what keeps the default honest: a
-    /// page that leads with live work says out loud how much finished work it is not showing.
-    @Test("resting on Live, the line counts live work and names the archive")
-    func theRestingLineIsAboutLiveWork() {
+    /// Narrowed to Live the line is about live work, and the archived clause is the pointer to the
+    /// scope that shows the rest: a list that leaves finished work out says out loud how much of it
+    /// there is.
+    ///
+    /// Home no longer rests here, because the strip that offers the chips is `all` and `archived`
+    /// alone. `RevealChoice.offered` still names `live`, so an agent can put the window in this
+    /// scope, and this is the line the owner then reads.
+    @Test("narrowed to Live, the line counts live work and names the archive")
+    func theLiveLineIsAboutLiveWork() {
         #expect(
             HomeList.summary(
                 listing: listing(shown: 3, considered: 20, live: 3, archived: 17),
-                filter: HomeFilter(),
+                filter: HomeFilter(scope: .live),
                 projects: 4
             ) == "3 live in 4 projects \u{00B7} 17 archived"
         )
@@ -123,7 +127,7 @@ struct HomeSummaryTests {
         #expect(
             HomeList.summary(
                 listing: listing(shown: 5, considered: 5, live: 5),
-                filter: HomeFilter(),
+                filter: HomeFilter(scope: .live),
                 projects: 1
             ) == "5 live"
         )
@@ -165,7 +169,7 @@ struct HomeSummaryTests {
         )
         let allArchived = listing(shown: 0, considered: 17, live: 0, archived: 17)
         #expect(
-            HomeList.summary(listing: allArchived, filter: HomeFilter(), projects: 4)
+            HomeList.summary(listing: allArchived, filter: HomeFilter(scope: .live), projects: 4)
                 == "Nothing live \u{00B7} 17 archived"
         )
     }
