@@ -346,6 +346,22 @@ struct TranscriptRowHeightsTests {
         #expect(heights.height(for: key("row.0")) == 999)
     }
 
+    /// The check that a row is the height it draws at asks this, and so does `note`. Two answers
+    /// would mean a height the cache calls unchanged being reported as a row drawn wrong.
+    @Test("half a point is the same height, and it is the slack a note is filed under")
+    func oneRuleAboutTheSameHeight() {
+        #expect(TranscriptRowHeights.isSameHeight(24, 24.4))
+        #expect(!TranscriptRowHeights.isSameHeight(24, 25))
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(24, for: key("row.1"))
+        // Rounded up to 25, which is a point away and therefore news.
+        let news = heights.note(24.4, for: key("row.1"))
+        #expect(news)
+        let again = heights.note(25, for: key("row.1"))
+        #expect(!again)
+    }
+
     @Test("half a point is the same width, and one answer says so")
     func oneRuleAboutTheSameWidth() {
         #expect(TranscriptRowHeights.isSameWidth(831.5, 831.75))

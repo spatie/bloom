@@ -53,6 +53,11 @@ enum ScrollProbe {
         // Not brought to the front, for the reason at the head of `ProbeHarness.window`.
         let (window, contentView) = await harness.window()
 
+        // Before the conversation is opened, so the arrival is in the count. `uncorrectedRows` is
+        // the one to read: a row the table draws at a height the row did not report is the white
+        // gap between rows. See `TranscriptHoldCensus`.
+        TranscriptHoldCensus.reset()
+
         if let workspace {
             OpenWorkspaceNotification.post(WorkspaceID(workspace))
             // Long enough for the transcript to load every row and for the inspector to settle.
@@ -151,6 +156,7 @@ enum ScrollProbe {
             "didScroll": .bool((offsets.max() ?? 0) - (offsets.min() ?? 0) > 1),
             "step": .number(Double(step)),
             "sweeps": .integer(sweeps),
+            "transcriptHold": .map(TranscriptHoldCensus.summary()),
         ]
         // The probe's own keys win over both, so a report that has an opinion keeps it.
         return .object(
