@@ -70,6 +70,32 @@ final class TranscriptTableController {
     }
 }
 
+/// The transcript's scroll view, which differs from `NSScrollView` in exactly one answer.
+///
+/// **A markdown table stopped the transcript scrolling under the pointer.** A table and a code
+/// fence are each drawn inside a `ScrollView(.horizontal)` so a wide one can be pushed sideways,
+/// and SwiftUI backs that with a real `NSScrollView` of its own, `SwiftUI.HostingScrollView`. Over
+/// the lazy stack there is a SwiftUI scroll view above it, which it knows about and hands a
+/// vertical wheel straight to. Here there is not, so it falls through to `NSScrollView`'s own
+/// `scrollWheel(with:)` and the answer becomes AppKit's: a scroll view that is already at its edge
+/// in an axis keeps the event and scrolls elastically **unless a responder above it has asked for
+/// one**, and `NSResponder.wantsForwardedScrollEvents(for:)` is false by default, which the header
+/// documents and the runtime confirms: asked on macOS 27, a plain `NSScrollView` answers false for
+/// both axes. Nothing asked, so a wheel over a table rubber-banded the table and left the
+/// transcript standing still.
+///
+/// Asking is the whole fix. AppKit forwards only from an inner view already at its edge in that
+/// axis, which for one with nothing to scroll vertically is always, and it decides the event's
+/// predominant axis itself, so a mostly-horizontal wheel stays with the table it is over and a wide
+/// table still scrolls sideways. One answer here covers everything that scrolls horizontally inside
+/// a row, tables and code fences alike, rather than each of them having to fend off a gesture it
+/// never wanted.
+final class TranscriptScrollView: NSScrollView {
+    override func wantsForwardedScrollEvents(for axis: NSEvent.GestureAxis) -> Bool {
+        axis == .vertical
+    }
+}
+
 struct TranscriptTable: NSViewRepresentable {
     let entries: [TranscriptTableEntry]
     let controller: TranscriptTableController
@@ -115,7 +141,7 @@ struct TranscriptTable: NSViewRepresentable {
         table.dataSource = context.coordinator
         table.delegate = context.coordinator
 
-        let scroll = NSScrollView()
+        let scroll = TranscriptScrollView()
         scroll.documentView = table
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = false
