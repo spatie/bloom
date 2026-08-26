@@ -41,6 +41,15 @@ struct HomeView: View {
     /// without this, the only way into the list is to click a row, and clicking a row opens it.
     /// A list you cannot arrow down is not a list.
     @FocusState private var isListFocused: Bool
+    /// Whether the list has already been handed the keyboard on this visit to Home.
+    ///
+    /// Held out here rather than beside the `.task` that reads it, because that task belongs to
+    /// the table and the table is not what a visit to Home is: the pane draws either the empty
+    /// state or the list, so a search whose results arrive after its names have stopped matching
+    /// destroys the table and builds another one. This state sits above that swap and is reset
+    /// only when `HomeView` itself is rebuilt, which is when the selection leaves Home and comes
+    /// back. See `HomeListKeyboard`.
+    @State private var hasClaimedKeyboard = false
     /// The row under the pointer, held here rather than in each row, so crossing the pane lights
     /// one row at a time and a hover invalidates the list rather than nothing at all.
     @State private var hovered: WorkspaceID?
@@ -217,6 +226,14 @@ struct HomeView: View {
         .task {
             // A beat, so the table exists before the focus is aimed at it.
             try? await Task.sleep(for: .milliseconds(50))
+            // And then only if there is still nobody the keyboard would be taken from. This task
+            // runs whenever the TABLE is built, which a search does twice per character, so
+            // without the guard typing "df" ended with the caret in the results. See
+            // `HomeListKeyboard`, which carries the whole sequence.
+            guard HomeListKeyboard.claims(
+                searchFieldHasKeyboard: app.isSearchFieldFocused, hasClaimed: hasClaimedKeyboard
+            ) else { return }
+            hasClaimedKeyboard = true
             isListFocused = true
         }
         // Return opens whatever the arrow keys landed on. The list has the keyboard whenever the
