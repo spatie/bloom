@@ -31,13 +31,13 @@ public enum BusyBreath {
     ///
     /// Three seconds, and the third decimal matters. The design was drawn at 3.6, which is inside
     /// the 3.0 to 3.8 band every breathing candidate was drawn in, and 3.6 was not kept. Every
-    /// moving mark in this window reads its phase from `BusyPulse.epoch` so that the light on the
-    /// rule and the marks in the sidebar are one heartbeat rather than two that drift past each
-    /// other, and that only holds while the periods stay in whole number ratios: the rule crosses
-    /// in 3 seconds and its whole figure is 6. A 3.6 second breath shares no useful multiple with
-    /// either, so the two marks would beat against each other on a cycle of half a minute. Three
-    /// seconds is exactly one crossing of the rule, so a breath and a crossing begin together
-    /// every time.
+    /// moving mark in this window reads its phase from `BusyPulse.epoch` so that the rule under the
+    /// title bar and the marks in the sidebar are one heartbeat rather than two that drift past
+    /// each other, and that only holds while the periods stay in whole number ratios: the dot
+    /// pulses in `BusyDot.period` and the rule brightens on that same wave, which is a second and a
+    /// half. A 3.6 second breath shares no useful multiple with it, so the marks would beat against
+    /// each other on a cycle of eighteen seconds. Three seconds is exactly two of those pulses, so
+    /// a breath and a pulse begin together every time.
     public static let period: TimeInterval = 3
 
     /// Where the breath is at a fraction of its period, from 0 at rest to 1 at the top.

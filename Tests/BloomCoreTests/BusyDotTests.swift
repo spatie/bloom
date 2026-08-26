@@ -7,13 +7,14 @@ import Testing
 @Suite("The pulse a busy mark moves on")
 struct BusyDotTests {
     /// The one number here that is not free. Every mark phases off `BusyPulse.epoch`, and that
-    /// only puts them on one heartbeat while the periods stay in whole number ratios: the light on
-    /// the rule crosses in `BusyPulse.pass`, which is three seconds, and its whole figure is six.
-    @Test("a pulse divides a crossing of the rule")
-    func periodDividesTheSweep() {
+    /// only puts them on one heartbeat while the periods stay in whole number ratios: the rule
+    /// under the title bar brightens on this very number (`BusyRule.period`), and the retrying
+    /// turn's glyph breathes in `BusyBreath.period`, which is three seconds.
+    @Test("a pulse divides the marks that move more slowly")
+    func periodDividesTheSlowerMarks() {
         #expect(BusyDot.period == 1.5)
-        #expect((3 / BusyDot.period).truncatingRemainder(dividingBy: 1) == 0)
-        #expect((6 / BusyDot.period).truncatingRemainder(dividingBy: 1) == 0)
+        #expect(BusyRule.period == BusyDot.period)
+        #expect((BusyBreath.period / BusyDot.period).truncatingRemainder(dividingBy: 1) == 0)
     }
 
     @Test("it swells as it fades")

@@ -4,11 +4,11 @@ import BloomCore
 
 /// The window's one heartbeat, while an agent is working.
 ///
-/// Everything that moves while agents are running reads its phase from here: the light that
-/// travels the shared rule under the title bar (`RuleSweep`), the dot at the head of every working
-/// row in the sidebar (`WorkspaceRunningGlyph`), and the same dot beside "Working" in the
-/// transcript and in front of a running tab's label (`ActivityDot`). None of them starts an
-/// animation of its own, and that is the whole reason this type exists.
+/// Everything that moves while agents are running reads its phase from here: the shared rule under
+/// the title bar, which brightens and dims across its whole width (`RulePulse`), the dot at the
+/// head of every working row in the sidebar (`WorkspaceRunningGlyph`), and the same dot beside
+/// "Working" in the transcript and in front of a running tab's label (`ActivityDot`). None of them
+/// starts an animation of its own, and that is the whole reason this type exists.
 ///
 /// An animation begins when the view that carries it is committed. Five agents started at five
 /// different moments therefore give five row figures at five different phases, which is not a
@@ -43,9 +43,13 @@ import BloomCore
 /// share an absolute `beginTime` and have periods in a whole number ratio cannot drift, where two
 /// restarted from a timer could only be as accurate as the timer.
 ///
-/// The periods below stay in that ratio: a pulse of the dot is 1.5 seconds, a crossing of the rule
-/// is 3, and out and back is 6, so every crossing of the light begins with a pulse and the light's
-/// turn lands on one. See `10bef55` for the measurement that established it.
+/// The periods stay in that ratio, and each of them lives with the mark it belongs to rather than
+/// here: `BusyDot.period` is a second and a half and `BusyRule.period` takes that same number, so
+/// the rule and every dot in the window reach the top of their pulse on one frame, and
+/// `BusyBreath.period` is three, which is two of those. There were four constants here describing
+/// the figure of the light that used to travel the rule (a crossing was three seconds and out and
+/// back was six), and they went with the light: see `RulePulse` for what replaced it, and
+/// `10bef55` for the measurement that established the ratio.
 ///
 /// It runs while something is running, and it does not care whether the window is in front. See
 /// `BusyPulseDriver`, which is the single place that decides.
@@ -53,26 +57,6 @@ import BloomCore
 @Observable
 final class BusyPulse {
     static let shared = BusyPulse()
-
-    /// The unit. Everything else here is a count of these.
-    ///
-    /// It is half a pulse of the busy dot: the dot swells on one beat and settles on the next, so
-    /// a whole pulse is a second and a half. `BusyDot.period` is that number where the mark can be
-    /// tested, and this is the same number where the light is measured against it.
-    static let beat: CFTimeInterval = 0.75
-
-    /// One pulse of the busy dot: out, and back.
-    static let wave: CFTimeInterval = beat * 2
-
-    /// How long the light takes to cross the rule once, in either direction.
-    ///
-    /// Three seconds, and it is the same three seconds a crossing has always taken. It is four
-    /// beats, so it is a whole number of the dot's pulses, which is what keeps the two marks
-    /// locked to each other.
-    static let pass: CFTimeInterval = beat * 4
-
-    /// The whole of the light's figure: out, and back. Six seconds, which is four waves.
-    static let sweep: CFTimeInterval = pass * 2
 
     /// Whether the heartbeat is running at all.
     ///
