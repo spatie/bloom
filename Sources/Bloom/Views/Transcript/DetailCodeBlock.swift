@@ -1,4 +1,5 @@
 import SwiftUI
+import BloomCore
 
 /// A block of literal text inside an expanded row: a command, a file's new contents, one side of an
 /// edit. Long blocks are cut until asked for, because the row is a detail view and not a pager.
@@ -55,19 +56,24 @@ private struct DetailBlock: View {
 
     var body: some View {
         if !text.isEmpty {
-            let capped = TextCap.cap(text, lines: showsAll ? .max : TextCap.lineCap)
+            // Measured at the FOLDED cap whichever way round the block is, because that is the
+            // only question worth asking: is there more here than the fold shows. Asking the
+            // opened-out text whether it was truncated answers no, which is how the way back used
+            // to leave the screen the moment somebody took it.
+            let folded = TextCap.cap(text, lines: TextCap.lineCap)
+            let shown = showsAll ? TextCap.cap(text, lines: .max).text : folded.text
 
             VStack(alignment: .leading, spacing: TranscriptLayout.tight * 2) {
                 // The button sits in its own column beside the text rather than over it. The text
                 // wraps and can be a hundred lines, so an overlay would land on the first line of
                 // exactly the blocks worth copying.
                 HStack(alignment: .top, spacing: TranscriptLayout.glyphGap) {
-                    Text(capped.text)
+                    Text(shown)
                         .font(font)
                         .foregroundStyle(Palette.textPrimary)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    // Whole, and deliberately not `capped.text`: a block that has been folded to
+                    // Whole, and deliberately not `shown`: a block that has been folded to
                     // its first forty lines still copies the file. What is on the pasteboard is
                     // never the version the pane had room for.
                     //
@@ -84,8 +90,8 @@ private struct DetailBlock: View {
                 .background(tint, in: RoundedRectangle(cornerRadius: Metrics.corner))
                 .onHover { isHovered = $0 }
 
-                if capped.truncated, !showsAll {
-                    Button("Show all") { showsAll = true }
+                if folded.truncated {
+                    Button(TextFold.title(isExpanded: showsAll)) { showsAll.toggle() }
                         .linkButton()
                         .font(Typo.caption)
                 }

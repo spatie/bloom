@@ -74,10 +74,13 @@ public struct CodeBlockView: View {
                 .padding(MarkdownMetrics.blockGap)
             }
 
-            if prepared.lines.count > Self.lineCap, !showsAllLines {
+            // No `!showsAllLines`: an opened fence keeps the control, now reading the other way.
+            // A fence unfolded once could not be folded again, and two thousand lines is a lot of
+            // pane to have put between the reader and whatever they were scrolling towards.
+            if prepared.lines.count > Self.lineCap {
                 Hairline()
-                Button("Show all \(prepared.lines.count) lines") {
-                    showsAllLines = true
+                Button(TextFold.title(isExpanded: showsAllLines, lines: prepared.lines.count)) {
+                    showsAllLines.toggle()
                 }
                 .linkButton()
                 .font(Typo.caption)
