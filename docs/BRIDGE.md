@@ -70,6 +70,14 @@ for being an agent that another agent asked for and nobody weighed. **It is not 
 because every tool a parent has is implicitly scoped to the worktree it is sitting in and this
 caller is sitting in none.
 
+**Two clients come in on it, and neither is a special case of the other.** One is the owner's own
+terminal, holding the token Settings > Terminal handed them. The other is Ask Bloom, the
+conversation inside the app that belongs to no workspace: `BridgeServer.register(askSession:)`
+attaches it to the same standalone token rather than minting one, because the definition above is
+exactly what that chat is, and a fourth role or an invented workspace would have been the only
+other ways to say so. It follows that regenerating the token from Settings cuts both off, which is
+what a revocation should do.
+
 Identity is minted by Bloom and handed to the CLI through the shim's environment, never claimed by
 the agent. That is what lets every tool be implicitly scoped: **no tool takes a workspace id as a
 parameter**, so there is nothing for a model to forge, mistype or hold on to after it has gone
@@ -91,7 +99,7 @@ uses, so Bloom and Bloom Dev can never land on one. The landmine there is `socka
 
 ## 3. The tools
 
-Twenty-five, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
+Twenty-six, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
 gate. A list of handlers rather than a switch, because a switch would put every tool in three
 places: the listing, the dispatch and the gate.
 
@@ -105,6 +113,7 @@ places: the listing, the dispatch and the gate.
 | `workspace_list` | Every workspace, its state, its worktree path, its chats and their cost, what an agent is stopped on, what is queued and why | | | ✓ |
 | `workspace_start` | Cut a worktree and put an agent in it with a task, on a new branch or on a branch that already exists | ✓ | | ✓ |
 | `workspace_merge` | Ask a workspace's own agent to merge its pull request | | | ✓ |
+| `reveal` | Point Bloom's window at one workspace, or at Home narrowed by project, scope and search. Navigation and nothing else: it creates nothing and archives nothing | | | ✓ |
 | `pane_open` | Open a chat, a terminal or a browser in a new tab of the caller's own workspace | ✓ | | |
 | `pane_split` | Put one beside what is on screen rather than behind it | ✓ | | |
 | `pane_close` | Take one back off the screen | ✓ | | |
@@ -137,15 +146,16 @@ transport failure the CLI may retry or surface as a broken server; an errored re
 model reads and can act on. "You are not allowed to do that" is something to tell the model, not
 something to tell the transport.
 
-### The fifteen that need the app, and the ten that do not
+### The sixteen that need the app, and the ten that do not
 
 `BridgeToolbox.standard` holds the ten that reach nothing but the store, and it is what a
 `BridgeServer` built without the app serves, which is every test that did not ask for more.
-`AppModel.bridgeToolbox()` adds the other fifteen to it, because starting a workspace has to reach
+`AppModel.bridgeToolbox()` adds the other sixteen to it, because starting a workspace has to reach
 the main-actor graph that runs one, asking for a merge has to reach the same path the Merge button
-takes, and a pane is a thing the window owns. Each of those crosses the line as an injected closure
-(`WorkspaceStarting`, `WorkspaceMergeRequesting`, `PaneOpening`, `PaneSplitting`, `PaneClosing`,
-`PaneRenaming`, `PaneListing`, `BrowserPaneCommanding`, `WorkspaceTabListing`,
+takes, moving the selection is the window's own, and a pane is a thing the window owns. Each of
+those crosses the line as an injected closure
+(`WorkspaceStarting`, `WorkspaceMergeRequesting`, `Revealing`, `PaneOpening`, `PaneSplitting`,
+`PaneClosing`, `PaneRenaming`, `PaneListing`, `BrowserPaneCommanding`, `WorkspaceTabListing`,
 `WorkspaceTabSelecting`), so a pane an agent asks for is the pane the
 menu makes, unchanged and not copied. It adds them **to** `.standard` rather than listing its
 handlers again, because a copy of that list is a copy that drifts: a tool added to the core toolbox
@@ -193,9 +203,12 @@ Nothing here opens or closes a tab except the tools whose whole subject that is.
 brings an existing tab forward and will not make one on the way, which is what keeps "go back to the
 terminal" from forking a second terminal.
 
-Nothing archives. `workspace_archive` is not one of the sixteen: it removes a worktree and can
+Nothing archives. `workspace_archive` is not one of the twenty-six: it removes a worktree and can
 remove a branch with it, and the whole reason Bloom asks before archiving by hand is that the
-answer is sometimes no.
+answer is sometimes no. `reveal` is the answer to the request that wants one. Asked to clean up the
+finished workspaces, an agent ends by putting the candidates on screen, selected, with the owner
+looking at them and the button under their finger, which is a different thing from eight worktrees
+being gone.
 
 Nothing merges. `workspace_merge` **does not merge**: it composes the request Bloom's own Merge
 button composes and sends it into that workspace's chat as an ordinary message, so the agent runs
@@ -443,7 +456,7 @@ So `BridgeToolApproval` names the tools Bloom answers for itself:
 
 | Self-approved | Not |
 | --- | --- |
-| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `pane_list`, `workspace_tabs`, `workspace_tab_select`, `browser_read`, `quick_prompt_list` | everything else |
+| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `pane_list`, `workspace_tabs`, `workspace_tab_select`, `browser_read`, `quick_prompt_list`, `reveal` | everything else |
 
 It is a list rather than "anything with our prefix", so a tool added later is opted in by somebody
 thinking about it rather than by inheriting a decision made before it existed.
@@ -482,6 +495,11 @@ reading it. `browser_screenshot` and `browser_text` carry the page itself into a
 which is to say off this machine, and a page he is signed into is his own data. Bloom cannot tell a
 dev server's front page from an administration screen, so it does not try: it asks, and the person
 who can tell answers.
+
+`reveal` is on it, and it is the one entry whose argument runs the other way from the paragraph
+below. It is called by the owner's own client, so the owner IS sitting there, and asking would put
+a question in front of somebody who has just said out loud "show me those". It creates nothing,
+archives nothing and touches no file: what it costs is a glance, and the way back is a click.
 
 The project tools are not on it, and that is deliberate rather than an omission: the list is for
 tools an agent must be able to call while nobody is watching, and those are called by the owner's
