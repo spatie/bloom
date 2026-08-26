@@ -271,9 +271,15 @@ struct TranscriptTable: NSViewRepresentable {
 
         func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
 
+        /// A row that draws nothing still has to be a row, because the table counts them and
+        /// `rect(ofRow:)` is how every scroll in this file names a place. A hundredth of a point
+        /// is the smallest thing that is still positive: five of them is half a pixel, and one
+        /// that later has something to draw is remeasured the moment its content key moves.
+        private static let hair: CGFloat = 0.01
+
         func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-            guard entries.indices.contains(row) else { return 1 }
-            return height(of: entries[row])
+            guard entries.indices.contains(row) else { return Self.hair }
+            return max(Self.hair, height(of: entries[row]))
         }
 
         func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
@@ -328,7 +334,7 @@ struct TranscriptTable: NSViewRepresentable {
         /// `fittingSize` solve the layout at that width instead of handing back the unwrapped
         /// ideal width of a paragraph.
         private func measure(_ entry: TranscriptTableEntry) -> CGFloat {
-            guard width > 1 else { return 1 }
+            guard width > 1 else { return 0 }
             let host = NSHostingView(rootView: AnyView(
                 HostedRow(content: entry.content(), report: { _ in }, fills: false)
                     .environment(\.self, environment)
@@ -339,11 +345,21 @@ struct TranscriptTable: NSViewRepresentable {
             host.layoutSubtreeIfNeeded()
             let height = host.fittingSize.height
             constraint.isActive = false
-            // A row that measures as nothing is a measurement that failed rather than a row with
-            // no height, and a transcript of zero height rows is unusable. One line is wrong by
-            // less than that.
-            guard height > 1 else { return TranscriptLayout.rowHeight * scale }
-            return height.rounded(.up)
+            // **Nothing is a real answer, and pretending otherwise is what put blank space between
+            // the rows.**
+            //
+            // This used to read "a row that measures as nothing is a measurement that failed", and
+            // hand back one row height. It is not a failure: a stored row that draws nothing is
+            // ordinary. `TranscriptRowView` renders an empty view for an assistant block with no
+            // text, for a tool result whose call is already on the row above it, and for a system
+            // row that is not an init, which includes any hook payload whose marker sits past the
+            // 256 bytes `TranscriptNoise` sniffs. In a `LazyVStack` every one of those is an
+            // `EmptyView` and takes no space at all. Here each of them was taking twenty-four
+            // points, which is exactly the several hundred points of blank the owner photographed
+            // under `Session started`: five of them in a row, then three, then three more above a
+            // turn footer. Every single-line row in this transcript ends in `transcriptRowFrame`
+            // and is pinned to `rowHeight`, so none of them could have been the tall one.
+            return max(0, height.rounded(.up))
         }
 
         /// **What the row turned out to be when it was drawn, which outranks anything measured off
@@ -360,8 +376,11 @@ struct TranscriptTable: NSViewRepresentable {
         private func noted(height: CGFloat, for entryID: String) {
             guard let row = index[entryID], entries.indices.contains(row) else { return }
             let key = cacheKey(entries[row])
-            let rounded = height.rounded(.up)
-            guard rounded > 1, abs((heights[key] ?? 0) - rounded) > 0.5 else { return }
+            // Nought is a report like any other, and refusing it was the second half of the blank
+            // between the rows: an empty row drew nothing, said so, and was told it did not count.
+            // See `measure`.
+            let rounded = max(0, height.rounded(.up))
+            guard abs((heights[key] ?? -1) - rounded) > 0.5 else { return }
             heights[key] = rounded
             owedHeights.insert(row)
             guard owedWork == nil else { return }
