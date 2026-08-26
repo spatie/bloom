@@ -254,6 +254,11 @@ struct FilePreview: View {
         }
     }
 
+    /// No tint behind the numbers, for the reason `DiffLineView.gutter` gives: a grey column
+    /// against the ground the code sits on draws a hard vertical edge down the left of the file,
+    /// and a hard edge reads as a boundary between two things rather than as the margin of one.
+    /// It also has to match, because Diff, Preview and Edit are three views of one file and this
+    /// pane is the one you land in by clicking a file that has not changed.
     private func row(at index: Int, width: CGFloat) -> some View {
         HStack(spacing: 0) {
             Text("\(index + 1)")
@@ -262,7 +267,6 @@ struct FilePreview: View {
                 .foregroundStyle(Palette.textTertiary)
                 .frame(width: CodeMetrics.numberWidth, alignment: .trailing)
                 .padding(.trailing, CodeMetrics.gutterPadding)
-                .background(Palette.diffGutter)
             CodeText(
                 line: lines[index],
                 language: language,

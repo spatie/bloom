@@ -493,9 +493,6 @@ enum Palette {
     static let diffAddEmphasis = diffPositive.opacity(0.28)
     static let diffDeleteBackground = negative.opacity(0.14)
     static let diffDeleteEmphasis = negative.opacity(0.30)
-    /// The line number column, which is the sunken step and nothing else.
-    static let diffGutter = surfaceSunken
-
     /// A line under review, and the band holding its comment. The one amber wash in the window,
     /// on `warning`'s hue, because the diff's own washes have already spent green and red: a
     /// comment is neither an addition nor a problem, and either of those colours would claim it

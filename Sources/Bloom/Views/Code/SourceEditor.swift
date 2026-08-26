@@ -100,7 +100,7 @@ struct SourceEditor: NSViewRepresentable {
         // with and the gutter is drawn on top of the first few characters of every line.
         let ruler = LineNumberRuler(scrollView: scrollView, textView: textView)
         ruler.fill = resolvedGround
-        ruler.rule = NSColor(Palette.border)
+        ruler.numberColor = NSColor(Palette.textTertiary)
         scrollView.verticalRulerView = ruler
         scrollView.hasVerticalRuler = true
         scrollView.rulersVisible = true
@@ -125,7 +125,7 @@ struct SourceEditor: NSViewRepresentable {
         scrollView.backgroundColor = ground
         if let ruler = scrollView.verticalRulerView as? LineNumberRuler {
             ruler.fill = ground
-            ruler.rule = NSColor(Palette.border)
+            ruler.numberColor = NSColor(Palette.textTertiary)
             ruler.needsDisplay = true
         }
 
