@@ -23,7 +23,7 @@ struct RateLimitRowView: View {
                 Text("Rate limit")
                     .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
-                    .transcriptLabelColumn()
+                    .transcriptLabelColumn("Rate limit", font: Typo.label)
 
                 Text(sentence)
                     .font(Typo.label)

@@ -59,7 +59,7 @@ struct StreamingThinkingView: View {
                 .foregroundStyle(Palette.textSecondary)
                 .italic()
                 .lineLimit(1)
-                .transcriptLabelColumn()
+                .transcriptLabelColumn("Thinking", font: Typo.label)
 
             if tokens > 0 {
                 Text("\(tokens) tokens")

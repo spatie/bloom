@@ -150,7 +150,7 @@ struct ToolRowHeader: View {
                 .foregroundStyle(Palette.textSecondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .transcriptLabelColumn()
+                .transcriptLabelColumn(presentation.label, font: Typo.label)
                 .reportsTruncation(
                     of: presentation.label,
                     font: Typo.label,

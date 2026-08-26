@@ -9,8 +9,8 @@ import SwiftUI
 ///
 /// The three spacings below are the window's scale rather than numbers of their own, so the
 /// transcript cannot drift a point away from the sidebar and the inspector the way it did when
-/// all three kept private copies. The column widths underneath them are genuinely the
-/// transcript's, because nothing else in the window has a glyph column or a label column.
+/// all three kept private copies. The widths underneath them are genuinely the transcript's,
+/// because nothing else in the window has a glyph column.
 enum TranscriptLayout {
     /// The gap between two things that belong to each other, such as a label and its counter.
     static let tight = Metrics.spacingTight
@@ -58,10 +58,13 @@ enum TranscriptLayout {
 
     static let glyphWidth: CGFloat = 16
     static let glyphGap: CGFloat = 8
-    /// The label column, at the default text size. Read through `transcriptLabelColumn()` rather
-    /// than directly, because it is the one column here that holds text of unknown length.
-    static let labelWidth: CGFloat = 176
-    /// Where an expanded body starts, lined up under the label column.
+    /// The widest a row's label may be drawn, at the default text size, which is not the width it
+    /// is drawn at. Read through `transcriptLabelColumn(_:font:)`, where a label's own width is
+    /// worked out and where the reason for the ceiling being this number is written down.
+    static let labelCeiling: CGFloat = 176
+    /// Where an expanded body starts, lined up under the label. Built from the glyph column and
+    /// not from the label's own width, which is why nothing below a row moved when that stopped
+    /// being a fixed number.
     static let detailIndent: CGFloat = glyphWidth + glyphGap + inset
     static let nestIndent: CGFloat = 16
     /// The coloured rule down the left of an error, a quote or a tool result.
@@ -92,26 +95,4 @@ enum TranscriptLayout {
     /// loses the start of the next line. Generous on purpose: at the sizes the window is usually
     /// dragged to this never bites, and it only ever stops prose running away.
     static let proseMeasure: CGFloat = 680
-}
-
-/// The label column of a row header.
-///
-/// Fixed columns are what make the transcript scan, but this one holds text nobody chose the
-/// length of ("Run Pint and the new test"), so it is the one that has to grow with the user's text
-/// size. The glyph and detail columns stay pinned, so an expanded body still lands under the label
-/// it belongs to whatever size the text is set at.
-struct TranscriptLabelColumn: ViewModifier {
-    /// Was a `@ScaledMetric`, which on macOS never moves because there is no Dynamic Type for it to
-    /// track, so the column stayed at 176 however large the conversation was set.
-    @Environment(\.fontScale) private var fontScale
-
-    func body(content: Content) -> some View {
-        content.frame(width: TranscriptLayout.labelWidth * fontScale, alignment: .leading)
-    }
-}
-
-extension View {
-    func transcriptLabelColumn() -> some View {
-        modifier(TranscriptLabelColumn())
-    }
 }

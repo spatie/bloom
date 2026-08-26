@@ -15,6 +15,9 @@ import BloomCore
 /// shows fewer characters than it did, and a page that photographed a short command would hide
 /// exactly that.
 ///
+/// It is also where the label's width is judged, which is why the labels here run from four
+/// letters to a sentence: see `TranscriptLabelColumn`.
+///
 /// `Snapshot.render` picks this up as the "tool-rows" scene, light and dark.
 struct ToolRowSnapshotGallery: View {
     /// 154 characters, wrapped in nothing. This is the line from the screenshot.
@@ -144,6 +147,26 @@ struct ToolRowSnapshotGallery: View {
                     "description": .string("Find where the transcript decides which rows are code"),
                     "prompt": .string(Self.brief),
                 ], isExpanded: true)
+            }
+
+            // The label column was never the tool rows' alone, so the rows that share it are
+            // photographed beside them: a transcript running two habits would read worse than one
+            // running either. The last row is the pairing that is easiest to get wrong, a text
+            // detail and a chip on the same line behind a short label.
+            group("The other rows on the same ceiling") {
+                SessionStartRowView(info: AgentInit(
+                    sessionID: "s1",
+                    model: "opus-5-1m",
+                    permissionMode: "acceptEdits"
+                ))
+                ThinkingRowView(
+                    text: "The gap is the whole complaint: four letters of label, then a "
+                        + "hundred and forty seven points of nothing before its own detail."
+                )
+                row("s1", "Grep", [
+                    "pattern": .string("labelWidth|transcriptLabelColumn"),
+                    "path": .string("/tmp/app/src/WebhookCall.php"),
+                ])
             }
         }
         .frame(width: 760, alignment: .leading)
