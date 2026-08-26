@@ -360,24 +360,12 @@ struct SessionTabsView: View {
     /// about which of them it would move. On the boundary it opens, the target is the thing it is
     /// pointing at.
     ///
-    /// `.accessoryBar` rather than the default `.button` fill: on macOS 26 that fill is the
-    /// saturated accent colour, and a pane that is on almost all the time then shouts all the
-    /// time. `.accessoryBar` marks on with the same neutral raised capsule Finder gives its own
-    /// toolbar items, which is legible without being an alarm. It stays a `Toggle` so VoiceOver
-    /// still reads it as one and announces the on state without being told to.
+    /// What it looks like is `InspectorToggle`, which is a view of its own so that both of its
+    /// states can be photographed.
     private var inspectorToggle: some View {
         @Bindable var app = app
 
-        return Toggle(isOn: $app.isInspectorVisible) {
-            Label("Inspector", systemImage: "sidebar.right")
-                .labelStyle(.iconOnly)
-                .font(Typo.labelEmphasis)
-        }
-        .toggleStyle(.button)
-        .buttonStyle(.accessoryBar)
-        .padding(.horizontal, Metrics.spacing)
-        .frame(height: Metrics.barHeight)
-        .help(app.isInspectorVisible ? "Hide the changed files" : "Show the changed files")
+        return InspectorToggle(isVisible: $app.isInspectorVisible)
     }
 
     /// Whether this tab can be opened beside the one the user is in. The pair of menu items is
