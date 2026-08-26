@@ -9,6 +9,7 @@ struct ComposerOption: Identifiable, Hashable {
     static let models = [
         ComposerOption(id: "opus", label: "Opus 5"),
         ComposerOption(id: "sonnet", label: "Sonnet 5"),
+        ComposerOption(id: "fable", label: "Fable 5"),
         ComposerOption(id: "haiku", label: "Haiku 4.5"),
     ]
 

@@ -28,7 +28,7 @@ struct ModelAliasTests {
 
     @Test("leaves alone anything the CLI already understands", arguments: [
         // The CLI's own shorthand.
-        "opus", "sonnet", "haiku",
+        "opus", "sonnet", "fable", "haiku",
         // Someone who typed an exact build knows what they want, and rewriting it would be worse
         // than passing it through.
         "claude-opus-5", "claude-opus-5[1m]", "claude-haiku-4-5-20251001",

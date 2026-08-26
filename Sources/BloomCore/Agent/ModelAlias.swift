@@ -12,7 +12,7 @@ import Foundation
 /// settings file, the Models screen or the composer's picker.
 public enum ModelAlias {
     /// The families the CLI names, in the order a longest-match check needs them.
-    private static let families = ["opus", "sonnet", "haiku"]
+    private static let families = ["opus", "sonnet", "fable", "haiku"]
 
     public static func cliValue(for model: String) -> String {
         let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
