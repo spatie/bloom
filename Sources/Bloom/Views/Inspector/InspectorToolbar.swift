@@ -133,11 +133,25 @@ struct InspectorToolbar: View {
     /// here. AppKit has no `appearance()` proxy to set it globally either.
     ///
     /// So the tint was a line of code that did nothing, sitting under a comment claiming a colour
-    /// decision that was never being made. What it wanted is what the system now does anyway: this
-    /// SDK draws the selected segment as a neutral capsule rather than in the accent colour, so
-    /// the tab row is already the quiet grey the pull request band above it needs it to be, and
-    /// there is nothing left for a tint to fix. If a future SDK puts the accent back in it, this is
-    /// the note to come back to, and the answer will be a control of our own rather than a tint.
+    /// decision that was never being made. That half is settled: `.tint` cannot reach this control
+    /// whatever it draws.
+    ///
+    /// **The colours above were measured in a window that was not key, and that is not the same
+    /// question.** They came off `--gallery system-accent`, which is captured with `needsFocus`
+    /// false, and every accented control on this platform drops to a neutral grey while its window
+    /// is inactive: that page says so itself about the switch beside it. `#CFCFCF` and `#4B4E54`
+    /// are those greys. In a key window `NSAccentColorName` in `Resources/Info.plist` makes this
+    /// process's `controlAccentColor` Bloom's own `accentFill`, and the owner's screenshot of a
+    /// live window shows the selected segment carrying it. Which is the right outcome and needs
+    /// nothing done to it: the accent it fills with is ours.
+    ///
+    /// Do not add glass here. `.glassEffect` shapes a view's own background, and this is one
+    /// `NSSegmentedControl` rather than three views, so a tinted glass segment means drawing the
+    /// strip by hand and freezing it at today's look. Measured for the record: white on
+    /// `.regular.tint(accentFill)` over this pane's light ground is 4.32 to 1 at a tint as strong
+    /// as nine tenths and 2.99 at seven tenths, against a floor of 4.5. Bloom's light surface is
+    /// pure white, so any translucency drags the fill towards the ink on it. Flat `accentFill` is
+    /// 5.24.
     private var tabPicker: some View {
         // Whichever tabs this workspace has, rather than all three. Checks is only offered when
         // GitHub has reported a run for the branch, so a workspace with no pull request draws two

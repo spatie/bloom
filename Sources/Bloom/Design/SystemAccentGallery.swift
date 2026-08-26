@@ -28,9 +28,11 @@ import BloomCore
 /// four swatches on the right are what those three would be drawn in, which is the same question
 /// answered one step indirectly.
 ///
-/// The last row is the control that deliberately does not follow, and it is here so the next person
-/// does not read its absence as a bug. See `InspectorToolbar` and `SettingsView`: a segmented
-/// control's selected cell is a neutral capsule on this SDK, and it stays one.
+/// The last row is the segmented control, and it is the one thing on this page that this page
+/// cannot answer. It is drawn without the `controlActiveState` override the column beside it gets,
+/// so it is photographed in the inactive grey every accented control drops to, exactly as the
+/// switch above it is. In a key window it carries `controlAccentColor`, which this process resolves
+/// to Bloom's own `accentFill`. See `InspectorToolbar`, where the same correction is written down.
 struct SystemAccentGallery: View {
     var app: AppModel
 
@@ -98,7 +100,7 @@ struct SystemAccentGallery: View {
                     }
                 }
 
-                captioned("The one that stays neutral, and is meant to") {
+                captioned("The one this page cannot answer: grey here, accent in a key window") {
                     SystemAccentSegments()
                 }
 
@@ -182,8 +184,8 @@ private struct SystemAccentControls: View {
     }
 }
 
-/// The segmented control, alone, because the answer about it is "unchanged" and that is worth
-/// photographing next to everything that did change.
+/// The segmented control, alone. See the head of this file: what it draws here is the inactive
+/// grey, not the answer.
 private struct SystemAccentSegments: View {
     @State private var segment = 0
 

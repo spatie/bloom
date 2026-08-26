@@ -93,6 +93,21 @@ struct PaneTabsGallery: View {
                 ),
             ])
 
+            // The one thing on this page that is a question rather than a record. `.glass` is a
+            // system style, so what it draws for a `.button` toggle's ON state is Apple's decision
+            // and not ours, and the whole reason the control used to be `.accessoryBar` was to keep
+            // that state off the saturated accent. Both states, side by side, is the answer.
+            row(
+                "The inspector toggle, hidden and shown",
+                tabs: [fixture("Chat", PaneGlyph.chat, active: true), fixture("Terminal", PaneGlyph.terminal)],
+                inspectorVisible: false
+            )
+            row(
+                "The same strip with the inspector open",
+                tabs: [fixture("Chat", PaneGlyph.chat, active: true), fixture("Terminal", PaneGlyph.terminal)],
+                inspectorVisible: true
+            )
+
             VStack(alignment: .leading, spacing: 8) {
                 caption("The three glyphs at the size they are read at")
                 HStack(spacing: 20) {
@@ -118,10 +133,10 @@ struct PaneTabsGallery: View {
     private static let longTitle =
         "WKWebView | Apple Developer Documentation | Displaying web content in a view"
 
-    private func row(_ title: String, tabs: [Fixture]) -> some View {
+    private func row(_ title: String, tabs: [Fixture], inspectorVisible: Bool? = nil) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             caption(title)
-            StripRow(tabs: tabs)
+            StripRow(tabs: tabs, inspectorVisible: inspectorVisible)
         }
     }
 
@@ -143,6 +158,9 @@ struct PaneTabsGallery: View {
 /// and the other four reading as though nothing in them were selected.
 private struct StripRow: View {
     var tabs: [Fixture]
+    /// Whether the strip ends in the inspector's toggle, and which way it is thrown. Nil for the
+    /// rows that are about the tabs.
+    var inspectorVisible: Bool?
 
     @Namespace private var selection
 
@@ -162,7 +180,10 @@ private struct StripRow: View {
         } append: {
             EmptyView()
         } trailing: {
-            EmptyView()
+            if let inspectorVisible {
+                TabStripSeparator()
+                InspectorToggle(isVisible: .constant(inspectorVisible))
+            }
         }
         .frame(width: 620)
         .background(Palette.surface)
@@ -202,7 +223,7 @@ extension Gallery {
     static let paneTabs = Gallery(
         name: "pane-tabs",
         title: "Pane tabs",
-        size: CGSize(width: 700, height: 720),
+        size: CGSize(width: 700, height: 880),
         needsFocus: false,
         view: { app in AnyView(PaneTabsGallery(app: app)) }
     )
