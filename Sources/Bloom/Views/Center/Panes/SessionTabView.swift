@@ -34,7 +34,7 @@ struct SessionTabView: View {
     var body: some View {
         TabItemView(
             title: session.title.isEmpty ? PaneNaming.untitledChat : session.title,
-            icon: PaneGlyph.chatTab(agentMark: agentGlyph),
+            icon: .symbol(PaneGlyph.chatTab(agentMark: agentGlyph)),
             isActive: isActive,
             isRunning: isRunning,
             isAtPaneEdge: isAtPaneEdge,

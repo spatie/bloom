@@ -192,6 +192,11 @@ struct SessionTabsView: View {
         // an empty session list. It is `CenterColumnView`'s task now, after `onAppear`.
         .task(id: model.workspace.id) {
             tabs.load(workspaceID: model.workspace.id)
+            // The icons this Mac has already seen, read back once per launch. Here rather than at
+            // startup because this is what needs them: a workspace reopening on a browser tab
+            // should draw its icon on the first frame instead of asking the page for something
+            // that is already on disk.
+            await BrowserFaviconStore.shared.warm()
         }
     }
 
@@ -269,7 +274,7 @@ struct SessionTabsView: View {
     ) -> some View {
         TabItemView(
             title: tabs.displayTitle(of: tab, in: model),
-            icon: tab.icon,
+            icon: icon(for: tab),
             isActive: selected == .tool(tab.id),
             isAtPaneEdge: isAtPaneEdge,
             surface: Self.pane.surface,
@@ -302,6 +307,16 @@ struct SessionTabsView: View {
             onBegin: { begin(.tool(tab.id)) },
             onEnd: { finish(taken: $0) }
         ))
+    }
+
+    /// What a tool tab wears. Three of the four kinds have a glyph of Bloom's own; a browser wears
+    /// the page's own favicon, or the globe until one arrives and for ever if none does.
+    ///
+    /// A dictionary lookup behind one address parse, which is what it costs to ask this from a
+    /// body that redraws on a window resize. See `BrowserFaviconStore`.
+    private func icon(for tab: CenterTab) -> TabItemIcon {
+        guard tab.kind == .browser else { return .symbol(tab.icon) }
+        return .page(BrowserFaviconStore.shared.icon(for: tab.url))
     }
 
     private func closeTitle(for tab: CenterTab) -> String {

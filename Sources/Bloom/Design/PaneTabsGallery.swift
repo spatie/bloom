@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import BloomCore
 
@@ -93,6 +94,37 @@ struct PaneTabsGallery: View {
                 ),
             ])
 
+            // The two states a browser tab has. A page that declared an icon wears it; a dev
+            // server that declared none and a tab at no address keep the globe. Both are drawn in
+            // the same box at the same width, so nothing moves when an icon lands.
+            row("Browser tabs, wearing what the page gave them", tabs: [
+                page(
+                    BrowserTabTitle.title(
+                        page: "Spatie", address: "https://spatie.be/", fallback: "Browser"
+                    ),
+                    Self.redMark,
+                    active: true
+                ),
+                page(
+                    BrowserTabTitle.title(
+                        page: "spatie/laravel-backup",
+                        address: "https://github.com/spatie/laravel-backup",
+                        fallback: "Browser 2"
+                    ),
+                    Self.darkMark
+                ),
+                page(
+                    BrowserTabTitle.title(
+                        page: "", address: "http://localhost:3000/", fallback: "Browser 3"
+                    ),
+                    nil
+                ),
+                page(
+                    BrowserTabTitle.title(page: "", address: "about:blank", fallback: "Browser 4"),
+                    nil
+                ),
+            ])
+
             // Two rows that have to come out identical, which is the whole reason they are both
             // here. The control is a `Button` and has no on state to draw, the way the sidebar's
             // own toolbar item has none: see `InspectorToggle`. A filled plate in the second row
@@ -153,7 +185,38 @@ struct PaneTabsGallery: View {
     }
 
     private func fixture(_ title: String, _ icon: String, active: Bool = false) -> Fixture {
-        Fixture(title: title, icon: icon, isActive: active)
+        Fixture(title: title, icon: .symbol(icon), isActive: active)
+    }
+
+    private func page(_ title: String, _ favicon: NSImage?, active: Bool = false) -> Fixture {
+        Fixture(title: title, icon: .page(favicon), isActive: active)
+    }
+
+    /// Stand-ins for a real page's icon, drawn here because a gallery has no network and a capture
+    /// must not depend on one. Built once rather than per draw: this page redraws.
+    private static let redMark = mark(.systemRed, "S")
+    private static let darkMark = mark(.black, "G")
+
+    /// At `BrowserFavicon.pixels` square, which is what the page is asked to draw into, so the
+    /// strip is shown resampling exactly what it resamples.
+    private static func mark(_ colour: NSColor, _ letter: String) -> NSImage {
+        let side = CGFloat(BrowserFavicon.pixels)
+        return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            colour.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: side / 5, yRadius: side / 5).fill()
+
+            let text = letter as NSString
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: side * 0.62, weight: .bold),
+                .foregroundColor: NSColor.white,
+            ]
+            let drawn = text.size(withAttributes: attributes)
+            text.draw(
+                at: NSPoint(x: (rect.width - drawn.width) / 2, y: (rect.height - drawn.height) / 2),
+                withAttributes: attributes
+            )
+            return true
+        }
     }
 }
 
@@ -218,7 +281,7 @@ private struct StripRow: View {
 
 private struct Fixture {
     var title: String
-    var icon: String
+    var icon: TabItemIcon
     var isActive: Bool
 }
 

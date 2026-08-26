@@ -85,6 +85,10 @@ final class BrowserSession {
     /// are `BrowserFind` in the core.
     private(set) var find = BrowserFind()
 
+    /// The question in flight about this page's icon, so a tab that navigates twice does not leave
+    /// two of them racing to file an answer against two different origins.
+    @ObservationIgnored private var iconRequest: Task<Void, Never>?
+
     /// KVO on everything the toolbar reads, because the navigation delegate does not see every
     /// navigation.
     ///
@@ -195,6 +199,12 @@ final class BrowserSession {
     }
 
     func reload() {
+        // A reader pressing reload is asking for this page again, icon included. It is the only
+        // way to get a second look at an origin that had no icon the first time, which a dev
+        // server that has since grown one is exactly. See `BrowserFaviconStore.claim`.
+        if let origin = BrowserFavicon.origin(of: displayAddress) {
+            BrowserFaviconStore.shared.forget(origin)
+        }
         // A dev server that was not up when the tab opened has no page to reload, so an empty
         // view reloads the address instead of reloading nothing.
         if webView.url == nil, let url = currentURL {
@@ -297,6 +307,87 @@ final class BrowserSession {
                 }
             }
         }
+    }
+
+    // MARK: - The page's own icon
+
+    /// Asks the page what its icon is, unless this origin has been asked already.
+    ///
+    /// Off the navigation delegate rather than off the title observation, because this is a
+    /// question about a document and `didFinish` is the one callback that means one has arrived. A
+    /// `pushState` inside a single page app fires none of it and needs none: the origin has not
+    /// moved, so the store already holds the answer and the tab is already wearing it.
+    fileprivate func findIcon() {
+        guard let origin = BrowserFavicon.origin(of: displayAddress),
+              BrowserFaviconStore.shared.claim(origin)
+        else { return }
+
+        iconRequest?.cancel()
+        iconRequest = Task { [weak self] in await self?.findIcon(for: origin) }
+    }
+
+    /// Two questions and then silence, which is `BrowserFavicon.attempts`.
+    ///
+    /// **None of this costs the strip anything.** Both calls are asynchronous, the fetching and
+    /// the drawing happen inside the page, and what crosses back is a few kilobytes of PNG. There
+    /// is nothing here a tab being laid out can wait on, and the one write at the end lands in
+    /// `BrowserFaviconStore`, which the strip reads from a dictionary.
+    private func findIcon(for origin: String) async {
+        for delay in BrowserFavicon.attempts {
+            try? await Task.sleep(for: .milliseconds(delay))
+            guard !Task.isCancelled else { return }
+            // The page moved off this origin while Bloom was waiting, so any answer now would be
+            // filed against a site the tab has left.
+            guard BrowserFavicon.origin(of: displayAddress) == origin else { return }
+
+            let links = await iconLinks()
+            // Nothing declared yet. A framework that writes its `<link rel=icon>` from script has
+            // not necessarily written it by the time the page finishes loading, which is the whole
+            // reason there is a second attempt.
+            guard let choice = BrowserFavicon.choose(from: links) else { continue }
+
+            guard let answer = await iconImage(at: choice.index),
+                  // The list is read again inside the page, so a document that rewrote its
+                  // `<link>` elements in between would be handing back a different icon from the
+                  // one that was chosen. The same href or nothing.
+                  answer.href == links[choice.index].href,
+                  let png = BrowserFavicon.read(answer.dataURL)
+            else { return }
+
+            BrowserFaviconStore.shared.adopt(png, for: origin)
+            return
+        }
+    }
+
+    /// What the page says its icons are. See `BrowserFaviconScript`, which is where the argument
+    /// about the isolated content world and the numbers passed as numbers lives.
+    private func iconLinks() async -> [BrowserFaviconLink] {
+        let value: Any? = try? await webView.callAsyncJavaScript(
+            BrowserFaviconScript.links,
+            arguments: [
+                "limit": BrowserFavicon.linkLimit,
+                "chars": BrowserFavicon.textLimit,
+            ],
+            contentWorld: .defaultClient
+        )
+        return BrowserFavicon.links(from: value as? [String] ?? [])
+    }
+
+    /// One of them, named by its place in that list rather than by its address, drawn into a square
+    /// the page is told the size of and handed back as a PNG.
+    private func iconImage(at index: Int) async -> (href: String, dataURL: String)? {
+        let value: Any? = try? await webView.callAsyncJavaScript(
+            BrowserFaviconScript.image,
+            arguments: [
+                "index": index,
+                "size": BrowserFavicon.pixels,
+                "chars": BrowserFavicon.textLimit,
+                "timeout": BrowserFavicon.loadTimeout,
+            ],
+            contentWorld: .defaultClient
+        )
+        guard let pair = value as? [String], pair.count == 2 else { return nil }
+        return (href: pair[0], dataURL: pair[1])
     }
 
     /// The page asked for a window of its own, through `target="_blank"` or `window.open`.
@@ -429,6 +520,10 @@ final class BrowserSession {
 
     func stop() {
         observations = []
+        // A question put to a page whose tab has gone. Nothing would come back through it, and a
+        // sleeping task holding this session is one more thing keeping a closed web view alive.
+        iconRequest?.cancel()
+        iconRequest = nil
         // Before the web view is let go, so a page waiting on an answer gets one. Never calling
         // WebKit's completion handler hangs that page for ever, and a closing tab must not leave a
         // sheet standing on the window either. See `BrowserDialogPresenter`.
@@ -570,6 +665,7 @@ private final class NavigationObserver: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         owner?.refresh()
+        owner?.findIcon()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
