@@ -31,6 +31,19 @@ import Foundation
         return SubagentRoster(subagents)
     }
 
+    /// The same row, started as a backgrounded shell command rather than as an agent. `local_bash`
+    /// is the one word the CLI uses for it, and `SubagentKind` matches it exactly.
+    private func command(
+        _ id: String,
+        state: SubagentState = .running,
+        finishedAt: Date? = nil,
+        summary: String = ""
+    ) -> Subagent {
+        Subagent(id: SubagentID(id), description: "agent-browser open \"/settings\"",
+                 taskType: "local_bash", state: state, summary: summary,
+                 outputFile: "/x", finishedAt: finishedAt)
+    }
+
     private func ids(_ rows: [SubagentRow]) -> [String] { rows.map(\.id.rawValue) }
 
     // MARK: Working rows are never touched
@@ -244,6 +257,52 @@ import Foundation
         #expect(SubagentRetention.failureCount(roster) == 3)
         let later = now.addingTimeInterval(600)
         #expect(SubagentRetention.rows(roster, now: later).count == 3)
+    }
+
+    // MARK: A shell command is not a subagent
+
+    /// `system/task_started` is sent for a Task subagent and for a backgrounded shell command
+    /// alike, and `task_type` is the only field between them. The pane had been drawing both, so
+    /// three rows reading `agent-browser set viewport 1440 900 >/dev/null` stood under a
+    /// workspace, two of them crossed. This pane is for the other AI working on the workspace.
+    @Test func aBackgroundedShellCommandNeverHasARow() {
+        let roster = SubagentRoster([
+            command("1"),
+            command("2", state: .failed, finishedAt: Self.start, summary: "exit 1"),
+            command("3", state: .completed, finishedAt: Self.start, summary: "exit 0"),
+        ])
+        #expect(SubagentRetention.rows(roster, now: Self.start).isEmpty)
+    }
+
+    /// Including one somebody opened. The exemption that keeps an opened row is about a reader
+    /// looking at a row this pane drew, and it never drew this one.
+    @Test func evenAnOpenedCommandHasNoRow() {
+        let roster = SubagentRoster([command("1", state: .failed, finishedAt: Self.start)])
+        #expect(SubagentRetention.rows(roster, now: Self.start, opened: SubagentID("1")).isEmpty)
+    }
+
+    /// The agents beside it are untouched, which is the half that has to keep working.
+    @Test func theAgentsBesideItKeepTheirRows() {
+        let roster = SubagentRoster([subagent("1"), command("2"), subagent("3")])
+        #expect(ids(SubagentRetention.rows(roster, now: Self.start)) == ["1", "3"])
+    }
+
+    /// A failed command must not put a number on the workspace row that nothing under it explains.
+    @Test func aFailedCommandIsNotCountedOnTheWorkspaceRow() {
+        let roster = SubagentRoster([
+            command("1", state: .failed, finishedAt: Self.start),
+            command("2", state: .failed, finishedAt: Self.start),
+            subagent("3", state: .failed, finishedAt: Self.start),
+        ])
+        #expect(SubagentRetention.failureCount(roster) == 1)
+    }
+
+    /// Nothing is on a clock for a row that was never drawn, so no sweep is scheduled for one.
+    @Test func aCommandPutsNothingOnTheClock() {
+        let roster = SubagentRoster([
+            command("1", state: .completed, finishedAt: Self.start, summary: "exit 0"),
+        ])
+        #expect(SubagentRetention.nextChange(roster, now: Self.start) == nil)
     }
 }
 
