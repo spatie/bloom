@@ -88,11 +88,24 @@ final class InspectorGeometry {
 ///
 /// `PullRequestBar` itself is drawn exactly as the inspector drew it, given the width of the pane
 /// it is now the heading for.
+///
+/// **What the band cannot say, it says on hover.** 380 points with a Create pull request button
+/// in them leaves the branch and the state a couple of dozen characters each, so the band reads
+/// `…t-question` over `No pull reque…` on a name nobody would call long. Resting on it opens the
+/// card the sidebar row opens, filled in for a pull request rather than for a workspace: see
+/// `WorkspaceHoverCard.pullRequestBand`. Nothing new is fetched for it. Everything on it is what
+/// `PullRequestBar` is already polling for the band itself.
 struct TitleBarStrip: View {
     let app: AppModel
 
     /// The title bar's own height, measured off the window before this view was put in it.
     let height: CGFloat
+
+    /// Where the band is on screen, for the card that hangs under it. Held rather than reported,
+    /// for the reason on `HoverCardAnchor`, and needed here for a second reason besides: a title
+    /// bar accessory is its own SwiftUI root, so a `GeometryReader` in it measures a space whose
+    /// origin is the accessory's rather than the window's.
+    @State private var anchor = HoverCardAnchor()
 
     private var inspector: InspectorGeometry { .shared }
 
@@ -105,6 +118,50 @@ struct TitleBarStrip: View {
                     // because a band on its way out is still a band: see `InspectorGeometry`.
                     .frame(width: inspector.bandWidth, height: height)
                     .background { ground(for: model) }
+                    .background { HoverCardAnchorReader(anchor: anchor) }
+                    // The whole band is the target, button included, and that is a decision rather
+                    // than the easy way to write it. The band is one subject: the branch, where it
+                    // is going, and what GitHub says about it, with a button that acts on exactly
+                    // that. A card that opened over the left two thirds and not the right third
+                    // would be an affordance you have to find. What keeps it from firing on a
+                    // pointer crossing the band on its way to that button is the wait, which is
+                    // `Motion.hoverCardDelay` and is the same 350ms the sidebar rests for.
+                    //
+                    // The card hangs BELOW, so it never covers the thing it was opened from, and
+                    // it takes no clicks, so it cannot come between the pointer and the button.
+                    // Both of those are the panel's, not this view's: see the presenter.
+                    //
+                    // Whether hover works at all in a title bar accessory is the one thing here
+                    // that was reasoned rather than measured, and it is written down as reasoning
+                    // so the next reader knows to check it. The accessory is a real `NSView` in
+                    // the window's title bar container, so SwiftUI installs its tracking area the
+                    // ordinary way, and what AppKit reserves in that band is the window DRAG,
+                    // which is a mouse-down gesture rather than a tracking one. The head of
+                    // `TitleBarStripController` measured the neighbouring half of that: a click on
+                    // a control here reaches the control and a drag on the band's background still
+                    // moves the window. If the card never opens, this is the line to doubt first,
+                    // and an `NSTrackingArea` on the hosting view is the way out.
+                    .onHoverChange { inside in
+                        let source = WorkspaceHoverCardPresenter.Source
+                            .pullRequestBand(model.workspace.id)
+                        if inside {
+                            WorkspaceHoverCardPresenter.shared.pointerEntered(
+                                source,
+                                card: { bandCard(for: model) },
+                                anchor: { anchor.screenFrame },
+                                side: .below
+                            )
+                        } else {
+                            WorkspaceHoverCardPresenter.shared.pointerExited(source)
+                        }
+                    }
+                    // The band leaves under a stationary pointer whenever the inspector is
+                    // collapsed or the selection moves to Home, and neither of those sends an
+                    // exit. The sidebar row keeps this for the same reason.
+                    .onDisappear {
+                        WorkspaceHoverCardPresenter.shared
+                            .pointerExited(.pullRequestBand(model.workspace.id))
+                    }
                     // The band arrives the way the pane does, from the window's trailing edge, over
                     // the same quarter of a second. A transition rather than an offset held on a
                     // view that is always in the tree, because `PullRequestBar` polls GitHub for as
@@ -127,6 +184,20 @@ struct TitleBarStrip: View {
         // A separate SwiftUI root: the window's environment does not reach a title bar accessory,
         // so the model is handed in rather than inherited.
         .environment(app)
+    }
+
+    /// What the card says, built at the moment it opens rather than on every redraw.
+    ///
+    /// **Nothing in here fetches.** The pull request is whatever `PullRequestBar`'s own poll last
+    /// brought back and the local counts are whatever the inspector last read, which are the two
+    /// facts the band beside it is already drawn and tinted from. A hover that started a `gh` call
+    /// would put a subprocess behind moving the pointer across the top of the window.
+    private func bandCard(for model: WorkspaceModel) -> WorkspaceHoverCard {
+        WorkspaceHoverCard.pullRequestBand(
+            workspace: model.workspace,
+            pullRequest: model.pullRequest,
+            localWork: model.localWork
+        )
     }
 
     /// The four points the title bar is taller than the strip.

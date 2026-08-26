@@ -119,26 +119,37 @@ public struct WorkspaceHoverCard: Sendable, Hashable {
         return WorkspaceHoverCard(
             title: workspace.name,
             branch: workspace.branch,
-            // `hasDiff` rather than a count of its own, so the card is holding the same opinion
-            // about an empty worktree that the row's own counts and `WorkspaceStatus` hold.
-            diff: workspace.hasDiff
-                ? Diff(additions: workspace.additions, deletions: workspace.deletions)
-                : nil,
+            diff: counts(for: workspace),
             status: status,
             state: status.label,
             detail: status.detail(pullRequest: pullRequest),
-            // Whatever GitHub last said, whether or not the state above came from it. A workspace
-            // whose agent is mid turn still has its pull request, and "#362" under "Agent
-            // running" is two facts rather than two answers: the state is about now, the number
-            // is about the branch. Suppressing it there would mean the number blinked out every
-            // time a turn started, which is the one moment somebody is most likely to want it.
-            //
-            // A pull request belonging to an earlier life of a reused branch name never reaches
-            // here: `PullRequestOwnership` drops it upstream, which is where that rule lives.
-            pullRequest: pullRequest.map {
-                PullRequestRef(number: $0.number, title: $0.title, url: $0.url)
-            },
+            pullRequest: reference(to: pullRequest),
             age: HomeAge.phrase(for: workspace.lastActivityAt, now: now)
         )
+    }
+
+    /// The counts, from `hasDiff` rather than from a rule of its own, so the card holds the same
+    /// opinion about an empty worktree that the row's own counts and `WorkspaceStatus` hold.
+    ///
+    /// Shared by both makers below the same reasoning: two cards drawn by one view must not be
+    /// able to disagree about whether a worktree has anything in it.
+    static func counts(for workspace: Workspace) -> Diff? {
+        workspace.hasDiff
+            ? Diff(additions: workspace.additions, deletions: workspace.deletions)
+            : nil
+    }
+
+    /// Whatever GitHub last said, whether or not the state beside it came from GitHub. A workspace
+    /// whose agent is mid turn still has its pull request, and "#362" under "Agent running" is two
+    /// facts rather than two answers: the state is about now, the number is about the branch.
+    /// Suppressing it there would mean the number blinked out every time a turn started, which is
+    /// the one moment somebody is most likely to want it.
+    ///
+    /// A pull request belonging to an earlier life of a reused branch name never reaches here:
+    /// `PullRequestOwnership` drops it upstream, which is where that rule lives.
+    static func reference(to pullRequest: PullRequest?) -> PullRequestRef? {
+        pullRequest.map {
+            PullRequestRef(number: $0.number, title: $0.title, url: $0.url)
+        }
     }
 }

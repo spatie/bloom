@@ -1,4 +1,5 @@
 import SwiftUI
+import BloomCore
 
 /// The whole of a tool row's line, shown while the pointer rests on a row that had to cut it.
 ///
@@ -29,9 +30,11 @@ struct ToolRowCard: View {
     var availableWidth: CGFloat
 
     /// Wide enough for a shell command with a couple of flags on one line, and no wider: the card
-    /// sits over the conversation, so it borrows that space rather than owning it. The same cap
-    /// the file card uses, for the same reason.
-    private static let maxWidth: CGFloat = 520
+    /// sits over the conversation, so it borrows that space rather than owning it.
+    ///
+    /// This is where that measurement was taken, and it is `HoverCardWidth.ceiling` now rather
+    /// than a literal, because three cards had copied it and the workspace card wanted a fourth.
+    private static var maxWidth: CGFloat { HoverCardWidth.ceiling }
     private static let minWidth: CGFloat = 240
 
     var body: some View {

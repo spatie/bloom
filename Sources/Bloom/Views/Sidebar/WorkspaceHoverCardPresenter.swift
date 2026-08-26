@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 import BloomCore
 
-/// Opens and closes the card that stands beside a hovered workspace row.
+/// Opens and closes the card that stands beside a hovered workspace row, and under a hovered pull
+/// request band.
 ///
 /// **A panel of its own rather than a `.popover` or an overlay, and each of the two it is not was
 /// ruled out for a different reason.** An overlay cannot leave the sidebar: the column is an
@@ -25,15 +26,27 @@ import BloomCore
 /// Everything it closes on is listed in `watchForDismissal()`. The delay before it opens is
 /// `Motion.hoverCardDelay`, shared with the composer's own chip card so the window has one answer
 /// to "the pointer is resting on this rather than crossing it".
+///
+/// It serves two surfaces now, which is why the key below is a `Source` rather than a workspace.
+/// The pull request band in the title bar opens the same card about the same workspace, and with
+/// a workspace id alone, crossing from that workspace's sidebar row to its band would have been
+/// read as the pointer never having moved.
 @MainActor
 final class WorkspaceHoverCardPresenter {
     static let shared = WorkspaceHoverCardPresenter()
 
-    /// The row the pointer is on, as far as this knows. Cleared by every dismissal, which is what
-    /// makes a dismissal STICK: the pointer has to leave and arrive again, or arrive on another
-    /// row, before anything opens. Without that a card closed by a scroll reopened under a
-    /// stationary pointer the moment the scroll ended.
-    private var hovered: WorkspaceID?
+    /// What is being hovered, told apart by the surface as well as by the workspace.
+    enum Source: Hashable {
+        case workspaceRow(WorkspaceID)
+        /// The pull request band at the trailing end of the title bar. See `TitleBarStrip`.
+        case pullRequestBand(WorkspaceID)
+    }
+
+    /// The thing the pointer is on, as far as this knows. Cleared by every dismissal, which is
+    /// what makes a dismissal STICK: the pointer has to leave and arrive again, or arrive on
+    /// something else, before anything opens. Without that a card closed by a scroll reopened
+    /// under a stationary pointer the moment the scroll ended.
+    private var hovered: Source?
     /// The wait between the pointer arriving and the card opening.
     private var pending: Task<Void, Never>?
     private var panel: NSPanel?
@@ -50,36 +63,42 @@ final class WorkspaceHoverCardPresenter {
 
     // MARK: - The pointer
 
-    /// The pointer has arrived on a row.
+    /// The pointer has arrived on something that has a card.
     ///
     /// The card and the anchor are closures rather than values because both are read at the end of
     /// the delay rather than at the start of it: a workspace whose agent finishes mid-wait should
     /// open the card it has then, and a row the list has scrolled under the pointer should be
     /// measured where it ended up.
+    ///
+    /// The wait is `Motion.hoverCardDelay` for both surfaces and that is the point of it being
+    /// there rather than here: it is the window's one answer to whether a pointer is resting on
+    /// something or crossing it, and it is also the whole of what stops the band's card opening
+    /// on a pointer travelling across the band to the Create pull request button.
     func pointerEntered(
-        _ workspaceID: WorkspaceID,
+        _ source: Source,
         card: @escaping @MainActor () -> WorkspaceHoverCard?,
-        anchor: @escaping @MainActor () -> CGRect?
+        anchor: @escaping @MainActor () -> CGRect?,
+        side: HoverCardPlacement.Side = .trailing
     ) {
-        guard hovered != workspaceID else { return }
-        hovered = workspaceID
+        guard hovered != source else { return }
+        hovered = source
         pending?.cancel()
-        // Whatever is up belongs to another row, and crossing from one row to the next should not
-        // leave the old card standing while the new one waits out its delay.
+        // Whatever is up belongs to something else, and crossing from one row to the next should
+        // not leave the old card standing while the new one waits out its delay.
         hide()
 
         pending = Task { [weak self] in
             try? await Task.sleep(for: Motion.hoverCardDelay)
-            guard !Task.isCancelled, let self, self.hovered == workspaceID else { return }
+            guard !Task.isCancelled, let self, self.hovered == source else { return }
             guard let card = card(), let anchor = anchor() else { return }
-            self.show(card, at: anchor)
+            self.show(card, at: anchor, side: side)
         }
     }
 
-    /// The pointer has left a row. Ignored when the card has since moved to another row, because
-    /// SwiftUI delivers the arrival on the new row before the departure from the old one.
-    func pointerExited(_ workspaceID: WorkspaceID) {
-        guard hovered == workspaceID else { return }
+    /// The pointer has left. Ignored when the card has since moved elsewhere, because SwiftUI
+    /// delivers the arrival on the new row before the departure from the old one.
+    func pointerExited(_ source: Source) {
+        guard hovered == source else { return }
         dismiss()
     }
 
@@ -93,7 +112,7 @@ final class WorkspaceHoverCardPresenter {
 
     // MARK: - The panel
 
-    private func show(_ card: WorkspaceHoverCard, at anchor: CGRect) {
+    private func show(_ card: WorkspaceHoverCard, at anchor: CGRect, side: HoverCardPlacement.Side) {
         // No card over a window that is not the one being worked in. This is the same fact
         // `didResignKeyNotification` closes on, asked before opening rather than after: a window
         // can lose key during the wait.
@@ -112,18 +131,27 @@ final class WorkspaceHoverCardPresenter {
             self.hosting = hosting
         }
 
-        // The card sizes itself from its content, so the height is asked for rather than chosen:
-        // a three line workspace name draws a taller card than a one line one, and a panel given
-        // a fixed height would either clip the name or float it in dead space.
+        // The card sizes itself from its content in BOTH axes, so both are asked for rather than
+        // chosen: a long branch draws a wider card than a short one, and a three line workspace
+        // name draws a taller card than a one line one. A panel given either number by hand would
+        // clip the card or float it in dead space.
+        //
+        // The width still goes through `HoverCardWidth.fits` rather than being taken as it comes.
+        // The card clamps itself to the same bounds, so on a laid out hosting view the two agree;
+        // what this catches is the hosting view answering with a fraction, or with a zero because
+        // it has not laid out yet, and a zero here is a panel with a shadow and nothing in it.
         guard let hosting else { return }
         hosting.layoutSubtreeIfNeeded()
+        let fitting = hosting.fittingSize
         let size = CGSize(
-            width: WorkspaceHoverCardView.width,
-            height: hosting.fittingSize.height
+            width: HoverCardWidth.fits(content: fitting.width),
+            height: fitting.height
         )
 
         panel.setFrame(
-            HoverCardPlacement.frame(anchor: anchor, size: size, visible: screen.visibleFrame),
+            HoverCardPlacement.frame(
+                anchor: anchor, size: size, visible: screen.visibleFrame, side: side
+            ),
             display: false
         )
 
@@ -241,10 +269,14 @@ final class WorkspaceHoverCardPresenter {
     }
 }
 
-// MARK: - Where the row is
+// MARK: - Where the anchor is
 
-/// A handle on a sidebar row's own `NSView`, so the presenter can ask where the row is at the
-/// moment the card opens.
+/// A handle on the `NSView` behind whatever the card is about, so the presenter can ask where it
+/// is at the moment the card opens. A sidebar row, or the pull request band in the title bar.
+///
+/// The band is the reason this is not called a row any more, and it is also the case that proves
+/// the paragraph below. A title bar accessory's SwiftUI `.global` space is a whole title bar out
+/// from the window's, which is exactly the error the two AppKit conversions do not make.
 ///
 /// A view rather than a `GeometryReader`, because what is needed is a rectangle in SCREEN
 /// coordinates and SwiftUI has no coordinate space that reaches one: `.global` is the hosting
@@ -258,10 +290,10 @@ final class WorkspaceHoverCardPresenter {
 /// SwiftUI state on each of those would invalidate every row in the sidebar to answer a question
 /// nobody had asked yet.
 @MainActor
-final class SidebarRowAnchor {
+final class HoverCardAnchor {
     fileprivate weak var view: NSView?
 
-    /// The row's rectangle on screen, or nil while the row is not in a window, which is every row
+    /// The anchor's rectangle on screen, or nil while it is not in a window, which is every row
     /// between being made and being laid out.
     var screenFrame: CGRect? {
         guard let view, let window = view.window else { return nil }
@@ -269,9 +301,9 @@ final class SidebarRowAnchor {
     }
 }
 
-/// Attaches a `SidebarRowAnchor` to the row it is put behind. Draws nothing.
-struct SidebarRowAnchorReader: NSViewRepresentable {
-    var anchor: SidebarRowAnchor
+/// Attaches a `HoverCardAnchor` to whatever it is put behind. Draws nothing.
+struct HoverCardAnchorReader: NSViewRepresentable {
+    var anchor: HoverCardAnchor
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()

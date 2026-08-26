@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import BloomCore
 
 /// The card that floats over the composer while the pointer rests on a chip.
 ///
@@ -40,8 +41,9 @@ struct AttachmentCard: View {
     var availableWidth: CGFloat
 
     /// Big enough that a screenshot of a window is readable, and no bigger: the card sits over the
-    /// conversation the reader is answering, so it borrows that space rather than owning it.
-    private static let maxWidth: CGFloat = 520
+    /// conversation the reader is answering, so it borrows that space rather than owning it. The
+    /// box every card over the centre pane takes, which is `HoverCardWidth.ceiling`.
+    private static var maxWidth: CGFloat { HoverCardWidth.ceiling }
     private static let maxHeight: CGFloat = 380
 
     var body: some View {

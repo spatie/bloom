@@ -68,6 +68,21 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
         if workspace.setupState == .failed { return .setupFailed }
         if workspace.unread { return .unread }
 
+        return ofBranch(workspace: workspace, pullRequest: pullRequest)
+    }
+
+    /// The same verdict with the agent left out of it: what is true of the BRANCH and whatever
+    /// pull request it has.
+    ///
+    /// The tail of `resolve`, named rather than copied, because the card that opens over the pull
+    /// request band needs exactly this half. That band is about a branch, so a mark reading
+    /// "Agent running" or "Unread" over it would be answering a question nobody asked there, and
+    /// a second copy of the precedence below is how two panes come to disagree about one
+    /// workspace. See `WorkspaceHoverCard.pullRequestBand`.
+    public static func ofBranch(
+        workspace: Workspace,
+        pullRequest: PullRequest?
+    ) -> WorkspaceStatus {
         if let pullRequest {
             if pullRequest.isMerged { return .merged }
             if pullRequest.isClosed { return .closed }
