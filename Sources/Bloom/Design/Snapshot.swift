@@ -894,6 +894,13 @@ enum Snapshot {
             // overwritten by a yellow bar. Here neither picture is wrong, which is worse, because
             // nothing about the file would say which one it is.
             ("running-glyph-still", AnyView(RunningGlyphGallery()), Gallery.runningGlyph.size),
+            // The activity rule, on the same terms and for a better reason than most: the still
+            // figure is the point of that page rather than a consolation. It is what `Reduce
+            // Motion` draws, and the claim being made about it is that a crest parked at the
+            // trailing edge still says which way the line is running, which is a claim a
+            // photograph can settle. The moving rows come out as yellow placeholders here; they
+            // are what `--snapshot-gallery --gallery activity-rule` is for.
+            ("activity-rule-still", AnyView(ActivityRuleGallery()), Gallery.activityRule.size),
             // No review-comments and no inspector-tabs scene, deliberately, and for one reason:
             // `ImageRenderer` paints SwiftUI's yellow placeholder over an `NSViewRepresentable`,
             // and each of those two pages exists to show one. The review comment box is the

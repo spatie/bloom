@@ -46,11 +46,11 @@ struct InspectorView: View {
             // The busy signal lights this half of the same rule. An overlay rather than a
             // background, because unlike the strip beside it nothing in this row is opaque and
             // there is nothing here for the rule to be broken by. It needs to know nothing about
-            // the strip beside it: both segments fade off one epoch, so they cannot disagree. See
-            // `RulePulse`.
+            // the strip beside it: both segments run off one epoch, so they cannot disagree. See
+            // `ActivityRule`.
             InspectorToolbar(model: model)
                 .overlay(alignment: .bottom) { Hairline() }
-                .overlay { RulePulse() }
+                .overlay { ActivityRule() }
 
             // What the list below is measured from, when it is not measured from everything.
             //

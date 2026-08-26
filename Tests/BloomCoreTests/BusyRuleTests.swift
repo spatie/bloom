@@ -49,4 +49,25 @@ struct BusyRuleTests {
         #expect(BusyRule.opacity(at: -1) == BusyRule.opacity(at: 0))
         #expect(BusyRule.opacity(at: 2) == BusyRule.opacity(at: 1))
     }
+
+    /// The half of this figure that is not alpha. A rule that says "working" only by getting
+    /// brighter is a rule the corner of an eye cannot tell from a rule, which is the report that
+    /// took this variation out of the window; see `BusyCrest`. Thickening is the part of the answer
+    /// that survives into the variation that stayed.
+    @Test("it thickens as well as brightens")
+    func thickensAsWellAsBrightens() {
+        #expect(BusyRule.height(at: 1) > BusyRule.height(at: 0))
+        #expect(BusyRule.height(at: BusyRule.resting) == BusyRule.restingHeight)
+        #expect(BusyRule.height(at: 1) == BusyRule.peakHeight)
+        #expect(BusyRule.height(at: -1) == BusyRule.height(at: 0))
+        #expect(BusyRule.height(at: 2) == BusyRule.height(at: 1))
+    }
+
+    /// The rule is drawn on a one point hairline, and the still figure has to be exactly that line
+    /// rather than a line and a bit: a screenshot of an idle window and a screenshot of a working
+    /// one under `Reduce Motion` differ in tint and in nothing else.
+    @Test("the still figure is the hairline itself")
+    func restsOnTheHairline() {
+        #expect(BusyRule.restingHeight == 1)
+    }
 }

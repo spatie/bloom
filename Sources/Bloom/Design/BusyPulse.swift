@@ -5,7 +5,7 @@ import BloomCore
 /// The window's one heartbeat, while an agent is working.
 ///
 /// Everything that moves while agents are running reads its phase from here: the shared rule under
-/// the title bar, which brightens and dims across its whole width (`RulePulse`), the dot at the
+/// the title bar, which carries a crest along its whole width (`ActivityRule`), the dot at the
 /// head of every working row in the sidebar (`WorkspaceRunningGlyph`), and the same dot beside
 /// "Working" in the transcript and in front of a running tab's label (`ActivityDot`). None of them
 /// starts an animation of its own, and that is the whole reason this type exists.
@@ -44,12 +44,13 @@ import BloomCore
 /// restarted from a timer could only be as accurate as the timer.
 ///
 /// The periods stay in that ratio, and each of them lives with the mark it belongs to rather than
-/// here: `BusyDot.period` is a second and a half and `BusyRule.period` takes that same number, so
-/// the rule and every dot in the window reach the top of their pulse on one frame, and
-/// `BusyBreath.period` is three, which is two of those. There were four constants here describing
-/// the figure of the light that used to travel the rule (a crossing was three seconds and out and
-/// back was six), and they went with the light: see `RulePulse` for what replaced it, and
-/// `10bef55` for the measurement that established the ratio.
+/// here: `BusyDot.period` is a second and a half, `BusyCrest.wavePeriod` takes that same number and
+/// `BusyCrest.period` is three, which is two of those and is also `BusyBreath.period`. So the crest
+/// leaves the rule on a frame where every dot in the window is at the top of its swell. There were
+/// four constants here describing the figure of the light that used to travel the rule (a crossing
+/// was three seconds and out and back was six), and they went with the light: see `ActivityRule`
+/// for the two figures that have replaced it since, and `10bef55` for the measurement that
+/// established the ratio.
 ///
 /// It runs while something is running, and it does not care whether the window is in front. See
 /// `BusyPulseDriver`, which is the single place that decides.
@@ -235,7 +236,7 @@ class BusyPulseLayerView: NSView {
     /// The pulse every mark here is made of: half a period between the two ends of an envelope the
     /// core holds, played forwards and then backwards forever.
     ///
-    /// **It was written twice, as `PulsingDotView.pulse` and `PulsingRuleView.fade`, line for
+    /// **It was written twice, as `PulsingDotView.pulse` and the activity rule's own fade, line for
     /// line.** They could only ever have been the same: `BusyRule.period` IS `BusyDot.period` by
     /// construction, so the duration was one number reached down two paths. The frame rate cap is
     /// the one thing that genuinely differed, so it is a parameter and each caller keeps its own
