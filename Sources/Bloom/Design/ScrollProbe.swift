@@ -57,11 +57,6 @@ enum ScrollProbe {
         // Not brought to the front, for the reason at the head of `ProbeHarness.window`.
         let (window, contentView) = await harness.window()
 
-        // Before the conversation is opened, so the arrival is in the count. `uncorrectedRows` is
-        // the one to read: a row the table draws at a height the row did not report is the white
-        // gap between rows. See `TranscriptHoldCensus`.
-        TranscriptHoldCensus.reset()
-
         if let workspace {
             OpenWorkspaceNotification.post(WorkspaceID(workspace))
             // Long enough for the transcript to load every row and for the inspector to settle.
@@ -132,6 +127,11 @@ enum ScrollProbe {
         // ninety fifth percentile and not say what took it.
         PaneLayoutTiming.reset()
         PaneLayoutTiming.isEnabled = true
+        // **Here rather than before the conversation opens, so every number covers one window.**
+        // The counts used to start at the arrival while the clocks only start here, which makes a
+        // mean of them a mean over two different things: cells counted during a workspace opening,
+        // divided into seconds spent during a sweep. The arrival has its own probes.
+        TranscriptHoldCensus.reset()
 
         recorder.start()
         documentHeights.removeAll()
@@ -227,6 +227,9 @@ enum ScrollProbe {
             let gaps = inBand.map(\.1).sorted()
             let calls = (inBand.last?.0.noteCalls ?? 0) - (inBand.first?.0.noteCalls ?? 0)
             let rows = (inBand.last?.0.notedRows ?? 0) - (inBand.first?.0.notedRows ?? 0)
+            let cells = (inBand.last?.0.cellsBuilt ?? 0) - (inBand.first?.0.cellsBuilt ?? 0)
+            let cellMs = ((inBand.last?.0.cellSeconds ?? 0) - (inBand.first?.0.cellSeconds ?? 0)) * 1000
+            let noteMs = ((inBand.last?.0.noteSeconds ?? 0) - (inBand.first?.0.noteSeconds ?? 0)) * 1000
             out.append(.object([
                 "band": .integer(band),
                 "fromEnd": .number(low),
@@ -235,6 +238,12 @@ enum ScrollProbe {
                 "p95Ms": .number(ProbeStats.percentile(0.95, of: gaps)),
                 "noteCalls": .integer(abs(calls)),
                 "notedRows": .integer(abs(rows)),
+                // **What the band SPENT, beside what it did.** A cost that is flat across the
+                // bands is the price of a row appearing and is paid wherever the reader is; one
+                // that climbs is the answer to why the top is worse.
+                "cellsBuilt": .integer(abs(cells)),
+                "cellMs": .number(abs(cellMs)),
+                "noteMs": .number(abs(noteMs)),
             ]))
         }
         return ["climbBands": .array(out)]
@@ -298,6 +307,10 @@ enum ScrollProbe {
         var at: Double
         var noteCalls: Int
         var notedRows: Int
+        /// Cumulative, so a band's share is the difference across it. See `climb`.
+        var cellsBuilt: Int
+        var cellSeconds: Double
+        var noteSeconds: Double
     }
 
     private static var frames: [Frame] = []
@@ -318,7 +331,10 @@ enum ScrollProbe {
                 offset: offset,
                 at: CACurrentMediaTime(),
                 noteCalls: TranscriptHoldCensus.noteCalls,
-                notedRows: TranscriptHoldCensus.notedRows
+                notedRows: TranscriptHoldCensus.notedRows,
+                cellsBuilt: TranscriptHoldCensus.cellsBuilt,
+                cellSeconds: TranscriptHoldCensus.cellSeconds,
+                noteSeconds: TranscriptHoldCensus.noteSeconds
             ))
             // One vsync. Sleeping rather than driving from the display link callback keeps the
             // callback doing nothing but reading the clock, which is what makes the gap between
