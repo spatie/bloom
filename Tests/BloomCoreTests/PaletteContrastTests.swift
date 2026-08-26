@@ -209,6 +209,49 @@ struct PaletteContrastTests {
         }
     }
 
+    /// Why the browser bar's address is not drawn in Bloom's own tertiary ink.
+    ///
+    /// The pane's toolbar puts its arrow capsule and its address pill in `Glass.regular`, and over
+    /// a flat backdrop that material is the backdrop lifted toward white. The backdrop is
+    /// `surfaceSunken`, so how far the ink can be trusted is a question about how far the lift
+    /// goes, and in dark the answer is: not far at all. The exact lift is the system's and cannot
+    /// be read from here, which is the point of asking it as a range.
+    ///
+    /// Retuning the pair is the obvious escape and it is closed: an ink that still clears the text
+    /// floor on a quarter-lifted ground is so near `labelColor` that the emphasised host and the
+    /// dim scheme stop being two tones. So the address goes to AppKit's semantic labels instead,
+    /// which resolve against the glass's own appearance. See `BrowserToolbarView.addressLabel`.
+    @Test("a translucent ground costs Bloom's tertiary ink its floor in dark")
+    func aLiftedGroundCostsTheTertiaryInk() {
+        let ground = PaletteInk.surfaceSunken.dark
+        let ink = PaletteInk.textTertiary.dark
+
+        // Resting, on the opaque bar it was tuned against, it is comfortable.
+        #expect(Contrast.ratio(ink, ground) >= Contrast.textFloor)
+
+        // A tenth of the way to white and it is under the floor for text.
+        let tenth = Contrast.composited(0xFFFFFF, over: ground, at: 0.10)
+        #expect(Contrast.ratio(ink, tenth) < Contrast.textFloor)
+
+        // A fifth, and it is under the floor a glyph holds, never mind a word.
+        let fifth = Contrast.composited(0xFFFFFF, over: ground, at: 0.20)
+        #expect(Contrast.ratio(ink, fifth) < Contrast.nonTextFloor)
+
+        // The escape, closed. `#BACCD4` is about the darkest ink that still clears the text floor
+        // a quarter of the way to white, and against the host beside it there is nothing left.
+        let quarter = Contrast.composited(0xFFFFFF, over: ground, at: 0.25)
+        let dim: UInt32 = 0xBACCD4
+        #expect(Contrast.ratio(dim, quarter) >= Contrast.textFloor)
+        let host = Contrast.composited(0xFFFFFF, over: ground, at: 0.85)
+        #expect(Contrast.ratio(dim, host) < 1.5)
+        #expect(Contrast.ratio(ink, host) > 2)
+
+        // Light is a different question and the answer there is yes: glass over a bar that is
+        // already all but white barely moves it, so the tertiary keeps its floor.
+        let lit = Contrast.composited(0xFFFFFF, over: PaletteInk.surfaceSunken.light, at: 0.25)
+        #expect(Contrast.ratio(PaletteInk.textTertiary.light, lit) >= Contrast.textFloor)
+    }
+
     /// A boundary is not read, so it holds the non-text floor rather than the text one. `border`
     /// is the case the window used to have none of: `separatorColor` composites to a 25 unit step
     /// on white, which the eye reads as nothing.

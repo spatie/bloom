@@ -38,12 +38,15 @@ struct BrowserToolbarButton: View {
 /// no stock component for any of it, and `BrowserToolbar` says why: the toolbar, the joined pair
 /// and the search item are all `NSWindow`'s, and this is a pane inside a split inside a tab.
 ///
-/// Two notes this file used to carry are overturned by that, both knowingly. The pair had no
-/// plate, because `surfaceRaised` means *switched on* in this window and a fill round two of five
-/// glyphs would have read that way; it cannot now, since the pair and the field wear the same fill
-/// and the same radius, so the bar reads as two raised controls beside three bare glyphs. And the
-/// camera has crossed the field, because with Reload inside the field what is left on the right is
-/// the two controls that take this page elsewhere.
+/// **The pair and the field are real glass.** It was refused once on the grounds that glass
+/// samples an arbitrary web page, and that was wrong: `BrowserTabView` is a `VStack(spacing: 0)`,
+/// so this bar sits above the page rather than over it. What the two shapes sample is the bar's
+/// own `surfaceSunken`, which is ours.
+///
+/// The camera and Share stay `.accessoryBar` rather than taking `.buttonStyle(.glass)`. Four
+/// raised capsules in a row is a bar with no groups left in it, and Safari's own two are bare
+/// glyphs until the pointer is on them. The camera is on that side because with Reload inside the
+/// field, what is left on the right is the pair that takes this page elsewhere.
 struct BrowserToolbarView: View {
     var toolbar: BrowserToolbar
     /// What the field shows, which is not where the page is. See `BrowserTabView.address`.
@@ -76,14 +79,24 @@ struct BrowserToolbarView: View {
     private var display: BrowserAddressDisplay { .of(address) }
 
     var body: some View {
-        HStack(spacing: Metrics.spacingWide) {
-            navigation
-            addressField
-            BrowserToolbarButton(control: toolbar.screenshot, action: capture)
-            BrowserShareButton(control: toolbar.share, shareable: toolbar.shareable)
+        // One sampling pass for the two shapes rather than two, which is what the container is
+        // for. `spacing: 0` because the other thing it does is merge shapes that come within a
+        // distance of each other, and the capsule and the pill running together into one blob is
+        // exactly what the three groups above must not become.
+        GlassEffectContainer(spacing: 0) {
+            HStack(spacing: Metrics.spacingWide) {
+                navigation
+                addressField
+                BrowserToolbarButton(control: toolbar.screenshot, action: capture)
+                BrowserShareButton(control: toolbar.share, shareable: toolbar.shareable)
+            }
         }
         .padding(.horizontal, Metrics.spacingSmall)
         .frame(height: Metrics.barHeight)
+        // The bar itself is a colour and not glass. What is behind it is `Palette.surface`, one
+        // flat fill, so the material would resolve to a colour Bloom already has a name for, and
+        // it would lift the ground the two shapes above sample. Its bottom edge also meets the
+        // page's top edge, where a ground that moves reads as a seam rather than as material.
         .background(Palette.surfaceSunken)
     }
 
@@ -98,10 +111,15 @@ struct BrowserToolbarView: View {
                 .modifier(HistoryMenu(entries: forwardHistory, go: goToHistory))
         }
         .frame(height: Metrics.controlHeight)
-        .background(Palette.surfaceRaised)
-        // Before the border, so the clip takes the hover fills of the two buttons and not the
-        // stroke, which `strokeBorder` already draws inside the edge.
+        // Clipped before the glass, not after it. `glassEffect` shapes only its own background, so
+        // the two hover fills still need this to stop at the capsule.
         .clipShape(Capsule())
+        // `.interactive()` here and nowhere else in the bar: this shape is nothing but controls,
+        // and the material answering the pointer is what separates glass from a picture of it.
+        // Which arrow is under the pointer is still said by `.accessoryBar`'s own fill inside.
+        .glassEffect(.regular.interactive(), in: Capsule())
+        // The rim is drawn rather than left to the material's, because it is what still says where
+        // the capsule ends once Reduce Transparency has turned the glass opaque.
         .overlay { Capsule().strokeBorder(Palette.border, lineWidth: Metrics.hairline) }
     }
 
@@ -112,7 +130,7 @@ struct BrowserToolbarView: View {
             if !isEditing, let symbol = display.security.symbol {
                 Image(systemName: symbol)
                     .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
+                    .foregroundStyle(Palette.textSecondary)
                     .help(display.security.help ?? "")
                     .accessibilityLabel(display.security.help ?? "")
             }
@@ -122,8 +140,12 @@ struct BrowserToolbarView: View {
         .padding(.leading, Metrics.spacing)
         .padding(.trailing, Metrics.spacingTight)
         .frame(height: Metrics.controlHeight)
-        .background(alignment: .leading) { fill }
+        .background(alignment: .leading) { load }
         .clipShape(Capsule())
+        // `.regular` and not `.interactive()`. This is where a caret is put, and a material that
+        // lifts and settles on the way to placing one reads as fidgety rather than alive. Both
+        // controls in the pill keep their own hover fills.
+        .glassEffect(.regular, in: Capsule())
         .overlay {
             Capsule().strokeBorder(
                 isRingVisible ? Palette.focusRing : Palette.border,
@@ -132,13 +154,15 @@ struct BrowserToolbarView: View {
         }
     }
 
-    /// The field's ground, with the load behind it.
+    /// How far the page has got, over the glass and under the address.
     ///
     /// `Palette.selected` rather than a tint: it is the step of Bloom's ramp meant to sit under
     /// content in a list that has not got the keyboard, which is exactly what is wanted behind a
     /// line of text, and it keeps the accent out of a bar that has nothing else tinted in it.
-    @ViewBuilder private var fill: some View {
-        Palette.surfaceRaised
+    ///
+    /// Opaque, so the material stops where the load has reached. A wash the glass carried through
+    /// would be a progress fill you have to look for, which is the one thing it must not be.
+    @ViewBuilder private var load: some View {
         if let progress = toolbar.progress {
             GeometryReader { proxy in
                 Palette.selected.frame(width: proxy.size.width * progress)
@@ -174,10 +198,19 @@ struct BrowserToolbarView: View {
         Text(string).foregroundStyle(colour)
     }
 
+    /// The dim runs are `textSecondary` and not `textTertiary`, and that is the glass rather than
+    /// a taste. Bloom's tertiary is tuned for opaque grounds: on the sunken bar in dark it measures
+    /// 5.65 to 1, and it crosses the 4.5 floor as soon as glass lifts that ground 8 percent toward
+    /// white, 2.98 by 20. Retuning it does not help, because an ink still clearing 4.5 at a quarter
+    /// lift stands only 1.32 to 1 off `labelColor` where the tertiary stands 2.21 today: the floor
+    /// is bought by deleting the two-tone. So the pair goes semantic, the way `QuotaPanel` did on
+    /// the menu's material, and AppKit resolves both against the glass's own effective appearance
+    /// with the vibrancy a flat composite cannot model. See
+    /// `PaletteContrastTests.aLiftedGroundCostsTheTertiaryInk`.
     private var addressLabel: some View {
         // Interpolated rather than concatenated: `Text.+` is deprecated in macOS 26 and the app
         // target builds with -warnings-as-errors.
-        Text("\(tinted(display.leading, Palette.textTertiary))\(tinted(display.host, Palette.textPrimary))\(tinted(display.trailing, Palette.textTertiary))")
+        Text("\(tinted(display.leading, Palette.textSecondary))\(tinted(display.host, Palette.textPrimary))\(tinted(display.trailing, Palette.textSecondary))")
             .lineLimit(1)
             // The tail, which is where a query string lives. The host is the part worth reading
             // and it is at the head, so it is the part that always survives the cut.
