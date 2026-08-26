@@ -17,6 +17,12 @@ import QuartzCore
 /// what it counts.** An increment is free; a walk over the visible rows is not, and this file has
 /// already reported a regression that was its own. See the head of `ProbeHarness`. Increment where
 /// the thing happens, and take anything that has to LOOK at the screen on the settle.
+///
+/// **And before adding one at all, run `sample`.** Three counters here were added to find why a
+/// transcript scrolled badly and all three acquitted their suspect, because a counter can only
+/// find what somebody already suspected. A profiler found it in eight seconds, in a shape none of
+/// them was written to notice. The order that works is profile first and count afterwards, to
+/// watch what the profile named. The argument is at the head of `ProbeHarness`.
 @MainActor
 enum TranscriptHoldCensus {
     private(set) static var holds = 0

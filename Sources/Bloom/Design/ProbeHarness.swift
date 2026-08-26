@@ -45,6 +45,30 @@ import BloomCore
 /// nothing else. Anything that walks rows, cells or views on the way past is measuring itself as
 /// well as the app, and there is no way to tell the two apart in the report.
 ///
+/// **Reach for `sample` before writing a counter.** The most useful thing a night of this
+/// produced, and it was learned by getting it wrong three times in a row.
+///
+/// A transcript that scrolled badly upwards was chased with counters, and every one of them was
+/// aimed at a suspect somebody had already named. The document's movement: wrong question, and the
+/// number it produced was partly measuring the history landing rather than the scroll. The list
+/// rebuilding its entries: real, and two per cent of the wall clock. Cells being built: two tenths
+/// of one per cent, and worse than useless, because that timer bracketed an assignment whose work
+/// SwiftUI defers, so it could not have found the cost even if it had been pointed at the right
+/// thing. Three rounds of building, running and reading, and the answer was in none of them.
+///
+/// Then `sample` on the probe process for one busy window: 22 per cent of the main thread under
+/// `NSHostingView.beginTransaction` and the SwiftUI graph flush below it, and 726 samples of 3,034
+/// inside `-[NSView _layoutSubtreeWithOldSize:]`. Eight seconds, no build, no flag, nothing added
+/// to the app. Every live row was a hosting view with a graph of its own and four constraints, and
+/// the cost was per view ALIVE per display cycle, which is a shape no counter here was written to
+/// notice.
+///
+/// **A counter can only find what you already suspect. A profiler finds what is there.** So the
+/// order is: profile first, and add a counter afterwards, to watch the thing the profile named so
+/// that a later run can say whether it came back. `sample` and `heap` run headless against a
+/// process that is already going, film nothing, need no display and cost no rebuild, which makes
+/// reaching for them cheaper than the counter that will not answer the question.
+///
 /// # What is NOT here
 ///
 /// Every probe's driver and subject: a divider drag, a workspace selection, a tab pick, a scroll,
