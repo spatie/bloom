@@ -94,7 +94,7 @@ struct PullRequestBar: View {
                 worktree: model.workspace.path,
                 localWork: model.localWork,
                 isWorking: isWorking,
-                isAgentBusy: model.isRunning,
+                branchActions: branchActions,
                 onMerge: merge,
                 onPush: push,
                 onFixConflicts: { fixConflicts(on: pullRequest) },
@@ -106,12 +106,25 @@ struct PullRequestBar: View {
                 branch: model.workspace.branch,
                 baseBranch: model.workspace.baseBranch,
                 isWorking: isWorking || model.isLoadingPullRequest,
-                isAgentBusy: model.isRunning,
+                branchActions: branchActions,
                 worktree: model.workspace.path,
                 hasChanges: hasChanges,
                 action: createPullRequest
             )
         }
+    }
+
+    /// Whether the strip's buttons may touch this branch, decided once for the whole band.
+    ///
+    /// `AppModel.isRunning` rather than `model.isRunning`, though both answer the same question
+    /// with the same rule (`AgentTurns`, over every chat in the workspace, so a workspace with
+    /// four of them is busy if any one is mid turn). It is the one observable mirror every busy
+    /// reader in this window shares, rebuilt whole by `recomputeAgentTurns` from the session rows
+    /// and the live transcripts, so the strip greys out at the same moment the sidebar's row and
+    /// the menu bar say the agent started. A second route to the same fact is how this app came
+    /// to have three answers to it once already.
+    private var branchActions: BranchActionAvailability {
+        .mayActOnBranch(isAgentBusy: app.isRunning(model.workspace))
     }
 
     /// Whether the branch has anything on it. The inspector's own list first, because it is the

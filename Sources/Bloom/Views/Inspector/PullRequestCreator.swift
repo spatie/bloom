@@ -29,9 +29,10 @@ struct PullRequestCreator: View {
     var branch: String
     var baseBranch: String
     var isWorking: Bool
-    /// The workspace's agent is mid turn. The request is a turn of its own, so it has to wait
-    /// rather than interleave with whatever was asked a moment ago.
-    var isAgentBusy: Bool
+    /// Whether this strip may act on the branch at all. Opening a pull request pushes it, so a
+    /// turn already writing to the worktree holds the button back: see
+    /// `BranchActionAvailability`, which decides it for both halves of this band.
+    var branchActions: BranchActionAvailability
     /// Where a sign in would run, if the quiet line below the branch is pressed.
     var worktree: String
     /// Whether this branch has anything on it at all. A worktree identical to its base has nothing
@@ -171,7 +172,13 @@ struct PullRequestCreator: View {
     /// What the branch is for, in the one line under it: where it is headed, or why the button is
     /// not going to do anything yet.
     private var subtitle: String {
-        hasChanges ? "No pull request yet. Target \(baseBranch)." : "Nothing has changed on this branch yet."
+        // The held back band says so on the line it already has, for the reason
+        // `PullRequestSummary.detailLine` gives: a disabled button that explains itself only on
+        // hover is a button most people never get an explanation from.
+        if let note = branchActions.note { return note }
+        return hasChanges
+            ? "No pull request yet. Target \(baseBranch)."
+            : "Nothing has changed on this branch yet."
     }
 
     /// Tinted explicitly. An untinted `.borderedProminent` follows the system accent on this
@@ -182,17 +189,19 @@ struct PullRequestCreator: View {
             .buttonStyle(.borderedProminent)
             .tint(Palette.accentFill)
             .controlSize(.regular)
-            // Never disabled for a turn that is already running: the request queues behind it.
-            // See `PullRequestStatus.agentBusyReason`. A branch with nothing on it does not draw
-            // this button at all: see `body`.
+            // Held back while a turn runs, like every other button in this band: opening the
+            // pull request pushes the branch, and a worktree being written to as it is read
+            // pushes half of something. See `BranchActionAvailability`. A branch with nothing on
+            // it does not draw this button at all: see `body`.
+            .disabled(!branchActions.isAllowed)
             .help(helpText)
     }
 
     private var helpText: String {
         // The same sentence `PullRequestSummary` shows on the buttons it draws in this band once
         // there is a pull request, from the one place it is written: it is a fact about how all
-        // five of these buttons work rather than about this one.
-        if isAgentBusy { return PullRequestStatus.agentBusyReason }
+        // of these buttons work rather than about this one.
+        if let reason = branchActions.reason { return reason }
         // No path named. There are two, the project's own and Bloom's copy of the default, and
         // which one is in play is not something a tooltip should be teaching anybody.
         return "Ask this workspace's agent to push the branch and open a pull request against "

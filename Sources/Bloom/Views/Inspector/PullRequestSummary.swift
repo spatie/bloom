@@ -26,12 +26,13 @@ struct PullRequestSummary: View {
     /// still running, which is not the same as "nothing", and is drawn as nothing extra.
     var localWork: LocalWork?
     var isWorking: Bool
-    /// The workspace's agent is mid turn. Every button in this strip works by composing a turn
-    /// and sending it, and an agent runs one turn at a time, so a press made now joins the chat's
-    /// queue and goes when this turn ends. That is what the buttons say while it is true;
-    /// `PullRequestCreator` takes the same fact for the same reason, and both say it in the same
-    /// words: `PullRequestStatus.agentBusyReason`.
-    var isAgentBusy: Bool
+    /// Whether this strip may act on the branch at all, decided once for the whole band.
+    ///
+    /// Every button here works by composing a turn and sending it, and what the agent then does
+    /// is commit, push, merge, cut a branch or bring the base in. While a turn is already running
+    /// none of that may start: see `BranchActionAvailability`, which holds the reason and the
+    /// words. `PullRequestCreator` takes the same value for the same reason.
+    var branchActions: BranchActionAvailability
     var onMerge: (GitHub.MergeMethod) -> Void
     /// Hands the outstanding work to the workspace's agent to commit and push.
     var onPush: () -> Void
@@ -171,7 +172,7 @@ struct PullRequestSummary: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
 
-            if let detail = status.detail {
+            if let detail = detailLine {
                 Text(detail)
                     .font(Typo.caption)
                     // Grey, and deliberately so: it is a count read off the headline above it, and
@@ -188,6 +189,16 @@ struct PullRequestSummary: View {
         .help(helpText)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
+    }
+
+    /// The one line under the headline, and what takes it over while the agent is working.
+    ///
+    /// A band that is holding its buttons back says so here rather than only in a tooltip.
+    /// "1 check passed" is a fact that will still be true in a minute, and a reader looking at
+    /// four greyed out controls is asking a different question. Nobody hovers a disabled control
+    /// to find out why it is disabled unless they already suspect the answer.
+    private var detailLine: String? {
+        branchActions.note ?? status.detail
     }
 
     /// The one prominent control, whichever it is, and whatever stands beside it.
@@ -214,8 +225,19 @@ struct PullRequestSummary: View {
     /// split button normally carries its chevron on the trailing side. That is worth giving up,
     /// because the alternative is the trailing edge belonging to a 19 point chevron rather than
     /// to the button, which is exactly the misalignment being fixed.
-    @ViewBuilder
     private var trailing: some View {
+        // Disabled here, for the cluster, rather than on each button in it. Everything in this
+        // slot ends in a turn that writes to the worktree or the branch, so it is one question,
+        // and a control added to the cluster later inherits the answer instead of having to
+        // remember to ask it. `BranchActionAvailability` carries what is held back and why.
+        // Nothing outside this slot is touched: the number, the arrow out to the browser and the
+        // strip's own context menu only ever read.
+        trailingControls
+            .disabled(!branchActions.isAllowed)
+    }
+
+    @ViewBuilder
+    private var trailingControls: some View {
         if isWorking {
             ProgressView()
                 .controlSize(.small)
@@ -299,8 +321,9 @@ struct PullRequestSummary: View {
             .tint(tint ?? Palette.accent)
             .controlSize(.regular)
             .help(
-                "Cut a new branch from \(baseBranch) in this worktree and carry on, keeping this "
-                    + "workspace's session, its setup and anything uncommitted."
+                branchActions.reason
+                    ?? "Cut a new branch from \(baseBranch) in this worktree and carry on, "
+                        + "keeping this workspace's session, its setup and anything uncommitted."
             )
     }
 
@@ -340,8 +363,9 @@ struct PullRequestSummary: View {
             .tint(status.tone.fill)
             .controlSize(.regular)
             .help(
-                "Remove this workspace's worktree. #\(pullRequest.number) is merged, so this asks "
-                    + "first only when something here exists nowhere else."
+                branchActions.reason
+                    ?? "Remove this workspace's worktree. #\(pullRequest.number) is merged, so "
+                        + "this asks first only when something here exists nowhere else."
             )
     }
 
@@ -373,11 +397,11 @@ struct PullRequestSummary: View {
             .buttonStyle(.borderedProminent)
             .tint(status.tone.fill)
             .controlSize(.regular)
-            // Not disabled mid turn. See `PullRequestStatus.agentBusyReason`.
+            // Disabled with the rest of the cluster while a turn runs: pushing a worktree that
+            // is being written to as it is read publishes half of something.
             .help(
-                isAgentBusy
-                    ? PullRequestStatus.agentBusyReason
-                    : "Ask this workspace's agent to \(pushLabel.lowercased()) branch "
+                branchActions.reason
+                    ?? "Ask this workspace's agent to \(pushLabel.lowercased()) branch "
                         + "\(pullRequest.branch.isEmpty ? "this branch" : pullRequest.branch), so "
                         + "#\(pullRequest.number) is what is on this disk."
             )
@@ -433,11 +457,11 @@ struct PullRequestSummary: View {
             .buttonStyle(.borderedProminent)
             .tint(status.tone.fill)
             .controlSize(.regular)
-            // Not disabled mid turn. See `PullRequestStatus.agentBusyReason`.
+            // Disabled with the rest of the cluster while a turn runs: merging the base into a
+            // worktree an agent is editing is the same collision as the button above it.
             .help(
-                isAgentBusy
-                    ? PullRequestStatus.agentBusyReason
-                    : "Ask this workspace's agent to bring \(baseBranch) into this worktree and "
+                branchActions.reason
+                    ?? "Ask this workspace's agent to bring \(baseBranch) into this worktree and "
                         + "resolve the conflicts here. Nothing is pushed and #\(pullRequest.number)"
                         + " is not merged."
             )
@@ -460,7 +484,9 @@ struct PullRequestSummary: View {
         // reads as a stray control that wandered into the strip.
         .foregroundStyle(tint ?? Palette.accent)
         .controlSize(.small)
-        .disabled(!status.canMerge || isAgentBusy)
+        // A running agent is not in here: `trailing` disables the whole cluster for that, so the
+        // chevron and the button beside it can never disagree about it.
+        .disabled(!status.canMerge)
         .help(blockedReason ?? "Merge #\(pullRequest.number), by whichever method")
     }
 
@@ -493,8 +519,8 @@ struct PullRequestSummary: View {
             .buttonStyle(.borderedProminent)
             .tint(status.tone.fill)
             .controlSize(.regular)
-            // A busy agent is not in here any more, only a pull request GitHub will not merge.
-            // See `PullRequestStatus.agentBusyReason`.
+            // Only what GitHub says about the pull request. A running agent is the cluster's
+            // answer rather than this button's: see `trailing`.
             .disabled(!status.canMerge)
             // Disabled controls do not explain themselves, and "why is this greyed out" is the
             // whole question a blocked pull request raises.
@@ -505,11 +531,11 @@ struct PullRequestSummary: View {
 
     /// What the Merge button has to say for itself, or nil when there is nothing.
     ///
-    /// The busy turn comes first. It is true of every button in this strip rather than of one of
-    /// them, and it is the reason that goes away on its own, so a reader hovering while their
-    /// agent is working is told where their press will land rather than told about a draft.
+    /// The running agent comes first. It is true of every button in this strip rather than of one
+    /// of them, and it is the reason that goes away on its own, so a reader hovering while their
+    /// agent is working is told what they are waiting for rather than told about a draft.
     private var blockedReason: String? {
-        isAgentBusy ? PullRequestStatus.agentBusyReason : status.blockedReason
+        branchActions.reason ?? status.blockedReason
     }
 
     /// The title belongs somewhere, and a tooltip on the state is where: it answers "which pull
