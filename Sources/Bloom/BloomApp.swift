@@ -61,6 +61,11 @@ struct BloomApp: App {
         // `StreamProbe`.
         if StreamProbe.isRequested { StreamProbe.schedule() }
 
+        // And the one that asks whether a gesture DID WHAT IT SAID rather than what it cost:
+        // `Bloom --jump-probe <out.json>` asks for the live end from several starting positions
+        // and reports how far short of it the view came to rest. See `JumpProbe`.
+        if JumpProbe.isRequested { JumpProbe.schedule() }
+
         // And the one that answers "the battery menu says Bloom is using significant energy":
         // `Bloom --idle-probe <out.json> --idle-worktrees <list>` runs the diff stat pass the six
         // second loop runs and reports what it cost in process time and in subprocesses. It is the
