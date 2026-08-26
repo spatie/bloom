@@ -141,9 +141,7 @@ struct AgentsSettingsView: View {
         Section {
             Label {
                 Text("Bloom looked for \(selection.executableName) on your PATH and did not find it. Install the CLI, or point Bloom at the executable below.")
-                    .font(Typo.label)
-                    .foregroundStyle(Palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .settingsFootnote()
             } icon: {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(Palette.textTertiary)
@@ -258,9 +256,7 @@ struct AgentsSettingsView: View {
             Section {
                 Label {
                     Text("Bloom can detect and configure \(selection.label), but cannot run a workspace with it yet. Workspaces run on \(AgentKind.runnableSentence).")
-                        .font(Typo.label)
-                        .foregroundStyle(Palette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .settingsFootnote()
                 } icon: {
                     Image(systemName: "info.circle")
                         .foregroundStyle(Palette.textTertiary)

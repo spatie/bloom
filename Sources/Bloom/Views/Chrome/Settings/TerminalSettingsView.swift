@@ -42,45 +42,40 @@ struct TerminalSettingsView: View {
 
     // MARK: - Sections
 
+    /// One instruction, the command, and the warning. Nothing else is above the thing to copy.
+    ///
+    /// The three paragraphs this used to open with said, between them, what an MCP server is, that
+    /// already-running sessions will not pick it up, and what the entry is called. Only the last
+    /// two are facts a person needs while they are here, and both are short enough to sit beside
+    /// the Copy button instead of above the box.
     private func connectSection(_ command: String) -> some View {
         Section {
             Text(
-                "Run this once. It registers Bloom as an MCP server for every Claude Code session "
-                    + "on this Mac, so you can ask the one in your terminal to list your projects, "
-                    + "add a repository, and start a workspace."
+                "Run this once, and Claude Code in your terminal can list your projects, add a "
+                    + "repository and start a workspace."
             )
-            .font(Typo.label)
-            .foregroundStyle(Palette.textSecondary)
-            .fixedSize(horizontal: false, vertical: true)
+            .settingsFootnote()
 
             commandBox(command)
-
-            Text(
-                "Sessions already running will not see it. Start a new one, then ask it what it is "
-                    + "connected to. It appears in your client as "
-                    + BridgeRegistration.ownerServerName + "."
-            )
-            .font(Typo.caption)
-            .foregroundStyle(Palette.textSecondary)
-            .fixedSize(horizontal: false, vertical: true)
 
             legacyEntryNote
         } header: {
             Text("Use Bloom from your own terminal")
         } footer: {
+            // The one paragraph on this pane that is not explanation but prevention, so it stays
+            // on screen and stays next to the button. A committed token is the single genuinely
+            // bad outcome this feature makes available.
             Label {
                 Text(
-                    "It registers at user scope, which keeps it in your own configuration file. Do "
-                        + "not paste it into a project's .mcp.json: that file is committed, and "
-                        + "the token in it lets anything that can reach this Mac create projects "
-                        + "and workspaces in your Bloom."
+                    "Registers at user scope, in your own configuration file. Never paste it into "
+                        + "a project's .mcp.json: that file is committed, and the token in it lets "
+                        + "anything that can reach this Mac create projects and workspaces in your "
+                        + "Bloom."
                 )
             } icon: {
                 Image(systemName: "exclamationmark.triangle.fill")
             }
-            .font(Typo.caption)
-            .foregroundStyle(Palette.textSecondary)
-            .fixedSize(horizontal: false, vertical: true)
+            .settingsFootnote()
             .padding(.top, Metrics.spacingSmall)
         }
     }
@@ -96,25 +91,31 @@ struct TerminalSettingsView: View {
     /// Code reports a failed server at the start of every session with nothing to say why.
     ///
     /// So: one sentence and the line that removes it, in the pane the refusal message already
-    /// sends people to. It will read as noise to somebody installing Bloom for the first time,
-    /// which is the price of not silently leaving a stranger with a broken entry.
+    /// sends people to. Behind a disclosure, because it is addressed to people who ran a command
+    /// that no longer exists and is noise to everybody installing Bloom for the first time, which
+    /// is now most readers of this pane. Closed it costs one line; deleted it would leave a
+    /// stranger with a broken entry and nothing to say why.
     private var legacyEntryNote: some View {
-        VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-            Text(
-                "Earlier versions registered as bloom-owner-bridge, whatever copy of Bloom they "
-                    + "came from. If you ran that command, remove the old entry:"
-            )
-            .fixedSize(horizontal: false, vertical: true)
-
-            Text("claude mcp remove --scope user bloom-owner-bridge")
-                .font(Typo.codeSmall)
-                .textSelection(.enabled)
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                Text(
+                    "Earlier versions registered as bloom-owner-bridge, whatever copy of Bloom "
+                        + "they came from. If you ran that command, remove the old entry:"
+                )
                 .fixedSize(horizontal: false, vertical: true)
+
+                Text("claude mcp remove --scope user bloom-owner-bridge")
+                    .font(Typo.codeSmall)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .settingsFootnote()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, Metrics.spacingSmall)
+        } label: {
+            Text("Upgrading from an earlier version")
+                .settingsFootnote()
         }
-        .font(Typo.caption)
-        .foregroundStyle(Palette.textSecondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, Metrics.spacingSmall)
     }
 
     private func commandBox(_ command: String) -> some View {
@@ -137,8 +138,17 @@ struct TerminalSettingsView: View {
                         )
                 )
 
-            HStack {
+            HStack(spacing: Metrics.gutter) {
+                // Beside the button rather than in a paragraph of its own above it: both facts are
+                // about what happens after the press, and this is where the press is.
+                Text(
+                    "Appears as \(BridgeRegistration.ownerServerName). Sessions already running "
+                        + "will not see it."
+                )
+                .settingsFootnote()
+
                 Spacer()
+
                 Button(didCopy ? "Copied" : "Copy command") { copy(command) }
                     .disabled(didCopy)
             }
@@ -151,9 +161,7 @@ struct TerminalSettingsView: View {
             SettingsRow("Regenerate") {
                 HStack(spacing: Metrics.gutter) {
                     Text("Ends the connection above and issues a new command to run.")
-                        .font(Typo.label)
-                        .foregroundStyle(Palette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .settingsFootnote()
 
                     Spacer()
 
@@ -165,13 +173,10 @@ struct TerminalSettingsView: View {
             Text("Token")
         } footer: {
             Text(
-                "Do this if the token has been somewhere it should not have been, a commit or a "
-                    + "screen share. The old one stops working immediately, so run the new command "
-                    + "afterwards or your terminal will lose Bloom."
+                "Do this if the token has been somewhere it should not have been. The old one "
+                    + "stops working at once, so run the new command afterwards."
             )
-            .font(Typo.caption)
-            .foregroundStyle(Palette.textSecondary)
-            .fixedSize(horizontal: false, vertical: true)
+            .settingsFootnote()
         }
     }
 
@@ -184,12 +189,10 @@ struct TerminalSettingsView: View {
     private var unavailableSection: some View {
         Section("Use Bloom from your own terminal") {
             Text(
-                "This copy of Bloom cannot be connected to an outside client, because the bridge "
-                    + "it would connect through is not running. Reinstalling Bloom is the fix."
+                "The bridge this would connect through is not running, so this copy of Bloom "
+                    + "cannot be reached from an outside client. Reinstalling Bloom is the fix."
             )
-            .font(Typo.label)
-            .foregroundStyle(Palette.textSecondary)
-            .fixedSize(horizontal: false, vertical: true)
+            .settingsFootnote()
         }
     }
 

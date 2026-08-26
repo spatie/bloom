@@ -32,8 +32,7 @@ struct NotificationSettingsView: View {
                 }
             } footer: {
                 Text("Nothing is sent for the workspace already on screen while Bloom is in front of you.")
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textSecondary)
+                    .settingsFootnote()
             }
 
             Section("Tell me when") {
@@ -50,9 +49,8 @@ struct NotificationSettingsView: View {
             Section {
                 Toggle("Badge the Dock icon with unread agent results", isOn: $badgesUnread)
             } footer: {
-                Text("The number is how many workspaces an agent has finished in and nobody has read yet. It clears as you read them, and there is no badge when there is nothing waiting.")
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textSecondary)
+                Text("How many workspaces an agent has finished in and nobody has read yet. It clears as you read them.")
+                    .settingsFootnote()
             }
 
             Section {
@@ -60,8 +58,7 @@ struct NotificationSettingsView: View {
                     .disabled(!isEnabled || service.isBlockedBySystem)
             } footer: {
                 Text("Sends one banner now, so you can see where macOS puts it.")
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textSecondary)
+                    .settingsFootnote()
             }
         }
         .settingsForm()

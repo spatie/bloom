@@ -99,3 +99,17 @@ extension EnvironmentValues {
     /// a row's cue to take its label's natural width for one frame.
     @Entry var settingsLabelColumn: CGFloat = 0
 }
+
+extension View {
+    /// The one way a settings pane says something secondary: a section footer, or a caption under a
+    /// control that could not carry the fact in its label.
+    ///
+    /// Three modifiers that every pane had grown its own copy of, and had begun to disagree on. The
+    /// `fixedSize` is the one that matters: without it a footer in a grouped form is offered a
+    /// single line and truncates rather than wrapping.
+    func settingsFootnote() -> some View {
+        font(Typo.caption)
+            .foregroundStyle(Palette.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}

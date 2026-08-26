@@ -140,16 +140,23 @@ public enum PromptRegistry {
         public static let count = "count"
     }
 
+    /// Sent when the pull request strip's Create pull request button is pressed.
+    ///
+    /// The agent does the pushing and the `gh` call itself, rather than Bloom shelling out, so it
+    /// can follow the project's own commit and pull request conventions. How it does that lives in
+    /// `.bloom/pr-instructions.md`, or in Bloom's own copy of that file when the project has none,
+    /// because the steps belong to the project and not to this app. The template below is only the
+    /// sentence that carries the file.
+    ///
+    /// The summary is one line on purpose. What somebody editing this needs is which button sends
+    /// it and which file rides along; the paragraph above used to be on screen and is why the
+    /// Prompts pane opened with two hundred words before its first control.
     static let createPullRequest = PromptDefinition(
         id: .createPullRequest,
         title: "Create pull request",
         summary: """
-        Sent to the workspace's agent when you press Create pull request, with the project's \
-        `.bloom/pr-instructions.md` attached, or Bloom's own copy of it when the project has \
-        none. The agent does the pushing and the `gh` call itself, so it can follow the project's \
-        own commit and PR conventions. How it does that lives in that file rather than here, \
-        because it belongs to the project and not to Bloom. This is only the sentence that \
-        carries it.
+        Sent when you press Create pull request, with the project's `.bloom/pr-instructions.md` \
+        attached.
         """,
         variables: [
             PromptVariable(name: CreatePullRequest.workspace, summary: "The workspace's name."),
@@ -182,10 +189,8 @@ public enum PromptRegistry {
         id: .pushLocalWork,
         title: "Commit and push",
         summary: """
-        Sent to the workspace's agent when you press Commit and push in the pull request strip, \
-        which appears when this worktree is holding work GitHub has not got. Bloom never writes a \
-        commit message itself: the agent knows what it changed and how this project words a \
-        commit, and one Bloom invented would be in the history forever.
+        Sent when you press Commit and push in the pull request strip. The agent writes the \
+        commit message, not Bloom.
         """,
         variables: [
             PromptVariable(name: PushLocalWork.workspace, summary: "The workspace's name."),
@@ -222,10 +227,8 @@ public enum PromptRegistry {
         id: .continueAfterMerge,
         title: "Continue after a merge",
         summary: """
-        Sent to the workspace's agent when you press Continue on a merged pull request. By the \
-        time it arrives the worktree is already on a new branch, cut from an updated base, in the \
-        same directory and the same session. This only tells the agent what moved, so it does not \
-        find out an hour later from a confusing `git status`.
+        Sent when you press Continue on a merged pull request, after the worktree has already \
+        moved to a new branch. It only says what moved.
         """,
         variables: [
             PromptVariable(name: ContinueAfterMerge.workspace, summary: "The workspace's name."),
@@ -275,11 +278,8 @@ public enum PromptRegistry {
         id: .mergePullRequest,
         title: "Merge a pull request",
         summary: """
-        Sent to the workspace's agent when you confirm Merge, with the project's \
-        `.bloom/merge-instructions.md` attached, or Bloom's own copy of it when the project has \
-        none. Bloom never runs `gh pr merge` itself: the agent runs it in front of you, under the \
-        permission mode you set, and can tell you what GitHub said when it refuses. How the merge \
-        is done lives in that file rather than here, because it belongs to the project.
+        Sent when you confirm Merge, with the project's `.bloom/merge-instructions.md` attached. \
+        The agent runs `gh pr merge` in front of you, not Bloom.
         """,
         variables: [
             PromptVariable(name: MergePullRequest.workspace, summary: "The workspace's name."),
@@ -342,13 +342,8 @@ public enum PromptRegistry {
         id: .fixConflicts,
         title: "Fix merge conflicts",
         summary: """
-        Sent to the workspace's agent when you press Fix merge conflicts, which is what the strip \
-        offers in place of Merge once GitHub reports that the branch conflicts with its base. It \
-        asks for the base branch to be brought into this worktree and the conflicts resolved \
-        here, and the resolution pushed so that GitHub stops refusing the pull request. Nothing is \
-        merged: what you get back is a branch that can be merged, and the decision to merge it \
-        stays yours. An agent that is not sure about a resolution stops and says so rather than \
-        pushing it.
+        Sent when you press Fix merge conflicts. It resolves against the base branch here and \
+        pushes the result; it never merges the pull request.
         """,
         variables: [
             PromptVariable(name: FixConflicts.workspace, summary: "The workspace's name."),
@@ -394,13 +389,15 @@ public enum PromptRegistry {
         """
     )
 
+    /// Sent when inline comments left on the diff are sent from the composer.
+    ///
+    /// Each comment already carries its file, its line and the code around it by the time it gets
+    /// here, so the template only has to say what to do with them.
     static let review = PromptDefinition(
         id: .review,
         title: "Send review comments",
         summary: """
-        Sent when you have left inline comments on the diff and press send. Each comment already \
-        carries its file, its line and the code around it, so this prompt only has to say what to \
-        do with them.
+        Sent when you send the inline comments you left on the diff.
         """,
         variables: [
             PromptVariable(
@@ -434,14 +431,17 @@ public enum PromptRegistry {
     /// It is answered by a separate, short-lived `claude -p` process with every tool switched off
     /// and the default system prompt replaced, because naming a task needs none of the context
     /// that makes a coding agent expensive to start. See `WorkspaceNamer`.
+    ///
+    /// Until the answer arrives the workspace wears a plant name, and the answer never becomes
+    /// part of the workspace's own conversation. Turned off, a workspace is named from the first
+    /// line of the message instead, which is how it always worked; `PromptSettingsView` says that
+    /// much in a tooltip on the switch.
     static let nameWorkspace = PromptDefinition(
         id: .nameWorkspace,
         title: "Name a new workspace",
         summary: """
-        Sent a moment after a workspace is created, to turn what you asked for into a short name \
-        and a branch. Until the answer arrives the workspace wears a plant name. Answered by a \
-        small model with no tools and no access to the repository, and it never becomes part of \
-        the workspace's own conversation.
+        Sent a moment after a workspace is created, to turn what you asked for into a name and a \
+        branch.
         """,
         variables: [
             PromptVariable(
