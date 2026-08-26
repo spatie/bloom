@@ -120,6 +120,12 @@ public enum BridgeToolApproval {
         // which tab the reader is looking at, in the workspace whose agent is asking, and one
         // click puts it back. It cannot create a tab, which is what keeps it this small.
         "workspace_tab_select",
+        // Navigation and only navigation, asked for by the owner's own client in a conversation
+        // the owner is sitting in front of. It creates nothing, archives nothing and touches no
+        // file: what it costs is a glance, and the way back is a click. Asking would put a
+        // question in front of somebody who has just said out loud "show me those", and a hung ask
+        // is a hung turn. See `RevealTool`.
+        "reveal",
     ]
 
     /// Whether this ask is Bloom answering itself.

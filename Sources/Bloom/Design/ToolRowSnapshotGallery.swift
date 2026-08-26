@@ -39,11 +39,8 @@ struct ToolRowSnapshotGallery: View {
     /// one. See `CommandDisplay`.
     private static let worktree = "/Users/freek/bloom/workspaces/there-there/freekmurze-hibiki-sea"
 
-    private var workspace: Workspace {
-        Workspace(
-            repoID: RepoID("r1"), name: "laravel-webhook-server", branch: "main",
-            path: Self.worktree, baseBranch: "main"
-        )
+    private var home: TranscriptHome {
+        TranscriptHome(workspaceID: WorkspaceID("r1"), worktree: Self.worktree)
     }
 
     private func row(
@@ -55,8 +52,8 @@ struct ToolRowSnapshotGallery: View {
         let use = AgentToolUse(id: id, name: name, input: .object(input))
         return ToolRowView(
             use: use,
-            presentation: TranscriptPresenter.present(use, worktree: workspace.path),
-            workspace: workspace,
+            presentation: TranscriptPresenter.present(use, worktree: home.worktree),
+            home: home,
             result: nil,
             isError: false,
             refusal: nil,

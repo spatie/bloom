@@ -209,6 +209,34 @@ final class AppModel {
     /// outside this file both destroy a model whose workspace has genuinely gone.
     @ObservationIgnored var workspaceModels: [WorkspaceID: WorkspaceModel] = [:]
 
+    /// The conversation that belongs to Bloom rather than to a workspace. See `AskModel`.
+    ///
+    /// Built on first use and kept for the life of the window, for the same reason the dictionary
+    /// above is: it holds a running agent and a loaded transcript, and going back to Home and
+    /// returning must not lose either. Outside observation for the same reason too, so that a view
+    /// body asking for it is not a write that invalidates the body it is in. What the window
+    /// watches is the state inside the model.
+    @ObservationIgnored private var storedAsk: AskModel?
+
+    var ask: AskModel {
+        if let storedAsk { return storedAsk }
+        let model = AskModel(app: self)
+        storedAsk = model
+        return model
+    }
+
+    /// The mark the Ask Bloom row wears, or nil when it has nothing to say.
+    ///
+    /// It reads `storedAsk` rather than `ask`, and that is the point: the sidebar draws this row on
+    /// every pass, and asking whether the conversation is busy must not be what brings it into
+    /// existence. Nil until it has been opened this launch, which is exactly right, because a chat
+    /// that has never been opened is not doing anything.
+    var askStatus: WorkspaceStatus? {
+        guard let storedAsk else { return nil }
+        if storedAsk.isAwaitingPermission { return .awaitingPermission }
+        return storedAsk.isRunning ? .running : nil
+    }
+
     /// Workspaces whose row has already left the sidebar while their archive is still running.
     ///
     /// The archive hides the row before any filesystem work starts, on purpose, and the store is
@@ -459,14 +487,17 @@ final class AppModel {
 
         let models = Array(workspaceModels.values)
         // Signal every agent first, so the SIGTERM escalations all run at the same time rather than
-        // one after another.
+        // one after another. Ask Bloom is signalled with them, and only if it was ever opened:
+        // touching `ask` here would build a model on the way out.
         for model in models { model.stopEverything() }
+        storedAsk?.stopEverything()
 
         // The shells and the agents wait on their own escalations, so the two waits overlap rather
         // than queue. Each model returns as soon as its agent is gone, which is immediately for all
         // but the one that ignored SIGTERM.
         async let terminals: Void = TerminalSessionStore.shared.shutdownAll()
         for model in models { await model.shutdown() }
+        await storedAsk?.shutdown()
         await terminals
     }
 
@@ -1227,7 +1258,10 @@ final class AppModel {
     /// Counted over the live models rather than the stored sessions, because a session row says
     /// what was true when it was written and this question is about processes running right now.
     var runningAgentCount: Int {
-        runningWorkspaceIDs.count
+        // Ask Bloom counts, and only if it has been opened this launch. It is an agent mid turn
+        // whose work a quit would throw away, which is the whole of what this question is for, and
+        // it is in no workspace so nothing else here counts it.
+        runningWorkspaceIDs.count + ((storedAsk?.isRunning ?? false) ? 1 : 0)
     }
 
     /// The workspaces those agents are working in, named so the confirmation can say where the
@@ -1239,11 +1273,15 @@ final class AppModel {
     /// reported by its session row, and there is no model to take a name from. Counted and named
     /// have to agree, or the confirmation says "2 agents are working" over one line.
     var runningAgentWorkspaceNames: [String] {
-        runningWorkspaceIDs
+        let workspaceNames = runningWorkspaceIDs
             .compactMap { id in
                 workspaceModels[id]?.workspace.name ?? workspaces.first { $0.id == id }?.name
             }
             .sorted()
+        // Named rather than counted silently, so the confirmation says where the work is: "2
+        // agents are still running" with one line under it is a list that does not add up.
+        guard storedAsk?.isRunning == true else { return workspaceNames }
+        return workspaceNames + [AskConversation.title]
     }
 
     // MARK: - Workspaces

@@ -11,7 +11,7 @@ import BloomCore
 /// (a customised template, an older wording) the turn renders as its full text instead.
 struct ReviewTurnChips: View {
     var chips: [ReviewTurnRecord.Chip]
-    var workspace: Workspace
+    var home: TranscriptHome
 
     @Environment(AppModel.self) private var app
 
@@ -35,7 +35,7 @@ struct ReviewTurnChips: View {
     /// The same door every file chip in the transcript uses. The line is not scrolled to: the
     /// file may have changed shape since, and a wrong scroll claims more than a right open.
     private func open(_ chip: ReviewTurnRecord.Chip) {
-        guard let model = app.existingModel(for: workspace.id) else { return }
+        guard let id = home.workspaceID, let model = app.existingModel(for: id) else { return }
         FileReview.open(path: chip.filePath, in: model)
     }
 }

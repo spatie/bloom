@@ -55,11 +55,8 @@ struct PermissionSnapshotGallery: View {
         )
     }
 
-    private var workspace: Workspace {
-        Workspace(
-            repoID: RepoID("r1"), name: "laravel-mobile-pass", branch: "main",
-            path: "/tmp/nowhere", baseBranch: "main"
-        )
+    private var home: TranscriptHome {
+        TranscriptHome(workspaceID: WorkspaceID("w1"), worktree: "/tmp/nowhere")
     }
 
     private func toolRow(_ id: String, name: String, file: String) -> some View {
@@ -67,7 +64,7 @@ struct PermissionSnapshotGallery: View {
         return ToolRowView(
             use: use,
             presentation: TranscriptPresenter.present(use),
-            workspace: workspace,
+            home: home,
             result: nil,
             isError: false,
             refusal: nil,

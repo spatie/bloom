@@ -386,9 +386,15 @@ enum Snapshot {
     /// than by each flag remembering to say so.
     /// `--menu-probe` is named by its flag rather than through `MenuProbe.isRequested`, because
     /// that type is compiled into debug builds only and this property is not.
+    ///
+    /// **Every probe, not two of them.** This listed `FrameProbe` and `SwitchProbe` only, so a
+    /// scroll, resize, tab or idle run on a machine that has not finished onboarding was met by
+    /// the welcome window, which is ordered front and is therefore the window a probe attaches to.
+    /// A run then reported "no transcript NSScrollView found" and looked like a broken transcript.
     static var isDrivingTheWindow: Bool {
         isRequested || isWindowCaptureRequested || isGalleryCaptureRequested
-            || FrameProbe.isRequested || SwitchProbe.isRequested
+            || FrameProbe.isRequested || SwitchProbe.isRequested || ScrollProbe.isRequested
+            || ResizeProbe.isRequested || TabProbe.isRequested
             || CommandLine.arguments.contains("--menu-probe")
     }
 

@@ -285,8 +285,9 @@ struct WorkspaceEventRow: View {
         ToolRowHeader(
             presentation: event.presentation,
             // Only ever read by a file chip, and an event has none: its detail is a line of log or
-            // a branch name, never a path this row invites anybody to open.
-            workspace: model?.workspace ?? Workspace(repoID: RepoID(""), name: "", branch: "", path: "", baseBranch: ""),
+            // a branch name, never a path this row invites anybody to open. It used to build an
+            // empty `Workspace` with a blank `RepoID` every pass to satisfy the type.
+            home: model.map { TranscriptHome($0.workspace) } ?? TranscriptHome(),
             isError: event.isFailure,
             durationMS: event.durationMS,
             isExpanded: isExpanded,

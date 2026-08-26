@@ -31,6 +31,20 @@ import BloomCore
 /// The runtime guard the two probes carried is gone because there is nothing left for it to
 /// catch, which is the only kind of check worth deleting.
 ///
+/// **A probe whose cost scales with the change it is measuring reports the probe.** The newest
+/// lesson, and the one that is hardest to see afterwards, because the numbers it produces are
+/// plausible. `TranscriptHoldCensus` is read by four probes and written by the transcript, and its
+/// census of the screen walked the visible rows on every movement of the clip view: about thirty
+/// rows, which is nothing. Then a change under measurement made most rows a hundredth of a point
+/// tall, a viewport came to span hundreds of them rather than thirty, and the walk grew with the
+/// thing it was watching. Every band of that run came back slower, on a machine at a third of the
+/// load, and the run was read as a regression in the app.
+///
+/// So a hook that a probe reads belongs where the view has STOPPED: a settle, an end of gesture, a
+/// placement. Per frame is for what the frame did, which is `FrameRecorder` reading a clock and
+/// nothing else. Anything that walks rows, cells or views on the way past is measuring itself as
+/// well as the app, and there is no way to tell the two apart in the report.
+///
 /// # What is NOT here
 ///
 /// Every probe's driver and subject: a divider drag, a workspace selection, a tab pick, a scroll,
@@ -110,6 +124,7 @@ struct ProbeHarness {
     ///
     /// The wait loop is a loop because there is no window for the first moments of a launch, and
     /// a probe that asked once got nil and reported nothing at all.
+
     /// **`--window-hidden`: a run the owner cannot see.**
     ///
     /// `open -g` keeps a probe from taking the keyboard, and it does not keep a 1,440 point window
@@ -131,7 +146,11 @@ struct ProbeHarness {
         async let hiding: Void = hideWindowsAsTheyOpen()
         await settle()
         await hiding
-        for _ in 0..<60 {
+        // A minute rather than fifteen seconds. Several agents build on this Mac at once, the load
+        // average has been over two hundred, and a debug build opening a window on a loaded
+        // machine is not a fifteen second operation. A run that gave up early reported "no window
+        // to probe", which reads as a broken app rather than as a slow one.
+        for _ in 0..<240 {
             let candidate = NSApp.windows.first {
                 $0.isVisible && $0.contentView != nil && $0.parent == nil
                     && $0.styleMask.contains(.titled)
@@ -141,8 +160,22 @@ struct ProbeHarness {
                 await resize(candidate)
                 return (candidate, content)
             }
+            // **A background launch does not always open the scene.** `open -g` is how a probe
+            // stays out of the owner's way, and a `Window` scene launched that way can come up
+            // with no window at all: `NSApp.windows` was empty eighteen seconds in, and a run
+            // that had worked all evening began reporting a broken transcript instead. This is
+            // what a click on the Dock icon does, and it takes no focus.
+            if NSApp.windows.isEmpty, let delegate = NSApp.delegate {
+                _ = delegate.applicationShouldHandleReopen?(NSApp, hasVisibleWindows: false)
+            }
             try? await Task.sleep(for: .milliseconds(250))
         }
+        // Every window, not the filtered set, because "no window to probe" has twice meant "a
+        // window this predicate declined" rather than "no window".
+        let all = NSApp.windows.map {
+            "\($0.title)|\(type(of: $0))|vis=\($0.isVisible)|titled=\($0.styleMask.contains(.titled))|parent=\($0.parent != nil)"
+        }
+        FileHandle.standardError.write(Data("all windows: \(all)\n".utf8))
         fail("no window to probe")
     }
 

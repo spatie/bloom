@@ -6,7 +6,7 @@ import BloomCore
 struct ToolRowHeader: View {
     var presentation: ToolPresentation
     /// Which worktree the row's paths are relative to, and which review a file chip opens into.
-    var workspace: Workspace
+    var home: TranscriptHome
     var isError: Bool
     /// Set when the call never ran, which the protocol reports with the same `is_error` a real
     /// failure carries. See `ToolRefusal`.
@@ -318,7 +318,7 @@ struct ToolRowHeader: View {
         // The rule is `FileChipTarget` in the core, shared with the pills a sent turn draws inside
         // its own sentence: two copies of it would be two answers to "can this chip be opened",
         // four lines apart in the same transcript.
-        let target = FileChipTarget.resolve(path, in: workspace.path)
+        let target = FileChipTarget.resolve(path, in: home.worktree)
         let attachment = PromptAttachment.sent(path: target.path)
         let worktree = target.worktree
         // Spelled out rather than mapped over the optional, so the closure's actor is written down
@@ -352,7 +352,9 @@ struct ToolRowHeader: View {
 
     /// The same door the composer's chips and a sent turn's chips use.
     private func open(_ path: String) {
-        guard let model = app.existingModel(for: workspace.id) else { return }
+        // No workspace is Ask Bloom, which has no review pane for a file to open into. The chip
+        // still draws and still previews: what a path in that conversation is for is reading.
+        guard let id = home.workspaceID, let model = app.existingModel(for: id) else { return }
         FileReview.open(path: path, in: model)
     }
 }

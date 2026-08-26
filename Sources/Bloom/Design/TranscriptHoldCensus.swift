@@ -11,6 +11,11 @@ import Foundation
 /// divider does is a thing to measure on this system rather than to remember from a document.
 ///
 /// Counters, written where the holds are and read by nothing but a report.
+///
+/// **A counter added here is code on the app's own path, so where it is written matters as much as
+/// what it counts.** An increment is free; a walk over the visible rows is not, and this file has
+/// already reported a regression that was its own. See the head of `ProbeHarness`. Increment where
+/// the thing happens, and take anything that has to LOOK at the screen on the settle.
 @MainActor
 enum TranscriptHoldCensus {
     private(set) static var holds = 0
@@ -33,10 +38,13 @@ enum TranscriptHoldCensus {
     /// it was told. See `TranscriptTable.Coordinator.checkCorrected`, which carries the bug.
     private(set) static var correctedRows = 0
     private(set) static var uncorrectedRows = 0
-    /// **What is on the screen, and how much of it is a guess.** Sampled on every movement of the
-    /// clip view: the most rows the reader could see at once that the table was drawing at a
-    /// height nobody has measured, and the most it was drawing at a height that disagrees with
-    /// what was measured. Either of them above nought is white space the reader can see.
+    /// **What is on the screen, and how much of it is a guess.** Sampled when the view has stopped
+    /// moving: the most rows the reader could see at once that the table was drawing at a height
+    /// nobody has measured, and the most it was drawing at a height that disagrees with what was
+    /// measured. Either of them above nought is white space the reader can see.
+    ///
+    /// Sampled on the settle rather than on every frame, because the walk is over the visible rows
+    /// and a screenful is not a fixed number of them: see `censusOfTheScreen`.
     private(set) static var screenEstimated = 0
     private(set) static var screenWrong = 0
     private(set) static var screensSeen = 0
@@ -45,6 +53,17 @@ enum TranscriptHoldCensus {
     /// there. See `TranscriptTable.Coordinator.scheduleSettle`.
     private(set) static var screenEstimatedSettled = 0
     private(set) static var screenWrongSettled = 0
+    /// **What a correction costs the table.** Every `noteHeightOfRows` call, the rows in them, and
+    /// every time a correction wrote the scroll offset to keep the reader where they were. A
+    /// scroll upwards draws rows nobody has drawn before, so all three climb with distance, which
+    /// is what "the higher I go the more stuttery it gets" is made of.
+    private(set) static var noteCalls = 0
+    private(set) static var notedRows = 0
+    private(set) static var placeWrites = 0
+    /// Cells the table asked for, which is one SwiftUI graph each. A row that draws nothing is a
+    /// hundredth of a point tall, so a screenful of them is hundreds of rows rather than thirty,
+    /// and this is the only number that would say so.
+    private(set) static var cellsBuilt = 0
 
     static func held(_ what: TranscriptPaneHold.PaneHeld, underAHand hand: Bool, liveResize: Bool) {
         switch what {
@@ -77,6 +96,18 @@ enum TranscriptHoldCensus {
         }
     }
 
+    /// One `noteHeightOfRows`, and how many rows it named.
+    static func noted(rows: Int) {
+        noteCalls += 1
+        notedRows += rows
+    }
+
+    /// One write of the scroll offset that actually moved it.
+    static func placed() { placeWrites += 1 }
+
+    /// One cell handed to the table. See `cellsBuilt`.
+    static func builtCell() { cellsBuilt += 1 }
+
     /// One batch of corrections, and the ones that did not take.
     static func corrected(rows: Int, uncorrected: Int) {
         correctedRows += rows
@@ -99,6 +130,10 @@ enum TranscriptHoldCensus {
         screensSeen = 0
         screenEstimatedSettled = 0
         screenWrongSettled = 0
+        noteCalls = 0
+        notedRows = 0
+        placeWrites = 0
+        cellsBuilt = 0
     }
 
     static func summary() -> [String: Double] {
@@ -118,6 +153,10 @@ enum TranscriptHoldCensus {
             "screensSeen": Double(screensSeen),
             "screenEstimatedSettled": Double(screenEstimatedSettled),
             "screenWrongSettled": Double(screenWrongSettled),
+            "noteCalls": Double(noteCalls),
+            "notedRows": Double(notedRows),
+            "placeWrites": Double(placeWrites),
+            "cellsBuilt": Double(cellsBuilt),
         ]
     }
 }

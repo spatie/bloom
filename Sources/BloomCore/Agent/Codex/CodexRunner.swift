@@ -521,7 +521,10 @@ public actor CodexRunner: SessionRunner {
 
     private func repoID() async -> RepoID? {
         if let cachedRepoID { return cachedRepoID }
-        guard let workspace = try? await store.workspace(id: session.workspaceID) else { return nil }
+        // Nil for a chat with no worktree, which is Ask Bloom: there is no project behind it, so
+        // there is no project scope to grant in it either. See `PermissionScopeOffer`.
+        guard let workspaceID = session.workspaceID,
+              let workspace = try? await store.workspace(id: workspaceID) else { return nil }
         cachedRepoID = workspace.repoID
         return workspace.repoID
     }

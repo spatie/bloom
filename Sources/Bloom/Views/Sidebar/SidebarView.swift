@@ -99,6 +99,14 @@ struct SidebarView: View {
             // Xcode.
             Section {
                 navRow(.home, title: "Home", icon: "house")
+                // The one row that came back, and it needed an argument. Search and Archive were
+                // taken out because both were the list of workspaces Home already draws. This is
+                // not that list under a filter: it is a conversation, it holds state a chip on
+                // Home cannot hold, and it is the only thing in the window scoped to no workspace.
+                //
+                // Under Home rather than over it, because Home is where you land and this is where
+                // you go. See `SidebarSelection.ask`.
+                askRow
             }
 
             // A plain row rather than a `Section` header, because the things it heads are
@@ -538,6 +546,25 @@ struct SidebarView: View {
             .tag(target)
             .listRowBackground(selectionFill(for: target))
             .selectedRowInk(isEmphasized: isEmphasized(target))
+    }
+
+    /// Home's row is a name. This one also says what the conversation is doing, because it is the
+    /// only row in the pane whose agent is not in a workspace: nothing else in the window would
+    /// report it, and a hand raised in a room nobody is in is a turn that waits for ever.
+    ///
+    /// The same mark the workspace rows below carry, from the same type, so the column says
+    /// "working" and "waiting on you" in one shape throughout.
+    private var askRow: some View {
+        HStack(spacing: 0) {
+            SidebarNavRow(title: AskConversation.title, icon: "bubble.left.and.text.bubble.right")
+            Spacer(minLength: Metrics.spacingSmall)
+            if let status = app.askStatus {
+                WorkspaceStatusGlyph(status: status, isOnSelection: isEmphasized(.ask))
+            }
+        }
+        .tag(SidebarSelection.ask)
+        .listRowBackground(selectionFill(for: .ask))
+        .selectedRowInk(isEmphasized: isEmphasized(.ask))
     }
 
     /// The fill under one row, or nothing at all when that row is not the selection.
