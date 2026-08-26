@@ -163,10 +163,25 @@ struct SidebarEmptyNoticeRow: View {
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textTertiary)
 
+                // **A control, not a link.** It was `linkButton`, which is the style for a
+                // sentence with an address in it, and in a sidebar it came out as a line of blue
+                // web text under a grey one: the owner's word for it was fugly, and he is right.
+                // Nothing else in this column is underlined-blue-adjacent, and what this does is
+                // open a sheet rather than go somewhere.
+                //
+                // It stays rather than being deleted, because the `+` that does the same thing is
+                // on the header above and only appears once the pointer is on that header. An
+                // empty project with no visible way out of being empty is the reason this was
+                // added.
                 if !isFiltered, let onCreate {
-                    Button("New workspace", action: onCreate)
-                        .linkButton()
-                        .font(Typo.caption)
+                    Button(action: onCreate) {
+                        Label("New workspace", systemImage: "plus")
+                            .labelStyle(.titleAndIcon)
+                            .font(Typo.caption)
+                    }
+                    .buttonStyle(.accessoryBar)
+                    .tint(Palette.accent)
+                    .controlSize(.small)
                 }
             }
         } icon: {
