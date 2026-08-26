@@ -60,7 +60,10 @@ public enum PendingMessageDiscard {
     /// Both trailers are machine writing appended at send time, and neither survives a round trip
     /// through a text box: the chips would come back as their rendered prompt, and the attachment
     /// paths would come back as a list the composer draws from its own staging instead.
-    private static func isPlainText(_ body: String) -> Bool {
+    ///
+    /// `PendingMessageEdit` asks this too, and it is the one question the two of them share: it is
+    /// a fact about the body, where everything else here is a policy about the box.
+    public static func isPlainText(_ body: String) -> Bool {
         ReviewTurn.split(body) == nil && AttachmentTrailer.split(body).paths.isEmpty
     }
 
