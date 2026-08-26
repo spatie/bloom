@@ -633,7 +633,16 @@ struct TranscriptTable: NSViewRepresentable {
             let drawn = max(Double(Self.hair), TranscriptRowHeights.rounded(Double(height)))
             if let told, TranscriptRowHeights.isSameHeight(Double(told), drawn) { return }
             owedHeights.insert(entryID)
-            guard owedWork == nil else { return }
+            drainOwedHeights()
+        }
+
+        /// **Tells the table every correction the cache has taken and it has not been told about.**
+        ///
+        /// Its own method because a report is no longer the only thing that can owe one. A hold
+        /// takes the queue out of flight, and if the hold turns out not to have changed the width
+        /// then everything in it is still true and has to be said. See `holdEnded`.
+        private func drainOwedHeights() {
+            guard owedWork == nil, !owedHeights.isEmpty else { return }
             owedWork = Task { @MainActor [weak self] in
                 guard let self else { return }
                 owedWork = nil
@@ -723,6 +732,16 @@ struct TranscriptTable: NSViewRepresentable {
                 }
             }
             TranscriptHoldCensus.sawScreen(estimated: estimated, wrong: wrong, settled: settled)
+            // **What this counts, it now also puts right.** A row the table draws at a height
+            // nobody measured it at is the bug with two faces: a row over the row beneath it, or a
+            // last line under the composer that the scroller will not reach. `drainOwedHeights`
+            // closes the one path that was losing corrections, and this closes the class: whatever
+            // else could ever leave the table disagreeing with the cache, one screenful of rows is
+            // reconciled the moment the reader stops moving.
+            //
+            // On the settle only. It writes heights, which moves the document, and doing that on a
+            // frame somebody is scrolling is the stutter rather than the cure.
+            if settled, wrong > 0 { repairTheScreen() }
             #if DEBUG
             // Which rows, once the screen has stopped moving, because a guess that is standing
             // there is worth naming and a guess mid flick is not.
@@ -735,6 +754,21 @@ struct TranscriptTable: NSViewRepresentable {
                 ))
             }
             #endif
+        }
+
+        /// **Tells the table what the cache holds for every row on screen.**
+        ///
+        /// The safety net under `drainOwedHeights`, and deliberately blunt: it does not care how
+        /// the table came to disagree, only that a reader is looking at rows drawn at heights
+        /// nobody measured them at. One screenful, once, when nothing is moving.
+        private func repairTheScreen() {
+            let rows = IndexSet(visibleRows.filter { entries.indices.contains($0) })
+            guard !rows.isEmpty else { return }
+            let wasAtEnd = isFollowingAlong
+            let anchor = anchorEntry()
+            noteHeights(rows)
+            keepPlace(wasAtEnd: wasAtEnd, anchor: anchor)
+            reportGeometry()
         }
 
         /// Whether this row is on screen at a number somebody guessed.
@@ -1172,12 +1206,28 @@ struct TranscriptTable: NSViewRepresentable {
             // who had not moved at all would be anchored back to their top row by a drag. Nothing
             // under them moves while the hold is on, so this answer is still true when it is used.
             heldPlace = HeldPlace(wasAtEnd: isFollowingAlong, anchor: anchorEntry())
-            // Both were queued against the width being left behind.
+            // Queued against the width being left behind, and picked up again by `rewidth`.
             resizeWork?.cancel()
             resizeWork = nil
+            // **Taken out of flight and KEPT, and throwing it away was a bug the reader could
+            // see.** These are heights the cache has already taken from rows that were drawn: the
+            // table is the only thing that has not been told. Dropping them left it believing a
+            // row was shorter than it draws, for ever, because nothing asks twice. A cell that
+            // already holds its content never reports again, `note` calls the same number no news,
+            // and `measureExactly` skips any row the cache knows, so every mechanism that could
+            // have put it right declines to.
+            //
+            // What that looks like is one bug with two faces. In the middle of a conversation the
+            // row spills over the one beneath it, because a cell does not clip and `HostedRow`
+            // draws from the top down. At the END of it there is no row beneath, so the spill goes
+            // under the composer, and the document is short by exactly the difference, so the
+            // scroller will not travel to it: the last line of an answer cannot be read at all.
+            //
+            // Kept rather than applied here, because a hold that really is a width change makes
+            // them worthless: they were measured against the width being left. `holdEnded` knows
+            // which kind it was.
             owedWork?.cancel()
             owedWork = nil
-            owedHeights = []
         }
 
         @discardableResult
@@ -1188,6 +1238,12 @@ struct TranscriptTable: NSViewRepresentable {
             // "is this pane a different width from the one these heights were taken at" has one
             // answer wherever it is asked.
             let moved = rewidth()
+            // **The width did not move, so everything the hold took out of flight is still true.**
+            // A reflow tells the table about every row and supersedes them; no reflow tells it
+            // about none, and the corrections a hold interrupted would otherwise be lost. That is
+            // the reader's own report: a resize, and then a row drawn through the row above it, or
+            // a last line that cannot be scrolled to. See `holdBegan`.
+            if !moved { drainOwedHeights() }
             // After the width, so this pass finds the cache already declared for the new one and
             // deals with the rows that changed rather than with all of them.
             if let whileHeld {
@@ -1208,6 +1264,9 @@ struct TranscriptTable: NSViewRepresentable {
             isHeld = false
             whileHeld = nil
             heldPlace = nil
+            // Nothing here reflows, so anything the hold took out of flight is owed by this file
+            // and by nobody else. See `holdBegan`.
+            drainOwedHeights()
         }
 
         var reducesMotion: Bool { rowEnvironment?.reduceMotion ?? false }
@@ -1419,12 +1478,17 @@ private struct HostedRow: View {
 /// The hosting view is exactly the row, so there is no second opinion about its height. What the
 /// content wants instead comes back through `HostedRow`, measured by the same layout that drew it.
 ///
-/// **By frame, and it was by four constraints.** Filling the cell is the same arrangement either
-/// way, and one of them enrols every live row in the Auto Layout engine. A profile of an upward
-/// scroll spent 726 samples of 3,034 inside `-[NSView _layoutSubtreeWithOldSize:]`, recursing some
-/// fifteen deep with 538 still at the bottom, which is the breadth of a table full of cells rather
-/// than the depth of any one of them. A frame set in `layout` is the same geometry with no solver
-/// in it, and the assignment is guarded, so a row whose size has not moved costs nothing at all.
+/// **Pinned on all four edges, and it was briefly a frame set in `layout`.** A profile of an upward
+/// scroll spent 726 samples of 3,034 inside `-[NSView _layoutSubtreeWithOldSize:]`, which is every
+/// live cell sitting in the Auto Layout engine, and a frame is the same geometry with no solver in
+/// it. Then a reader resized a pane and got rows drawn over one another, and the constraints came
+/// back, because the saving was small and unmeasured on its own while text over text is the app
+/// looking broken.
+///
+/// It was never proved to be the cause: nothing in the width path changed that night, so a row can
+/// be drawn at a height measured for another width either way. It was reverted on the shape of the
+/// risk rather than on evidence, and the evidence is a build with this line changed and nothing
+/// else. If that build overlaps too, the fault is older than the mask and this can come back.
 final class TranscriptTableCell: NSView {
     private let host: NSHostingView<AnyView>
     private var appliedKey: TranscriptContentKey?
@@ -1435,20 +1499,14 @@ final class TranscriptTableCell: NSView {
         host = NSHostingView(rootView: AnyView(EmptyView()))
         super.init(frame: .zero)
         self.identifier = identifier
-        // The mask keeps the geometry right through an autoresize AppKit does on its own; the
-        // frame in `layout` below is what makes it exact. Both, because a cell is handed its size
-        // by the table rather than asked for one, and the two agree in every case.
-        host.translatesAutoresizingMaskIntoConstraints = true
-        host.autoresizingMask = [.width, .height]
-        host.frame = bounds
+        host.translatesAutoresizingMaskIntoConstraints = false
         addSubview(host)
-    }
-
-    override func layout() {
-        super.layout()
-        // Guarded, because assigning a frame is what makes a hosting view lay its content out
-        // again, and this runs for every live cell on every pass that moves one.
-        if host.frame != bounds { host.frame = bounds }
+        NSLayoutConstraint.activate([
+            host.leadingAnchor.constraint(equalTo: leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: trailingAnchor),
+            host.topAnchor.constraint(equalTo: topAnchor),
+            host.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
     }
 
     @available(*, unavailable)

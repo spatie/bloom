@@ -43,15 +43,11 @@ struct SplitPaneDivider: View {
                 height: axis == .vertical ? Self.grab : length
             )
             .contentShape(Rectangle())
-            .onHover { inside in
-                // Pushed and popped rather than `set`, so the arrow comes back when the pointer
-                // leaves. During a drag AppKit keeps the pushed cursor, which is what we want.
-                if inside {
-                    (axis == .horizontal ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push()
-                } else {
-                    NSCursor.pop()
-                }
-            }
+            // Pushed and popped rather than `set`, so the arrow comes back when the pointer
+            // leaves. During a drag AppKit keeps the pushed cursor, which is what we want.
+            // Through the modifier rather than by hand, because a pane closing under the pointer
+            // took the divider away before its exit event: see `ResizeCursor`.
+            .resizeCursor(axis == .horizontal ? .resizeLeftRight : .resizeUpDown)
             .gesture(
                 // `.global`, and that is the whole of why this drag is smooth. The default is
                 // `.local`, which is local to THIS view, and this view moves the moment the ratio

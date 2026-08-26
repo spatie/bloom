@@ -264,7 +264,7 @@ final class DetailSplitViewController: NSSplitViewController {
             return
         }
 
-        // The two halves of the inspector, started together.
+        // The three parts of the inspector, started together.
         //
         // What the user reads as one thing arriving is drawn by two frameworks: this pane, and the
         // pull request band, which is a title bar accessory because it sits in the title bar rather
@@ -275,9 +275,14 @@ final class DetailSplitViewController: NSSplitViewController {
         //
         // So both are started inside one animation context, off one duration. The context is given
         // its numbers rather than left at its defaults for the same reason the band is told about
-        // the slide at all: a length nobody wrote down is a length the two halves are free to
-        // disagree about later. `Motion.inspectorSeconds` is what the default already was, so the
-        // pane keeps exactly the speed it has always collapsed at.
+        // the slide at all: a length nobody wrote down is a length the parts are free to disagree
+        // about later. `Motion.inspectorSeconds` is what the default already was, so the pane keeps
+        // exactly the speed it has always collapsed at.
+        //
+        // The third part is the window's search field, and it moves because the band's accessory is
+        // what decides how much title bar the toolbar gets. It is not mentioned in this call because
+        // nothing here has to mention it: it follows the accessory, the accessory follows this
+        // publish, and `TitleBarStripController.resize` is where that is written down.
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Motion.inspectorSeconds
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)

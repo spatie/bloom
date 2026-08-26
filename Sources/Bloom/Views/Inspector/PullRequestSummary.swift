@@ -272,13 +272,15 @@ struct PullRequestSummary: View {
             // One control, and only the one the state is asking for. Nothing stands beside it:
             // the merge method chevron is inside the merge button now, and it is drawn nowhere a
             // merge is not what the button does.
-            primaryButton.fixedSize()
+            //
+            // No `.fixedSize()` over either of these two slots. It was here, and it is what took
+            // the width away before the buttons under it could ever see it. See `continueButton`.
+            primaryButton
         } else if pullRequest.isMerged {
             HStack(spacing: Metrics.spacingTight) {
                 continueButton
                 archiveButton
             }
-            .fixedSize()
         }
         // A CLOSED pull request still gets nothing, and that is not an oversight. Continue is
         // built on the merge: the work is on the base branch, so cutting a fresh branch from the
@@ -332,12 +334,22 @@ struct PullRequestSummary: View {
     /// The two forms are the same trick `pushButton` uses. "Continue" beside "Archive" and a
     /// headline is more than the pane's default width carries, and the headline is the part that
     /// must not be the thing that truncates.
+    ///
+    /// **The `.fixedSize()` is on the candidates, never on the `ViewThatFits`.** It sat outside on
+    /// all five of the strip's two-form controls, and that is what made the second form
+    /// unreachable: `.fixedSize()` proposes an unspecified width to what it wraps, and a
+    /// `ViewThatFits` measuring against an unspecified width finds its FIRST candidate fits, every
+    /// time and at every pane width. So "Continue", "Archive", "Commit and push" and "Fix merge
+    /// conflicts" kept their titles always, and the fallback four doc comments in this file
+    /// promise had never once been drawn. Inside, it does the job it was reached for: each
+    /// candidate reports the width its own label wants rather than a truncated one, and the row
+    /// takes the first that fits what it was actually offered. `InspectorToolbar` puts it on the
+    /// candidate and has always been right about it.
     private var continueButton: some View {
         ViewThatFits(in: .horizontal) {
-            continueControl.labelStyle(.titleAndIcon)
-            continueControl.labelStyle(.iconOnly)
+            continueControl.labelStyle(.titleAndIcon).fixedSize()
+            continueControl.labelStyle(.iconOnly).fixedSize()
         }
-        .fixedSize()
     }
 
     private var continueControl: some View {
@@ -374,12 +386,13 @@ struct PullRequestSummary: View {
     /// has never seen, an edited `.env`, commits made on a detached HEAD. What the merge changes
     /// is only the commits, and only through `isPullRequestMerged`, which is true here because
     /// GitHub said so. Nothing about the safety checks is weakened to make this button quiet.
+    ///
+    /// Two forms, with the `.fixedSize()` on the candidates for the reason `continueButton` gives.
     private var archiveButton: some View {
         ViewThatFits(in: .horizontal) {
-            archiveControl.labelStyle(.titleAndIcon)
-            archiveControl.labelStyle(.iconOnly)
+            archiveControl.labelStyle(.titleAndIcon).fixedSize()
+            archiveControl.labelStyle(.iconOnly).fixedSize()
         }
-        .fixedSize()
     }
 
     private var archiveControl: some View {
@@ -408,13 +421,12 @@ struct PullRequestSummary: View {
     /// longest label anything in this strip carries, and beside a 15 point headline, a chip and a
     /// menu it does not fit the pane at its default width. Dropping the title rather than letting
     /// the headline truncate keeps the sentence, which is the part that cannot be guessed from a
-    /// glyph.
+    /// glyph. The `.fixedSize()` is on the candidates for the reason `continueButton` gives.
     private var pushButton: some View {
         ViewThatFits(in: .horizontal) {
-            pushControl.labelStyle(.titleAndIcon)
-            pushControl.labelStyle(.iconOnly)
+            pushControl.labelStyle(.titleAndIcon).fixedSize()
+            pushControl.labelStyle(.iconOnly).fixedSize()
         }
-        .fixedSize()
     }
 
     private var pushControl: some View {
@@ -457,13 +469,13 @@ struct PullRequestSummary: View {
     /// a signed out `gh` has no bearing on whether it can work.
     ///
     /// Two forms, the way `pushButton` has two. "Fix merge conflicts" is longer than any other
-    /// label in the strip and the headline is the part that must not be what truncates.
+    /// label in the strip and the headline is the part that must not be what truncates. The
+    /// `.fixedSize()` is on the candidates for the reason `continueButton` gives.
     private var fixConflictsButton: some View {
         ViewThatFits(in: .horizontal) {
-            fixConflictsControl.labelStyle(.titleAndIcon)
-            fixConflictsControl.labelStyle(.iconOnly)
+            fixConflictsControl.labelStyle(.titleAndIcon).fixedSize()
+            fixConflictsControl.labelStyle(.iconOnly).fixedSize()
         }
-        .fixedSize()
     }
 
     /// Tinted `status.tone.fill`, which in this state is red, and deliberately so.

@@ -761,29 +761,31 @@ enum Metrics {
 enum Motion {
     static let pane: Animation = .easeOut(duration: 0.18)
 
-    /// The inspector column arriving and leaving, and the pull request band arriving with it.
+    /// The inspector column arriving and leaving, the pull request band arriving with it, and the
+    /// window's search field moving over to make room.
     ///
-    /// Two halves of one movement, drawn by two frameworks. The column is an `NSSplitViewItem`
-    /// under AppKit's animator; the band along the top of it is a title bar accessory drawn in
-    /// SwiftUI, because it sits in the title bar rather than inside the pane. That is why they used
-    /// to arrive at different times: the band was drawn or it was not, with nothing in between, so
-    /// it appeared whole on the frame the toolbar button was pressed and the column spent a quarter
-    /// of a second sliding in underneath it. The owner's words were "bit jarring now".
+    /// Three parts of one movement, and no two of them are drawn by the same thing. The column is
+    /// an `NSSplitViewItem` under AppKit's animator. The band along the top of it is a title bar
+    /// accessory, because it sits in the title bar rather than inside the pane. The field is an
+    /// `NSSearchToolbarItem`, packed by `NSToolbar` into whatever width that accessory leaves it.
+    /// That is why they used to arrive at different times: the band was drawn or it was not, with
+    /// nothing in between, so it appeared whole on the frame the toolbar button was pressed while
+    /// the column spent a quarter of a second sliding in underneath it (the owner's words were "bit
+    /// jarring now"), and the field then popped 379 points sideways on the frame the accessory
+    /// changed size.
     ///
-    /// So the number lives here rather than inside either of them, and both read it:
+    /// So the number lives here rather than inside any of them, and all three read it.
     /// `DetailSplitViewController` sets it on the `NSAnimationContext` the collapse runs in, and
-    /// `TitleBarStrip` slides the band with it.
+    /// `TitleBarStripController` walks the accessory's frame across it a frame at a time, which
+    /// carries the band and the field together. See `InspectorSlide` for the curve, which has to be
+    /// the `easeInEaseOut` the animation context is given for the same reason this length is shared.
     ///
     /// A quarter of a second is what an `NSAnimationContext` defaults to, which is what the column
-    /// has always collapsed in, so writing it down changes nothing about how the pane feels. It is
-    /// deliberately not `pane`: this movement belongs to the split view and the band is joining it,
-    /// and a speed chosen here that the split view then declined to use would put the two halves
+    /// has always collapsed in, so writing it down changed nothing about how the pane feels. It is
+    /// deliberately not `pane`: this movement belongs to the split view and the other two are
+    /// joining it, and a speed chosen here that the split view then declined to use would put them
     /// back out of step, which is the whole bug.
     static let inspectorSeconds: TimeInterval = 0.25
-
-    /// `inspectorSeconds` as SwiftUI states it. `easeInEaseOut` is the curve the animation context
-    /// is given below, and both frameworks spell that as the same cubic.
-    static let inspector: Animation = .easeInOut(duration: inspectorSeconds)
 
     /// A hover state fading in, and a disclosure settling. See the sidebar rows.
     ///
@@ -843,26 +845,13 @@ enum Motion {
 
 // MARK: - Materials
 
-/// A real AppKit material, so the sidebar is translucent and vibrant the way every other Mac
-/// sidebar is, and so it dims correctly when the window is not key.
-struct VisualEffectBackground: NSViewRepresentable {
-    var material: NSVisualEffectView.Material = .sidebar
-    var blending: NSVisualEffectView.BlendingMode = .behindWindow
-    var emphasized = false
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.state = .followsWindowActiveState
-        return view
-    }
-
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        view.material = material
-        view.blendingMode = blending
-        view.isEmphasized = emphasized
-    }
-}
-
+/// Every ground in this window is a colour, and there is deliberately no `NSVisualEffectView`
+/// anywhere for one to be reached for from.
+///
+/// There was: a `VisualEffectBackground` representable and a `headerMaterial()`, both of them
+/// under this heading with nothing calling either, directly above the two measurements that say
+/// why nothing should. Machinery kept under an argument against itself is an invitation to put
+/// the argued-against thing back, so it is gone and the measurements are below.
 extension View {
     /// The sidebar's ground.
     ///
@@ -873,20 +862,16 @@ extension View {
     /// would render green over a green wallpaper. A themed ramp cannot survive that. Everything
     /// vibrancy was buying beyond the tint, the rounded window corner and the toolbar unification,
     /// belongs to the window rather than to this view and is unaffected.
+    ///
+    /// The same answer came back for the strips of small controls, which is why they take this
+    /// colour too rather than a material of their own: `NSVisualEffectView(.headerView)` measured
+    /// `#292C33` over a `#0A1A25` pane, a neutral grey with nothing to do with what was behind it,
+    /// so every strip in the window read as a piece of a different app laid over it.
     func sidebarMaterial() -> some View {
         background(Palette.sidebar)
     }
 
-    /// The ground under a strip of small controls: a panel's tab bar, a run script's header.
-    ///
-    /// `NSVisualEffectView(.headerView)` measured `#292C33` over a `#0A1A25` pane, a neutral grey
-    /// with nothing to do with what was behind it, so every strip in the window read as a piece of
-    /// a different app laid on top. The chrome colour is what the material was standing in for.
-    func headerMaterial() -> some View {
-        background(Palette.sidebar)
-    }
-
-    /// The strip a tab bar sits in: the header material with the pane's top edge already on it.
+    /// The strip a tab bar sits in: the chrome colour with the pane's top edge already on it.
     ///
     /// The rule belongs here, behind the tabs, rather than in an overlay over them. Drawn over the
     /// top it crosses the selected tab as well, which boxes that tab in and leaves the strip

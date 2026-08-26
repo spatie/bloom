@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 import BloomCore
 
@@ -24,12 +25,20 @@ import BloomCore
 /// laid out from its view's frame rather than from its intrinsic content size, measured on this
 /// branch: with a 132 point intrinsic size the container kept the one point frame it was given. So
 /// the frame is set by hand, and this is what says when.
+///
+/// **That frame is also the window's search field's x, which is why the accessory travels rather
+/// than jumps.** The toolbar gets what the trailing accessory leaves it, and `.searchable`'s
+/// `NSSearchToolbarItem` is packed against the end of it by `BloomWindowToolbar`'s flexible
+/// spacer. See `TitleBarStripController.resize` and `InspectorSlide`.
 @MainActor
 @Observable
 final class InspectorGeometry {
     static let shared = InspectorGeometry()
 
     /// The inspector pane's width in points, zero while it is collapsed.
+    ///
+    /// Where the pane is GOING rather than where the title bar is: for a quarter of a second after
+    /// this is written the accessory is still on its way to it.
     private(set) var width: CGFloat = 0
 
     /// The width the band is DRAWN at, which is the last width the pane actually had.
@@ -40,31 +49,41 @@ final class InspectorGeometry {
     /// keeps its shape for the whole of the slide it is in the middle of.
     private(set) var bandWidth: CGFloat = Metrics.inspectorWidth
 
-    /// Whether the width just published is the column opening or collapsing, rather than a divider
-    /// drag, a window resize or a launch.
+    /// Whether the title bar has any room for the band at all.
     ///
-    /// The band animates on this and on nothing else, which is what keeps the two halves one
-    /// movement. A drag has to stay live and a launch has to be instant, and both of those publish
-    /// a width too; only the collapse is a slide. Reduce Motion arrives down this same wire, because
-    /// the split view is the thing told not to animate and it then publishes `false`, so the window
-    /// takes one decision about movement rather than two that can disagree.
-    private(set) var isSliding = false
+    /// Written by the accessory rather than derived from `width`, because the two answer different
+    /// questions for as long as a slide is running: `width` is zero on the FIRST frame of a hide,
+    /// and the band has a quarter of a second of leaving still to do inside an accessory that is
+    /// still most of the way open. The band is mounted while the accessory has width and dropped
+    /// the moment it has none, which is what keeps `PullRequestBar` from polling GitHub for a band
+    /// nobody can see.
+    private(set) var isVisible = false
 
-    /// Called when it moves, and told whether the move is a slide. Not observation: the reader is
-    /// an `NSView` frame.
+    /// Called when the pane's width moves, and told whether the move is the column opening or
+    /// collapsing rather than a divider drag, a window resize or a launch.
+    ///
+    /// Only a collapse is a slide. A drag has to stay live and a launch has to be instant, and both
+    /// of those publish a width too. Reduce Motion arrives down this same wire, because the split
+    /// view is the thing told not to animate and it then publishes `false`, so the window takes one
+    /// decision about movement rather than two that can disagree.
+    ///
+    /// Not observation: the reader is an `NSView` frame.
     @ObservationIgnored var onChange: ((_ sliding: Bool) -> Void)?
 
     private init() {}
-
-    /// Below this the pane is closed or mid animation, and the strip should not be drawn.
-    var isVisible: Bool { width > 1 }
 
     func setInspectorWidth(_ value: CGFloat, sliding: Bool = false) {
         guard abs(width - value) > 0.5 else { return }
         width = value
         if value > 1 { bandWidth = value }
-        isSliding = sliding
         onChange?(sliding)
+    }
+
+    /// Said by the accessory as it starts to open and again once it has finished closing. See
+    /// `isVisible` for why the accessory is the one that knows.
+    func setBandVisible(_ visible: Bool) {
+        guard isVisible != visible else { return }
+        isVisible = visible
     }
 }
 
@@ -107,11 +126,21 @@ struct TitleBarStrip: View {
     /// origin is the accessory's rather than the window's.
     @State private var anchor = HoverCardAnchor()
 
+    /// The workspace the band is drawn for, which outlives the selection by one slide.
+    ///
+    /// `app.selectedModel` is nil the instant the window moves to Home, and the band has a quarter
+    /// of a second of leaving still to do. It used to survive that on SwiftUI's own removal
+    /// transition, which keeps a departing subtree alive for as long as the animation it is playing;
+    /// the band plays none any more, because the accessory's frame carries it out now, so what the
+    /// transition was holding has to be held here instead. The same shape as
+    /// `InspectorGeometry.bandWidth` and for the same reason: a band on its way out is still a band.
+    @State private var shown: WorkspaceModel?
+
     private var inspector: InspectorGeometry { .shared }
 
     var body: some View {
         Group {
-            if let model = app.selectedModel, inspector.isVisible {
+            if let model = shown, inspector.isVisible {
                 PullRequestBar(model: model)
                     // As wide as the pane below it, so the band ends where the pane does and the
                     // split divider runs out of the bottom of it. `bandWidth` rather than `width`
@@ -162,25 +191,35 @@ struct TitleBarStrip: View {
                         WorkspaceHoverCardPresenter.shared
                             .pointerExited(.pullRequestBand(model.workspace.id))
                     }
-                    // The band arrives the way the pane does, from the window's trailing edge, over
-                    // the same quarter of a second. A transition rather than an offset held on a
-                    // view that is always in the tree, because `PullRequestBar` polls GitHub for as
-                    // long as it is on screen and a band parked off the edge of the window is still
-                    // on screen. Nothing needs to fade: the pane does not, and one movement means
-                    // one movement.
-                    .transition(.offset(x: inspector.bandWidth))
             }
         }
-        // The band is drawn at the width the PANE has, and the accessory gives that width back only
-        // once the band has finished leaving it, so for the frame between those two the two numbers
-        // disagree. This is which edge wins: the band keeps its leading edge rather than being
-        // centred in a frame it has outgrown.
+        // The band is drawn at the width the PANE settles at, inside an accessory whose own width
+        // is travelling, so the two numbers disagree for the whole of every slide. This is which
+        // edge wins: the band keeps its leading edge rather than being centred in a frame it has
+        // outgrown, and the accessory clips the rest.
+        //
+        // **That is the whole of the band's movement now, and there is no transition here any
+        // more.** The accessory's trailing edge is the window's, so shrinking it walks its leading
+        // edge towards that corner and the band goes with it, clipped as it passes the edge, which
+        // is exactly what the pane below is doing. A `.transition(.offset)` on top of that would be
+        // the same distance travelled twice: the band left in the first half of the slide and
+        // arrived in the second. Gluing the band to the edge the accessory gives back also glues it
+        // to the search field, which is packed against that same edge from the other side, so the
+        // two things in the title bar cannot drift apart no matter what clock either is on.
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: height)
-        // Only a collapse is animated, and only because the split view said so. See
-        // `InspectorGeometry.isSliding`, which is also where Reduce Motion arrives: the split view
-        // is told not to animate, publishes no slide, and this is nil.
-        .animation(inspector.isSliding ? Motion.inspector : nil, value: inspector.isVisible)
+        // The model's identity rather than its row: a workspace row is rewritten every six seconds
+        // by the diff stat refresh, and the only thing this needs to hear about is the band being
+        // for a different workspace. `initial` seeds it for a window that comes up on one.
+        .onChange(of: app.selectedModel.map { ObjectIdentifier($0) }, initial: true) { _, _ in
+            if let model = app.selectedModel { shown = model }
+        }
+        // The end of a slide out is the moment the departing band can be let go of. Taken from the
+        // selection rather than set to nil, because the inspector can also be closed with a
+        // workspace still selected, and that band should come back with the pane.
+        .onChange(of: inspector.isVisible) { _, visible in
+            if !visible { shown = app.selectedModel }
+        }
         // A separate SwiftUI root: the window's environment does not reach a title bar accessory,
         // so the model is handed in rather than inherited.
         .environment(app)
@@ -244,10 +283,10 @@ struct TitleBarStrip: View {
 final class TitleBarStripController: NSTitlebarAccessoryViewController {
     private let height: CGFloat
 
-    /// The pending end of a slide out: the moment the accessory is allowed to give its width back.
-    /// Cancelled by anything that arrives first, so a hide reversed halfway never shrinks the band
-    /// that is already on its way back in. See `resize`.
-    private var handover: Task<Void, Never>?
+    /// The slide in progress and the clock it is measured against, or nil at rest. See `resize`.
+    private var slide: InspectorSlide?
+    private var startedAt: CFTimeInterval = 0
+    private var frames: CADisplayLink?
 
     init(app: AppModel, height: CGFloat) {
         self.height = height
@@ -277,34 +316,96 @@ final class TitleBarStripController: NSTitlebarAccessoryViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not decoded from a nib") }
 
-    /// Follows the pane's width, and lags it by exactly one slide when the pane is going away.
+    /// Follows the pane's width, over a quarter of a second when the pane is sliding and this frame
+    /// when it is not.
     ///
     /// One point rather than zero when there is nothing to show, so the accessory is never a view
     /// of no size at all in the title bar's layout. On Home and on Search that is what it is.
     ///
-    /// The lag is the whole reason this is not a one line setter. The band leaves through this
-    /// frame, so taking the frame away on the first frame of the slide cuts the band off instead of
-    /// letting it go, which is the same pop at the other end of the movement. Only a collapse
-    /// waits: a divider drag publishes `sliding` false and has to stay live, or the band trails the
-    /// divider by a quarter of a second the whole time it is being dragged.
+    /// **This used to jump, and what it dragged with it was the search field.** The toolbar is laid
+    /// out in what the trailing accessory leaves it, and `BloomWindowToolbar`'s flexible spacer
+    /// packs `.searchable`'s item against the end of that, so the field sits exactly where this
+    /// frame's leading edge puts it: measured offscreen at 1440 points with the accessory at 380,
+    /// the field's capsule is at x=727, and with the accessory at one point it has 379 more points
+    /// to travel into. Setting the frame in one step therefore moved the field 379 points in one
+    /// frame while the pane spent `Motion.inspectorSeconds` sliding underneath it, and the old
+    /// version made it worse in the other direction: a hide waited out the whole slide and then
+    /// jumped, so the field moved a quarter of a second after everything else had stopped.
+    ///
+    /// No toolbar API animates that, and none is needed. An `NSToolbar` re-packs its items whenever
+    /// the space it is given changes, which is what it does on every frame of a live window resize.
+    /// So the frame is walked to its new width a frame at a time and the toolbar tracks it, the way
+    /// it tracks a resize. `InspectorSlide` is the arithmetic, and it is on the same cubic and the
+    /// same length as the split view's animation context, so the pane, the band and the field are
+    /// three parts of one movement rather than three movements.
+    ///
+    /// Only a collapse travels. A divider drag publishes `sliding` false and has to stay live, or
+    /// the band trails the divider by a quarter of a second the whole time it is being dragged, and
+    /// Reduce Motion arrives the same way: the split view is told not to animate and publishes no
+    /// slide.
     private func resize(sliding: Bool) {
-        handover?.cancel()
-        let width = max(InspectorGeometry.shared.width, 1)
-        guard sliding, width < view.frame.width else {
-            apply(width)
+        let target = max(InspectorGeometry.shared.width, 1)
+        // A view with no window has no display to take a link from, and a slide whose clock never
+        // ticks is an accessory stuck at the width it set off from. Nothing can be watching such a
+        // window anyway, so it lands rather than travels. This is also the first call, from `init`.
+        guard sliding, view.window != nil else {
+            endSlide()
+            InspectorGeometry.shared.setBandVisible(target > 1)
+            apply(target)
             return
         }
-        handover = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(Motion.inspectorSeconds))
-            guard !Task.isCancelled else { return }
-            // Asked again rather than closed over: a hide reversed before it finished has already
-            // published the width this should settle at, and that is the number to land on.
-            self?.apply(max(InspectorGeometry.shared.width, 1))
-        }
+        startSlide(to: target)
     }
 
+    /// Starts from where the accessory actually is rather than from where it should have been, so a
+    /// hide reversed halfway travels back from halfway rather than snapping open first.
+    private func startSlide(to target: CGFloat) {
+        // A target the accessory is already at ends whatever was running rather than being ignored:
+        // that is a hide reversed at the exact point it had reached, and the slide it was on is no
+        // longer going anywhere this window wants.
+        guard abs(view.frame.width - target) > 0.5 else {
+            endSlide()
+            return
+        }
+        // Mounted before the first step rather than when the width crosses a point, so the band has
+        // been laid out by the time there is enough accessory to see any of it in.
+        if target > 1 { InspectorGeometry.shared.setBandVisible(true) }
+        slide = InspectorSlide(
+            from: view.frame.width, to: target, seconds: Motion.inspectorSeconds
+        )
+        startedAt = CACurrentMediaTime()
+        guard frames == nil else { return }
+        let link = view.displayLink(target: self, selector: #selector(step))
+        link.add(to: .main, forMode: .common)
+        frames = link
+    }
+
+    /// `targetTimestamp` rather than the clock, because it is when the frame being laid out here
+    /// will be SHOWN, and that is what Core Animation and SwiftUI interpolate the other two thirds
+    /// of this movement against. Reading the clock at the callback instead runs a frame behind them,
+    /// which at the fastest part of the curve is a dozen points of daylight at the band's edge.
+    @objc private func step(_ sender: CADisplayLink) {
+        guard let slide else {
+            endSlide()
+            return
+        }
+        let elapsed = sender.targetTimestamp - startedAt
+        apply(slide.width(after: elapsed))
+        guard slide.hasFinished(after: elapsed) else { return }
+        InspectorGeometry.shared.setBandVisible(slide.to > 1)
+        endSlide()
+    }
+
+    private func endSlide() {
+        slide = nil
+        frames?.invalidate()
+        frames = nil
+    }
+
+    /// The epsilon is a point of a point rather than half a point, because the last few steps of an
+    /// ease are smaller than that and one of them is the one that lands on the final width.
     private func apply(_ width: CGFloat) {
-        guard abs(view.frame.width - width) > 0.5 else { return }
+        guard abs(view.frame.width - width) > 0.01 else { return }
         view.setFrameSize(NSSize(width: width, height: height))
         view.superview?.needsLayout = true
     }

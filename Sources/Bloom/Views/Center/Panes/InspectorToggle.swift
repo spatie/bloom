@@ -47,6 +47,12 @@ struct InspectorToggle: View {
         .frame(width: Metrics.barHeight, height: Metrics.barHeight)
         .contentShape(Rectangle())
         .onHoverChange { isHovered = $0 }
+        // **The plate is inset inside the slot rather than filling it**, and the two points are
+        // measured rather than chosen. `fee6766` read the bottom panel's two controls off a two
+        // times capture of the strip: a plate handed the whole 32 point slot ran x=0 to x=32, and
+        // the rule that closes the tabs off began on x=32, so the two shapes met with no daylight
+        // between them at all. That panel and its controls are gone; this is the only plate left
+        // in a strip slot and it keeps the finding. Off every side, so the glyph stays centred.
         .background {
             if isHovered {
                 RoundedRectangle(cornerRadius: Metrics.cornerSmall)

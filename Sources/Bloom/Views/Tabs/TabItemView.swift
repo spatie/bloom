@@ -93,7 +93,21 @@ struct TabItemView: View {
     /// One highlight for the whole strip, so `matchedGeometryEffect` has something to match on.
     private static let selectionID = "tabItem.selection"
 
+    /// How much wider the close cross's hit box is than the cross, on every side.
+    ///
+    /// `Metrics.glyph` is 13 and its own doc calls it "the box a sidebar row's state glyph sits
+    /// in, matching the cap height of the text beside it", which is a metric for lining marks up
+    /// down a column and not one for aiming at. Safari's cross is a 16 point target. Taken as
+    /// padding under a `contentShape` and then taken straight back off, so the target grows and
+    /// the strip's layout does not: every tab would otherwise be three points wider, and at the
+    /// 200 point ceiling three points come off the title instead.
+    private static let closeSlop: CGFloat = 1.5
+
     @State private var isHovered = false
+    /// The pointer on the close cross itself rather than on the tab around it.
+    ///
+    /// See the tap gestures below: this is what keeps a click on the cross from also selecting.
+    @State private var isCloseHovered = false
     @State private var renameText = ""
     @FocusState private var isRenameFocused: Bool
 
@@ -179,9 +193,23 @@ struct TabItemView: View {
         // That was most of what switching tabs felt like. Recognised side by side, the select fires
         // on the first click and the rename on the second, which is also what the Finder does: the
         // second click of a rename lands on the row the first one already selected.
-        .simultaneousGesture(TapGesture().onEnded { onSelect() })
+        //
+        // What `simultaneous` also recognises alongside is a gesture defined by a SUBVIEW, and the
+        // close cross is a `Button`, which is one. So a click on the cross ran `onClose()` and this
+        // as well: the window switched to the tab it was in the middle of destroying and then
+        // landed on whichever neighbour the store picked. The pointer has to be on the cross before
+        // it can press it, so the hover the cross already tracks is what tells the two apart. Not a
+        // `SpatialTapGesture` against the cross's frame, which would have to be measured and kept
+        // in step with the layout; and not `.exclusively(before:)`, for the 350ms reason above.
+        .simultaneousGesture(TapGesture().onEnded { if !isCloseHovered { onSelect() } })
         .simultaneousGesture(TapGesture(count: 2).onEnded { if canRename { onStartRename() } })
-        .onHover { isHovered = $0 }
+        // The cross is only hit testable while the tab is hovered, so it cannot be pointed at once
+        // this goes false. Cleared here as well rather than trusting the cross's own exit event to
+        // arrive first, because a flag stuck true is a tab that stops selecting altogether.
+        .onHover {
+            isHovered = $0
+            if !$0 { isCloseHovered = false }
+        }
         .help(title)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
@@ -267,9 +295,15 @@ struct TabItemView: View {
                 // ink draws the same nothing and the element stays.
                 .foregroundStyle(closeInk)
                 .frame(width: Metrics.glyph, height: Metrics.glyph)
+                // Out and back again: the hit box is `closeSlop` bigger on every side, and the
+                // space the cross takes in the row is unchanged. See `closeSlop`.
+                .padding(Self.closeSlop)
                 .contentShape(Rectangle())
+                .padding(-Self.closeSlop)
         }
         .buttonStyle(.borderless)
+        // What the tab's own tap gesture asks before it selects. See the gestures on the row.
+        .onHoverChange { isCloseHovered = $0 }
         // Hit testing still follows the hover, and deliberately: this sits at a tab's trailing
         // edge, and a close button that takes a click while invisible closes tabs somebody meant
         // to select.
