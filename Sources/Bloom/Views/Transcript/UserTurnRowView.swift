@@ -30,7 +30,7 @@ struct UserTurnRowView: View {
     /// composer showed them a moment before the send.
     var reviewChips: [ReviewTurnRecord.Chip] = []
     /// Which worktree those paths are relative to, and which review the chips open into.
-    var workspace: Workspace
+    var home: TranscriptHome
 
     @Environment(AppModel.self) private var app
     /// The list's one value, set in `TranscriptListView`, rather than actions built per bubble:
@@ -196,7 +196,7 @@ struct UserTurnRowView: View {
             }
 
             if !reviewChips.isEmpty {
-                ReviewTurnChips(chips: reviewChips, workspace: workspace)
+                ReviewTurnChips(chips: reviewChips, home: home)
             }
 
             if !attachments.isEmpty {
@@ -206,7 +206,7 @@ struct UserTurnRowView: View {
                     ForEach(attachments, id: \.self) { path in
                         AttachmentChip(
                             attachment: .sent(path: path),
-                            worktree: workspace.path,
+                            worktree: home.worktree,
                             onOpen: { open(path) },
                             onPreview: { frame in preview(path, frame) },
                             // No warning triangle on a turn that has already gone. The composer
@@ -233,7 +233,9 @@ struct UserTurnRowView: View {
     /// same door the composer's chips use. The model is looked up rather than passed down: the
     /// transcript is handed a session, not a workspace model, and `existingModel` only reads.
     private func open(_ path: String) {
-        guard let model = app.existingModel(for: workspace.id) else { return }
+        // No workspace is Ask Bloom, which has no review pane for a file to open into. The chip
+        // still draws and still previews, which is what a path in that conversation is for.
+        guard let id = home.workspaceID, let model = app.existingModel(for: id) else { return }
         FileReview.open(path: path, in: model)
     }
 
@@ -265,7 +267,7 @@ struct UserTurnRowView: View {
     /// tool row gives, and it is the honest one here, because a sent turn is a record of what was
     /// asked rather than a picker. See `AttachmentChip.verifiesOnDisk`.
     private func card(for path: String) -> TranscriptHoverCard {
-        let target = FileChipTarget.resolve(path, in: workspace.path)
+        let target = FileChipTarget.resolve(path, in: home.worktree)
         return .file(attachment: .sent(path: target.path), worktree: target.worktree)
     }
 

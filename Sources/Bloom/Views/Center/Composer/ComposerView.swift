@@ -88,8 +88,8 @@ struct ComposerView: View {
             text: $transcript.draft,
             caret: $caret,
             isFocused: $isFocused,
-            mentionRoot: transcript.workspace.path,
-            attachmentRoot: transcript.workspace.path,
+            mentionRoot: transcript.cwd,
+            attachmentRoot: transcript.cwd,
             attachmentKey: transcript.session.id.rawValue,
             reviewComments: reviewComments,
             onRemoveReviewComment: remove(reviewComment:),
@@ -105,7 +105,7 @@ struct ComposerView: View {
                 context: transcript.contextUsage,
                 isRunning: transcript.isRunning,
                 canSend: canSend,
-                project: transcript.workspace.path,
+                project: transcript.cwd,
                 onAttach: actions.attach,
                 onQuickPrompt: { fire($0, insert: actions.insert) },
                 onSend: send,
@@ -336,7 +336,7 @@ struct ComposerView: View {
         // chip carries a warning while it is on screen; this is the last check before it matters,
         // and a file that fails it is taken out of the sentence rather than sent as a path to
         // nothing.
-        let worktree = transcript.workspace.path
+        let worktree = transcript.cwd
         let text = AttachmentDraft
             .parse(transcript.draft, paths: attachments.map(\.path))
             .keeping { path in
@@ -485,8 +485,8 @@ struct ComposerView: View {
         // defaults were applied on an earlier launch, which is exactly the path a return to a chat
         // tab takes. A mark on the last line would never fire for it. See `TabProbe`.
         defer {
-            SwitchTrace.mark("composer.prepared", workspace: transcript.workspace.id)
-            SwitchTrace.markOnScreen("composer.prepared", workspace: transcript.workspace.id)
+            SwitchTrace.mark("composer.prepared", workspace: transcript.workspace?.id)
+            SwitchTrace.markOnScreen("composer.prepared", workspace: transcript.workspace?.id)
         }
         isFocused = true
         caret = (transcript.draft as NSString).length
@@ -519,7 +519,7 @@ struct ComposerView: View {
 
         // Off the main actor because it reads up to six files from disk.
         var repoSettings = RepoSettings()
-        if let repo = app.repo(for: transcript.workspace) {
+        if let workspace = transcript.workspace, let repo = app.repo(for: workspace) {
             let path = repo.path
             repoSettings = await Task.detached(priority: .utility) {
                 SettingsLoader.load(repo: path)

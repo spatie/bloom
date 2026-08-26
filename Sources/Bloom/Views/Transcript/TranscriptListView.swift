@@ -228,7 +228,7 @@ struct TranscriptListView: View {
     private var mustReachIndex: Int? {
         let seqs = transcript.rows.lazy.map(\.seq)
         if let target = app.pendingTranscriptTarget,
-           target.workspaceID == transcript.workspace.id {
+           target.workspaceID == transcript.workspace?.id {
             return TranscriptWindow.index(ofSeqAtOrAfter: target.seq, in: seqs)
         }
         if let unread = transcript.firstUnreadSeq {
@@ -241,7 +241,7 @@ struct TranscriptListView: View {
     /// is not a change: see `TranscriptRowEnvironment`, which is what carries it to the rows.
     private var linkActions: TranscriptLinkActions {
         TranscriptLink.actions(
-            for: app.existingModel(for: transcript.workspace.id), pane: memory?.pane
+            for: transcript.workspace.flatMap { app.existingModel(for: $0.id) }, pane: memory?.pane
         )
     }
 
@@ -296,7 +296,7 @@ struct TranscriptListView: View {
         // over a 1,104 row conversation, six percent of the whole gesture was inside
         // `ObservationCenter.invalidate` doing exactly that. `projectName` is also worth a line of
         // its own: it reaches `AppModel.repo(for:)`, which is a linear scan.
-        let workspace = transcript.workspace
+        let home = transcript.home
         let projectName = transcript.projectName
         let rows = transcript.rows
         let permissionMode = transcript.session.permissionMode
@@ -306,34 +306,39 @@ struct TranscriptListView: View {
         let arrivals = self.arrivals
 
         var out: [TranscriptTableEntry] = []
-        out.append(TranscriptTableEntry(
-            id: .setup,
-            contentKey: TranscriptContentKey {
-                $0.combine("setup")
-                $0.combine(workspace.id)
-                $0.combine(isRunningSetup)
-                $0.combine(transcript.hasNothingToShow)
-                $0.combine(Int(paneHeight))
-            },
-            content: {
-                AnyView(
-                    WorkspaceEventsView(
-                        workspaceID: workspace.id,
-                        isRunning: isRunningSetup,
-                        // Nothing said yet AND nothing waiting to be said. Once there is a bubble
-                        // on screen, "You can ask for something now" is answered by the bubble.
-                        isFirstThing: transcript.hasNothingToShow,
-                        paneHeight: paneHeight,
-                        onVisibilityChange: { showsSetup = $0 },
-                        onShowLogEnd: { wasAsked in showSetupLogEnd(wasAsked: wasAsked) }
+        // A workspace's setup script, its worktree events and its opening prompt. All three are
+        // things a worktree has, so a conversation with none skips the entry rather than drawing
+        // an empty one: see `TranscriptHome`.
+        if let workspaceID = home.workspaceID {
+            out.append(TranscriptTableEntry(
+                id: .setup,
+                contentKey: TranscriptContentKey {
+                    $0.combine("setup")
+                    $0.combine(workspaceID)
+                    $0.combine(isRunningSetup)
+                    $0.combine(transcript.hasNothingToShow)
+                    $0.combine(Int(paneHeight))
+                },
+                content: {
+                    AnyView(
+                        WorkspaceEventsView(
+                            workspaceID: workspaceID,
+                            isRunning: isRunningSetup,
+                            // Nothing said yet AND nothing waiting to be said. Once there is a bubble
+                            // on screen, "You can ask for something now" is answered by the bubble.
+                            isFirstThing: transcript.hasNothingToShow,
+                            paneHeight: paneHeight,
+                            onVisibilityChange: { showsSetup = $0 },
+                            onShowLogEnd: { wasAsked in showSetupLogEnd(wasAsked: wasAsked) }
+                        )
+                        // The air the lazy stack got from `.padding(.vertical)` on its content. It
+                        // cannot be a content inset here: see `TranscriptTable.makeNSView`.
+                        .padding(.top, TranscriptLayout.block)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     )
-                    // The air the lazy stack got from `.padding(.vertical)` on its content. It
-                    // cannot be a content inset here: see `TranscriptTable.makeNSView`.
-                    .padding(.top, TranscriptLayout.block)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                )
-            }
-        ))
+                }
+            ))
+        }
 
         for row in visibleRows where !TranscriptNoise.isHidden(row) {
             let isExpanded = expanded.contains(row.seq)
@@ -375,7 +380,7 @@ struct TranscriptListView: View {
                             TurnFooterView(
                                 rows: rows,
                                 row: row,
-                                worktree: workspace.path,
+                                worktree: home.worktree,
                                 permissionMode: permissionMode,
                                 wasStopped: wasStopped,
                                 recovered: recovered
@@ -394,7 +399,7 @@ struct TranscriptListView: View {
                         AnyView(
                             TranscriptRowView(
                                 row: row,
-                                workspace: workspace,
+                                home: home,
                                 isExpanded: isExpanded,
                                 isNested: row.parentToolUseID != nil,
                                 projectName: projectName,
@@ -436,11 +441,11 @@ struct TranscriptListView: View {
                     Group {
                         if let review {
                             UserTurnRowView(
-                                text: review.message, reviewChips: review.chips, workspace: workspace
+                                text: review.message, reviewChips: review.chips, home: transcript.home
                             )
                         } else {
                             UserTurnRowView(
-                                text: turn.body, attachments: turn.paths, workspace: workspace
+                                text: turn.body, attachments: turn.paths, home: transcript.home
                             )
                         }
                     }
@@ -519,8 +524,8 @@ struct TranscriptListView: View {
     var body: some View {
         // The first pass of this body after a tab switch, which is where the rebuilt list starts.
         // Stamped once per timeline, so the passes that follow it cost nothing to ignore.
-        let _ = SwitchTrace.mark("transcript.body", workspace: transcript.workspace.id)
-        let _ = SwitchTrace.markOnScreen("transcript.body", workspace: transcript.workspace.id)
+        let _ = SwitchTrace.mark("transcript.body", workspace: transcript.workspace?.id)
+        let _ = SwitchTrace.markOnScreen("transcript.body", workspace: transcript.workspace?.id)
         // Only so the delete confirmation below has a binding to the model's own state. The
         // question cannot live in this view: see `TranscriptModel.discarding`.
         @Bindable var transcript = transcript
@@ -685,8 +690,8 @@ struct TranscriptListView: View {
             // 163ms to 169ms main thread block on every return.
             guard resumed != transcript.session.id else {
                 arrivalSession = transcript.session.id
-                SwitchTrace.mark("transcript.window", workspace: transcript.workspace.id)
-                SwitchTrace.markOnScreen("transcript.window", workspace: transcript.workspace.id)
+                SwitchTrace.mark("transcript.window", workspace: transcript.workspace?.id)
+                SwitchTrace.markOnScreen("transcript.window", workspace: transcript.workspace?.id)
                 return
             }
 
@@ -700,8 +705,8 @@ struct TranscriptListView: View {
             )
             drawn = Drawn(session: transcript.session.id, window: settled)
             TranscriptDrawn.note(settled.count)
-            SwitchTrace.mark("transcript.window", workspace: transcript.workspace.id)
-            SwitchTrace.markOnScreen("transcript.window", workspace: transcript.workspace.id)
+            SwitchTrace.mark("transcript.window", workspace: transcript.workspace?.id)
+            SwitchTrace.markOnScreen("transcript.window", workspace: transcript.workspace?.id)
             // Not an arrival. See `TranscriptLiveEndFollower.forget`.
             follower.forget()
             // **And the opening again, in one call rather than the stack's two.**
@@ -720,8 +725,8 @@ struct TranscriptListView: View {
             // The session has finished arriving, so from here on a row that turns up is a row the
             // reader is watching turn up. The history that just landed is not one of them.
             arrivalSession = transcript.session.id
-            SwitchTrace.mark("transcript.history", workspace: transcript.workspace.id)
-            SwitchTrace.markOnScreen("transcript.history", workspace: transcript.workspace.id)
+            SwitchTrace.mark("transcript.history", workspace: transcript.workspace?.id)
+            SwitchTrace.markOnScreen("transcript.history", workspace: transcript.workspace?.id)
         }
         // Deleting a queued message asks first, in the app's own confirmation. On the list rather
         // than on the row, so the question survives its row leaving, which is exactly what happens
@@ -958,7 +963,10 @@ struct TranscriptListView: View {
             // A search result outranks both of the others. Somebody who clicked a line of a
             // transcript in the search screen asked for that line. Centred rather than at the top,
             // because the sentence usually needs the turn around it to make sense.
-            if let target = app.takeTranscriptTarget(for: transcript.workspace.id) {
+            // A search result is always a row in a workspace's transcript, because search is
+            // over workspaces. A chat with none has nothing to be taken.
+            if let workspaceID = transcript.workspace?.id,
+               let target = app.takeTranscriptTarget(for: workspaceID) {
                 opening = .row(target.seq, .center)
             } else if let unread = transcript.firstUnreadSeq, unread != transcript.rows.first?.seq {
                 opening = .row(unread, .top)

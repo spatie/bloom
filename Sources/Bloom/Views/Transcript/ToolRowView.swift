@@ -15,7 +15,7 @@ struct ToolRowView: View {
     var presentation: ToolPresentation
     /// Which worktree the call's paths are relative to, so a file chip in the header knows where
     /// it opens.
-    var workspace: Workspace
+    var home: TranscriptHome
     var result: AgentToolResult?
     var isError: Bool
     /// Set when the call never ran. A refusal is drawn as one throughout: not the red a failure
@@ -34,7 +34,7 @@ struct ToolRowView: View {
             ExpandableRowHeader(isExpanded: isExpanded, onToggle: onToggle) {
                 ToolRowHeader(
                     presentation: presentation,
-                    workspace: workspace,
+                    home: home,
                     isError: isError,
                     refusal: refusal,
                     refusalReason: refusalReason,

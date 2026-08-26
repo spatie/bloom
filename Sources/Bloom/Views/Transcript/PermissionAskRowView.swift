@@ -30,8 +30,16 @@ struct PermissionAskRowView: View {
     var decision: String?
     /// Set when a rule answered instead of a person, naming the rule that did it.
     var note: String
-    /// What the project is called, so the widest scope can say where it applies.
-    var projectName: String
+    /// What the project is called, so the widest scope can say where it applies, or nil when
+    /// there is no project behind this conversation.
+    ///
+    /// **Nil is not a missing value, it is an answer**, and it changes what this card may offer.
+    /// `permission_grants.repo_id` is `NOT NULL REFERENCES repos(id)`, so an always-allow rule is
+    /// stored against a project; a chat that has none cannot store one. Ask Bloom is that chat.
+    /// The buttons come from `PermissionScopeOffer` rather than from three `if`s here, so the
+    /// widest thing on offer and the sentence under it are decided in one place, in the core,
+    /// where a test can read them.
+    var projectName: String?
     var onAnswer: (PermissionDecision) -> Void = { _ in }
 
     @State private var isWritingReason = false
@@ -39,6 +47,11 @@ struct PermissionAskRowView: View {
     @FocusState private var isReasonFocused: Bool
 
     private var isOpen: Bool { decision == nil }
+
+    /// Which allows this ask may honestly draw, widest first, and the sentence under them.
+    private var offer: PermissionScopeOffer {
+        PermissionScopeOffer.of(ask: ask, project: projectName)
+    }
 
     var body: some View {
         // `cardInset` for both the margin and the gap between the groups, which is the bargain
@@ -206,35 +219,30 @@ struct PermissionAskRowView: View {
             // still bordered and the one that asks for a sentence is still borderless.
             HStack(spacing: Metrics.gutter) {
                 HStack(spacing: Metrics.spacing) {
-                    if ask.canWiden {
-                        // The prominent one, and deliberately the widest rather than the
-                        // narrowest. See the note at the top of this file: the ask rate is what
-                        // decides whether this feature is kept or switched off, and "Allow once"
-                        // as the default answer is what makes a long turn ask thirty times.
-                        Button("Always allow") { onAnswer(.allow(scope: .project)) }
-                            .buttonStyle(.borderedProminent)
-                            // Bloom's fill rather than the system accent, as every other prominent button in
-                            // the app carries. See `EmptyStateView`.
-                            .tint(Palette.accentFill)
-                            .keyboardShortcut(.return, modifiers: .command)
+                    // The widest one is the prominent one, and deliberately so rather than the
+                    // narrowest. See the note at the top of this file: the ask rate is what
+                    // decides whether this feature is kept or switched off, and "Allow once" as
+                    // the default answer is what makes a long turn ask thirty times.
+                    //
+                    // Which scope IS the widest is `PermissionScopeOffer`'s answer rather than
+                    // this view's. In a project it is "Always allow"; in a chat with no project it
+                    // is "Allow for this session", because there is nothing wider that could
+                    // honestly be stored. The button that used to be here in that case said
+                    // "Always allow" and would have granted one call.
+                    Button(offer.prominent.buttonLabel) { onAnswer(.allow(scope: offer.prominent)) }
+                        .buttonStyle(.borderedProminent)
+                        // Bloom's fill rather than the system accent, as every other prominent button in
+                        // the app carries. See `EmptyStateView`.
+                        .tint(Palette.accentFill)
+                        // Command and Return while there is more than one allow to choose between,
+                        // and a bare Return when this is the only one. Exactly what the two
+                        // branches this replaced did, kept because the modifier is what stops a
+                        // reflexive Return granting the widest scope on the row.
+                        .keyboardShortcut(.return, modifiers: offer.widens ? .command : [])
 
-                        Button("This session") { onAnswer(.allow(scope: .session)) }
+                    ForEach(Array(offer.scopes.dropFirst()), id: \.self) { scope in
+                        Button(scope.compactLabel) { onAnswer(.allow(scope: scope)) }
                             .buttonStyle(.bordered)
-                    }
-
-                    // When there is a rule to grant, the once button is the quiet one and the rule
-                    // is prominent. When there is not, once is the only allow there is, so it takes
-                    // the emphasis and the return key rather than leaving the row with no default.
-                    if ask.canWiden {
-                        Button("Once") { onAnswer(.allow(scope: .once)) }
-                            .buttonStyle(.bordered)
-                    } else {
-                        Button("Allow once") { onAnswer(.allow(scope: .once)) }
-                            .buttonStyle(.borderedProminent)
-                            // Bloom's fill rather than the system accent, as every other prominent button in
-                            // the app carries. See `EmptyStateView`.
-                            .tint(Palette.accentFill)
-                            .keyboardShortcut(.defaultAction)
                     }
                 }
 
@@ -279,25 +287,14 @@ struct PermissionAskRowView: View {
 
     /// The rule, in the CLI's spelling, and what each button would do with it. Printed rather than
     /// hidden behind a hover, because a scope nobody read is a scope nobody chose.
-    @ViewBuilder
     private var scopeLine: some View {
-        if ask.canWiden {
-            Text(PermissionScope.project.consequence(rule: ask.ruleText, project: projectName))
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-        } else if !ask.rules.isEmpty {
-            // A rule exists and the CLI asked for it not to be offered. Saying so is better than
-            // a button that is quietly missing.
-            Text("\(ask.ruleText) cannot be granted from here: the agent asked for this one to be decided on its own.")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-        } else {
-            Text("No rule was offered for this, so it can only be allowed once.")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-        }
+        // One sentence from one place. It used to be three branches here, and a fourth was needed
+        // the moment a chat could have no project: a rule the CLI offered, in a conversation with
+        // nowhere to store it. See `PermissionScopeOffer`, which says what each of the four is.
+        Text(offer.explanation)
+            .font(Typo.caption)
+            .foregroundStyle(Palette.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// The deny sentence goes to the model as the tool result, so it is worth typing: "not on this
@@ -389,8 +386,12 @@ struct PermissionAskRowView: View {
         // that ran is exactly the thing this row exists to prevent. The rule is on the ask itself,
         // which is why it can be said again a week later.
         case PermissionAskOutcome.auto:
-            return "Allowed by \(ask.ruleText), which you approved for \(projectName)."
-        case "allow-project": return "Always allowed. \(ask.ruleText) is granted for \(projectName)."
+            // A grant is stored against a project, so a row saying one answered this always has a
+            // project to name. The fallback is for a transcript read after the project was
+            // removed, which is the one way the pair can come apart.
+            return "Allowed by \(ask.ruleText), which you approved for \(projectName ?? "this project")."
+        case "allow-project":
+            return "Always allowed. \(ask.ruleText) is granted for \(projectName ?? "this project")."
         case "allow-session": return "Allowed for this session."
         case "allow-once": return "Allowed once."
         case "deny-stop": return "Denied, and the turn was stopped."

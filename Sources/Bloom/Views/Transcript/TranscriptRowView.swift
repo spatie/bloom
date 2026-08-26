@@ -42,8 +42,7 @@ struct TranscriptRowView: View, Equatable {
             && lhs.row.parentToolUseID == rhs.row.parentToolUseID
             && lhs.isExpanded == rhs.isExpanded
             && lhs.isNested == rhs.isNested
-            && lhs.workspace.id == rhs.workspace.id
-            && lhs.workspace.path == rhs.workspace.path
+            && lhs.home == rhs.home
             // A question being answered has to redraw the row that asked it, and the decision is
             // the only thing about it that changes after it is stored.
             && lhs.row.permissionDecision == rhs.row.permissionDecision
@@ -55,12 +54,13 @@ struct TranscriptRowView: View, Equatable {
     /// Which worktree the row's paths are relative to, and where a file chip opens. Read by a user
     /// turn's attachment chips and by the file chips in a tool row, and constant for a whole
     /// transcript, so it is handed down rather than looked up per row.
-    var workspace: Workspace
+    var home: TranscriptHome
     var isExpanded = false
     var isNested = false
-    /// What the project is called, so a permission row can name where a rule would apply. Handed
-    /// down for the same reason `workspace` is: it is constant for a whole transcript.
-    var projectName: String = ""
+    /// What the project is called, so a permission row can name where a rule would apply, or nil
+    /// when there is no project behind this conversation. Handed down for the same reason `home`
+    /// is: it is constant for a whole transcript.
+    var projectName: String?
     var onToggle: () -> Void = {}
     /// Answering a permission question. Never a user turn: it writes a control response that
     /// unblocks a turn already in flight.
@@ -94,7 +94,7 @@ struct TranscriptRowView: View, Equatable {
                 UserTurnRowView(
                     text: review.message,
                     reviewChips: review.chips,
-                    workspace: workspace
+                    home: home
                 )
             } else {
                 // Attachments reach the agent as paths in the prompt text, which is the only
@@ -107,7 +107,7 @@ struct TranscriptRowView: View, Equatable {
                 UserTurnRowView(
                     text: turn.body,
                     attachments: turn.paths,
-                    workspace: workspace
+                    home: home
                 )
             }
 
@@ -128,9 +128,9 @@ struct TranscriptRowView: View, Equatable {
                     presentation: TranscriptPresentationCache.presentation(
                         rowID: row.id,
                         use: use,
-                        worktree: workspace.path
+                        worktree: home.worktree
                     ),
-                    workspace: workspace,
+                    home: home,
                     result: toolResult,
                     isError: row.isError,
                     refusal: row.refusal,

@@ -69,6 +69,13 @@ final class TranscriptModel {
     let cwd: String
     private unowned let app: AppModel
 
+    /// Where this conversation's file paths point, and which workspace a file chip opens into.
+    /// One value rather than the whole workspace, because those two fields are all a row has ever
+    /// read off it. See `TranscriptHome`.
+    var home: TranscriptHome {
+        TranscriptHome(workspaceID: workspace?.id, worktree: cwd)
+    }
+
     /// The row as the app holds it now. The snapshot above goes stale the moment automatic
     /// naming lands, minutes into the workspace's life, and every alert and notification from
     /// this chat then called the workspace by its ocean placeholder for the rest of the launch.
