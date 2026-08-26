@@ -92,6 +92,14 @@ struct WorkspaceMenuSubjectTests {
         #expect(!subject.allows(.openInEditor))
         #expect(!subject.allows(.revealInFinder))
         #expect(!subject.allows(.rename))
+        // The three that are about a row in a list, and the sidebar never lists an archived
+        // workspace at all.
+        #expect(!subject.allows(.pin))
+        #expect(!subject.allows(.unreadMark))
+        #expect(!subject.allows(.colour))
+        // A name still means something once the worktree has gone, which is why it sits with Copy
+        // Branch Name rather than with the four that touch the disk.
+        #expect(subject.allows(.copyName))
         #expect(subject.liveID == nil)
         #expect(subject.archivedID == live)
         #expect(subject.id == live)

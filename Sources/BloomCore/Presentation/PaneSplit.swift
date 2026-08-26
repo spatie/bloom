@@ -44,6 +44,31 @@ public enum PaneDuplicateOutcome: Equatable, Sendable {
     /// is enabled and does nothing when it is pressed is worse than one that is greyed, because
     /// the first press teaches the user that the menu lies and there is no second lesson.
     public var opensAPane: Bool { self != .nothing }
+
+    /// Which of the three kinds in a Split submenu means "this pane again", and therefore carries
+    /// the split's key equivalent.
+    ///
+    /// **This is the whole of why the View menu's two items became submenus.** They were plain
+    /// items that always duplicated, so `Cmd+\` on a shell opened another shell, and there was no
+    /// menu route at all to the split people actually ask for, which is a page or a terminal
+    /// beside the conversation. That one lived in a two-level context menu with no key on it.
+    ///
+    /// The key goes on a row rather than on the item the submenu hangs off, because AppKit never
+    /// sends the action of an item that has a submenu: a key equivalent written on the parent is
+    /// drawn beside a row that cannot fire. `TerminalPaneMenu` already puts `Cmd+D` on Terminal
+    /// for exactly that reason, and this is the same trick with the row worked out rather than
+    /// fixed.
+    ///
+    /// Nil when nothing can be opened, which is the review and the notes: a workspace has exactly
+    /// one of each, so there is no row for the key to sit on and the whole submenu greys.
+    public var sameAgainKind: PaneKind? {
+        switch self {
+        case .sameContent: .chat
+        case .freshTerminal: .terminal
+        case .freshBrowser: .browser
+        case .nothing: nil
+        }
+    }
 }
 
 /// The one place that decides what splitting a pane produces.

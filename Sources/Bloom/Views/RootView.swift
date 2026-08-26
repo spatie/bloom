@@ -399,6 +399,13 @@ extension Notification.Name {
     /// at a time, and a menu item cannot reach into either. Both lists listen, and each ignores a
     /// workspace it is not drawing, so the post can be made without knowing which is on screen.
     static let bloomRenameWorkspace = Notification.Name("bloom.renameWorkspace")
+    /// The File menu's Rename Tab, aimed at the strip that owns the field.
+    ///
+    /// The same shape as the workspace rename above and for the same reason: the field belongs to
+    /// a tab inside a strip, the strip owns the one field that can be open at a time, and a menu
+    /// item can reach neither. It carries no id, because unlike the two workspace lists there is
+    /// only ever one strip on screen and it renames the tab it has selected.
+    static let bloomRenameTab = Notification.Name("bloom.renameTab")
 }
 
 extension Notification {

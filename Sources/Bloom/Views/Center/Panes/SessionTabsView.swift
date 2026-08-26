@@ -190,6 +190,14 @@ struct SessionTabsView: View {
         // it was wrong by exactly one await: this body has no suspension point in it, so it ran
         // while `WorkspaceModel` was still on the `Store` actor and judged real tool tabs against
         // an empty session list. It is `CenterColumnView`'s task now, after `onAppear`.
+        // Rename Tab from the File menu, which reaches the one field this strip owns. It renames
+        // the selected tab, which is the tab the menu item was greyed against.
+        .onReceive(NotificationCenter.default.publisher(for: .bloomRenameTab)) { _ in
+            guard let selected = store.selectedTab(in: model) else { return }
+            // `PaneContent.id` is the same string this strip files an open field under, for both
+            // kinds, which is what lets one notification carry no id of its own.
+            renamingID = selected.id
+        }
         .task(id: model.workspace.id) {
             tabs.load(workspaceID: model.workspace.id)
             // The icons this Mac has already seen, read back once per launch. Here rather than at
@@ -285,7 +293,7 @@ struct SessionTabsView: View {
             // already see.
             editableTitle: tabs.displayTitle(of: tab, in: model),
             canClose: true,
-            canRename: tab.kind != .review && tab.kind != .notes,
+            canRename: TabRenaming.canRename(.tool(tab.id), tabKind: tab.kind),
             closeTitle: closeTitle(for: tab),
             onSelect: { store.select(.tool(tab.id), in: model) },
             onStartRename: { renamingID = tab.id },
@@ -406,10 +414,12 @@ struct SessionTabsView: View {
         return store.canAbsorb(content)
     }
 
+    /// Whether asking for this tab beside itself would produce anything. The rule was written out
+    /// here as a third copy of `kind != .review && kind != .notes`; it is `PaneSplit`'s, through
+    /// the same door the split itself goes through, so the menu item and the split cannot come to
+    /// different answers about one tab.
     private func duplicable(_ content: PaneContent) -> Bool {
-        guard case .tool(let id) = content else { return true }
-        let kind = tabs.tabs(for: model.workspace.id).first { $0.id == id }?.kind
-        return kind != .review && kind != .notes
+        PaneDuplicate.canOpen(content, in: model)
     }
 
     /// Opens a tab beside the one the user asked from, rather than in place of it. The menu item
