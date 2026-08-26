@@ -301,7 +301,7 @@ struct TranscriptIndexTests {
         try await say(store, session, "an unrepeatable word: zarquon")
         #expect(try await store.searchTranscripts("zarquon").count == 1)
 
-        try await store.deleteWorkspace(id: session.workspaceID)
+        try await store.deleteWorkspace(id: try #require(session.workspaceID))
         #expect(try await store.searchTranscripts("zarquon").isEmpty)
     }
 

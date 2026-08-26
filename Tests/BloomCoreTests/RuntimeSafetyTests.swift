@@ -479,7 +479,7 @@ struct AgentRunnerPersistenceFailureTests {
         let events = runner.events
         // Exactly what archiving or removing does: the workspace goes, and every session and
         // message under it goes with it, `ON DELETE CASCADE`.
-        try await store.deleteWorkspace(id: session.workspaceID)
+        try await store.deleteWorkspace(id: try #require(session.workspaceID))
         await runner.ingest(.assistantText(AgentTextBlock(text: "mid turn", raw: Data("{}".utf8))))
 
         let received = await take(1, from: events)
