@@ -70,9 +70,10 @@ struct ToolRowHeader: View {
     private var detailText: Text {
         let lead = presentation.detailLead
         guard !lead.text.isEmpty else { return Text(presentation.detail) }
-        return Text(lead.text).foregroundStyle(lead.tint.colour)
-            + Text(lead.joiner)
-            + Text(presentation.detail)
+        // Interpolated rather than concatenated: `Text.+` is deprecated in macOS 26 and the app
+        // target builds with -warnings-as-errors.
+        let tinted = Text(lead.text).foregroundStyle(lead.tint.colour)
+        return Text("\(tinted)\(lead.joiner)\(presentation.detail)")
     }
 
     /// The face the detail is set in.
