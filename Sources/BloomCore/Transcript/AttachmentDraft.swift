@@ -264,6 +264,27 @@ public struct AttachmentDraft: Equatable, Sendable {
         return result
     }
 
+    /// The file whose token starts at this offset in the draft, as its place in reading order.
+    ///
+    /// The way a chip in a text view names itself to the rules here, and it goes by position
+    /// rather than by counting: a path somebody typed inside backticks is a file to `parse` and
+    /// still plain text in the storage, because nothing rewrites the storage while the draft it
+    /// stands for is unchanged. The two lists then differ, and a chip's ordinal in one of them is
+    /// the wrong file in the other.
+    public func attachment(startingAt offset: Int) -> Int? {
+        var seen = 0
+        var location = 0
+        for segment in segments {
+            let length = (segment.text as NSString).length
+            if case .attachment = segment {
+                if location == offset { return seen }
+                seen += 1
+            }
+            location += length
+        }
+        return nil
+    }
+
     /// Where one file sits in the draft, together with the single space that was written beside
     /// it. Nil when the draft names no such file.
     ///

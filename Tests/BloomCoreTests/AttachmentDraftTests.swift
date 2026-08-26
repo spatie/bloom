@@ -206,6 +206,21 @@ struct AttachmentDraftTests {
         #expect(AttachmentDraft.parse("`\(Self.copy)`").removal(ofAttachment: 1) == nil)
     }
 
+    /// How a chip in the composer says which file it is: by where it starts, because a path typed
+    /// inside backticks is a file here and still plain text over there.
+    @Test("A file is found by where it starts in the draft")
+    func findsByOffset() {
+        let draft = "a `\(Self.copy)` b `\(Self.spaced)`"
+        let parsed = AttachmentDraft.parse(draft)
+
+        #expect(parsed.attachment(startingAt: 2) == 0)
+        #expect(parsed.attachment(startingAt: 2 + (Self.copy as NSString).length + 5) == 1)
+        // Anywhere that is not the first character of a token names nothing.
+        #expect(parsed.attachment(startingAt: 0) == nil)
+        #expect(parsed.attachment(startingAt: 3) == nil)
+        #expect(parsed.attachment(startingAt: (draft as NSString).length) == nil)
+    }
+
     /// Every removal is a removal of one, so doing it once per file has to land on the same
     /// sentence `keeping` gives for all of them at once.
     @Test("Taking every chip off one at a time agrees with taking them all at once")
