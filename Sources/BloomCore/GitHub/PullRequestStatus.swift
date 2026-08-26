@@ -60,21 +60,10 @@ public struct PullRequestStatus: Sendable, Hashable {
         case fixConflicts
     }
 
-    /// What the strip's buttons say about themselves while the workspace's agent is mid turn.
-    ///
-    /// Here rather than in the two views that say it, because it is one fact about how every one
-    /// of these buttons works: none of them does anything itself, they all compose a turn, and an
-    /// agent runs one turn at a time. `PullRequestCreator` and `PullRequestSummary` both show it,
-    /// and a sentence written out twice is a sentence that gets improved once.
-    ///
-    /// **They used to be dead while it said this, and are not any more.** A disabled button and a
-    /// press that quietly refused were two ways of saying the same thing, and both of them left
-    /// somebody pressing again to find out whether the first press had counted. The turn goes into
-    /// the chat's queue instead, drawn above the composer as a pending message that says when it
-    /// goes and can be cancelled there. See `WorkspaceModel.requestPullRequest`.
-    public static let agentBusyReason =
-        "The agent is working. The request is sent as a turn, so it waits in the queue for this "
-            + "one to finish."
+    // A running agent is not one of the reasons in here: everything in this type is what GitHub
+    // says about the pull request. Whether the strip's buttons may be pressed while this
+    // workspace's agent is mid turn is `BranchActionAvailability`, which answers for the whole
+    // band at once and carries the reason a reader is given.
 
     public init(
         tone: Tone,
