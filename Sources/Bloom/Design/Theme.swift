@@ -796,6 +796,10 @@ enum Motion {
     /// deliberately not `pane`: this movement belongs to the split view and the other two are
     /// joining it, and a speed chosen here that the split view then declined to use would put them
     /// back out of step, which is the whole bug.
+    ///
+    /// `hoverSeconds` below is the same idea for the hover speed, and exists for the same reason:
+    /// an `NSAnimationContext` takes a `TimeInterval` and cannot be handed an `Animation`, so
+    /// anything AppKit plays needs the length written down separately or it writes its own.
     static let inspectorSeconds: TimeInterval = 0.25
 
     /// A hover state fading in, and a disclosure settling. See the sidebar rows.
@@ -804,7 +808,12 @@ enum Motion {
     /// before the cursor has finished arriving, or the row reads as lagging rather than as
     /// responding. Named because five call sites had grown their own literals (0.12 twice, 0.15,
     /// 0.2 once) and a file that argues one window has one speed cannot also hold four of them.
-    static let hover: Animation = .easeInOut(duration: 0.12)
+    ///
+    /// A sixth had grown one since: a tab's favicon crossfading in `TabItemIcon`, spelled out as
+    /// `.easeInOut(duration: 0.12)`, which is this constant with the name taken off. Naming a
+    /// speed only stops the drift if the next call site reads the name.
+    static let hoverSeconds: TimeInterval = 0.12
+    static let hover: Animation = .easeInOut(duration: hoverSeconds)
 
     /// A pane's own length, borrowed by anything that settles at the same speed.
     ///
