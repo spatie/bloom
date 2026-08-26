@@ -88,6 +88,12 @@ struct BloomWindowToolbar: ToolbarContent {
         ToolbarItem(placement: .navigation) {
             WindowTitleControl(app: app)
         }
+        // No plate behind the name. AppKit gives every toolbar item a shared background, which
+        // put a glass capsule around the window's title; next to the bare `Home`/`Ask Bloom` rows
+        // and the plain search field it read as a control you could press, and the name is not
+        // one. The switch is the one `WindowTitleControl`'s notes name: it turns the plate off
+        // rather than dividing it, so the item still sits where it sat.
+        .sharedBackgroundVisibility(.hidden)
 
         // The elastic middle of the bar, and the whole reason the search field sits at the
         // window's trailing edge rather than beside the name.

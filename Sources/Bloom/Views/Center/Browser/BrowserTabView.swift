@@ -62,8 +62,26 @@ struct BrowserTabView: View {
                     downloads: session.downloads, clear: session.clearDownloads
                 )
             }
-            BrowserWebView(session: session, paneMenu: pageMenu, host: host)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ZStack {
+                BrowserWebView(session: session, paneMenu: pageMenu, host: host)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                // A tab nobody has given an address is a white rectangle under a toolbar, which
+                // reads as a page that failed to load rather than as a pane waiting to be told
+                // where to go. Every other empty pane in the window says what it is for, so this
+                // one does too. Over the web view rather than instead of it, so the view keeps its
+                // identity and the first page does not arrive into a pane that has just been
+                // rebuilt.
+                if session.currentURL == nil {
+                    EmptyStateView(
+                        glyph: "globe",
+                        title: "No page yet",
+                        message: "Type an address above, or ask the agent to open one here."
+                    )
+                    .background(Palette.surface)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Palette.surface)
         // Per tab, so switching between two browser tabs puts each field back where its own page

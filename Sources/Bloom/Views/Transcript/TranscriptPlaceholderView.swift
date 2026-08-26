@@ -8,6 +8,16 @@ import SwiftUI
 struct TranscriptPlaceholderView: View {
     var isRunningSetup: Bool
 
+    /// What to say instead of "Nothing here yet", for a conversation whose empty state is a
+    /// different sentence.
+    ///
+    /// Ask Bloom had its own `EmptyStateView` laid over the transcript in a `ZStack`, and the
+    /// transcript went on drawing this one underneath: two headings and two paragraphs on top of
+    /// each other. One pane shows one empty state, so the caller replaces the words rather than
+    /// covering them up. Setting up still wins over both, because it is the more urgent thing to
+    /// say and it is temporary.
+    var emptyState: TranscriptEmptyState?
+
     var body: some View {
         if isRunningSetup {
             EmptyStateView(
@@ -15,6 +25,8 @@ struct TranscriptPlaceholderView: View {
                 title: "Setting up the workspace",
                 message: "The setup script is still running. Ask for something now and it goes as soon as that finishes."
             )
+        } else if let emptyState {
+            EmptyStateView(glyph: emptyState.glyph, title: emptyState.title, message: emptyState.message)
         } else {
             EmptyStateView(
                 glyph: "text.alignleft",
@@ -23,4 +35,11 @@ struct TranscriptPlaceholderView: View {
             )
         }
     }
+}
+
+/// The words an empty transcript shows, for the panes that have their own.
+struct TranscriptEmptyState: Equatable {
+    var glyph: String
+    var title: String
+    var message: String
 }

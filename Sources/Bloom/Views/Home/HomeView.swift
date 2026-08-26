@@ -149,8 +149,12 @@ struct HomeView: View {
     }
 
     /// A real `List`, so the rows come with the things a hand-built stack never gets right: arrow
-    /// key navigation between rows, section headers that stick, and row recycling, which is what
-    /// keeps five hundred workspaces from being five hundred live views.
+    /// key navigation between rows and row recycling, which is what keeps five hundred workspaces
+    /// from being five hundred live views.
+    ///
+    /// The date headings are ordinary rows rather than `Section` headers. As headers they pinned
+    /// to the top and the rows slid underneath them, which reads as an index keeping your place in
+    /// a long document; this is a flat list of workspaces and there is no place to keep.
     ///
     /// The one thing it is NOT allowed to bring is its own selection fill. Under `.listStyle(.inset)`
     /// that is a full bleed bar of the system accent, which was a third selection treatment in a
@@ -159,6 +163,11 @@ struct HomeView: View {
         List(selection: $selected) {
             ForEach(listing.groups) { group in
                 Section {
+                    HomeGroupHeading(title: group.title)
+                        .listRowInsets(Self.rowInsets)
+                        .listRowBackground(Color.clear)
+                        .selectionDisabled()
+
                     ForEach(group.rows) { row in
                         HomeListRow(
                             row: row,
@@ -194,13 +203,6 @@ struct HomeView: View {
                             HomeRowMenu(row: row) { renaming = $0 }
                         }
                     }
-                } header: {
-                    HomeGroupHeading(title: group.title, count: group.rows.count)
-                        // The rows' own leading inset, said as padding because a section header
-                        // ignores `listRowInsets` under the inset style. Without it the heading
-                        // hangs a spacing step to the left of the column it heads, which is the
-                        // one misalignment on this screen the eye actually catches.
-                        .padding(.leading, Self.rowInsets.leading)
                 }
             }
 
@@ -250,6 +252,11 @@ struct HomeView: View {
     private var recentArchive: some View {
         if !listing.tail.isEmpty {
             Section {
+                HomeGroupHeading(title: "Recently archived", isSecondary: true)
+                    .listRowInsets(Self.rowInsets)
+                    .listRowBackground(Color.clear)
+                    .selectionDisabled()
+
                 ForEach(listing.tail) { row in
                     HomeListRow(
                         row: row,
@@ -287,14 +294,6 @@ struct HomeView: View {
                 .listRowInsets(Self.rowInsets)
                 .listRowBackground(Color.clear)
                 .selectionDisabled()
-            } header: {
-                HomeGroupHeading(
-                    title: "Recently archived",
-                    count: listing.tail.count,
-                    isSecondary: true,
-                    of: listing.tailTotal
-                )
-                .padding(.leading, Self.rowInsets.leading)
             }
         }
     }

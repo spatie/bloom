@@ -49,18 +49,13 @@ struct AskView: View {
 
     private func conversation(_ transcript: TranscriptModel) -> some View {
         VStack(spacing: 0) {
-            ZStack {
-                TranscriptView(transcript: transcript) { isTranscriptScrolledUp = $0 }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                // Over the transcript rather than in place of it, because the transcript is what
-                // fills as soon as anything is said and the pane must not change shape underneath
-                // the first answer. It goes the moment there is a bubble, a sentence on its way
-                // out or one queued: see `hasNothingToShow`.
-                if transcript.hasNothingToShow {
-                    opening
-                }
+            // The transcript draws the empty state itself, given these words. It used to be a
+            // second `EmptyStateView` laid over the top in a `ZStack`, which left both headings
+            // and both paragraphs on screen at once, printed over each other.
+            TranscriptView(transcript: transcript, emptyState: Self.opening) {
+                isTranscriptScrolledUp = $0
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: .bottom) {
                 if isTranscriptScrolledUp {
                     JumpToNewestPill(action: transcript.jumpToLiveEnd)
@@ -92,11 +87,9 @@ struct AskView: View {
     /// It says what this chat can do and what it cannot, in that order, because the second is the
     /// surprising half: it looks exactly like every other conversation in Bloom and it cannot
     /// change a file.
-    private var opening: some View {
-        EmptyStateView(
-            glyph: "bubble.left.and.text.bubble.right",
-            title: AskConversation.emptyHeading,
-            message: AskConversation.emptyDetail
-        )
-    }
+    private static let opening = TranscriptEmptyState(
+        glyph: "bubble.left.and.text.bubble",
+        title: AskConversation.emptyHeading,
+        message: AskConversation.emptyDetail
+    )
 }

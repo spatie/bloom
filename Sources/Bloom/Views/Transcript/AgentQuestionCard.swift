@@ -234,6 +234,17 @@ struct AgentQuestionCard: View {
                 .disabled(!isOpen)
                 // Focus moves here when the row appears, which it only does by being asked for.
                 .task { otherFocus = question.id }
+                // Return sends, because the field is the last thing anybody touches before the
+                // answer goes and reaching for the mouse to finish a sentence is not how a Mac
+                // works. "Send answer" carries `.defaultAction`, but this field is on a vertical
+                // axis so that a long answer wraps, and a vertical `TextField` takes Return for a
+                // newline before the default button ever sees it. Shift-Return still makes one,
+                // which is the pairing every composer in this app already uses.
+                .onKeyPress(keys: [.return]) { press in
+                    guard press.modifiers.isEmpty, isComplete else { return .ignored }
+                    send()
+                    return .handled
+                }
             }
             .padding(.vertical, Metrics.spacing)
             .padding(.horizontal, Metrics.spacingWide)

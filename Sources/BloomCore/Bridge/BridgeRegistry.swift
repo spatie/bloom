@@ -91,7 +91,7 @@ public final class BridgeRegistry: Sendable {
     /// alone. It grants nothing: `admit(ownerToken:)` is what lets that token through the
     /// handshake, and this chat is on it whether or not anything is written here.
     public func attachOwner(sessionID: SessionID) {
-        state.withLock { $0.ownerSessions.insert(sessionID) }
+        state.withLock { _ = $0.ownerSessions.insert(sessionID) }
     }
 
     public func identity(forToken token: String) -> BridgeIdentity? {

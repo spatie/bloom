@@ -9,6 +9,8 @@ struct TranscriptView: View {
     private let transcript: TranscriptModel?
     /// Passed through to explain an empty transcript while a workspace is still being set up.
     private let isRunningSetup: Bool
+    /// The words this pane's empty state uses, when they are not the standard ones.
+    private let emptyState: TranscriptEmptyState?
 
     /// Told whenever the user leaves, or returns to, the live end of the transcript. The composer
     /// uses it to decide whether a "jump to newest" pill is worth offering.
@@ -22,11 +24,13 @@ struct TranscriptView: View {
     init(
         transcript: TranscriptModel,
         isRunningSetup: Bool = false,
+        emptyState: TranscriptEmptyState? = nil,
         memory: TranscriptPaneMemory? = nil,
         onScrolledUpChange: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         self.transcript = transcript
         self.isRunningSetup = isRunningSetup
+        self.emptyState = emptyState
         self.memory = memory
         self.onScrolledUpChange = onScrolledUpChange
     }
@@ -36,11 +40,13 @@ struct TranscriptView: View {
     init(
         transcript: TranscriptModel?,
         isRunningSetup: Bool = false,
+        emptyState: TranscriptEmptyState? = nil,
         memory: TranscriptPaneMemory? = nil,
         onScrolledUpChange: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         self.transcript = transcript
         self.isRunningSetup = isRunningSetup
+        self.emptyState = emptyState
         self.memory = memory
         self.onScrolledUpChange = onScrolledUpChange
     }
@@ -51,6 +57,7 @@ struct TranscriptView: View {
                 TranscriptListView(
                     transcript: transcript,
                     isRunningSetup: isRunningSetup,
+                    emptyState: emptyState,
                     memory: memory,
                     onScrolledUpChange: onScrolledUpChange
                 )

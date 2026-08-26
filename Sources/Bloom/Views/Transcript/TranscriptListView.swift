@@ -30,6 +30,9 @@ struct TranscriptListView: View {
     /// Only to explain an empty transcript: a workspace whose setup script is still running has a
     /// session but cannot have said anything yet.
     var isRunningSetup: Bool = false
+    /// The words this pane's empty state uses, when they are not the standard ones. See
+    /// `TranscriptPlaceholderView.emptyState`.
+    var emptyState: TranscriptEmptyState?
     /// Where this pane's place in this conversation is kept while the pane does not exist. Nil for
     /// a transcript nobody comes back to, which is the archive sheet's. See `TranscriptResume`.
     let memory: TranscriptPaneMemory?
@@ -38,11 +41,13 @@ struct TranscriptListView: View {
     init(
         transcript: TranscriptModel,
         isRunningSetup: Bool = false,
+        emptyState: TranscriptEmptyState? = nil,
         memory: TranscriptPaneMemory? = nil,
         onScrolledUpChange: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         self.transcript = transcript
         self.isRunningSetup = isRunningSetup
+        self.emptyState = emptyState
         self.memory = memory
         self.onScrolledUpChange = onScrolledUpChange
         // Seeded here rather than restored from a `task`, because both of these decide what the
@@ -559,7 +564,7 @@ struct TranscriptListView: View {
         .overlay { TranscriptHoverOverlay(host: hoverHost) }
         .overlay {
             if showsPlaceholder {
-                TranscriptPlaceholderView(isRunningSetup: isRunningSetup)
+                TranscriptPlaceholderView(isRunningSetup: isRunningSetup, emptyState: emptyState)
             }
         }
         // The case the whole of `TranscriptResume` is about: a tab switch destroys this view, and
