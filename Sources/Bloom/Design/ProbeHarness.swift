@@ -110,14 +110,34 @@ struct ProbeHarness {
     ///
     /// The wait loop is a loop because there is no window for the first moments of a launch, and
     /// a probe that asked once got nil and reported nothing at all.
+    /// **`--window-hidden`: a run the owner cannot see.**
+    ///
+    /// `open -g` keeps a probe from taking the keyboard, and it does not keep a 1,440 point window
+    /// off the display: the run still opens one, on the desktop he is working on. Transparent, the
+    /// window lays out, draws and reports frames exactly as it did, and there is nothing on his
+    /// screen. Polled rather than set once, because the window is on screen from the moment it
+    /// opens and the wait below is three seconds long.
+    private func hideWindowsAsTheyOpen() async {
+        guard Self.isPresent("--window-hidden") else { return }
+        for _ in 0..<300 {
+            for window in NSApp.windows where window.alphaValue > 0 { window.alphaValue = 0 }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     func window() async -> (window: NSWindow, content: NSView) {
+        // Alongside the wait rather than before it, so a window that opens during the settle is
+        // hidden on the frame it opens rather than three seconds later.
+        async let hiding: Void = hideWindowsAsTheyOpen()
         await settle()
+        await hiding
         for _ in 0..<60 {
             let candidate = NSApp.windows.first {
                 $0.isVisible && $0.contentView != nil && $0.parent == nil
                     && $0.styleMask.contains(.titled)
             }
             if let candidate, let content = candidate.contentView {
+                if Self.isPresent("--window-hidden") { candidate.alphaValue = 0 }
                 await resize(candidate)
                 return (candidate, content)
             }

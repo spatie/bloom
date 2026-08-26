@@ -627,6 +627,44 @@ struct TranscriptTable: NSViewRepresentable {
             TranscriptHoldCensus.corrected(rows: owed.count, uncorrected: wrong)
         }
 
+        /// **What the reader can see, and how much of it is a guess.**
+        ///
+        /// `checkCorrected` can only speak for rows that reported. A row that never reports at all
+        /// is answered from the mean for ever and nothing above would say so, which is the shape
+        /// of blank this file has now been wrong about twice. This counts the visible rows the
+        /// table is drawing at a height nobody has measured, on every movement of the clip view:
+        /// two dictionary lookups per visible row, which at a screenful is nothing.
+        private func censusOfTheScreen(settled: Bool = false) {
+            guard let tableView, heights.isReady else { return }
+            var estimated = 0
+            var wrong = 0
+            for row in visibleRows where entries.indices.contains(row) {
+                let key = entries[row].contentKey
+                guard let measured = heights.height(for: key) else {
+                    estimated += 1
+                    continue
+                }
+                let told = Double(tableView.rect(ofRow: row).height)
+                if !TranscriptRowHeights.isSameHeight(told, max(Double(Self.hair), measured)) {
+                    wrong += 1
+                }
+            }
+            TranscriptHoldCensus.sawScreen(estimated: estimated, wrong: wrong, settled: settled)
+            #if DEBUG
+            // Which rows, once the screen has stopped moving, because a guess that is standing
+            // there is worth naming and a guess mid flick is not.
+            if settled, estimated > 0 {
+                let named = visibleRows
+                    .filter { entries.indices.contains($0) }
+                    .filter { heights.height(for: entries[$0].contentKey) == nil }
+                    .map { entries[$0].id.description }
+                FileHandle.standardError.write(Data(
+                    "transcript: \(estimated) guessed rows on screen: \(named)\n".utf8
+                ))
+            }
+            #endif
+        }
+
         /// Every height change in this file goes through here.
         ///
         /// **`noteHeightOfRows(withIndexesChanged:)` animates, and almost never should.** It is
@@ -949,6 +987,7 @@ struct TranscriptTable: NSViewRepresentable {
             // nobody is holding it any more.
             if holdsEnd, !isPutting, !currentGeometry.isAtEnd { releaseEnd() }
             reportGeometry()
+            censusOfTheScreen()
             scheduleSettle()
         }
 
@@ -990,6 +1029,7 @@ struct TranscriptTable: NSViewRepresentable {
                 try? await Task.sleep(for: .milliseconds(150))
                 guard !Task.isCancelled, let self, !isLiveScrolling else { return }
                 settleWork = nil
+                censusOfTheScreen(settled: true)
                 onSettled?()
             }
         }
@@ -1245,7 +1285,13 @@ private struct HostedRow: View {
     var fills = true
 
     var body: some View {
-        let measured = content
+        // **The stack is what makes an empty row report.** Sixty per cent of a real session is
+        // rows that draw nothing: a stream event, a tool result whose call is on the row above.
+        // Modifiers on a view whose body is empty lay nothing out, so the reader behind it never
+        // appeared and nought was never reported, and those rows kept the running mean for ever:
+        // three or four of them between two one line Bash rows is the hundred points of blank this
+        // was reported for. A stack is a container and lays out at nothing, which is a height.
+        let measured = VStack(alignment: .leading, spacing: 0) { content }
             .frame(maxWidth: .infinity, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
             .background(
