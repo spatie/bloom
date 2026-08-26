@@ -26,3 +26,29 @@ enum ProjectFolderPicker {
         return url.path
     }
 }
+
+extension ProjectFolderPicker {
+    /// Asking where a project that does not exist yet should be put.
+    ///
+    /// A different question from `choose`, and so a different panel: this one is answered with the
+    /// PARENT folder, the project's own folder does not exist and is not meant to be made here,
+    /// and the prompt therefore says Choose rather than Add. `NewProjectSheet` makes the folder
+    /// itself, which is the whole reason that sheet exists.
+    ///
+    /// - Parameter startingAt: the location already in the field, so the panel opens where the
+    ///   person is rather than where they were last.
+    static func chooseLocation(startingAt path: String?) async -> String? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Choose"
+        panel.message = "Choose the folder your new project should be created in."
+        if let path, FileManager.default.fileExists(atPath: path) {
+            panel.directoryURL = URL(fileURLWithPath: path)
+        }
+        guard await panel.present() == .OK, let url = panel.url else { return nil }
+        return url.path
+    }
+}

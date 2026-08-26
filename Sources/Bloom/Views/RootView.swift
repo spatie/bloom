@@ -32,6 +32,12 @@ struct RootView: View {
     @State private var createTargetRepo: Repo?
     /// Set by the File menu's pull request item and by nothing else. See `CreateWorkspaceSheet`.
     @State private var createStartsOnPullRequest = false
+    @State private var isNewProjectPresented = false
+    /// The project the new-project sheet has just made, waiting for that sheet to leave the
+    /// screen. Two sheets cannot be up at once, and raising the second one from inside the first
+    /// one's dismissal is the only ordering AppKit reliably draws, so the hand-off is a value
+    /// parked here and read in `onDismiss`.
+    @State private var projectToStartWorkIn: Repo?
 
     var body: some View {
         @Bindable var app = app
@@ -183,6 +189,28 @@ struct RootView: View {
             CreateWorkspaceSheet(
                 initialRepo: createTargetRepo, startsOnPullRequest: createStartsOnPullRequest
             )
+        }
+        // Starting a project that is not a repository yet, and then going straight on to its
+        // first workspace.
+        //
+        // **The hand-off is the one behavioural change.** Adding a folder ends with a project in
+        // the sidebar because the person already had one and may well have work in it. Creating a
+        // project ends in the create sheet, because a repository with one empty commit in it is
+        // not something anybody wanted for its own sake: they had an idea, and the next thing is
+        // an agent working on it.
+        .sheet(isPresented: $isNewProjectPresented, onDismiss: startWorkInNewProject) {
+            NewProjectSheet { path in
+                guard let path else {
+                    isNewProjectPresented = false
+                    return
+                }
+                // Registered before the sheet comes down rather than after, so the project is in
+                // hand by the time `onDismiss` looks for it. It is one store write.
+                Task {
+                    projectToStartWorkIn = await app.addCreatedProject(at: path)
+                    isNewProjectPresented = false
+                }
+            }
         }
         // Send Feedback and Submit a Prompt, raised from the Help menu. Here rather than at the
         // menu item, because a `Commands` body is not a view and cannot present anything, and
@@ -348,6 +376,9 @@ struct RootView: View {
         // window into the state the two busy signals are for. See `Snapshot`.
         .acceptsCaptureRunningState(app)
         .acceptsCaptureNotice(app)
+        .onReceive(NotificationCenter.default.publisher(for: .bloomNewProject)) { _ in
+            isNewProjectPresented = true
+        }
         .onReceive(NotificationCenter.default.publisher(for: .bloomNewWorkspace)) { note in
             createTargetRepo = note.object as? Repo ?? app.selectedWorkspace.flatMap(app.repo(for:))
             createStartsOnPullRequest = note.userInfo?[Notification.bloomPullRequestKey] as? Bool == true
@@ -381,6 +412,17 @@ struct RootView: View {
 
     // MARK: - Actions
 
+    /// The first workspace of a project that has just been created, raised as the new-project
+    /// sheet leaves the screen. Nothing happens when the sheet was cancelled, which is what an
+    /// empty `projectToStartWorkIn` means.
+    private func startWorkInNewProject() {
+        guard let repo = projectToStartWorkIn else { return }
+        projectToStartWorkIn = nil
+        createTargetRepo = repo
+        createStartsOnPullRequest = false
+        isCreateSheetPresented = true
+    }
+
     private func confirmArchive(_ request: ArchiveRequest) {
         Task { await app.confirmArchive(request) }
     }
@@ -396,6 +438,10 @@ extension Notification.Name {
     /// body.
     static let bloomFocusSearch = Notification.Name("bloom.focusSearch")
     static let bloomNewWorkspace = Notification.Name("bloom.newWorkspace")
+    /// Raises the New Project sheet. A notification for the same reason the create sheet is one:
+    /// the sheet lives here, and the sidebar's menu, Home's empty state, the toolbar and a
+    /// `Commands` body can none of them present anything themselves.
+    static let bloomNewProject = Notification.Name("bloom.newProject")
     /// Posted only by `Snapshot`, and only in a debug build. See the handler above.
     static let bloomStartTerminalWorkspace = Notification.Name("bloom.startTerminalWorkspace")
     /// The Workspace menu's Rename, aimed at whichever list is drawing that row.

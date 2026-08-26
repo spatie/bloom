@@ -1,4 +1,5 @@
 import SwiftUI
+import BloomCore
 
 /// The word above the project sections, and the button that adds one.
 ///
@@ -18,6 +19,7 @@ import SwiftUI
 /// and a second one would be two filters for one list. It stays at the foot of the pane, which is
 /// where Xcode and Finder put the control that narrows a source list.
 struct SidebarProjectsHeader: View {
+    var onNewProject: () -> Void
     var onAddProject: () -> Void
 
     @State private var isHovered = false
@@ -31,10 +33,19 @@ struct SidebarProjectsHeader: View {
 
             Spacer(minLength: Metrics.spacingSmall)
 
+            // A menu rather than a button, because there are two things to do here and they are
+            // not the same act with two names: New makes a folder and a repository for somebody
+            // who has an idea, Add takes a repository that already exists. This control said Add
+            // for as long as it existed, which is the word that only means anything to the second
+            // of the two.
+            //
             // Lit on hover rather than revealed by it, and drawn exactly as the per-project `+`
             // is, so the sidebar has one convention for a header's button rather than two.
-            Button(action: onAddProject) {
-                Label("Add project", systemImage: "folder.badge.plus")
+            Menu {
+                Button(MenuBarCatalogue[.newProject].title, action: onNewProject)
+                Button(MenuBarCatalogue[.addProjectFolder].title, action: onAddProject)
+            } label: {
+                Label("New or add a project", systemImage: "folder.badge.plus")
                     .labelStyle(.iconOnly)
                     .font(Typo.label)
                     .frame(
@@ -47,13 +58,23 @@ struct SidebarProjectsHeader: View {
                         in: RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                     )
             }
+            // `.button` over `.plain` rather than `.borderlessButton`, for the reason
+            // `WorkspaceRow`'s ellipsis has written down and measured: a borderless menu draws its
+            // label in an ink of its own and ignores the colour it is given, wherever that colour
+            // is stated, so the hover lift below would have moved the background and left the
+            // glyph where it was.
+            .menuStyle(.button)
             .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
             .foregroundStyle(isHovered ? Palette.textPrimary : Palette.textSecondary)
-            // No key equivalent of its own. It used to carry Cmd+Option+A, which was a second key
-            // for a command the File menu already advertises as Shift+Cmd+O, registered on a
-            // hidden button where nothing could announce it. One command with one key, drawn in
-            // the menu bar, beats two keys with one of them undiscoverable. See `BloomCommands`.
-            .help("Add a project folder (⇧⌘O)")
+            // Neither row carries a key equivalent of its own, and the titles come from
+            // `MenuBarCatalogue` so this and the File menu cannot name one action two ways. A
+            // `Menu` in a view cannot fire a key equivalent anyway, and registering one here as
+            // well would be a second binding on a hidden control that wins over the menu bar's
+            // and announces nothing. See `BloomCommands`, and `MenuCommand` for where the keys
+            // really live.
+            .help("New project (⌥⌘N), or add a project folder (⇧⌘O)")
         }
         .contentShape(Rectangle())
         .onHoverChange { isHovered = $0 }

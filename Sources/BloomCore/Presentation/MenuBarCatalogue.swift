@@ -71,6 +71,11 @@ public enum MenuBarCatalogue {
         // spends a double click on it.
         MenuBarItem(.renameTab, in: .file, "Rename Tab", availability: .needsTab),
         MenuBarItem(.closeTab, in: .file, "Close Tab", key: .command("w"), availability: .needsTab),
+        // Two verbs for two different people, and they are not the same command with two names.
+        // New makes the folder and the repository for somebody who has an idea; Add takes a
+        // repository that already exists. Every door into this used to say Add, which is a word
+        // that only makes sense to the second of the two.
+        MenuBarItem(.newProject, in: .file, "New Project…", key: .init("n", .command, .option)),
         MenuBarItem(.addProjectFolder, in: .file, "Add Project Folder…", key: .init("o", .command, .shift)),
         MenuBarItem(.save, in: .file, "Save", key: .command("s"), availability: .sometimes),
 
@@ -193,6 +198,7 @@ public enum MenuBarAction: String, CaseIterable, Sendable {
     case showNotes
     case renameTab
     case closeTab
+    case newProject
     case addProjectFolder
     case save
 

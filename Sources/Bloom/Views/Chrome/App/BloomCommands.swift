@@ -177,6 +177,12 @@ struct BloomCommands: Commands {
 
             Divider()
 
+            // Two doors rather than one, and the words are the whole point of the pair: New
+            // makes a folder and a repository for somebody with an idea, Add takes a repository
+            // that already exists. See `NewProjectSheet`.
+            MenuCommand(.newProject) {
+                NotificationCenter.default.post(name: .bloomNewProject, object: nil)
+            }
             MenuCommand(.addProjectFolder, perform: addProjectFolder)
         }
 
