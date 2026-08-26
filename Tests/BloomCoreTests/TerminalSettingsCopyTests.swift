@@ -37,7 +37,10 @@ struct TerminalSettingsCopyTests {
         let line = TerminalSettingsCopy.textSizeSource(override: nil, ghostty: nil)
 
         #expect(line.contains("system monospaced"))
-        #expect(!line.contains("Ghostty"))
+        // Naming Ghostty in the negative is the point: the failure this sentence guards against is
+        // a pane claiming to follow a configuration that is not there. Saying none was found is
+        // the clearest way to not claim it.
+        #expect(line.contains("No Ghostty configuration"))
     }
 
     /// The switch is disabled without tmux, and a disabled switch with no reason beside it is the
