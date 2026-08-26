@@ -86,9 +86,18 @@ struct AttachmentChip: View {
     /// Shorter than a list row: this is a label above the text field, and at 28 points a row of
     /// them read as a second toolbar. Not private: the bar reads it to know how tall one row of
     /// chips is before it has measured any.
-    static let height: CGFloat = 22
+    ///
+    /// It is `Metrics.controlHeight` rather than a 22 of its own, which is what it was: the same
+    /// number, said twice. That rung is "a control drawn with a fill of its own inside a strip",
+    /// which is exactly what a chip is.
+    static let height: CGFloat = Metrics.controlHeight
     /// The icon, and the close control that replaces it.
-    private static let slot: CGFloat = 14
+    ///
+    /// Not private, because `SlashCommandChip` and `ReviewCommentChip` each held a 14 of their own
+    /// with a comment promising it was this one. `SlashCommandChip` already condemns that shape
+    /// three lines below its copy, for `hoverDelay`: a promise in a comment cannot stop the drift
+    /// and a reference to the constant can.
+    static let slot: CGFloat = 14
     /// Enough for a name like `Screenshot 2026-08-19 at 14.03.11.png` to be recognisable once it
     /// is truncated in the middle, and short enough that four chips fit across a narrow column.
     private static let maxNameWidth: CGFloat = 150

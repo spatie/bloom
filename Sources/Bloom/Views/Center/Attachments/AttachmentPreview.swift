@@ -40,6 +40,18 @@ struct AttachmentPreview: View {
     /// them is not a sliver.
     private static let minSide: CGFloat = 120
 
+    /// The mark at the head of one of those two cards, and the box a file's own icon is drawn in.
+    ///
+    /// Deliberately off `Typo` and off `Metrics`, and said here rather than left as two bare
+    /// numbers in the stack below. `Typo` stops at 15, which is a heading inside prose, and its own
+    /// doc argues that a sixth rung invented for one card is how a five rung scale stops being one;
+    /// this is a picture rather than type. `NSWorkspace` hands an icon back at 16, 32 and 128, and
+    /// 48 is the step between the middle two that keeps it sharp beside `minSide`. The two are a
+    /// pair: the drawn glyph is smaller than the file icon because a stroked symbol at the icon's
+    /// size outweighs the filename under it.
+    private static let noteGlyph: CGFloat = 28
+    private static let noteIcon: CGFloat = 48
+
     var body: some View {
         content
             .frame(maxWidth: maxWidth, maxHeight: maxHeight)
@@ -90,12 +102,12 @@ struct AttachmentPreview: View {
         VStack(spacing: Metrics.spacing) {
             if let glyph {
                 Image(systemName: glyph)
-                    .font(.system(size: 28))
+                    .font(.system(size: Self.noteGlyph))
                     .foregroundStyle(Palette.textTertiary)
             } else {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
                     .resizable()
-                    .frame(width: 48, height: 48)
+                    .frame(width: Self.noteIcon, height: Self.noteIcon)
             }
 
             Text(title)

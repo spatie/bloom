@@ -758,6 +758,51 @@ enum Metrics {
     static let controlHeight: CGFloat = 22
 }
 
+/// How far off the window a floating thing is lifted.
+///
+/// Three call sites had invented three recipes for one question: `MenuPanel` at 0.24 over twelve
+/// points, `JumpToNewestPill` at 0.18 over four and 0.28 over twelve under the pointer, and the
+/// pane drag ghost at 0.18 over eight. Nothing distinguished them; they were written on three
+/// days. Two levels are enough for what the window actually has, and they are named for what the
+/// thing is doing rather than for how dark the shadow is.
+///
+/// Black rather than the label colour, in both. A shadow tinted with `labelColor` becomes a white
+/// glow in dark appearance, which is the opposite of what a shadow is for, and every one of the
+/// three call sites had already had to write that down for itself.
+enum Elevation {
+    /// A control sitting on the page: the jump pill at rest.
+    case resting
+    /// A panel open over the window, or something carried under the pointer.
+    case lifted
+
+    var opacity: Double {
+        switch self {
+        case .resting: 0.18
+        case .lifted: 0.24
+        }
+    }
+
+    var radius: CGFloat {
+        switch self {
+        case .resting: Metrics.spacingSmall
+        case .lifted: Metrics.gutter
+        }
+    }
+
+    var offset: CGFloat {
+        switch self {
+        case .resting: Metrics.spacingTight
+        case .lifted: Metrics.spacingSmall
+        }
+    }
+}
+
+extension View {
+    func elevation(_ level: Elevation) -> some View {
+        shadow(color: .black.opacity(level.opacity), radius: level.radius, y: level.offset)
+    }
+}
+
 /// How a pane arrives and leaves.
 ///
 /// One curve for every pane SwiftUI draws, because two panes that move at different speeds read as

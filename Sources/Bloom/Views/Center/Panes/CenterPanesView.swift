@@ -197,6 +197,11 @@ struct CenterPanesView: View {
         }
     }
 
+    /// The plate a carried pane is drawn as: wide enough to read as a pane rather than a chip,
+    /// and small enough not to cover the drop target it is being moved onto. Named because it was
+    /// two bare numbers in the middle of the stack below.
+    private static let ghostSize = CGSize(width: 96, height: 56)
+
     /// The small plate under the pointer while a pane is being carried.
     ///
     /// Deliberately a token rather than a picture of the pane. A live shell or a loaded page cannot
@@ -214,8 +219,9 @@ struct CenterPanesView: View {
                     .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
             }
             .overlay { Image(systemName: symbol).foregroundStyle(Palette.textSecondary) }
-            .frame(width: 96, height: 56)
-            .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
+            .frame(width: Self.ghostSize.width, height: Self.ghostSize.height)
+            // Carried under the pointer, which is `lifted`. It had a fourth recipe of its own.
+            .elevation(.lifted)
             .position(x: move.point.x, y: move.point.y)
             .allowsHitTesting(false)
     }

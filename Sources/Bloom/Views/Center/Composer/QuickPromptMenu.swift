@@ -205,9 +205,9 @@ struct QuickPromptMenu: View {
     @ViewBuilder
     private var empty: some View {
         if !query.isEmpty {
-            MenuEmptyRow(text: "Nothing matches \(query)")
+            MenuEmptyRow(text: "Nothing matches \(query)", inset: Self.contentInset)
         } else if !catalog.isLoaded {
-            MenuEmptyRow(text: "Looking for quick prompts\u{2026}")
+            MenuEmptyRow(text: "Looking for quick prompts\u{2026}", inset: Self.contentInset)
         } else {
             VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
                 Text("Nothing here yet.")

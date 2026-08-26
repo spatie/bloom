@@ -28,6 +28,9 @@ struct BrowserFindBar: View {
     var body: some View {
         HStack(spacing: Metrics.spacingWide) {
             Image(systemName: "magnifyingglass")
+                // The size the composer's search field draws the same mark at. Left at the default
+                // it was a 13 point glyph leading a strip set in caption and micro.
+                .imageScale(.small)
                 .foregroundStyle(Palette.textTertiary)
                 .frame(width: Metrics.glyph)
 

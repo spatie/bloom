@@ -134,7 +134,10 @@ struct WorkspaceRow: View {
                     if workspace.pinned {
                         Image(systemName: "pin.fill")
                             .font(Typo.micro)
-                            .foregroundStyle(.tertiary)
+                            // The palette's rung rather than AppKit's third, which `textTertiary`
+                            // was retuned away from: the system's is 1.9 to 1 and means a disabled
+                            // control. Home draws the same pin and always did it this way.
+                            .foregroundStyle(Palette.textTertiary)
                             .accessibilityLabel("Pinned")
                     }
 
@@ -417,7 +420,7 @@ private struct PullRequestQuestion: Hashable, Sendable {
 /// a number. The same shape the subagent rows use, at the same size the diff stat beside it uses.
 private struct SubagentFailureLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Metrics.spacingTight) {
             configuration.icon
             configuration.title
         }
