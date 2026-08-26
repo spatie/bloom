@@ -161,6 +161,7 @@ enum SwitchProbe {
             "name": .string(name),
             // Where the switch left the reader, which is the whole of what "it did not keep my
             // place" means. See `ProbeHarness.scrollPlace`.
+            "drawnRows": .integer(TranscriptDrawn.rows),
             "place": .object(ProbeHarness.scrollPlace(
                 ProbeHarness.transcriptScrollView(in: contentView)
             )),
@@ -231,6 +232,28 @@ enum SwitchProbe {
             ]))
         }
         report["visits"] = .array(visits)
+
+        // **Can the reader get to the end at all?** The reported bug is a conversation that stops
+        // part way down and cannot be scrolled past, because the window the list is drawing ends
+        // there and nothing had told it to grow. Wheeling down as far as it will go and asking
+        // what is left is the whole test.
+        app.selection = .workspace(top)
+        try? await Task.sleep(for: .milliseconds(settle))
+        if let scroll = ProbeHarness.transcriptScrollView(in: contentView) {
+            for _ in 0..<200 {
+                ProbeHarness.wheel(scroll, by: -300)
+                try? await Task.sleep(for: .milliseconds(8))
+            }
+            try? await Task.sleep(for: .seconds(2))
+            var reached = ProbeHarness.scrollPlace(scroll)
+            reached["drawnRows"] = .integer(TranscriptDrawn.rows)
+            if let model = app.existingModel(for: top),
+               let session = model.activeSession,
+               let transcript = model.existingTranscript(for: session.id) {
+                reached["sessionRows"] = .integer(transcript.rows.count)
+            }
+            report["reachesTheEnd"] = .object(reached)
+        }
         return report
     }
 

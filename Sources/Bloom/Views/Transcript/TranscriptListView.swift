@@ -590,7 +590,21 @@ struct TranscriptListView: View {
                 reachToEnd.value = new
             }
             .onScrollGeometryChange(for: TranscriptGeometry.self, of: Self.measure) { _, new in
-                geometry = new
+                // **The end of what is drawn is not the end of the conversation.**
+                //
+                // A window that stops short of the live end is a scroll view whose content ends
+                // where the window does, and every measurement taken from that geometry says the
+                // reader has arrived at the end: the pill that offers to take them to the newest
+                // row is not drawn, the pane is written down as having been left at the live end,
+                // and the rows below are unreachable because the only thing that grows the window
+                // downwards is noticing that the reader wants them. Reported as "sometimes I
+                // cannot scroll to the end any more", with a screenshot of a conversation that
+                // stopped mid turn, and it came right the moment a new message arrived, which is
+                // the row count changing and the window growing behind it.
+                //
+                // So the geometry is corrected before anything reads it, and the correction is
+                // the truth: there is more below.
+                geometry = trueEnd(of: new)
                 // The bottom half of the window, and it needs neither an anchor nor a flag: rows
                 // added BELOW the viewport move nothing at all. A window with a bottom edge only
                 // exists after a session was opened on an old row, and reaching the end of it is
@@ -611,7 +625,7 @@ struct TranscriptListView: View {
                 // moves about once every eleven points of a drag, and the flag moves when the
                 // reader arrives at or leaves the end. So the extra reports are a handful per
                 // scroll, and each of them is a correction the transition form could not make.
-                onScrolledUpChange?(new.isFarFromEnd)
+                onScrolledUpChange?(trueEnd(of: new).isFarFromEnd)
             }
             // A second subscription, on the raw offset, and deliberately not folded into the one
             // above. Everything in `TranscriptGeometry` is quantised precisely so that a drag
@@ -624,7 +638,15 @@ struct TranscriptListView: View {
             // Where the reader ends up, written down for the pane that is built next. On the end
             // of a gesture rather than during one: see `remember`.
             .onScrollPhaseChange { _, phase in
-                if phase == .idle { remember() }
+                if phase == .idle {
+                    remember()
+                    // A scroll that ended against the bottom of a short window is a reader asking
+                    // for what is under it, and the geometry may not have CHANGED while they tried:
+                    // `onScrollGeometryChange` reports transitions, so a view that was already at
+                    // the end of the content when the pane opened never reports anything at all.
+                    // That is the stuck case. See `trueEnd`.
+                    growWindowDown()
+                }
             }
             // And on the way out, which is the case the whole of `TranscriptResume` is about: a
             // tab switch destroys this view, and a reader who arrived, read what was on screen and
@@ -636,6 +658,8 @@ struct TranscriptListView: View {
             .settlesArrivals($arrival)
             .onChange(of: transcript.rows.count, initial: true) { _, _ in
                 position(proxy)
+                // A row arriving is another chance to notice that the window stops short of it.
+                growWindowDown()
                 trackArrivals()
                 // A row has landed, so the end of the content has moved. Between rows the tail
                 // grows without any of this being told, which is what `isStreaming` below is for.
@@ -1256,6 +1280,22 @@ struct TranscriptListView: View {
     /// layout pass the growth causes and not merely the state write that asks for it. Clearing it
     /// moves nothing: by then the content size is settled, and an anchor only does anything on a
     /// change of size.
+    /// A scroll geometry with the rows the window is not drawing taken into account.
+    ///
+    /// Everything `TranscriptGeometry` measures is measured against the CONTENT, and the content
+    /// is the window rather than the conversation. While the two differ, a reader at the bottom of
+    /// the content is not at the end of anything, and saying otherwise is what made the rows below
+    /// unreachable. See the subscription that calls this.
+    private func trueEnd(of measured: TranscriptGeometry) -> TranscriptGeometry {
+        guard drawn.session == transcript.session.id,
+              drawn.window.canGrowDown(rowCount: transcript.rows.count)
+        else { return measured }
+        var corrected = measured
+        corrected.isNearBottom = false
+        corrected.isFarFromEnd = true
+        return corrected
+    }
+
     /// Puts the rest of the conversation back, a chunk at a time, below what is drawn.
     ///
     /// The mirror of `growWindow` and much the simpler half. Nothing moves when content is added
