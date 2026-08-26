@@ -26,7 +26,20 @@ struct ChangedFileList: View {
     @State private var treeRows: [ChangedFileTreeRow] = []
     /// Folders the user closed. Empty means everything is open, which is what a change of twenty
     /// files wants on first sight.
+    ///
+    /// **A live filter never writes to this**, so a needle typed and deleted costs the reader
+    /// nothing. See `filterCollapsed`.
     @State private var collapsed: Set<String> = []
+    /// What is in the filter field.
+    @State private var query = ""
+    /// The diff narrowed to it, or nil when the field is empty. Nil is not the same answer as an
+    /// empty array: one draws the whole diff, the other says nothing matched. See
+    /// `ChangedFileFilter`, which is also where the reason this filters the FILES rather than the
+    /// tree is written down.
+    @State private var filtered: [ChangedFile]?
+    /// The folders closed while a filter is live, which starts at none because this tree is open
+    /// by default. Thrown away when the field is cleared, so the reader gets their own tree back.
+    @State private var filterCollapsed: Set<String> = []
     /// Resolved when the selection moves rather than in `body`, which runs again on every hover.
     @State private var previewURL: URL?
     /// Bumped on every row activation, which is what puts the keyboard back on the list after the
@@ -58,32 +71,46 @@ struct ChangedFileList: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ScrollViewReader { proxy in
-            Group {
-                if model.changedFiles.isEmpty {
-                    empty
-                } else if isTree {
-                    tree
-                } else {
-                    list
+        VStack(spacing: 0) {
+            // Only over a diff there is something to narrow. A filter above "No changes yet" is a
+            // control that cannot do anything, offered at the one moment it is useless.
+            if !model.changedFiles.isEmpty {
+                InspectorFilterField(query: $query, onEscape: escape, onReturn: enterList)
+                Hairline()
+            }
+
+            ScrollViewReader { proxy in
+                Group {
+                    if model.changedFiles.isEmpty {
+                        empty
+                    } else if let filtered, filtered.isEmpty {
+                        noMatches
+                    } else if isTree {
+                        tree
+                    } else {
+                        list
+                    }
+                }
+                // The row an arrow key moved to comes into view, which is the other half of the
+                // key. Only while this list holds the keyboard: a cursor that moved because the
+                // agent rewrote the file list must not drag the reader's scroll position with it.
+                .onChange(of: cursor) { _, path in
+                    guard hasKeyboard, let path else { return }
+                    proxy.scrollTo(path)
                 }
             }
-            // The row an arrow key moved to comes into view, which is the other half of the key.
-            // Only while this list holds the keyboard: a cursor that moved because the agent
-            // rewrote the file list must not drag the reader's scroll position with it.
-            .onChange(of: cursor) { _, path in
-                guard hasKeyboard, let path else { return }
-                proxy.scrollTo(path)
-            }
+            // Arrows, Home and End, type-select, Return, and the space bar Quick Look that used to
+            // be reachable only with the pointer. See `ListKeyboardHost`. Around the list rather
+            // than around the whole tab, so the ring it draws says the LIST has the keyboard at
+            // the moment the field above it does not.
+            .listKeyboard(
+                hasKeyboard: $hasKeyboard,
+                previewing: previewURL,
+                armToken: quickLookArm,
+                onKey: handle
+            )
         }
-        // Arrows, Home and End, type-select, Return, and the space bar Quick Look that used to be
-        // reachable only with the pointer. See `ListKeyboardHost`.
-        .listKeyboard(
-            hasKeyboard: $hasKeyboard,
-            previewing: previewURL,
-            armToken: quickLookArm,
-            onKey: handle
-        )
+        .onChange(of: query) { _, _ in rebuild() }
         .onChange(of: model.changedFiles, initial: true) { _, _ in
             rebuild()
             // A file the agent has just deleted stops being previewable without the selection
@@ -189,6 +216,17 @@ struct ChangedFileList: View {
         }
     }
 
+    /// A blank pane under a field with something in it reads as the list having broken rather than
+    /// as the needle having found nothing. Worded as the All files tab words its own, because they
+    /// are the same sentence about two lists.
+    private var noMatches: some View {
+        EmptyStateView(
+            glyph: "magnifyingglass",
+            title: "No files match",
+            message: "Nothing in this diff matches \(query)."
+        )
+    }
+
     /// The same shape as the checks list's section header, which is the only other pinned header
     /// in this column: a name at the pane's own inset, then how many rows are under it.
     ///
@@ -223,7 +261,7 @@ struct ChangedFileList: View {
                 ChangedFolderRow(
                     name: item.node.name,
                     path: item.node.path,
-                    isExpanded: !collapsed.contains(item.node.path),
+                    isExpanded: !closedFolders.contains(item.node.path),
                     depth: item.depth,
                     fullPath: fullPath(item.node.path),
                     action: { activate(folder: item.node.path) },
@@ -270,13 +308,25 @@ struct ChangedFileList: View {
     /// every six seconds because a file gained a line would be the tree animating for a reason
     /// nobody gave it. Opening a folder is the one gesture that reflows: see `toggle`.
     private func rebuild() {
+        let narrowed = ChangedFileFilter.apply(
+            to: model.changedFiles, needle: FileNeedle.canonical(query)
+        )
+        filtered = narrowed
+        // Reset when the filter GOES, not on every rebuild. A running agent rewrites the changed
+        // files every few seconds and each of those comes through here, so clearing this per call
+        // would reopen, twice a minute, a folder the reader had just closed under their needle.
+        if narrowed == nil { filterCollapsed = [] }
+
+        let shown = narrowed ?? model.changedFiles
+        let closed = closedFolders
+
         if isTree {
             adopt(ChangedFileTree.rows(
-                from: ChangedFileTree.build(from: model.changedFiles),
-                collapsed: collapsed
+                from: ChangedFileTree.build(from: shown),
+                collapsed: closed
             ))
         } else {
-            groups = ChangedFileGroup.build(from: model.changedFiles)
+            groups = ChangedFileGroup.build(from: shown)
             treeRows = []
             let files = groups.flatMap(\.files)
             rowPaths = files.map(\.path)
@@ -284,6 +334,16 @@ struct ChangedFileList: View {
             forgetMissingCursor()
         }
     }
+
+    // MARK: - What is drawn
+
+    /// The files both shapes are built from: the whole diff, or what the needle left of it.
+    private var shownFiles: [ChangedFile] { filtered ?? model.changedFiles }
+
+    /// The folders drawn closed, which is the reader's own set until a filter is live and the
+    /// filter's while it is. Two sets rather than one, so clearing the field restores the tree
+    /// rather than guessing at it: see `collapsed`.
+    private var closedFolders: Set<String> { filtered == nil ? collapsed : filterCollapsed }
 
     private func adopt(_ rows: [ChangedFileTreeRow]) {
         treeRows = rows
@@ -306,7 +366,7 @@ struct ChangedFileList: View {
     /// The new rows are built before anything is written, because their count is what decides
     /// whether the write is animated at all.
     private func toggle(_ path: String) {
-        var next = collapsed
+        var next = closedFolders
         if next.contains(path) {
             next.remove(path)
         } else {
@@ -314,7 +374,7 @@ struct ChangedFileList: View {
         }
 
         let rows = ChangedFileTree.rows(
-            from: ChangedFileTree.build(from: model.changedFiles),
+            from: ChangedFileTree.build(from: shownFiles),
             collapsed: next
         )
         let motion = TreeDisclosureMotion.rows(
@@ -322,7 +382,13 @@ struct ChangedFileList: View {
         )
 
         withAnimation(motion.animation) {
-            collapsed = next
+            // Under a filter this writes the filter's set, so a folder closed while narrowing
+            // holds until the field is cleared and costs the reader nothing afterwards.
+            if filtered == nil {
+                collapsed = next
+            } else {
+                filterCollapsed = next
+            }
             adopt(rows)
         }
     }
@@ -371,11 +437,12 @@ struct ChangedFileList: View {
     /// `collapsed` set is the inverse of open, because a change of twenty files wants everything
     /// open on first sight.
     private var treeShape: [TreeRow] {
-        treeRows.map {
+        let closed = closedFolders
+        return treeRows.map {
             TreeRow(
                 depth: $0.depth,
                 isDirectory: $0.node.file == nil,
-                isExpanded: !collapsed.contains($0.node.path)
+                isExpanded: !closed.contains($0.node.path)
             )
         }
     }
@@ -412,6 +479,43 @@ struct ChangedFileList: View {
         cursor = path
         toggle(path)
         quickLookArm += 1
+    }
+
+    // MARK: - The filter field
+
+    /// Escape in the filter field, in the two steps a Mac search field has: the first clears what
+    /// was typed, and with nothing left to clear the second hands the keyboard to the list the
+    /// field was narrowing. Clearing puts every folder back where the reader had it, which is the
+    /// whole of why `collapsed` and `filterCollapsed` are two sets.
+    ///
+    /// Spelled exactly as the All files tab spells it. Two tabs of one column whose fields
+    /// answered Escape differently would be the drift the shared field exists to stop.
+    private func escape() {
+        guard query.isEmpty else {
+            query = ""
+            return
+        }
+        enterList()
+    }
+
+    /// Return in the filter field, and the second Escape: the keyboard moves to the list.
+    ///
+    /// It opens the first match rather than only highlighting it, which is this list's own rule
+    /// and not the All files tab's: over there a highlighted row is a row you are passing over, and
+    /// here the highlighted row IS the review that is open, so arrowing onto one opens it. Landing
+    /// on the first FILE rather than the first row, because in the tree shape the folders above it
+    /// are rows too and a folder is not something the centre column can open.
+    private func enterList() {
+        guard cursor == nil, let first = firstFilePath else {
+            quickLookArm += 1
+            return
+        }
+        move(to: first)
+    }
+
+    private var firstFilePath: String? {
+        guard isTree else { return rowPaths.first }
+        return treeRows.first(where: { $0.node.file != nil })?.node.path
     }
 
     private func fullPath(_ relative: String) -> String {
