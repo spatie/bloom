@@ -41,6 +41,20 @@ struct SidebarSelectionTests {
         #expect(SidebarSelection.home.subagentID == nil)
     }
 
+    /// Everything that hangs off `workspaceID` gets the right answer for a conversation with no
+    /// worktree for free: no inspector, no terminal, no diff poll, no pull request accessory, and
+    /// a Workspace menu that greys itself. Exactly the fall-out `.home` gets, which is what it
+    /// should be, because neither of them is a worktree.
+    @Test("Ask Bloom carries no workspace either, and is not Home")
+    func askCarriesNothing() {
+        #expect(SidebarSelection.ask.workspaceID == nil)
+        #expect(SidebarSelection.ask.archivedWorkspaceID == nil)
+        #expect(SidebarSelection.ask.subagentID == nil)
+        // Two destinations, so a window on one must never be treated as being on the other.
+        #expect(SidebarSelection.ask != .home)
+        #expect(Set<SidebarSelection>([.ask, .home]).count == 2)
+    }
+
     /// The one that stops an archived workspace being reopened as a live one. Same id, two cases,
     /// and they must not be equal or share a hash: a dictionary or a `Set` keyed on a selection
     /// would otherwise answer for the wrong one.

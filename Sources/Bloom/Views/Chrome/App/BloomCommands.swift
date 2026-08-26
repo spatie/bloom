@@ -177,6 +177,12 @@ struct BloomCommands: Commands {
 
             Divider()
 
+            // Two doors rather than one, and the words are the whole point of the pair: New
+            // makes a folder and a repository for somebody with an idea, Add takes a repository
+            // that already exists. See `NewProjectSheet`.
+            MenuCommand(.newProject) {
+                NotificationCenter.default.post(name: .bloomNewProject, object: nil)
+            }
             MenuCommand(.addProjectFolder, perform: addProjectFolder)
         }
 
@@ -343,6 +349,14 @@ struct BloomCommands: Commands {
                 model.selection = .home
             }
             .disabled(model.selection == .home)
+
+            // No key equivalent, deliberately. Every letter that would read as this one is taken
+            // by something in front of it, and a menu item is discoverable without one where a
+            // second binding on a key the composer already uses is not.
+            Button("Go to Ask Bloom") {
+                model.selection = .ask
+            }
+            .disabled(model.selection == .ask)
         }
 
         // Zoom, at the foot of the View menu, where Safari, Preview and Notes all keep it, and

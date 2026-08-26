@@ -29,6 +29,10 @@ public struct ComposerControls: Equatable, Sendable {
     /// How the agent is asked to write, by name. `OutputStyle.defaultName` for "leave it alone",
     /// which is what a session is until somebody picks something else.
     public var outputStyle: String
+    /// Whether this chat has a worktree behind it. False is Ask Bloom, and it is here rather than
+    /// left to the view because it changes what the permission menu has to say. See
+    /// `missingPermissionModeNote`.
+    public var hasWorktree: Bool
 
     public init(
         model: String = AppDefaults.fallbackModel,
@@ -36,7 +40,8 @@ public struct ComposerControls: Equatable, Sendable {
         agentKind: AgentKind = .claudeCode,
         permissionMode: PermissionMode = AppDefaults.fallbackPermissionMode,
         isFastMode: Bool = false,
-        outputStyle: String = OutputStyle.defaultName
+        outputStyle: String = OutputStyle.defaultName,
+        hasWorktree: Bool = true
     ) {
         self.model = model
         self.effort = effort
@@ -44,6 +49,7 @@ public struct ComposerControls: Equatable, Sendable {
         self.permissionMode = permissionMode
         self.isFastMode = isFastMode
         self.outputStyle = outputStyle
+        self.hasWorktree = hasWorktree
     }
 
     public init(session: Session, isFastMode: Bool, outputStyle: String) {
@@ -53,7 +59,10 @@ public struct ComposerControls: Equatable, Sendable {
             agentKind: session.agentKind,
             permissionMode: session.permissionMode,
             isFastMode: isFastMode,
-            outputStyle: outputStyle
+            outputStyle: outputStyle,
+            // Read off the row rather than passed in, so the one caller that has a chat with no
+            // worktree cannot forget to say so.
+            hasWorktree: session.workspaceID != nil
         )
     }
 
@@ -69,10 +78,26 @@ public struct ComposerControls: Equatable, Sendable {
         }
     }
 
-    /// What a menu says about the mode that is missing, so somebody who knows Bloom has a Plan
-    /// mode is not left wondering where it went.
+    /// What the permission menu says under its rows: which mode is missing and why, and what a
+    /// mode means here when it does not mean what it usually means.
+    ///
+    /// Two facts, and both can be true at once, so they are joined rather than one winning. The
+    /// second is the one worth reading twice. Every other chat in Bloom is in a worktree, which is
+    /// a copy of a project cut for the purpose, so Full access there is full access to a copy. This
+    /// conversation has no worktree, and the same words would mean the whole machine.
     public var missingPermissionModeNote: String? {
-        agentKind == .codex ? "Plan is a Claude Code mode. Codex has no equivalent." : nil
+        var notes: [String] = []
+        if agentKind == .codex {
+            notes.append("Plan is a Claude Code mode. Codex has no equivalent.")
+        }
+        if !hasWorktree {
+            notes.append(
+                "This conversation has no worktree, so anything wider than Ask reaches the whole "
+                    + "machine rather than a copy of a project. Whatever you choose lasts until "
+                    + "Bloom next starts, and then it is Ask again."
+            )
+        }
+        return notes.isEmpty ? nil : notes.joined(separator: " ")
     }
 
     /// Whether this backend has output styles at all.

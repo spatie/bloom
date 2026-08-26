@@ -893,16 +893,20 @@ extension View {
     /// reading as a row of buttons; drawn behind, the selected tab's own opaque fill breaks it, and
     /// that break is what joins the tab to the content below.
     ///
-    /// `pulsing` puts the busy signal on that rule, and it goes in this background rather than in
+    /// `busy` puts the activity signal on that rule, and it goes in this background rather than in
     /// an overlay for exactly the reason the rule does: the lit rule has to be broken by the
     /// selected tab on the same pixels the rule is broken on, or the tab reads as sitting on top of
-    /// a line rather than as part of it. See `RulePulse`.
-    func tabStripMaterial(pulsing: Bool = false) -> some View {
+    /// a line rather than as part of it. See `ActivityRule`.
+    ///
+    /// `busy` and no longer `pulsing`, because the signal no longer pulses: it is a crest running
+    /// the rule, and a parameter named after a figure that has been replaced is the next reader's
+    /// wrong turn. The same rename took `RuleSweep` to `RulePulse` when the light stopped sweeping.
+    func tabStripMaterial(busy: Bool = false) -> some View {
         background {
             ZStack(alignment: .bottom) {
                 Palette.sidebar
                 Hairline()
-                if pulsing { RulePulse() }
+                if busy { ActivityRule() }
             }
         }
     }
@@ -923,6 +927,45 @@ struct Hairline: View {
                 width: axis == .vertical ? Metrics.hairline : nil,
                 height: axis == .horizontal ? Metrics.hairline : nil
             )
+    }
+}
+
+/// Something the user has to read before pressing, or after it went wrong.
+///
+/// Here rather than beside the sheet that first drew it: `ProjectSetupSheet` and
+/// `NewProjectSheet` are the two halves of one question, so a warning worded and tinted two ways
+/// would be the same fault the two dialogs were split to avoid.
+struct Callout: View {
+    enum Tone {
+        case warning
+        case negative
+
+        var color: Color {
+            switch self {
+            case .warning: Palette.warning
+            case .negative: Palette.negative
+            }
+        }
+    }
+
+    let text: String
+    let symbol: String
+    let tone: Tone
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Metrics.spacingWide) {
+            Image(systemName: symbol)
+                .font(Typo.caption)
+                .foregroundStyle(tone.color)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Metrics.inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tone.color.opacity(0.10), in: RoundedRectangle(cornerRadius: Metrics.corner))
     }
 }
 

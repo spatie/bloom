@@ -214,12 +214,9 @@ public actor CodexModelCatalog {
     /// rather show a stale list than an empty one.
     public var lastKnown: [CodexModel] { cached }
 
-    /// The account's default first, then the rest in the order the server gave them. The server's
-    /// order is deliberate and is not re-sorted alphabetically, which would put `gpt-5.2` above
-    /// the model the account is actually meant to use.
+    /// Most capable first. See `CodexModelRank`, which holds the rules and the reason the
+    /// account's default no longer jumps the queue.
     static func sorted(_ models: [CodexModel]) -> [CodexModel] {
-        let defaults = models.filter(\.isDefault)
-        let rest = models.filter { !$0.isDefault }
-        return defaults + rest
+        CodexModelRank.ordered(models)
     }
 }

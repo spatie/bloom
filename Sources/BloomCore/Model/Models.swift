@@ -334,7 +334,15 @@ public enum PermissionMode: String, Sendable, Codable, CaseIterable {
 
 public struct Session: Identifiable, Sendable, Hashable, Codable {
     public var id: SessionID
-    public var workspaceID: WorkspaceID
+    /// The worktree this chat is having its conversation in, or nil when there is not one.
+    ///
+    /// **Nil is Ask Bloom and nothing else today.** That chat sits above every project, so there
+    /// is no worktree for it to be about, and the column was `NOT NULL` until the rebuild in
+    /// `Store.migrate` relaxed it. Everything that lists a workspace's chats filters by this and
+    /// so never sees such a row, which is the whole reason a nullable column beat a sentinel
+    /// workspace: the `workspaces` table's invariant is that a row in it is a real directory on
+    /// disk, and the diff poll, the archive path and every git call believe it.
+    public var workspaceID: WorkspaceID?
     public var title: String
     public var agentSessionID: String?
     public var model: String
@@ -370,7 +378,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     /// all could be handed to the public `Store.upsert`, which writes every column.
     init(
         id: SessionID = .new(),
-        workspaceID: WorkspaceID,
+        workspaceID: WorkspaceID?,
         title: String = PaneNaming.chat,
         agentSessionID: String? = nil,
         model: String = AppDefaults.fallbackModel,
@@ -412,7 +420,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     /// `SessionLifecycle.apply`, which stamps `updatedAt` in the same statement.
     public init(
         id: SessionID = .new(),
-        workspaceID: WorkspaceID,
+        workspaceID: WorkspaceID?,
         title: String = PaneNaming.chat,
         agentSessionID: String? = nil,
         model: String = AppDefaults.fallbackModel,

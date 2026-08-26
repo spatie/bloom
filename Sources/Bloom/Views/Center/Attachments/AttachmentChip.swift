@@ -75,6 +75,8 @@ struct AttachmentChip: View {
     @State private var isHovered = false
     @State private var isMissing = false
     @State private var hoverTask: Task<Void, Never>?
+    /// The pointer on the remove button itself, which is a smaller target than the chip.
+    @State private var isRemoveHovered = false
     /// Read once, when the pointer enters, and only where a preview is wanted. See `probe`.
     @State private var frameInWindow: CGRect = .zero
 
@@ -174,17 +176,42 @@ struct AttachmentChip: View {
             : Palette.selectedEmphasizedText
     }
 
+    /// Full strength, because this glyph is the whole control. The rest of the chip is allowed to
+    /// be quiet; the thing that throws the file away is not.
+    private var removeInk: Color {
+        isOnSelection ? Palette.selectedEmphasizedText : Palette.textPrimary
+    }
+
+    /// The plate the X sits on, which darkens under the pointer so the press has somewhere to land
+    /// before it happens.
+    private var removePlate: Color {
+        if isOnSelection {
+            return Palette.selectedEmphasizedText.opacity(isRemoveHovered ? 0.28 : 0.16)
+        }
+        return isRemoveHovered ? Palette.hover : Palette.surface
+    }
+
     @ViewBuilder
     private var leading: some View {
         if isHovered, let onRemove {
+            // **A drawn glyph on a plate, not `xmark.circle.fill`.** That symbol knocks its X out
+            // of a filled disc, so the X is a hole showing whatever is behind the chip: grey on
+            // grey at eleven points, which is a smudge rather than a control. The X is the ink
+            // here and the plate is behind it, which is the same way the system draws a token's
+            // remove button and the reason Conductor's reads at a glance where ours did not.
             Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .resizable()
+                Image(systemName: "xmark")
+                    .font(.system(size: Self.slot * 0.58, weight: .bold))
+                    .foregroundStyle(removeInk)
                     .frame(width: Self.slot, height: Self.slot)
-                    .foregroundStyle(isOnSelection ? Palette.selectedEmphasizedText : Palette.textSecondary)
+                    .background(removePlate, in: Circle())
+                    .overlay {
+                        Circle().strokeBorder(stroke, lineWidth: Metrics.hairline)
+                    }
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
+            .onHoverChange { isRemoveHovered = $0 }
             .help("Remove \(attachment.filename)")
             .accessibilityLabel("Remove \(attachment.filename)")
         } else {

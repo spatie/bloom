@@ -916,7 +916,8 @@ struct AgentRunnerPermissionTests {
     }
 
     private func repoID(of session: Session, in store: Store) async throws -> RepoID {
-        try #require(await store.workspace(id: session.workspaceID)).repoID
+        let workspaceID = try #require(session.workspaceID)
+        return try #require(await store.workspace(id: workspaceID)).repoID
     }
 
     /// A runner with a live fake process behind it, so answers have somewhere to be written.
@@ -1070,6 +1071,25 @@ struct AgentRunnerPermissionTests {
         await runner.answer(requestID: "req-1", decision: .allow(scope: .once))
 
         #expect(try await store.permissionGrants().isEmpty)
+    }
+
+    /// The other half of `PermissionScopeOffer`, held here rather than only in the card.
+    ///
+    /// `permission_grants.repo_id` is `NOT NULL REFERENCES repos(id)`, so a chat with no worktree
+    /// has no project to store a rule against. Ask Bloom's card does not offer the button, and
+    /// this is what happens if one ever reaches the runner anyway: the answer still goes back and
+    /// unblocks the turn, and nothing is written that would claim to last.
+    @Test("a chat with no workspace cannot grant a project rule, however it is answered")
+    func noWorkspaceGrantsNothing() async throws {
+        let store = try makeTestStore("perm")
+        let session = try await store.upsert(AskConversation.newSession())
+        let (runner, process) = try await running(store, session: session)
+        await runner.ingest(.permissionAsk(ask()))
+
+        await runner.answer(requestID: "req-1", decision: .allow(scope: .project))
+
+        #expect(try await store.permissionGrants().isEmpty)
+        #expect(answers(on: process).count == 1)
     }
 
     /// The whole point of the rule model: the second time the same question comes round, nobody is

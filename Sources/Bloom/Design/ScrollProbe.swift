@@ -41,6 +41,8 @@ enum ScrollProbe {
 
     private static var workspace: String? { ProbeHarness.value(for: "--scroll-workspace") }
     private static var sweeps: Int { ProbeHarness.count("--scroll-sweeps", or: 4) }
+    /// `--scroll-warm 0`: measure the first trip rather than the one after it. See `run`.
+    private static var warm: Bool { ProbeHarness.count("--scroll-warm", or: 1) != 0 }
     /// `--scroll-composer 400`: grow the composer to this many points instead of scrolling.
     private static var composer: Double? { ProbeHarness.value(for: "--scroll-composer").flatMap(Double.init) }
     private static var step: CGFloat { ProbeHarness.points("--scroll-step", or: 24) }
@@ -54,11 +56,6 @@ enum ScrollProbe {
     private static func run() async {
         // Not brought to the front, for the reason at the head of `ProbeHarness.window`.
         let (window, contentView) = await harness.window()
-
-        // Before the conversation is opened, so the arrival is in the count. `uncorrectedRows` is
-        // the one to read: a row the table draws at a height the row did not report is the white
-        // gap between rows. See `TranscriptHoldCensus`.
-        TranscriptHoldCensus.reset()
 
         if let workspace {
             OpenWorkspaceNotification.post(WorkspaceID(workspace))
@@ -88,8 +85,7 @@ enum ScrollProbe {
         // is one whose rows are still being measured, and every one of those measurements lands
         // on the main thread inside a frame somebody is waiting for.
         let heightBefore = scroll.documentView?.frame.height ?? 0
-        let travel = scroll.endOffset
-        guard travel > 1 else {
+        guard scroll.endOffset > 1 else {
             harness.fail("the transcript is shorter than its viewport, so there is nothing to scroll")
         }
 
@@ -102,16 +98,49 @@ enum ScrollProbe {
 
         // A warm pass that is thrown away. The first trip through a long transcript pays for every
         // row's first layout, and reporting that as the steady state would overstate every number.
-        await sweep(scroll, travel: travel, sweeps: 1)
-        try? await Task.sleep(for: .seconds(1))
+        //
+        // **`--scroll-warm 0` keeps that trip instead, and it is the one being complained about.**
+        // "The higher I go up, the more stuttery it gets" is about the pass that draws every row
+        // for the first time. A warmed run measures the pass after it, where there is nothing left
+        // to put right: the upward leg of one made a single `noteHeightOfRows` call in two hundred
+        // frames, which is a steady state and not the question.
+        if warm {
+            await sweep(scroll, travel: scroll.endOffset, sweeps: 1)
+            try? await Task.sleep(for: .seconds(1))
+        }
+
+        await documentToStopChanging(scroll)
+
+        // **Read here rather than on arrival.** The history lands a beat after the tail, so an end
+        // sampled before that names a document a fraction of its final height: a run that took
+        // 7,722 points swept the last eighth of a 32,600 point conversation and never went near
+        // the top, which is the half being asked about.
+        let travel = scroll.endOffset
 
         harness.markStarted()
 
+        // **Where a frame's time went, not just how long it took.** The complaint is stuttering
+        // rather than a low frame rate, so the question is which pass is eating a frame, and the
+        // centre column's layout is the candidate: a body pass over this list rebuilds an entry
+        // for every row in the window. `SwitchProbe` and `TabProbe` have read this for months and
+        // the scroll probe never turned it on, which is why an upward sweep could say 62ms at the
+        // ninety fifth percentile and not say what took it.
+        PaneLayoutTiming.reset()
+        PaneLayoutTiming.isEnabled = true
+        // **Here rather than before the conversation opens, so every number covers one window.**
+        // The counts used to start at the arrival while the clocks only start here, which makes a
+        // mean of them a mean over two different things: cells counted during a workspace opening,
+        // divided into seconds spent during a sweep. The arrival has its own probes.
+        TranscriptHoldCensus.reset()
+
         recorder.start()
+        documentHeights.removeAll()
+        frames.removeAll()
         let wallBefore = CACurrentMediaTime()
         await sweep(scroll, travel: travel, sweeps: sweeps)
         let wall = CACurrentMediaTime() - wallBefore
         recorder.stop()
+        PaneLayoutTiming.isEnabled = false
 
         harness.write(report(
             recorder: recorder, travel: travel, wall: wall, window: window, scroll: scroll,
@@ -139,6 +168,109 @@ enum ScrollProbe {
         try? await Task.sleep(for: .seconds(1))
     }
 
+    /// **The arrival is not the gesture, and `documentMoves` was counting it.**
+    ///
+    /// A session's history lands a beat after its tail, as one insert of some two thousand rows,
+    /// and the document grows by the whole height of them on that frame. Whether that fell inside
+    /// the measured window or just before it was a matter of timing, and it moved the reported
+    /// worst move between 8,035 and 32,218 points across three runs of builds that differed in
+    /// ways that could not account for it. Worse, it cannot be improved: the rows really are that
+    /// tall, so a perfect estimate produces the same jump, and on the run that prompted this the
+    /// arithmetic came to 28,779 against a reported worst of 24,795. A number with a floor above
+    /// the value being reported is not measuring the thing it is named for.
+    ///
+    /// So a run waits for the document to stop changing before it starts counting. What is left is
+    /// what SCROLLING does to it, which is the question.
+    private static func documentToStopChanging(_ scroll: NSScrollView) async {
+        var last = scroll.documentView?.frame.height ?? 0
+        var still = 0
+        // Ten seconds at the outside. A conversation still growing after that is a running turn,
+        // and a run measures what it finds rather than waiting for a turn to end.
+        for _ in 0..<100 {
+            try? await Task.sleep(for: .milliseconds(100))
+            let now = scroll.documentView?.frame.height ?? 0
+            still = abs(now - last) <= 0.5 ? still + 1 : 0
+            last = now
+            // Half a second of not moving. Long enough to be past the insert, short enough that a
+            // run does not spend its time here.
+            if still >= 5 { return }
+        }
+    }
+
+    /// **"The higher I go up, the more stuttery it gets", as a number.**
+    ///
+    /// The upward frames only, split into five bands by how far up the document they were, from
+    /// the live end to the top. For each band: the median gap between frames, and what the table
+    /// was asked to do in them. A cost that climbs band by band is the complaint; a flat one says
+    /// the feeling is somewhere else.
+    ///
+    /// Bands rather than a correlation because the answer has to be readable in a report, and
+    /// five of them because a sweep is a few hundred frames and fewer than fifty a band is noise.
+    private static func climb() -> [String: JSONValue] {
+        // Downwards is the sweep's return leg and is not the gesture being complained about.
+        var upward: [(Frame, Double)] = []
+        for (index, frame) in frames.enumerated() where index > 0 {
+            let previous = frames[index - 1]
+            guard frame.offset < previous.offset else { continue }
+            upward.append((frame, (frame.at - previous.at) * 1000))
+        }
+        guard upward.count >= 25 else { return ["climbBands": .array([])] }
+        let top = upward.map(\.0.offset).max() ?? 1
+        let bands = 5
+        var out: [JSONValue] = []
+        for band in 0..<bands {
+            // Band 0 is nearest the live end, band 4 is the top of the conversation.
+            let high = top * Double(bands - band) / Double(bands)
+            let low = top * Double(bands - band - 1) / Double(bands)
+            let inBand = upward.filter { $0.0.offset <= high && $0.0.offset > low }
+            guard !inBand.isEmpty else { continue }
+            let gaps = inBand.map(\.1).sorted()
+            let calls = (inBand.last?.0.noteCalls ?? 0) - (inBand.first?.0.noteCalls ?? 0)
+            let rows = (inBand.last?.0.notedRows ?? 0) - (inBand.first?.0.notedRows ?? 0)
+            let cells = (inBand.last?.0.cellsBuilt ?? 0) - (inBand.first?.0.cellsBuilt ?? 0)
+            let cellMs = ((inBand.last?.0.cellSeconds ?? 0) - (inBand.first?.0.cellSeconds ?? 0)) * 1000
+            let noteMs = ((inBand.last?.0.noteSeconds ?? 0) - (inBand.first?.0.noteSeconds ?? 0)) * 1000
+            out.append(.object([
+                "band": .integer(band),
+                "fromEnd": .number(low),
+                "frames": .integer(inBand.count),
+                "medianMs": .number(ProbeStats.percentile(0.5, of: gaps)),
+                "p95Ms": .number(ProbeStats.percentile(0.95, of: gaps)),
+                "noteCalls": .integer(abs(calls)),
+                "notedRows": .integer(abs(rows)),
+                // **What the band SPENT, beside what it did.** A cost that is flat across the
+                // bands is the price of a row appearing and is paid wherever the reader is; one
+                // that climbs is the answer to why the top is worse.
+                "cellsBuilt": .integer(abs(cells)),
+                "cellMs": .number(abs(cellMs)),
+                "noteMs": .number(abs(noteMs)),
+            ]))
+        }
+        return ["climbBands": .array(out)]
+    }
+
+    /// How much the document resized while the sweep was running.
+    private static func documentMovement() -> [String: JSONValue] {
+        let heights = documentHeights
+        var moves = 0
+        var worst: CGFloat = 0
+        for (index, height) in heights.enumerated() where index > 0 {
+            let step = abs(height - heights[index - 1])
+            if step > 0.5 {
+                moves += 1
+                worst = max(worst, step)
+            }
+        }
+        return [
+            "documentMoves": .integer(moves),
+            "documentMovedShare":
+                .number(heights.isEmpty ? 0 : Double(moves) / Double(heights.count)),
+            "worstDocumentMove": .number(Double(worst)),
+            "documentSweepMin": .number(Double(heights.min() ?? 0)),
+            "documentSweepMax": .number(Double(heights.max() ?? 0)),
+        ]
+    }
+
     private static func nudge(_ scroll: NSScrollView) {
         let origin = scroll.contentView.bounds.origin
         scroll.contentView.setBoundsOrigin(CGPoint(x: origin.x, y: max(0, origin.y - 1)))
@@ -160,6 +292,29 @@ enum ScrollProbe {
         }
     }
 
+    /// The document's own height, sampled once a frame while the sweep runs.
+    ///
+    /// **This is the thing being felt.** The complaint is not a frame rate: it is that the content
+    /// keeps resizing under the hand. A document whose height moves during a sweep is a transcript
+    /// still finding out how tall it is, and every move of it shifts everything below the row that
+    /// changed.
+    private static var documentHeights: [CGFloat] = []
+
+    /// One frame of a sweep: where it was, when it was, and what the table had been asked to do by
+    /// then. See `climb`, which is the whole reason this is kept per frame rather than summed.
+    private struct Frame {
+        var offset: CGFloat
+        var at: Double
+        var noteCalls: Int
+        var notedRows: Int
+        /// Cumulative, so a band's share is the difference across it. See `climb`.
+        var cellsBuilt: Int
+        var cellSeconds: Double
+        var noteSeconds: Double
+    }
+
+    private static var frames: [Frame] = []
+
     private static func travelTo(_ scroll: NSScrollView, from: CGFloat, to: CGFloat) async {
         let direction: CGFloat = to > from ? 1 : -1
         var offset = from
@@ -170,6 +325,17 @@ enum ScrollProbe {
                 CGPoint(x: scroll.contentView.bounds.origin.x, y: offset)
             )
             scroll.reflectScrolledClipView(scroll.contentView)
+            documentHeights.append(scroll.documentView?.frame.height ?? 0)
+            // Where this frame was, and what the table was asked to do during it. See `climb`.
+            frames.append(Frame(
+                offset: offset,
+                at: CACurrentMediaTime(),
+                noteCalls: TranscriptHoldCensus.noteCalls,
+                notedRows: TranscriptHoldCensus.notedRows,
+                cellsBuilt: TranscriptHoldCensus.cellsBuilt,
+                cellSeconds: TranscriptHoldCensus.cellSeconds,
+                noteSeconds: TranscriptHoldCensus.noteSeconds
+            ))
             // One vsync. Sleeping rather than driving from the display link callback keeps the
             // callback doing nothing but reading the clock, which is what makes the gap between
             // two of its ticks the honest cost of a frame.
@@ -197,7 +363,12 @@ enum ScrollProbe {
             "step": .number(Double(step)),
             "sweeps": .integer(sweeps),
             "transcriptHold": .map(TranscriptHoldCensus.summary()),
-        ]
+            // `detail` is the centre column, which is the one holding the transcript. Each entry
+            // is `[startedMs, tookMs]`, so a pass can be laid against the frame it landed in.
+            "paneLayout": .map(PaneLayoutTiming.summary()),
+            "panePasses": .map(PaneLayoutTiming.timeline()),
+        ].merging(documentMovement()) { mine, _ in mine }
+            .merging(climb()) { mine, _ in mine }
         // The probe's own keys win over both, so a report that has an opinion keeps it.
         return .object(
             own

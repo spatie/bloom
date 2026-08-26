@@ -386,9 +386,15 @@ enum Snapshot {
     /// than by each flag remembering to say so.
     /// `--menu-probe` is named by its flag rather than through `MenuProbe.isRequested`, because
     /// that type is compiled into debug builds only and this property is not.
+    ///
+    /// **Every probe, not two of them.** This listed `FrameProbe` and `SwitchProbe` only, so a
+    /// scroll, resize, tab or idle run on a machine that has not finished onboarding was met by
+    /// the welcome window, which is ordered front and is therefore the window a probe attaches to.
+    /// A run then reported "no transcript NSScrollView found" and looked like a broken transcript.
     static var isDrivingTheWindow: Bool {
         isRequested || isWindowCaptureRequested || isGalleryCaptureRequested
-            || FrameProbe.isRequested || SwitchProbe.isRequested
+            || FrameProbe.isRequested || SwitchProbe.isRequested || ScrollProbe.isRequested
+            || ResizeProbe.isRequested || TabProbe.isRequested
             || CommandLine.arguments.contains("--menu-probe")
     }
 
@@ -486,6 +492,15 @@ enum Snapshot {
                 try? await Task.sleep(for: .seconds(2))
             }
 
+            // `--new-project` opens the New Project sheet, for the same reason `--create-sheet`
+            // opens the other one: it is a sheet, and a sheet has no way in that a capture run can
+            // press. Pass it LAST, as above.
+            let wantsNewProject = arguments.contains("--new-project")
+            if wantsNewProject {
+                NotificationCenter.default.post(name: .bloomNewProject, object: nil)
+                try? await Task.sleep(for: .seconds(2))
+            }
+
             // `--project-setup <folder>` hands a folder to the same code path the file panel
             // does, so the offer to turn it into a repository can be looked at. It has to be
             // driven from here because the only other way in is an `NSOpenPanel`, and a modal
@@ -578,7 +593,7 @@ enum Snapshot {
             // A sheet is its own window, hanging off the one it was presented from, and it is
             // never in `capturableWindows()`: it carries no title bar. Asked for by name here
             // rather than searched for, so nothing else on screen can be picked by mistake.
-            if wantsCreateSheet || wantsProjectSetup || wantsFeedbackSheet {
+            if wantsCreateSheet || wantsNewProject || wantsProjectSetup || wantsFeedbackSheet {
                 for _ in 0..<20 where candidate?.attachedSheet == nil {
                     try? await Task.sleep(for: .milliseconds(250))
                 }
@@ -879,6 +894,13 @@ enum Snapshot {
             // overwritten by a yellow bar. Here neither picture is wrong, which is worse, because
             // nothing about the file would say which one it is.
             ("running-glyph-still", AnyView(RunningGlyphGallery()), Gallery.runningGlyph.size),
+            // The activity rule, on the same terms and for a better reason than most: the still
+            // figure is the point of that page rather than a consolation. It is what `Reduce
+            // Motion` draws, and the claim being made about it is that a crest parked at the
+            // trailing edge still says which way the line is running, which is a claim a
+            // photograph can settle. The moving rows come out as yellow placeholders here; they
+            // are what `--snapshot-gallery --gallery activity-rule` is for.
+            ("activity-rule-still", AnyView(ActivityRuleGallery()), Gallery.activityRule.size),
             // No review-comments and no inspector-tabs scene, deliberately, and for one reason:
             // `ImageRenderer` paints SwiftUI's yellow placeholder over an `NSViewRepresentable`,
             // and each of those two pages exists to show one. The review comment box is the

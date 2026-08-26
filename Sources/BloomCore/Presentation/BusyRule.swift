@@ -10,6 +10,13 @@ import Foundation
 /// the plainest of them: no light and no travel, the whole width brightening at once, which is the
 /// one variation that cannot be too small to notice because it is as wide as the window.
 ///
+/// **It is not what the window draws today.** The plainest variation won the drawing and then lost
+/// the app: at the bottom of a long transcript, one point of hairline moving in alpha alone was
+/// reported as "not clear at all", which is the same complaint the travelling light collected, one
+/// cause down. What replaced it is `BusyCrest`, and this figure is kept because it is the incumbent
+/// in that comparison and `BusyRuleVariant.swell` still draws it. See `BusyRuleVariant` for the
+/// three, and for which one the window took.
+///
 /// It moves on the busy dot's own wave rather than on a period of its own, so the rule and every
 /// dot in the window swell together and the window has one heartbeat rather than two things
 /// blinking near each other. `period` is the dot's number by construction and not by coincidence:
@@ -58,5 +65,26 @@ public enum BusyRule {
     public static func opacity(at pulse: Double) -> Double {
         let fraction = min(max(pulse, 0), 1)
         return restingOpacity + (peakOpacity - restingOpacity) * fraction
+    }
+
+    /// How thick the rule is at the bottom of the pulse: the hairline it is drawn on, and nothing
+    /// more.
+    public static let restingHeight = 1.0
+
+    /// And at the top.
+    ///
+    /// Three points, because the complaint that produced `BusyCrest` applies to this figure too: a
+    /// rule that differs from an idle one in alpha alone is a rule peripheral vision cannot tell
+    /// apart from a rule. The extra two points are drawn as a softer glow above the line rather
+    /// than as more line, so the top of the pulse is a swelling rather than a border.
+    public static let peakHeight = 3.0
+
+    /// How thick it is at a point in the pulse, in points.
+    ///
+    /// Straight interpolation for the same reason `opacity(at:)` is: the easing belongs to the
+    /// animation that plays between the two ends, not to the type that names them.
+    public static func height(at pulse: Double) -> Double {
+        let fraction = min(max(pulse, 0), 1)
+        return restingHeight + (peakHeight - restingHeight) * fraction
     }
 }

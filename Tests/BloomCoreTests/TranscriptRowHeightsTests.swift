@@ -283,6 +283,157 @@ struct TranscriptRowHeightsTests {
         #expect(heights.assumed(for: key("row.1")) == 100)
     }
 
+    /// **A row that is going to draw nothing is answered, not estimated.** Most of a session is
+    /// stream events with no view in them, and the mean is the worst answer for one: too tall by
+    /// the whole mean, three or four times between every pair of tool calls, and then corrected the
+    /// moment it is drawn. See `TranscriptRowInk`.
+    @Test("a row that draws nothing is worth nothing before it is drawn")
+    func assumesNothingForABlankRow() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(100, for: key("row.1"))
+        #expect(heights.assumed(for: key("blank"), drawsNothing: true) == 0)
+        #expect(heights.assumed(for: key("blank")) == 100)
+    }
+
+    /// The claim is about a row nobody has drawn. A measurement outranks it, because being wrong
+    /// about this has to cost one correction rather than a row stuck at nothing.
+    @Test("a measurement outranks the claim that a row draws nothing")
+    func measurementBeatsTheClaim() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(42, for: key("row.1"))
+        #expect(heights.assumed(for: key("row.1"), drawsNothing: true) == 42)
+    }
+
+    /// **The rows that drew nothing are not in the mean.** A session where most rows draw nothing
+    /// made the mean several times too small for the rows it is actually asked about, which is the
+    /// other half of a screen of wrong heights.
+    @Test("rows that drew nothing do not drag the estimate down")
+    func noughtsAreNotInTheMean() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(100, for: key("row.1"))
+        heights.note(200, for: key("row.2"))
+        for row in 0..<50 { heights.note(0, for: key("blank.\(row)")) }
+        #expect(heights.estimate == 150)
+        // The noughts are still remembered, and still nought.
+        #expect(heights.height(for: key("blank.7")) == 0)
+        #expect(heights.count == 52)
+    }
+
+    /// A row that drew something and then drew nothing leaves the mean as if it had never been in
+    /// it, which is what a fold closing or a tail emptying does.
+    @Test("a row that becomes nothing leaves the mean")
+    func aRowThatEmptiesLeavesTheMean() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(100, for: key("row.1"))
+        heights.note(300, for: key("row.2"))
+        heights.note(0, for: key("row.2"))
+        #expect(heights.estimate == 100)
+    }
+
+    /// **The estimate stops moving, because the document's total depends on it.** A table caches
+    /// every height it is told, so a drifting estimate turns each wholesale re-ask into one jump of
+    /// `unmeasured x drift`: measured at 32,218 points on a 2,981 row conversation, which is the
+    /// height of the whole document.
+    @Test("the estimate settles and then holds still")
+    func settlesAndHolds() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        for row in 0..<TranscriptRowHeights.settleAfter {
+            heights.note(100, for: key("row.\(row)"))
+        }
+        #expect(heights.estimate == 100)
+        // Everything after this is measured on its own account and changes nothing for the rows
+        // nobody has drawn, until the sample it was formed from has doubled. Twenty three of these
+        // is forty seven drawn rows against the twenty four it settled from, so it holds even
+        // though every one of them disagrees.
+        for row in 0..<23 { heights.note(900, for: key("late.\(row)")) }
+        #expect(heights.estimate == 100)
+        #expect(heights.assumed(for: key("never.drawn")) == 100)
+    }
+
+    /// **The screenful it settles from is the least representative one in the session**: a pane
+    /// arrives at the live end, so the sample is the newest answer, which is the longest prose
+    /// there is. Measured, that left a document half again taller than the truth with nothing able
+    /// to take the number again.
+    @Test("a settled estimate formed off a bad screenful is taken again")
+    func resettlesWhenItIsBadlyOut() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        // The tail: a screenful of tall rows, which settles it at 400.
+        for row in 0..<TranscriptRowHeights.settleAfter {
+            heights.note(400, for: key("tail.\(row)"))
+        }
+        #expect(heights.estimate == 400)
+        // The conversation behind it, which is what the session is really made of. Nothing moves
+        // until the sample has doubled, however wrong the held number is: twenty three of these
+        // leaves forty seven drawn rows against the twenty four it settled from.
+        for row in 0..<23 { heights.note(20, for: key("row.\(row)")) }
+        #expect(heights.estimate == 400)
+        // The forty eighth doubles it, and 210 is the mean of the two halves.
+        heights.note(20, for: key("row.23"))
+        #expect(heights.estimate == 210)
+    }
+
+    /// A number that is nearly right must not move, because the whole point of settling is that a
+    /// wholesale re-ask cashes in whatever drift there has been since the last one.
+    @Test("a settled estimate that is nearly right is left alone")
+    func doesNotResettleForSmallDrift() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        for row in 0..<TranscriptRowHeights.settleAfter {
+            heights.note(100, for: key("row.\(row)"))
+        }
+        #expect(heights.estimate == 100)
+        // A tenth out over hundreds of rows, which is inside the drift this tolerates.
+        for row in 0..<400 { heights.note(110, for: key("more.\(row)")) }
+        #expect(heights.estimate == 100)
+    }
+
+    /// Before it settles it still tracks, because the first screenful is all there is to go on and
+    /// a constant is worse than a mean of two real rows.
+    @Test("the estimate tracks until it settles")
+    func tracksUntilItSettles() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(100, for: key("row.1"))
+        #expect(heights.estimate == 100)
+        heights.note(300, for: key("row.2"))
+        #expect(heights.estimate == 200)
+    }
+
+    /// A width or a text size change empties the cache, and the number formed at the old one goes
+    /// with it. A paragraph at another size is not an estimate of anything.
+    @Test("emptying the cache unsettles the estimate")
+    func settlingIsEmptiedWithTheCache() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        for row in 0..<TranscriptRowHeights.settleAfter {
+            heights.note(100, for: key("row.\(row)"))
+        }
+        heights.forget()
+        #expect(heights.estimate == TranscriptRowHeights.assumedRowHeight)
+        heights.note(40, for: key("fresh"))
+        #expect(heights.estimate == 40)
+    }
+
+    /// The rows that drew nothing are not what settles it either. A session where most rows draw
+    /// nothing would otherwise settle on a number formed from almost no real rows.
+    @Test("noughts do not settle the estimate")
+    func noughtsDoNotSettleIt() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        for row in 0..<200 { heights.note(0, for: key("blank.\(row)")) }
+        heights.note(100, for: key("row.1"))
+        #expect(heights.estimate == 100)
+        heights.note(300, for: key("row.2"))
+        // Two drawn rows is not a screenful, so it is still tracking.
+        #expect(heights.estimate == 200)
+    }
+
     /// The running total has to survive an overwrite, which is what every drawn row does to what
     /// was measured for it off screen.
     @Test("a row measured again does not count twice")

@@ -154,6 +154,13 @@ final class WorkspaceHoverCardPresenter {
             ),
             display: false
         )
+        // `hasShadow` alone drew nothing. AppKit renders a borderless window's shadow from the
+        // alpha its content paints, and it caches that the first time the window is shown, which
+        // here is at the 1x1 frame `makePanel` opens with and before SwiftUI has drawn a single
+        // pixel. The card came out flat against the pane behind it, which is the whole difference
+        // between this and the hover card in the transcript. The shadow has to be invalidated
+        // after every resize, because each new size is a new alpha to trace.
+        panel.invalidateShadow()
 
         guard panel.parent !== parent else {
             panel.orderFront(nil)

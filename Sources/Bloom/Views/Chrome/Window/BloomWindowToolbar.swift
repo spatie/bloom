@@ -53,14 +53,20 @@ struct BloomWindowToolbar: ToolbarContent {
             ToolbarItem(placement: .navigation) {
                 // A split button: the common case is one click, and the folder picker that used to
                 // hide in the account row lives behind the arrow.
+                // The titles are `MenuBarCatalogue`'s rather than three literals, so this menu
+                // and the File menu cannot end up naming one action two different ways.
                 Menu {
-                    Button("New Workspace", action: presentCreate)
+                    Button(MenuBarCatalogue[.newWorkspace].title, action: presentCreate)
                         .disabled(app.repos.isEmpty)
-                    Button("Add Project Folder\u{2026}", action: addProject)
+                    Button(MenuBarCatalogue[.newProject].title, action: newProject)
+                    Button(MenuBarCatalogue[.addProjectFolder].title, action: addProject)
                 } label: {
                     Label("New workspace", systemImage: "plus")
                 } primaryAction: {
-                    if app.repos.isEmpty { addProject() } else { presentCreate() }
+                    // With no projects there is no workspace to start, so the click does the
+                    // thing that needs nothing on disk. It used to open the file panel, which is
+                    // the right answer only for somebody who already has a repository.
+                    if app.repos.isEmpty { newProject() } else { presentCreate() }
                 }
                 .help("Start a workspace")
                 // The control had no accessibility label at all, which matters more now that it
@@ -88,6 +94,12 @@ struct BloomWindowToolbar: ToolbarContent {
         ToolbarItem(placement: .navigation) {
             WindowTitleControl(app: app)
         }
+        // No plate behind the name. AppKit gives every toolbar item a shared background, which
+        // put a glass capsule around the window's title; next to the bare `Home`/`Ask Bloom` rows
+        // and the plain search field it read as a control you could press, and the name is not
+        // one. The switch is the one `WindowTitleControl`'s notes name: it turns the plate off
+        // rather than dividing it, so the item still sits where it sat.
+        .sharedBackgroundVisibility(.hidden)
 
         // The elastic middle of the bar, and the whole reason the search field sits at the
         // window's trailing edge rather than beside the name.
@@ -125,5 +137,9 @@ struct BloomWindowToolbar: ToolbarContent {
 
     private func addProject() {
         Task { await app.addProjectByAsking() }
+    }
+
+    private func newProject() {
+        NotificationCenter.default.post(name: .bloomNewProject, object: nil)
     }
 }

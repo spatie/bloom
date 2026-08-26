@@ -103,6 +103,22 @@ struct HomeEmptyStateTests {
         for state in states { #expect(state.message.hasSuffix(".")) }
     }
 
+    /// The first state is the only one with two ways out, and the prominent one is the one that
+    /// needs no folder. Bloom used to offer this reader nothing but a file panel, which is the
+    /// wrong door for somebody whose project does not exist yet.
+    @Test("only the state with no projects offers a second button")
+    func onlyTheFirstStateHasTwoWaysOut() {
+        #expect(HomeEmptyState.noProjects.actionTitle == "New project")
+        #expect(HomeEmptyState.noProjects.secondaryActionTitle == "Add a project folder")
+        let others: [HomeEmptyState] = [
+            .noWorkspaces, .noMatch(query: "blue", scope: .all),
+            .noneInChosenProjects(phrase: "Bloom"), .emptyScope(.archived),
+        ]
+        for state in others {
+            #expect(state.secondaryActionTitle == nil, "\(state)")
+        }
+    }
+
     /// A search narrowed to transcripts that found nothing did not fail to find a workspace, and
     /// saying it did would send the reader looking for a name they never typed.
     @Test("a search says which kind of thing it failed to find")

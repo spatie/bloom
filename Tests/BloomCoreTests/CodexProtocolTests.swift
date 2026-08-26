@@ -460,12 +460,16 @@ private func events(_ name: String) throws -> [CodexEvent] {
         #expect(counter.count == 2)
     }
 
-    @Test func putsTheAccountDefaultFirstAndKeepsTheServersOrderOtherwise() async throws {
+    /// The account's default used to be lifted to the top. It is not any more: the list is ordered
+    /// by capability now (see `CodexModelRank`), and these three ids name no version, so nothing
+    /// distinguishes them and the server's own order is what survives. `a` is the default here and
+    /// stays where the server put it, which is the whole of the change.
+    @Test func keepsTheServersOrderWhenNothingRanksTheModels() async throws {
         let catalog = catalog(counter: Counter(), models: sample)
         let models = try await catalog.models()
-        #expect(models.map(\.id) == ["a", "b", "hidden"])
+        #expect(models.map(\.id) == ["b", "a", "hidden"])
         let visible = try await catalog.pickerModels()
-        #expect(visible.map(\.id) == ["a", "b"])
+        #expect(visible.map(\.id) == ["b", "a"])
     }
 
     @Test func handsBackTheEffortsForOneModel() async throws {

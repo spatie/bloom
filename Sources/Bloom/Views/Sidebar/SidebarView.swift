@@ -99,13 +99,21 @@ struct SidebarView: View {
             // Xcode.
             Section {
                 navRow(.home, title: "Home", icon: "house")
+                // The one row that came back, and it needed an argument. Search and Archive were
+                // taken out because both were the list of workspaces Home already draws. This is
+                // not that list under a filter: it is a conversation, it holds state a chip on
+                // Home cannot hold, and it is the only thing in the window scoped to no workspace.
+                //
+                // Under Home rather than over it, because Home is where you land and this is where
+                // you go. See `SidebarSelection.ask`.
+                askRow
             }
 
             // A plain row rather than a `Section` header, because the things it heads are
             // themselves sections and a list cannot nest one inside another. It carries no tag
             // and refuses selection, so it stays a label. Home keeps its own section above it,
             // which is what stops it reading as the first project.
-            SidebarProjectsHeader(onAddProject: addProject)
+            SidebarProjectsHeader(onNewProject: newProject, onAddProject: addProject)
                 .selectionDisabled()
                 .listRowSeparator(.hidden)
 
@@ -540,6 +548,25 @@ struct SidebarView: View {
             .selectedRowInk(isEmphasized: isEmphasized(target))
     }
 
+    /// Home's row is a name. This one also says what the conversation is doing, because it is the
+    /// only row in the pane whose agent is not in a workspace: nothing else in the window would
+    /// report it, and a hand raised in a room nobody is in is a turn that waits for ever.
+    ///
+    /// The same mark the workspace rows below carry, from the same type, so the column says
+    /// "working" and "waiting on you" in one shape throughout.
+    private var askRow: some View {
+        HStack(spacing: 0) {
+            SidebarNavRow(title: AskConversation.title, icon: "bubble.left.and.bubble.right")
+            Spacer(minLength: Metrics.spacingSmall)
+            if let status = app.askStatus {
+                WorkspaceStatusGlyph(status: status, isOnSelection: isEmphasized(.ask))
+            }
+        }
+        .tag(SidebarSelection.ask)
+        .listRowBackground(selectionFill(for: .ask))
+        .selectedRowInk(isEmphasized: isEmphasized(.ask))
+    }
+
     /// The fill under one row, or nothing at all when that row is not the selection.
     ///
     /// Nothing rather than `Color.clear`, deliberately: a `listRowBackground` of clear REPLACES
@@ -579,18 +606,28 @@ struct SidebarView: View {
 
     // MARK: - Empty
 
+    /// The first sentence anybody reads, on the pane that will hold their projects.
+    ///
+    /// It used to say "Point Bloom at a git repository to start running agents in it", which for
+    /// the person with an idea and no folder is the sentence that ends the evaluation. It had also
+    /// stopped being true: Bloom will make the repository, and now it will make the folder too.
+    /// The prominent half is the one that needs no folder, because that is the reader this panel
+    /// was failing.
     private var noProjects: some View {
         ContentUnavailableView {
             Label("No projects yet", systemImage: "folder.badge.plus")
         } description: {
-            Text("Point Bloom at a git repository to start running agents in it.")
+            Text("Start a new project, or point Bloom at a repository you already have.")
         } actions: {
-            Button("Choose a folder", systemImage: "folder", action: addProject)
-                .buttonStyle(.borderedProminent)
-                // Tinted explicitly, like every other prominent button in the app: untinted it
-                // follows the system accent, which on a Mac set to Graphite is grey glass. See
-                // `EmptyStateView`, which says the same over the same button.
-                .tint(Palette.accentFill)
+            VStack(spacing: Metrics.spacingSmall) {
+                Button("New project", systemImage: "plus", action: newProject)
+                    .buttonStyle(.borderedProminent)
+                    // Tinted explicitly, like every other prominent button in the app: untinted it
+                    // follows the system accent, which on a Mac set to Graphite is grey glass. See
+                    // `EmptyStateView`, which says the same over the same button.
+                    .tint(Palette.accentFill)
+                Button("Choose a folder", systemImage: "folder", action: addProject)
+            }
         }
     }
 
@@ -605,6 +642,12 @@ struct SidebarView: View {
 
     private func addProject() {
         Task { await app.addProjectByAsking() }
+    }
+
+    /// The sheet lives in `RootView` for the same reason the create sheet does, so every entry
+    /// point posts and behaves identically.
+    private func newProject() {
+        NotificationCenter.default.post(name: .bloomNewProject, object: nil)
     }
 }
 

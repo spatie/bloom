@@ -110,7 +110,7 @@ struct CodexRunnerPersistenceFailureTests {
         )
 
         let events = runner.events
-        try await store.deleteWorkspace(id: session.workspaceID)
+        try await store.deleteWorkspace(id: try #require(session.workspaceID))
         // Refused: stopping the run closes the connection this send is riding on, which is the
         // point. The turn does not get to carry on into a transcript that is not there.
         try? await runner.send("hello")

@@ -55,16 +55,33 @@ struct TranscriptRow: Identifiable, Hashable {
 @Observable
 final class TranscriptModel {
     var session: Session
-    /// The workspace as it was when this model was made. Its id and path are stable and are what
-    /// most of the file needs; its name is not, and anything said out loud reads `workspaceNow`.
-    let workspace: Workspace
+    /// The workspace as it was when this model was made, or nil for a chat that is in none.
+    ///
+    /// **Nil is Ask Bloom and nothing else today.** Its id and path are stable and are what most
+    /// of the file needs; its name is not, and anything said out loud reads `workspaceNow`. Every
+    /// reader of this is a thing a worktree has and this chat does not: an inspector, a diff, an
+    /// unread mark, a notification that names a place. Each of them now says nothing rather than
+    /// saying it about a workspace that was invented to keep the type non-optional.
+    let workspace: Workspace?
+    /// Where this chat's agent runs. The worktree, when there is one, and Ask Bloom's own empty
+    /// directory when there is not. See `AskConversation.directory`, which argues at length why
+    /// that directory is empty rather than the owner's home.
+    let cwd: String
     private unowned let app: AppModel
+
+    /// Where this conversation's file paths point, and which workspace a file chip opens into.
+    /// One value rather than the whole workspace, because those two fields are all a row has ever
+    /// read off it. See `TranscriptHome`.
+    var home: TranscriptHome {
+        TranscriptHome(workspaceID: workspace?.id, worktree: cwd)
+    }
 
     /// The row as the app holds it now. The snapshot above goes stale the moment automatic
     /// naming lands, minutes into the workspace's life, and every alert and notification from
     /// this chat then called the workspace by its ocean placeholder for the rest of the launch.
-    private var workspaceNow: Workspace {
-        app.existingModel(for: workspace.id)?.workspace ?? workspace
+    private var workspaceNow: Workspace? {
+        guard let workspace else { return nil }
+        return app.existingModel(for: workspace.id)?.workspace ?? workspace
     }
 
     private(set) var rows: [TranscriptRow] = []
@@ -132,7 +149,7 @@ final class TranscriptModel {
     /// `SubagentRoster` for the argument, which is that the longest one of these is meant to live
     /// is a single turn and the CLI's own record of it is already on disk.
     private(set) var subagents = SubagentRoster() {
-        didSet { app.noteSubagentsChanged(workspaceID: workspace.id) }
+        didSet { if let id = workspace?.id { app.noteSubagentsChanged(workspaceID: id) } }
     }
 
     var draft = ""
@@ -217,6 +234,19 @@ final class TranscriptModel {
     init(session: Session, workspace: Workspace, app: AppModel) {
         self.session = session
         self.workspace = workspace
+        self.cwd = workspace.path
+        self.app = app
+    }
+
+    /// The conversation that belongs to Bloom rather than to a workspace.
+    ///
+    /// A second initialiser rather than an optional argument on the one above, because the two
+    /// disagree about what `cwd` is and a caller passing nil to the first would have had to know
+    /// to pass a directory as well. See `AskConversation`.
+    init(askSession session: Session, directory: String, app: AppModel) {
+        self.session = session
+        self.workspace = nil
+        self.cwd = directory
         self.app = app
     }
 
@@ -226,8 +256,8 @@ final class TranscriptModel {
 
     func load() async {
         guard let store, !isLoaded else {
-            SwitchTrace.mark("transcript.reused", workspace: workspace.id)
-            SwitchTrace.markOnScreen("transcript.reused", workspace: workspace.id)
+            SwitchTrace.mark("transcript.reused", workspace: workspace?.id)
+            SwitchTrace.markOnScreen("transcript.reused", workspace: workspace?.id)
             return
         }
         // Whichever of the two callers gets here first does the reading, and the other waits on it.
@@ -245,9 +275,9 @@ final class TranscriptModel {
     /// whatever order it pleases, and that is what left an answer undrawn until the scroller was
     /// dragged.
     private func read(from store: Store) async {
-        SwitchTrace.mark("transcript.read.start", workspace: workspace.id)
+        SwitchTrace.mark("transcript.read.start", workspace: workspace?.id)
         let messages = (try? await store.messages(sessionID: session.id)) ?? []
-        SwitchTrace.mark("transcript.read.done", workspace: workspace.id)
+        SwitchTrace.mark("transcript.read.done", workspace: workspace?.id)
         // Read once for the whole session rather than per row: a transcript can hold thousands of
         // rows and at most a handful of them are questions.
         let decisions = (try? await store.permissionAskDecisions(sessionID: session.id)) ?? [:]
@@ -282,7 +312,7 @@ final class TranscriptModel {
         // is one window of a session that has just been asked for, at `.utility`, and a handle
         // nobody would ever call `cancel` on is bookkeeping.
         let unread = firstUnreadSeq
-        Task.detached(priority: .utility) { [rows = built.rows, worktree = workspace.path] in
+        Task.detached(priority: .utility) { [rows = built.rows, worktree = cwd] in
             await TranscriptPrime.run(rows: rows, worktree: worktree, unreadSeq: unread)
         }
 
@@ -293,8 +323,8 @@ final class TranscriptModel {
         // whole list to walk. Everything after this folds in what arrived. Nothing is held from
         // before: this is a session being read from the start.
         contextUsage = ContextWindowUsage.latest(in: built.rows)
-        SwitchTrace.mark("transcript.rows.built", workspace: workspace.id)
-        SwitchTrace.markOnScreen("transcript.rows.built", workspace: workspace.id)
+        SwitchTrace.mark("transcript.rows.built", workspace: workspace?.id)
+        SwitchTrace.markOnScreen("transcript.rows.built", workspace: workspace?.id)
 
         draft = (try? await store.draft(sessionID: session.id)) ?? ""
         // Read, and deliberately not drained. A message queued before the last quit must not
@@ -512,10 +542,12 @@ final class TranscriptModel {
     /// wrong: the transcript already spent a release drawing "setup has not run yet" over output
     /// the script had just printed, for exactly that reason.
     var deliveryHold: DeliveryHold {
-        let model = app.existingModel(for: workspace.id)
+        // A chat with no worktree has no setup script to be waiting on, so both halves are
+        // false and the hold can only ever be a running turn or an open question.
+        let model = workspace.flatMap { app.existingModel(for: $0.id) }
         return DeliveryHold.of(
             isRunningSetup: model?.isRunningSetup ?? false,
-            didSetupFail: (model?.workspace ?? workspace).setupState == .failed,
+            didSetupFail: (model?.workspace ?? workspace)?.setupState == .failed,
             isTurnRunning: isRunning,
             isAwaitingQuestion: isAwaitingPermission
         )
@@ -828,11 +860,17 @@ final class TranscriptModel {
     /// somewhere other than here.
     private func ensureRunner() -> (any SessionRunner)? {
         guard let store else { return nil }
+        // Two registrations, because there are two identities. A chat in a worktree gets a token
+        // minted for that workspace and the role its origin says; Ask Bloom gets the owner's own,
+        // which is the same door the owner's terminal comes in through and the reason every owner
+        // tool works here without one of them being written twice.
+        let bridge = workspace.map { app.bridge?.register(session: session, workspace: $0) }
+            ?? app.bridge?.register(askSession: session)
         let runner = self.runner ?? Self.makeRunner(
             session: session,
-            workspacePath: workspace.path,
+            workspacePath: cwd,
             store: store,
-            bridge: app.bridge?.register(session: session, workspace: workspace)
+            bridge: bridge
         )
         self.runner = runner
         if pumpTask == nil { startPump(on: runner) }
@@ -953,10 +991,15 @@ final class TranscriptModel {
             subagents.turnEnded()
             await refreshSession()
             app.alert = BloomAlert(
-                title: "The agent stopped in \(workspaceNow.name)",
+                title: "The agent stopped in \(workspaceNow?.name ?? AskConversation.title)",
                 message: failure.message.isEmpty ? "It exited without finishing the turn." : failure.message
             )
-            NotificationService.shared.agentFailed(workspace: workspaceNow, message: failure.message)
+            // The banner names a workspace and a chat with none has nothing to name. The alert
+            // above is already on screen in front of the person who asked, which is where they
+            // were: this chat is the one they opened rather than one running in the background.
+            if let workspaceNow {
+                NotificationService.shared.agentFailed(workspace: workspaceNow, message: failure.message)
+            }
 
         case .result(let result):
             // A turn that recovered leaves its sentence on the row that closes it; one that failed
@@ -989,7 +1032,9 @@ final class TranscriptModel {
             statusLabel = "Waiting on you"
             refreshAwaitingPermission()
             await refreshSession()
-            NotificationService.shared.agentNeedsPermission(workspace: workspaceNow)
+            if let workspaceNow {
+                NotificationService.shared.agentNeedsPermission(workspace: workspaceNow)
+            }
 
         case .permissionDecided(let resolution):
             settle(resolution)
@@ -1064,8 +1109,11 @@ final class TranscriptModel {
 
     /// What the project is called, for a permission row that has to say where a rule would apply.
     /// "Always allow ... in Bloom" is a promise about a place, and the place has to be named.
-    var projectName: String {
-        app.repo(for: workspace)?.name ?? workspaceNow.name
+    /// Nil when there is no project behind this chat, which is what stops the card offering a
+    /// scope it cannot store. See `PermissionScopeOffer`.
+    var projectName: String? {
+        guard let workspace else { return nil }
+        return app.repo(for: workspace)?.name ?? workspaceNow?.name
     }
 
     /// The questions this session is holding a turn open for, in the order they arrived.
@@ -1189,7 +1237,13 @@ final class TranscriptModel {
 
     private func notifyFinished(result: AgentResult) async {
         guard let store else { return }
-        try? await store.touch(workspaceID: workspace.id, unread: app.selection.workspaceID != workspace.id)
+        // Every line below is about a worktree: an unread mark on a sidebar row, a workspace model
+        // to refresh, a banner naming where the turn finished. A chat with none is a chat the
+        // owner is looking at, so there is nothing to mark and nobody to tell.
+        guard let workspace, let workspaceNow else { return }
+        try? await store.touch(
+            workspaceID: workspace.id, unread: app.selection.workspaceID != workspace.id
+        )
 
         // `workspaceNow`, twice over: `model(for:)` pushes the value it is handed into the
         // live model, so the stale snapshot did not just misname the notification, it reverted

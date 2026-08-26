@@ -20,6 +20,10 @@ struct ComposerView: View {
     /// number is read by the view that passes it, so the pane publishing a new height rebuilt the
     /// transcript beside this box on every frame that rewrapped a line of the draft.
     var room: ComposerRoom = ComposerRoom()
+    /// What the empty box says. The default is what every chat in a worktree says; Ask Bloom
+    /// passes its own, because a conversation that cannot change a file should not open by
+    /// inviting somebody to ask it to.
+    var placeholder: String = ComposerEditor.chatPlaceholder
 
     @Environment(AppModel.self) private var app
 
@@ -88,12 +92,15 @@ struct ComposerView: View {
             text: $transcript.draft,
             caret: $caret,
             isFocused: $isFocused,
-            mentionRoot: transcript.workspace.path,
-            attachmentRoot: transcript.workspace.path,
+            mentionRoot: transcript.cwd,
+            attachmentRoot: transcript.cwd,
             attachmentKey: transcript.session.id.rawValue,
             reviewComments: reviewComments,
             onRemoveReviewComment: remove(reviewComment:),
             onOpenReviewComment: open(reviewComment:),
+            // Declared after the review comments on `ComposerPrompt`, and the memberwise
+            // initialiser takes its arguments in declaration order.
+            placeholder: placeholder,
             editorHeight: editorHeight,
             onContentHeightChange: { contentHeight = $0 },
             onKey: handle(key:),
@@ -105,7 +112,7 @@ struct ComposerView: View {
                 context: transcript.contextUsage,
                 isRunning: transcript.isRunning,
                 canSend: canSend,
-                project: transcript.workspace.path,
+                project: transcript.cwd,
                 onAttach: actions.attach,
                 onQuickPrompt: { fire($0, insert: actions.insert) },
                 onSend: send,
@@ -336,7 +343,7 @@ struct ComposerView: View {
         // chip carries a warning while it is on screen; this is the last check before it matters,
         // and a file that fails it is taken out of the sentence rather than sent as a path to
         // nothing.
-        let worktree = transcript.workspace.path
+        let worktree = transcript.cwd
         let text = AttachmentDraft
             .parse(transcript.draft, paths: attachments.map(\.path))
             .keeping { path in
@@ -485,8 +492,8 @@ struct ComposerView: View {
         // defaults were applied on an earlier launch, which is exactly the path a return to a chat
         // tab takes. A mark on the last line would never fire for it. See `TabProbe`.
         defer {
-            SwitchTrace.mark("composer.prepared", workspace: transcript.workspace.id)
-            SwitchTrace.markOnScreen("composer.prepared", workspace: transcript.workspace.id)
+            SwitchTrace.mark("composer.prepared", workspace: transcript.workspace?.id)
+            SwitchTrace.markOnScreen("composer.prepared", workspace: transcript.workspace?.id)
         }
         isFocused = true
         caret = (transcript.draft as NSString).length
@@ -519,7 +526,7 @@ struct ComposerView: View {
 
         // Off the main actor because it reads up to six files from disk.
         var repoSettings = RepoSettings()
-        if let repo = app.repo(for: transcript.workspace) {
+        if let workspace = transcript.workspace, let repo = app.repo(for: workspace) {
             let path = repo.path
             repoSettings = await Task.detached(priority: .utility) {
                 SettingsLoader.load(repo: path)
@@ -527,7 +534,12 @@ struct ComposerView: View {
         }
         guard !Task.isCancelled else { return }
 
-        let resolved = ComposerDefaults.resolve(repo: repoSettings, app: appDefaults)
+        // A chat with no worktree does not inherit the owner's permission mode, and that is the
+        // whole of decision two: the default is Full access, and this is the one conversation in
+        // Bloom that sits above every project. See `ComposerDefaults.resolve`.
+        let resolved = ComposerDefaults.resolve(
+            repo: repoSettings, app: appDefaults, hasWorktree: transcript.workspace != nil
+        )
 
         if appDefaults.fastMode != isFastMode {
             isFastMode = appDefaults.fastMode

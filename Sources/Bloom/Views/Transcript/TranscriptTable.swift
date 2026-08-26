@@ -32,6 +32,15 @@ struct TranscriptTableEntry: Identifiable {
     /// their own state and redraw inside the cell they are in; handing them a new root view on
     /// every pass threw that state away and rebuilt the tail several times a second.
     let contentKey: TranscriptContentKey
+    /// Whether this entry is expected to draw nothing at all, which most of a session is. An
+    /// unmeasured row that says so is told nought rather than the running mean: see
+    /// `TranscriptRowInk`, which decides it, and `TranscriptRowHeights.assumed`, which uses it.
+    ///
+    /// False for the four entries that are not stored rows. Each of them draws nothing much of the
+    /// time, and each is on screen at the live end where it is measured immediately anyway, so a
+    /// claim about them would buy nothing and could be wrong about the streaming tail, which is the
+    /// one entry that changes height without anything saying so.
+    var drawsNothing = false
     /// Built on demand: when the row is measured, and when it is drawn. Nothing is built for a row
     /// that is neither, which is what keeps the pass that assembles these cheap.
     let content: @MainActor () -> AnyView
@@ -479,6 +488,9 @@ struct TranscriptTable: NSViewRepresentable {
         private static let hair: CGFloat = 0.01
 
         func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+            // An increment, on a path AppKit may call for every row of the table. See
+            // `TranscriptHoldCensus.heightAsks`, which is here to find out whether it does.
+            TranscriptHoldCensus.askedHeight()
             guard entries.indices.contains(row) else { return Self.hair }
             return max(Self.hair, height(of: entries[row]))
         }
@@ -496,7 +508,17 @@ struct TranscriptTable: NSViewRepresentable {
             cell.onHeightChange = { [weak self] id, height in
                 self?.noted(height: height, for: id)
             }
-            cell.apply(entry: entry, environment: rowEnvironment)
+            // **Every row in the visible rect gets one of these, and this is where a row's SwiftUI
+            // graph is actually built.** It is outside the pane's own layout pass, so
+            // `PaneLayoutTiming` never saw it: that reported a ceiling of 0.8ms while a quarter of
+            // the frames were being dropped. Timed rather than assumed, and only the calls that
+            // really replace the root view, because a recycled cell holding what it already holds
+            // returns early. See `TranscriptHoldCensus.cellSeconds`.
+            let started = TranscriptHoldCensus.clock()
+            let rebuilt = cell.apply(entry: entry, environment: rowEnvironment)
+            TranscriptHoldCensus.askedCell(
+                rebuilt: rebuilt, seconds: TranscriptHoldCensus.since(started)
+            )
             return cell
         }
 
@@ -516,7 +538,7 @@ struct TranscriptTable: NSViewRepresentable {
         /// grows.
         private func height(of entry: TranscriptTableEntry) -> CGFloat {
             guard heights.isReady else { return Self.hair }
-            return CGFloat(heights.assumed(for: entry.contentKey))
+            return CGFloat(heights.assumed(for: entry.contentKey, drawsNothing: entry.drawsNothing))
         }
 
         /// A fresh `NSHostingView` per measurement, at the exact width the cell is laid out at.
@@ -560,6 +582,16 @@ struct TranscriptTable: NSViewRepresentable {
             guard !isHeld else { return }
             guard let row = index[entryID], entries.indices.contains(row) else { return }
             guard heights.note(height, for: entries[row].contentKey) else { return }
+            // **News to the cache is not always news to the table.** A row the table is already
+            // drawing at this height needs no `noteHeightOfRows`, and the whole of a correction's
+            // cost is that call: it moves the document's total and makes AppKit lay out every row
+            // below the one that changed, which near the top of a long conversation is all of
+            // them. Measured on a 2,981 row session, an upward sweep made 285 of those calls and
+            // resized the document on 214 frames of 312. Most of them were rows that draw nothing
+            // arriving at the nought they were already being drawn at.
+            let told = tableView?.rect(ofRow: row).height
+            let drawn = max(Double(Self.hair), TranscriptRowHeights.rounded(Double(height)))
+            if let told, TranscriptRowHeights.isSameHeight(Double(told), drawn) { return }
             owedHeights.insert(entryID)
             guard owedWork == nil else { return }
             owedWork = Task { @MainActor [weak self] in
@@ -611,9 +643,9 @@ struct TranscriptTable: NSViewRepresentable {
             // this one, which is the streaming tail on every frame of a turn.
             for id in owed where !owedHeights.contains(id) {
                 guard let row = rowOf(id),
-                      let measured = heights.height(for: entries[row].contentKey) else { continue }
+                      heights.height(for: entries[row].contentKey) != nil else { continue }
                 let told = tableView.rect(ofRow: row).height
-                let drawn = max(Double(Self.hair), measured)
+                let drawn = owedHeight(of: entries[row])
                 guard !TranscriptRowHeights.isSameHeight(Double(told), drawn) else { continue }
                 wrong += 1
                 #if DEBUG
@@ -632,20 +664,21 @@ struct TranscriptTable: NSViewRepresentable {
         /// `checkCorrected` can only speak for rows that reported. A row that never reports at all
         /// is answered from the mean for ever and nothing above would say so, which is the shape
         /// of blank this file has now been wrong about twice. This counts the visible rows the
-        /// table is drawing at a height nobody has measured, on every movement of the clip view:
-        /// two dictionary lookups per visible row, which at a screenful is nothing.
+        /// table is drawing at a height nobody has measured.
+        ///
+        /// **On the settle, and it used to be on every movement of the clip view.** A screenful is
+        /// not a fixed number of rows: most of a session draws nothing and is a hundredth of a
+        /// point tall, so a viewport can span hundreds of rows rather than the thirty this walked
+        /// when it was written. Instrumentation that grows with what it is watching distorts what
+        /// it measures, and the three numbers anybody reads from it are settled ones anyway.
         private func censusOfTheScreen(settled: Bool = false) {
             guard let tableView, heights.isReady else { return }
             var estimated = 0
             var wrong = 0
             for row in visibleRows where entries.indices.contains(row) {
-                let key = entries[row].contentKey
-                guard let measured = heights.height(for: key) else {
-                    estimated += 1
-                    continue
-                }
+                if isGuessed(entries[row]) { estimated += 1 }
                 let told = Double(tableView.rect(ofRow: row).height)
-                if !TranscriptRowHeights.isSameHeight(told, max(Double(Self.hair), measured)) {
+                if !TranscriptRowHeights.isSameHeight(told, owedHeight(of: entries[row])) {
                     wrong += 1
                 }
             }
@@ -655,14 +688,33 @@ struct TranscriptTable: NSViewRepresentable {
             // there is worth naming and a guess mid flick is not.
             if settled, estimated > 0 {
                 let named = visibleRows
-                    .filter { entries.indices.contains($0) }
-                    .filter { heights.height(for: entries[$0].contentKey) == nil }
+                    .filter { entries.indices.contains($0) && isGuessed(entries[$0]) }
                     .map { entries[$0].id.description }
                 FileHandle.standardError.write(Data(
                     "transcript: \(estimated) guessed rows on screen: \(named)\n".utf8
                 ))
             }
             #endif
+        }
+
+        /// Whether this row is on screen at a number somebody guessed.
+        ///
+        /// **A row claimed to draw nothing is answered rather than guessed**, so it is not counted
+        /// here: `TranscriptRowInk` decided it from the row itself, and nought is the whole of what
+        /// such a row can be. Counting those would have this report a screenful of alarms for the
+        /// change that removed the alarms.
+        private func isGuessed(_ entry: TranscriptTableEntry) -> Bool {
+            heights.height(for: entry.contentKey) == nil && !entry.drawsNothing
+        }
+
+        /// The height this row ought to be drawn at: what was measured, what it is claimed to be,
+        /// or the mean. The same number `height(of:)` gives the table, so the two cannot disagree
+        /// about what counts as a row drawn wrong.
+        private func owedHeight(of entry: TranscriptTableEntry) -> Double {
+            max(
+                Double(Self.hair),
+                heights.assumed(for: entry.contentKey, drawsNothing: entry.drawsNothing)
+            )
         }
 
         /// Every height change in this file goes through here.
@@ -689,14 +741,20 @@ struct TranscriptTable: NSViewRepresentable {
                     (cell as? TranscriptTableCell)?.clips(whileGrowingFor: seconds)
                 }
             }
+            let started = TranscriptHoldCensus.clock()
             NSAnimationContext.beginGrouping()
             NSAnimationContext.current.duration = seconds
             if seconds > 0 {
                 NSAnimationContext.current.timingFunction =
                     CAMediaTimingFunction(name: .easeOut)
             }
+            // What AppKit does here is the other unmeasured half: a height changing near the top
+            // of a long list moves every row below it. See `TranscriptHoldCensus.noteSeconds`.
             tableView.noteHeightOfRows(withIndexesChanged: rows)
             NSAnimationContext.endGrouping()
+            TranscriptHoldCensus.noted(
+                rows: rows.count, seconds: TranscriptHoldCensus.since(started)
+            )
         }
 
         /// A fold is about to open or close, so the height change it causes is the one this file
@@ -911,6 +969,7 @@ struct TranscriptTable: NSViewRepresentable {
             // which is what `TranscriptAnchor.isAtEnd` allows for a clip view's rounding, would
             // refuse a real correction.
             guard abs(clip.bounds.origin.y - target) > 0.01 else { return }
+            TranscriptHoldCensus.placed()
             // So that the escape in `clipMoved` does not read this file's own arrival at the end
             // as the reader scrolling away from it.
             isPutting = true
@@ -987,7 +1046,6 @@ struct TranscriptTable: NSViewRepresentable {
             // nobody is holding it any more.
             if holdsEnd, !isPutting, !currentGeometry.isAtEnd { releaseEnd() }
             reportGeometry()
-            censusOfTheScreen()
             scheduleSettle()
         }
 
@@ -1344,12 +1402,15 @@ final class TranscriptTableCell: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not in a nib") }
 
-    func apply(entry: TranscriptTableEntry, environment: TranscriptRowEnvironment) {
+    /// Returns whether the root view had to be replaced, which is the expensive half and the only
+    /// half worth timing. See `TranscriptHoldCensus.cellSeconds`.
+    @discardableResult
+    func apply(entry: TranscriptTableEntry, environment: TranscriptRowEnvironment) -> Bool {
         // The recycling. A cell that already holds this content is left exactly as it is, which
         // is what a table buys over a stack that rebuilds every realised row on every pass. The
         // three entries that re-render themselves are NOT excepted, and used to be: handing the
         // streaming tail a new root view on every pass rebuilt it several times a second.
-        guard appliedKey != entry.contentKey else { return }
+        guard appliedKey != entry.contentKey else { return false }
         appliedKey = entry.contentKey
         let id = entry.id
         host.rootView = AnyView(
@@ -1364,6 +1425,7 @@ final class TranscriptTableCell: NSView {
             .id(id)
             .transcriptRowEnvironment(environment)
         )
+        return true
     }
 
     /// Clips this cell for as long as its row is travelling to a new height.

@@ -203,6 +203,43 @@ public final class BridgeServer: Sendable {
         }
     }
 
+    /// The same, for the conversation that belongs to Bloom rather than to a workspace.
+    ///
+    /// **It comes in on the owner's own token rather than one minted for it, and that is the whole
+    /// design rather than a shortcut.** `BridgeIdentity.owner` is defined as the owner sitting in
+    /// no workspace, with no session and no worktree behind it, which is exactly what this chat is;
+    /// minting a session token for it would have meant inventing a fourth role, or a workspace for
+    /// it to be scoped to. On the owner's token it gets the eleven owner tools that already exist,
+    /// gated by the same `roles` sets the owner's terminal is gated by, with no second rule to
+    /// keep in step.
+    ///
+    /// The session is recorded in the registry all the same, and that is not bookkeeping: the
+    /// config sweep deletes the file for any session it does not recognise, and a chat with no
+    /// minted token is a chat the sweep would have disconnected the moment another one started.
+    ///
+    /// Nil when there is no shim to point at, exactly as `register` is: the chat then runs with no
+    /// bridge tools, which is a conversation that can talk and cannot look anything up, rather
+    /// than a conversation that fails to start.
+    public func register(askSession session: Session) -> BridgeHandle? {
+        guard let attachment = ownerAttachment() else {
+            note("no bloom-bridge beside the running executable, so \(session.id) gets no bridge")
+            return nil
+        }
+        registry.attachOwner(sessionID: session.id)
+        do {
+            let path = try BridgeRegistration.writeClaudeConfig(
+                attachment,
+                sessionID: session.id,
+                directory: configDirectory
+            )
+            sweepConfigDirectory()
+            return BridgeHandle(attachment: attachment, mcpConfigPath: path)
+        } catch {
+            note("could not write the bridge config for \(session.id): \(error.readableMessage)")
+            return nil
+        }
+    }
+
     /// Drops a session's token and the config file that carried it.
     ///
     /// The token is refused at the handshake from this moment, so the file is a dead letter: it

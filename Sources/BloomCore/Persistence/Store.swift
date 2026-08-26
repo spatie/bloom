@@ -157,6 +157,17 @@ public actor Store {
 
     // MARK: - Migrations
 
+    /// What a migration refuses to finish over.
+    ///
+    /// One case, because there is one step in the list that can take rows with it: the sessions
+    /// rebuild drops a table other tables cascade from, and a count that came back short means the
+    /// cascade fired. Thrown from inside the migration transaction, so the schema and the rows go
+    /// back to what they were and the app opens on the old shape rather than on a shorter
+    /// transcript.
+    public enum StoreTrouble: Error, Sendable {
+        case rebuildLostRows(table: String, before: Int64, after: Int64)
+    }
+
     /// One migration step. Most are a block of SQL, but a step that has to look at the rows it is
     /// about to constrain needs real code, so the list holds closures rather than strings.
     private typealias Migration = @Sendable (SQLiteDatabase) throws -> Void
@@ -786,10 +797,91 @@ public actor Store {
                         """)
                 }
             },
+
+            // The chat that belongs to no workspace: Ask Bloom, which has a transcript, a cost and
+            // a permission history, and no worktree for any of it to hang off.
+            //
+            // `workspace_id` has been `NOT NULL` since the first step in this list, and SQLite
+            // cannot drop a `NOT NULL` in place, so this is the first table rebuild here against
+            // forty-odd `ADD COLUMN` steps. The order is SQLite's own recipe: build the new table,
+            // copy every row, drop the old one, rename the new one over it.
+            //
+            // **Foreign keys have to be off while that runs, and this is the reason `migrate` turns
+            // them off rather than a tidiness.** With them on, `DROP TABLE sessions` performs an
+            // implicit `DELETE FROM` that fires `ON DELETE CASCADE` into `messages`, `drafts`,
+            // `permission_asks` and `handoffs`: the whole transcript would go out with the
+            // constraint, in a step whose purpose is to relax one. The count check below is that
+            // fear written down, because a migration that quietly emptied a table is the one kind
+            // this list must never ship.
+            //
+            // Replayable, like every step above: it reads the column's own `notnull` flag and
+            // returns when the rebuild has already happened, so the store's tests can rewind
+            // `user_version` over the new shape without this throwing.
+            { db in
+                let columns = try db.query("PRAGMA table_info(sessions);")
+                let workspaceColumn = columns.first { $0.string("name") == "workspace_id" }
+                guard workspaceColumn?.int("notnull") == 1 else { return }
+
+                let before = try db.query("SELECT COUNT(*) AS n FROM messages").first?.int("n") ?? 0
+                try db.execute("""
+                    CREATE TABLE sessions_rebuilt (
+                        id TEXT PRIMARY KEY,
+                        workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+                        title TEXT NOT NULL,
+                        agent_session_id TEXT,
+                        model TEXT NOT NULL DEFAULT 'opus',
+                        effort TEXT NOT NULL DEFAULT 'high',
+                        agent_kind TEXT NOT NULL DEFAULT 'claudeCode',
+                        permission_mode TEXT NOT NULL DEFAULT 'acceptEdits',
+                        state TEXT NOT NULL DEFAULT 'idle',
+                        sort_order INTEGER NOT NULL DEFAULT 0,
+                        created_at REAL NOT NULL,
+                        updated_at REAL NOT NULL,
+                        archived_at REAL,
+                        last_read_seq INTEGER NOT NULL DEFAULT 0,
+                        input_tokens INTEGER NOT NULL DEFAULT 0,
+                        output_tokens INTEGER NOT NULL DEFAULT 0,
+                        cost_usd REAL NOT NULL DEFAULT 0,
+                        context_tokens INTEGER NOT NULL DEFAULT 0
+                    );
+
+                    INSERT INTO sessions_rebuilt (
+                        id, workspace_id, title, agent_session_id, model, effort, agent_kind,
+                        permission_mode, state, sort_order, created_at, updated_at, archived_at,
+                        last_read_seq, input_tokens, output_tokens, cost_usd, context_tokens
+                    )
+                    SELECT
+                        id, workspace_id, title, agent_session_id, model, effort, agent_kind,
+                        permission_mode, state, sort_order, created_at, updated_at, archived_at,
+                        last_read_seq, input_tokens, output_tokens, cost_usd, context_tokens
+                    FROM sessions;
+
+                    DROP TABLE sessions;
+                    ALTER TABLE sessions_rebuilt RENAME TO sessions;
+                    CREATE INDEX IF NOT EXISTS sessions_workspace ON sessions(workspace_id);
+                    """)
+
+                let after = try db.query("SELECT COUNT(*) AS n FROM messages").first?.int("n") ?? 0
+                guard after == before else {
+                    throw StoreTrouble.rebuildLostRows(table: "messages", before: before, after: after)
+                }
+            },
         ]
 
         let current = Int(db.userVersion)
         guard current < migrations.count else { return }
+
+        // Off for the run, and back on after it, which is SQLite's own instruction for a schema
+        // change that rebuilds a table rather than a preference. A `DROP TABLE` with foreign keys
+        // enforced deletes the children of every row it drops, and the sessions rebuild below
+        // would take `messages` with it. The pragma is a no-op inside a transaction, so it has to
+        // be here, outside the one the steps run in.
+        //
+        // Nothing else is open on this connection yet: `migrate` is called from `Store.init`,
+        // before the actor exists, so there is no window in which another writer sees them off.
+        try db.execute("PRAGMA foreign_keys = OFF;")
+        defer { try? db.execute("PRAGMA foreign_keys = ON;") }
+
         // One transaction for the lot: a migration that half ran would leave a schema no version
         // number describes.
         try db.transaction {
@@ -1393,6 +1485,21 @@ public actor Store {
         try db.query(
             "SELECT * FROM sessions WHERE workspace_id = ? AND archived_at IS NULL ORDER BY sort_order, created_at",
             [.text(workspaceID)]
+        ).map(Self.session(from:))
+    }
+
+    /// The chats that belong to no worktree, oldest first.
+    ///
+    /// Ask Bloom's, and nothing else today. It is a separate method rather than a nil argument to
+    /// `sessions(workspaceID:)` because `= NULL` is never true in SQL and a caller that passed nil
+    /// there would get an empty list and no error, which is the quietest way to be wrong.
+    public func sessionsWithoutWorkspace() throws -> [Session] {
+        try db.query(
+            """
+            SELECT * FROM sessions
+            WHERE workspace_id IS NULL AND archived_at IS NULL
+            ORDER BY sort_order, created_at
+            """
         ).map(Self.session(from:))
     }
 
@@ -2719,7 +2826,8 @@ public actor Store {
     private static func session(from row: Row) -> Session {
         Session(
             id: SessionID(row.string("id") ?? newID()),
-            workspaceID: WorkspaceID(row.string("workspace_id") ?? ""),
+            // A null here is a chat with no worktree, which is Ask Bloom. See `Session.workspaceID`.
+            workspaceID: row.string("workspace_id").map(WorkspaceID.init),
             title: row.string("title") ?? "Session",
             agentSessionID: row.string("agent_session_id"),
             model: row.string("model") ?? "opus",

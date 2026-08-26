@@ -202,17 +202,22 @@ struct WorkspaceHoverCardView: View {
 
     /// The card's own ground.
     ///
-    /// `MenuPanel` is the app's floating card and this is deliberately not it. `MenuPanel` samples
-    /// the window it is drawn in (glass since macOS 26, `.withinWindow` vibrancy before that) and
-    /// carries a SwiftUI shadow, both of which are right inside the composer's window and neither
-    /// of which is right here: this card IS a window, so the material has to blend with what is
-    /// behind the window rather than with the window, and the shadow is AppKit's to draw around
-    /// the panel's alpha. What is kept is the shape and the rim, so the two read as one family.
+    /// The shadow is still AppKit's, because this card IS a window and a SwiftUI shadow inside a
+    /// transparent one is clipped by the window's bounds into a hard edge on two sides. See
+    /// `WorkspaceHoverCardPresenter`, which has to invalidate it by hand.
+    ///
+    /// The material is glass, which is a correction. This was `NSVisualEffectView(.menu)` blended
+    /// `.behindWindow`, on the argument that a card which is its own window should sample the
+    /// desktop rather than the app. That argument is about vibrancy and it did not survive macOS
+    /// 26: what it produced was a flat grey plate, while the hover card in the transcript, a
+    /// `MenuPanel` a few hundred points away describing the same kind of thing, is glass. Two
+    /// cards in one window in two generations of material is the thing the owner sees, and a
+    /// system popover on 26 is glass too, so this follows the platform rather than the old
+    /// argument. The shape and the rim were always shared; now the ground is.
     private var cardBackground: some View {
-        VisualEffectBackground(material: .menu, blending: .behindWindow)
-            // Clipped rather than filled through a shape, because the material is a view rather
-            // than a `ShapeStyle` and `background(_:in:)` will not take one.
-            .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
+        RoundedRectangle(cornerRadius: Metrics.corner)
+            .fill(.clear)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Metrics.corner))
             .overlay {
                 RoundedRectangle(cornerRadius: Metrics.corner)
                     .strokeBorder(Palette.border, lineWidth: Metrics.hairline)

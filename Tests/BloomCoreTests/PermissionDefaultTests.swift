@@ -68,6 +68,22 @@ struct PermissionDefaultTests {
         #expect(resolved.permissionMode == .bypassPermissions)
     }
 
+    /// **The one deliberate exception, named here so it does not read as the drift this suite
+    /// exists to stop.** Every unstated starting point above agrees with the fallback. Ask Bloom's
+    /// does not, and it is not an unstated starting point: it is a chat with no worktree, where
+    /// Full access would mean the whole machine rather than a copy of a project. See
+    /// `AskConversation.permissionMode`, and `modeOnOpening` for why it has to be reapplied.
+    @Test("the chat with no worktree is the one thing that does not take the default")
+    func theConversationWithNoWorktreeIsTheException() {
+        #expect(AskConversation.permissionMode != AppDefaults.fallbackPermissionMode)
+        #expect(AskConversation.newSession().permissionMode == .auto)
+        #expect(
+            ComposerDefaults
+                .resolve(repo: RepoSettings(), app: AppDefaults(), hasWorktree: false)
+                .permissionMode == AskConversation.permissionMode
+        )
+    }
+
     /// What Claude Code is told. `--permission-mode bypassPermissions` skips the permission
     /// prompt for tool calls; it is not a sandbox, so the CLI's own hooks and settings files are
     /// still what they were.
