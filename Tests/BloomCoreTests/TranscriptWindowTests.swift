@@ -2,14 +2,11 @@ import Foundation
 import Testing
 @testable import BloomCore
 
-/// How much of a session the list draws.
+/// How much of a session the list is allowed to hand its lazy stack.
 ///
 /// The arithmetic is here rather than in `TranscriptListView` for the reason the whole split
-/// exists: a window worked out inside a view is a window nothing can hold still.
-///
-/// **The fixtures below use eight thousand rows where they used four.** Four thousand is drawn in
-/// one piece now, so a test that meant "a long session" has to name one past the ceiling or it
-/// quietly stops testing the stepped growth it was written for. See `TranscriptWindow.whole`.
+/// exists: a window worked out inside a view is a window nothing can hold still, and the numbers
+/// this returns are the difference between a resize at six frames a second and one at sixty.
 @Suite("Transcript window")
 struct TranscriptWindowTests {
     // MARK: Opening
@@ -22,8 +19,8 @@ struct TranscriptWindowTests {
 
     @Test("a long session opens on the tail the arrival frame chose")
     func longSessionsOpenOnTheTail() {
-        let window = TranscriptWindow.opening(rowCount: 8_000, tailStart: 7_920)
-        #expect(window == TranscriptWindow(start: 7_920, end: 8_000))
+        let window = TranscriptWindow.opening(rowCount: 4_000, tailStart: 3_920)
+        #expect(window == TranscriptWindow(start: 3_920, end: 4_000))
     }
 
     /// The case that forced the window to have a bottom edge. An agent working while nobody is
@@ -31,7 +28,7 @@ struct TranscriptWindowTests {
     /// window that ran from there to the end was the whole session with extra steps.
     @Test("a session opened on an old row draws that row's neighbourhood, not the rest of the session")
     func anOldTargetDoesNotOpenTheWholeSession() {
-        let window = TranscriptWindow.opening(rowCount: 8_000, tailStart: 7_920, mustReach: 100)
+        let window = TranscriptWindow.opening(rowCount: 4_000, tailStart: 3_920, mustReach: 100)
         #expect(window.start == 100 - TranscriptWindow.margin)
         #expect(window.end == 100 - TranscriptWindow.margin + TranscriptWindow.margin + TranscriptWindow.settled)
         #expect(window.count < 1_000)
@@ -39,23 +36,20 @@ struct TranscriptWindowTests {
 
     @Test("a target already inside the tail leaves the window where it was")
     func aTargetInsideChangesNothing() {
-        let window = TranscriptWindow.opening(rowCount: 8_000, tailStart: 7_920, mustReach: 7_990)
-        #expect(window == TranscriptWindow(start: 7_920, end: 8_000))
+        let window = TranscriptWindow.opening(rowCount: 4_000, tailStart: 3_920, mustReach: 3_990)
+        #expect(window == TranscriptWindow(start: 3_920, end: 4_000))
     }
 
     @Test("a target near the top of the session cannot push the window past its first row")
     func aTargetNearTheTopClamps() {
-        let window = TranscriptWindow.opening(rowCount: 8_000, tailStart: 7_920, mustReach: 3)
+        let window = TranscriptWindow.opening(rowCount: 4_000, tailStart: 3_920, mustReach: 3)
         #expect(window.start == 0)
     }
 
-    /// It used to answer an EMPTY window here, because the tail was clamped to the session and
-    /// landed on its last row. Ten rows are drawn whole now, which is both the better answer and
-    /// the one every other case gives.
-    @Test("a tail longer than the session draws the session")
+    @Test("a tail longer than the session is clamped to the session")
     func theTailIsClampedToTheSession() {
         let window = TranscriptWindow.opening(rowCount: 10, tailStart: 80)
-        #expect(window == TranscriptWindow(start: 0, end: 10))
+        #expect(window == TranscriptWindow(start: 10, end: 10))
     }
 
     // MARK: Settling
@@ -63,70 +57,23 @@ struct TranscriptWindowTests {
     @Test("the window settles to a few hundred rows once the arrival is over")
     func settlingHoldsTheSettledLength() {
         let settled = TranscriptWindow.settling(
-            from: TranscriptWindow(start: 7_920, end: 8_000), rowCount: 8_000
+            from: TranscriptWindow(start: 3_920, end: 4_000), rowCount: 4_000
         )
-        #expect(settled == TranscriptWindow(start: 8_000 - TranscriptWindow.settled, end: 8_000))
+        #expect(settled == TranscriptWindow(start: 4_000 - TranscriptWindow.settled, end: 4_000))
     }
 
     @Test("settling never narrows a window that was opened wide")
     func settlingNeverNarrows() {
         let settled = TranscriptWindow.settling(
-            from: TranscriptWindow(start: 4_920, end: 8_000), rowCount: 8_000
+            from: TranscriptWindow(start: 920, end: 4_000), rowCount: 4_000
         )
-        #expect(settled == TranscriptWindow(start: 4_920, end: 8_000))
+        #expect(settled == TranscriptWindow(start: 920, end: 4_000))
     }
 
     @Test("settling leaves a window opened around an old row exactly where it is")
     func settlingLeavesATargetWindow() {
         let opened = TranscriptWindow(start: 20, end: 500)
-        #expect(TranscriptWindow.settling(from: opened, rowCount: 8_000) == opened)
-    }
-
-    // MARK: Drawn whole
-
-    /// **The window exists for a `LazyVStack` that this app no longer draws with.** Under a table
-    /// what a window costs is the arriving: a growth rebuilds every entry the list holds and
-    /// inserts four hundred rows on a frame the reader is scrolling through. See
-    /// `TranscriptWindow.whole`.
-    @Test("a session inside the ceiling is drawn whole from the first frame")
-    func aWholeSessionOpensWhole() {
-        let rows = TranscriptWindow.whole
-        let window = TranscriptWindow.opening(rowCount: rows, tailStart: rows - 80)
-        #expect(window == TranscriptWindow(start: 0, end: rows))
-        #expect(window.canGrowUp == false)
-        #expect(window.canGrowDown(rowCount: rows) == false)
-    }
-
-    /// A row asked for by name is already in the list, so nothing has to move to reach it.
-    @Test("a whole session needs no window moved to reach an old row")
-    func aWholeSessionReachesEveryRow() {
-        let window = TranscriptWindow.opening(rowCount: 3_000, tailStart: 2_920, mustReach: 4)
-        #expect(window == TranscriptWindow(start: 0, end: 3_000))
-    }
-
-    /// **The jump pill must not take the session apart.** Handing the tail back here would remove
-    /// every row above it from the list and put them all back on the next scroll upwards.
-    @Test("the live end of a whole session is still the whole session")
-    func liveEndKeepsAWholeSession() {
-        #expect(TranscriptWindow.liveEnd(rowCount: 3_000) == TranscriptWindow(start: 0, end: 3_000))
-    }
-
-    @Test("settling a whole session leaves it whole")
-    func settlingAWholeSession() {
-        let settled = TranscriptWindow.settling(
-            from: TranscriptWindow(start: 2_600, end: 3_000), rowCount: 3_000
-        )
-        #expect(settled == TranscriptWindow(start: 0, end: 3_000))
-    }
-
-    /// A session past the ceiling keeps every bit of the stepped growth, because the cost that
-    /// justifies the ceiling is the pass that assembles one entry per row in the window.
-    @Test("a session past the ceiling still opens on its tail")
-    func pastTheCeilingIsWindowed() {
-        let rows = TranscriptWindow.whole + 1
-        let window = TranscriptWindow.opening(rowCount: rows, tailStart: rows - 80)
-        #expect(window == TranscriptWindow(start: rows - 80, end: rows))
-        #expect(window.canGrowUp)
+        #expect(TranscriptWindow.settling(from: opened, rowCount: 4_000) == opened)
     }
 
     @Test("a session shorter than the settled length settles at its first row")
@@ -152,13 +99,13 @@ struct TranscriptWindowTests {
 
     @Test("a growth downward adds a chunk of what came after")
     func growthDownAddsAChunk() {
-        let grown = TranscriptWindow(start: 0, end: 500).grownDown(rowCount: 8_000)
+        let grown = TranscriptWindow(start: 0, end: 500).grownDown(rowCount: 4_000)
         #expect(grown == TranscriptWindow(start: 0, end: 500 + TranscriptWindow.chunk))
     }
 
     @Test("a growth downward stops at the live end")
     func growthDownStopsAtTheEnd() {
-        #expect(TranscriptWindow(start: 0, end: 7_900).grownDown(rowCount: 8_000).end == 8_000)
+        #expect(TranscriptWindow(start: 0, end: 3_900).grownDown(rowCount: 4_000).end == 4_000)
     }
 
     @Test("a window at both ends of the session has nothing left to grow into")
@@ -174,8 +121,8 @@ struct TranscriptWindowTests {
 
     @Test("the live end is the tail rather than everything between here and it")
     func liveEndIsTheTail() {
-        let window = TranscriptWindow.liveEnd(rowCount: 8_000)
-        #expect(window == TranscriptWindow(start: 8_000 - TranscriptWindow.settled, end: 8_000))
+        let window = TranscriptWindow.liveEnd(rowCount: 4_000)
+        #expect(window == TranscriptWindow(start: 4_000 - TranscriptWindow.settled, end: 4_000))
     }
 
     @Test("the live end of a short session is the whole of it")
@@ -187,9 +134,9 @@ struct TranscriptWindowTests {
 
     @Test("a remembered window is clamped to the session it is restored into")
     func clampingARememberedWindow() {
-        let remembered = TranscriptWindow(start: 7_000, end: 8_000)
+        let remembered = TranscriptWindow(start: 3_000, end: 4_000)
         #expect(remembered.clamped(rowCount: 100) == TranscriptWindow(start: 100, end: 100))
-        #expect(remembered.clamped(rowCount: 8_200) == remembered)
+        #expect(remembered.clamped(rowCount: 4_200) == remembered)
     }
 
     // MARK: Finding a row

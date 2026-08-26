@@ -1,10 +1,6 @@
 import Foundation
 
-/// How much of a session the list draws, and when that moves.
-///
-/// **Read `whole` first.** Everything below it was written for a `LazyVStack`, which the transcript
-/// no longer uses, and the argument the rest of this header makes is that stack's. A session small
-/// enough is drawn in one piece now, and none of the stepped growth below happens at all.
+/// How much of a session the list hands to its lazy stack, and when that moves.
 ///
 /// **A lazy stack is lazy about realising a row and is not lazy about knowing one.** Placing its
 /// subviews walks every child it has been handed, realised or not, so the cost of a layout pass
@@ -63,39 +59,6 @@ public struct TranscriptWindow: Equatable, Sendable {
     /// flick, and small enough that adding it is a layout of a few milliseconds.
     public static let chunk = 400
 
-    /// **The most rows a session can have and still be drawn in one piece.**
-    ///
-    /// Everything above this line was written for a `LazyVStack`, and the numbers in this file's
-    /// header are that stack's: a lazy stack places every child it holds on every pass, realised
-    /// or not, so the window existed because the cost of a layout followed the length of the
-    /// conversation. The transcript is an `NSTableView` now. A table knows a row count, keeps its
-    /// own row geometry and builds a view only for what is in the visible rect, so holding four
-    /// thousand rows costs it nothing per pass.
-    ///
-    /// What a window costs INSTEAD, under a table, is the arriving. Growing it by four hundred
-    /// rows rebuilds every entry the list holds, diffs the whole list, rebuilds its index and
-    /// inserts four hundred rows into the table, all on a frame the reader is scrolling through.
-    /// Reported, unprompted and twice: "lines get added to the view then they stutter when
-    /// scrolling", and "if i scroll to bottom and then up again, those lines that were added
-    /// previously don't stutter anymore". A session drawn whole arrives once, when it opens, and
-    /// never again.
-    ///
-    /// **The number is a bound rather than a measurement, and it is honest about which.** What
-    /// scales with the window under a table is the pass that assembles the entries: a content key
-    /// hashed from a dozen fields, two closures and a payload sniff, per row, on every pass this
-    /// view runs. Nobody has timed one entry, so the cost of a four thousand row pass is not
-    /// known. It is set above every session in the owner's database, which has seventeen of them
-    /// and tops out at 2,981 rows, and far below the twenty thousand `TranscriptRowHeights` will
-    /// hold, so a session nobody could have read in a week keeps the stepped growth it has today.
-    /// Time one entries pass and this can stop being a guess.
-    public static let whole = 5_000
-
-    /// Whether a session of this size is drawn in one piece.
-    public static func isWhole(rowCount: Int) -> Bool { rowCount <= whole }
-
-    /// The window that holds a whole session.
-    public static func everything(rowCount: Int) -> Self { Self(start: 0, end: max(0, rowCount)) }
-
     /// How many rows above a row that has to be reachable the window starts.
     ///
     /// A search result opens centred in the pane, so the rows above it have to exist or there is
@@ -111,8 +74,6 @@ public struct TranscriptWindow: Equatable, Sendable {
     /// all: the margin is what a row ARRIVING in a window brings with it, not a claim about every
     /// row.
     public static func opening(rowCount: Int, tailStart: Int, mustReach: Int? = nil) -> Self {
-        // Nothing to move the window to, and nothing to grow into. See `whole`.
-        if isWhole(rowCount: rowCount) { return everything(rowCount: rowCount) }
         let tail = Self(start: clamp(tailStart, rowCount: rowCount), end: max(0, rowCount))
         guard let mustReach, mustReach < tail.start else { return tail }
         let start = clamp(mustReach - margin, rowCount: rowCount)
@@ -125,7 +86,6 @@ public struct TranscriptWindow: Equatable, Sendable {
     /// must not be pulled back to the live end a hundred milliseconds later, which would take the
     /// row the reader asked for off the list.
     public static func settling(from window: Self, rowCount: Int) -> Self {
-        if isWhole(rowCount: rowCount) { return everything(rowCount: rowCount) }
         guard window.end >= rowCount else { return window }
         return Self(
             start: min(window.start, clamp(rowCount - settled, rowCount: rowCount)),
@@ -151,12 +111,7 @@ public struct TranscriptWindow: Equatable, Sendable {
     /// realising every one of them on the way is the exact cost `TranscriptTail` was written to
     /// avoid.
     public static func liveEnd(rowCount: Int) -> Self {
-        // **A whole session stays whole here, and that is not a detail.** Handing the tail back
-        // would take two and a half thousand rows OUT of the list to answer the jump pill, and put
-        // every one of them back the moment the reader scrolled up again: a removal, a reload and
-        // then the growth this exists to avoid, for a reader who only asked to go to the end.
-        if isWhole(rowCount: rowCount) { return everything(rowCount: rowCount) }
-        return Self(start: clamp(rowCount - settled, rowCount: rowCount), end: max(0, rowCount))
+        Self(start: clamp(rowCount - settled, rowCount: rowCount), end: max(0, rowCount))
     }
 
     /// The window's rows in the order a preparation pass should take them: nearest first to the

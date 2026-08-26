@@ -219,13 +219,6 @@ struct TranscriptListView: View {
     /// asks for it, and `position` pins the answer the moment it has used it.
     private var drawnWindow: TranscriptWindow {
         let rows = transcript.rows
-        // **A session small enough is drawn whole, however the window was left.** Here as well as
-        // in every producer of one, because this is the only answer the drawing actually reads: a
-        // row arriving at the live end is in the list the moment it exists, rather than after a
-        // growth noticed it. See `TranscriptWindow.whole`.
-        if TranscriptWindow.isWhole(rowCount: rows.count) {
-            return TranscriptWindow.everything(rowCount: rows.count)
-        }
         guard drawn.session == transcript.session.id else {
             return TranscriptWindow.opening(
                 rowCount: rows.count,
@@ -829,12 +822,8 @@ struct TranscriptListView: View {
         // because the only thing that grows the window downwards is noticing that the reader wants
         // them. Reported as "sometimes I cannot scroll to the end any more". So the geometry is
         // corrected before anything reads it, and the correction is the truth: there is more below.
-        // `drawnWindow` rather than `drawn.window`, because the drawing is what the reader can
-        // reach and the two differ for a session drawn whole: the held one lags a row arriving at
-        // the end until a growth catches it up, and reading that here would tell a reader sitting
-        // at the live end that there is more below them for ever.
         if drawn.session == transcript.session.id,
-           drawnWindow.canGrowDown(rowCount: transcript.rows.count) {
+           drawn.window.canGrowDown(rowCount: transcript.rows.count) {
             measured.isNearBottom = false
             measured.isFarFromEnd = true
         }
