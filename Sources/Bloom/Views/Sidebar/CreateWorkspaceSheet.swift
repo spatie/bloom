@@ -239,14 +239,16 @@ struct CreateWorkspaceSheet: View {
             // become its qualifiers: "New workspace, in bloom, from main" reads as one sentence
             // across the band.
             //
-            // The horizontal padding is the one the controls beside it carry inside their own
-            // plates, so the title's first letter lands on the same 12 points as the project's
-            // name and as everything below the hairline. Without it the title sat six points
-            // proud of the whole sheet.
+            // Trailing padding only now, and those six points are still the ones the controls
+            // beside it carry inside their own plates, so the title does not run into the
+            // project's tile. The leading twelve moved to the strip itself, at the foot of this
+            // view: the title's first letter lands on the same 12 points as the project's name
+            // and as everything below the hairline either way, and this way the strip has one
+            // margin rather than a sum of two, so the trailing control keeps the same 12.
             Text("New workspace")
                 .font(Typo.heading)
                 .foregroundStyle(Palette.textPrimary)
-                .padding(.horizontal, Metrics.spacing)
+                .padding(.trailing, Metrics.spacing)
                 .accessibilityAddTraits(.isHeader)
 
             projectControl
@@ -265,8 +267,24 @@ struct CreateWorkspaceSheet: View {
 
             overflowMenu
         }
-        .padding(.horizontal, Metrics.spacing)
-        .padding(.vertical, Metrics.spacingSmall)
+        // The same padding as `ProjectSetupSheet`'s header, which is the app's other sheet header
+        // sitting above a hairline: `gutter` across, `inset` down.
+        //
+        // It was `spacing` across and `spacingSmall` down, six points and four, and both were the
+        // numbers for what this strip used to be: a row of 28 point control plates, which carry
+        // their own air and are drawn as plates rather than read as words. A 15 point bold title
+        // has neither, so four points put it into the sheet's rounded corner, which is what was
+        // reported as the top of the sheet sticking to the title. Ten points of air above and
+        // below leave the row optically centred in its band and clear of the corner.
+        //
+        // Only the vertical was ever wrong. The title already stood on 12 points, because it
+        // carried six of its own on top of the strip's six, and it still does. What the strip
+        // gains across is a trailing margin that matches: the overflow control now keeps the same
+        // 12 from the right edge that the title keeps from the left, where it kept six. Widening
+        // this sheet from 620 to 700 spent nothing on either edge, so neither number had moved
+        // since the strip held no title at all.
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.vertical, Metrics.inset)
     }
 
     /// The project, with its mark on it. A `Menu` rather than a `Picker`, which is what finally
