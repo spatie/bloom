@@ -72,7 +72,12 @@ struct AskView: View {
             // so that it can be dropped anywhere a transcript exists. What it loses here is the
             // review comments and the worktree an attachment is resolved against, neither of which
             // this chat has.
-            ComposerView(transcript: transcript, model: nil, room: room)
+            ComposerView(
+                transcript: transcript,
+                model: nil,
+                room: room,
+                placeholder: AskConversation.placeholder
+            )
         }
         // The height the two share, which is what caps how far the divider between them can be
         // dragged. Rounded inside the probe for the reason `ChatPaneView` gives: raw, it changed on

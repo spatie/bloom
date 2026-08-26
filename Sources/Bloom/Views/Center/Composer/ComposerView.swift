@@ -20,6 +20,10 @@ struct ComposerView: View {
     /// number is read by the view that passes it, so the pane publishing a new height rebuilt the
     /// transcript beside this box on every frame that rewrapped a line of the draft.
     var room: ComposerRoom = ComposerRoom()
+    /// What the empty box says. The default is what every chat in a worktree says; Ask Bloom
+    /// passes its own, because a conversation that cannot change a file should not open by
+    /// inviting somebody to ask it to.
+    var placeholder: String = ComposerEditor.chatPlaceholder
 
     @Environment(AppModel.self) private var app
 
@@ -94,6 +98,9 @@ struct ComposerView: View {
             reviewComments: reviewComments,
             onRemoveReviewComment: remove(reviewComment:),
             onOpenReviewComment: open(reviewComment:),
+            // Declared after the review comments on `ComposerPrompt`, and the memberwise
+            // initialiser takes its arguments in declaration order.
+            placeholder: placeholder,
             editorHeight: editorHeight,
             onContentHeightChange: { contentHeight = $0 },
             onKey: handle(key:),
