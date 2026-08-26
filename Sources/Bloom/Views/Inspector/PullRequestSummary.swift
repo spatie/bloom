@@ -33,6 +33,12 @@ struct PullRequestSummary: View {
     /// none of that may start: see `BranchActionAvailability`, which holds the reason and the
     /// words. `PullRequestCreator` takes the same value for the same reason.
     var branchActions: BranchActionAvailability
+    /// How this project merges, which the split button promises and its menu ticks. Per project
+    /// and remembered: see `MergeMethodChoice`.
+    var mergeMethod: GitHub.MergeMethod
+    /// Changes the method in force. It never merges, which is the whole difference between this
+    /// and `onMerge`.
+    var onChooseMergeMethod: (GitHub.MergeMethod) -> Void
     var onMerge: (GitHub.MergeMethod) -> Void
     /// Hands the outstanding work to the workspace's agent to commit and push.
     var onPush: () -> Void
@@ -206,8 +212,8 @@ struct PullRequestSummary: View {
     /// The primary slot belongs to whatever the state is actually asking for. With local work in
     /// the worktree that is not Merge: merging now would land the pull request WITHOUT what the
     /// reader is looking at and delete the branch it was on. So the primary swaps to Commit and
-    /// push, and merging stays exactly one click away in the menu beside it, which already listed
-    /// all three methods and already opens the same confirmation. Nothing is taken away; what
+    /// push, and merging stays exactly one press away in the quiet split button beside it, which
+    /// carries the same method and opens the same confirmation. Nothing is taken away; what
     /// changes is which of the two the strip is pointing at.
     ///
     /// **The primary control is last in every one of these, and that is the whole rule.** It used
@@ -221,10 +227,11 @@ struct PullRequestSummary: View {
     ///
     /// Everything that is not the primary sits immediately before it, at the tight spacing, so
     /// the pair still reads as one cluster rather than as two controls that happen to be near
-    /// each other. The merge method chevron before Merge is the one place this looks unusual: a
-    /// split button normally carries its chevron on the trailing side. That is worth giving up,
-    /// because the alternative is the trailing edge belonging to a 19 point chevron rather than
-    /// to the button, which is exactly the misalignment being fixed.
+    /// each other. The merge method chevron used to be the awkward one here: it stood BEFORE
+    /// Merge, on the leading side, because a 19 point chevron at the trailing edge is exactly the
+    /// misalignment the rule above was written to fix. It is inside the button now, on the
+    /// trailing side where a split button carries it, and the button's own trailing edge is still
+    /// the pane's inset. See `mergeControl`.
     private var trailing: some View {
         // Disabled here, for the cluster, rather than on each button in it. Everything in this
         // slot ends in a turn that writes to the worktree or the branch, so it is one question,
@@ -244,7 +251,11 @@ struct PullRequestSummary: View {
                 .accessibilityLabel("Working")
         } else if pullRequest.isOpen {
             HStack(spacing: Metrics.spacingTight) {
-                mergeMenu
+                // Only when merging is not what the state is asking for, because then the split
+                // button IS the primary and there is nothing to stand beside it. This is what the
+                // old chevron did in those states: it was the only way to merge a branch whose
+                // primary said Commit and push, and losing it would have taken a route away.
+                if status.remedy != .merge { mergeControl(isPrimary: false) }
                 primaryButton
             }
             .fixedSize()
@@ -273,7 +284,7 @@ struct PullRequestSummary: View {
     @ViewBuilder
     private var primaryButton: some View {
         switch status.remedy {
-        case .merge: mergeButton
+        case .merge: mergeControl(isPrimary: true)
         case .fixConflicts: fixConflictsButton
         case .commitAndPush, .push: pushButton
         }
@@ -467,64 +478,41 @@ struct PullRequestSummary: View {
             )
     }
 
-    /// The other two merge methods, and while there is local work the way to merge at all.
-    private var mergeMenu: some View {
-        Menu {
-            ForEach(GitHub.MergeMethod.allCases, id: \.self) { method in
-                Button(method.label) { propose(method) }
-            }
-        } label: {
-            Label("Choose a merge method", systemImage: "chevron.down")
-        }
-        .labelStyle(.iconOnly)
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        // The state's colour rather than a neutral grey. It stands beside a filled button in
-        // that colour and belongs to it, and a grey chevron a few points off a teal capsule
-        // reads as a stray control that wandered into the strip.
-        .foregroundStyle(tint ?? Palette.accent)
-        .controlSize(.small)
-        // A running agent is not in here: `trailing` disables the whole cluster for that, so the
-        // chevron and the button beside it can never disagree about it.
-        .disabled(!status.canMerge)
-        .help(blockedReason ?? "Merge #\(pullRequest.number), by whichever method")
-    }
-
-    /// The one prominent control in the inspector, and the only solid colour in the strip.
+    /// Merge, and the chevron that chooses which merge, as one control.
     ///
-    /// A real `Button` rather than a `Menu` with a primary action. A menu styled `.button` ignores
-    /// `.borderedProminent` and the tint under it on this SDK and comes out as the same neutral
-    /// capsule as every other control in the bar, which is exactly the signal this control exists
-    /// to carry. The other two methods moved to the chevron beside it, which stays a menu and stays
-    /// quiet because it is not the thing being pointed at.
+    /// This replaces a pair: a prominent `Merge` button that always proposed a squash, and a small
+    /// borderless chevron beside it whose three items each merged by their own method. Nothing has
+    /// been dropped. All three methods are still there, still in GitHub's own wording, still one
+    /// press from a merge; what changed is that picking one now sets the mode and the button says
+    /// which, so the press that lands somebody's branch is always the press on the thing labelled
+    /// with what it will do.
     ///
-    /// Always explicitly tinted, and the tint does take effect: measured on this SDK the fill
-    /// comes out at the tint's own value, where an untinted `.borderedProminent` comes out at
-    /// `#3478F6`, the system accent, which is whatever blue or pink the user set in General. The
-    /// fill is the state's own colour instead, so the strip is one decision from end to end and a
-    /// red bar ends in a red button. Failing checks do not block merging, which is the whole
-    /// reason that has to hold.
+    /// Prominent when merging is what the state is asking for, quiet when it is not. The quiet
+    /// form is the old chevron's other job: with local work in the worktree the primary swaps to
+    /// Commit and push, and merging has to stay reachable rather than disappear.
     ///
-    /// The one thing no tint survives is the window losing key. AppKit draws every prominent
-    /// button in an inactive window as a neutral glass capsule, this one included, and there is no
-    /// override for it short of building the control by hand. That is the platform being
-    /// consistent rather than a bug here, and it is worth knowing before reading a screenshot of
-    /// this strip: a grey Merge button means the screenshot was taken with another app in front.
+    /// **The tint measurement that used to live here has moved to `MergeSplitButton`,** because
+    /// it is the reason that control is drawn the way it is. The short version is unchanged: the
+    /// system will not tint a menu, prominent or otherwise, so the band's colour is painted behind
+    /// it. What no drawing survives is the window losing key, when AppKit draws every prominent
+    /// control as a neutral glass capsule. That is the platform being consistent rather than a bug
+    /// here, and it is worth knowing before reading a screenshot of this strip: a grey Merge
+    /// button means the screenshot was taken with another app in front.
     ///
-    /// Every path through it opens the confirmation. The button proposes a squash merge because
-    /// that is what it says; nothing here ever performs one, and since merging moved onto the
-    /// agent nothing anywhere in this target does either.
-    private var mergeButton: some View {
-        Button("Merge", systemImage: "arrow.triangle.merge") { propose(.squash) }
-            .buttonStyle(.borderedProminent)
-            .tint(status.tone.fill)
-            .controlSize(.regular)
+    /// Every path through it opens the confirmation. Nothing here performs a merge, and since
+    /// merging moved onto the agent nothing anywhere in this target does either.
+    private func mergeControl(isPrimary: Bool) -> some View {
+        MergeSplitButton(
+            method: mergeMethod,
+            fill: status.tone.fill,
+            isPrimary: isPrimary,
             // Only what GitHub says about the pull request. A running agent is the cluster's
-            // answer rather than this button's: see `trailing`.
-            .disabled(!status.canMerge)
-            // Disabled controls do not explain themselves, and "why is this greyed out" is the
-            // whole question a blocked pull request raises.
-            .help(blockedReason ?? "Squash and merge, or choose another method")
+            // answer rather than this control's: see `trailing`.
+            canMerge: status.canMerge,
+            help: blockedReason,
+            choose: onChooseMergeMethod,
+            merge: { propose(mergeMethod) }
+        )
     }
 
     // MARK: - Text

@@ -95,6 +95,8 @@ struct PullRequestBar: View {
                 localWork: model.localWork,
                 isWorking: isWorking,
                 branchActions: branchActions,
+                mergeMethod: model.mergeMethod,
+                onChooseMergeMethod: chooseMergeMethod,
                 onMerge: merge,
                 onPush: push,
                 onFixConflicts: { fixConflicts(on: pullRequest) },
@@ -136,12 +138,26 @@ struct PullRequestBar: View {
 
     // MARK: - Actions
 
+    /// Changes how this project merges, and merges nothing.
+    ///
+    /// The whole point of the split button: the menu picks the mode, the button performs it. A
+    /// menu item that merged was the old chevron, and it meant the irreversible press was in two
+    /// places at once, one of them unlabelled until it had already happened.
+    private func chooseMergeMethod(_ method: GitHub.MergeMethod) {
+        Task { await model.chooseMergeMethod(method) }
+    }
+
     private func poll() async {
         // The first pass is an arrival rather than a poll, and it is allowed a recent answer.
         // This runs on `.task(id:)`, so it used to send two gh calls to GitHub every time the
         // window landed on a workspace, including landing back on one it had left four seconds
         // earlier. Every pass after this one asks GitHub properly: twenty seconds is exactly long
         // enough that an answer from the last one is not worth having.
+        // Read on every arrival rather than once per launch, because the choice belongs to the
+        // project and not to this workspace: picking Rebase in one of a project's worktrees has
+        // to be what the band says in the next one, and switching workspace is what starts this.
+        await model.loadMergeMethod()
+
         var maxAge = WorkspaceModel.pullRequestArrivalMaxAge
         while !Task.isCancelled {
             await model.refreshPullRequest(maxAge: maxAge)

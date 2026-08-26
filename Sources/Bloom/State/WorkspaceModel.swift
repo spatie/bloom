@@ -145,6 +145,14 @@ final class WorkspaceModel {
     }
 
     var isLoadingPullRequest = false
+
+    /// How this project's branches land, which is what the band's split button promises.
+    ///
+    /// Kept here so the band can read it synchronously while it draws, and read back from the
+    /// store on every arrival, because the choice belongs to the PROJECT: two workspaces cut from
+    /// the same repository are two copies of this property and the store is the one answer between
+    /// them. See `MergeMethodChoice`, which holds the scope argument and the key.
+    private(set) var mergeMethod = MergeMethodChoice.fallback
     /// What the last press on the pull request strip left to say, drawn at the top of the
     /// inspector column.
     ///
@@ -1304,6 +1312,28 @@ final class WorkspaceModel {
     /// changed asks again with no age at all: a finished turn, the bar's own poll, and the button
     /// that creates one.
     static let pullRequestArrivalMaxAge = Duration.seconds(30)
+
+    /// Reads this project's merge method back, for the band that is about to draw it.
+    ///
+    /// Nothing here talks to GitHub or to git: it is one row of the store's key value table, so it
+    /// costs nothing to ask again every time a workspace is arrived at, and asking again is what
+    /// keeps two worktrees of one project from disagreeing about their project's convention.
+    func loadMergeMethod() async {
+        guard let store else { return }
+        mergeMethod = await MergeMethodChoice.load(repoID: workspace.repoID, from: store)
+    }
+
+    /// Changes the method in force, and merges nothing.
+    ///
+    /// The property moves first so the button's label changes with the press that changed it,
+    /// rather than a beat later when SQLite has answered. A write that fails leaves the choice
+    /// standing for this launch, which is the right way round: the alternative is a menu that
+    /// appears to ignore the tick.
+    func chooseMergeMethod(_ method: GitHub.MergeMethod) async {
+        mergeMethod = method
+        guard let store else { return }
+        await MergeMethodChoice.save(method, repoID: workspace.repoID, to: store)
+    }
 
     /// - Parameter maxAge: how old a cached answer may be. Zero always asks GitHub.
     func refreshPullRequest(maxAge: Duration = .zero) async {
