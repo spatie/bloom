@@ -14,11 +14,17 @@ struct WorkspaceEventsView: View, Equatable {
     /// closures beside them are new closures.
     ///
     /// Functions are never equal to one another, and both of these are built fresh in
-    /// `TranscriptListView.body`, so without this SwiftUI has to assume the feed differs from the
-    /// one it drew a moment ago and re-runs this body on every pass of the transcript's own list.
+    /// `TranscriptListView.body`, so without this SwiftUI had to assume the feed differed from the
+    /// one it drew a moment ago and re-ran this body on every pass of the transcript's own list.
     /// That body reads the setup timeline, which is the whole of what the note above is about:
     /// the read was kept out of the list so a flush redraws these rows and nothing else, and a
     /// comparison that always fails put the list's passes back on top of it.
+    ///
+    /// **The transcript no longer needs it, and it is kept because the argument is still true of
+    /// anything else that draws this.** A table rebuilds a cell only when its content key moves,
+    /// so the feed is handed a fresh root view when the workspace, the run or the pane height
+    /// changes and at no other time, which is the same set of conditions this compares. The list
+    /// used to have to say `.equatable()` to get that; now it gets it for nothing.
     ///
     /// **The closures are ignored, and `workspaceID` is what makes that safe.** A view kept by an
     /// equal comparison keeps the closure it was built with, so what matters is what a stale one
@@ -248,9 +254,18 @@ struct WorkspaceEventRow: View {
     /// swallow the wheel for as long as the pointer was over it, and a reader could not get past
     /// a block that is five hundred lines tall.
     ///
-    /// Named here and used by `TranscriptListView`, because only that view holds the scroller.
-    /// Nothing else in the transcript carries an id that is not a row's sequence number, and this
-    /// one cannot collide with those: they are integers.
+    /// **Nothing reads this at the moment, and it is kept for what it knows rather than for what
+    /// it does.** It was the id a `ScrollViewReader` was pointed at over the lazy stack, and the
+    /// placement above is measured: under the sentence rather than under the log, because
+    /// anchoring on the block put "You can ask for something now" exactly one line below the
+    /// bottom edge of the pane.
+    ///
+    /// The table cannot be pointed at a SwiftUI id inside a cell. The whole feed is one row of the
+    /// table, so `TranscriptListView.showSetupLogEnd` asks for the bottom of that row instead,
+    /// which is the same place whenever the setup event is the last thing in the feed and is
+    /// below it when something later has been added. Putting this back to work means measuring
+    /// where this sentinel sits inside the row and scrolling to that offset, which is more
+    /// machinery than the case has so far been worth.
     static let endID = "bloom.workspaceEvent.setupEnd"
 
     /// Puts the newest line of the log on screen.

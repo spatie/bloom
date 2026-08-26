@@ -169,24 +169,19 @@ public enum TranscriptMotion {
         return .glide(seconds: glideFloor + (glideCeiling - glideFloor) * ramp)
     }
 
-    /// Whether arriving at the end has to be said a second time once the glide has finished.
-    ///
-    /// **Yes while a turn is streaming, and this is the one place the two mechanisms meet.** The
-    /// end of the content is where it was when the glide was aimed at it, and a running turn moves
-    /// it down by a line every few hundred milliseconds. So a glide during a turn lands a little
-    /// short of the end it was pointed at, and short of the end is exactly the state in which the
-    /// transcript does NOT follow the tail: the size-change anchor is only in force while the
-    /// reader is near the bottom. Left alone, pressing the pill mid turn takes you to where the
-    /// answer was and then leaves you behind again.
-    ///
-    /// Saying the edge again on arrival closes that gap and re-attaches the follow in one move.
-    /// Not animated, because it is covering the two lines that arrived during the glide.
-    ///
-    /// A finished turn needs none of this. Nothing is growing, so the glide lands on the end.
-    public static func reassertsLiveEnd(after move: LiveEndMove, isStreaming: Bool) -> Bool {
-        switch move {
-        case .jump: false
-        case .glide: isStreaming
-        }
-    }
+    // MARK: - What used to be here
+    //
+    // **`reassertsLiveEnd(after:isStreaming:)` was removed, and the reason it existed is worth
+    // keeping.** It answered whether a glide to the live end had to say the end a second time
+    // when it landed, and the answer was yes while a turn was streaming: the end of the content
+    // moves down while the travel is in the air, so the glide lands a little short of the end it
+    // was aimed at, and short of the end was exactly the state in which the lazy stack dropped
+    // its size-change anchor and stopped following the tail. The caller kept a task to say it
+    // again a beat later.
+    //
+    // What made it obsolete is that arriving at the end is no longer a movement. The transcript
+    // asks to BE at the end, the table holds that instruction and re-asserts it every time
+    // anything changes where the end is, and a turn growing the content while a travel is in
+    // flight is one of the things it re-asserts for. A rule about saying something twice is not
+    // needed by a thing that never stopped saying it. See `TranscriptTableController.goToEnd`.
 }
