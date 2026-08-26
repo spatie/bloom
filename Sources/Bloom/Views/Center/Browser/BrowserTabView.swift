@@ -189,48 +189,72 @@ struct BrowserTabView: View {
         }
     }
 
-    /// The pane's own menu with the screenshot on top of it, which is what a right click on the
-    /// page ends up showing under WebKit's Reload and Inspect Element.
+    /// The pane's own menu with what Bloom can do with this page on top of it, which is what a
+    /// right click on the page ends up showing under WebKit's Reload and Inspect Element.
     ///
-    /// The camera in the toolbar was the only way to reach this. A toolbar glyph with no word next
-    /// to it is discoverable by hovering it and reading the help tag, which is to say discoverable
-    /// by accident, and the right click is where a Mac user asks what can be done with the thing
-    /// under the pointer. It is not a menu bar item because it acts on one page in one pane, and
-    /// the menu bar cannot say which page.
+    /// The camera in the toolbar was the only way to reach the screenshot. A toolbar glyph with no
+    /// word next to it is discoverable by hovering it and reading the help tag, which is to say
+    /// discoverable by accident, and the right click is where a Mac user asks what can be done with
+    /// the thing under the pointer. Neither item is a menu bar item, because both act on one page
+    /// in one pane and the menu bar cannot say which page.
     ///
-    /// Built fresh on every click, like the pane menu it wraps, and dropped while a capture is
-    /// already running for the reason the toolbar button goes quiet: a second press in the middle
-    /// of the first would attach the same page twice.
+    /// **These two are one group, above the pane's own.** WebKit's items act on the page, these
+    /// act on the page, and Split Right and Close Pane act on the pane, so the separators the
+    /// reader ends up with divide it that way. Opening elsewhere leads, because it is the one item
+    /// here that hands the page to something outside Bloom.
+    ///
+    /// Built fresh on every click, like the pane menu it wraps. Either item is dropped rather than
+    /// greyed when it has nothing to act on, which is what Close Pane does one group down: no
+    /// address to open, no Open in External Browser, and a capture already running takes the
+    /// screenshot out for the reason the toolbar button goes quiet, which is that a second press
+    /// in the middle of the first would attach the same page twice.
+    private func pageMenu() -> NSMenu {
+        let menu = paneMenu?() ?? NSMenu()
+
+        var items: [NSMenuItem] = []
+        // Never the raw address. What may be handed to another application is `BrowserAddress`'s
+        // decision, because the string was written by the page.
+        if let url = BrowserAddress.external(from: session.displayAddress) {
+            // The same words the transcript's link menu uses for the same destination. See
+            // `TranscriptLinkMenu`.
+            items.append(item("Open in External Browser") { NSWorkspace.shared.open(url) })
+        }
+        if !isCapturing {
+            // The same words as the toolbar's own camera, taken from the one place that says them,
+            // so the glyph and the menu item cannot drift into naming the same thing two ways.
+            items.append(item(BrowserToolbar().screenshot.name, perform: capture))
+        }
+        guard !items.isEmpty else { return menu }
+
+        if !menu.items.isEmpty { menu.insertItem(.separator(), at: 0) }
+        for (offset, item) in items.enumerated() { menu.insertItem(item, at: offset) }
+        return menu
+    }
+
+    /// An item that runs a closure.
     ///
     /// The target is hung off the item's `representedObject` as well as its `target`, because
     /// `NSMenuItem` holds its target weakly and represented objects strongly, and the menu is the
     /// only thing alive by the time the item is clicked. See `BrowserPageWebView` for what happens
     /// to these items next.
-    private func pageMenu() -> NSMenu {
-        let menu = paneMenu?() ?? NSMenu()
-        guard !isCapturing else { return menu }
-
-        // The same words as the toolbar's own camera, taken from the one place that says them, so
-        // the glyph and the menu item cannot drift into naming the same thing two ways.
-        let title = BrowserToolbar().screenshot.name
-        let target = SnapshotMenuTarget(perform: capture)
+    private func item(
+        _ title: String, perform: @escaping @MainActor () -> Void
+    ) -> NSMenuItem {
+        let target = PageMenuTarget(perform: perform)
         let item = NSMenuItem(
-            title: title, action: #selector(SnapshotMenuTarget.fire), keyEquivalent: ""
+            title: title, action: #selector(PageMenuTarget.fire), keyEquivalent: ""
         )
         item.target = target
         item.representedObject = target
-
-        if !menu.items.isEmpty { menu.insertItem(.separator(), at: 0) }
-        menu.insertItem(item, at: 0)
-        return menu
+        return item
     }
 
 }
 
-/// What answers the page menu's screenshot item. A closure cannot be an `NSMenuItem` action, and
-/// the view that built the item is a struct that will not be there when the item is clicked.
+/// What answers an item of the page menu. A closure cannot be an `NSMenuItem` action, and the view
+/// that built the item is a struct that will not be there when the item is clicked.
 @MainActor
-final class SnapshotMenuTarget: NSObject {
+final class PageMenuTarget: NSObject {
     private let perform: @MainActor () -> Void
 
     init(perform: @escaping @MainActor () -> Void) {
