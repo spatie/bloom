@@ -145,6 +145,28 @@ enum Palette {
     /// the worst ground cleared AA. See `PaletteContrastTests`, which now says so on every build.
     static let textTertiary = dynamic(PaletteInk.textTertiary)
 
+    /// The tertiary rung where the ground under it is glass, which is a different rung in each
+    /// appearance because the ground moves in only one of them.
+    ///
+    /// `glassEffect` over a flat backdrop is that backdrop lifted toward white. In light the bar
+    /// it lifts is already all but white, so `#F7FAFA` becomes about `#F9FBFB` and `textTertiary`
+    /// holds 4.56 to 1 there: nothing has happened and the tuned ink is still the right one. In
+    /// dark the same lift is the whole story, because `#0C1E2A` has somewhere to go:
+    /// `textTertiary` measures 5.65 on the resting bar, crosses the 4.5 floor by an 8 percent lift
+    /// and reaches 2.98 by 20. `secondaryLabelColor` is 5.07 and 4.01 at those two, and AppKit
+    /// resolves it against the material's own effective appearance rather than against a number
+    /// tuned for an opaque page.
+    ///
+    /// **The two halves differ because the ground differs, and unifying them costs whichever half
+    /// is unified away.** Both land in the same place against their own ground, 4.56 in light and
+    /// 4.51 to 5.07 in dark, so it is one weight to look at and two colours only underneath.
+    /// See `PaletteContrastTests.aLiftedGroundCostsTheTertiaryInk` and `BrowserToolbarView`.
+    static let textTertiaryOnGlass = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? .secondaryLabelColor
+            : NSColor(rgb: PaletteInk.textTertiary.light)
+    })
+
     /// Ink on anything Bloom has filled with a colour of its own.
     ///
     /// Spelled as the selection's ink rather than built from the same `NSColor` a second time,

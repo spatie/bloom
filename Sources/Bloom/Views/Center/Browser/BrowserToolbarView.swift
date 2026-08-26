@@ -130,7 +130,7 @@ struct BrowserToolbarView: View {
             if !isEditing, let symbol = display.security.symbol {
                 Image(systemName: symbol)
                     .font(Typo.caption)
-                    .foregroundStyle(Palette.textSecondary)
+                    .foregroundStyle(Palette.textTertiaryOnGlass)
                     .help(display.security.help ?? "")
                     .accessibilityLabel(display.security.help ?? "")
             }
@@ -198,19 +198,25 @@ struct BrowserToolbarView: View {
         Text(string).foregroundStyle(colour)
     }
 
-    /// The dim runs are `textSecondary` and not `textTertiary`, and that is the glass rather than
-    /// a taste. Bloom's tertiary is tuned for opaque grounds: on the sunken bar in dark it measures
-    /// 5.65 to 1, and it crosses the 4.5 floor as soon as glass lifts that ground 8 percent toward
-    /// white, 2.98 by 20. Retuning it does not help, because an ink still clearing 4.5 at a quarter
-    /// lift stands only 1.32 to 1 off `labelColor` where the tertiary stands 2.21 today: the floor
-    /// is bought by deleting the two-tone. So the pair goes semantic, the way `QuotaPanel` did on
-    /// the menu's material, and AppKit resolves both against the glass's own effective appearance
-    /// with the vibrancy a flat composite cannot model. See
-    /// `PaletteContrastTests.aLiftedGroundCostsTheTertiaryInk`.
+    /// The dim half of the two-tone, named here only so the interpolation below fits on a line.
+    private var dim: Color { Palette.textTertiaryOnGlass }
+
+    /// The dim runs are `textTertiaryOnGlass`, which is Bloom's tertiary in light and AppKit's
+    /// secondary label in dark. **The two halves differ because the ground does.** Glass lifts a
+    /// flat backdrop toward white, and in light this bar is already all but white, so the tertiary
+    /// holds 4.56 to 1 and nothing is wrong; in dark the same lift takes it from 5.65 through the
+    /// 4.5 floor at 8 percent to 2.98 at 20. Retuning one pair cannot cover both, because an ink
+    /// still clearing 4.5 on a quarter-lifted dark ground stands 1.32 to 1 off `labelColor` where
+    /// the tertiary stands 2.21: the floor gets bought by deleting the two-tone. See
+    /// `Palette.textTertiaryOnGlass` and `PaletteContrastTests.aLiftedGroundCostsTheTertiaryInk`.
+    ///
+    /// The connection glyph takes the same ink rather than the bar's `textSecondary`, so the dim
+    /// half of the address stays one weight. Its floor is a glyph's 3, and the tertiary misses
+    /// even that in dark, at 2.98.
     private var addressLabel: some View {
         // Interpolated rather than concatenated: `Text.+` is deprecated in macOS 26 and the app
         // target builds with -warnings-as-errors.
-        Text("\(tinted(display.leading, Palette.textSecondary))\(tinted(display.host, Palette.textPrimary))\(tinted(display.trailing, Palette.textSecondary))")
+        Text("\(tinted(display.leading, dim))\(tinted(display.host, Palette.textPrimary))\(tinted(display.trailing, dim))")
             .lineLimit(1)
             // The tail, which is where a query string lives. The host is the part worth reading
             // and it is at the head, so it is the part that always survives the cut.

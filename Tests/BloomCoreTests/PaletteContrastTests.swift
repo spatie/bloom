@@ -246,10 +246,58 @@ struct PaletteContrastTests {
         #expect(Contrast.ratio(dim, host) < 1.5)
         #expect(Contrast.ratio(ink, host) > 2)
 
-        // Light is a different question and the answer there is yes: glass over a bar that is
-        // already all but white barely moves it, so the tertiary keeps its floor.
+        // Light is a different question and the answer there is the opposite: glass over a bar
+        // already all but white barely moves it, so the tuned ink keeps its floor and there is
+        // nothing here to fix. This is why `Palette.textTertiaryOnGlass` has two different halves.
         let lit = Contrast.composited(0xFFFFFF, over: PaletteInk.surfaceSunken.light, at: 0.25)
         #expect(Contrast.ratio(PaletteInk.textTertiary.light, lit) >= Contrast.textFloor)
+    }
+
+    /// What `Palette.textTertiaryOnGlass` resolves to, on both sides, and why it is not one colour.
+    ///
+    /// `secondaryLabelColor` is semantic and cannot be read from here, so it is stated as the
+    /// alphas AppKit composites it at: black at 50 percent in light, white at 55 in dark. Those
+    /// two numbers are the whole of it, and measuring the composite rather than the alpha is the
+    /// point `compositingIsTheThingMeasured` makes further up.
+    ///
+    /// The pair is asserted in both directions. In dark the semantic ink is the one that holds,
+    /// and in light it is the one that fails, which is the fact that stops the two halves being
+    /// tidied into one.
+    @Test("the ink on glass takes the better half in each appearance, and they are different halves")
+    func theInkOnGlassDiffersBecauseTheGroundDoes() {
+        let secondaryInLight = 0.50
+        let secondaryInDark = 0.55
+
+        // Light: the ground barely moves, Bloom's own ink clears the floor, and AppKit's does not.
+        let lit = Contrast.composited(0xFFFFFF, over: PaletteInk.surfaceSunken.light, at: 0.25)
+        let semanticInLight = Contrast.composited(0x000000, over: lit, at: secondaryInLight)
+        #expect(Contrast.ratio(PaletteInk.textTertiary.light, lit) >= Contrast.textFloor)
+        #expect(Contrast.ratio(semanticInLight, lit) < Contrast.textFloor)
+
+        // Dark: the ground moves a long way, and the two swap places. A 15 percent lift is the
+        // semantic ink's own edge rather than comfort, at 4.51, so this is the recorded limit of
+        // the arrangement: a `surfaceSunken` retuned any lighter and the browser bar says so here.
+        for lift in [0.10, 0.15] {
+            let ground = Contrast.composited(0xFFFFFF, over: PaletteInk.surfaceSunken.dark, at: lift)
+            let semantic = Contrast.composited(0xFFFFFF, over: ground, at: secondaryInDark)
+            #expect(Contrast.ratio(PaletteInk.textTertiary.dark, ground) < Contrast.textFloor)
+            #expect(
+                Contrast.ratio(semantic, ground) >= Contrast.textFloor,
+                "the semantic ink on a \(lift) lift: \(Contrast.ratio(semantic, ground).rounded(to: 2)) to 1"
+            )
+        }
+
+        // And it is one weight to look at, not two: each half lands in the same band against the
+        // ground it is drawn on, so switching appearance does not change how dim the run reads.
+        let inLight = Contrast.ratio(PaletteInk.textTertiary.light, lit)
+        let darkGround = Contrast.composited(0xFFFFFF, over: PaletteInk.surfaceSunken.dark, at: 0.15)
+        let inDark = Contrast.ratio(
+            Contrast.composited(0xFFFFFF, over: darkGround, at: secondaryInDark), darkGround
+        )
+        #expect(
+            abs(inLight - inDark) < 0.75,
+            "light reads at \(inLight.rounded(to: 2)) and dark at \(inDark.rounded(to: 2))"
+        )
     }
 
     /// A boundary is not read, so it holds the non-text floor rather than the text one. `border`
