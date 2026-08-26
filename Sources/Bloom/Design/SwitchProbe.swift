@@ -41,6 +41,9 @@ enum SwitchProbe {
     /// switch kicks off has to be allowed to land inside the timeline, or the report is a
     /// measurement of the settle rather than of the switch.
     private static var settle: Int { ProbeHarness.count("--switch-settle", or: 4000) }
+    /// How many wheel steps back the reader is scrolled before being switched away from. Four
+    /// hundred reaches the top of any conversation in the fixture; forty stops part way up.
+    private static var scrollSteps: Int { ProbeHarness.count("--switch-scroll", or: 400) }
 
     // MARK: - Entry
 
@@ -185,12 +188,17 @@ enum SwitchProbe {
         let bottom = order[order.count - 1]
         var report: [String: JSONValue] = [:]
 
-        // One to the top. A wheel scroll rather than a jump, in one large step per frame, because
-        // what is being set up is a reader's position and a reader gets there by scrolling.
+        // One scrolled back, a wheel step per frame, because what is being set up is a reader's
+        // position and a reader gets there by scrolling.
+        //
+        // `--switch-scroll` is how far, and it is a flag because the two ends of the range are two
+        // different questions. All the way to the top is where a place has to be exact; a stop
+        // part way up is where a place has to EXIST, and it is the case the owner reported second:
+        // a reader who is neither at the end nor at the beginning was being put back at the end.
         app.selection = .workspace(top)
         try? await Task.sleep(for: .milliseconds(settle))
         if let scroll = ProbeHarness.transcriptScrollView(in: contentView) {
-            for _ in 0..<400 {
+            for _ in 0..<scrollSteps {
                 ProbeHarness.wheel(scroll, by: 300)
                 try? await Task.sleep(for: .milliseconds(8))
             }
