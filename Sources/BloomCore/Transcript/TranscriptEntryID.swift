@@ -37,6 +37,19 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
         return seq
     }
 
+    /// **Whether this entry can change what it draws without its content key moving.**
+    ///
+    /// A stored row cannot: everything that changes what one draws is hashed into its key, so a
+    /// row that has been measured is measured until the key moves. The four that are not stored
+    /// rows all can, because each re-renders from its own observation inside the cell it is in.
+    /// The streaming tail is the one that bites: it draws nothing at all between turns, so
+    /// anything that treats "measured at nought" as "will always be nought" would leave a running
+    /// turn with no view to appear in.
+    ///
+    /// Here rather than beside the table because it is a claim about these five cases, and a
+    /// caller acting on it is deciding whether to build a row's view at all.
+    public var redrawsItself: Bool { seq == nil }
+
     public var description: String {
         switch self {
         case .setup: "setup"

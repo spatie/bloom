@@ -502,6 +502,33 @@ struct TranscriptTable: NSViewRepresentable {
         ) -> NSView? {
             guard entries.indices.contains(row), let rowEnvironment else { return nil }
             let entry = entries[row]
+            // **A row that turned out to draw nothing gets no view at all, and that is most of a
+            // session.** Sixty per cent of a real conversation is stream events with no view in
+            // them, and a table builds one for every row in the visible rect: an `NSHostingView`
+            // with a SwiftUI graph of its own, a runloop observer of its own, and a place of its
+            // own in the layout. A profile of an upward scroll put 22 per cent of the main thread
+            // in `NSHostingView.beginTransaction` and the graph flush under it, none of which any
+            // counter here could see, because the cost is per LIVE view per display cycle rather
+            // than per view built.
+            //
+            // **Measured, never merely claimed, and that is the whole safety of it.** This asks
+            // what the row TURNED OUT to be when it was drawn, so nothing is owed a correction and
+            // there is nothing left to learn by drawing it again. A row that has only been
+            // ESTIMATED at nought, by `TranscriptRowInk`, is still built and still reports, which
+            // is what would catch that guess being wrong. And a row that gains content gets a new
+            // content key, misses here, and is built like any other row: this cannot bring back
+            // the blank between two Bash rows, because a row it silences has already told the
+            // table it draws nothing.
+            //
+            // **A stored row and nothing else, and that is not a tidiness.** Three entries in this
+            // list re-render from their own observation and change height without their content
+            // key moving: the streaming tail, the setup log, and the delivery at the head of the
+            // queue. The tail draws NOTHING between turns, so it would be measured at nought,
+            // silenced, and then have no view at all on the frame a turn starts: the answer would
+            // never appear. `noted` is what keeps those three right and it needs a cell to hear
+            // from. A stored row cannot do that to us, because everything that changes what one
+            // draws is in its key.
+            if !entry.id.redrawsItself, heights.measuredNothing(entry.contentKey) { return nil }
             let identifier = NSUserInterfaceItemIdentifier("bloom.transcript.cell")
             let cell = tableView.makeView(withIdentifier: identifier, owner: self)
                 as? TranscriptTableCell ?? TranscriptTableCell(identifier: identifier)
@@ -536,6 +563,19 @@ struct TranscriptTable: NSViewRepresentable {
         /// The three entries that re-render themselves are answered the same way. What keeps them
         /// right is `noted` below, which is authoritative and which the tail triggers itself as it
         /// grows.
+        ///
+        /// ## AppKit estimates too, and leaving it to is the faster of the two
+        ///
+        /// macOS 13 gave `NSTableView` its own row height estimation: it asks for a fraction of
+        /// the heights and guesses the rest, replacing them as rows come into view. So there are
+        /// two estimating machines here, one under the other, and the obvious suspicion is that
+        /// they fight. **Measured, and they do not.** With
+        /// `-NSTableViewCanEstimateRowHeights NO`, on the same binary and the same machine state,
+        /// the delegate was asked for 2,523 heights rather than 1,752 and the share of dropped
+        /// frames got WORSE, 28.9 per cent to 32.6. AppKit's estimation is doing us a favour.
+        ///
+        /// Written down because it is a thing somebody will otherwise turn off again in six
+        /// months on the strength of how plausible it sounds.
         private func height(of entry: TranscriptTableEntry) -> CGFloat {
             guard heights.isReady else { return Self.hair }
             return CGFloat(heights.assumed(for: entry.contentKey, drawsNothing: entry.drawsNothing))
@@ -1376,9 +1416,15 @@ private struct HostedRow: View {
 
 /// One row of the table: an `NSHostingView` and the key of what is in it.
 ///
-/// Pinned on all four edges, so the hosting view is exactly the row and there is no second opinion
-/// about its height. What the content wants instead comes back through `HostedRow`, measured by
-/// the same layout that drew it.
+/// The hosting view is exactly the row, so there is no second opinion about its height. What the
+/// content wants instead comes back through `HostedRow`, measured by the same layout that drew it.
+///
+/// **By frame, and it was by four constraints.** Filling the cell is the same arrangement either
+/// way, and one of them enrols every live row in the Auto Layout engine. A profile of an upward
+/// scroll spent 726 samples of 3,034 inside `-[NSView _layoutSubtreeWithOldSize:]`, recursing some
+/// fifteen deep with 538 still at the bottom, which is the breadth of a table full of cells rather
+/// than the depth of any one of them. A frame set in `layout` is the same geometry with no solver
+/// in it, and the assignment is guarded, so a row whose size has not moved costs nothing at all.
 final class TranscriptTableCell: NSView {
     private let host: NSHostingView<AnyView>
     private var appliedKey: TranscriptContentKey?
@@ -1389,14 +1435,20 @@ final class TranscriptTableCell: NSView {
         host = NSHostingView(rootView: AnyView(EmptyView()))
         super.init(frame: .zero)
         self.identifier = identifier
-        host.translatesAutoresizingMaskIntoConstraints = false
+        // The mask keeps the geometry right through an autoresize AppKit does on its own; the
+        // frame in `layout` below is what makes it exact. Both, because a cell is handed its size
+        // by the table rather than asked for one, and the two agree in every case.
+        host.translatesAutoresizingMaskIntoConstraints = true
+        host.autoresizingMask = [.width, .height]
+        host.frame = bounds
         addSubview(host)
-        NSLayoutConstraint.activate([
-            host.leadingAnchor.constraint(equalTo: leadingAnchor),
-            host.trailingAnchor.constraint(equalTo: trailingAnchor),
-            host.topAnchor.constraint(equalTo: topAnchor),
-            host.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
+    }
+
+    override func layout() {
+        super.layout()
+        // Guarded, because assigning a frame is what makes a hosting view lay its content out
+        // again, and this runs for every live cell on every pass that moves one.
+        if host.frame != bounds { host.frame = bounds }
     }
 
     @available(*, unavailable)

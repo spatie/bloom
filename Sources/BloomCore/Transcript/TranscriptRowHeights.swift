@@ -260,6 +260,27 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         heights[contentKey]
     }
 
+    /// **Whether this row has been measured and turned out to draw nothing at all.**
+    ///
+    /// The question a table asks before building a view for a row. A row that drew nothing has no
+    /// view worth building: under a table, every visible row costs an `NSHostingView` with its own
+    /// SwiftUI graph, its own runloop observer and its own place in the layout, and a sixth of a
+    /// millisecond of graph flush per row per frame is what a scroll is made of. Sixty per cent of
+    /// a real session is such rows.
+    ///
+    /// **Measured, and not merely claimed, and the difference is the whole safety of it.**
+    /// `TranscriptRowInk` says what a row is EXPECTED to draw, which is a guess used to answer a
+    /// height before anybody has drawn it. This says what a row TURNED OUT to draw when it was
+    /// drawn, so nothing is owed a correction and there is nothing left to learn by drawing it
+    /// again. A row that gains content gets a new content key, misses here, and is built like any
+    /// other row.
+    ///
+    /// Exactly nought rather than `isSameHeight`, because `note` rounds a height UP: a row that
+    /// drew four tenths of a point is remembered as one and is not this.
+    public func measuredNothing(_ contentKey: TranscriptContentKey) -> Bool {
+        heights[contentKey] == 0
+    }
+
     /// What an unmeasured row that draws SOMETHING is worth: the mean of the rows measured here
     /// that drew something, or `assumedRowHeight` before there is one.
     ///

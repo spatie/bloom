@@ -283,7 +283,71 @@ struct TranscriptRowHeightsTests {
         #expect(heights.assumed(for: key("row.1")) == 100)
     }
 
-    /// **A row that is going to draw nothing is answered, not estimated.** Most of a session is
+    // MARK: - Whether a row is worth a view
+
+    /// **The rule behind giving a row no view at all.** A table builds an `NSHostingView` with a
+    /// SwiftUI graph of its own for every row in the visible rect, and sixty per cent of a real
+    /// session draws nothing. Only a row that has been MEASURED at nought is silenced, because
+    /// then nothing is owed a correction.
+    @Test("a row measured at nothing is known to draw nothing")
+    func measuredNothingIsNothing() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(0, for: key("blank"))
+        #expect(heights.measuredNothing(key("blank")))
+    }
+
+    /// **The one that keeps the gaps from coming back.** A row nobody has measured is not known to
+    /// draw nothing, whatever `TranscriptRowInk` guessed about it: it is built, it reports, and
+    /// that report is what would catch the guess being wrong.
+    @Test("a row nobody has measured is not known to draw nothing")
+    func unmeasuredIsNotNothing() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        #expect(!heights.measuredNothing(key("never.drawn")))
+        // Even though it is answered as nought, which is a claim rather than a measurement.
+        #expect(heights.assumed(for: key("never.drawn"), drawsNothing: true) == 0)
+        #expect(!heights.measuredNothing(key("never.drawn")))
+    }
+
+    /// A row that drew something is not silenced, and a row rounded up to a point is something.
+    /// `note` rounds UP, so four tenths of a point is remembered as one and is a row with a view.
+    @Test("anything at all is not nothing")
+    func somethingIsNotNothing() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(24, for: key("row.1"))
+        heights.note(0.4, for: key("row.2"))
+        #expect(!heights.measuredNothing(key("row.1")))
+        #expect(!heights.measuredNothing(key("row.2")))
+        #expect(heights.height(for: key("row.2")) == 1)
+    }
+
+    /// **A row that gains content is built again.** The cache is keyed on what the row draws, so a
+    /// row that was nothing and now has something is a different key, which nobody has measured.
+    /// This is why silencing a row cannot bring the blank between two rows back.
+    @Test("a row that gains content is not the row that drew nothing")
+    func gainingContentMissesTheCache() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(0, for: key("row.7.empty"))
+        #expect(heights.measuredNothing(key("row.7.empty")))
+        // The same row, now with something in it, and therefore a different content key.
+        #expect(!heights.measuredNothing(key("row.7.full")))
+    }
+
+    /// Emptying the cache un-silences everything, which is what a text size change comes to: every
+    /// row is built again, reports again, and the ones that draw nothing go quiet again.
+    @Test("emptying the cache stops any row being known to draw nothing")
+    func forgettingUnsilencesEverything() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(0, for: key("blank"))
+        heights.forget()
+        #expect(!heights.measuredNothing(key("blank")))
+    }
+
+    /// **A row that draws nothing is answered, not estimated.** Most of a session is
     /// stream events with no view in them, and the mean is the worst answer for one: too tall by
     /// the whole mean, three or four times between every pair of tool calls, and then corrected the
     /// moment it is drawn. See `TranscriptRowInk`.
