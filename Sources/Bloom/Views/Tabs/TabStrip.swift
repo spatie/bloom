@@ -317,48 +317,6 @@ struct TabStripOverflow: Equatable {
     static let fadeWidth: CGFloat = 16
 }
 
-/// The box a control at one end of a tab strip is drawn in: the bottom panel's chevron and its
-/// `+`.
-///
-/// The slot stays the bar's own height, square, so nothing in the strip moves and the tabs start
-/// where they started. What this settles is the PLATE inside it.
-///
-/// `.accessoryBar` draws its hover and pressed states in the button's OWN bounds, and a button
-/// handed a frame fills that frame, so a control given the whole slot came out with a plate the
-/// full width of it. Measured off a two times capture of the strip: the chevron's plate ran from
-/// x=0 to x=32 and the rule before the first tab began on x=32, with no daylight at all between
-/// the two shapes. The `+` had the same join mirrored, its plate's leading edge hard against the
-/// rule that follows the last tab. Against a SELECTED first tab, where that rule is hidden, the
-/// plate ended on x=32 and the tab's own outline began on x=33: one point of ground, which is a
-/// single pixel of it on a display that is not Retina.
-///
-/// So the plate is what was too wide, rather than the gap after it being too small, and the two
-/// want different fixes: the gap can only be widened by moving something, while the plate can be
-/// inset inside a slot that does not move. Two points at each side, which is `Metrics.spacingTight`
-/// and the same figure the sidebar's header buttons keep above and below their own plate. Taken
-/// off both sides rather than the trailing one, so the glyph stays on the centre of its slot.
-///
-/// The cost is two points of hit target at each side. The plate IS the button here, so a narrower
-/// plate is a narrower button and there is no way to have one without the other; what is left is
-/// 28 points across, in a bar whose controls are only about sixteen points tall to begin with.
-struct TabStripControlBox: ViewModifier {
-    /// The daylight each side of the plate. The tight rung of the spacing scale.
-    static let inset: CGFloat = Metrics.spacingTight
-
-    func body(content: Content) -> some View {
-        content
-            .frame(width: Metrics.barHeight - 2 * Self.inset, height: Metrics.barHeight)
-            .padding(.horizontal, Self.inset)
-    }
-}
-
-extension View {
-    /// See `TabStripControlBox`.
-    func tabStripControl() -> some View {
-        modifier(TabStripControlBox())
-    }
-}
-
 /// The rule between two tabs, and between the tabs and the controls at either end.
 ///
 /// Half the height of the strip and one point wide, measured off Safari, where the rule between
