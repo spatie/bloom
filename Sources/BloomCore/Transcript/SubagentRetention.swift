@@ -10,6 +10,9 @@ import Foundation
 /// and the sidebar had become a log of a turn that was still running. A sidebar is a navigation
 /// surface. Eight finished rows is a transcript in the wrong pane.
 ///
+/// Before any of that: a backgrounded shell command has no row at all, whatever state it is in.
+/// See `keeps`. The rest of this file is about the rows that remain, which are agents.
+///
 /// So a finished row goes, with three exemptions, each of which is a thing you would otherwise
 /// have to go and look for.
 ///
@@ -74,9 +77,11 @@ public enum SubagentRetention: Sendable {
     /// How many of this turn's subagents failed, whether or not they still have a row.
     ///
     /// What the workspace row says, and the reason the cap above is safe: the count is of every
-    /// failure, so the three crosses and the number never disagree about how bad it was.
+    /// failure, so the three crosses and the number never disagree about how bad it was. Every
+    /// failure this pane would ever draw, that is: a background command has no row here, so
+    /// counting one would put a number on the workspace row that nothing under it explains.
     public static func failureCount(_ roster: SubagentRoster) -> Int {
-        roster.subagents.count { $0.state == .failed }
+        roster.subagents.count { $0.kind == .agent && $0.state == .failed }
     }
 
     /// When the row set next changes on its own, or nil when nothing is on a clock.
@@ -105,6 +110,16 @@ public enum SubagentRetention: Sendable {
     private static func keeps(
         _ subagent: Subagent, now: Date, opened: SubagentID?, failuresKept: inout Int
     ) -> Bool {
+        // A backgrounded shell command never has a row. Both arrive on `system/task_started` and
+        // `SubagentKind` is what tells them apart, so the pane had been drawing whichever the CLI
+        // happened to start: three lines reading `agent-browser set viewport 1440 900 >/dev/null`
+        // under a workspace, two of them crossed, which is a shell log in a navigation pane. What
+        // this pane is for is the other AI working on the workspace, and a command is not one.
+        // The roster still holds them and the transcript still draws their panes, both unchanged:
+        // the command's output is worth reading, it is just not worth a permanent row beside the
+        // workspace it was run in.
+        guard subagent.kind == .agent else { return false }
+
         if subagent.state == .failed {
             let kept = subagent.id == opened || failuresKept < failureLimit
             if kept { failuresKept += 1 }
