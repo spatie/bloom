@@ -110,11 +110,23 @@ final class WorkspaceTabsStore {
     /// 2e3d6e3 written down: the sweep kills every tmux session whose pane id nothing can
     /// enumerate, there is no way to get a killed shell back, and the next phase does rewrite a
     /// key the census reads.
+    ///
+    /// One snapshot of the app's own domain feeds all three scans below, because
+    /// `dictionaryRepresentation()` materialises the merged search list and this ran it three
+    /// times on the main actor before the window was usable. See `DefaultsSnapshot`.
     private init() {
         let defaults = UserDefaults.standard
-        TabMigration.migrateAll(in: defaults)
+        var snapshot = DefaultsSnapshot.own(defaults, name: Bundle.main.bundleIdentifier)
 
-        for (key, value) in defaults.dictionaryRepresentation()
+        for tab in TabMigration.migrateAll(in: defaults, keys: snapshot.keys) {
+            // Phase A's own writes, folded back in. The scan below reads the snapshot rather than
+            // defaults, so without this a launch that migrated would file no tab at all and show
+            // every migrated workspace unsplit.
+            guard let data = defaults.data(forKey: tab.key) else { continue }
+            snapshot[tab.key] = data
+        }
+
+        for (key, value) in snapshot
         where key.hasPrefix(TabDefaults.tabPrefix) {
             let rootID = String(key.dropFirst(TabDefaults.tabPrefix.count))
             guard let data = value as? Data,
@@ -141,7 +153,7 @@ final class WorkspaceTabsStore {
             arrangements[rootID] = arrangement
         }
 
-        for (key, value) in defaults.dictionaryRepresentation()
+        for (key, value) in snapshot
         where key.hasPrefix(TabDefaults.stripPrefix) {
             let workspaceID = WorkspaceID(String(key.dropFirst(TabDefaults.stripPrefix.count)))
             guard let data = value as? Data,

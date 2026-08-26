@@ -94,12 +94,19 @@ public enum TabMigration {
 
     /// Runs phase A over a whole defaults domain, and returns what it made.
     ///
+    /// The keys are handed in rather than read here, because the caller is already holding a
+    /// snapshot of the app's own domain and `dictionaryRepresentation()` would materialise the
+    /// merged search list a second time. See `DefaultsSnapshot`. A key in the list that has since
+    /// gone simply reads as nothing, so a stale list costs a lookup and no correctness.
+    ///
     /// Sorted, so two runs over the same domain do the same writes in the same sequence. Nothing
     /// depends on that today, but a migration whose behaviour turns on a dictionary's iteration
     /// order cannot be reproduced from a bug report.
     @discardableResult
-    public static func migrateAll(in defaults: UserDefaults) -> [CompositeTab] {
-        defaults.dictionaryRepresentation().keys
+    public static func migrateAll(
+        in defaults: UserDefaults, keys: some Sequence<String>
+    ) -> [CompositeTab] {
+        keys
             .filter { $0.hasPrefix(TabDefaults.legacyCentrePrefix) }
             .sorted()
             .compactMap { migrate(legacyKey: $0, in: defaults) }

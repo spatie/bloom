@@ -306,6 +306,7 @@ final class AppModel {
     func bootstrap() async {
         Self.probeInstance = self
         guard store == nil else { return }
+        let began = Date()
         do {
             // Off the main actor. Opening the database creates directories, opens the file and
             // runs every migration, and one of those migrations walks the whole messages table.
@@ -360,6 +361,8 @@ final class AppModel {
             // jumps to the workspace.
             restoreLastSelection()
             isLoaded = true
+            let blocking = Int(Date().timeIntervalSince(began) * 1000)
+            Log.launch.info("window usable after \(blocking, privacy: .public)ms")
             reportFailedDatabaseMigration()
         } catch {
             // `TranscriptStanding.complaint` rather than `readableMessage`: a `SQLiteError`

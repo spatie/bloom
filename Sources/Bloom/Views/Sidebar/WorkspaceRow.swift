@@ -71,6 +71,19 @@ struct WorkspaceRow: View {
     private var isEmphasized: Bool { backgroundProminence == .increased }
 
     var body: some View {
+        // Bound once. `status` was resolved three times a pass and the pull request dictionary read
+        // five, because the sentence reaches both and is asked for twice, by the tooltip and by
+        // VoiceOver, which get the same words on purpose. GitHub's answer is read straight from the
+        // shared store rather than passed in, because the sidebar's row builder cannot reach it.
+        let pullRequest = WorkspacePullRequests.shared.pullRequest(for: workspace.id)
+        let status = WorkspaceStatus.resolve(
+            workspace: workspace,
+            isRunning: isRunning,
+            pullRequest: pullRequest,
+            isAwaitingPermission: isAwaitingPermission
+        )
+        let statusDescription = status.summary(pullRequest: pullRequest)
+
         Label {
             HStack(spacing: Metrics.spacing) {
                 if isRenaming {
@@ -176,7 +189,9 @@ struct WorkspaceRow: View {
         .onHover { isHovered = $0 }
         // Only rows that exist ask GitHub anything, and the id carries the branch and whether
         // there is any work at all, because both change what is worth asking about.
-        .task(id: "\(workspace.id)|\(workspace.branch)|\(workspace.hasDiff)") {
+        .task(id: PullRequestQuestion(
+            workspace: workspace.id, branch: workspace.branch, hasDiff: workspace.hasDiff
+        )) {
             await WorkspacePullRequests.shared.track(workspace)
         }
         // The list inverts the row's text for us, but a label that carries its own colour, such as
@@ -367,30 +382,6 @@ struct WorkspaceRow: View {
         .accessibilityLabel("Archive \(workspace.name)")
     }
 
-    // MARK: - Status
-
-    /// GitHub's answer for this branch, if anything has asked yet. Read straight from the shared
-    /// store rather than passed in, because the sidebar's row builder has no way to reach it.
-    private var pullRequest: PullRequest? {
-        WorkspacePullRequests.shared.pullRequest(for: workspace.id)
-    }
-
-    private var status: WorkspaceStatus {
-        WorkspaceStatus.resolve(
-            workspace: workspace,
-            isRunning: isRunning,
-            pullRequest: pullRequest,
-            isAwaitingPermission: isAwaitingPermission
-        )
-    }
-
-    /// What the mark means, in one sentence, for the tooltip and for VoiceOver. Both get the same
-    /// words on purpose: a sighted user hovering and a VoiceOver user landing on the row are
-    /// asking the identical question.
-    private var statusDescription: String {
-        status.summary(pullRequest: pullRequest)
-    }
-
     // MARK: - Renaming
 
     /// One door out of the field, for all four ways of leaving it.
@@ -411,6 +402,15 @@ struct WorkspaceRow: View {
         ) else { return }
         Task { await app.rename(workspace, to: name) }
     }
+}
+
+/// What is worth asking GitHub about again, as a value rather than as the interpolated string this
+/// used to be: that string was built on every pass of every row and never read, because a `.task`
+/// id is only ever compared.
+private struct PullRequestQuestion: Hashable, Sendable {
+    var workspace: WorkspaceID
+    var branch: String
+    var hasDiff: Bool
 }
 
 /// The cross and its count, set tight so the pair reads as one mark rather than as an icon beside

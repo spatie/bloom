@@ -85,12 +85,24 @@ public enum Shell {
         spawns.load(ordering: .relaxed)
     }
 
-    public static func environment(extra: [String: String] = [:]) -> [String: String] {
+    /// This process's environment with the PATH above merged in, worked out once.
+    ///
+    /// It used to be rebuilt per spawn: the whole process environment copied, PATH split, about 45
+    /// entries deduped through a `Set`, and `which` asks for it before every subprocess as well.
+    /// Nothing in Bloom calls `setenv`, so the base cannot move under this, and the two callers
+    /// that pass an overlay get a copy-on-write copy of it rather than a rebuild.
+    private static let base: [String: String] = {
         var env = ProcessInfo.processInfo.environment
         let existing = env["PATH"]?.components(separatedBy: ":") ?? []
         var seen = Set<String>()
         let merged = (existing + extraPaths).filter { seen.insert($0).inserted }
         env["PATH"] = merged.joined(separator: ":")
+        return env
+    }()
+
+    public static func environment(extra: [String: String] = [:]) -> [String: String] {
+        guard !extra.isEmpty else { return base }
+        var env = base
         for (key, value) in extra { env[key] = value }
         return env
     }

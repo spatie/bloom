@@ -291,19 +291,28 @@ struct DiffView: View {
 
     private func present(_ fileDiff: FileDiff) async {
         let path = file.path
-        let document = await Task.detached(priority: .userInitiated) {
-            DiffDocument.prepare(file: fileDiff, path: path)
-        }.value
-
-        guard !Task.isCancelled else { return }
-
-        // The worktree copy is what the between-hunks expanders reveal. A file git deleted, or one
-        // that is not text, simply has no expanders. Split by the anchor's own rule rather than
+        let worktree = model.workspace.path
+        // The worktree copy is read here rather than after the await, which is where it used to be
+        // and where it read and split a whole file on the main actor on every file click.
+        //
+        // It is what the between-hunks expanders reveal. A file git deleted, or one that is not
+        // text, simply has no expanders. Split by the anchor's own rule rather than
         // `components(separatedBy:)`, which counts a phantom last line on a file ending in a
         // newline: the review payload resolves against `ReviewCommentAnchor.split`, and the bands
         // resolve against these lines, so the two splits disagreeing at the end of the file is
         // exactly the band-versus-payload disagreement `ReviewCommentRender` warns against.
-        fileLines = model.contents(of: path).map(ReviewCommentAnchor.split)
+        let prepared = await Task.detached(priority: .userInitiated) {
+            (
+                document: DiffDocument.prepare(file: fileDiff, path: path),
+                lines: WorkspaceModel.contents(of: path, in: worktree)
+                    .map(ReviewCommentAnchor.split)
+            )
+        }.value
+
+        guard !Task.isCancelled else { return }
+
+        let document = prepared.document
+        fileLines = prepared.lines
         phase = .ready(document)
         rebuild()
         prime(document)

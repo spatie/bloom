@@ -1098,7 +1098,11 @@ final class TranscriptModel {
         // still on its way in, and the read ends by putting the whole list on the model in one go:
         // a row appended here in the meantime would simply be overwritten.
         await loader.wait()
-        let after = rows.map(\.seq).max() ?? -1
+        // `lazy`, because this runs on every assistant text, tool use and tool result event and the
+        // eager map allocated an array the length of the whole transcript each time. Not
+        // `rows.last?.seq`: a tool result folds onto a row that is already there rather than
+        // appending, so the last row is not reliably the highest sequence.
+        let after = rows.lazy.map(\.seq).max() ?? -1
         let fresh = (try? await store.messages(sessionID: session.id, afterSeq: after)) ?? []
         guard !fresh.isEmpty else { return }
         let appendedFrom = rows.count
