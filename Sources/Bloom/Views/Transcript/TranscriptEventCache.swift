@@ -5,7 +5,6 @@ import BloomCore
 ///
 /// The payload bytes are part of the key alongside the row ID because an updated store row may
 /// retain its identity. Exact byte equality prevents a cached event from surviving that change.
-@MainActor
 enum TranscriptEventCache {
     /// **Bounded by bytes, not by rows.** `countLimit` was 256, and a real transcript is longer
     /// than that: the workspace this was measured against holds 1,306 messages, so one scroll from
@@ -31,14 +30,20 @@ enum TranscriptEventCache {
     private static let limit = 0
     private static let costLimit = 8 * 1_024 * 1_024
 
-    private static let events: NSCache<TranscriptPayloadKey, TranscriptEventBox> = {
+    /// **Both of these are shared, and both are safe to share.** `NSCache` does its own locking,
+    /// which is half of it; the other half is that a `TranscriptEventBox` and a
+    /// `TranscriptJSONBox` are `final class`es holding one `let` of a `Sendable` enum, and
+    /// `TranscriptPayloadKey` is immutable in the same way. Nothing a reader gets out of here can
+    /// be written by anybody, which is what lets `TranscriptPrime` fill them off the main actor
+    /// while the table reads them on it.
+    nonisolated(unsafe) private static let events: NSCache<TranscriptPayloadKey, TranscriptEventBox> = {
         let cache = NSCache<TranscriptPayloadKey, TranscriptEventBox>()
         cache.countLimit = limit
         cache.totalCostLimit = costLimit
         return cache
     }()
 
-    private static let jsonValues: NSCache<TranscriptPayloadKey, TranscriptJSONBox> = {
+    nonisolated(unsafe) private static let jsonValues: NSCache<TranscriptPayloadKey, TranscriptJSONBox> = {
         let cache = NSCache<TranscriptPayloadKey, TranscriptJSONBox>()
         cache.countLimit = limit
         cache.totalCostLimit = costLimit

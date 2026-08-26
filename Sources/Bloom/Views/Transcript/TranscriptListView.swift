@@ -308,11 +308,13 @@ struct TranscriptListView: View {
         var out: [TranscriptTableEntry] = []
         out.append(TranscriptTableEntry(
             id: .setup,
-            contentKey: "setup"
-                + ".\(workspace.id)"
-                + ".\(isRunningSetup)"
-                + ".\(transcript.hasNothingToShow)"
-                + ".\(Int(paneHeight))",
+            contentKey: TranscriptContentKey {
+                $0.combine("setup")
+                $0.combine(workspace.id)
+                $0.combine(isRunningSetup)
+                $0.combine(transcript.hasNothingToShow)
+                $0.combine(Int(paneHeight))
+            },
             content: {
                 AnyView(
                     WorkspaceEventsView(
@@ -344,12 +346,20 @@ struct TranscriptListView: View {
             // is built rather than baked in as this runs, and putting it in the key would rebuild
             // the cell again a fifth of a second later when the answer expired, throwing away the
             // settle it is meant to be showing. See `TranscriptArrivals`.
-            let key = [
-                "\(row.id)", "\(row.seq)", row.kind.rawValue, "\(row.isError)",
-                "\(row.durationMS ?? -1)", "\(row.resultPayload?.count ?? -1)",
-                row.permissionDecision ?? "", row.permissionNote, "\(isExpanded)",
-                row.parentToolUseID ?? "", "\(wasStopped)", "\(recovered != nil)",
-            ].joined(separator: "|")
+            let key = TranscriptContentKey {
+                $0.combine(row.id)
+                $0.combine(row.seq)
+                $0.combine(row.kind)
+                $0.combine(row.isError)
+                $0.combine(row.durationMS)
+                $0.combine(row.resultPayload?.count)
+                $0.combine(row.permissionDecision)
+                $0.combine(row.permissionNote)
+                $0.combine(isExpanded)
+                $0.combine(row.parentToolUseID)
+                $0.combine(wasStopped)
+                $0.combine(recovered != nil)
+            }
             // Free, and no for the two kinds that make up most of a long session, so it is asked
             // here rather than inside the closure that runs per cell.
             let settles = TranscriptMotion.fadesOnArrival(row.kind)
@@ -413,7 +423,11 @@ struct TranscriptListView: View {
             id: .sending,
             // The session is in the key for the reason `streaming` below carries: a pane visits
             // one conversation after another and the heights are remembered across the switch.
-            contentKey: "sending.\(transcript.session.id).\(sending?.id.rawValue ?? "none")",
+            contentKey: TranscriptContentKey {
+                $0.combine("sending")
+                $0.combine(transcript.session.id)
+                $0.combine(sending?.id)
+            },
             content: {
                 guard let sending else { return AnyView(EmptyView()) }
                 let review = ReviewTurn.split(sending.body)
@@ -451,7 +465,11 @@ struct TranscriptListView: View {
             // several hundred points of blank under the newest row, closing again the moment the
             // cell is drawn. Every stored row is keyed by a row id, which is unique across
             // sessions; these two are the only entries that are not.
-            id: .streaming, contentKey: "streaming.\(transcript.session.id)",
+            id: .streaming,
+            contentKey: TranscriptContentKey {
+                $0.combine("streaming")
+                $0.combine(transcript.session.id)
+            },
             content: {
                 AnyView(
                     StreamingTailView(transcript: transcript)
@@ -474,7 +492,11 @@ struct TranscriptListView: View {
             let hold = isLast ? transcript.deliveryHold : nil
             out.append(TranscriptTableEntry(
                 id: .pending(delivery.id),
-                contentKey: "pending.\(delivery.id).\(isLast)",
+                contentKey: TranscriptContentKey {
+                    $0.combine("pending")
+                    $0.combine(delivery.id)
+                    $0.combine(isLast)
+                },
                 content: {
                     AnyView(
                         PendingTurnRowView(

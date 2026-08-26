@@ -12,6 +12,9 @@ import Foundation
 ///
 /// ## The key is the content, and the width and the scale are the cache's
 ///
+/// The content is a `TranscriptContentKey`, which is a hash rather than the string it used to be:
+/// see that type for what building four hundred of those strings on every pass cost.
+///
 /// A row's height depends on three things: what it draws, how wide it is drawn, and the text size
 /// it is drawn at. The obvious spelling folds all three into one key, which is what the spike did,
 /// and it is wrong in a way that only shows up after a while: the pane is resized all day, so the
@@ -123,9 +126,9 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// arrived. What a caller measures a fresh row against, so that it cannot measure at one width
     /// and file the answer under another.
     public private(set) var measure: Measure?
-    private var heights: [String: Double] = [:]
+    private var heights: [TranscriptContentKey: Double] = [:]
     /// The keys whose height was taken at a width that no longer holds. See `rewidth`.
-    private var stale: Set<String> = []
+    private var stale: Set<TranscriptContentKey> = []
     /// The sum of `heights`, kept in step on every write so the mean below costs nothing to ask.
     private var total: Double = 0
 
@@ -182,14 +185,14 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     }
 
     /// Whether this height is owed a measurement at the width the cache is now for.
-    public func isStale(_ contentKey: String) -> Bool { stale.contains(contentKey) }
+    public func isStale(_ contentKey: TranscriptContentKey) -> Bool { stale.contains(contentKey) }
 
     /// How many heights are still estimates. For a probe: it is the count of rows a resize did
     /// NOT have to measure, which is the whole of what the hold buys.
     public var staleCount: Int { stale.count }
 
     /// The remembered height of this content, or nothing if it has never been measured.
-    public func height(for contentKey: String) -> Double? {
+    public func height(for contentKey: TranscriptContentKey) -> Double? {
         heights[contentKey]
     }
 
@@ -209,7 +212,7 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// Never nil and never a measurement, so answering it for every row of a session costs a
     /// dictionary lookup each. See the header for why a table is answered rather than made to
     /// wait.
-    public func assumed(for contentKey: String) -> Double {
+    public func assumed(for contentKey: TranscriptContentKey) -> Double {
         heights[contentKey] ?? estimate
     }
 
@@ -227,7 +230,7 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// False for a height that has not moved by half a point, which is what keeps a row that
     /// reports its size on every layout pass from telling the table to relayout on every one.
     @discardableResult
-    public mutating func note(_ height: Double, for contentKey: String) -> Bool {
+    public mutating func note(_ height: Double, for contentKey: TranscriptContentKey) -> Bool {
         guard measure != nil else { return false }
         // Before the news test below, so a row that turns out to be exactly as tall as it was at
         // the old width still stops being owed a measurement.

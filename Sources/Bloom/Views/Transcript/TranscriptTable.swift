@@ -31,7 +31,7 @@ struct TranscriptTableEntry: Identifiable {
     /// be.** The streaming tail, the setup log and the delivery at the head of the queue watch
     /// their own state and redraw inside the cell they are in; handing them a new root view on
     /// every pass threw that state away and rebuilt the tail several times a second.
-    let contentKey: String
+    let contentKey: TranscriptContentKey
     /// Built on demand: when the row is measured, and when it is drawn. Nothing is built for a row
     /// that is neither, which is what keeps the pass that assembles these cheap.
     let content: @MainActor () -> AnyView
@@ -1218,7 +1218,7 @@ private struct HostedRow: View {
 /// the same layout that drew it.
 final class TranscriptTableCell: NSView {
     private let host: NSHostingView<AnyView>
-    private var appliedKey: String?
+    private var appliedKey: TranscriptContentKey?
     private var unclip: Task<Void, Never>?
     var onHeightChange: (@MainActor (TranscriptEntryID, CGFloat) -> Void)?
 

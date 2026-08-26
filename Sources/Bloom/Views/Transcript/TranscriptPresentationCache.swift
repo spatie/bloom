@@ -17,7 +17,6 @@ import BloomCore
 /// The cost limit the event cache carries has no equivalent here. A `ToolPresentation` is a glyph
 /// name, two short strings and a handful of chips, all of them already truncated to a line, so the
 /// count is the whole of what needs bounding. Only the number was wrong.
-@MainActor
 enum TranscriptPresentationCache {
     /// **Every tool row a long session can hold, rather than a screen of them.**
     ///
@@ -35,7 +34,11 @@ enum TranscriptPresentationCache {
     /// thousand payloads would be the transcript itself.
     private static let limit = 8_192
 
-    private static let values: NSCache<NSNumber, ToolPresentationBox> = {
+    /// Shared, and safe to share for `TranscriptEventCache`'s reason: `NSCache` does its own
+    /// locking, a `ToolPresentationBox` is a `final class` holding one `let` of a `Sendable`
+    /// struct, and an `NSNumber` is immutable. `TranscriptPrime` fills this off the main actor
+    /// while the table reads it on it.
+    nonisolated(unsafe) private static let values: NSCache<NSNumber, ToolPresentationBox> = {
         let cache = NSCache<NSNumber, ToolPresentationBox>()
         cache.countLimit = limit
         return cache
