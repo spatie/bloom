@@ -73,7 +73,6 @@ struct HomeView: View {
             // centre a message in.
             if hasAnyWorkspace {
                 HomeBar(
-                    summary: summary,
                     repos: app.repos,
                     counts: listing.counts,
                     isSearching: listing.isSearching,
@@ -82,6 +81,12 @@ struct HomeView: View {
             }
 
             content
+
+            // The counts, at the foot of the pane rather than at the trailing end of the strip,
+            // beside the rows they are about. See `HomeStatusBar`.
+            if hasAnyWorkspace, !summary.isEmpty {
+                HomeStatusBar(summary: summary)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.windowBackground)
@@ -199,6 +204,8 @@ struct HomeView: View {
                 }
             }
 
+            recentArchive
+
             transcriptResults
         }
         .listStyle(.inset)
@@ -224,6 +231,71 @@ struct HomeView: View {
         .onDeleteCommand {
             guard let selected, let row = row(for: selected), !row.isArchived else { return }
             Task { await app.archive(row.workspace) }
+        }
+    }
+
+    /// The finished work under the live list: the most recent few, and a way through to the rest.
+    ///
+    /// **This is what makes defaulting to Live honest.** The archive is not behind a chip nobody
+    /// clicks, it is on the page, demoted: a quieter heading saying how many of how many, the same
+    /// rows the list draws anywhere else, and a plain row at the foot that moves the chip to
+    /// Archived. What it is not is the page, which is what it was when Home opened on All and
+    /// seventeen of twenty rows were over. Which rows and how many is `HomeList.tail`.
+    ///
+    /// These rows are real list rows, so the arrow keys walk into them and Return opens one, the
+    /// same as any other archived row on this screen. The "show the rest" row is not: it is a
+    /// control rather than a workspace, and giving the selection somewhere to land that is not a
+    /// workspace would break the one keyboard model the whole pane runs on.
+    @ViewBuilder
+    private var recentArchive: some View {
+        if !listing.tail.isEmpty {
+            Section {
+                ForEach(listing.tail) { row in
+                    HomeListRow(
+                        row: row,
+                        isRunning: false,
+                        now: now,
+                        isRenaming: false,
+                        onCommitRename: { _ in },
+                        onCancelRename: {}
+                    )
+                    .arrivingRow(arrival.isArriving(row.id))
+                    .tag(row.id)
+                    .simultaneousGesture(TapGesture().onEnded { open(row) })
+                    .listRowInsets(Self.rowInsets)
+                    .onHoverChange { hovered = $0 ? row.id : (hovered == row.id ? nil : hovered) }
+                    .listRowBackground(
+                        HomeRowBackground(
+                            isSelected: selected == row.id,
+                            isHovered: hovered == row.id
+                        )
+                    )
+                    .contextMenu {
+                        HomeRowMenu(row: row) { renaming = $0 }
+                    }
+                }
+
+                // Bloom's accent rather than `.link`, which is the system's and is blue glass on a
+                // Mac set to Graphite. The same note is on every prominent button in the app.
+                Button("Show all \(ArchiveDeletion.count(listing.tailTotal, "archived workspace"))") {
+                    app.homeFilter.scope = .archived
+                }
+                .buttonStyle(.plain)
+                .font(Typo.caption)
+                .foregroundStyle(Palette.accent)
+                .padding(.vertical, Metrics.spacingSmall)
+                .listRowInsets(Self.rowInsets)
+                .listRowBackground(Color.clear)
+                .selectionDisabled()
+            } header: {
+                HomeGroupHeading(
+                    title: "Recently archived",
+                    count: listing.tail.count,
+                    isSecondary: true,
+                    of: listing.tailTotal
+                )
+                .padding(.leading, Self.rowInsets.leading)
+            }
         }
     }
 
@@ -286,7 +358,7 @@ struct HomeView: View {
 
     // MARK: - Summary
 
-    /// What the readout at the end of the strip says. `HomeList.summary` in the core, where its
+    /// What the status bar at the foot of the pane says. `HomeList.summary` in the core, where its
     /// branches can be asked about: this was four pieces of view state picking between sentences,
     /// and one of those sentences had already been wrong once.
     private var summary: String {
@@ -402,7 +474,7 @@ struct HomeView: View {
         // In the same breath as `listing` rather than from an `onChange` watching it, so a row
         // and the fact that it is new land in one update and the row's first drawn frame is the
         // faded one.
-        let ids = listing.groups.flatMap { $0.rows.map(\.id) }
+        let ids = listing.groups.flatMap { $0.rows.map(\.id) } + listing.tail.map(\.id)
         if rescoped {
             arrival.adopt(ids)
         } else {
@@ -423,11 +495,13 @@ struct HomeView: View {
         }
     }
 
+    /// The tail is searched too, because those rows are selectable: without it, arrowing into the
+    /// recent archive left Return doing nothing and greyed out every item in the Workspace menu.
     private func row(for id: WorkspaceID) -> HomeRow? {
         for group in listing.groups {
             if let match = group.rows.first(where: { $0.id == id }) { return match }
         }
-        return nil
+        return listing.tail.first { $0.id == id }
     }
 
     /// The highlighted row, offered to the menu bar. It carries the workspace itself because an

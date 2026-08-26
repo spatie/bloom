@@ -80,7 +80,13 @@ struct SidebarStatusBar: View {
             .padding(.horizontal, Metrics.spacingSmall)
             .frame(height: Metrics.barHeight)
         }
-        .background(.bar)
+        // `Palette.sidebar`, not `.bar`. Home grew a status bar of its own at the foot of the
+        // detail column, so these two strips now run side by side across the bottom of the window
+        // and have to read as one line rather than as two competing ones. `.bar` is a material: it
+        // sat a few units off the column it stands in, and it would have sat a few units off the
+        // flat strip next to it. The palette already names one colour for "the sidebar column, the
+        // title bar, and every strip of small controls", and this is one of those.
+        .background(Palette.sidebar)
     }
 
     /// Whether the pane is showing what it shows when nothing has been asked of it.

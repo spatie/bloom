@@ -1,11 +1,18 @@
 import SwiftUI
 import BloomCore
 
-/// One workspace on Home, on one line.
+/// One workspace on Home, on two lines.
 ///
 /// The order across the row is the order the questions are asked in. Something at the very leading
 /// edge says "look here"; the project mark says whose work this is; the name says which piece of
-/// it; the mark, the counts and the age on the trailing edge say how it went and how long ago.
+/// it; under the name, the project spelled out and the branch say which worktree; the mark, the
+/// counts and the age on the trailing edge say how it went and how long ago.
+///
+/// **It was one line, and the owner's complaint about the list was that the rows were thin with a
+/// lot of air between the name and the numbers at the right.** He was describing a real hole: a
+/// name at one edge and three columns at the other, with nothing between them on any row. The
+/// second line fills it with the two things a person identifies a worktree by, which Home was the
+/// only list in the window not showing. See `origin`.
 ///
 /// **Why the project mark leads and the status mark does not.** In the sidebar the workspace sits
 /// under its project's heading, so the leading slot is free for the status glyph and that is what
@@ -68,71 +75,16 @@ struct HomeListRow: View {
     private static let diffWidth: CGFloat = 84
 
     var body: some View {
-        HStack(spacing: Metrics.spacing) {
+        HStack(spacing: Metrics.spacingWide) {
             rail
 
             RepoIcon(repo: row.repo)
 
-            if isRenaming {
-                TextField("Workspace name", text: $draft)
-                    .textFieldStyle(.plain)
-                    .focused($fieldFocused)
-                    .onSubmit { end(.submitted) }
-                    .onExitCommand { end(.escaped) }
-                    // Clicking away commits, as it does in Finder, rather than leaving the field
-                    // open on the row holding text nobody ever asked to keep. Guarded on having
-                    // had the focus, so the false the field starts at is not read as losing it.
-                    .onChange(of: fieldFocused) { had, has in
-                        guard had, !has else { return }
-                        end(.focusLost)
-                    }
-                    .task {
-                        draft = workspace.name
-                        hasEnded = false
-                        // A beat, so the field exists before focus moves to it.
-                        try? await Task.sleep(for: .milliseconds(30))
-                        fieldFocused = true
-                    }
-            } else {
-                WorkspaceNameText(workspace, isUnread: isUnread)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-
-                // Why this row is in a search, when the answer is not on the row already.
-                //
-                // The search reaches the name, the branch and the project, so a perfect answer can
-                // have nothing on it that looks like what was typed: searching a branch name gave
-                // a list of workspaces with no visible connection to the query at all. Drawn only
-                // while searching, and only for the two fields the row does not otherwise show.
-                // See `HomeRow.match`.
-                if let match = row.match {
-                    Text(match)
-                        .font(Typo.codeTiny)
-                        .foregroundStyle(Palette.textTertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .layoutPriority(-1)
-                }
-
-                // Right after the name, the same place the sidebar puts it, so one workspace is
-                // marked in one way in both lists. No accessibility label of its own: this row is
-                // merged into a single element below, which would swallow it, so the colour is
-                // said in `accessibilityLabel` instead.
-                //
-                // Nothing special for the archived case. The whole row is drained by `grayscale`
-                // a few lines down, which takes the dot with it, and that is the right answer: an
-                // archived workspace cannot be given a colour or have one taken off.
-                WorkspaceColourDot(hex: workspace.colour)
-
-                if workspace.pinned {
-                    Image(systemName: "pin.fill")
-                        .font(Typo.micro)
-                        .foregroundStyle(Palette.textTertiary)
-                        .accessibilityHidden(true)
-                }
+            VStack(alignment: .leading, spacing: Metrics.spacingHair) {
+                name
+                origin
             }
-
-            Spacer(minLength: Metrics.spacingWide)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             trailing
         }
@@ -166,7 +118,7 @@ struct HomeListRow: View {
         // either; they are part of the list Home opens on.
         .grayscale(row.isArchived ? 1 : 0)
         .opacity(row.isArchived ? 0.6 : 1)
-        .frame(minHeight: Metrics.rowHeight)
+        .frame(minHeight: HomeMetrics.rowHeight)
         // The whole row, including the gap the name does not fill, is the click target. Without
         // it only the text is, and a list where half of each row ignores the pointer feels broken
         // long before anyone works out why.
@@ -183,6 +135,92 @@ struct HomeListRow: View {
     }
 
     // MARK: - Parts
+
+    /// The first line: what this workspace is called, and the two marks that travel with the name.
+    @ViewBuilder
+    private var name: some View {
+        HStack(spacing: Metrics.spacing) {
+            if isRenaming {
+                TextField("Workspace name", text: $draft)
+                    .textFieldStyle(.plain)
+                    .focused($fieldFocused)
+                    .onSubmit { end(.submitted) }
+                    .onExitCommand { end(.escaped) }
+                    // Clicking away commits, as it does in Finder, rather than leaving the field
+                    // open on the row holding text nobody ever asked to keep. Guarded on having
+                    // had the focus, so the false the field starts at is not read as losing it.
+                    .onChange(of: fieldFocused) { had, has in
+                        guard had, !has else { return }
+                        end(.focusLost)
+                    }
+                    .task {
+                        draft = workspace.name
+                        hasEnded = false
+                        // A beat, so the field exists before focus moves to it.
+                        try? await Task.sleep(for: .milliseconds(30))
+                        fieldFocused = true
+                    }
+            } else {
+                WorkspaceNameText(workspace, isUnread: isUnread)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                // Right after the name, the same place the sidebar puts it, so one workspace is
+                // marked in one way in both lists. No accessibility label of its own: this row is
+                // merged into a single element below, which would swallow it, so the colour is
+                // said in `accessibilityLabel` instead.
+                //
+                // Nothing special for the archived case. The whole row is drained by `grayscale`
+                // further down, which takes the dot with it, and that is the right answer: an
+                // archived workspace cannot be given a colour or have one taken off.
+                WorkspaceColourDot(hex: workspace.colour)
+
+                if workspace.pinned {
+                    Image(systemName: "pin.fill")
+                        .font(Typo.micro)
+                        .foregroundStyle(Palette.textTertiary)
+                        .accessibilityHidden(true)
+                }
+
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    /// The second line: whose work this is, and which branch it is on.
+    ///
+    /// **The row was one line and it was the wrong one line.** A name at the leading edge and three
+    /// numbers at the trailing edge left forty points of nothing between them on every row, on a
+    /// screen whose whole complaint was that it looked sparse. What went in the gap is what a
+    /// person actually identifies a worktree by and what Home was the only list not showing: the
+    /// project, spelled rather than left to a 16 point monogram, and the branch.
+    ///
+    /// It also retired the search's match label. That existed because a row could be a perfect
+    /// answer with nothing on it that looked like what was typed, and the two fields it stood in
+    /// for, the branch and the project, are both on this line now, on every row, searching or not.
+    private var origin: some View {
+        HStack(spacing: Metrics.spacingSmall) {
+            if let repo = row.repo {
+                Text(repo.name)
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+
+                Text(verbatim: "/")
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textTertiary.opacity(0.5))
+            }
+
+            Text(workspace.branch)
+                .font(Typo.codeTiny)
+                .foregroundStyle(Palette.textTertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer(minLength: 0)
+        }
+        .accessibilityHidden(true)
+    }
 
     /// Always occupies its width, so every name in the list starts on the same vertical line
     /// whether or not its row is marked.
