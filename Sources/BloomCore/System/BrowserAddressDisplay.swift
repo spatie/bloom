@@ -75,6 +75,14 @@ public struct BrowserAddressDisplay: Equatable, Sendable {
         if let query = parts.percentEncodedQuery { trailing += "?" + query }
         if let fragment = parts.percentEncodedFragment { trailing += "#" + fragment }
 
+        // Cut again, on the assembled parts. The cap in `sanitised` bounds what the parser is
+        // handed, and percent encoding then makes the pieces longer than the string they came
+        // from: one ellipsis goes in as three bytes and comes back out as `%E2%80%A6`.
+        let head = leading.count + host.count
+        if head + trailing.count > limit {
+            trailing = String(trailing.prefix(max(0, limit - head))) + "…"
+        }
+
         return BrowserAddressDisplay(
             leading: leading,
             host: host + (parts.port.map { ":\($0)" } ?? ""),

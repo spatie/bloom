@@ -170,10 +170,14 @@ struct BrowserToolbarView: View {
         }
     }
 
+    private func tinted(_ string: String, _ colour: Color) -> Text {
+        Text(string).foregroundStyle(colour)
+    }
+
     private var addressLabel: some View {
-        (Text(display.leading).foregroundStyle(Palette.textTertiary)
-            + Text(display.host).foregroundStyle(Palette.textPrimary)
-            + Text(display.trailing).foregroundStyle(Palette.textTertiary))
+        // Interpolated rather than concatenated: `Text.+` is deprecated in macOS 26 and the app
+        // target builds with -warnings-as-errors.
+        Text("\(tinted(display.leading, Palette.textTertiary))\(tinted(display.host, Palette.textPrimary))\(tinted(display.trailing, Palette.textTertiary))")
             .lineLimit(1)
             // The tail, which is where a query string lives. The host is the part worth reading
             // and it is at the head, so it is the part that always survives the cut.
