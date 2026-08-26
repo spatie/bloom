@@ -9,6 +9,13 @@ import BloomCore
 /// to match, and the next press on the button is what merges. Nothing in the menu performs
 /// anything, so the one irreversible act in this app stays behind the one control that says it.
 ///
+/// **It is the merge button and nothing else.** It is drawn only where the strip's primary action
+/// is a merge. An earlier version also stood, quiet and icon only, where the primary was Commit
+/// and push or Fix merge conflicts, on the argument that the old chevron was the only way to merge
+/// in those states. The owner has overruled that: a menu about merging beside a button about
+/// committing is a control the band did not ask for. `PullRequestSummary.mergeControl` carries
+/// what that costs.
+///
 /// **The system's split button, drawn by the system, with the fill painted behind it.** A
 /// `Menu` with a `primaryAction` and `.menuStyle(.button)` IS this control on macOS: it draws the
 /// hairline, the chevron, the pressed states and the keyboard, and an inline `Picker` inside it
@@ -25,13 +32,11 @@ import BloomCore
 /// "Checks failing" band ends in a red button. A neutral capsule there would be the strip losing
 /// the signal it exists to carry.
 struct MergeSplitButton: View {
-    /// The method in force for this project. The button promises it, the menu ticks it.
+    /// The method in force for this project. The button promises it and the menu ticks it, and
+    /// they are the same value: see `body` for what it takes to keep that true.
     var method: GitHub.MergeMethod
-    /// The colour of the band this stands in. Painted only when this is the prominent control.
+    /// The colour of the band this stands in.
     var fill: Color
-    /// Whether merging is what this state is asking for, which is what decides between the filled
-    /// control and the quiet one beside another state's primary.
-    var isPrimary: Bool
     /// Whether GitHub will take a merge at all. A running agent is not in here: the cluster
     /// answers for that, once, for every control in it.
     var canMerge: Bool
@@ -48,49 +53,38 @@ struct MergeSplitButton: View {
 
     private var isLive: Bool { isClusterEnabled && canMerge }
 
-    @ViewBuilder
     var body: some View {
-        if isPrimary {
-            // Two forms, as every other control in this strip has, and for the same reason: the
-            // headline is the part that must not be what truncates.
-            ViewThatFits(in: .horizontal) {
-                styled.labelStyle(.titleAndIcon)
-                styled.labelStyle(.iconOnly)
-            }
-            .fixedSize()
-        } else {
-            // The quiet form is always the glyph, measured rather than chosen: the band is 380
-            // points, and "Squash and merge" beside "Commit and push" comes to 326 of them with
-            // the number and the gaps still to pay for, which leaves the headline nothing at all.
-            // The old chevron was 19 points for the same job; this is 44, and it is what the
-            // strip can afford. The method is still said out loud, in the tick in the menu and in
-            // the tooltip, which is where an icon only control says everything anyway.
-            styled.labelStyle(.iconOnly).fixedSize()
+        // Two forms, as every other control in this strip has, and for the same reason: the
+        // headline is the part that must not be what truncates.
+        ViewThatFits(in: .horizontal) {
+            styled.labelStyle(.titleAndIcon)
+            styled.labelStyle(.iconOnly)
         }
+        .fixedSize()
+        // **The label and the tick are one value, and this is what makes that true.** A `Menu`'s
+        // content is not evaluated when the view is rebuilt; it is evaluated when the menu opens,
+        // out of the closure SwiftUI stored, and the tick is drawn from the selection that closure
+        // captured. The label is re-read on every rebuild. So the button said "Rebase and merge"
+        // over a menu still ticking Squash: two ages of one value, which is the exact fault this
+        // control exists to remove. Giving it the value's identity makes a changed method a new
+        // control, so there is no older closure left to evaluate.
+        .id(method)
     }
 
-    @ViewBuilder
     private var styled: some View {
-        if isPrimary {
-            control
-                .buttonStyle(.borderedProminent)
-                // The label, the chevron and the hairline in white. See the type's note: the
-                // system will not tint this control, so the only lever left over its ink is the
-                // appearance it draws itself for.
-                .environment(\.colorScheme, .dark)
-                .background(
-                    // Dimmed rather than hidden when the press is not available, which is how
-                    // AppKit draws a disabled prominent button and therefore how this one has
-                    // to look beside them.
-                    fill.opacity(isLive ? 1 : 0.35),
-                    in: .rect(cornerRadius: Metrics.corner)
-                )
-        } else {
-            // Quiet, beside somebody else's primary. The strip's rule is that the prominent
-            // control is whatever the state is asking for, and when that is Commit and push or
-            // Fix merge conflicts, merging is still one press away rather than gone.
-            control.buttonStyle(.bordered)
-        }
+        control
+            .buttonStyle(.borderedProminent)
+            // The label, the chevron and the hairline in white. See the type's note: the system
+            // will not tint this control, so the only lever left over its ink is the appearance
+            // it draws itself for.
+            .environment(\.colorScheme, .dark)
+            .background(
+                // Dimmed rather than hidden when the press is not available, which is how AppKit
+                // draws a disabled prominent button and therefore how this one has to look beside
+                // them.
+                fill.opacity(isLive ? 1 : 0.35),
+                in: .rect(cornerRadius: Metrics.corner)
+            )
     }
 
     private var control: some View {
@@ -101,10 +95,10 @@ struct MergeSplitButton: View {
             // the platform to draw it. It also cannot perform anything, which is exactly the
             // promise this menu makes.
             Picker("Merge method", selection: binding) {
-                ForEach(MergeMethodChoice.offered, id: \.self) { method in
+                ForEach(MergeMethodChoice.offered, id: \.self) { offered in
                     // GitHub's own wording here, because this menu is read beside the web UI.
                     // The button says `buttonLabel`, which is a promise about the next press.
-                    Text(method.label).tag(method)
+                    Text(offered.label).tag(offered)
                 }
             }
             .pickerStyle(.inline)
