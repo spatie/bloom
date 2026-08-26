@@ -454,7 +454,9 @@ struct DiffView: View {
             }
 
         case let .gapExpander(gapID, hidden):
-            DiffExpanderView(title: "Expand \(min(hidden, Self.gapStep)) lines", width: width) {
+            DiffExpanderView(
+                title: "Expand \(Counted.of(min(hidden, Self.gapStep), "line"))", width: width
+            ) {
                 revealedGaps[gapID, default: 0] += min(hidden, Self.gapStep)
                 rebuild()
             }
