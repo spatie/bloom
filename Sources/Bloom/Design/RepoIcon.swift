@@ -127,7 +127,8 @@ struct RepoIcon: View {
     }
 
     private var tint: Color {
-        accent.map(Color.init(hexString:)) ?? Palette.textTertiary
+        guard let accent else { return Palette.textTertiary }
+        return RepoAccent.tint(for: accent)
     }
 
     /// On the emphasized selection the tile becomes the translucent white a `Chip` becomes there,
@@ -150,19 +151,46 @@ struct RepoIcon: View {
     /// draws (a Reminders list mark, a Finder tag), and only the genuinely pale colours flip.
     private var contrastingInk: Color {
         guard let accent else { return Palette.textPrimary }
-        guard let color = NSColor(Color(hexString: accent)).usingColorSpace(.sRGB) else {
-            return .white
-        }
-        let luminance = 0.2126 * linear(color.redComponent)
-            + 0.7152 * linear(color.greenComponent)
-            + 0.0722 * linear(color.blueComponent)
-        return luminance > 0.35 ? .black : .white
+        return RepoAccent.ink(for: accent)
+    }
+}
+
+/// The two colours a project's accent hex resolves to, worked out once per hex.
+///
+/// Both used to be worked out on every body pass of every project mark, artwork included: the
+/// monogram sits in the stack at zero opacity so that a found icon arriving is a crossfade rather
+/// than a relayout. That was two hex parses, three `NSColor`s, a SwiftUI to AppKit bridge, a
+/// colour space conversion and three `pow()` calls per mark per pass, for an answer that depends
+/// on nothing but the string. The zero-opacity monogram stays, because gating it on `artwork`
+/// would make the arrival an insertion again; it is the arithmetic behind it that goes.
+///
+/// The luminance is `Contrast`'s, which is WCAG's and is unit tested, rather than a second copy
+/// here. The two agreed already: the branch constants (0.03928 against 0.04045) are the two
+/// spellings of the same crossover and meet to five decimal places at the one byte value between
+/// them.
+///
+/// No eviction. The keys are the accents of the projects in the sidebar, so the table is bounded
+/// by how many projects the owner has.
+@MainActor
+private enum RepoAccent {
+    private static var inks: [String: Color] = [:]
+    private static var tints: [String: Color] = [:]
+
+    static func tint(for hex: String) -> Color {
+        if let known = tints[hex] { return known }
+        let tint = Color(hexString: hex)
+        tints[hex] = tint
+        return tint
     }
 
-    /// sRGB is gamma encoded, so its components have to be linearised before they mean anything
-    /// as a brightness. Averaging the raw bytes instead is what makes a mid blue look as bright
-    /// as a mid yellow to the arithmetic and to nothing else.
-    private func linear(_ component: CGFloat) -> CGFloat {
-        component <= 0.04045 ? component / 12.92 : pow((component + 0.055) / 1.055, 2.4)
+    static func ink(for hex: String) -> Color {
+        if let known = inks[hex] { return known }
+        // The same fallback `Color(hexString:)` makes, so an unreadable accent is measured as the
+        // colour it is actually drawn in rather than as nothing.
+        let parsed = HexColor(hex: hex) ?? HexColor(red: 0x4C, green: 0x8D, blue: 0xF6)
+        let packed = UInt32(parsed.red) << 16 | UInt32(parsed.green) << 8 | UInt32(parsed.blue)
+        let ink: Color = Contrast.relativeLuminance(of: packed) > 0.35 ? .black : .white
+        inks[hex] = ink
+        return ink
     }
 }

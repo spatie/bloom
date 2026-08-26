@@ -40,6 +40,11 @@ enum Log {
     /// Permission questions: what was granted, and what a crash left unanswered.
     static let permissions = Logger(subsystem: subsystem, category: "permissions")
 
+    /// The blocking half of `bootstrap`, which is how long the window sits on `LoadingView`.
+    /// Nothing outside the process can see the moment `isLoaded` is set, so a sampler cannot
+    /// answer this and a probe would have to be told when to start.
+    static let launch = Logger(subsystem: subsystem, category: "launch")
+
     /// The workspace bridge: the socket it bound, the handshakes it refused, and the sessions it
     /// could not register. Every one of those is a tool the agent silently does not have, which is
     /// invisible from inside a transcript.

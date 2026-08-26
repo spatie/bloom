@@ -44,6 +44,8 @@ struct RepoHeaderRow: View {
     @FocusState private var repoFieldFocused: Bool
 
     @State private var isConfirmingRemove = false
+    /// What the dialog says, from the moment the menu item was pressed. See `askAboutRemoving`.
+    @State private var removal: Confirmation?
     /// Lights the `+` and swaps the project's mark for its settings gear. It belongs to this row
     /// rather than to a hover id shared across the whole list, so crossing the pane lights one
     /// project at a time.
@@ -157,17 +159,18 @@ struct RepoHeaderRow: View {
                 repo: repo,
                 onCreateWorkspace: onCreateWorkspace,
                 onRename: beginRepoRename,
-                onRemove: { isConfirmingRemove = true }
+                onRemove: askAboutRemoving
             )
         }
         .confirmationDialog(
-            removal.title,
+            removal?.title ?? "",
             isPresented: $isConfirmingRemove,
-            titleVisibility: .visible
-        ) {
+            titleVisibility: .visible,
+            presenting: removal
+        ) { removal in
             Button(removal.confirmLabel, role: .destructive, action: removeRepo)
             Button(removal.cancelLabel, role: .cancel) {}
-        } message: {
+        } message: { removal in
             Text(removal.message)
         }
     }
@@ -397,8 +400,17 @@ struct RepoHeaderRow: View {
     // MARK: - Actions
 
     /// The one question, asked here and in both settings panes. See `ProjectRemoval`.
-    private var removal: Confirmation {
-        app.projectRemoval(repo)
+    ///
+    /// Built when the menu item is pressed and held, rather than computed in `body`. It used to be
+    /// a computed property read as `confirmationDialog`'s positional title, which is a plain
+    /// argument rather than one of the lazy `@ViewBuilder` closures under it, so it was evaluated
+    /// on every pass whether or not the dialog was open. `AppModel.projectRemoval` filters the
+    /// whole workspace list, which made every project header depend on that list, and `reload()`
+    /// reassigns it whenever any diff stat moves: the same observation edge `DetailColumn` names
+    /// in its own doc, one pane over.
+    private func askAboutRemoving() {
+        removal = app.projectRemoval(repo)
+        isConfirmingRemove = true
     }
 
     private func removeRepo() {

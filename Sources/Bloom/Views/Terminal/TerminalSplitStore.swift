@@ -31,9 +31,16 @@ final class TerminalSplitStore {
     /// Read in one pass at launch rather than lazily per tab. A getter may not mutate, and loading
     /// from a task instead would leave the first frame showing a single pane, which is long enough
     /// to fork a shell for a pane the restored layout does not have.
+    ///
+    /// The app's own domain rather than `dictionaryRepresentation()`, which merges the whole
+    /// search list in to answer about one prefix. See `DefaultsSnapshot`. Its own snapshot rather
+    /// than one shared with `WorkspaceTabsStore`, because these two are reached from different
+    /// call sites in `bootstrap` and a snapshot handed across them would be a cache with a
+    /// lifetime nobody owns, for a domain of 87 entries.
     private init() {
         let defaults = UserDefaults.standard
-        for (key, value) in defaults.dictionaryRepresentation() where key.hasPrefix(Self.keyPrefix) {
+        let snapshot = DefaultsSnapshot.own(defaults, name: Bundle.main.bundleIdentifier)
+        for (key, value) in snapshot where key.hasPrefix(Self.keyPrefix) {
             guard let encoded = value as? String, let layout = SplitLayout(encoded: encoded) else {
                 continue
             }

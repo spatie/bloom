@@ -1268,7 +1268,16 @@ final class WorkspaceModel {
 
     /// Full contents of a file in the worktree, for the All files tab.
     func contents(of relativePath: String) -> String? {
-        let full = (workspace.path as NSString).appendingPathComponent(relativePath)
+        Self.contents(of: relativePath, in: workspace.path)
+    }
+
+    /// The same read with the worktree named, for a caller that is off the main actor.
+    ///
+    /// `DiffView.present` does the first read of a clicked file beside `DiffDocument.prepare` in
+    /// the same detached task, and this is what lets it: everything else in that function had
+    /// already been moved off the main actor and the file read had been left behind on it.
+    nonisolated static func contents(of relativePath: String, in worktree: String) -> String? {
+        let full = (worktree as NSString).appendingPathComponent(relativePath)
         return try? String(contentsOfFile: full, encoding: .utf8)
     }
 

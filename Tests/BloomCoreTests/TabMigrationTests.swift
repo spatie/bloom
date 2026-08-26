@@ -394,7 +394,9 @@ struct TabMigrationDefaultsTests {
         let second = try #require(other.encoded)
         defaults.set(second, forKey: "center.panes.w2")
 
-        let tabs = TabMigration.migrateAll(in: defaults)
+        let tabs = TabMigration.migrateAll(
+            in: defaults, keys: DefaultsSnapshot.own(defaults, name: name).keys
+        )
 
         #expect(tabs.map(\.key) == ["center.tab.s1", "center.tab.s2"])
         #expect(defaults.data(forKey: "center.panes.w1") == nil)
