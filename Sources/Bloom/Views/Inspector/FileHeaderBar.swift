@@ -90,7 +90,7 @@ struct FileHeaderBar: View {
         HStack(spacing: InspectorLayout.gap) {
             viewedToggle(compact: compact)
             revertButton
-            layoutToggles
+            layoutPicker
             whitespaceToggle
             copyButton
             shareButton
@@ -138,37 +138,51 @@ struct FileHeaderBar: View {
             .id("\(model.workspace.id)/\(file.path)")
     }
 
+    /// Destructive, the way the collapsed arrangement already draws it.
+    ///
+    /// It was a plain `.accessoryBar` glyph, identical in weight to Copy beside it, so the one
+    /// control in this bar that throws work away looked exactly like the one that puts it on the
+    /// pasteboard. The overflow menu at `collapsed` marks the same action `role: .destructive` and
+    /// always has; a bar and its own overflow saying two different things about one action is the
+    /// disagreement, not the styling.
     private var revertButton: some View {
-        Button("Revert file", systemImage: "arrow.uturn.backward") {
+        Button(role: .destructive) {
             isConfirmingRevert = true
+        } label: {
+            Label("Revert file", systemImage: "arrow.uturn.backward")
         }
         .labelStyle(.iconOnly)
         .inspectorBarControl()
         .help("Throw away the changes to \(file.filename)")
     }
 
-    private var layoutToggles: some View {
-        HStack(spacing: Metrics.spacingTight) {
-            Toggle(isOn: unified) {
-                Label("Unified diff", systemImage: "list.bullet.rectangle")
-            }
-            .help("Show the diff as one column")
-
-            Toggle(isOn: $isSideBySide) {
-                Label("Side by side diff", systemImage: "rectangle.split.2x1")
-            }
-            .help("Show the diff side by side")
+    /// Unified or side by side, which is one choice between two values and is therefore a
+    /// `Picker`.
+    ///
+    /// It was two `.toggleStyle(.button)` toggles joined by a hand written inverting `Binding`, so
+    /// the one exclusive choice in this bar was the only control in it not drawn as a choice: two
+    /// buttons that happen never to be on together. The collapsed arrangement above already draws
+    /// it as an inline `Picker`, and `modePicker` two controls along is a segmented one, so this
+    /// bar held all three spellings of the same idea.
+    ///
+    /// `Image` rather than `Label` in the segments: a segmented control on macOS is an
+    /// `NSSegmentedControl`, whose cells carry a title or an image and not both, which
+    /// `CreateWorkspaceSheet.modePicker` records having found out the hard way.
+    private var layoutPicker: some View {
+        Picker("Diff layout", selection: $isSideBySide) {
+            Image(systemName: "list.bullet.rectangle")
+                .accessibilityLabel("Unified diff")
+                .tag(false)
+            Image(systemName: "rectangle.split.2x1")
+                .accessibilityLabel("Side by side diff")
+                .tag(true)
         }
-        .labelStyle(.iconOnly)
-        .toggleStyle(.button)
-        .inspectorBarControl()
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.small)
+        .fixedSize()
         .disabled(mode == .edit)
-    }
-
-    /// The two layout buttons are one choice, so the unified one writes the same storage rather
-    /// than keeping a second flag that could disagree with it.
-    private var unified: Binding<Bool> {
-        Binding(get: { !isSideBySide }, set: { isSideBySide = !$0 })
+        .help("Show the diff as one column or side by side")
     }
 
     private var whitespaceToggle: some View {

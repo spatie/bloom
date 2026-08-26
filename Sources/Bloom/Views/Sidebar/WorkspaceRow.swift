@@ -134,7 +134,10 @@ struct WorkspaceRow: View {
                     if workspace.pinned {
                         Image(systemName: "pin.fill")
                             .font(Typo.micro)
-                            .foregroundStyle(.tertiary)
+                            // The palette's rung rather than AppKit's third, which `textTertiary`
+                            // was retuned away from: the system's is 1.9 to 1 and means a disabled
+                            // control. Home draws the same pin and always did it this way.
+                            .foregroundStyle(Palette.textTertiary)
                             .accessibilityLabel("Pinned")
                     }
 
@@ -383,8 +386,11 @@ struct WorkspaceRow: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(isEmphasized ? Palette.textInverted : Palette.textSecondary)
-        // The shortcut is named the way Conductor names its own, with ours rather than theirs.
-        .help("Archive workspace  ⌘⌫")
+        // One notation for a shortcut in a tooltip, everywhere: the glyphs, in brackets, after
+        // the sentence. The app had three, and this row was the one that wrote two spaces and
+        // no brackets. The other two were `SidebarProjectsHeader`, which already reads this
+        // way, and `ComposerStopButton`, which spelled the keys out in words.
+        .help("Archive workspace (⌘⌫)")
         .accessibilityLabel("Archive \(workspace.name)")
     }
 
@@ -423,7 +429,7 @@ private struct PullRequestQuestion: Hashable, Sendable {
 /// a number. The same shape the subagent rows use, at the same size the diff stat beside it uses.
 private struct SubagentFailureLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Metrics.spacingTight) {
             configuration.icon
             configuration.title
         }

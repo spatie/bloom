@@ -76,6 +76,10 @@ struct TurnFooterView: View {
                     .imageScale(.medium)
                     .foregroundStyle(appearance.tint)
                     .accessibilityLabel(outcome.label)
+                    // Four ways a turn can end, collapsed into one 13 point mark, and this row is
+                    // the only place any of them is said. VoiceOver could read it and a pointer
+                    // could not; the `Menu` eight lines below already carries a tooltip.
+                    .help(outcome.label)
 
                 Text(TurnDuration.format(row.durationMS ?? result?.durationMS ?? 0))
                     .font(Typo.caption)

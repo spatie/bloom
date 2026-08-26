@@ -172,7 +172,10 @@ struct ChangedFileList: View {
                     }
                 }
             }
-            .padding(.bottom, Metrics.spacingSmall)
+            // The same inset the tree keeps, top and bottom. The flat list held four points at the
+            // bottom and none at the top while the tree held two at both, so switching shape moved
+            // every row two points and the pane looked like it had reloaded.
+            .padding(.vertical, InspectorLayout.tight)
         }
     }
 

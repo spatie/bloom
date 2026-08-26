@@ -4,12 +4,16 @@ import BloomCore
 /// Gives File > Close the Shift+Cmd+W that Safari and Terminal give it when Cmd+W has gone to
 /// something smaller than a window.
 ///
-/// Bloom's Cmd+W closes the session, deliberately: the window lists every workspace and every
-/// agent in the app, so closing it on the reflex that closes a tab everywhere else used to end the
-/// process and every running turn with it. What that leaves behind is a File > Close with no key
-/// at all, which is the item somebody actually wants when they do mean the window. Safari and
-/// Terminal have both been in exactly this position for twenty years and both answer it the same
-/// way, so this is the convention rather than an invention.
+/// Bloom's Cmd+W closes the tab, deliberately: the window lists every workspace and every agent in
+/// the app, so closing it on the reflex that closes a tab everywhere else used to end the process
+/// and every running turn with it. What that leaves behind is a File > Close with no key at all,
+/// which is the item somebody actually wants when they do mean the window. Safari and Terminal
+/// have both been in exactly this position for twenty years and both answer it the same way, so
+/// this is the convention rather than an invention.
+///
+/// It said "closes the session" until this was corrected, which was true of the item Cmd+W used to
+/// carry. `BloomCommands` retired Close Session: a conversation IS a tab in the centre strip, and
+/// the old item closed the workspace's active chat whatever was actually in front of you.
 ///
 /// It is done in AppKit rather than in `BloomCommands` because SwiftUI has no command group that
 /// names this item. It is contributed by the window scene itself, and `CommandGroupPlacement` has

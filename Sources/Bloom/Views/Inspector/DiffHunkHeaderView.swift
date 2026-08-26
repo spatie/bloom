@@ -15,6 +15,9 @@ struct DiffHunkHeaderView: View {
             Image(systemName: "curlybraces")
                 .font(Typo.micro)
                 .imageScale(.small)
+                // Decoration: the scope is in the text beside it, and every comparable glyph down
+                // this column is already hidden.
+                .accessibilityHidden(true)
             Text(text)
                 .font(Typo.codeTiny)
                 .lineLimit(1)

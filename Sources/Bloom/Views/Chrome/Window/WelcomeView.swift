@@ -43,6 +43,10 @@ struct WelcomeView: View {
 
     private var report: SetupReport { inspection.shown }
 
+    /// See the note where they are applied: the brand band is off the spacing scale on purpose.
+    private static let plinthTop: CGFloat = 30
+    private static let plinthBottom: CGFloat = 22
+
     var body: some View {
         Group {
             switch flow.step {
@@ -120,8 +124,13 @@ struct WelcomeView: View {
                 .padding(.top, Metrics.spacingWide + Metrics.spacingSmall)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 30)
-        .padding(.bottom, 22)
+        // The brand plinth's own numbers, and deliberately not rungs of the spacing scale. This
+        // band is a fixed-size window's header holding serif display type over moving water, laid
+        // out against the title bar rather than against a row of controls, and the scale is for
+        // gaps between things that sit in a resizable pane. `AboutWindow` says the same about its
+        // own two. Off the scale and said so, rather than off the scale in silence.
+        .padding(.top, Self.plinthTop)
+        .padding(.bottom, Self.plinthBottom)
         .padding(.horizontal, Metrics.pane)
         .background {
             ZStack {

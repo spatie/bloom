@@ -52,7 +52,10 @@ struct UserTurnRowView: View {
     /// What a bubble drawn outside a transcript is capped at, which is every use of this view that
     /// is not the list: nothing else puts one up today, and a bubble with no cap at all would run
     /// the full width of whatever it landed in.
-    private static let uncappedFallback: CGFloat = 560
+    ///
+    /// Not private, for the reason `inset` above gives: `PendingTurnRowView` draws the same bubble
+    /// in a different state and had a copied 560 of its own.
+    static let uncappedFallback: CGFloat = 560
 
     private var maxWidth: CGFloat { bubbleWidth?.cap ?? Self.uncappedFallback }
 

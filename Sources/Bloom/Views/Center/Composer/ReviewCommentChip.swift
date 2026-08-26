@@ -19,8 +19,13 @@ struct ReviewCommentChip: View {
 
     @State private var isHovered = false
 
-    /// The same slot as the sibling chips, so a row holding all three kinds has one rhythm.
-    private static let slot: CGFloat = 14
+    /// The same slot as the sibling chips, so a row holding all three kinds has one rhythm. Their
+    /// constant rather than a third copy of its value.
+    private static let slot: CGFloat = AttachmentChip.slot
+    /// And the same ceiling on the name, which was written here as a bare 340 in the frame below.
+    /// A comment's summary is the same kind of thing a plugin's name is: middle truncated, the
+    /// half that says which one it is goes first.
+    private static let maxNameWidth: CGFloat = SlashCommandChip.maxNameWidth
 
     var body: some View {
         HStack(spacing: Metrics.spacingSmall) {
@@ -31,7 +36,7 @@ struct ReviewCommentChip: View {
                 .foregroundStyle(Palette.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .frame(maxWidth: 340, alignment: .leading)
+                .frame(maxWidth: Self.maxNameWidth, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, Metrics.spacing)

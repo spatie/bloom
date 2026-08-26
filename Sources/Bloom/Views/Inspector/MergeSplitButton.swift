@@ -89,7 +89,11 @@ struct MergeSplitButton: View {
                 // draws a disabled prominent button and therefore how this one has to look beside
                 // them.
                 fill.opacity(isLive ? 1 : 0.35),
-                in: .rect(cornerRadius: Metrics.corner)
+                // A capsule, because that is what macOS 26 draws a `.borderedProminent` button as.
+                // Painted as a six point rounded rectangle, this fill's corners sat outside the
+                // control's own bezel and its silhouette disagreed with every other prominent
+                // button in the strip.
+                in: .capsule
             )
     }
 

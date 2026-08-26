@@ -41,6 +41,8 @@ struct ProjectSetupSheet: View {
     @State private var access: GitHubAvailability.State = .unknown
     @State private var phase: Phase = .choosing
     @State private var signIn: GitHubSignIn.Request?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @State private var isShowingExcluded = false
     @State private var availabilityCheck: Task<Void, Never>?
     @State private var isLoadingOwners = false
@@ -248,6 +250,12 @@ struct ProjectSetupSheet: View {
                     .foregroundStyle(Palette.textSecondary)
                 }
                 .buttonStyle(.plain)
+                // The three things `RepoHeaderRow.disclosure` gives its own chevron and this one
+                // had none of: the state as a value rather than only in the glyph's direction, a
+                // tooltip, and the turn as movement that Reduce Motion drops.
+                .animation(reduceMotion ? nil : Motion.pane, value: isShowingExcluded)
+                .accessibilityValue(isShowingExcluded ? "Expanded" : "Collapsed")
+                .help(isShowingExcluded ? "Hide what is left out" : "Show what is left out")
 
                 if isShowingExcluded {
                     VStack(alignment: .leading, spacing: Metrics.spacingTight) {

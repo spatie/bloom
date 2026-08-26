@@ -28,9 +28,6 @@ struct ComposerContextGauge: View {
     private static let barWidth: CGFloat = 26
     private static let barHeight: CGFloat = 4
 
-    /// Where a nearly full window stops being background information. Past it the bar takes the
-    /// warning colour, which is the only thing in this control that asks to be noticed.
-
     var body: some View {
         Button {
             isShowingDetail = true

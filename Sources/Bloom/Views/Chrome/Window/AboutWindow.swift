@@ -95,6 +95,10 @@ private struct AboutView: View {
     /// off `.footer__credit`.
     private static let badgeHeight: CGFloat = 19
 
+    /// See the note where they are applied: the brand band is off the spacing scale on purpose.
+    private static let plinthTop: CGFloat = 38
+    private static let plinthBottom: CGFloat = 26
+
     var body: some View {
         VStack(spacing: 0) {
             plinth
@@ -156,8 +160,11 @@ private struct AboutView: View {
                 .padding(.top, Metrics.spacingWide + Metrics.spacingSmall)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 38)
-        .padding(.bottom, 26)
+        // The brand plinth's own numbers, as in `WelcomeView`, and off the spacing scale for the
+        // reason given there: this is a fixed-size window's header of serif display type over the
+        // water, measured against the title bar rather than against a row of controls.
+        .padding(.top, Self.plinthTop)
+        .padding(.bottom, Self.plinthBottom)
         .background {
             // `.ignoresSafeArea` because this is the view builder overload of `background`,
             // which respects the safe area that the ShapeStyle overload ignores by default.

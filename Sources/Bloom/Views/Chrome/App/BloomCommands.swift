@@ -29,8 +29,17 @@ struct BloomCommands: Commands {
     /// confirmation lives. Nil whenever that band is not on screen, which greys the item.
     @FocusedValue(\.mergeAction) private var mergeAction: MergeAction?
 
+    /// Opens the project settings window, which is a scene rather than a sheet.
+    @Environment(\.openWindow) private var openWindow
+
     init(model: AppModel) {
         self.model = model
+    }
+
+    /// Which project the settings item opens: the selected workspace's, or the only sensible
+    /// fallback, which is the first one.
+    private var projectSettingsRepo: Repo? {
+        model.selectedWorkspace.flatMap(model.repo(for:)) ?? model.repos.first
     }
 
     var body: some Commands {
@@ -88,6 +97,19 @@ struct BloomCommands: Commands {
                 )
             }
             .disabled(model.repos.isEmpty)
+
+            // Third in File, which is where `MenuBarCatalogue` says it is. It used to be a
+            // `Button` with its own title and its own key in a `Commands` body of its own,
+            // contributed `after: .newItem`, which put it LAST in the menu: the table's stated
+            // ordering was false for exactly one row, and the row was the one the table could not
+            // see. In File rather than beside Settings in the app menu, for the reason that
+            // separate body already gave: an item added after `.appSettings` reads better and is
+            // also where a second Settings item invites the wrong click.
+            MenuCommand(.projectSettings) {
+                guard let repo = projectSettingsRepo else { return }
+                openWindow(id: RepoSettingsWindow.id, value: repo.id)
+            }
+            .disabled(projectSettingsRepo == nil)
 
             MenuCommand(.newSession) {
                 guard let workspace = model.selectedModel else { return }
@@ -350,10 +372,12 @@ struct BloomCommands: Commands {
             }
             .disabled(model.selection == .home)
 
-            // No key equivalent, deliberately. Every letter that would read as this one is taken
-            // by something in front of it, and a menu item is discoverable without one where a
-            // second binding on a key the composer already uses is not.
-            Button("Go to Ask Bloom") {
+            // The title and the key come from the table, like every other row in the bar. Written
+            // here as a `Button` with its own string, it was a title nothing could check and a
+            // keylessness nothing could compare against the rest of the bar, which is what
+            // `MenuCommand`'s header calls the whole point of it. The argument for no key is on
+            // the row itself now.
+            MenuCommand(.goToAsk) {
                 model.selection = .ask
             }
             .disabled(model.selection == .ask)
@@ -456,7 +480,7 @@ struct BloomCommands: Commands {
 
             MenuCommand(.openInEditor) {
                 guard let workspace = workspace(for: .openInEditor) else { return }
-                Reveal.inEditor(workspace.path)
+                Reveal.inEditor(workspace.path, repo: workspace.repoID)
             }
             .disabled(workspace(for: .openInEditor) == nil)
 

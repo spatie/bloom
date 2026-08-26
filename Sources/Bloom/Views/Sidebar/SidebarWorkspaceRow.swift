@@ -148,12 +148,27 @@ struct SidebarEmptyNoticeRow: View {
     /// Only used to say WHY there is nothing here, which is a different sentence when a filter is
     /// hiding rows than when the project has none.
     var isFiltered: Bool
+    /// Starts one. Absent when a filter is what is hiding the rows, because the way out of that is
+    /// to change the filter and a project with workspaces does not need a button offering more.
+    var onCreate: (@MainActor () -> Void)?
 
     var body: some View {
         Label {
-            Text(isFiltered ? "Nothing matches the filter" : "No workspaces yet")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
+            // The sentence, and then the way out of it. Every other empty state in the app carries
+            // one: the sidebar's "No projects yet", Home's, the create sheet's. This one said "No
+            // workspaces yet" and stopped, and the `+` that fixes it is on the header above and
+            // only appears once the pointer is on that header.
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                Text(isFiltered ? "Nothing matches the filter" : "No workspaces yet")
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textTertiary)
+
+                if !isFiltered, let onCreate {
+                    Button("New workspace", action: onCreate)
+                        .linkButton()
+                        .font(Typo.caption)
+                }
+            }
         } icon: {
             Color.clear
         }

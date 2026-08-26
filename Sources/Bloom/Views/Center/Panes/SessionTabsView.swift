@@ -15,6 +15,7 @@ struct SessionTabsView: View {
     @Bindable var model: WorkspaceModel
 
     @Environment(AppModel.self) private var app
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var renamingID: String?
     /// A tab being dragged along the strip, and the order the strip is showing because of it.
@@ -171,7 +172,13 @@ struct SessionTabsView: View {
             }
             // Only when a drag moves the tabs. A reload that came from anywhere else, a session
             // arriving or a tab being renamed, must not make the strip slide about.
-            .animation(.snappy(duration: 0.18), value: drag?.order)
+            //
+            // `Motion.pane` rather than the `.snappy(duration: 0.18)` this was written as. The
+            // length was already `pane`'s; what differed was the curve, and `.snappy` is a spring
+            // that overshoots, against the argument at the head of `Motion` that a pane is
+            // furniture and furniture that springs is a toy. Tabs moving out from under a dragged
+            // tab are the strip relaying out, not an event of their own.
+            .animation(reduceMotion ? nil : Motion.pane, value: drag?.order)
         } append: {
             // The rule between the last tab and the `+`, which is the same rule the tabs have
             // between each other and goes the same way: hidden against the selected tab, whose

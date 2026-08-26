@@ -215,6 +215,10 @@ final class WorkspaceHoverCardPresenter {
     /// `Motion.pane`, because it follows a deliberate 350ms rest and anything slower than the
     /// hover it answers reads as lag. Skipped entirely for Reduce Motion, which is what that
     /// setting asks for.
+    ///
+    /// The length is `Motion.hoverSeconds` rather than the 0.12 written here, which was the same
+    /// number under another name. An `NSAnimationContext` cannot be handed an `Animation`, which
+    /// is the two-framework case `inspectorSeconds` already exists for.
     private func fadeIn(_ panel: NSPanel) {
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
             panel.alphaValue = 1
@@ -222,7 +226,7 @@ final class WorkspaceHoverCardPresenter {
         }
         panel.alphaValue = 0
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.12
+            context.duration = Motion.hoverSeconds
             panel.animator().alphaValue = 1
         }
     }

@@ -448,13 +448,15 @@ struct DiffView: View {
             DiffHunkHeaderView(text: text, width: width)
 
         case let .runExpander(runID, hidden):
-            DiffExpanderView(title: "Expand \(hidden) lines", width: width) {
+            DiffExpanderView(title: "Expand \(Counted.of(hidden, "line"))", width: width) {
                 expandedRuns.insert(runID)
                 rebuild()
             }
 
         case let .gapExpander(gapID, hidden):
-            DiffExpanderView(title: "Expand \(min(hidden, Self.gapStep)) lines", width: width) {
+            DiffExpanderView(
+                title: "Expand \(Counted.of(min(hidden, Self.gapStep), "line"))", width: width
+            ) {
                 revealedGaps[gapID, default: 0] += min(hidden, Self.gapStep)
                 rebuild()
             }

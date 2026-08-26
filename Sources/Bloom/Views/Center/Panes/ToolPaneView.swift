@@ -61,8 +61,9 @@ struct ToolPaneView: View {
             }
             // Gated, because what it drives is `WorktreeSetupStrip`'s `.move(edge: .top)`: the
             // strip slides down and back up, pushing the terminal with it, on every terminal tab
-            // opened while setup runs.
-            .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: readiness)
+            // opened while setup runs. A strip pushing a pane is the pane's own movement, so it
+            // is on the pane's curve rather than the `.snappy(duration: 0.2)` it was written as.
+            .animation(reduceMotion ? nil : Motion.pane, value: readiness)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.surfaceSunken)
             .task(id: tab.id) { await prepareTerminal() }

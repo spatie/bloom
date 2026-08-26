@@ -385,8 +385,7 @@ public struct ArchiveDeletion: Sendable, Hashable {
     ///   forced it: Home's transcript heading counts matches, and "1 matchs" is the sort of thing
     ///   a reader stops on.
     public static func count(_ value: Int, _ noun: String, plural: String? = nil) -> String {
-        let word = value == 1 ? noun : (plural ?? noun + "s")
-        return "\(value.formatted()) \(word)"
+        Counted.of(value, noun, plural: plural)
     }
 
     /// One formatter for every size in this feature, so the list, the summary and the confirmation

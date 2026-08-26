@@ -17,14 +17,21 @@ final class LineNumberRuler: NSRulerView {
     private var lineStarts: [Int] = [0]
     private var isStale = true
 
-    /// What the gutter is painted with.
+    /// What the gutter is painted with, and what the numbers on it are painted in.
     ///
     /// Resolved by the caller and stored, never converted inside `draw`: turning a SwiftUI `Color`
     /// into an `NSColor` during a draw pass drags the SwiftUI graph into it, which is what broke
-    /// the window capture the first time this ruler was written. The defaults are the AppKit
-    /// colours the diff has always used, so a caller that says nothing gets exactly what it had.
-    var fill: NSColor = .underPageBackgroundColor
-    var rule: NSColor = .separatorColor
+    /// the window capture the first time this ruler was written. So the palette is reached from
+    /// `SourceEditor`, which is already re-resolving the ground on every appearance change, and
+    /// these are the AppKit fallbacks a caller that says nothing gets.
+    ///
+    /// There is no rule beside the numbers and no tint under them. `fill` is the page ground, so
+    /// the gutter is the margin of the file rather than a strip stuck to the side of it, which is
+    /// the treatment `DiffLineView.gutter` argues for and the one Diff, Preview and Edit now
+    /// share. A hairline here was also drawn at `1 / backingScaleFactor`, half a point on Retina,
+    /// which is the width `Metrics.hairline` was moved off because the rules in this window were
+    /// not so much subtle as absent.
+    var fill: NSColor = .textBackgroundColor
     var numberColor: NSColor = .tertiaryLabelColor {
         didSet { attributes[.foregroundColor] = numberColor }
     }
@@ -130,16 +137,10 @@ final class LineNumberRuler: NSRulerView {
         //
         // Already-resolved `NSColor`s, never a `Palette` value converted here: converting a
         // SwiftUI `Color` inside a draw pass drags the SwiftUI graph into it, and that broke the
-        // window capture in a different way again. See `fill` and `rule`.
+        // window capture in a different way again. See `fill` and `numberColor`.
         let gutter = bounds
         fill.setFill()
         gutter.fill()
-
-        rule.setFill()
-        let hairline = 1 / (window?.backingScaleFactor ?? 2)
-        NSRect(
-            x: bounds.maxX - hairline, y: gutter.minY, width: hairline, height: gutter.height
-        ).fill()
 
         let inset = textView.textContainerInset.height
         let origin = convert(NSPoint.zero, from: textView).y + inset

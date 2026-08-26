@@ -58,11 +58,31 @@ enum Reveal {
         apple.executeAndReturnError(&error)
     }
 
-    /// Walks a short, fixed list of editors and opens the folder in the first one installed,
-    /// falling back to Finder. Not the app the user has associated with folders: that
-    /// association is Finder on nearly every machine, so asking LaunchServices would answer
-    /// Finder for the people this menu item exists for.
-    static func inEditor(_ path: String) {
+    /// Opens a path in the editor this project was last opened in.
+    ///
+    /// **It used to ignore that entirely**, and `OpenInMenu`'s header recorded the consequence and
+    /// declined to fix it: ⇧⌘E and the "Open File in" submenu could open two different editors on
+    /// the same Mac, agreeing only by coincidence on one where VS Code happens to be the answer to
+    /// both. A Zed or a Sublime user got their choice from the submenu and VS Code from the menu
+    /// bar. `OpenIn.preferred` is the same question the submenu asks, so both now get one answer.
+    ///
+    /// The fixed ladder below is still what answers when nothing is installed that the catalogue
+    /// knows, and its own reason is unchanged: NOT the app the user has associated with folders,
+    /// because that association is Finder on nearly every machine and would answer Finder for
+    /// exactly the people this item exists for.
+    ///
+    /// - Parameter repo: whose choice to honour. Nil where the caller genuinely has no project in
+    ///   hand, which falls back to whatever was last used anywhere, as the submenu does.
+    @MainActor
+    static func inEditor(_ path: String, repo: RepoID? = nil) {
+        var isDirectory: ObjCBool = false
+        FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+        let target: OpenInTarget = isDirectory.boolValue ? .folder(path) : .file(path)
+        if let app = OpenIn.preferred(for: target, repo: repo) {
+            OpenIn.open(path, with: app, repo: repo)
+            return
+        }
+
         let url = URL(fileURLWithPath: path)
         for bundleID in ["com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92", "com.apple.dt.Xcode"] {
             if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {

@@ -355,6 +355,20 @@ enum Palette {
     /// so a finished question reads as part of the record rather than as something still waiting.
     static let questionWashSettled = accent.opacity(0.03)
 
+    /// The amber twin of the set above: the wash and the rule of a card that wants something of
+    /// the reader without being an error. The permission ask while it is holding the turn open,
+    /// and a retry while it is counting down.
+    ///
+    /// Named for the same reason `questionWash` is, and named because the two cards had already
+    /// drifted apart: the ask card was `0.07` over `0.46` and the retry `0.07` over `0.28`, two
+    /// amber plates a reader meets in one scroll with visibly different rules. The border takes
+    /// `questionBorder`'s rung rather than either of the two literals it replaces, since neither
+    /// of them had an argument behind it and the question card is the same card in another colour.
+    static let cautionWash = warning.opacity(0.07)
+    static let cautionBorder = warning.opacity(0.4)
+    /// The ask card once it has been answered, matching `questionWashSettled`.
+    static let cautionWashSettled = warning.opacity(0.03)
+
     /// Something went wrong: a failed check, an error row, a deletion count.
     ///
     /// Not `systemRed`. The system reds are tuned to be the one saturated thing on their screen,
@@ -493,8 +507,6 @@ enum Palette {
     static let diffAddEmphasis = diffPositive.opacity(0.28)
     static let diffDeleteBackground = negative.opacity(0.14)
     static let diffDeleteEmphasis = negative.opacity(0.30)
-    /// The line number column, which is the sunken step and nothing else.
-    static let diffGutter = surfaceSunken
 
     /// A line under review, and the band holding its comment. The one amber wash in the window,
     /// on `warning`'s hue, because the diff's own washes have already spent green and red: a
@@ -747,6 +759,51 @@ enum Metrics {
     static let controlHeight: CGFloat = 22
 }
 
+/// How far off the window a floating thing is lifted.
+///
+/// Three call sites had invented three recipes for one question: `MenuPanel` at 0.24 over twelve
+/// points, `JumpToNewestPill` at 0.18 over four and 0.28 over twelve under the pointer, and the
+/// pane drag ghost at 0.18 over eight. Nothing distinguished them; they were written on three
+/// days. Two levels are enough for what the window actually has, and they are named for what the
+/// thing is doing rather than for how dark the shadow is.
+///
+/// Black rather than the label colour, in both. A shadow tinted with `labelColor` becomes a white
+/// glow in dark appearance, which is the opposite of what a shadow is for, and every one of the
+/// three call sites had already had to write that down for itself.
+enum Elevation {
+    /// A control sitting on the page: the jump pill at rest.
+    case resting
+    /// A panel open over the window, or something carried under the pointer.
+    case lifted
+
+    var opacity: Double {
+        switch self {
+        case .resting: 0.18
+        case .lifted: 0.24
+        }
+    }
+
+    var radius: CGFloat {
+        switch self {
+        case .resting: Metrics.spacingSmall
+        case .lifted: Metrics.gutter
+        }
+    }
+
+    var offset: CGFloat {
+        switch self {
+        case .resting: Metrics.spacingTight
+        case .lifted: Metrics.spacingSmall
+        }
+    }
+}
+
+extension View {
+    func elevation(_ level: Elevation) -> some View {
+        shadow(color: .black.opacity(level.opacity), radius: level.radius, y: level.offset)
+    }
+}
+
 /// How a pane arrives and leaves.
 ///
 /// One curve for every pane SwiftUI draws, because two panes that move at different speeds read as
@@ -785,6 +842,10 @@ enum Motion {
     /// deliberately not `pane`: this movement belongs to the split view and the other two are
     /// joining it, and a speed chosen here that the split view then declined to use would put them
     /// back out of step, which is the whole bug.
+    ///
+    /// `hoverSeconds` below is the same idea for the hover speed, and exists for the same reason:
+    /// an `NSAnimationContext` takes a `TimeInterval` and cannot be handed an `Animation`, so
+    /// anything AppKit plays needs the length written down separately or it writes its own.
     static let inspectorSeconds: TimeInterval = 0.25
 
     /// A hover state fading in, and a disclosure settling. See the sidebar rows.
@@ -793,7 +854,12 @@ enum Motion {
     /// before the cursor has finished arriving, or the row reads as lagging rather than as
     /// responding. Named because five call sites had grown their own literals (0.12 twice, 0.15,
     /// 0.2 once) and a file that argues one window has one speed cannot also hold four of them.
-    static let hover: Animation = .easeInOut(duration: 0.12)
+    ///
+    /// A sixth had grown one since: a tab's favicon crossfading in `TabItemIcon`, spelled out as
+    /// `.easeInOut(duration: 0.12)`, which is this constant with the name taken off. Naming a
+    /// speed only stops the drift if the next call site reads the name.
+    static let hoverSeconds: TimeInterval = 0.12
+    static let hover: Animation = .easeInOut(duration: hoverSeconds)
 
     /// A pane's own length, borrowed by anything that settles at the same speed.
     ///

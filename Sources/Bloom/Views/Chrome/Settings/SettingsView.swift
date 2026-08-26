@@ -405,7 +405,10 @@ private struct EffectiveSettingsView: View {
         Group {
             SettingsRow("Configuration") {
                 Button("Open Project Settings") {
-                    Reveal.inEditor((repo.path as NSString).appendingPathComponent(".conductor/settings.toml"))
+                    Reveal.inEditor(
+                        (repo.path as NSString).appendingPathComponent(".conductor/settings.toml"),
+                        repo: repo.id
+                    )
                 }
             }
 

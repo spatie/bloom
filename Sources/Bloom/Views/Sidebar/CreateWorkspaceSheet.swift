@@ -265,7 +265,7 @@ struct CreateWorkspaceSheet: View {
                     .accessibilityLabel("Loading branches")
             }
 
-            overflowMenu
+            worktreeNote
         }
         // The same padding as `ProjectSetupSheet`'s header, which is the app's other sheet header
         // sitting above a hairline: `gutter` across, `inset` down.
@@ -417,23 +417,18 @@ struct CreateWorkspaceSheet: View {
         }
     }
 
-    /// Everything real but rarely changed. Conductor puts the same class of thing behind the same
-    /// glyph, and for the same reason: a control nobody touches on nineteen creations out of twenty
-    /// should not be taking room from the one thing they came here to write.
-    private var overflowMenu: some View {
-        Menu {
-            Section {
-                Text("Worktree in \(WorkspaceManager.workspacesRoot.path)")
-            }
-        } label: {
-            ComposerControlLabel(systemImage: "ellipsis", text: nil)
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("More options")
-        .accessibilityLabel("More options")
+    /// Where the worktree is going to be cut.
+    ///
+    /// It was an ellipsis menu labelled "More options" whose entire content was one `Text`: not
+    /// clickable, not copyable, not selectable, and behind a press. A menu with nothing to choose
+    /// in it is not a menu, and a control that opens onto one line of prose is a tooltip that
+    /// charges a click. The sentence is the tooltip now, and the glyph says what it is about.
+    private var worktreeNote: some View {
+        Image(systemName: "folder")
+            .font(Typo.caption)
+            .foregroundStyle(Palette.textTertiary)
+            .help("Worktree in \(WorkspaceManager.workspacesRoot.path)")
+            .accessibilityLabel("Worktree in \(WorkspaceManager.workspacesRoot.path)")
     }
 
     // MARK: - The choice, and then the box
@@ -621,6 +616,11 @@ struct CreateWorkspaceSheet: View {
 
             HStack(spacing: Metrics.spacing) {
                 Spacer(minLength: 0)
+                // Beside Create rather than in the row below it. The two things that end this
+                // sheet were stacked vertically, which is not a shape a Mac sheet has: the pair is
+                // one decision and reads as one row, with the default action rightmost.
+                Button("Cancel", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
                 // The same button the composer's footer ends with, in the same corner of the same
                 // box, doing the same job. One way to finish the sheet in both modes, Return
                 // presses it in both, and it does not move when the mode changes.
@@ -701,14 +701,14 @@ struct CreateWorkspaceSheet: View {
         max(contentHeight, ComposerTextEditor.lineHeight * Self.minEditorLines)
     }
 
+    /// What the sheet is willing to promise, under the box. Cancel used to stand at its trailing
+    /// end, which put the sheet's two terminal actions one above the other; it is beside Create
+    /// now.
     private var statusRow: some View {
         HStack(spacing: Metrics.spacingWide) {
             hint
 
             Spacer(minLength: 0)
-
-            Button("Cancel", role: .cancel) { dismiss() }
-                .keyboardShortcut(.cancelAction)
         }
     }
 

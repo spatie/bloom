@@ -291,7 +291,8 @@ struct WorkspaceEventRow: View {
             isError: event.isFailure,
             durationMS: event.durationMS,
             isExpanded: isExpanded,
-            isHovered: isHovered
+            isHovered: isHovered,
+            showsDisclosure: canExpand
         )
     }
 
