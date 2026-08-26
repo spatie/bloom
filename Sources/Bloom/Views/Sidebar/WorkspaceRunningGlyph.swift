@@ -24,8 +24,8 @@ import BloomCore
 /// `PulsingDot` reads `BusyPulse.epoch` rather than starting a loop of its own, which is the whole
 /// argument on that type: five agents started at five moments give five figures at five phases, and
 /// nothing ever pulls them back together. Phased off one instant, five working rows pulse as one
-/// column, and they are in step with the light on the rule as well, because two pulses are exactly
-/// one crossing of it. See `BusyDot.period`.
+/// column, and they are in step with the rule under the title bar as well, which brightens on this
+/// very wave rather than on one of its own. See `BusyDot.period` and `BusyRule`.
 ///
 /// # What it costs
 ///

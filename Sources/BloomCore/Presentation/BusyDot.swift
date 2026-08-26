@@ -24,11 +24,12 @@ public enum BusyDot {
     /// A second and a half, where the SwiftUI animation this replaced ran 0.7 seconds each way.
     /// Every moving mark in the window takes its phase from `BusyPulse.epoch` so that the window
     /// has one heartbeat rather than several that drift past each other, and that only holds while
-    /// the periods stay in whole number ratios: the light on the rule crosses in 3 seconds and its
-    /// whole figure is 6, so a 1.5 second pulse begins with every crossing and every second pulse
-    /// begins with the light's turn. 1.4 shares no useful multiple with either and the two marks
-    /// would beat against each other on a cycle of half a minute. Each leg is therefore a
-    /// twentieth of a second longer than it was, which is not a difference anybody can see.
+    /// the periods stay in whole number ratios. This is the number the rest are measured against:
+    /// the rule under the title bar takes it outright (`BusyRule.period`), so the rule and every
+    /// dot reach the top of their pulse on the same frame, and a breath is 3 seconds, which is two
+    /// of these. 1.4 divides neither, and the marks would beat against each other rather than
+    /// share a beat. Each leg is therefore a twentieth of a second longer than it was, which is
+    /// not a difference anybody can see.
     public static let period: TimeInterval = 1.5
 
     /// How wide the dot is at the top of its pulse, as a multiple of its resting diameter.

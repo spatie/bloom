@@ -14,7 +14,7 @@ import BloomCore
 /// picture cannot disagree with the app about what a tab looks like. What is faked is only the
 /// state behind them: there is no workspace, no session and no web view in a capture.
 struct PaneTabsGallery: View {
-    /// Only so the strip has one to read. `TabStrip` puts the busy sweep on the rule under the
+    /// Only so the strip has one to read. `TabStrip` puts the busy signal on the rule under the
     /// title bar and asks the app model whether anything is running, so a strip drawn without one
     /// in the environment traps rather than draws.
     var app: AppModel

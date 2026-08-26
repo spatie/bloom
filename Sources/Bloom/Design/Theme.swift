@@ -788,28 +788,6 @@ enum Motion {
     /// rest arriving.
     static let arrival: Animation = .easeOut(duration: 0.18)
 
-    /// One crossing of the window's shared rule by the light, out or back. See `RuleSweep`.
-    ///
-    /// Deliberately nothing like `pane`, and this is the one place in the file where that is the
-    /// right answer. Everything else here is a response: something was pressed and the window
-    /// answers in a fifth of a second. This is a background signal that runs for as long as an
-    /// agent works, which can be hours, and at a pane's speed a light crossing the whole window
-    /// would be a flick rather than a pass. Three seconds is slow enough to read as texture from
-    /// the far edge of vision and never fast enough to pull the eye off the transcript.
-    ///
-    /// `easeInOut` rather than `linear` because the light does not leave the rule at the end of a
-    /// crossing any more, it turns round on it, and this curve is what the turn is made of: it
-    /// puts the light's speed at zero on the frame it reaches an end and takes it back up from
-    /// there, so the two legs are the halves of one movement rather than two crossings stitched
-    /// together. The same shape macOS gives its own indeterminate bar, measured off one rather
-    /// than assumed. See `RuleSweep`.
-    ///
-    /// Three seconds is a crossing, and out and back is six. Nothing waits any more: the light
-    /// used to travel for three seconds of every four and a half and be parked off the far edge
-    /// for the rest, so a crossing now begins every three seconds where one began every four and
-    /// a half.
-    static let sweep: Animation = .easeInOut(duration: 3)
-
     /// How long the pointer has to rest before a card opens under it: the composer's file chip,
     /// and the sidebar row's.
     ///
@@ -880,16 +858,16 @@ extension View {
     /// reading as a row of buttons; drawn behind, the selected tab's own opaque fill breaks it, and
     /// that break is what joins the tab to the content below.
     ///
-    /// `sweeping` puts the busy signal on that rule, and it goes in this background rather than in
-    /// an overlay for exactly the reason the rule does. The light has to be broken by the selected
-    /// tab on the same pixels the rule is broken on, or it reads as a stutter instead of as
-    /// something passing behind the tab. See `RuleSweep`.
-    func tabStripMaterial(sweeping: Bool = false) -> some View {
+    /// `pulsing` puts the busy signal on that rule, and it goes in this background rather than in
+    /// an overlay for exactly the reason the rule does: the lit rule has to be broken by the
+    /// selected tab on the same pixels the rule is broken on, or the tab reads as sitting on top of
+    /// a line rather than as part of it. See `RulePulse`.
+    func tabStripMaterial(pulsing: Bool = false) -> some View {
         background {
             ZStack(alignment: .bottom) {
                 Palette.sidebar
                 Hairline()
-                if sweeping { RuleSweep(segment: .tabStrip) }
+                if pulsing { RulePulse() }
             }
         }
     }

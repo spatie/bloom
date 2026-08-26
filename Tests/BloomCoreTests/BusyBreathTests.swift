@@ -98,8 +98,9 @@ struct BusyBreathTests {
     }
 
     /// The period is not free: every moving mark in the window is phased off one instant, and that
-    /// only keeps them together while the periods share whole multiples. The rule crosses in
-    /// `BusyPulse.pass`, which is three seconds.
+    /// only keeps them together while the periods share whole multiples. The busy dot pulses in
+    /// `BusyDot.period` and the rule under the title bar brightens on the same wave, which is a
+    /// second and a half, so this is two of those.
     @Test("the period is a whole number of seconds, so the marks cannot drift apart")
     func periodStaysInRatio() {
         #expect(BusyBreath.period == 3)
