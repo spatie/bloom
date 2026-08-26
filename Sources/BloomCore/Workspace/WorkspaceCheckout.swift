@@ -237,6 +237,28 @@ public enum WorkspaceCheckoutPlan {
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
+    /// The same merge with nothing dropped: every branch the repository has, local and remote, in
+    /// one list, with whatever is holding each.
+    ///
+    /// What the picker offers is a subset of this, and the difference is that the picker is a list
+    /// somebody reads while a caller that names a branch by name has already read one. The default
+    /// branch is the case that matters: it is dropped from the picker because it is normally the
+    /// branch the project's own checkout is on, and git will not have it twice, but "normally" is
+    /// not always. A project left on a feature branch has its default branch free, and hiding it
+    /// there would refuse a checkout git would have allowed. So nothing is hidden and `inUse`
+    /// answers the question instead, which is git's own worktree listing rather than an assumption
+    /// about which branch the project is on.
+    ///
+    /// Pull request heads are not dropped either, for the same reason: there is no pull request
+    /// row here to offer instead.
+    public static func everyBranch(
+        local: [String], remote: [String], inUse: [String: BranchHolder] = [:]
+    ) -> [ExistingBranch] {
+        // The empty string excludes nothing: `offeredBranches` drops the branch it is given as the
+        // default, and no branch is called "". One merge rule, asked for twice.
+        offeredBranches(local: local, remote: remote, defaultBranch: "", inUse: inUse)
+    }
+
     /// The branches the offered pull requests are already speaking for.
     ///
     /// A fork's head is left out on purpose. It is not a branch of this repository at all, so a

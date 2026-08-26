@@ -132,15 +132,20 @@ extension AppModel {
             controls.agentKind = agent
         }
 
+        // Both halves of the order's source, handed to the same two arguments the create sheet's
+        // two tabs fill in. Nothing is decided here: `AgentStartSource` has already found the
+        // branch in the project and refused the call if it is not there, so this side is the same
+        // pass-through it always was.
         let workspace = try await startWorkspace(
             in: repo,
             prompt: order.prompt,
-            baseBranch: order.baseBranch,
+            baseBranch: order.source.baseBranch,
             branch: nil,
             controls: controls,
             select: false,
             origin: origin,
-            name: order.name
+            name: order.name,
+            checkout: order.source.checkout
         )
 
         return StartedWorkspaceSummary(

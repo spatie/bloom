@@ -94,6 +94,29 @@ public enum BranchHolder: Sendable, Hashable, Codable {
             + " or start a new branch from '\(branch)' on the Create new branch tab,"
             + " which gets you the same code."
     }
+
+    /// The same refusal for a caller with no screen, which is `workspace_start` over the bridge.
+    ///
+    /// Two audiences and one fact, in the shape `FolderRefusal` already uses for the same split:
+    /// the opening and the way out are shared, and only the last clause differs, because a tab
+    /// strip is not something an agent can be sent to. What it can do is ask again, so the offer
+    /// names the argument instead of the tab. Sending a model to a control it cannot see is how
+    /// it ends up describing the app to the owner rather than doing the work.
+    public func agentRefusal(branch: String) -> String {
+        let opening: String
+        switch self {
+        case .workspace(let name):
+            opening = "'\(branch)' is already open in Bloom's workspace '\(name)'."
+        case .projectCheckout(let path):
+            opening = "'\(branch)' is the branch the project itself is on, at \(path)."
+        case .otherWorktree(let path):
+            opening = "'\(branch)' is checked out at \(path), which is not one of Bloom's workspaces."
+        }
+        return opening
+            + " Git allows one worktree per branch, so Bloom cannot open it again."
+            + " Ask again with base_branch '\(branch)' instead of existing_branch, which cuts a"
+            + " new branch from it and starts you on the same code, or leave it and say so."
+    }
 }
 
 public extension BranchHolder {

@@ -103,7 +103,7 @@ places: the listing, the dispatch and the gate.
 | `project_hide` | Take a project out of the sidebar. A view preference and nothing more | | | ✓ |
 | `project_unhide` | Put it back, in the place it already had | | | ✓ |
 | `workspace_list` | Every workspace, its state, its worktree path, its chats and their cost, what an agent is stopped on, what is queued and why | | | ✓ |
-| `workspace_start` | Cut a worktree on a new branch and put an agent in it with a task | ✓ | | ✓ |
+| `workspace_start` | Cut a worktree and put an agent in it with a task, on a new branch or on a branch that already exists | ✓ | | ✓ |
 | `workspace_merge` | Ask a workspace's own agent to merge its pull request | | | ✓ |
 | `pane_open` | Open a chat, a terminal or a browser in a new tab of the caller's own workspace | ✓ | | |
 | `pane_split` | Put one beside what is on screen rather than behind it | ✓ | | |
@@ -284,6 +284,43 @@ page to be fetched: a tab restored from the last launch that nobody has looked a
 the address it remembers and refused for anything needing a live page. `browser_go` takes the two
 schemes `pane_open` takes and refuses the rest, through the same reading, so neither door will
 render `file:///` in the owner's window on a model's say-so.
+
+### Which branch a workspace starts on
+
+`workspace_start` offers the choice the create sheet offers, and it is the sheet's own choice
+rather than a second one written for the bridge. The sheet draws it as a tab strip,
+`WorkspaceSourceTab`; over the socket it is two arguments, and `AgentStartSource` is the
+translation between them.
+
+| Argument | The tab it is | What happens to a commit |
+| --- | --- | --- |
+| `base_branch`, or nothing | Create new branch | It lands on a new branch, and merges into the branch that was named |
+| `existing_branch` | Continue on existing branch | It lands on the branch that was named, and merges when that branch does |
+
+Nothing said is a new branch from the project's default branch, which is exactly what the tool did
+before there was a choice, so every caller written against the older tool keeps working. Naming
+both arguments is refused rather than resolved to one of them: they are opposite in effect, and a
+call that asked for both has not decided.
+
+**The second one is here because the first one answers the wrong question about somebody else's
+work.** Told to look at a colleague's branch, the tool could only cut a fresh branch off its tip,
+so the worktree opened identical to that branch and the Changes tab drew nothing. It was right and
+it was useless. That is the bug `docs/start-from.html` was written about, arriving a second time
+through the other door.
+
+The branch is found in the project before anything is cut, and both ways of not finding it are a
+sentence rather than a failed start. A name that is not there is answered with the names that are,
+which is the list the picker would have shown somebody who could see one. A branch something else
+is already sitting on is refused with what has it, git's own worktrees included rather than only
+Bloom's rows, because git allows one worktree per branch and the alternative is git exiting 128 in
+the middle of a start. Both refusals end by offering `base_branch` on the same name, which is a
+different intention and Bloom does not take it on a caller's behalf.
+
+A pull request cannot be named, though the sheet's second tab lists them beside the branches.
+Resolving one costs a `gh` call and a network round trip on a path that otherwise spends only local
+git, and an agent that wants a pull request's code can name its head branch, which is what the
+picker draws a listed pull request by anyway. `WorkspaceCheckout` already carries the case, so the
+day it is wanted it is an argument rather than a mechanism.
 
 ### How many a caller may start
 

@@ -165,6 +165,143 @@ struct WorkspaceStartToolTests {
         #expect(recorder.orders[0].agent == nil)
     }
 
+    // MARK: Which branch it starts on
+
+    /// A caller, a store and a repository that really has the branches, because everything on this
+    /// path is decided by asking git what is there.
+    private func gitFixture(label: String) async throws -> (fixture: Fixture, repo: TempRepo) {
+        let repo = try await TempRepo()
+        try await Shell.check("git", ["branch", "freek/figma"], cwd: repo.path)
+
+        let store = try makeTestStore(label)
+        let project = try await store.upsert(
+            Repo(name: "flare", path: repo.path, defaultBranch: "main")
+        )
+        let workspace = try await store.upsert(Workspace(
+            repoID: project.id,
+            name: "group occurrences",
+            branch: "claude/group-occurrences",
+            path: "/tmp/flare-group",
+            baseBranch: "main"
+        ))
+        let session = try await store.upsert(Session(workspaceID: workspace.id, title: "First chat"))
+
+        return (
+            Fixture(
+                store: store,
+                identity: BridgeIdentity(
+                    sessionID: session.id, workspaceID: workspace.id, role: .parent
+                ),
+                workspace: workspace
+            ),
+            repo
+        )
+    }
+
+    /// The whole point of the second route. Cutting a fresh branch off a colleague's branch gives a
+    /// worktree identical to it, so the Changes tab draws nothing and the workspace is useless for
+    /// the job it was started for. What has to reach the app is a `WorkspaceCheckout`.
+    @Test("a call naming an existing branch starts on that branch", .tags(.git, .subprocess))
+    func startsOnAnExistingBranch() async throws {
+        let (fixture, repo) = try await gitFixture(label: "start-existing")
+        defer { repo.cleanUp() }
+        let recorder = Recorder()
+
+        let result = await recorder.tool().call(
+            request([
+                "prompt": .string("Read what is on this branch and fix the failing test"),
+                "existing_branch": .string("freek/figma"),
+            ]),
+            as: fixture.identity,
+            store: fixture.store
+        )
+
+        #expect(!result.isError)
+        let order = try #require(recorder.orders.first)
+        #expect(order.source.tab == .existingBranch)
+        #expect(order.source.checkout == .branch(ExistingBranch(name: "freek/figma", isLocal: true)))
+        #expect(order.source.baseBranch == nil)
+    }
+
+    @Test("a call naming neither still cuts a new branch, as it always did", .tags(.git, .subprocess))
+    func defaultsToANewBranch() async throws {
+        let (fixture, repo) = try await gitFixture(label: "start-default")
+        defer { repo.cleanUp() }
+        let recorder = Recorder()
+
+        _ = await recorder.tool().call(
+            request(["prompt": .string("do a thing")]), as: fixture.identity, store: fixture.store
+        )
+
+        let order = try #require(recorder.orders.first)
+        #expect(order.source == .newBranch(from: nil))
+        #expect(order.source.checkout == nil)
+    }
+
+    /// The refusal the caller cannot get from a picker it cannot see. Told this, it asks again with
+    /// a name that is there; told nothing, it gets a workspace on a branch nobody meant.
+    @Test("a branch that is not in the project is refused, with what is", .tags(.git, .subprocess))
+    func refusesABranchThatIsNotThere() async throws {
+        let (fixture, repo) = try await gitFixture(label: "start-missing-branch")
+        defer { repo.cleanUp() }
+        let recorder = Recorder()
+
+        let result = await recorder.tool().call(
+            request([
+                "prompt": .string("do a thing"),
+                "existing_branch": .string("freek/figmaa"),
+            ]),
+            as: fixture.identity,
+            store: fixture.store
+        )
+
+        #expect(result.isError)
+        #expect(result.text.contains("no branch called 'freek/figmaa'"))
+        #expect(result.text.contains("'freek/figma'"))
+        #expect(recorder.orders.isEmpty)
+    }
+
+    /// Git allows one worktree per branch, and the project's own checkout is a worktree. Refused in
+    /// words here rather than by git exiting 128 half way through a start.
+    @Test("the branch the project itself is on is refused, by its path", .tags(.git, .subprocess))
+    func refusesTheProjectsOwnBranch() async throws {
+        let (fixture, repo) = try await gitFixture(label: "start-held-branch")
+        defer { repo.cleanUp() }
+        let recorder = Recorder()
+
+        let result = await recorder.tool().call(
+            request(["prompt": .string("do a thing"), "existing_branch": .string("main")]),
+            as: fixture.identity,
+            store: fixture.store
+        )
+
+        #expect(result.isError)
+        #expect(result.text.contains("the project itself is on"))
+        #expect(result.text.contains("base_branch"))
+        #expect(recorder.orders.isEmpty)
+    }
+
+    @Test("naming both branch arguments is refused before anything is looked up")
+    func refusesBothBranchArguments() async throws {
+        let fixture = try await fixture()
+        let recorder = Recorder()
+
+        let result = await recorder.tool().call(
+            request([
+                "prompt": .string("do a thing"),
+                "base_branch": .string("main"),
+                "existing_branch": .string("freek/figma"),
+            ]),
+            as: fixture.identity,
+            store: fixture.store
+        )
+
+        #expect(result.isError)
+        #expect(result.text.contains("base_branch"))
+        #expect(result.text.contains("existing_branch"))
+        #expect(recorder.orders.isEmpty)
+    }
+
     // MARK: What it refuses
 
     @Test("a missing or empty prompt is refused before anything is created")
@@ -398,6 +535,12 @@ struct WorkspaceStartToolTests {
 
         #expect(description.contains("not when its work is done"))
         #expect(description.contains("cannot see this conversation"))
+        // The choice, in the sheet's own words, so a model reading the tool list and a person
+        // reading the tab strip are told the same thing. See `AgentStartSource`.
+        #expect(description.contains(WorkspaceSourceTab.newBranch.title))
+        #expect(description.contains(WorkspaceSourceTab.existingBranch.title))
+        #expect(description.contains(WorkspaceSourceTab.existingBranch.explanation))
+        #expect(description.contains("existing_branch"))
         #expect(description.contains("real money"))
         #expect(!description.lowercased().contains("subagent"))
     }
