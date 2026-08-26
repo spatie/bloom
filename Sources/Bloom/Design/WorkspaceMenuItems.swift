@@ -106,7 +106,8 @@ struct WorkspaceMenuItems: View {
     /// Running this repository's setup script in this worktree, worded and gated by
     /// `SetupRunOffer`, which is also what the menu bar's Workspace menu draws. Absent when the
     /// repository has no setup script, greyed while a run is going, and "Run Setup" rather than
-    /// "Run Setup Again" on a workspace where it has never run.
+    /// "Run Setup Again" on a workspace where it has never run. It asks before it runs, through
+    /// the same `SetupRunAlert` the other two controls go through.
     ///
     /// **Nothing is offered for a workspace with no live `WorkspaceModel`, and that is not a
     /// no-op waiting to happen.** Two of the three facts the item is made of are the model's:
@@ -128,7 +129,7 @@ struct WorkspaceMenuItems: View {
     @ViewBuilder
     private var setupItem: some View {
         if let model = app.existingModel(for: workspace.id), let offer = model.setupRunOffer {
-            Button(offer.title) { model.runSetupAgain() }
+            Button(offer.title) { SetupRunAlert.shared.ask(model) }
                 .disabled(!offer.isEnabled)
         }
     }

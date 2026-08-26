@@ -477,10 +477,10 @@ struct WorkspaceEventRow: View {
                     // Not hidden from accessibility the way its neighbour is. Nothing else on this
                     // row does what it does, so there is no second announcement of it to prefer.
                     if showsRunSetupAgain, let model {
-                        Button("Run setup again") { model.runSetupAgain() }
+                        Button("Run setup again") { SetupRunAlert.shared.ask(model) }
                             .linkButton()
                             .font(Typo.caption)
-                            .help("Runs this repository's setup script in this workspace again")
+                            .help("Asks, then runs this repository's setup script in this workspace again")
                     }
                 }
                 .padding(.leading, TranscriptLayout.block)

@@ -28,6 +28,8 @@ import Foundation
 /// contradicting itself an inch apart, and that is a sentence somebody read before it was fixed.
 /// See `WorkspaceModel.hasRunSetup` for what counts as a first time, which includes a run this app
 /// was killed in the middle of.
+///
+/// Pressing the item asks before it runs. See `SetupRunConfirmation`.
 public struct SetupRunOffer: Sendable, Hashable {
     /// What the item says.
     public let title: String
