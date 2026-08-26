@@ -111,7 +111,13 @@ struct CreateWorkspaceSheet: View {
     /// above the box rather than the route beside Create is what hands those labels back, and it
     /// is not a happy accident: a control that says which of two things you are doing does not
     /// belong in the row that qualifies the turn. Do not put a second button back here.
-    private static let width: CGFloat = 620
+    ///
+    /// **And then a fifth control arrived and took the words again.** The row carries fast mode
+    /// now as well as the model, the effort, the output style and the permission mode, and 620
+    /// put every one of them back on the glyph-only rung: a sheet asking what you want to work on
+    /// while showing five unlabelled symbols is a sheet that tells you nothing about what it is
+    /// about to do. The number below is what the same row needs with its words on.
+    private static let width: CGFloat = 700
     /// What the writing area opens at. Five lines, because the question is "what do you want to
     /// work on" and a one-line box answers it with "something short".
     private static let minEditorLines: CGFloat = 5
