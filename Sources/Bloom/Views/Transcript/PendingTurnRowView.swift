@@ -31,6 +31,9 @@ struct PendingTurnRowView: View {
     /// a divider somebody had left in. At the foot of the run it reads as what it is, which is a
     /// note about everything above it.
     var hold: DeliveryHold?
+    /// Takes this one out of the queue and puts its words back in the composer. No question first:
+    /// nothing is lost, so a dialog would only be in the way. See `PendingMessageEdit`.
+    var onEdit: @MainActor () -> Void
     /// Asks to delete this one. It asks rather than deletes: the confirmation and the promise
     /// about where the sentence ends up are `PendingMessageDiscard`'s, through `TranscriptModel`.
     var onDelete: @MainActor () -> Void
@@ -108,7 +111,7 @@ struct PendingTurnRowView: View {
     /// what was asked for: the bubble holds the owner's words and nothing else, so that the words
     /// look the same before and after they go.
     ///
-    /// **Delete is drawn at rest and lights up under the pointer**, where it used to be drawn at
+    /// **Both are drawn at rest and light up under the pointer**, where Delete used to be drawn at
     /// opacity zero until the pointer arrived. The owner asked for the ability to delete a pending
     /// message that the app already had, which is what a control nobody can see amounts to. At
     /// rest it is the tertiary ink of the sentence beside it, so the row reads as one caption
@@ -133,16 +136,15 @@ struct PendingTurnRowView: View {
     @ViewBuilder
     private var caption: some View {
         HStack(spacing: Metrics.gutter) {
-            // Not `linkButton()`, and not `.link` with a tint of its own: measured on this SDK,
-            // `.buttonStyle(.link)` paints the system link colour whatever `.tint` says, so the
-            // resting state came out the same blue as the pointed-at one and the whole point of
-            // the two states was lost. A plain button takes the colour it is given, and
-            // `.pointerStyle` puts back the one thing the link style was buying.
-            Button("Delete", action: onDelete)
-                .buttonStyle(.plain)
-                .foregroundStyle(isPointedAt ? Palette.link : Palette.textTertiary)
-                .pointerStyle(.link)
-                .help("Takes this message back out of the queue. It is not sent.")
+            // First, because it is the safer of the two and the one wanted more often. Offered
+            // only for a message the composer could actually be handed back as text, which is
+            // `PendingMessageEdit.canEdit`: a disabled button with no explanation says less than
+            // no button at all.
+            if PendingMessageEdit.canEdit(delivery) {
+                action("Edit", help: "Takes this message back into the composer to change it.", run: onEdit)
+            }
+
+            action("Delete", help: "Takes this message back out of the queue. It is not sent.", run: onDelete)
 
             if let hold {
                 Text(hold.sentence)
@@ -150,5 +152,20 @@ struct PendingTurnRowView: View {
             }
         }
         .font(Typo.caption)
+    }
+
+    /// Not `linkButton()`, and not `.link` with a tint of its own: measured on this SDK,
+    /// `.buttonStyle(.link)` paints the system link colour whatever `.tint` says, so the resting
+    /// state came out the same blue as the pointed-at one and the whole point of the two states
+    /// was lost. A plain button takes the colour it is given, and `.pointerStyle` puts back the
+    /// one thing the link style was buying.
+    private func action(
+        _ label: String, help: String, run: @escaping @MainActor () -> Void
+    ) -> some View {
+        Button(label, action: run)
+            .buttonStyle(.plain)
+            .foregroundStyle(isPointedAt ? Palette.link : Palette.textTertiary)
+            .pointerStyle(.link)
+            .help(help)
     }
 }

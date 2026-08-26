@@ -193,6 +193,11 @@ final class TranscriptModel {
     /// clear afterwards. See `jumpToLiveEnd`.
     private(set) var liveEndRequests = 0
 
+    /// Bumped when something outside the composer has put words in the draft that the owner is
+    /// meant to carry on writing. A counter for `liveEndRequests`'s reason: two requests in a row
+    /// are two requests, and the composer has nothing to clear afterwards.
+    private(set) var composerFocusRequests = 0
+
     private var runner: (any SessionRunner)?
     private var pumpTask: Task<Void, Never>?
     private var indexByRefID: [String: Int] = [:]
@@ -577,6 +582,33 @@ final class TranscriptModel {
             draft = text
             await saveDraft()
         }
+    }
+
+    /// Takes one back out of the queue and into the composer, to be changed before it goes.
+    ///
+    /// No confirmation, because nothing is lost: the words end up in the box the owner is looking
+    /// at. `Store.cancelDelivery` is the same way out Delete uses, so the drain cannot fire on a
+    /// message this has already handed back, and the same lost race is possible and says so.
+    ///
+    /// The join is worked out after the row is gone rather than before, so the words go in front
+    /// of whatever the box holds by then rather than in front of what it held a round trip ago.
+    func editPending(_ delivery: Delivery) async {
+        guard PendingMessageEdit.canEdit(delivery), let store else { return }
+        let removed = (try? await store.cancelDelivery(id: delivery.id)) ?? false
+        await refreshQueue()
+
+        guard removed else {
+            app.notice = BloomNotice(message: PendingMessageEdit.alreadySentSentence)
+            return
+        }
+
+        draft = PendingMessageEdit.draft(taking: delivery, into: draft)
+        // Both before the write, the way `submit` draws and jumps before it awaits anything: the
+        // box the words landed in is where the owner should be on that frame, not a round trip
+        // later.
+        composerFocusRequests += 1
+        jumpToLiveEnd()
+        await saveDraft()
     }
 
     /// Closes the question when the message it is about is no longer waiting.

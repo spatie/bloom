@@ -116,6 +116,13 @@ struct ComposerView: View {
         .padding(.bottom, Metrics.gutter)
         .task(id: transcript.session.id) { await prepare() }
         .onChange(of: transcript.draft) { _, _ in scheduleDraftSave() }
+        // Something put words in the box for the owner to carry on writing, which today is Edit on
+        // a queued message. The caret goes to the start rather than the end, because the words that
+        // just arrived are at the front and are the ones the button was pressed to change.
+        .onChange(of: transcript.composerFocusRequests) { _, _ in
+            isFocused = true
+            caret = 0
+        }
         .onDisappear(perform: saveDraftNow)
     }
 

@@ -472,6 +472,7 @@ struct TranscriptListView: View {
                         PendingTurnRowView(
                             delivery: delivery,
                             hold: hold,
+                            onEdit: { Task { await transcript.editPending(delivery) } },
                             onDelete: { transcript.askToDiscard(delivery) }
                         )
                         .padding(.horizontal, TranscriptLayout.inset)

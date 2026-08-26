@@ -1,8 +1,9 @@
 import SwiftUI
 import BloomCore
 
-/// Every state of deleting a queued message on one page: the bubble at rest, under the pointer,
-/// the question, and what the queue looks like once the answer is Delete.
+/// Every state of taking a queued message back on one page: the bubble at rest, under the pointer,
+/// the one Edit is not offered for, the question, and what the queue looks like once the answer is
+/// Delete.
 ///
 /// It exists because the change is mostly about what a control looks like when nobody is pointing
 /// at it. Delete used to be drawn at opacity zero until the pointer arrived, which is why the
@@ -41,6 +42,7 @@ struct PendingDeleteSnapshotGallery: View {
                 PendingTurnRowView(
                     delivery: Self.delivery(Self.typed),
                     hold: .question,
+                    onEdit: {},
                     onDelete: {}
                 )
             }
@@ -49,6 +51,7 @@ struct PendingDeleteSnapshotGallery: View {
                 PendingTurnRowView(
                     delivery: Self.delivery(Self.typed),
                     hold: .question,
+                    onEdit: {},
                     onDelete: {},
                     pointerInside: true
                 )
@@ -62,20 +65,37 @@ struct PendingDeleteSnapshotGallery: View {
                     PendingTurnRowView(
                         delivery: Self.delivery("Also check the migration."),
                         hold: nil,
-                            onDelete: {}
+                        onEdit: {},
+                        onDelete: {}
                     )
                     PendingTurnRowView(
                         delivery: Self.delivery(Self.typed),
                         hold: nil,
-                            onDelete: {},
+                        onEdit: {},
+                        onDelete: {},
                         pointerInside: true
                     )
                     PendingTurnRowView(
                         delivery: Self.delivery("And run the tests when you are done."),
                         hold: .turn,
-                            onDelete: {}
+                        onEdit: {},
+                        onDelete: {}
                     )
                 }
+            }
+
+            // Its words cannot come back as text, so Edit is not drawn at all rather than drawn
+            // dead. See `PendingMessageEdit.canEdit`.
+            group("A message carrying a file, which Edit is not offered for") {
+                PendingTurnRowView(
+                    delivery: Self.delivery(
+                        AttachmentTrailer.compose(text: "Look at this.", paths: ["/tmp/shot.png"])
+                    ),
+                    hold: .turn,
+                    onEdit: {},
+                    onDelete: {},
+                    pointerInside: true
+                )
             }
 
             group("The question, when the composer is empty") {
