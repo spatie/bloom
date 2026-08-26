@@ -20,6 +20,10 @@ public struct ToolPresentation: Equatable, Sendable {
     /// drawing, in one place, so a new tool cannot invent a sixth colour by accident.
     public var tint: ToolTint
     public var chips: [ToolChip] = []
+    /// Drawn ahead of `detail` in its own ink, and `.none` for every row that is not a shell
+    /// command whose `cd` has been read. See `CommandDisplay`: which prefix a row may hide is
+    /// decided there, and this is what it left behind.
+    public var detailLead: CommandDisplay.Lead = .none
     /// The whole of what `detail` was cut down from, and nil when the row's argument is prose.
     ///
     /// One field answering both of the questions a row asks about its own argument, because they
@@ -36,6 +40,13 @@ public struct ToolPresentation: Equatable, Sendable {
     /// proportional face, which is most of them.
     public var detailIsCode: Bool { literal != nil }
 
+    /// The detail as one string, lead and all: what a row measures itself against and what it
+    /// reads as to VoiceOver. Nothing draws it, because the two halves are drawn in two inks.
+    public var detailLine: String {
+        let lead = detailLead
+        return lead.text.isEmpty ? detail : lead.text + lead.joiner + detail
+    }
+
     /// Written out because a memberwise initialiser on a public struct is internal.
     public init(
         glyph: String,
@@ -43,6 +54,7 @@ public struct ToolPresentation: Equatable, Sendable {
         detail: String,
         tint: ToolTint,
         chips: [ToolChip] = [],
+        detailLead: CommandDisplay.Lead = .none,
         literal: String? = nil
     ) {
         self.glyph = glyph
@@ -50,6 +62,7 @@ public struct ToolPresentation: Equatable, Sendable {
         self.detail = detail
         self.tint = tint
         self.chips = chips
+        self.detailLead = detailLead
         self.literal = literal
     }
 }

@@ -10,8 +10,8 @@ import Foundation
 /// What may be hidden is a decision about what a person is shown, so it is here rather than in the
 /// view. The rule: a `cd` to the worktree itself is dropped, because a row with no `cd` at all
 /// already means "ran in the worktree" and both are the same fact; a `cd` below the worktree keeps
-/// the part below; and a `cd` anywhere else is left exactly as the agent wrote it, because a
-/// command that ran outside this workspace is the thing a reader most needs to notice.
+/// the part below; and a `cd` anywhere else is left whole and marked, because a command that ran
+/// outside this workspace is the thing a reader most needs to notice.
 ///
 /// **Ask this before `ToolPresenter.oneLine`, not after.** A newline is one of the separators a
 /// `cd` can end with, and the collapse turns it into a space, which is indistinguishable from a
@@ -24,12 +24,48 @@ public struct CommandDisplay: Equatable, Sendable {
     public enum Place: Equatable, Sendable {
         /// The workspace's own worktree. The prefix is dropped.
         case workspace
-        /// A directory below the worktree, named by `location`.
+        /// A directory below the worktree, named by the path below it.
         case subdirectory(String)
-        /// Outside the worktree, or somewhere this cannot name. Nothing is dropped.
-        case elsewhere
+        /// Outside the worktree, or somewhere this cannot name. Nothing is dropped. The prefix is
+        /// the `cd` that left, and is empty where the text could not be split into one.
+        case elsewhere(prefix: String)
         /// No `cd` to read. Nothing is dropped.
         case unstated
+    }
+
+    /// What a row draws ahead of the command, in its own ink.
+    public enum Lead: Equatable, Sendable {
+        case none
+        /// A directory below the worktree. The command ran there rather than at the root.
+        case location(String)
+        /// The `cd` that left the worktree, kept whole. Its ink is what makes the row stand out.
+        case prefix(String)
+
+        public var text: String {
+            switch self {
+            case .none: ""
+            case .location(let path): path
+            case .prefix(let text): text
+            }
+        }
+
+        /// Between the lead and the command. A location is a tag on the row and gets a mark of its
+        /// own; a prefix is part of the command and keeps the space it had.
+        public var joiner: String {
+            switch self {
+            case .none: ""
+            case .location: " \u{203A} "
+            case .prefix: " "
+            }
+        }
+
+        public var tint: ToolTint {
+            switch self {
+            case .none: .neutral
+            case .location: .accent
+            case .prefix: .warning
+            }
+        }
     }
 
     public var place: Place
@@ -37,16 +73,30 @@ public struct CommandDisplay: Equatable, Sendable {
     /// original where nothing may be removed.
     public var command: String
 
-    /// The path below the worktree, and empty for every other place. The view draws this ahead of
-    /// `command`, in its own ink.
-    public var location: String {
-        guard case .subdirectory(let path) = place else { return "" }
-        return path
-    }
-
     public init(place: Place, command: String) {
         self.place = place
         self.command = command
+    }
+
+    /// Derived from `place` rather than stored beside it, so the two cannot disagree.
+    public var lead: Lead {
+        switch place {
+        case .workspace, .unstated: .none
+        case .subdirectory(let path): .location(path)
+        case .elsewhere(let prefix): prefix.isEmpty ? .none : .prefix(prefix)
+        }
+    }
+
+    /// True where the command left the workspace, however that was spelled.
+    public var leftTheWorkspace: Bool {
+        if case .elsewhere = place { return true }
+        return false
+    }
+
+    /// The whole detail as one string, lead and all: what a row measures and what it reads as.
+    public var line: String {
+        let lead = lead
+        return lead.text.isEmpty ? command : lead.text + lead.joiner + command
     }
 
     public static func of(_ command: String, worktree: String) -> CommandDisplay {
@@ -65,7 +115,9 @@ public struct CommandDisplay: Equatable, Sendable {
             case .notMoved:
                 break loop
             case .opaque:
-                return CommandDisplay(place: .elsewhere, command: command)
+                // Nothing is hidden and nothing is marked: there is no prefix this could honestly
+                // point at.
+                return CommandDisplay(place: .elsewhere(prefix: ""), command: command)
             case .moved(let destination, let remainder):
                 directory = destination
                 rest = remainder
@@ -74,13 +126,17 @@ public struct CommandDisplay: Equatable, Sendable {
         }
 
         guard moved else { return untouched }
-        guard let below = relation(of: directory, to: root) else {
-            return CommandDisplay(place: .elsewhere, command: command)
-        }
         // A row is never left blank, so a bare `cd somewhere` keeps its own text.
         guard !rest.isEmpty else { return untouched }
 
-        return CommandDisplay(place: below.isEmpty ? .workspace : .subdirectory(below), command: String(rest))
+        guard let below = relation(of: directory, to: root) else {
+            let consumed = command[..<rest.startIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+            return CommandDisplay(place: .elsewhere(prefix: consumed), command: String(rest))
+        }
+        return CommandDisplay(
+            place: below.isEmpty ? .workspace : .subdirectory(below),
+            command: String(rest)
+        )
     }
 
     // MARK: Reading one `cd`
@@ -102,8 +158,8 @@ public struct CommandDisplay: Equatable, Sendable {
         scan = scan.drop(while: { $0 == " " || $0 == "\t" })
 
         guard let word = word(&scan) else { return .opaque }
-        // A word Bloom would have to run a shell to understand, and `cd -`, which is a
-        // destination only the shell's own history knows.
+        // A word Bloom would have to run a shell to understand, and `cd -`, whose destination only
+        // the shell's own history knows.
         let readable = !word.contains("$") && !word.contains("`") && !word.hasPrefix("~") && word != "-"
         guard readable else { return .opaque }
 

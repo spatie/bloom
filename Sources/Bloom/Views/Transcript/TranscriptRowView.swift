@@ -125,7 +125,11 @@ struct TranscriptRowView: View, Equatable {
             if let use = toolUse {
                 ToolRowView(
                     use: use,
-                    presentation: TranscriptPresentationCache.presentation(rowID: row.id, use: use),
+                    presentation: TranscriptPresentationCache.presentation(
+                        rowID: row.id,
+                        use: use,
+                        worktree: workspace.path
+                    ),
                     workspace: workspace,
                     result: toolResult,
                     isError: row.isError,
