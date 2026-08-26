@@ -62,16 +62,28 @@ struct FixConflictsPromptTests {
         #expect(render.text.contains("feature/glyphs"))
     }
 
-    /// The two things this turn is not allowed to do, asserted rather than trusted. A prompt that
-    /// pushed would put a half resolved branch on the server, and one that merged would be the
-    /// button this whole change exists to remove.
-    @Test("the default prompt pushes nothing and merges nothing on GitHub")
-    func staysOnThisMachine() {
+    /// What this turn may and may not do, asserted rather than trusted.
+    ///
+    /// The push is the point: a conflict resolved in a worktree nobody has pushed is still a
+    /// conflict to GitHub, and the button is called Fix merge conflicts. The merge is still the
+    /// reader's, and a rewritten history needs the lease, or a push lands on top of somebody.
+    @Test("the default prompt pushes the resolution and merges nothing")
+    func pushesButDoesNotMerge() {
         let text = PromptRegistry.definition(for: .fixConflicts).defaultTemplate
 
-        #expect(text.contains("Do not push"))
-        #expect(text.contains("do not merge the pull request"))
+        #expect(text.contains("Then push it."))
+        #expect(text.contains("--force-with-lease"))
+        #expect(text.contains("Do not merge the pull request"))
         #expect(!text.contains("gh pr merge"))
+    }
+
+    /// The half of the instruction that keeps a bad resolution off the server. An agent that is
+    /// guessing has to stop, and the sentence that tells it so has to survive an edit of the rest.
+    @Test("the default prompt tells an agent that is unsure not to push")
+    func uncertaintyStops() {
+        let text = PromptRegistry.definition(for: .fixConflicts).defaultTemplate
+
+        #expect(text.contains("Do not push if you are not sure."))
     }
 
     /// The direction of the merge is the one thing in this prompt that must not be guessed, so

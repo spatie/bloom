@@ -320,9 +320,24 @@ public enum PromptRegistry {
     /// conventions for it are already in front of the agent in the project's own instruction
     /// files. A second file repeating them would be a second place to keep them right.
     ///
-    /// The template pushes nothing and merges nothing on the server. What comes out is a resolved
-    /// worktree with a commit in it, which is exactly the state the strip's Commit and push button
-    /// is for, so the next press is the reader's rather than this turn's.
+    /// **The template pushes the resolution, and it used to stop short of that.** The argument for
+    /// stopping was that a resolved worktree is the state the strip's Commit and push button is
+    /// for, so the next press could be the reader's. What that produced in practice was a turn
+    /// that reported success on a pull request GitHub still refused to merge, because a conflict
+    /// resolved in a worktree nobody has pushed is still a conflict to everybody else: the owner
+    /// asked "does the merge conflict still exist", was told "locally no, on GitHub yes", and had
+    /// to type "push" himself. A button called Fix merge conflicts that leaves the conflict
+    /// standing is not finished.
+    ///
+    /// It still merges nothing. Pushing is what makes the resolution real; merging is a decision
+    /// about whether the work is good, and that one stays with the reader.
+    ///
+    /// The push is conditional on the agent being sure, and that is not a hedge. Bringing a base
+    /// branch in is the one ordinary operation that regularly needs a person: two changes that
+    /// genuinely disagree, a test that now fails for a reason neither branch expected, a rebase
+    /// that rewrote history somebody else may have pulled. An agent that pushes a resolution it
+    /// does not believe in has made the problem harder to see, so the template tells it to stop
+    /// and say so instead.
     static let fixConflicts = PromptDefinition(
         id: .fixConflicts,
         title: "Fix merge conflicts",
@@ -330,8 +345,10 @@ public enum PromptRegistry {
         Sent to the workspace's agent when you press Fix merge conflicts, which is what the strip \
         offers in place of Merge once GitHub reports that the branch conflicts with its base. It \
         asks for the base branch to be brought into this worktree and the conflicts resolved \
-        here. Nothing is pushed and nothing is merged on GitHub: what you get back is a resolved \
-        worktree, and the strip then offers Commit and push in the ordinary way.
+        here, and the resolution pushed so that GitHub stops refusing the pull request. Nothing is \
+        merged: what you get back is a branch that can be merged, and the decision to merge it \
+        stays yours. An agent that is not sure about a resolution stops and says so rather than \
+        pushing it.
         """,
         variables: [
             PromptVariable(name: FixConflicts.workspace, summary: "The workspace's name."),
@@ -359,9 +376,21 @@ public enum PromptRegistry {
         around them to work out which is right instead of taking a side. Follow this project's \
         conventions, and run whatever it uses to check itself before you call anything resolved.
 
-        Commit the resolution, with a message worded the way this project words one. Do not push \
-        it, and do not merge the pull request. Finish by saying which files conflicted, what you \
-        decided in each of them, and anything you are not sure about.
+        Commit the resolution, with a message worded the way this project words one.
+
+        Then push it. A conflict resolved only in this worktree is still a conflict to everybody \
+        else, and pull request #{{number}} goes on refusing to merge until the branch on the \
+        server carries the resolution. If bringing {{base_branch}} in rewrote this branch's \
+        commits, which a rebase does, the push needs `--force-with-lease`, and it may only ever go \
+        to {{branch}}, never to {{base_branch}} and never to any other branch.
+
+        Do not push if you are not sure. Genuine uncertainty about what a resolution should be, a \
+        check that fails for a reason neither branch explains, or anything you had to guess at: \
+        leave the commit here, say what you are unsure about, and let a person look. A resolution \
+        nobody believes in is worse on the server than in a worktree.
+
+        Do not merge the pull request whatever happens. Finish by saying which files conflicted, \
+        what you decided in each of them, whether you pushed, and anything you are not sure about.
         """
     )
 
