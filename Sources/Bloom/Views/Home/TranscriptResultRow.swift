@@ -23,7 +23,11 @@ struct TranscriptResultRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.spacingTight) {
             Button(action: openWorkspace) {
-                HStack(spacing: Metrics.spacingWide) {
+                // Top, not centred. The icon sits beside a two-line block (the name, then the
+                // project and the match count), and centred it floats between the two lines
+                // pointing at neither. Against the first line it reads as the mark on the name,
+                // which is what it is.
+                HStack(alignment: .top, spacing: Metrics.spacingWide) {
                     RepoIcon(repo: repo)
 
                     VStack(alignment: .leading, spacing: Metrics.spacingTight) {
@@ -62,13 +66,20 @@ struct TranscriptResultRow: View {
             ForEach(result.matches) { match in
                 Button { openMatch(match) } label: {
                     HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingWide) {
+                        // The label stays a rung below the snippet. It says which kind of row
+                        // matched, which is context for the line beside it rather than the thing
+                        // being read, and two equal sizes made the pair read as one grey block.
                         Text(TranscriptSearch.label(for: match.kind))
-                            .font(Typo.caption)
+                            .font(Typo.micro)
                             .foregroundStyle(Palette.textTertiary)
                             .frame(width: Self.labelWidth, alignment: .trailing)
 
+                        // A rung up from caption. This is the only text on the screen anybody is
+                        // actually reading, since it is the matched line itself, and it was set
+                        // smaller than the workspace name above it and the same size as the label
+                        // to its left.
                         Text(snippet(match.snippet))
-                            .font(Typo.caption)
+                            .font(Typo.label)
                             .foregroundStyle(Palette.textSecondary)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)

@@ -56,22 +56,6 @@ public struct HomeGroup: Identifiable, Hashable, Sendable {
 /// number, and they are worked out in this one pass rather than in five more.
 public struct HomeListing: Sendable {
     public var groups: [HomeGroup]
-    /// The most recent finished work, drawn under the live list and capped.
-    ///
-    /// **Why the resting page carries any archived rows at all, having just defaulted them off.**
-    /// `HomeScope.live` is the right subject for Home and it is not the whole of what a person
-    /// wants on landing: the thing they finished an hour ago is the second question, and a screen
-    /// that answers only the first is a screen with three rows and half a window of ground under
-    /// them. So the archive is present as a tail rather than as the page: `HomeList.tailLimit`
-    /// rows under a heading of their own that says how many of how many, ending in a way through
-    /// to the rest. Three rows that matter above six that do not, instead of three above
-    /// seventeen.
-    ///
-    /// Empty in every other scope, and empty in a search, because in both of those the archive is
-    /// what was asked for rather than context around the answer.
-    public var tail: [HomeRow] = []
-    /// How much finished work the tail is a sample of, which is what its heading counts against.
-    public var tailTotal = 0
     /// The transcripts that matched, one entry per workspace. Empty outside a search, because the
     /// index is only asked when there is something to ask it.
     public var transcripts: [TranscriptWorkspaceMatches]
@@ -90,8 +74,6 @@ public struct HomeListing: Sendable {
 
     public init(
         groups: [HomeGroup],
-        tail: [HomeRow] = [],
-        tailTotal: Int = 0,
         transcripts: [TranscriptWorkspaceMatches] = [],
         counts: HomeScopeCounts = HomeScopeCounts(),
         isSearching: Bool = false,
@@ -101,8 +83,6 @@ public struct HomeListing: Sendable {
         shownArchived: Int
     ) {
         self.groups = groups
-        self.tail = tail
-        self.tailTotal = tailTotal
         self.transcripts = transcripts
         self.counts = counts
         self.isSearching = isSearching
@@ -141,10 +121,10 @@ public struct HomeFilter: Equatable, Sendable {
     /// scope rather than a switch of its own, because the switch was a second narrowing mechanism
     /// beside the field with its own state, its own empty state and its own clause in the summary
     /// line, all to answer a question the chips answer with a number attached.
-    public var scope: HomeScope = .live
+    public var scope: HomeScope = .all
 
     public init(
-        query: String = "", projects: Set<RepoID> = [], scope: HomeScope = .live
+        query: String = "", projects: Set<RepoID> = [], scope: HomeScope = .all
     ) {
         self.query = query
         self.projects = projects
@@ -272,8 +252,6 @@ public enum HomeList {
 
         return HomeListing(
             groups: groups,
-            tail: tail(after: ordered, from: matched, scope: filter.scope, isSearching: isSearching),
-            tailTotal: counts.archived,
             transcripts: shownTranscripts,
             counts: counts,
             isSearching: isSearching,
@@ -284,30 +262,17 @@ public enum HomeList {
         )
     }
 
-    /// How many finished rows follow the live list. Six: enough to fill the ground under three
-    /// live workspaces on a 1440 by 900 window, few enough that the eye reads it as a sample
-    /// rather than as the list starting again.
-    public static let tailLimit = 6
-
-    /// The recent archive drawn under a live list, newest first.
-    ///
-    /// Only under `live`, and only when the live list has something in it. On a machine where
-    /// nothing is live the pane raises `HomeEmptyState.emptyScope(.live)`, which says every
-    /// workspace here has been archived and carries the button that shows them; six rows of
-    /// archive under that sentence would be the sentence contradicting itself.
-    private static func tail(
-        after ordered: [HomeRow],
-        from matched: [HomeRow],
-        scope: HomeScope,
-        isSearching: Bool
-    ) -> [HomeRow] {
-        guard !isSearching, scope == .live, !ordered.isEmpty else { return [] }
-        return matched
-            .filter(\.isArchived)
-            .sorted { $0.workspace.lastActivityAt > $1.workspace.lastActivityAt }
-            .prefix(tailLimit)
-            .map { $0 }
-    }
+    // **Where "Recently archived" went.** A live list used to be followed by a tail: the six most
+    // recent archived rows under a quiet heading, ending in a row that moved the chip to Archived.
+    // It existed to make resting on `live` honest, because a page that hid the finished work while
+    // showing three live rows on a 1440 by 900 window left half the window empty and said nothing
+    // about the seventeen workspaces it was not drawing.
+    //
+    // It went because the strip lost its Live chip. `HomeScope.offered(searching:)` browses with
+    // `all` and `archived` alone now, and the tail was built under `live` and nowhere else, so
+    // nothing could reach it. Under `all` it would have been the same rows twice: the archived work
+    // is already in the list, in date order, above and below the live rows rather than below all of
+    // them. If a Live chip ever comes back, this comes back with it.
 
     /// The transcript results the project menu leaves standing.
     ///

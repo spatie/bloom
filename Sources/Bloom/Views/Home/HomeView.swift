@@ -56,6 +56,10 @@ struct HomeView: View {
     /// The id of the row being renamed in place, shared across the whole list so only one field
     /// can ever be open. The same arrangement the sidebar's rows use.
     @State private var renaming: WorkspaceID?
+    /// The deletion waiting to be confirmed, held by the list rather than by the menu, because a
+    /// menu is gone by the time the sheet would appear. Same `ArchiveDeletion` Storage settings
+    /// raises, so the sentence counting what would be destroyed is the same wherever it starts.
+    @State private var deleting: ArchiveDeletion?
 
     /// Which rows have just been added to the list, so they can fade in rather than appear. The
     /// same tracker and the same rules as the sidebar's, which is what stops one workspace
@@ -119,6 +123,20 @@ struct HomeView: View {
         // changed and at no other time.
         .task(id: app.archivedRevision) { archived = await app.archivedWorkspaces() }
         .task { await keepAgesCurrent() }
+        // The same confirmation Storage settings raises, for the same reason: it is the one
+        // irreversible act in the app, and it counts what would go rather than asking "are you
+        // sure" over an unnamed quantity.
+        .confirmation($deleting) { deletion in
+            Confirmation(
+                title: deletion.title,
+                message: deletion.message,
+                confirmLabel: deletion.confirmLabel,
+                cancelLabel: deletion.cancelLabel,
+                tone: .destructive
+            )
+        } onConfirm: { deletion in
+            Task { _ = await app.deleteArchived(deletion.footprints.map(\.id)) }
+        }
         .onChange(of: app.workspaces, initial: true) { _, _ in rebuild() }
         .onChange(of: app.repos) { _, _ in rebuild() }
         .onChange(of: archived) { _, _ in rebuild() }
@@ -209,13 +227,11 @@ struct HomeView: View {
                             )
                         )
                         .contextMenu {
-                            HomeRowMenu(row: row) { renaming = $0 }
+                            HomeRowMenu(row: row, onRename: { renaming = $0 }, onDelete: askToDelete)
                         }
                     }
                 }
             }
-
-            recentArchive
 
             transcriptResults
         }
@@ -250,68 +266,6 @@ struct HomeView: View {
         .onDeleteCommand {
             guard let selected, let row = row(for: selected), !row.isArchived else { return }
             Task { await app.archive(row.workspace) }
-        }
-    }
-
-    /// The finished work under the live list: the most recent few, and a way through to the rest.
-    ///
-    /// **This is what makes defaulting to Live honest.** The archive is not behind a chip nobody
-    /// clicks, it is on the page, demoted: a quieter heading saying how many of how many, the same
-    /// rows the list draws anywhere else, and a plain row at the foot that moves the chip to
-    /// Archived. What it is not is the page, which is what it was when Home opened on All and
-    /// seventeen of twenty rows were over. Which rows and how many is `HomeList.tail`.
-    ///
-    /// These rows are real list rows, so the arrow keys walk into them and Return opens one, the
-    /// same as any other archived row on this screen. The "show the rest" row is not: it is a
-    /// control rather than a workspace, and giving the selection somewhere to land that is not a
-    /// workspace would break the one keyboard model the whole pane runs on.
-    @ViewBuilder
-    private var recentArchive: some View {
-        if !listing.tail.isEmpty {
-            Section {
-                HomeGroupHeading(title: "Recently archived", isSecondary: true)
-                    .listRowInsets(Self.rowInsets)
-                    .listRowBackground(Color.clear)
-                    .selectionDisabled()
-
-                ForEach(listing.tail) { row in
-                    HomeListRow(
-                        row: row,
-                        isRunning: false,
-                        now: now,
-                        isRenaming: false,
-                        onCommitRename: { _ in },
-                        onCancelRename: {}
-                    )
-                    .arrivingRow(arrival.isArriving(row.id))
-                    .tag(row.id)
-                    .simultaneousGesture(TapGesture().onEnded { open(row) })
-                    .listRowInsets(Self.rowInsets)
-                    .onHoverChange { hovered = $0 ? row.id : (hovered == row.id ? nil : hovered) }
-                    .listRowBackground(
-                        HomeRowBackground(
-                            isSelected: selected == row.id,
-                            isHovered: hovered == row.id
-                        )
-                    )
-                    .contextMenu {
-                        HomeRowMenu(row: row) { renaming = $0 }
-                    }
-                }
-
-                // Bloom's accent rather than `.link`, which is the system's and is blue glass on a
-                // Mac set to Graphite. The same note is on every prominent button in the app.
-                Button("Show all \(ArchiveDeletion.count(listing.tailTotal, "archived workspace"))") {
-                    app.homeFilter.scope = .archived
-                }
-                .buttonStyle(.plain)
-                .font(Typo.caption)
-                .foregroundStyle(Palette.accent)
-                .padding(.vertical, Metrics.spacingSmall)
-                .listRowInsets(Self.rowInsets)
-                .listRowBackground(Color.clear)
-                .selectionDisabled()
-            }
         }
     }
 
@@ -495,7 +449,7 @@ struct HomeView: View {
         // In the same breath as `listing` rather than from an `onChange` watching it, so a row
         // and the fact that it is new land in one update and the row's first drawn frame is the
         // faded one.
-        let ids = listing.groups.flatMap { $0.rows.map(\.id) } + listing.tail.map(\.id)
+        let ids = listing.groups.flatMap { $0.rows.map(\.id) }
         if rescoped {
             arrival.adopt(ids)
         } else {
@@ -516,13 +470,14 @@ struct HomeView: View {
         }
     }
 
-    /// The tail is searched too, because those rows are selectable: without it, arrowing into the
-    /// recent archive left Return doing nothing and greyed out every item in the Workspace menu.
+    /// Every group is walked, because the arrow keys walk the whole list: a row the selection can
+    /// land on and this cannot find leaves Return doing nothing and greys out every item in the
+    /// Workspace menu.
     private func row(for id: WorkspaceID) -> HomeRow? {
         for group in listing.groups {
             if let match = group.rows.first(where: { $0.id == id }) { return match }
         }
-        return listing.tail.first { $0.id == id }
+        return nil
     }
 
     /// The highlighted row, offered to the menu bar. It carries the workspace itself because an
@@ -534,6 +489,24 @@ struct HomeView: View {
     }
 
     // MARK: - Actions
+
+    /// Raises the confirmation for one archived workspace.
+    ///
+    /// Through `archiveCleanup`, which loads every archived footprint, rather than a query for
+    /// this one. That is a database read and a `for-each-ref` per project to delete one row, and
+    /// it is deliberate: the footprint is what the confirmation counts (the chats, the transcript
+    /// rows, the review comments somebody typed by hand), and the branch standing is what stops it
+    /// claiming the work is gone when the branch is still there. Both are already written and
+    /// tested there, and a second cheaper path would be a second set of numbers to keep true.
+    private func askToDelete(_ workspace: Workspace) {
+        Task {
+            let cleanup = await app.archiveCleanup()
+            guard let footprint = cleanup.footprints.first(where: { $0.id == workspace.id }) else {
+                return
+            }
+            deleting = ArchiveDeletion([footprint])
+        }
+    }
 
     /// An archived row opens too, into the reader rather than into the centre column.
     ///
