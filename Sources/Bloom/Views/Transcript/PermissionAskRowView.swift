@@ -238,7 +238,7 @@ struct PermissionAskRowView: View {
                         // and a bare Return when this is the only one. Exactly what the two
                         // branches this replaced did, kept because the modifier is what stops a
                         // reflexive Return granting the widest scope on the row.
-                        .keyboardShortcut(.return, modifiers: offer.widens ? .command : [])
+                        .keyboardShortcut(.return, modifiers: offer.widens ? EventModifiers.command : [])
 
                     ForEach(Array(offer.scopes.dropFirst()), id: \.self) { scope in
                         Button(scope.compactLabel) { onAnswer(.allow(scope: scope)) }

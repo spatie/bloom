@@ -96,7 +96,7 @@ extension AppModel {
             // reached, so all the app does is move the selection.
             RevealTool { [weak self] reveal in
                 guard let self else { return .refused("Bloom is still starting up.") }
-                return self.revealForBridge(reveal)
+                return await self.revealForBridge(reveal)
             },
         ])
     }
