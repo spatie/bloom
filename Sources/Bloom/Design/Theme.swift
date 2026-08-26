@@ -723,12 +723,41 @@ enum Metrics {
 
 /// How a pane arrives and leaves.
 ///
-/// One curve for the inspector and for the terminal panel, because two panes that move at
-/// different speeds read as two apps. Short and without overshoot: a pane is furniture, and
-/// furniture that springs is a toy. Call sites drop it for Reduce Motion rather than substituting
-/// a slower one, because the setting is about movement, not about speed.
+/// One curve for every pane SwiftUI draws, because two panes that move at different speeds read as
+/// two apps. Short and without overshoot: a pane is furniture, and furniture that springs is a
+/// toy. Call sites drop it for Reduce Motion rather than substituting a slower one, because the
+/// setting is about movement, not about speed.
+///
+/// The inspector column is the one pane not on this curve, and it is not on it because it is not
+/// SwiftUI's: it is an `NSSplitViewItem` collapsing under AppKit's own animator. `inspector` below
+/// is the number that movement actually runs at, and what it exists for is that something SwiftUI
+/// draws has to travel with it.
 enum Motion {
     static let pane: Animation = .easeOut(duration: 0.18)
+
+    /// The inspector column arriving and leaving, and the pull request band arriving with it.
+    ///
+    /// Two halves of one movement, drawn by two frameworks. The column is an `NSSplitViewItem`
+    /// under AppKit's animator; the band along the top of it is a title bar accessory drawn in
+    /// SwiftUI, because it sits in the title bar rather than inside the pane. That is why they used
+    /// to arrive at different times: the band was drawn or it was not, with nothing in between, so
+    /// it appeared whole on the frame the toolbar button was pressed and the column spent a quarter
+    /// of a second sliding in underneath it. The owner's words were "bit jarring now".
+    ///
+    /// So the number lives here rather than inside either of them, and both read it:
+    /// `DetailSplitViewController` sets it on the `NSAnimationContext` the collapse runs in, and
+    /// `TitleBarStrip` slides the band with it.
+    ///
+    /// A quarter of a second is what an `NSAnimationContext` defaults to, which is what the column
+    /// has always collapsed in, so writing it down changes nothing about how the pane feels. It is
+    /// deliberately not `pane`: this movement belongs to the split view and the band is joining it,
+    /// and a speed chosen here that the split view then declined to use would put the two halves
+    /// back out of step, which is the whole bug.
+    static let inspectorSeconds: TimeInterval = 0.25
+
+    /// `inspectorSeconds` as SwiftUI states it. `easeInEaseOut` is the curve the animation context
+    /// is given below, and both frameworks spell that as the same cubic.
+    static let inspector: Animation = .easeInOut(duration: inspectorSeconds)
 
     /// A hover state fading in, and a disclosure settling. See the sidebar rows.
     ///

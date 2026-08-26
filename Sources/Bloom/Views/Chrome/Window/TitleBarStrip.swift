@@ -32,18 +32,39 @@ final class InspectorGeometry {
     /// The inspector pane's width in points, zero while it is collapsed.
     private(set) var width: CGFloat = 0
 
-    /// Called when it moves. Not observation: the reader is an `NSView` frame.
-    @ObservationIgnored var onChange: (() -> Void)?
+    /// The width the band is DRAWN at, which is the last width the pane actually had.
+    ///
+    /// Not `width`, and the difference between them is what lets the band leave rather than
+    /// vanish. A hide publishes a zero on the first frame of the transition, and a band drawn zero
+    /// points wide has not slid out, it has gone. This number is only ever raised, so the band
+    /// keeps its shape for the whole of the slide it is in the middle of.
+    private(set) var bandWidth: CGFloat = Metrics.inspectorWidth
+
+    /// Whether the width just published is the column opening or collapsing, rather than a divider
+    /// drag, a window resize or a launch.
+    ///
+    /// The band animates on this and on nothing else, which is what keeps the two halves one
+    /// movement. A drag has to stay live and a launch has to be instant, and both of those publish
+    /// a width too; only the collapse is a slide. Reduce Motion arrives down this same wire, because
+    /// the split view is the thing told not to animate and it then publishes `false`, so the window
+    /// takes one decision about movement rather than two that can disagree.
+    private(set) var isSliding = false
+
+    /// Called when it moves, and told whether the move is a slide. Not observation: the reader is
+    /// an `NSView` frame.
+    @ObservationIgnored var onChange: ((_ sliding: Bool) -> Void)?
 
     private init() {}
 
     /// Below this the pane is closed or mid animation, and the strip should not be drawn.
     var isVisible: Bool { width > 1 }
 
-    func setInspectorWidth(_ value: CGFloat) {
+    func setInspectorWidth(_ value: CGFloat, sliding: Bool = false) {
         guard abs(width - value) > 0.5 else { return }
         width = value
-        onChange?()
+        if value > 1 { bandWidth = value }
+        isSliding = sliding
+        onChange?(sliding)
     }
 }
 
@@ -80,12 +101,29 @@ struct TitleBarStrip: View {
             if let model = app.selectedModel, inspector.isVisible {
                 PullRequestBar(model: model)
                     // As wide as the pane below it, so the band ends where the pane does and the
-                    // split divider runs out of the bottom of it.
-                    .frame(width: inspector.width, height: height)
+                    // split divider runs out of the bottom of it. `bandWidth` rather than `width`
+                    // because a band on its way out is still a band: see `InspectorGeometry`.
+                    .frame(width: inspector.bandWidth, height: height)
                     .background { ground(for: model) }
+                    // The band arrives the way the pane does, from the window's trailing edge, over
+                    // the same quarter of a second. A transition rather than an offset held on a
+                    // view that is always in the tree, because `PullRequestBar` polls GitHub for as
+                    // long as it is on screen and a band parked off the edge of the window is still
+                    // on screen. Nothing needs to fade: the pane does not, and one movement means
+                    // one movement.
+                    .transition(.offset(x: inspector.bandWidth))
             }
         }
+        // The band is drawn at the width the PANE has, and the accessory gives that width back only
+        // once the band has finished leaving it, so for the frame between those two the two numbers
+        // disagree. This is which edge wins: the band keeps its leading edge rather than being
+        // centred in a frame it has outgrown.
+        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: height)
+        // Only a collapse is animated, and only because the split view said so. See
+        // `InspectorGeometry.isSliding`, which is also where Reduce Motion arrives: the split view
+        // is told not to animate, publishes no slide, and this is nil.
+        .animation(inspector.isSliding ? Motion.inspector : nil, value: inspector.isVisible)
         // A separate SwiftUI root: the window's environment does not reach a title bar accessory,
         // so the model is handed in rather than inherited.
         .environment(app)
@@ -135,6 +173,11 @@ struct TitleBarStrip: View {
 final class TitleBarStripController: NSTitlebarAccessoryViewController {
     private let height: CGFloat
 
+    /// The pending end of a slide out: the moment the accessory is allowed to give its width back.
+    /// Cancelled by anything that arrives first, so a hide reversed halfway never shrinks the band
+    /// that is already on its way back in. See `resize`.
+    private var handover: Task<Void, Never>?
+
     init(app: AppModel, height: CGFloat) {
         self.height = height
         super.init(nibName: nil, bundle: nil)
@@ -145,23 +188,51 @@ final class TitleBarStripController: NSTitlebarAccessoryViewController {
         // panes: the accessory container sets this view's frame, and an intrinsic content size only
         // gives autolayout a second opinion about it.
         host.sizingOptions = []
+        // The band slides in and out THROUGH this frame, so for a quarter of a second at each end
+        // it is drawn beyond the accessory's trailing edge. That edge is the window's, so the
+        // window would clip it anyway; clipping here says so rather than relying on it, and costs
+        // nothing at rest because the band is exactly this view's size once it has arrived.
+        host.clipsToBounds = true
         view = host
         layoutAttribute = .trailing
         // What the accessory keeps while the title bar is in its full screen state. Without it the
         // strip is the one thing in the title bar that can be given no height at all.
         fullScreenMinHeight = height
 
-        InspectorGeometry.shared.onChange = { [weak self] in self?.resize() }
-        resize()
+        InspectorGeometry.shared.onChange = { [weak self] sliding in self?.resize(sliding: sliding) }
+        resize(sliding: false)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not decoded from a nib") }
 
+    /// Follows the pane's width, and lags it by exactly one slide when the pane is going away.
+    ///
     /// One point rather than zero when there is nothing to show, so the accessory is never a view
     /// of no size at all in the title bar's layout. On Home and on Search that is what it is.
-    private func resize() {
+    ///
+    /// The lag is the whole reason this is not a one line setter. The band leaves through this
+    /// frame, so taking the frame away on the first frame of the slide cuts the band off instead of
+    /// letting it go, which is the same pop at the other end of the movement. Only a collapse
+    /// waits: a divider drag publishes `sliding` false and has to stay live, or the band trails the
+    /// divider by a quarter of a second the whole time it is being dragged.
+    private func resize(sliding: Bool) {
+        handover?.cancel()
         let width = max(InspectorGeometry.shared.width, 1)
+        guard sliding, width < view.frame.width else {
+            apply(width)
+            return
+        }
+        handover = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Motion.inspectorSeconds))
+            guard !Task.isCancelled else { return }
+            // Asked again rather than closed over: a hide reversed before it finished has already
+            // published the width this should settle at, and that is the number to land on.
+            self?.apply(max(InspectorGeometry.shared.width, 1))
+        }
+    }
+
+    private func apply(_ width: CGFloat) {
         guard abs(view.frame.width - width) > 0.5 else { return }
         view.setFrameSize(NSSize(width: width, height: height))
         view.superview?.needsLayout = true
