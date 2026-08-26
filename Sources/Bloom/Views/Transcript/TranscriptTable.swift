@@ -257,7 +257,13 @@ struct TranscriptTable: NSViewRepresentable {
         private var reaimWork: Task<Void, Never>?
         /// Rows whose height turned out to be wrong once they were drawn, batched so a pass over
         /// the visible rows costs one `noteHeightOfRows` rather than one each.
-        private var owedHeights = IndexSet()
+        ///
+        /// **By id, and it was by row index.** The batch is drained a turn after it is filled, and
+        /// a pass in between renumbers every row: an arrival draws the tail and puts the history
+        /// in above it a frame later, which moved every index in here by seventeen hundred. The
+        /// table was then told that seventeen hundred estimates had changed, and the rows that had
+        /// actually reported were never told again. See `noted`.
+        private var owedHeights: Set<TranscriptEntryID> = []
         private var owedWork: Task<Void, Never>?
 
         /// **A standing instruction to be at the end of the conversation.** See
@@ -442,6 +448,11 @@ struct TranscriptTable: NSViewRepresentable {
             if environmentMoved, change != .rebuilt { tableView.reloadData() }
 
             if remeasured {
+                // **The screen first, exactly.** A reset empties the cache under cells that are
+                // already drawn, and a cell holding the content it already holds never reports its
+                // height again, so those rows would be answered from the mean for ever. One screen,
+                // and none at all on the first pass of a pane, which has nothing laid out yet.
+                measureExactly(visibleRows)
                 noteHeights(IndexSet(integersIn: entries.indices))
             } else if !changed.isEmpty {
                 // The cells first, so that a row whose height is about to travel already holds
@@ -549,13 +560,16 @@ struct TranscriptTable: NSViewRepresentable {
             guard !isHeld else { return }
             guard let row = index[entryID], entries.indices.contains(row) else { return }
             guard heights.note(height, for: entries[row].contentKey) else { return }
-            owedHeights.insert(row)
+            owedHeights.insert(entryID)
             guard owedWork == nil else { return }
             owedWork = Task { @MainActor [weak self] in
                 guard let self else { return }
                 owedWork = nil
-                let rows = owedHeights
-                owedHeights = IndexSet()
+                let owed = owedHeights
+                owedHeights = []
+                // **Where each of them is NOW.** An id that has left the list is dropped, which is
+                // what a rebuilt list comes to. See `owedHeights`.
+                let rows = IndexSet(owed.compactMap(rowOf))
                 guard !rows.isEmpty else { return }
                 let wasAtEnd = isFollowingAlong
                 // **The row being corrected is usually above the reader.** Scrolling up brings
@@ -570,7 +584,47 @@ struct TranscriptTable: NSViewRepresentable {
                 // than it was measured at.
                 keepPlace(wasAtEnd: wasAtEnd, anchor: anchor)
                 reportGeometry()
+                // A turn later, because a table lays a height change out on the pass after it is
+                // told about it.
+                await Task.yield()
+                checkCorrected(owed)
             }
+        }
+
+        /// Where an entry is in the list now, or nothing if it has left it.
+        private func rowOf(_ entryID: TranscriptEntryID) -> Int? {
+            guard let row = index[entryID], entries.indices.contains(row) else { return nil }
+            return row
+        }
+
+        /// **A row is the height it draws at, and this is the thing that says so.**
+        ///
+        /// Nothing compared a row's estimate against the height it turned out to be, so a
+        /// correction that was filed against the wrong row shipped and was found by eye: a screen
+        /// of one line Bash rows with a hundred points of blank under each. A row that has
+        /// reported its drawn height and been corrected must be a row the table now draws at that
+        /// height, and a count of the ones that are not is the number to watch.
+        private func checkCorrected(_ owed: Set<TranscriptEntryID>) {
+            guard let tableView, !isHeld else { return }
+            var wrong = 0
+            // A row that has reported again since is owed another correction rather than missing
+            // this one, which is the streaming tail on every frame of a turn.
+            for id in owed where !owedHeights.contains(id) {
+                guard let row = rowOf(id),
+                      let measured = heights.height(for: entries[row].contentKey) else { continue }
+                let told = tableView.rect(ofRow: row).height
+                let drawn = max(Double(Self.hair), measured)
+                guard !TranscriptRowHeights.isSameHeight(Double(told), drawn) else { continue }
+                wrong += 1
+                #if DEBUG
+                // Said rather than trapped. A false positive is a row mid animation, and stopping
+                // the owner's build over one would be worse than the gap this is looking for.
+                FileHandle.standardError.write(Data(
+                    "transcript: row \(row) drew at \(drawn), the table says \(told)\n".utf8
+                ))
+                #endif
+            }
+            TranscriptHoldCensus.corrected(rows: owed.count, uncorrected: wrong)
         }
 
         /// Every height change in this file goes through here.
@@ -985,7 +1039,7 @@ struct TranscriptTable: NSViewRepresentable {
             resizeWork = nil
             owedWork?.cancel()
             owedWork = nil
-            owedHeights = IndexSet()
+            owedHeights = []
         }
 
         @discardableResult
@@ -1134,7 +1188,12 @@ struct TranscriptTable: NSViewRepresentable {
             let rect = CGRect(x: 0, y: max(0, y - viewport), width: 1, height: viewport * 3)
             let range = tableView.rows(in: rect)
             guard range.length > 0 else { return }
-            noteHeights(measureExactly(range.location..<(range.location + range.length)))
+            let rows = range.location..<(range.location + range.length)
+            measureExactly(rows)
+            // Every row of the landing, not only the ones this pass measured. A row whose height
+            // the cache already knows and the table does not is exactly the bug this file shipped,
+            // and re-asking sixty rows for a number they already have costs nothing.
+            noteHeights(IndexSet(integersIn: rows))
         }
 
         /// The rows the pane can see, in the entries' own indices.

@@ -115,6 +115,15 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// document several times the height of its content and a scroller to match.
     public static let assumedRowHeight: Double = 64
 
+    /// Whether a row is the height it drew at.
+    ///
+    /// The same half point `note` files a measurement under, so the check that a drawn row is the
+    /// height the table gives it cannot disagree with the cache about what counts as a change.
+    /// See `TranscriptTable.Coordinator.checkCorrected`.
+    public static func isSameHeight(_ one: Double, _ other: Double) -> Bool {
+        abs(one - other) <= 0.5
+    }
+
     /// The narrowest width worth measuring a row at.
     ///
     /// A table that has not been laid out yet reports a width of nought or one, and a row measured
@@ -236,7 +245,7 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         // the old width still stops being owed a measurement.
         stale.remove(contentKey)
         let rounded = Self.rounded(height)
-        guard abs((heights[contentKey] ?? -1) - rounded) > 0.5 else { return false }
+        guard !Self.isSameHeight(heights[contentKey] ?? -1, rounded) else { return false }
         // See `mostRows`. Asked before the insert, so the cache never holds more than it says.
         if heights.count >= Self.mostRows, heights[contentKey] == nil { forget() }
         total += rounded - (heights[contentKey] ?? 0)

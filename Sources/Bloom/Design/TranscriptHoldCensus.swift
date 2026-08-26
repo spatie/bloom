@@ -28,6 +28,11 @@ enum TranscriptHoldCensus {
     private(set) static var measurements = 0
     /// Rows a reflow left holding an estimate rather than measuring. What the hold buys.
     private(set) static var estimatedRows = 0
+    /// **The check that a row is the height it draws at.** Rows that reported the height they
+    /// drew at, and how many of those the table was still drawing at another height a turn after
+    /// it was told. See `TranscriptTable.Coordinator.checkCorrected`, which carries the bug.
+    private(set) static var correctedRows = 0
+    private(set) static var uncorrectedRows = 0
 
     static func held(_ what: TranscriptPaneHold.PaneHeld, underAHand hand: Bool, liveResize: Bool) {
         switch what {
@@ -49,6 +54,12 @@ enum TranscriptHoldCensus {
 
     static func released(estimated: Int) { estimatedRows = estimated }
 
+    /// One batch of corrections, and the ones that did not take.
+    static func corrected(rows: Int, uncorrected: Int) {
+        correctedRows += rows
+        uncorrectedRows += uncorrected
+    }
+
     static func reset() {
         holds = 0
         underAHand = 0
@@ -58,6 +69,8 @@ enum TranscriptHoldCensus {
         reveals = 0
         measurements = 0
         estimatedRows = 0
+        correctedRows = 0
+        uncorrectedRows = 0
     }
 
     static func summary() -> [String: Double] {
@@ -70,6 +83,8 @@ enum TranscriptHoldCensus {
             "reveals": Double(reveals),
             "measurements": Double(measurements),
             "estimatedRows": Double(estimatedRows),
+            "correctedRows": Double(correctedRows),
+            "uncorrectedRows": Double(uncorrectedRows),
         ]
     }
 }
