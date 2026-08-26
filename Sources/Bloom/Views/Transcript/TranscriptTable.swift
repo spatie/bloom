@@ -280,6 +280,14 @@ struct TranscriptTable: NSViewRepresentable {
         private var whileHeld:
             (entries: [TranscriptTableEntry], scale: CGFloat, environment: TranscriptRowEnvironment)?
 
+        /// Where the reader was when a hold began, which is where they still are: nothing under
+        /// them moves while it is on. See `holdBegan`.
+        private struct HeldPlace {
+            var wasAtEnd: Bool
+            var anchor: (id: TranscriptEntryID, delta: CGFloat)?
+        }
+        private var heldPlace: HeldPlace?
+
         /// The conversation this pane is currently drawing. A change of it is an arrival, and an
         /// arrival is not drawn until it is ready. See `showing(session:in:)`.
         private var shownSession: SessionID?
@@ -938,6 +946,14 @@ struct TranscriptTable: NSViewRepresentable {
         /// Everything stops. See `TranscriptHoldView`, and `TranscriptPaneHold` for the rule.
         func holdBegan() {
             isHeld = true
+            // **Where the reader is, read now rather than when the hold lets go.**
+            //
+            // Letting go is itself a frame change: the scroll view takes the pane's new size in
+            // one step, and a pane made shorter puts the end of the content below a reader who was
+            // sitting on it. `clipMoved` sees that and drops the standing instruction, so a reader
+            // who had not moved at all would be anchored back to their top row by a drag. Nothing
+            // under them moves while the hold is on, so this answer is still true when it is used.
+            heldPlace = HeldPlace(wasAtEnd: isFollowingAlong, anchor: anchorEntry())
             // Both were queued against the width being left behind.
             resizeWork?.cancel()
             resizeWork = nil
@@ -961,6 +977,15 @@ struct TranscriptTable: NSViewRepresentable {
                 )
             }
             return moved
+        }
+
+        /// Held no longer, and nothing to lay out: the rows this was holding belong to a
+        /// conversation the pane has already left. The width change it was holding is picked up by
+        /// `paneResized` on the next layout pass, which is a beat later and outside a view update.
+        func holdCancelled() {
+            isHeld = false
+            whileHeld = nil
+            heldPlace = nil
         }
 
         var reducesMotion: Bool { rowEnvironment?.reduceMotion ?? false }
@@ -995,10 +1020,25 @@ struct TranscriptTable: NSViewRepresentable {
         /// measured off screen. See `TranscriptRowHeights.rewidth`.
         @discardableResult
         private func rewidth() -> Bool {
+            let held = heldPlace
+            heldPlace = nil
             guard heights.rewidth(to: Double(columnWidth)) else { return false }
-            // Both read before anything moves under the reader. See `keepPlace`.
-            let wasAtEnd = isFollowingAlong
-            let anchor = anchorEntry()
+            // Both read before anything moves under the reader, which for a hold was before it
+            // began. See `keepPlace` and `holdBegan`.
+            let wasAtEnd: Bool
+            let anchor: (id: TranscriptEntryID, delta: CGFloat)?
+            if let held {
+                wasAtEnd = held.wasAtEnd
+                anchor = held.anchor
+            } else {
+                wasAtEnd = isFollowingAlong
+                anchor = anchorEntry()
+            }
+            // **Before the measuring, and that is not tidiness.** A user bubble is capped at a
+            // share of the pane's width, and the pane publishes that cap through this report. Rows
+            // measured before it lands would be measured against the width the pane used to be,
+            // and every bubble on screen would be corrected a moment later, during the fade.
+            reportGeometry()
             let eager = TranscriptPaneHold.eager(visible: visibleRows, count: entries.count)
             measureExactly(eager)
             noteHeights(IndexSet(integersIn: entries.indices))

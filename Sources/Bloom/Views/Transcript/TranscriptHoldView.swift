@@ -19,6 +19,9 @@ protocol TranscriptHoldDelegate: AnyObject {
     func holdBegan()
     /// Lay out at the new width. True when anything actually moved.
     func holdEnded() -> Bool
+    /// Stop being held, and lay out nothing: what was held belongs to a conversation the pane has
+    /// already left. See `holdForArrival`.
+    func holdCancelled()
     var reducesMotion: Bool { get }
 }
 
@@ -201,15 +204,16 @@ final class TranscriptHoldView: NSView {
     func holdForArrival() {
         guard !isArriving else { return }
         // A resize hold has nothing left to protect, because the rows it was holding still belong
-        // to the conversation being left. Ended rather than dropped: the table is held by a flag
-        // of its own, and dropping this would leave it held for ever.
+        // to the conversation being left. Cancelled rather than dropped: the table is held by a
+        // flag of its own, and dropping this would leave it held for ever. Cancelled rather than
+        // ENDED, and laid out on the next pass rather than this one, because this is called from
+        // inside `updateNSView` and a reflow reports geometry, which writes SwiftUI state.
         if frozen != nil {
             frozen = nil
             letGo?.cancel()
             letGo = nil
             needsLayout = true
-            layoutSubtreeIfNeeded()
-            _ = delegate?.holdEnded()
+            delegate?.holdCancelled()
         }
         isArriving = true
         scroll.alphaValue = 0
