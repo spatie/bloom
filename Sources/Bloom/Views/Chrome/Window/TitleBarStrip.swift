@@ -288,6 +288,28 @@ final class TitleBarStripController: NSTitlebarAccessoryViewController {
     private var startedAt: CFTimeInterval = 0
     private var frames: CADisplayLink?
 
+    /// The width the slide is going to, applied late if the frames never came.
+    ///
+    /// `NSView.displayLinkWithTarget:selector:` says it in its own header: "if the view is hidden,
+    /// or not on any display, the callback will not be invoked". A window minimised, moved to a
+    /// sleeping display or closed halfway through a slide therefore stops the clock, and what is
+    /// left behind is an accessory frozen part way between one point and 380. That is not a
+    /// cosmetic leftover. A trailing accessory INDENTS the toolbar's items, per
+    /// `NSTitlebarAccessoryViewController.h`, so a frozen one parks the search field at a width
+    /// nothing on screen explains and leaves it there until the inspector is next opened or closed.
+    ///
+    /// The version this replaced could not have that fault, because its whole mechanism was a
+    /// `Task.sleep` that always ran. Losing that guarantee was not part of the trade, so it is back
+    /// as a backstop rather than as the mechanism: it lands the width the frames were heading for,
+    /// and anything that finishes first cancels it.
+    private var landing: Task<Void, Never>?
+
+    /// How long after the slide should have ended the backstop gives up waiting for it.
+    ///
+    /// Long enough that a display link running normally has always called `endSlide` first, so on
+    /// a healthy window this task is only ever created and cancelled.
+    private static let landingGrace: TimeInterval = 0.1
+
     init(app: AppModel, height: CGFloat) {
         self.height = height
         super.init(nibName: nil, bundle: nil)
@@ -374,6 +396,12 @@ final class TitleBarStripController: NSTitlebarAccessoryViewController {
             from: view.frame.width, to: target, seconds: Motion.inspectorSeconds
         )
         startedAt = CACurrentMediaTime()
+        landing?.cancel()
+        landing = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Motion.inspectorSeconds + Self.landingGrace))
+            guard !Task.isCancelled else { return }
+            self?.land(on: target)
+        }
         guard frames == nil else { return }
         let link = view.displayLink(target: self, selector: #selector(step))
         link.add(to: .main, forMode: .common)
@@ -392,7 +420,14 @@ final class TitleBarStripController: NSTitlebarAccessoryViewController {
         let elapsed = sender.targetTimestamp - startedAt
         apply(slide.width(after: elapsed))
         guard slide.hasFinished(after: elapsed) else { return }
-        InspectorGeometry.shared.setBandVisible(slide.to > 1)
+        land(on: slide.to)
+    }
+
+    /// The end of a slide, however it got there: the last frame of one, or the backstop above.
+    /// `apply` is a no-op the second time, so both arriving costs nothing.
+    private func land(on width: CGFloat) {
+        InspectorGeometry.shared.setBandVisible(width > 1)
+        apply(width)
         endSlide()
     }
 
@@ -400,6 +435,8 @@ final class TitleBarStripController: NSTitlebarAccessoryViewController {
         slide = nil
         frames?.invalidate()
         frames = nil
+        landing?.cancel()
+        landing = nil
     }
 
     /// The epsilon is a point of a point rather than half a point, because the last few steps of an
