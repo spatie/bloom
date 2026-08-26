@@ -20,6 +20,14 @@ import Foundation
 /// changing either empties it. That is also the truthful shape, because there is never more than
 /// one width in play.
 ///
+/// ## It outlives the conversation it was filled for
+///
+/// A pane is pointed at one conversation after another, and the heights of the one being left are
+/// exactly what makes coming back to it free, so nothing here is emptied by a switch. Two things
+/// follow. Every key has to be unique across sessions, which stored rows get from a row id and
+/// which the transcript's two synthetic entries have to be given (see `TranscriptListView`). And
+/// the cache has to have a bound, which is `mostRows`.
+///
 /// ## A live resize does not remeasure, on purpose
 ///
 /// Every cached height was taken at a width that no longer holds, so all of them are wrong the
@@ -27,7 +35,7 @@ import Foundation
 /// the drag. So the caller does not: it holds the transcript at the width it was and lets go once,
 /// when the hand does. `rewidth(to:)` is where that lands, and it keeps the old numbers as
 /// estimates rather than emptying the cache, because emptying it is the four second stall the hold
-/// exists to remove. See `TranscriptResizeHold`.
+/// exists to remove. See `TranscriptPaneHold`.
 ///
 /// ## Nought is a real height
 ///
@@ -64,11 +72,23 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// Half a point, because a scroll view's own arithmetic lands on fractions and a row laid out
     /// at 831.5 points is the same row as one laid out at 831.75. Anything coarser and a real drag
     /// would fail to invalidate; anything finer and a rounding error would empty the cache for
-    /// nothing. Public because `TranscriptResizeHold` asks the same question of a pane's frame and
+    /// nothing. Public because `TranscriptPaneHold` asks the same question of a pane's frame and
     /// there is one answer to it.
     public static func isSameWidth(_ one: Double, _ other: Double) -> Bool {
         abs(one - other) <= 0.5
     }
+
+    /// The most rows remembered before the cache is emptied and started again.
+    ///
+    /// **A pane keeps the heights of every conversation it has drawn**, which is what makes
+    /// arriving back at one free, and one pane visits a great many in a day. At about 150 bytes a
+    /// row this is a few megabytes, which is the point at which it stops being a cache and starts
+    /// being a leak.
+    ///
+    /// Emptied rather than trimmed. There is no recency here to evict by, and adding some to
+    /// answer a question that arises once a day would be bookkeeping on every note: the honest
+    /// cost of hitting this is one conversation measured again.
+    public static let mostRows = 20_000
 
     /// The narrowest width worth measuring a row at.
     ///
@@ -169,6 +189,8 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         stale.remove(contentKey)
         let rounded = Self.rounded(height)
         guard abs((heights[contentKey] ?? -1) - rounded) > 0.5 else { return false }
+        // See `mostRows`. Asked before the insert, so the cache never holds more than it says.
+        if heights.count >= Self.mostRows, heights[contentKey] == nil { forget() }
         heights[contentKey] = rounded
         return true
     }

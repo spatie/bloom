@@ -1,16 +1,25 @@
 import Foundation
 
-/// Whether a pane being resized holds the transcript still, and what it lays out when it stops.
+/// When a pane holds its transcript back, and what it shows when it lets go.
 ///
-/// **The measurement.** A transcript row's height is only known once an `NSHostingView` has laid
-/// it out, at about two milliseconds each. A width change invalidates every one of them, so an
-/// 1,855 row session costs about four seconds of main thread to remeasure, and a drag asked for
-/// that several times over: the old debounce fired in every pause of the hand.
+/// **The measurement behind both halves.** A transcript row's height is only known once an
+/// `NSHostingView` has laid it out, at about two milliseconds each, and there are two moments that
+/// ask for a great many of them at once.
 ///
-/// So a drag remeasures nothing at all. The pane grows and the transcript keeps the size it had,
-/// the way Safari keeps a page while its sidebar moves, and the reflow happens once when the hand
-/// comes off. `TranscriptHoldView` is the mechanism; this is the part that can be tested.
-public enum TranscriptResizeHold {
+/// **A resize.** A width change invalidates every cached height, so an 1,855 row session costs
+/// about four seconds of main thread, and a drag asked for that several times over: the old
+/// debounce fired in every pause of the hand. So a drag remeasures nothing at all. The pane grows
+/// and the transcript keeps the size it had, the way Safari keeps a page while its sidebar moves,
+/// and the reflow happens once when the hand comes off.
+///
+/// **An arrival.** Pointing a pane at another conversation measures the tail of it, and a beat
+/// later the four hundred rows behind that. Until both have landed the pane is a transcript in
+/// pieces: rows at the top, then a jump to the live end. So it is not drawn at all until it is in
+/// the place it belongs, and then it is faded in.
+///
+/// One rule for both: hold, do the expensive thing, fade to it. `TranscriptHoldView` is the
+/// mechanism, and this is the part that can be tested.
+public enum TranscriptPaneHold {
     /// Whether a width change is worth holding the transcript for.
     ///
     /// A width nothing has been drawn at yet is not one: the first layout of a pane must reflow
@@ -39,6 +48,15 @@ public enum TranscriptResizeHold {
     public static func letsGo(underAHand: Bool) -> Duration {
         underAHand ? quietUnderAHand : quiet
     }
+
+    /// The longest a pane stays blank waiting for the conversation it has been pointed at.
+    ///
+    /// **What it is showing meanwhile is its own empty ground and never another conversation**, so
+    /// this is a backstop rather than a length anybody watches: the pane is revealed the moment its
+    /// rows are in and in the right place, which is a load from SQLite and a tail's worth of
+    /// measuring away. This is what covers a load that never returns, a task cancelled on its way
+    /// there, and a session with nothing in it at all.
+    public static let arrival: Duration = .seconds(1)
 
     /// The most rows measured either side of the ones on screen.
     ///

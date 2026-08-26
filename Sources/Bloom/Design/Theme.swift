@@ -792,13 +792,14 @@ enum Motion {
     /// rest arriving.
     static let arrival: Animation = .easeOut(duration: 0.18)
 
-    /// The transcript coming back at its new width after a pane divider is let go.
+    /// A transcript being drawn again after it has been held back: at its new width when a divider
+    /// is let go, and at all when the conversation a pane was pointed at has landed in it.
     ///
     /// A duration rather than an `Animation` because what plays it is a `CATransition` on a layer.
-    /// The same length as `pane`, deliberately: this is the end of a pane's own movement rather
-    /// than an event of its own. Not `inspectorSeconds`, because a quarter of a second spent
-    /// crossfading text that is already laid out reads as a wipe.
-    static let reflowSeconds: TimeInterval = 0.18
+    /// The same length as `pane`, deliberately: both are a pane's own movement finishing rather
+    /// than an event of their own. Not `inspectorSeconds`, because a quarter of a second spent
+    /// crossfading text that is already laid out reads as a wipe. See `TranscriptHoldView`.
+    static let revealSeconds: TimeInterval = 0.18
 
     /// How long the pointer has to rest before a card opens under it: the composer's file chip,
     /// and the sidebar row's.

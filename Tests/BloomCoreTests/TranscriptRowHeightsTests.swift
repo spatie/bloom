@@ -249,6 +249,37 @@ struct TranscriptRowHeightsTests {
         #expect(!heights.isStale("row.7"))
     }
 
+    // MARK: - The bound
+
+    /// A pane keeps the heights of every conversation it draws, and one pane visits a great many.
+    /// Emptying is the whole policy: the cost of hitting it is one conversation measured again.
+    @Test("a cache that has grown past its bound starts again")
+    func boundsWhatItRemembers() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        for row in 0..<TranscriptRowHeights.mostRows {
+            heights.note(Double(row % 400) + 1, for: "row.\(row)")
+        }
+        #expect(heights.count == TranscriptRowHeights.mostRows)
+        heights.note(120, for: "one.too.many")
+        #expect(heights.count == 1)
+        #expect(heights.height(for: "one.too.many") == 120)
+        // The width is kept, because the pane is still the width it was.
+        #expect(heights.measure?.width == 800)
+    }
+
+    @Test("a row already remembered is not what pushes the cache over")
+    func anUpdateIsNotAnInsert() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        for row in 0..<TranscriptRowHeights.mostRows {
+            heights.note(Double(row % 400) + 1, for: "row.\(row)")
+        }
+        heights.note(999, for: "row.0")
+        #expect(heights.count == TranscriptRowHeights.mostRows)
+        #expect(heights.height(for: "row.0") == 999)
+    }
+
     @Test("half a point is the same width, and one answer says so")
     func oneRuleAboutTheSameWidth() {
         #expect(TranscriptRowHeights.isSameWidth(831.5, 831.75))

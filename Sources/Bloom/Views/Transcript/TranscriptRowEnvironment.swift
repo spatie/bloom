@@ -67,6 +67,27 @@ struct TranscriptRowEnvironment: Equatable {
             && lhs.chatFont == rhs.chatFont
             && lhs.reduceMotion == rhs.reduceMotion
     }
+
+    /// Whether a row drawn in this environment can come out a different height from the same row
+    /// drawn in the other one.
+    ///
+    /// **This is why switching workspaces was slow.** `linkActions` names the pane a link opens
+    /// into, so it moves on every workspace switch and the switch counted as an environment
+    /// change; an environment change emptied the whole height cache, so arriving at a conversation
+    /// you had read a minute ago rebuilt an `NSHostingView` for every row in the window. What a
+    /// link does when it is pressed cannot change how tall a paragraph is, and neither can a hover
+    /// host or Reduce Motion. The text size and the typeface can, and a different list object
+    /// means a different pane, so both of those keep their old answer.
+    ///
+    /// The rule is here rather than in the core with the other decisions because it is about this
+    /// type, and this type holds `AppModel` and a SwiftUI environment value. There is nothing for
+    /// the core to hold.
+    func wraps(differentlyFrom other: Self) -> Bool {
+        fontScale != other.fontScale
+            || chatFont != other.chatFont
+            || app !== other.app
+            || bubbleWidth !== other.bubbleWidth
+    }
 }
 
 extension View {
