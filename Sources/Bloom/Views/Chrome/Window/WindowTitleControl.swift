@@ -29,8 +29,12 @@ import BloomCore
 /// Desktop & Dock has "Double-click a window's title bar to", set to Zoom or Minimise, and a title
 /// bar that started a rename instead would be a system preference quietly broken. That is why the
 /// title is drawn as a view of ours at all: the gesture is attached to the text's own shape, so
-/// every other point of the bar is untouched AppKit and keeps whatever the user set. `WindowChrome`
-/// hides AppKit's own title so there are not two.
+/// every other point of the bar is untouched AppKit and keeps whatever the user set.
+///
+/// **Two titles have to be turned off for this to be the only one, not one.** `WindowChrome` sets
+/// `NSWindow.titleVisibility`, which governs the title AppKit draws; `RootView` says
+/// `.toolbar(removing: .title)`, which governs the title item SwiftUI contributes from
+/// `navigationTitle`. The first shipped without the second and the window wore its name twice.
 struct WindowTitleControl: View {
     /// Handed in rather than read from the environment, as `BloomWindowToolbar` takes it, because
     /// a `contextMenu`'s content is built in a detached context that observable values in the

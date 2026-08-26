@@ -84,6 +84,13 @@ struct RootView: View {
                         app: app, isSidebarCollapsed: columnVisibility == .detailOnly
                     )
                 }
+                // Said here as well as under `navigationTitle` below, and deliberately.
+                //
+                // The title is declared on the split view and the toolbar is declared on this
+                // column, so the two are not the same view, and which of them resolves the default
+                // title item is not a thing reading the interface settles. The window came up
+                // wearing its name twice once already. Both, until a picture says which one did it.
+                .toolbar(removing: .title)
         }
         // As well as heading the toolbar (see BloomApp), the title names the window in the
         // Window menu and in Mission Control, so it is worth setting.
@@ -96,6 +103,20 @@ struct RootView: View {
         // names the window as well. It is still not what the inspector keys on, below: naming a
         // window costs nothing, and showing a diff for a worktree that is gone does not.
         .navigationTitle(app.menuWorkspace?.name ?? "Bloom")
+
+        // And then removed from the toolbar again, because `WindowTitleControl` draws the name
+        // itself and the window came up wearing it twice.
+        //
+        // The two titles are not one title drawn twice, they are two different mechanisms, which
+        // is why hiding one did not hide the other. `NSWindow.titleVisibility`, which `WindowChrome`
+        // sets, governs the title AppKit draws. The line above contributes a title item of
+        // SwiftUI's own to the window toolbar, and SwiftUI owns that one: it re-resolves it with
+        // the toolbar, so nothing set on the window from the side can take it away.
+        // `ToolbarDefaultItemKind.title` is the switch for it, and it is the only one.
+        //
+        // The title itself stays. It is what the Window menu, Mission Control and the Dock read,
+        // and the comment above is the reason it is set at all.
+        .toolbar(removing: .title)
 
         // Marks this scene as the main window, so the menu items that act on a workspace grey out
         // while Settings or a project settings window is key. See `MainWindowFocus`.

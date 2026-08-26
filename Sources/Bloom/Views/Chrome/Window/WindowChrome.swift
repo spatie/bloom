@@ -44,13 +44,17 @@ struct WindowChrome: ViewModifier {
         // so that a double click on the NAME can start a rename without taking the double click on
         // the BAR that Desktop & Dock has already spent on Zoom or Minimise.
         //
+        // **This is only half of it, and the half that shipped alone drew the name twice.** A
+        // window can carry two titles by two different routes: the one AppKit draws, which this
+        // governs, and a title item SwiftUI contributes to the toolbar from `navigationTitle`,
+        // which it owns and re-resolves and which nothing set on the window from the side can
+        // touch. That second one is `RootView`'s `.toolbar(removing: .title)`. Neither line makes
+        // the other redundant.
+        //
         // Here rather than in `WindowTitle`, which owns the title's words, because `addStrip`
         // below measures the title bar and the measurement has to be taken with this already
         // applied. Two sibling modifiers attach to the window in no defined order, so the
-        // measurement and the setting belong in one place. `NSWindowTitleHidden` "moves the
-        // toolbar up into the area previously occupied by the title", which is a no-op for a
-        // `.unified` toolbar whose title was already inline with it, but this is not a thing to
-        // depend on the ordering of.
+        // measurement and the setting belong in one place.
         window.titleVisibility = .hidden
         addStrip(to: window)
     }
