@@ -77,11 +77,16 @@ public enum WorkspaceMenuSubject: Hashable, Sendable {
         case .live:
             action != .restore
         case .archived:
-            // Reading a branch name is the one thing that still means something once the worktree
-            // is gone. Opening an editor or a Finder window on a path that is not there is not,
-            // and neither is archiving what is already archived. Renaming is left out because
-            // Home's own menu leaves it out: an archived row is a record rather than a workspace.
-            action == .restore || action == .copyBranchName
+            // Reading a name or a branch name is what still means something once the worktree is
+            // gone. Opening an editor or a Finder window on a path that is not there is not, and
+            // neither is archiving what is already archived. Renaming is left out because Home's
+            // own menu leaves it out: an archived row is a record rather than a workspace.
+            //
+            // Pin, the unread mark and the colour are all about a ROW IN A LIST, and the sidebar
+            // never lists an archived workspace at all. The unread mark has the same answer for a
+            // second reason of its own, written out on `WorkspaceUnreadMark.action(for:)`: an
+            // archived row's `unread` is a flag nothing draws and the user has no way to answer.
+            action == .restore || action == .copyBranchName || action == .copyName
         }
     }
 }
@@ -90,6 +95,11 @@ public enum WorkspaceMenuSubject: Hashable, Sendable {
 ///
 /// Setup, the run scripts and Stop Agent are not here: each needs a live `WorkspaceModel` rather
 /// than a row, and what they can do is decided by that model rather than by which list is focused.
+///
+/// The last four arrived when the menu bar was swept for actions that existed only on a right
+/// click. Pin, the unread mark and the colour were on a workspace row's own menu and in no menu at
+/// the top of the screen; Copy Name was on the window title's menu and nowhere else, which made it
+/// the one way in the whole app to put a workspace's name on the clipboard.
 public enum WorkspaceMenuAction: String, Hashable, Sendable, CaseIterable {
     case archive
     case restore
@@ -97,4 +107,8 @@ public enum WorkspaceMenuAction: String, Hashable, Sendable, CaseIterable {
     case revealInFinder
     case copyBranchName
     case rename
+    case pin
+    case unreadMark
+    case colour
+    case copyName
 }
