@@ -237,7 +237,7 @@ struct RevealToolTests {
         _ order: RevealOrder,
         workspaces: [Workspace],
         projects: [Repo]
-    ) throws -> Reveal {
+    ) throws -> RevealPlan {
         guard case .success(let reveal) = RevealChoice.resolve(
             order, workspaces: workspaces, projects: projects
         ) else {
@@ -267,8 +267,8 @@ struct RevealToolTests {
     private enum RevealTestTrouble: Error { case refused }
 
     private actor Recorder {
-        var reveals: [Reveal] = []
+        var reveals: [RevealPlan] = []
 
-        func record(_ reveal: Reveal) { reveals.append(reveal) }
+        func record(_ reveal: RevealPlan) { reveals.append(reveal) }
     }
 }

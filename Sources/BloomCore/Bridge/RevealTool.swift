@@ -5,7 +5,7 @@ import Foundation
 /// One verb, like `WorkspaceTabSelecting` next to it: the seams that report carry none and the
 /// seams that act carry exactly one. The name is resolved on this side of it, against the store,
 /// so the app is handed an id and a sentence rather than a string to go looking for.
-public typealias Revealing = @Sendable (Reveal) async -> RevealOutcome
+public typealias Revealing = @Sendable (RevealPlan) async -> RevealOutcome
 
 /// `reveal`: point Bloom's window at a workspace, or at Home under a scope and a search.
 ///
@@ -126,7 +126,7 @@ public struct RevealTool: BridgeToolHandling {
         let workspaces = (try? await store.workspaces()) ?? []
         let projects = (try? await store.repos()) ?? []
 
-        let resolved: Reveal
+        let resolved: RevealPlan
         switch RevealChoice.resolve(order, workspaces: workspaces, projects: projects) {
         case .failure(let refusal): return .failure(refusal.sentence)
         case .success(let found): resolved = found

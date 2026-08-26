@@ -111,7 +111,7 @@ extension AppModel {
     /// It refuses a workspace that has gone between the resolve and here, rather than selecting an
     /// id nothing answers to: `selection` would take it, and the window would land on an empty
     /// detail column with a sidebar agreeing with nothing.
-    func revealForBridge(_ reveal: Reveal) -> RevealOutcome {
+    func revealForBridge(_ reveal: RevealPlan) -> RevealOutcome {
         switch reveal.target {
         case .workspace(let id):
             guard workspaces.contains(where: { $0.id == id }) else {

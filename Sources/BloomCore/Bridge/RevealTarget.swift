@@ -18,7 +18,13 @@ public enum RevealTarget: Sendable, Equatable {
 /// The sentence is built here rather than by the app because it is built out of what was
 /// resolved, and resolving is what this file does. The app's closure only has to say whether the
 /// window was there to be moved.
-public struct Reveal: Sendable, Equatable {
+///
+/// `Plan` rather than the bare noun for two reasons. `Sources/Bloom` already has a `Reveal`, which
+/// is the menu item's family of verbs for showing a path in Finder, in Terminal or in an editor:
+/// a related idea about a different place, and the bare name inside the app target resolved to
+/// that one. And `Plan` is what this tree already calls a resolved, executable description of
+/// something about to happen; see `WorkspaceStartPlan` and `RepositoryStartPlan`.
+public struct RevealPlan: Sendable, Equatable {
     public let target: RevealTarget
     public let sentence: String
 
@@ -109,7 +115,7 @@ public enum RevealChoice {
         _ order: RevealOrder,
         workspaces: [Workspace],
         projects: [Repo]
-    ) -> Result<Reveal, PaneRefusal> {
+    ) -> Result<RevealPlan, PaneRefusal> {
         if let name = order.workspace {
             return workspaceTarget(name, among: workspaces, projects: projects)
         }
@@ -125,16 +131,16 @@ public enum RevealChoice {
             }
         }
 
-        return .success(Reveal(target: .home(filter), sentence: homeSentence(filter, project: project)))
+        return .success(RevealPlan(target: .home(filter), sentence: homeSentence(filter, project: project)))
     }
 
     private static func workspaceTarget(
         _ name: String,
         among workspaces: [Workspace],
         projects: [Repo]
-    ) -> Result<Reveal, PaneRefusal> {
+    ) -> Result<RevealPlan, PaneRefusal> {
         if let exact = workspaces.first(where: { $0.id.rawValue == name }) {
-            return .success(Reveal(
+            return .success(RevealPlan(
                 target: .workspace(exact.id), sentence: sentence(for: exact, projects: projects)
             ))
         }
@@ -143,7 +149,7 @@ public enum RevealChoice {
         let matches = workspaces.filter { $0.name.lowercased() == needle }
         switch matches.count {
         case 1:
-            return .success(Reveal(
+            return .success(RevealPlan(
                 target: .workspace(matches[0].id),
                 sentence: sentence(for: matches[0], projects: projects)
             ))
