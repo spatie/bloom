@@ -1,134 +1,142 @@
 import SwiftUI
 import BloomCore
 
-/// The one strip of chrome Home has: the controls that decide what the list contains, and what
-/// came back.
+/// The one strip of chrome Home has: which chip is lit, which projects are listed, and what the
+/// answer adds up to.
 ///
-/// **What this replaced, and why.** Home used to open with a page header: the Mac's icon at thirty
-/// points, the machine name set in title2 bold, a subtitle under it, and a large filled "New
-/// workspace" capsule at the trailing edge. Every one of those is a web convention rather than a
-/// Mac one. A Mac window states what it is in its title bar and offers its primary action in its
-/// toolbar, and this window already does both: the window's own title names what is showing, and
-/// `BloomWindowToolbar` puts a `+` split button on the leading edge that opens the same sheet. The
-/// header was a second title bar drawn inside the content, two hundred points below the real one,
-/// and the capsule was the same command offered twice in one window.
+/// **What came off it, and why the strip is glass now.** It used to hold a hand built search field
+/// with a hand drawn focus ring, a project menu, a "Hide archived" toggle and the readout. The
+/// field is gone: the window has a real `NSSearchToolbarItem` in its toolbar, which is where
+/// Finder and Mail publish search, and which draws its own glass and its own focus ring rather
+/// than an approximation of both. The toggle is gone too, into `HomeScope.live`, because a
+/// narrowing switch beside a set of narrowing chips is two mechanisms for one question.
 ///
-/// What is left is the part that could not move: three controls that only make sense against this
-/// list, and the count they change. They sit in a single accessory strip on the chrome colour, at
-/// `Metrics.barHeight`, which is what the sidebar's status bar and the inspector's tab row are.
-/// The strip is the same piece of furniture in all three places, so Home stops looking like a
-/// different app in the same window.
+/// What is left floats. A bar of controls over a list that scrolls under it is exactly what a
+/// material is for, so this is `.regular` glass in a `GlassEffectContainer` with the chips, which
+/// means a chip lighting up is one shape morphing rather than two surfaces disagreeing about the
+/// ground they stand on. The rows underneath are not glass and must not be: a row is content, and
+/// forty glass rows is noise.
 ///
 /// It does not scroll. The list under it is hundreds of rows on a real install, and a strip that
-/// leaves the screen takes the search field and the state of the filters with it, which is how a
-/// user ends up staring at eleven rows wondering where the rest went.
+/// leaves the screen takes the state of the filters with it, which is how a user ends up staring
+/// at eleven rows wondering where the rest went.
 struct HomeBar: View {
     /// What the list adds up to, worked out by `HomeView`. Empty means there is nothing to say.
     var summary: String
     var repos: [Repo]
-    var archivedCount: Int
+    var counts: HomeScopeCounts
+    var isSearching: Bool
     @Binding var filter: HomeFilter
 
-    @FocusState private var fieldFocused: Bool
-
-    /// See `ControlActiveState.showsFocusRing`: a ring belongs in the key window only.
-    @Environment(\.controlActiveState) private var activeState
-
-    /// Focused, and in the window the keys are going to.
-    private var isRingVisible: Bool { fieldFocused && activeState.showsFocusRing }
+    /// The chip under the pointer. Held here rather than in each chip so crossing the strip lights
+    /// one at a time, which is the same arrangement Home's rows use.
+    @State private var hovered: HomeScope?
 
     var body: some View {
-        HStack(spacing: Metrics.spacing) {
-            field
-            projectMenu
-            archivedToggle
+        // One sampling pass for the strip and every chip on it rather than one each, which is what
+        // the container is for. `spacing: 0` so two chips that come close do not merge into one
+        // blob, which is the other thing it does.
+        GlassEffectContainer(spacing: 0) {
+            HStack(spacing: Metrics.spacingSmall) {
+                ForEach(HomeScope.offered(searching: isSearching), id: \.self) { scope in
+                    chip(scope)
+                }
 
-            Spacer(minLength: Metrics.gutter)
+                Spacer(minLength: Metrics.gutter)
 
-            // Trailing, and the whole reason the count is still on screen at all: it describes the
-            // list rather than the database whenever the two differ, so it has to sit with the
-            // controls that made them differ. A forgotten filter is only obvious if the number it
-            // changed is an inch away from it.
-            //
-            // First to be given up when the pane is narrow. The controls are how the user gets out
-            // of a narrowed list; the readout only explains it.
-            if !summary.isEmpty {
-                Text(summary)
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .layoutPriority(-1)
-                    .accessibilityLabel("Showing \(summary)")
+                projectMenu
+
+                // Trailing, and the whole reason the count is still on screen at all: it describes
+                // the list rather than the database whenever the two differ, so it has to sit with
+                // the controls that made them differ.
+                //
+                // First to be given up when the pane is narrow. The controls are how the user gets
+                // out of a narrowed list; the readout only explains it.
+                if !summary.isEmpty {
+                    Text(summary)
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(-1)
+                        .accessibilityLabel("Showing \(summary)")
+                }
             }
+            .padding(.horizontal, Metrics.spacingWide)
+            .frame(height: Self.height)
+            .glassEffect(
+                .regular, in: RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
+            )
         }
         .padding(.horizontal, HomeMetrics.gutter)
-        .frame(height: Metrics.barHeight)
-        // The chrome colour with the pane's top edge already drawn on it, which is what every
-        // other strip of small controls in this window stands on.
-        .tabStripMaterial()
+        .padding(.top, Metrics.inset)
     }
 
-    // MARK: - Search
+    /// A chip and its clearance above and below. Not `Metrics.barHeight`: this strip floats over
+    /// the list rather than being a band ruled off from it, so it is sized by what it holds.
+    private static let height: CGFloat = Metrics.controlHeight + Metrics.spacing * 2
 
-    /// Hand built rather than `.searchable`, which on macOS puts the field in the window's toolbar.
-    /// The toolbar belongs to the window and is shared with the transcript and the inspector, so a
-    /// field that appeared in it would look like it searched all of them.
+    // MARK: - Scopes
+
+    /// One scope, with the number that says what clicking it would show.
     ///
-    /// The placeholder is one word. It was a sentence naming all three things the search looks at,
-    /// which is a fine thing to say once and a poor thing to have permanently occupying three
-    /// hundred points of a control strip; it is now the accessibility label and the tooltip, where
-    /// it is available to anyone who asks and in the way of nobody who does not.
-    private var field: some View {
-        HStack(spacing: Metrics.spacingSmall) {
-            Image(systemName: "magnifyingglass")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .accessibilityHidden(true)
+    /// The count is the half that earns the chip its place on the strip. "Needs you 3" answers the
+    /// question the window was opened with at a glance, without drawing a second list of the same
+    /// rows above the first one.
+    private func chip(_ scope: HomeScope) -> some View {
+        let isOn = filter.scope == scope
+        let count = counts.count(of: scope, searching: isSearching)
+        let label = scope.label(searching: isSearching)
 
-            TextField("Search", text: $filter.query)
-                .textFieldStyle(.plain)
-                .font(Typo.label)
-                .foregroundStyle(Palette.textPrimary)
-                .focused($fieldFocused)
-                .onExitCommand { clear() }
-
-            if !filter.query.isEmpty {
-                Button("Clear the search", systemImage: "xmark.circle.fill", action: clear)
-                    .labelStyle(.iconOnly)
+        return Button {
+            filter.scope = scope
+        } label: {
+            HStack(spacing: Metrics.spacingSmall) {
+                Text(label)
                     .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .buttonStyle(.plain)
+
+                Text(count, format: .number)
+                    .font(Typo.micro)
+                    .monospacedDigit()
+                    .foregroundStyle(isOn ? Palette.textInverted.opacity(0.8) : countTint(scope))
             }
+            .foregroundStyle(isOn ? Palette.textInverted : Palette.textSecondary)
+            .padding(.horizontal, Metrics.spacing)
+            .frame(height: Metrics.controlHeight)
+            .background(hovered == scope && !isOn ? Palette.hover : .clear, in: Capsule())
+            .contentShape(Capsule())
         }
-        .padding(.horizontal, Metrics.spacing)
-        .frame(width: Self.fieldWidth, height: Metrics.controlHeight)
-        .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
-        // A hand-built field gets no focus ring from AppKit, and a text field that looks
-        // identical whether or not it has the keyboard is the single most reliable way to make a
-        // Mac window feel like a web page. `keyboardFocusIndicatorColor` is the same colour the
-        // system draws, and it follows Full Keyboard Access and Increase Contrast with it.
-        .overlay {
-            RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                .stroke(
-                    isRingVisible ? Palette.focusRing : Palette.border,
-                    lineWidth: isRingVisible ? Self.focusRingWidth : Metrics.hairline
-                )
-        }
-        .help(Self.searchDescription)
-        .accessibilityLabel(Self.searchDescription)
+        .buttonStyle(.plain)
+        // A tinted glass chip is one control, rather than a coloured control standing next to a
+        // glass one. `.identity` for the unlit ones rather than dropping the modifier: the shape
+        // stays in the container either way, so a chip lighting up morphs instead of appearing,
+        // and the strip is already glass, so a second material inside it would be a surface on a
+        // surface.
+        .glassEffect(isOn ? .regular.tint(Palette.accentFill) : .identity, in: Capsule())
+        .onHoverChange { hovered = $0 ? scope : (hovered == scope ? nil : hovered) }
+        .accessibilityLabel("\(label), \(count)")
+        .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+        .help(help(for: scope))
     }
 
-    private static let searchDescription = "Search workspaces, branches and projects"
+    /// The one chip whose number is worth noticing before it is read. Everything else on the strip
+    /// is a count; this one is a queue with a person at the end of it.
+    private func countTint(_ scope: HomeScope) -> Color {
+        scope == .needsYou && counts.needsYou > 0 ? Palette.warning : Palette.textTertiary
+    }
 
-    /// Drawn inside the field's own edge rather than outside it, which is where AppKit puts a real
-    /// one. A ring outside would have to be given clearance by the strip, and a two point inner
-    /// stroke reads as the same signal at this size.
-    private static let focusRingWidth: CGFloat = 2
-
-    /// Enough for a branch name typed in full and no more. It was 360, which is not a control any
-    /// more, it is a column.
-    private static let fieldWidth: CGFloat = 220
+    private func help(for scope: HomeScope) -> String {
+        switch scope {
+        case .all:
+            isSearching ? "Every kind of result" : "Everything on this Mac, archived work included"
+        case .needsYou: "An agent has asked something, or a finished turn has not been read"
+        case .running: "An agent is mid turn"
+        case .live: "Still has a worktree on disk"
+        case .archived: "Archived: readable, restorable, with nothing left on disk"
+        case .workspaces: "Matched by name, branch or project"
+        case .transcripts: "Matched in what the agents said"
+        }
+    }
 
     // MARK: - Projects
 
@@ -139,6 +147,9 @@ struct HomeBar: View {
     ///
     /// `.menuStyle(.button)` because a borderless `Menu` on macOS throws a custom label away and
     /// draws only the chevron, which is what the sidebar's account row used to look like.
+    ///
+    /// No glass on it. It is system drawn already, and a material on top of a control that has its
+    /// own treatment freezes it at this year's version of that treatment.
     private var projectMenu: some View {
         Menu {
             Toggle("All projects", isOn: allProjects)
@@ -195,56 +206,5 @@ struct HomeBar: View {
                 }
             }
         )
-    }
-
-    // MARK: - Archived
-
-    /// A hide, not a show, and that is the whole of what changed here.
-    ///
-    /// This was "Archived" / "Showing archived", off by default, and the list it governed left
-    /// every archived workspace out until somebody found the button. Home is the only screen in
-    /// the app that lists an archived workspace at all, so that default made the one place they
-    /// exist the one place they could not be seen. Home now opens on everything, and a switch
-    /// whose only power is to add rows nobody hid has no job left: what is worth keeping is the
-    /// other direction, for the machine where a year of finished work buries the four things
-    /// still being worked in.
-    ///
-    /// The two labels are deliberately different kinds of phrase. At rest it offers the action,
-    /// because showing everything is simply what Home does and there is no state there worth
-    /// announcing. Turned on it reports the state, because rows are missing and something on this
-    /// strip has to say so.
-    ///
-    /// The label carries that on its own because nothing else here can. Measured off a window
-    /// capture, a small button-style toggle's filled plate is a step of grey away from its resting
-    /// one and the filled `archivebox` differs from the outlined one by a few pixels of tray: with
-    /// one fixed label, a filter that is hiding a third of the machine's work looks exactly like
-    /// one that is not. This control used to change its words too, and that was the signal doing
-    /// the work rather than the fill. The readout at the end of the strip still counts what is
-    /// being held back, but it is at the other end of the strip, and a filter you cannot see is
-    /// how somebody comes to report that their workspaces have disappeared.
-    private var archivedToggle: some View {
-        Toggle(isOn: $filter.hidesArchived) {
-            Label(
-                filter.hidesArchived ? "Archived hidden" : "Hide archived",
-                systemImage: filter.hidesArchived ? "archivebox.fill" : "archivebox"
-            )
-            .lineLimit(1)
-        }
-        .toggleStyle(.button)
-        .controlSize(.small)
-        .fixedSize()
-        .disabled(archivedCount == 0)
-        .help(
-            archivedCount == 0
-                ? "Nothing has been archived yet"
-                : "Leave the \(ArchiveDeletion.count(archivedCount, "archived workspace")) out of the list"
-        )
-    }
-
-    // MARK: - Actions
-
-    private func clear() {
-        filter.query = ""
-        fieldFocused = true
     }
 }

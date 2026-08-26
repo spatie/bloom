@@ -35,10 +35,10 @@ struct SidebarSelectionGallery: View {
                 .foregroundStyle(Palette.textSecondary)
 
             List(selection: $selection) {
+                // One row, as the pane has. Search and Archive stood here and were the same list
+                // of workspaces Home draws; see `SidebarSelection`.
                 Section {
                     row("Home", "house", "home")
-                    row("Search", "magnifyingglass", "search")
-                    row("Archive", "archivebox", "archive")
                 }
 
                 Section("Projects") {

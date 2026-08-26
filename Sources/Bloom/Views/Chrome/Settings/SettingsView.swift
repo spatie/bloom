@@ -70,7 +70,8 @@ struct SettingsView: View {
 
             // Grouped only to get under `TabView`'s builder limit, which is ten children and was
             // exactly reached before the Terminal pane arrived. `Group` conforms to `TabContent`,
-            // so this changes the tab bar not at all.
+            // so this changes the tab bar not at all, and it is where a new pane goes now that
+            // the limit is spent.
             Group {
                 Tab("Tools", systemImage: "wrench.and.screwdriver", value: SettingsTab.tools) {
                     ToolSettingsView()
@@ -81,6 +82,15 @@ struct SettingsView: View {
                 // reaches in the other way round.
                 Tab("Terminal", systemImage: "terminal", value: SettingsTab.terminal) {
                     TerminalSettingsView()
+                }
+
+                // Last of the panes that are about the machine rather than about the agents,
+                // which is where a Mac puts this one: System Settings > General > Storage sits
+                // at the foot of General, and Xcode's Components is the last of its tools. It is
+                // also the only pane in this window that can destroy something, so it is nowhere
+                // near the panes somebody opens to change a preference.
+                Tab("Storage", systemImage: "internaldrive", value: SettingsTab.storage) {
+                    StorageSettingsView()
                 }
             }
 

@@ -223,25 +223,25 @@ struct BloomCommands: Commands {
                     .keyboardShortcut("g", modifiers: [.command, .shift])
             }
 
-            // "Search", not "Find Workspace". This opens the sidebar's own Search, which reads
-            // the full text of every transcript as well as workspace names, so the old title
-            // named the smaller half of what it does and nobody would have guessed the rest was
-            // there. The sidebar item it selects is called Search, and one thing wants one name.
+            // "Search", not "Find Workspace". It searches names, branches, projects and the full
+            // text of every transcript on the machine, so the old title named the smaller half of
+            // what it does and nobody would have guessed the rest was there. The field it puts the
+            // keyboard in says "Search", and one thing wants one name.
             //
-            // No ellipsis: it puts a screen up in the window rather than raising anything to fill
-            // in, which is what the ellipsis promises.
+            // No ellipsis: it puts the caret in a field that is already on screen rather than
+            // raising anything to fill in, which is what the ellipsis promises.
             //
             // Shift+Cmd+F rather than Cmd+F. Cmd+F is the most reflexive keystroke on the platform
-            // and it belongs to the pane in front; this is the one that always means the screen,
+            // and it belongs to the pane in front; this is the one that always means the field,
             // which is what somebody in a terminal needs it to mean. Cmd+F still lands here
-            // whenever nothing in front can find, so the key that used to open this still does.
+            // whenever nothing in front can find, so the key that used to open the Search screen
+            // still reaches the search.
             Button("Search") {
-                model.selection = .search
+                NotificationCenter.default.post(name: .bloomFocusSearch, object: nil)
             }
             .keyboardShortcut("f", modifiers: [.command, .shift])
-            // Keyed on projects rather than on live workspaces, because search now also finds
-            // archived ones and a machine whose every workspace is archived still has something
-            // to find. See `AppModel.search`.
+            // Keyed on projects rather than on live workspaces, because search also finds archived
+            // ones and a machine whose every workspace is archived still has something to find.
             .disabled(model.repos.isEmpty)
         }
 
@@ -727,7 +727,7 @@ struct BloomCommands: Commands {
         case .findInPlace:
             FindInPlace.perform(.showFindInterface)
         case .workspaceSearch:
-            model.selection = .search
+            NotificationCenter.default.post(name: .bloomFocusSearch, object: nil)
         case nil:
             break
         }

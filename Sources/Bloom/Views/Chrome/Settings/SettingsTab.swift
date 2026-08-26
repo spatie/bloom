@@ -14,5 +14,8 @@ enum SettingsTab: String, Hashable {
     case tools
     /// Coupling a client the owner runs themselves. See `TerminalSettingsView`.
     case terminal
+    /// What the archived work costs and how to get the space back. It was a sidebar screen. See
+    /// `StorageSettingsView`.
+    case storage
     case about
 }

@@ -32,13 +32,13 @@ struct SidebarSelectionTests {
         #expect(SidebarSelection.workspace(workspace).archivedWorkspaceID == nil)
     }
 
-    @Test("the screens carry no workspace at all")
-    func screensCarryNothing() {
-        for selection: SidebarSelection in [.home, .search, .archive] {
-            #expect(selection.workspaceID == nil)
-            #expect(selection.archivedWorkspaceID == nil)
-            #expect(selection.subagentID == nil)
-        }
+    /// One case, where there were three. Search and Archive were destinations of their own and
+    /// both drew the same list of workspaces Home already draws.
+    @Test("Home carries no workspace at all")
+    func homeCarriesNothing() {
+        #expect(SidebarSelection.home.workspaceID == nil)
+        #expect(SidebarSelection.home.archivedWorkspaceID == nil)
+        #expect(SidebarSelection.home.subagentID == nil)
     }
 
     /// The one that stops an archived workspace being reopened as a live one. Same id, two cases,

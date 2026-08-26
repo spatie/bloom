@@ -3,8 +3,9 @@ import Testing
 
 /// The menu bar going dead against a row that is visibly highlighted.
 ///
-/// Home's selection is `.home` and the Archive's is `.archive`, so every item in the Workspace menu
-/// greyed out on both screens while the user was pointing at the workspace it names.
+/// Home's selection is `.home`, which names no workspace, so every item in the Workspace menu
+/// greyed out on the screen that lists every workspace on the Mac while the user was pointing at
+/// the one it names.
 @Suite("What the Workspace menu acts on")
 struct WorkspaceMenuSubjectTests {
     private let live = WorkspaceID("workspace-1")
@@ -22,17 +23,15 @@ struct WorkspaceMenuSubjectTests {
         )
     }
 
-    /// The whole point: on Home and in the Archive the highlighted row is what the menu means.
-    @Test("a highlighted row answers on the screens that have no workspace selected")
+    /// The whole point: on Home the highlighted row is what the menu means.
+    @Test("a highlighted row answers on the screen that has no workspace selected")
     func focusedRowAnswers() {
-        for selection in [SidebarSelection.home, .search, .archive] {
-            #expect(
-                WorkspaceMenuSubject.resolve(
-                    selection: selection,
-                    focusedRow: .init(id: live, isArchived: false)
-                ) == .live(live)
-            )
-        }
+        #expect(
+            WorkspaceMenuSubject.resolve(
+                selection: .home,
+                focusedRow: .init(id: live, isArchived: false)
+            ) == .live(live)
+        )
     }
 
     @Test("an archived row is not offered as a live one")

@@ -66,16 +66,17 @@ struct HomeView: View {
         @Bindable var app = app
 
         return VStack(spacing: 0) {
-            // Only once there is something for the controls to act on. A search field, a project
-            // filter and an archived switch over an empty machine are three controls that cannot
-            // change what is on screen, sitting directly above a panel explaining that there is
-            // nothing on screen. With them gone the pane is entirely empty, which is the one
-            // arrangement macOS does centre a message in.
+            // Only once there is something for the controls to act on. A row of chips and a
+            // project menu over an empty machine are controls that cannot change what is on
+            // screen, sitting directly above a panel explaining that there is nothing on screen.
+            // With them gone the pane is entirely empty, which is the one arrangement macOS does
+            // centre a message in.
             if hasAnyWorkspace {
                 HomeBar(
                     summary: summary,
                     repos: app.repos,
-                    archivedCount: archived.count,
+                    counts: listing.counts,
+                    isSearching: listing.isSearching,
                     filter: $app.homeFilter
                 )
             }
@@ -107,10 +108,27 @@ struct HomeView: View {
         .onChange(of: app.workspaces, initial: true) { _, _ in rebuild() }
         .onChange(of: app.repos) { _, _ in rebuild() }
         .onChange(of: archived) { _, _ in rebuild() }
-        // Rescoped, so a filter widening is not the whole list fading in at once. Home's search,
-        // its project menu and Hide archived are one control's worth of the same decision, and
-        // they answer the same way the sidebar's filter does. See `RowArrival`.
-        .onChange(of: app.homeFilter) { _, _ in rebuild(rescoped: true) }
+        // The two halves of the running state, watched separately because they move separately:
+        // a turn starting and a turn stopping to ask are different moments, and both change what
+        // the "Needs you" and "Running" chips count.
+        .onChange(of: app.runningWorkspaceIDs) { _, _ in rebuild() }
+        .onChange(of: app.waitingWorkspaceIDs) { _, _ in rebuild() }
+        // Rescoped, so a filter widening is not the whole list fading in at once. The search, the
+        // chips and the project menu are one control's worth of the same decision, and they answer
+        // the same way the sidebar's filter does. See `RowArrival`.
+        .onChange(of: app.homeFilter) { old, new in
+            rebuild(rescoped: true)
+            // Only when the QUERY moved. Clicking a chip or a project rebuilds the list out of
+            // results already in memory, and re-running an FTS5 match and a join for it would put
+            // a database query behind a filter that changes nothing about what matched.
+            //
+            // The index is asked from here rather than from wherever the field lives, because
+            // this is what knows the answer is on screen. It debounces, and it clears itself when
+            // there is nothing to ask. See `AppModel+TranscriptSearch`.
+            if old.query != new.query { app.searchTranscripts(new.query) }
+        }
+        .onChange(of: app.transcriptResults) { _, _ in rebuild(rescoped: true) }
+        .onAppear { app.searchTranscripts(app.homeFilter.query) }
     }
 
     // MARK: - Body
@@ -180,6 +198,8 @@ struct HomeView: View {
                         .padding(.leading, Self.rowInsets.leading)
                 }
             }
+
+            transcriptResults
         }
         .listStyle(.inset)
         .settlesArrivals($arrival)
@@ -199,11 +219,64 @@ struct HomeView: View {
         }
         // Delete on the highlighted row, which is what Mail does with the same key and what this
         // list answered with nothing at all. Live rows only: an archived row's worktree has
-        // already gone, and destroying its record is the Archive screen's own gesture, behind a
+        // already gone, and destroying its record is Settings > Storage's own gesture, behind a
         // confirmation, because there is no undo for that one.
         .onDeleteCommand {
             guard let selected, let row = row(for: selected), !row.isArchived else { return }
             Task { await app.archive(row.workspace) }
+        }
+    }
+
+    /// The second kind of result: workspaces whose transcript matched, with the best few lines
+    /// under each.
+    ///
+    /// **This is what merging the Search screen into Home actually added.** Home's field never
+    /// touched the full text index; that half only ever existed on the screen that has now gone,
+    /// so it is carried across rather than deleted with the screen around it.
+    ///
+    /// In the same `List` as the workspace rows rather than beside it, which is the whole reason
+    /// searching does not change the shape of this pane. The rows above keep AppKit's arrow keys
+    /// and Return, and there is no second keyboard model to write: the Search screen forwarded
+    /// both by hand out of an `NSTextField`, and that goes with it.
+    ///
+    /// Selection is refused on these, deliberately. A transcript result is a workspace with
+    /// several lines nested inside it, so Return would have two meanings and neither is answered
+    /// by walking a flat list. They are reached with the pointer, exactly as they were before.
+    @ViewBuilder
+    private var transcriptResults: some View {
+        if !listing.transcripts.isEmpty {
+            Section {
+                ForEach(listing.transcripts) { result in
+                    TranscriptResultRow(
+                        result: result,
+                        workspace: workspace(result.workspaceID),
+                        repo: workspace(result.workspaceID).flatMap { app.repo(for: $0) },
+                        isArchived: archived.contains { $0.id == result.workspaceID },
+                        openWorkspace: { openTranscript(result) },
+                        openMatch: { match in Task { await app.open(match) } }
+                    )
+                    .listRowInsets(Self.rowInsets)
+                    .listRowBackground(Color.clear)
+                    .selectionDisabled()
+                }
+            } header: {
+                Text(HomeList.transcriptHeading(listing.transcripts))
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .padding(.leading, Self.rowInsets.leading)
+            }
+        }
+
+        if listing.isSearching, app.isTranscriptIndexIncomplete {
+            // Said out loud rather than hidden, because a search of a half built index is a search
+            // that can be wrong, and a wrong "nothing matched" about work the user knows they did
+            // is the one answer this pane must never give silently.
+            Label("Still indexing older transcripts", systemImage: "clock")
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textTertiary)
+                .listRowInsets(Self.rowInsets)
+                .listRowBackground(Color.clear)
+                .selectionDisabled()
         }
     }
 
@@ -214,15 +287,10 @@ struct HomeView: View {
     // MARK: - Summary
 
     /// What the readout at the end of the strip says. `HomeList.summary` in the core, where its
-    /// five branches can be asked about: this was four pieces of view state picking between
-    /// sentences, and one of those sentences had already been wrong once.
+    /// branches can be asked about: this was four pieces of view state picking between sentences,
+    /// and one of those sentences had already been wrong once.
     private var summary: String {
-        HomeList.summary(
-            listing: listing,
-            isNarrowed: filter.isNarrowed,
-            projects: app.repos.count,
-            running: app.runningCount
-        )
+        HomeList.summary(listing: listing, filter: filter, projects: app.repos.count)
     }
 
     private var hasAnyWorkspace: Bool {
@@ -231,18 +299,19 @@ struct HomeView: View {
 
     // MARK: - Empty
 
-    /// Five states, drawn. Which one a machine is in, and every word of it, is `HomeEmptyState`
-    /// in the core: the order of those tests is load bearing and was a five-branch `if` chain in
-    /// here, tangled up with the views it produced, where nothing could ask it anything.
+    /// The empty states, drawn. Which one a machine is in, and every word of it, is
+    /// `HomeEmptyState` in the core: the order of those tests is load bearing and was a
+    /// five-branch `if` chain in here, tangled up with the views it produced, where nothing could
+    /// ask it anything.
     ///
     /// **Why these are still centred, when the rest of Home moved to the leading edge.** macOS
     /// centres a message in a pane that is empty, and only in a pane that is empty: an empty Finder
     /// window, an unselected Mail message, a closed Xcode editor. What it never does is float a
     /// centred block of marketing in the middle of a pane whose chrome is left aligned above it,
     /// which is what this screen was doing, and the fix for that was the chrome rather than the
-    /// centring. Two of these five appear with no strip above them at all, so the pane really is
-    /// empty; the other three appear under a strip of controls that is the reason the list is
-    /// empty, which is the same arrangement as a Mail search that matches nothing.
+    /// centring. Two of these appear with no strip above them at all, so the pane really is empty;
+    /// the rest appear under a strip of controls that is the reason the list is empty, which is
+    /// the same arrangement as a Mail search that matches nothing.
     ///
     /// The prose is one sentence each. It was two, and the second one was always a description of
     /// the product rather than of the state, which is what an empty pane on a Mac does not do.
@@ -255,9 +324,9 @@ struct HomeView: View {
             hasAnyWorkspace: hasAnyWorkspace,
             isListEmpty: listing.isEmpty,
             query: filter.query,
+            scope: filter.scope,
             hasProjectFilter: !filter.projects.isEmpty,
-            projectPhrase: projectPhrase,
-            archivedCount: archived.count
+            projectPhrase: projectPhrase
         ) {
             ContentUnavailableView {
                 Label(state.title, systemImage: state.symbol)
@@ -269,11 +338,11 @@ struct HomeView: View {
         }
     }
 
-    /// The way out of each state, which is the reason there are five states rather than one.
+    /// The way out of each state, which is the reason there are several states rather than one.
     ///
     /// The two that are prominent are the two that add something. Clearing a search, widening a
-    /// filter and unhiding archived are all undoing a control that is still on screen directly
-    /// above, so a filled button for them would be shouting about a switch the reader can see.
+    /// filter and going back to All are all undoing a control that is still on screen directly
+    /// above, so a filled button for them would be shouting about a chip the reader can see.
     @ViewBuilder
     private func action(for state: HomeEmptyState) -> some View {
         switch state {
@@ -292,8 +361,8 @@ struct HomeView: View {
             Button(state.actionTitle) { app.homeFilter.query = "" }
         case .noneInChosenProjects:
             Button(state.actionTitle) { app.homeFilter.projects = [] }
-        case .allArchived:
-            Button(state.actionTitle) { app.homeFilter.hidesArchived = false }
+        case .emptyScope:
+            Button(state.actionTitle) { app.homeFilter.scope = .all }
         }
     }
 
@@ -317,7 +386,11 @@ struct HomeView: View {
             repos: app.repos,
             workspaces: app.workspaces,
             archived: archived,
+            transcripts: app.transcriptResults,
             filter: filter,
+            activity: HomeActivity(
+                running: app.runningWorkspaceIDs, waiting: app.waitingWorkspaceIDs
+            ),
             now: stamp
         )
         // Every row in the list, flattened out of its date heading. Which heading a row is filed
@@ -377,6 +450,23 @@ struct HomeView: View {
             app.openArchived(row.workspace)
         } else {
             app.selection = .workspace(row.id)
+        }
+    }
+
+    /// The workspace a transcript result names, live or archived. `AppModel` holds only the live
+    /// ones, and this pane is the one place that has both lists to hand.
+    private func workspace(_ id: WorkspaceID) -> Workspace? {
+        app.workspaces.first { $0.id == id } ?? archived.first { $0.id == id }
+    }
+
+    /// The whole workspace, from the header of a transcript result. Same split as a name hit: a
+    /// live one opens the centre column, an archived one opens the reader.
+    private func openTranscript(_ result: TranscriptWorkspaceMatches) {
+        guard let workspace = workspace(result.workspaceID) else { return }
+        if workspace.state == .active {
+            app.selection = .workspace(workspace.id)
+        } else {
+            app.openArchived(workspace)
         }
     }
 

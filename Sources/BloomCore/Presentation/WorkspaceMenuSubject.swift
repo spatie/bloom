@@ -5,19 +5,18 @@ import Foundation
 ///
 /// **The bug this is written from.** Every item in that menu was gated on
 /// `AppModel.selectedWorkspace`, which is derived from `SidebarSelection.workspaceID`. On Home the
-/// selection is `.home` and in the Archive it is `.archive`, so a row highlighted in either of
-/// those lists left Archive, Open in Editor, Reveal in Finder and Copy Branch Name all greyed out
-/// while the user was looking straight at the thing they name. Mail and Finder key their menus to
-/// whichever list holds the keyboard: select a message in the search results and Delete, Move To
-/// and Get Info all act on it.
+/// selection is `.home`, so a row highlighted in that list left Archive, Open in Editor, Reveal in
+/// Finder and Copy Branch Name all greyed out while the user was looking straight at the thing
+/// they name. Mail and Finder key their menus to whichever list holds the keyboard: select a
+/// message in the search results and Delete, Move To and Get Info all act on it.
 ///
 /// **The rule, and why the selection is asked first.** A sidebar selection that names a workspace
 /// wins, because when the window is on a workspace the window is about that workspace. Only when
-/// it names something that is not a workspace (Home, Search, the Archive) does the highlighted row
-/// in the list on screen answer. In practice the two never both apply, because Home and the
-/// Archive fill the centre column and so cannot be on screen while a workspace is selected. The
-/// order is what makes that a guarantee rather than a coincidence: a focused value that lingered a
-/// frame too long after a screen was left can never redirect the menu at a row nobody can see.
+/// it names something that is not a workspace (Home) does the highlighted row in the list on
+/// screen answer. In practice the two never both apply, because Home fills the centre column and
+/// so cannot be on screen while a workspace is selected. The order is what makes that a guarantee
+/// rather than a coincidence: a focused value that lingered a frame too long after a screen was
+/// left can never redirect the menu at a row nobody can see.
 public enum WorkspaceMenuSubject: Hashable, Sendable {
     /// A live workspace, with a worktree on disk.
     case live(WorkspaceID)

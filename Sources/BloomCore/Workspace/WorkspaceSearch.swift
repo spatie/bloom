@@ -8,8 +8,11 @@ import Foundation
 /// them, silently dropping the project name, so asking Siri for a workspace by its project found
 /// nothing while typing the same words into the search field found it.
 ///
-/// Returning the text that matched rather than a Bool is what lets the Search screen say why a
-/// row is in the list without matching a second time and possibly disagreeing with itself.
+/// There are two callers now rather than three: the Search screen is a state of Home, so
+/// `HomeList.build` is the only list that asks this, and the Shortcuts query is the other.
+///
+/// Returning the text that matched rather than a Bool is what lets a caller say why a row is in
+/// the list without matching a second time and possibly disagreeing with itself.
 public enum WorkspaceSearch {
     /// Lowercases and trims, so a caller passes what the user typed and nothing else.
     public static func needle(_ query: String) -> String {

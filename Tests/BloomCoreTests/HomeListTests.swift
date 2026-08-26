@@ -354,7 +354,7 @@ struct HomeListTests {
         #expect(listing.groups.first?.rows.count == 2)
     }
 
-    @Test("archived workspaces are listed by default and counted while they are hidden")
+    @Test("archived workspaces are listed by default and the Live scope is what leaves them out")
     func archivedIsListedByDefaultAndCountedWhileHidden() {
         let now = date(2025, 8, 19, 12, 0, 0)
         let archived = [
@@ -384,17 +384,20 @@ struct HomeListTests {
             repos: [repo("repo")],
             workspaces: [workspace("live", at: now)],
             archived: archived,
-            filter: HomeFilter(hidesArchived: true),
+            filter: HomeFilter(scope: .live),
             now: now,
             calendar: Self.calendar
         )
 
         #expect(hidden.shown == 1)
-        #expect(hidden.considered == 1)
-        // Still counted while hidden, which is what lets the readout say how many rows are being
-        // held back rather than reporting a total that quietly disagrees with the database.
+        // Every workspace on the machine is considered now, whichever chip is lit: the chips have
+        // to count what clicking them would show, so the pass cannot stop at the selected one.
+        #expect(hidden.considered == 3)
         #expect(hidden.archived == 2)
         #expect(hidden.shownArchived == 0)
+        // And the Archived chip still says two while the Live chip is the one lit.
+        #expect(hidden.counts.archived == 2)
+        #expect(hidden.counts.live == 1)
     }
 
     @Test("an archived row sorts by recency like any other, not to the bottom")
@@ -499,9 +502,265 @@ struct HomeListTests {
         #expect(!HomeFilter(query: "   ").isNarrowed)
         #expect(HomeFilter(query: "sidebar").isNarrowed)
         #expect(HomeFilter(projects: [RepoID("a")]).isNarrowed)
-        // Hiding archived narrows the list, and is still deliberately not a narrowing by this
-        // measure: `isNarrowed` drives a "showing 11 of 312" readout, and a hidden archived
-        // workspace is never one of the 312. It is reported by its own clause instead.
-        #expect(!HomeFilter(hidesArchived: true).isNarrowed)
+        // A scope narrows the list and is still deliberately not a narrowing by this measure:
+        // `isNarrowed` drives a "showing 11 of 312" readout, and the chip that did it is carrying
+        // its own count an inch to the left of that sentence.
+        #expect(!HomeFilter(scope: .live).isNarrowed)
+        #expect(!HomeFilter(scope: .needsYou).isNarrowed)
+    }
+
+    // MARK: - Searching
+
+    private func transcriptResult(_ workspace: String, matches: Int) -> TranscriptWorkspaceMatches {
+        TranscriptWorkspaceMatches(
+            workspaceID: WorkspaceID(workspace),
+            matches: (0..<min(matches, 3)).map { seq in
+                TranscriptMatch(
+                    messageID: Int64(seq),
+                    workspaceID: WorkspaceID(workspace),
+                    sessionID: SessionID("s-\(workspace)"),
+                    sessionTitle: "Session",
+                    seq: seq,
+                    kind: .assistantText,
+                    createdAt: Date(timeIntervalSince1970: 0),
+                    snippet: TranscriptSnippet(segments: []),
+                    score: -1
+                )
+            },
+            total: matches
+        )
+    }
+
+    /// A row can be a perfect answer with nothing on it that looks like what was typed: the search
+    /// reaches the branch and the project as well as the name, and a list of workspaces with no
+    /// visible connection to the query is what searching a branch name used to produce.
+    @Test("a row says which field answered, unless it was the name")
+    func aRowCarriesWhatMatched() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        func rows(_ query: String) -> [HomeRow] {
+            HomeList.build(
+                repos: [repo("a", name: "Bloom")],
+                workspaces: [
+                    workspace("Sidebar rewrite", repoID: RepoID("a"), branch: "agent/glass", at: now),
+                ],
+                archived: [],
+                filter: HomeFilter(query: query),
+                now: now,
+                calendar: Self.calendar
+            ).groups.flatMap(\.rows)
+        }
+
+        #expect(rows("glass").first?.match == "agent/glass")
+        #expect(rows("bloom").first?.match == "Bloom")
+        // The name is already on the row, so repeating it beside itself would be noise.
+        #expect(rows("sidebar").first?.match == nil)
+        // And nothing carries a match outside a search.
+        #expect(rows("").first?.match == nil)
+    }
+
+    /// Searching, the date buckets go. A result list under headings that say "3 weeks ago" answers
+    /// a question nobody asked: what was typed is the question, and the heading over the answer
+    /// says which KIND of thing matched.
+    ///
+    /// It is still ONE group in one list, which is what keeps the arrow keys and Return working
+    /// with one keyboard model rather than two.
+    @Test("a search gathers the rows under one heading instead of date buckets")
+    func aSearchIsOneGroup() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        let listing = HomeList.build(
+            repos: [repo("repo", name: "Bloom")],
+            workspaces: [
+                workspace("sidebar today", at: now),
+                workspace("sidebar last month", at: date(2025, 6, 1, 9, 0, 0)),
+            ],
+            archived: [],
+            filter: HomeFilter(query: "sidebar"),
+            now: now,
+            calendar: Self.calendar
+        )
+
+        #expect(listing.isSearching)
+        #expect(listing.groups.count == 1)
+        #expect(listing.groups.first?.title == "Workspaces")
+        // Still newest first inside it.
+        #expect(listing.groups.first?.rows.map(\.id.rawValue) == ["sidebar today", "sidebar last month"])
+    }
+
+    /// **The half that only ever existed on the screen that has gone.** Home's field never touched
+    /// the full text index, so merging the two is not deleting a screen, it is Home gaining a
+    /// second kind of result.
+    @Test("the transcript results are a second kind of result, counted separately")
+    func transcriptsAreASecondKindOfResult() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        let listing = HomeList.build(
+            repos: [repo("repo", name: "Bloom")],
+            workspaces: [workspace("sidebar rewrite", at: now), workspace("quiet", at: now)],
+            archived: [],
+            transcripts: [
+                transcriptResult("quiet", matches: 6),
+                transcriptResult("sidebar rewrite", matches: 4),
+            ],
+            filter: HomeFilter(query: "sidebar"),
+            now: now,
+            calendar: Self.calendar
+        )
+
+        #expect(listing.counts.workspaces == 1)
+        #expect(listing.counts.transcripts == 10)
+        #expect(listing.counts.transcriptWorkspaces == 2)
+        #expect(listing.counts.count(of: .all, searching: true) == 11)
+        #expect(listing.transcripts.count == 2)
+        // A workspace that matched by name AND in its transcript is in both halves, on purpose:
+        // they are two different answers to the query and either may be the one wanted.
+        #expect(listing.groups.flatMap(\.rows).map(\.id.rawValue) == ["sidebar rewrite"])
+    }
+
+    /// The store answers about every workspace on the machine, so the project menu has to reach
+    /// the transcript half too. Without this, a list narrowed to one project still showed what the
+    /// agents said in the others.
+    @Test("the project filter reaches the transcript results")
+    func theProjectFilterReachesTranscripts() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        let listing = HomeList.build(
+            repos: [repo("a", name: "Bloom"), repo("b", name: "Baton")],
+            workspaces: [
+                workspace("one", repoID: RepoID("a"), at: now),
+                workspace("two", repoID: RepoID("b"), at: now),
+            ],
+            archived: [],
+            transcripts: [transcriptResult("one", matches: 3), transcriptResult("two", matches: 9)],
+            filter: HomeFilter(query: "sidebar", projects: [RepoID("a")]),
+            now: now,
+            calendar: Self.calendar
+        )
+
+        #expect(listing.transcripts.map(\.workspaceID.rawValue) == ["one"])
+        #expect(listing.counts.transcripts == 3)
+    }
+
+    /// A result whose workspace is in neither list has been deleted since the index was written,
+    /// and there is nothing left to open.
+    @Test("a transcript result for a workspace that is gone is dropped")
+    func aStrandedTranscriptResultIsDropped() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        let listing = HomeList.build(
+            repos: [repo("repo")],
+            workspaces: [workspace("here", at: now)],
+            archived: [],
+            transcripts: [transcriptResult("deleted", matches: 4)],
+            filter: HomeFilter(query: "sidebar"),
+            now: now,
+            calendar: Self.calendar
+        )
+
+        #expect(listing.transcripts.isEmpty)
+        #expect(listing.counts.transcripts == 0)
+    }
+
+    /// The chips split the answer by kind, which is Finder's scope bar over a folder of results.
+    @Test("the Workspaces and Transcripts chips each show one half")
+    func theSearchChipsSplitTheAnswer() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        func listing(_ scope: HomeScope) -> HomeListing {
+            HomeList.build(
+                repos: [repo("repo", name: "Bloom")],
+                workspaces: [workspace("sidebar rewrite", at: now)],
+                archived: [],
+                transcripts: [transcriptResult("sidebar rewrite", matches: 4)],
+                filter: HomeFilter(query: "sidebar", scope: scope),
+                now: now,
+                calendar: Self.calendar
+            )
+        }
+
+        #expect(listing(.all).groups.count == 1)
+        #expect(listing(.all).transcripts.count == 1)
+        #expect(listing(.workspaces).groups.count == 1)
+        #expect(listing(.workspaces).transcripts.isEmpty)
+        #expect(listing(.transcripts).groups.isEmpty)
+        #expect(listing(.transcripts).transcripts.count == 1)
+    }
+
+    /// The Archived chip means finished WORK, not finished workspaces, so it holds the transcripts
+    /// of archived workspaces as well as their rows, and nothing a live agent said.
+    @Test("the Archived chip narrows both halves of a search")
+    func archivedNarrowsBothHalves() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        let listing = HomeList.build(
+            repos: [repo("repo", name: "Bloom")],
+            workspaces: [workspace("sidebar live", at: now)],
+            archived: [workspace("sidebar gone", at: now, state: .archived)],
+            transcripts: [
+                transcriptResult("sidebar live", matches: 5),
+                transcriptResult("sidebar gone", matches: 2),
+            ],
+            filter: HomeFilter(query: "sidebar", scope: .archived),
+            now: now,
+            calendar: Self.calendar
+        )
+
+        #expect(listing.groups.flatMap(\.rows).map(\.id.rawValue) == ["sidebar gone"])
+        #expect(listing.transcripts.map(\.workspaceID.rawValue) == ["sidebar gone"])
+        // One archived row plus the two matches inside it, which is the same unit "Everything"
+        // counts in: one workspace hit plus one archived hit plus seven matches.
+        #expect(listing.counts.archived == 3)
+        #expect(listing.counts.count(of: .all, searching: true) == 9)
+    }
+
+    /// Outside a search the index is not asked, so anything left over from the last one must not
+    /// be drawn under a list of everything on the machine.
+    @Test("transcript results are dropped the moment the field is empty")
+    func transcriptsGoWhenTheFieldIsCleared() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        let listing = HomeList.build(
+            repos: [repo("repo")],
+            workspaces: [workspace("here", at: now)],
+            archived: [],
+            transcripts: [transcriptResult("here", matches: 4)],
+            filter: HomeFilter(),
+            now: now,
+            calendar: Self.calendar
+        )
+
+        #expect(!listing.isSearching)
+        #expect(listing.transcripts.isEmpty)
+    }
+
+    /// A search that found transcripts and no names is not an empty pane, and raising the empty
+    /// state over it would hide the answer.
+    @Test("a search with transcript hits and no name hits is not empty")
+    func transcriptsAloneAreNotEmpty() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        let listing = HomeList.build(
+            repos: [repo("repo")],
+            workspaces: [workspace("quiet", at: now)],
+            archived: [],
+            transcripts: [transcriptResult("quiet", matches: 4)],
+            filter: HomeFilter(query: "sidebar"),
+            now: now,
+            calendar: Self.calendar
+        )
+
+        #expect(listing.groups.isEmpty)
+        #expect(!listing.isEmpty)
+    }
+
+    /// Two counts because one of them alone misleads: "37 matches" over nine workspaces reads as a
+    /// very long list, and "9 workspaces" hides that most of them matched once.
+    @Test("the transcript heading counts matches and workspaces, and pluralises both")
+    func theTranscriptHeadingCountsBoth() {
+        #expect(
+            HomeList.transcriptHeading([transcriptResult("a", matches: 37)])
+                == "In transcripts \u{00B7} 37 matches in 1 workspace"
+        )
+        #expect(
+            HomeList.transcriptHeading([
+                transcriptResult("a", matches: 1), transcriptResult("b", matches: 2),
+            ]) == "In transcripts \u{00B7} 3 matches in 2 workspaces"
+        )
+        #expect(
+            HomeList.transcriptHeading([transcriptResult("a", matches: 1)])
+                == "In transcripts \u{00B7} 1 match in 1 workspace"
+        )
     }
 }

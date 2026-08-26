@@ -67,8 +67,12 @@ extension AppModel {
         }
         guard removed > 0 else { return .deleted(0) }
 
+        // Home, which is where every unresolvable selection in this app lands. It used to be the
+        // Archive screen, which was the list the delete was made from; the delete is made from
+        // Settings > Storage now, in another window, so the main window's selection has nowhere
+        // to go but back to the list of everything.
         if let open = selection.archivedWorkspaceID, ids.contains(open) {
-            selection = .archive
+            selection = .home
         }
         // Torn down rather than only dropped. Everything here was archived, and archiving stops
         // its agents, so in practice there is nothing left to stop; a model let go of while it

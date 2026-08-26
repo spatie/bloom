@@ -1,10 +1,11 @@
 import BloomCore
 
-/// Moving between workspaces without the pointer, and finding one by what was said in it.
+/// Moving between workspaces without the pointer.
 ///
-/// Two subjects in one file because they are the same subject from the reader's side: both are
-/// "get me to the workspace I mean", one by walking the list and one by naming it. Neither writes
-/// anything but `selection`.
+/// It held a second subject, `search`, which matched a workspace by name for the Search screen.
+/// That screen is gone and so is this copy of the rule: Home's list is built by `HomeList.build`,
+/// which asks `WorkspaceSearch` the same question in the core, over live and archived work in one
+/// pass, and there is one answer to it now rather than two lists that had to be kept in step.
 
 extension AppModel {
     func selectNextWorkspace(offset: Int) {
@@ -35,43 +36,4 @@ extension AppModel {
         await addRepository(at: path)
     }
 
-    // MARK: - Search
-
-    struct SearchHit: Identifiable {
-        var id: WorkspaceID { workspace.id }
-        var workspace: Workspace
-        var repo: Repo?
-        var reason: String
-        var isArchived = false
-    }
-
-    /// The rule lives in `WorkspaceSearch`, in the core, because Home's filter field and the
-    /// Shortcuts entity query ask the same question and used to answer it differently.
-    ///
-    /// Archived workspaces are searched too, and are passed in rather than read, because the
-    /// archived list is a database read and this is called from a view on every keystroke. They
-    /// come last: a live workspace is nearly always the one being looked for, and an archived hit
-    /// that pushed one down the list would be the search answering a question nobody asked.
-    ///
-    /// Leaving them out was its own bug. Somebody who archives something and then wants it back
-    /// types its name into search first, and search said "No Results" about a workspace whose
-    /// branch was sitting on disk.
-    func search(_ query: String, alsoSearching archived: [Workspace] = []) -> [SearchHit] {
-        let needle = WorkspaceSearch.needle(query)
-        guard !needle.isEmpty else { return [] }
-
-        func hits(in list: [Workspace], isArchived: Bool) -> [SearchHit] {
-            list.compactMap { workspace in
-                let repo = repo(for: workspace)
-                guard let reason = WorkspaceSearch.match(
-                    workspace: workspace, repo: repo, needle: needle
-                ) else { return nil }
-                return SearchHit(
-                    workspace: workspace, repo: repo, reason: reason, isArchived: isArchived
-                )
-            }
-        }
-
-        return hits(in: workspaces, isArchived: false) + hits(in: archived, isArchived: true)
-    }
 }

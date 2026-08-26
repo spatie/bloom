@@ -381,8 +381,12 @@ public struct ArchiveDeletion: Sendable, Hashable {
     /// Public because it was not, and three views wrote it again rather than reach for it. Two of
     /// the three dropped `.formatted()` while they were at it, so the same machine read "1000
     /// workspaces" on Home and "1,000 chats" here.
-    public static func count(_ value: Int, _ noun: String) -> String {
-        "\(value.formatted()) \(noun)\(value == 1 ? "" : "s")"
+    /// - Parameter plural: for the nouns an `s` does not pluralise. "match" is the one that
+    ///   forced it: Home's transcript heading counts matches, and "1 matchs" is the sort of thing
+    ///   a reader stops on.
+    public static func count(_ value: Int, _ noun: String, plural: String? = nil) -> String {
+        let word = value == 1 ? noun : (plural ?? noun + "s")
+        return "\(value.formatted()) \(word)"
     }
 
     /// One formatter for every size in this feature, so the list, the summary and the confirmation
