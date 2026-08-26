@@ -89,7 +89,9 @@ public struct RevealTool: BridgeToolHandling {
                     "type": .string("string"),
                     "enum": .array(RevealChoice.offered.map { .string($0.rawValue) }),
                     "description": .string(
-                        "Which of Home's chips to light: all, needsYou, running, live or archived."
+                        "Which of Home's chips to light: all, needsYou, running, live or "
+                            + "archived. Leaving it out shows everything, archived work included, "
+                            + "which is not what Home rests on when a person opens it themselves."
                     ),
                 ]),
                 "search": .object([

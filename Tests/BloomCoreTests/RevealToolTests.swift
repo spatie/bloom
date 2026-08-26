@@ -6,13 +6,29 @@ import Foundation
 struct RevealToolTests {
     // MARK: - Reading the arguments
 
-    @Test("no arguments is Home with nothing narrowed")
+    /// **Every expectation here names the scope**, and none of them writes a bare `HomeFilter()`.
+    /// These two tests did lean on that default, and passed until the Home merge changed it from
+    /// `.all` to `.live` underneath them: nothing overlapped textually, so the rebase was clean and
+    /// the compiler had nothing to say. A test that inherits a default is a test whose meaning
+    /// somebody else can change.
+    @Test("naming no scope shows everything, and the answer says so")
     func noArguments() throws {
         let order = try parse()
         #expect(order == RevealOrder())
+        #expect(order.scope == .all)
         let reveal = try resolve(order, workspaces: [], projects: [])
-        #expect(reveal.target == .home(HomeFilter()))
-        #expect(reveal.sentence == "Bloom is showing Home, with nothing narrowed.")
+        #expect(reveal.target == .home(HomeFilter(query: "", projects: [], scope: .all)))
+        #expect(reveal.sentence == "Bloom is on Home, showing All.")
+    }
+
+    /// The rule, pinned on its own so it cannot be changed by accident. Home rests on `.live`,
+    /// which hides archived work, and the headline use of this verb is showing somebody the
+    /// finished workspaces there is deliberately no tool to archive. A reveal that hid them would
+    /// lie about what it revealed.
+    @Test("a bare reveal is not what Home rests on")
+    func unnamedScopeIsNotHomeDefault() {
+        #expect(RevealChoice.scopeWhenUnnamed == .all)
+        #expect(RevealChoice.scopeWhenUnnamed != HomeFilter().scope)
     }
 
     @Test("blank strings are the same as nothing at all")
@@ -132,6 +148,8 @@ struct RevealToolTests {
         #expect(reveal.sentence.contains("bloom"))
         #expect(reveal.sentence.contains("Archived"))
         #expect(reveal.sentence.contains("parser"))
+        // The scope is in every sentence, including the one nobody chose. See `homeSentence`.
+        #expect(try resolve(try parse(), workspaces: [], projects: []).sentence.contains("All"))
     }
 
     @Test("a project is found by path as well as by name")
@@ -140,7 +158,10 @@ struct RevealToolTests {
         let reveal = try resolve(
             try parse(project: projects[1].path), workspaces: workspaces, projects: projects
         )
-        #expect(reveal.target == .home(HomeFilter(projects: [projects[1].id])))
+        #expect(reveal.target == .home(HomeFilter(
+            query: "", projects: [projects[1].id], scope: .all
+        )))
+        #expect(reveal.sentence.contains("mailcoach"))
     }
 
     @Test("a project nothing answers to is refused with the projects there are")
