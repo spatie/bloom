@@ -123,6 +123,12 @@ struct RootView: View {
                     prompt: Text("Search")
                 )
                 .searchFocused($isSearchFocused)
+                // Published to the model, because the pane that needs the answer cannot see a
+                // `@FocusState` declared up here and Home's list was taking the keyboard off this
+                // field mid word. See `HomeListKeyboard` for the sequence that did it.
+                .onChange(of: isSearchFocused) { _, focused in
+                    app.isSearchFieldFocused = focused
+                }
         }
         // As well as heading the toolbar (see BloomApp), the title names the window in the
         // Window menu and in Mission Control, so it is worth setting.

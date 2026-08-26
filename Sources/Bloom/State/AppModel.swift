@@ -188,6 +188,13 @@ final class AppModel {
     /// list, not a preference, and an app that starts up with a third of the machine's work
     /// missing because of something you did last Tuesday has to be worked out rather than read.
     var homeFilter = HomeFilter()
+    /// Whether the window's search field is first responder.
+    ///
+    /// Mirrored off `RootView`'s `@FocusState` because a `@FocusState` is private to the view that
+    /// declares it, and the pane that has to read this is Home's list, three view controllers down
+    /// inside the detail column. What it is read for is the one thing a list must never do, which
+    /// is take the keyboard off somebody who is mid word. See `HomeListKeyboard`.
+    var isSearchFieldFocused = false
     var isCreatingWorkspace = false
 
     /// The window's undo manager, handed over by the sidebar because only a view can see it.
