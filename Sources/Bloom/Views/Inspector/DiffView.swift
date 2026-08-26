@@ -448,7 +448,7 @@ struct DiffView: View {
             DiffHunkHeaderView(text: text, width: width)
 
         case let .runExpander(runID, hidden):
-            DiffExpanderView(title: "Expand \(hidden) lines", width: width) {
+            DiffExpanderView(title: "Expand \(Counted.of(hidden, "line"))", width: width) {
                 expandedRuns.insert(runID)
                 rebuild()
             }

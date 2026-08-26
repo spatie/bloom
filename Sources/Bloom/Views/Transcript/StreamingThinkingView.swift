@@ -1,4 +1,5 @@
 import SwiftUI
+import BloomCore
 
 /// Reasoning as it arrives.
 ///
@@ -62,7 +63,7 @@ struct StreamingThinkingView: View {
                 .transcriptLabelColumn("Thinking", font: Typo.label)
 
             if tokens > 0 {
-                Text("\(tokens) tokens")
+                Text(Counted.of(tokens, "token"))
                     .font(Typo.micro)
                     .foregroundStyle(Palette.textTertiary)
                     .monospacedDigit()
