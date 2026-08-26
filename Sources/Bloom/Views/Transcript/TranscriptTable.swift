@@ -29,8 +29,13 @@ struct TranscriptTableEntry: Identifiable {
     /// The height cache is keyed on this, so a row whose key has not moved is never remeasured and
     /// a cell holding it is never rebuilt.
     let contentKey: String
-    /// Whether the height has to be taken again every time it is asked for. True for the streaming
-    /// tail and the setup log, which grow without anything telling this view that they have.
+    /// Whether this entry re-renders itself from its own observation rather than from a pass over
+    /// the list: the streaming tail, the setup log, the delivery at the head of the queue.
+    ///
+    /// It no longer decides anything about the height, and that is the fix rather than a tidy-up.
+    /// A live entry used to be remeasured off screen on every call and handed a new root view on
+    /// every pass; now every entry's height comes from the cache and is corrected by what the cell
+    /// actually drew, which is a mechanism these three need and nothing else has to pay for.
     let isLive: Bool
     /// Built on demand: when the row is measured, and when it is drawn. Nothing is built for a row
     /// that is neither, which is what keeps the pass that assembles these cheap.
@@ -167,24 +172,18 @@ struct TranscriptTable: NSViewRepresentable {
         private var owedHeights = IndexSet()
         private var owedWork: Task<Void, Never>?
 
-        /// One hosting view, reused for every measurement.
+        /// The width a row is actually drawn at, which is the TABLE's width and not the clip
+        /// view's.
         ///
-        /// A fresh one per row is safer, because `NSHostingView` is free to cache its own fitting
-        /// size, and it is also the difference between a session opening and a session stalling: a
-        /// fresh hosting view builds a whole SwiftUI graph, and this measures every row of the
-        /// window before the first frame. Reused, with the size invalidated by hand. **If heights
-        /// come out wrong on this branch, this is the first thing to suspect.**
-        private lazy var measuringHost: NSHostingView<AnyView> = {
-            let host = NSHostingView(rootView: AnyView(EmptyView()))
-            host.translatesAutoresizingMaskIntoConstraints = false
-            return host
-        }()
-
-        private lazy var measuringWidth: NSLayoutConstraint = {
-            let constraint = measuringHost.widthAnchor.constraint(equalToConstant: 100)
-            constraint.isActive = true
-            return constraint
-        }()
+        /// **This was half of the wrong heights.** With legacy scrollers the clip view is fifteen
+        /// points wider than the document inside it, so every measurement was taken at a width no
+        /// row is ever laid out at: a paragraph measured at the wider figure wraps to fewer lines
+        /// than it draws at, and the row comes out short with its first line clipped off the top.
+        /// One column and no intercell spacing, so the table's width is the cell's width.
+        private var columnWidth: CGFloat {
+            if let tableView, tableView.bounds.width > 1 { return tableView.bounds.width }
+            return scrollView?.contentView.bounds.width ?? 0
+        }
 
         func attach(table: NSTableView, scroll: NSScrollView) {
             tableView = table
@@ -207,11 +206,19 @@ struct TranscriptTable: NSViewRepresentable {
 
         func apply(entries newEntries: [TranscriptTableEntry], scale newScale: CGFloat) {
             guard let tableView else { return }
-            let clipWidth = scrollView?.contentView.bounds.width ?? 0
-            if width == 0, clipWidth > 1 { width = clipWidth }
+            // The first width the table ever has. Until it arrives every measurement is one point
+            // tall, and a table told one point per row is a transcript that is not there. Anything
+            // cached against nought goes with it.
+            var widthArrived = false
+            if width == 0, columnWidth > 1 {
+                width = columnWidth
+                heights.removeAll()
+                widthArrived = true
+            }
             if newScale != scale {
                 scale = newScale
                 heights.removeAll()
+                widthArrived = true
             }
 
             let sameShape = newEntries.count == entries.count
@@ -232,9 +239,16 @@ struct TranscriptTable: NSViewRepresentable {
             for (offset, entry) in newEntries.enumerated() { index[entry.id] = offset }
 
             if sameShape {
-                guard !changed.isEmpty else { return }
-                tableView.noteHeightOfRows(withIndexesChanged: changed)
-                tableView.reloadData(forRowIndexes: changed, columnIndexes: IndexSet(integer: 0))
+                if widthArrived { noteHeights(IndexSet(entries.indices)) }
+                if !changed.isEmpty {
+                    noteHeights(changed)
+                    tableView.reloadData(
+                        forRowIndexes: changed, columnIndexes: IndexSet(integer: 0)
+                    )
+                } else if !widthArrived {
+                    // Nothing at all has moved. Not even a geometry report is owed.
+                    return
+                }
             } else {
                 tableView.reloadData()
             }
@@ -285,21 +299,46 @@ struct TranscriptTable: NSViewRepresentable {
             "\(entry.contentKey)#\(Int(width))#\(scale)"
         }
 
+        /// The cache, and a fresh measurement when it misses.
+        ///
+        /// Live entries read the cache like everything else now. They used to be measured on every
+        /// call, which is a whole hosting view per layout pass for the streaming tail; what keeps
+        /// them right instead is `noted` below, which is authoritative and which the tail triggers
+        /// itself as it grows.
         private func height(of entry: TranscriptTableEntry) -> CGFloat {
             let key = cacheKey(entry)
-            if !entry.isLive, let cached = heights[key] { return cached }
+            if let cached = heights[key] { return cached }
             let measured = measure(entry)
             heights[key] = measured
             return measured
         }
 
+        /// A fresh `NSHostingView` per measurement, at the exact width the cell is laid out at.
+        ///
+        /// **The other half of the wrong heights, and it is worth writing down what the shortcut
+        /// cost.** One hosting view reused for every row, with its size invalidated by hand, gave
+        /// a long conversation several hundred points of blank between rows: an `NSHostingView`
+        /// keeps its own fitting size, and `invalidateIntrinsicContentSize` followed by
+        /// `layoutSubtreeIfNeeded` does not reliably make it forget the row before. A fresh one
+        /// has no previous answer to hand back. It builds a whole SwiftUI graph per row, which is
+        /// the expensive thing this spike now knows it can afford: 2.1ms a layout pass against the
+        /// lazy stack's 11.9ms.
+        ///
+        /// The width is a required CONSTRAINT rather than a frame, because that is what makes
+        /// `fittingSize` solve the layout at that width instead of handing back the unwrapped
+        /// ideal width of a paragraph.
         private func measure(_ entry: TranscriptTableEntry) -> CGFloat {
             guard width > 1 else { return 1 }
-            measuringHost.rootView = AnyView(entry.content().environment(\.self, environment))
-            measuringWidth.constant = width
-            measuringHost.invalidateIntrinsicContentSize()
-            measuringHost.layoutSubtreeIfNeeded()
-            let height = measuringHost.fittingSize.height
+            let host = NSHostingView(rootView: AnyView(
+                HostedRow(content: entry.content(), report: { _ in }, fills: false)
+                    .environment(\.self, environment)
+            ))
+            host.translatesAutoresizingMaskIntoConstraints = false
+            let constraint = host.widthAnchor.constraint(equalToConstant: width)
+            constraint.isActive = true
+            host.layoutSubtreeIfNeeded()
+            let height = host.fittingSize.height
+            constraint.isActive = false
             // A row that measures as nothing is a measurement that failed rather than a row with
             // no height, and a transcript of zero height rows is unusable. One line is wrong by
             // less than that.
@@ -307,16 +346,23 @@ struct TranscriptTable: NSViewRepresentable {
             return height.rounded(.up)
         }
 
-        /// A drawn row turned out to be a different height from the one the table was told.
+        /// **What the row turned out to be when it was drawn, which outranks anything measured off
+        /// screen.**
         ///
-        /// This is what keeps the streaming tail growing. Nothing in the list body watches the
+        /// The number arriving here is the ideal height of the same content, laid out by the same
+        /// SwiftUI, at the width the cell was actually given. There is nothing better to know, so
+        /// the cache is overwritten rather than consulted: a measurement that disagrees with what
+        /// is on screen is a wrong measurement, whichever of the two was taken first.
+        ///
+        /// It is also what keeps the streaming tail growing. Nothing in the list body watches the
         /// per-token buffers, on purpose, so the only thing that knows the tail got taller is the
-        /// tail, and a hosting view sized by its own content is how it says so.
+        /// tail, and this is how it says so.
         private func noted(height: CGFloat, for entryID: String) {
             guard let row = index[entryID], entries.indices.contains(row) else { return }
             let key = cacheKey(entries[row])
-            guard height > 1, abs((heights[key] ?? 0) - height) > 1 else { return }
-            heights[key] = height
+            let rounded = height.rounded(.up)
+            guard rounded > 1, abs((heights[key] ?? 0) - rounded) > 0.5 else { return }
+            heights[key] = rounded
             owedHeights.insert(row)
             guard owedWork == nil else { return }
             owedWork = Task { @MainActor [weak self] in
@@ -326,10 +372,24 @@ struct TranscriptTable: NSViewRepresentable {
                 owedHeights = IndexSet()
                 guard !rows.isEmpty else { return }
                 let wasAtEnd = isAtEnd
-                tableView?.noteHeightOfRows(withIndexesChanged: rows)
+                noteHeights(rows)
                 if wasAtEnd { scrollToEnd() }
                 reportGeometry()
             }
+        }
+
+        /// Every height change in this file goes through here.
+        ///
+        /// **`noteHeightOfRows(withIndexesChanged:)` animates.** It is the AppKit half of "the
+        /// animations get in the way": a row correcting its height slides the whole document under
+        /// the reader over a quarter of a second, and a transcript correcting several does it
+        /// several times over. There is nothing to watch in a measurement being put right.
+        private func noteHeights(_ rows: IndexSet) {
+            guard let tableView, !rows.isEmpty else { return }
+            NSAnimationContext.beginGrouping()
+            NSAnimationContext.current.duration = 0
+            tableView.noteHeightOfRows(withIndexesChanged: rows)
+            NSAnimationContext.endGrouping()
         }
 
         // MARK: Scrolling
@@ -435,21 +495,20 @@ struct TranscriptTable: NSViewRepresentable {
         /// text rewraps, and the whole cache is rebuilt once when the hand comes off, anchored on
         /// the row at the top so the correction does not move the reader.
         @objc private func paneResized() {
-            let clipWidth = scrollView?.contentView.bounds.width ?? 0
-            guard clipWidth > 1, abs(clipWidth - width) > 0.5 else {
+            guard columnWidth > 1, abs(columnWidth - width) > 0.5 else {
                 reportGeometry()
                 return
             }
             resizeWork?.cancel()
             resizeWork = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .milliseconds(150))
-                guard !Task.isCancelled, let self, let tableView else { return }
-                let newWidth = scrollView?.contentView.bounds.width ?? 0
+                guard !Task.isCancelled, let self else { return }
+                let newWidth = columnWidth
                 guard newWidth > 1 else { return }
                 width = newWidth
                 heights.removeAll()
                 let anchor = anchorEntry()
-                tableView.noteHeightOfRows(withIndexesChanged: IndexSet(entries.indices))
+                noteHeights(IndexSet(entries.indices))
                 if let anchor { restore(anchor) }
                 reportGeometry()
             }
@@ -462,15 +521,64 @@ struct TranscriptTable: NSViewRepresentable {
     }
 }
 
+/// What every cell hosts, and the only place the drawn height is known.
+///
+/// **`fixedSize` vertically is the whole of it.** A hosting view pinned to the four edges of its
+/// cell proposes the ROW's height to the SwiftUI root inside it, and a root that takes what it is
+/// offered can never report that the row is the wrong size: it is squeezed, or it is padded with
+/// blank, and it says nothing either way. Fixed vertically, the content takes the width it is
+/// given and its own ideal height, the reader sees the row it should have had even before the
+/// correction lands, and the geometry reader behind it has a number worth sending back.
+///
+/// The transaction is the SwiftUI half of "the animations get in the way". A cell is recycled: the
+/// same hosting view is handed a different row, and any implicit animation inside turns that swap
+/// into a height or an opacity travelling from what the last row was to what this one is, which
+/// over a scrolling table reads as the whole transcript sliding about. It is cleared here, at the
+/// root of the hosted content, because the row views themselves are shared with the lazy stack and
+/// must not be touched.
+private struct HostedRow: View {
+    let content: AnyView
+    let report: @MainActor (CGFloat) -> Void
+    /// Whether this copy is the one in a cell, which has a row's height to fill, or the one being
+    /// measured, which has none. Everything else about the two is identical on purpose: a
+    /// measurement taken through a different set of modifiers from the one that draws is a
+    /// measurement that can disagree with what is on screen, which is the bug this pass is fixing.
+    var fills = true
+
+    var body: some View {
+        let measured = content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onChange(of: proxy.size.height, initial: true) { _, height in
+                            report(height)
+                        }
+                }
+            )
+        return Group {
+            if fills {
+                // Drawn from its top down, so a row the table has made too short shows its
+                // beginning and loses its end, rather than showing its end and clipping its
+                // first line off the top of the cell.
+                measured.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                measured
+            }
+        }
+        .transaction { $0.animation = nil }
+    }
+}
+
 /// One row of the table: an `NSHostingView` and the key of what is in it.
 ///
-/// Pinned on three sides rather than four, and sized vertically by its own intrinsic content size,
-/// so that the height SwiftUI actually wants is a thing this view knows. That is what lets a
-/// streaming tail report that it has grown, and what corrects a measurement that came out wrong.
+/// Pinned on all four edges, so the hosting view is exactly the row and there is no second opinion
+/// about its height. What the content wants instead comes back through `HostedRow`, measured by
+/// the same layout that drew it.
 final class TranscriptTableCell: NSView {
     private let host: NSHostingView<AnyView>
     private var appliedKey: String?
-    private var entryID: String?
     var onHeightChange: (@MainActor (String, CGFloat) -> Void)?
 
     init(identifier: NSUserInterfaceItemIdentifier) {
@@ -478,36 +586,38 @@ final class TranscriptTableCell: NSView {
         super.init(frame: .zero)
         self.identifier = identifier
         host.translatesAutoresizingMaskIntoConstraints = false
-        host.sizingOptions = [.intrinsicContentSize]
         addSubview(host)
         NSLayoutConstraint.activate([
             host.leadingAnchor.constraint(equalTo: leadingAnchor),
             host.trailingAnchor.constraint(equalTo: trailingAnchor),
             host.topAnchor.constraint(equalTo: topAnchor),
+            host.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
-        host.postsFrameChangedNotifications = true
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(hostResized),
-            name: NSView.frameDidChangeNotification, object: host
-        )
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not in a nib") }
 
-    deinit { NotificationCenter.default.removeObserver(self) }
-
     func apply(entry: TranscriptTableEntry, environment: EnvironmentValues) {
-        entryID = entry.id
         // The recycling. A cell that already holds this content is left exactly as it is, which is
         // what a table buys over a stack that rebuilds every realised row on every pass.
-        guard appliedKey != entry.contentKey || entry.isLive else { return }
+        //
+        // A live entry is NOT excepted, and used to be. The streaming tail and the setup log watch
+        // their own state and re-render themselves inside the cell; handing them a new root view on
+        // every pass threw that state away and rebuilt the tail several times a second.
+        guard appliedKey != entry.contentKey else { return }
         appliedKey = entry.contentKey
-        host.rootView = AnyView(entry.content().environment(\.self, environment))
-    }
-
-    @objc private func hostResized() {
-        guard let entryID else { return }
-        onHeightChange?(entryID, host.frame.height)
+        let id = entry.id
+        host.rootView = AnyView(
+            HostedRow(
+                content: entry.content(),
+                report: { [weak self] height in self?.onHeightChange?(id, height) }
+            )
+            // A recycled cell is handed an unrelated row, and without an identity SwiftUI treats
+            // that as the same view changing rather than a different view arriving, which is what
+            // gives it something to animate between. See `HostedRow`.
+            .id(id)
+            .environment(\.self, environment)
+        )
     }
 }
