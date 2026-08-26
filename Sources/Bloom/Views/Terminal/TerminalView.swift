@@ -557,6 +557,10 @@ struct TerminalView: NSViewRepresentable {
     var workspace: Workspace
     var repo: Repo?
     var port: Int
+    /// The folder this pane's shell starts in, empty for the worktree root. Every pane of a tab
+    /// gets the tab's, so splitting a terminal opened on a folder stays in that folder, which is
+    /// what splitting does in every other terminal.
+    var directory: String = ""
 
     /// Split panes only. A tab holding one terminal is always its own focused pane and never moves
     /// the keyboard, so it leaves all four of these alone.
@@ -602,7 +606,7 @@ struct TerminalView: NSViewRepresentable {
 
     @MainActor private var session: BloomTerminalView {
         TerminalSessionStore.shared.terminal(
-            for: tab, workspace: workspace, repo: repo, port: port
+            for: tab, workspace: workspace, repo: repo, port: port, directory: directory
         )
     }
 }

@@ -106,14 +106,16 @@ struct TerminalPaneCensusTests {
         let (name, defaults) = domain()
         defer { clean(name) }
 
-        // Byte for byte what `CenterTabStore.persist` writes today, and then, as the second
-        // element, a record from before `url` and `path` were added. Both name their pane: this
-        // reads two fields rather than the whole tab exactly so an older record still counts.
+        // What `CenterTabStore.persist` writes today, then a record from before `url` and `path`
+        // were added, then one carrying the folder a tab opened on a directory row remembers. All
+        // three name their pane: this reads two fields rather than the whole tab exactly so a
+        // record written on either side of a new field still counts.
         let current = #"{"id":"t1","workspaceID":"w1","kind":"terminal","title":"Terminal","url":"","path":""}"#
         let legacy = #"{"id":"t2","workspaceID":"w1","kind":"terminal","title":"Server"}"#
-        defaults.set(Data("[\(current),\(legacy)]".utf8), forKey: "center.tabs.w1")
+        let folder = #"{"id":"t3","workspaceID":"w1","kind":"terminal","title":"css","directory":"/tmp/w/css"}"#
+        defaults.set(Data("[\(current),\(legacy),\(folder)]".utf8), forKey: "center.tabs.w1")
 
-        #expect(TerminalPaneCensus.terminalTabs(of: workspace, in: defaults) == ["t1", "t2"])
+        #expect(TerminalPaneCensus.terminalTabs(of: workspace, in: defaults) == ["t1", "t2", "t3"])
     }
 
     /// The keys themselves, written out rather than built, because the literal is the contract.

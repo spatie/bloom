@@ -19,6 +19,9 @@ struct TerminalSplitView: View {
     var workspace: Workspace
     var repo: Repo?
     var port: Int
+    /// The folder every pane of this tab forks in, empty for the worktree root. See
+    /// `FolderTerminal`.
+    var directory: String = ""
     /// Called when the user closes the last pane, which is the tab asking to go away.
     var onCloseTab: @MainActor () -> Void
     /// Called when a split asks for something a shell tree cannot hold. See `handle`.
@@ -87,6 +90,7 @@ struct TerminalSplitView: View {
             workspace: workspace,
             repo: repo,
             port: port,
+            directory: directory,
             isFocusedPane: isFocused,
             focusRequest: focusRequest,
             onFocus: { splits.focus(id, in: ownerID) },

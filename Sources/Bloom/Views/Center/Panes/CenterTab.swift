@@ -48,6 +48,12 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
     /// whose owner called it Browser must not then start renaming itself from every page it
     /// visits.
     var isNamed: Bool = false
+    /// Terminal only: the folder inside the worktree its shell was asked to start in, empty for
+    /// the root, which is where every terminal but one opened from a folder row starts.
+    ///
+    /// Absolute, and read at fork time rather than trusted: a tab outlives the folder under it.
+    /// See `FolderTerminal.launchDirectory`.
+    var directory: String = ""
     /// Review only: the file being read, relative to the worktree. Kept here rather than taken
     /// from `WorkspaceModel.selectedFilePath` because that one is only ever a CHANGED file: the
     /// poll drops any selection git no longer reports, which would throw the reader out of a file
@@ -91,11 +97,13 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
         path = try container.decodeIfPresent(String.self, forKey: .path) ?? ""
         pageTitle = try container.decodeIfPresent(String.self, forKey: .pageTitle) ?? ""
         isNamed = try container.decodeIfPresent(Bool.self, forKey: .isNamed) ?? false
+        directory = try container.decodeIfPresent(String.self, forKey: .directory) ?? ""
     }
 
     init(
         id: String = newID(), workspaceID: WorkspaceID, kind: Kind, title: String,
-        url: String = "", path: String = "", pageTitle: String = "", isNamed: Bool = false
+        url: String = "", path: String = "", pageTitle: String = "", isNamed: Bool = false,
+        directory: String = ""
     ) {
         self.id = id
         self.workspaceID = workspaceID
@@ -105,5 +113,6 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
         self.path = path
         self.pageTitle = pageTitle
         self.isNamed = isNamed
+        self.directory = directory
     }
 }

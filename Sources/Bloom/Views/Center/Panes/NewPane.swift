@@ -31,11 +31,16 @@ enum NewPane {
     /// what the pane is for: `pane_open` and `pane_split` carry the name an agent gave, because
     /// four tabs called Terminal are four a reader cannot tell apart. Nil takes the numbering each
     /// kind has always had, so no menu changed when this argument arrived.
+    ///
+    /// `directory` is only read for a terminal, and only a folder row in the inspector passes one.
+    /// Empty is the worktree root, which is where every other route to a shell starts. See
+    /// `FolderTerminal`.
     static func open(
         _ kind: PaneKind,
         in model: WorkspaceModel,
         url: String = "",
         title: String? = nil,
+        directory: String = "",
         place: @escaping @MainActor (PaneContent) -> Void
     ) {
         switch kind {
@@ -49,7 +54,8 @@ enum NewPane {
         // port first, because both are baked into the process the moment it is forked.
         case .terminal:
             let tab = CenterTabStore.shared.add(
-                kind: .terminal, workspaceID: model.workspace.id, title: title
+                kind: .terminal, workspaceID: model.workspace.id, title: title,
+                directory: directory
             )
             place(.tool(tab.id))
 

@@ -24,6 +24,8 @@ struct FileTreeRow: View, Equatable {
     /// The node's location on disk, for the menu items that hand it to another app.
     var fullPath: String
     var action: () -> Void
+    /// Opens a shell in this row, which only a folder row offers. See `FolderTerminal`.
+    var onOpenTerminal: () -> Void
 
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -77,6 +79,13 @@ struct FileTreeRow: View, Equatable {
             // not handed to a terminal.
             OpenInItems(target: item.node.isDirectory ? .folder(fullPath) : .file(fullPath))
             Button("Reveal in Finder") { Reveal.inFinder(fullPath) }
+            // With the two above rather than beside Copy path: all three hand this row to
+            // something that opens it, and only the last is about the clipboard. `canOpen` is
+            // what keeps it off a file row, where the submenu above turns into Open File in, and
+            // off a folder that is not on disk.
+            if FolderTerminal.canOpen(folder: fullPath) {
+                Button(FolderTerminal.menuTitle, action: onOpenTerminal)
+            }
             Button("Copy path", action: copyPath)
         }
         .help(item.node.path)
