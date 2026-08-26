@@ -213,7 +213,9 @@ struct TerminalPaneCensusTests {
         let before = TerminalPaneCensus.census(of: [workspace], in: defaults)
         #expect(before == .init(panes: ["t1", "x1", "t3"]))
 
-        let migrated = TabMigration.migrateAll(in: defaults)
+        let migrated = TabMigration.migrateAll(
+            in: defaults, keys: DefaultsSnapshot.own(defaults, name: name).keys
+        )
 
         #expect(migrated.count == 1)
         #expect(TerminalPaneCensus.census(of: [workspace], in: defaults) == before)
@@ -241,7 +243,7 @@ struct TerminalPaneCensusTests {
         defaults.set(panes, forKey: "center.panes.w1")
 
         let before = try #require(UserDefaults.standard.persistentDomain(forName: name))
-        TabMigration.migrateAll(in: defaults)
+        TabMigration.migrateAll(in: defaults, keys: before.keys)
         let after = try #require(UserDefaults.standard.persistentDomain(forName: name))
 
         #expect(Set(before.keys) == ["center.tabs.w1", "terminal.split.t1", "center.panes.w1"])

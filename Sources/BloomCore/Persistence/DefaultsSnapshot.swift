@@ -13,12 +13,14 @@ import Foundation
 /// `SystemDefaults` is the only `register(defaults:)` in the app and it registers three switches.
 public enum DefaultsSnapshot {
     /// - Parameter name: the persistent domain, which is the bundle id for `UserDefaults.standard`
-    ///   and the suite name for a suite. Nil, or a domain the store cannot answer for, falls back
-    ///   to the merged representation, which is what an unbundled binary gets.
+    ///   and the suite name for a suite. Nil falls back to the merged representation, which is
+    ///   what an unbundled binary gets.
     public static func own(_ defaults: UserDefaults, name: String?) -> [String: Any] {
-        guard let name, let domain = defaults.persistentDomain(forName: name) else {
-            return defaults.dictionaryRepresentation()
-        }
-        return domain
+        // A named domain with nothing written to it answers nil, and that is an empty answer
+        // rather than an unanswerable one. Falling back there would take the whole merged list on
+        // every launch until the first tab is stored, and would put the registration domain back
+        // in the scan, which is the one thing this type exists to keep out.
+        guard let name else { return defaults.dictionaryRepresentation() }
+        return defaults.persistentDomain(forName: name) ?? [:]
     }
 }
